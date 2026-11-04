@@ -103,7 +103,7 @@ describe('EmptyCanvas', () => {
     it('drops "Add Tables from dbt" and says each table is a file you can commit', () => {
       const { queryByRole, getByText } = render(<EmptyCanvas />);
       expect(queryByRole('button', { name: 'Add Tables from dbt' })).toBeNull();
-      expect(getByText('Add your first table. Each one is a file you can commit.')).toBeTruthy();
+      expect(getByText('Add your first table.')).toBeTruthy();
       expect(document.body.textContent).not.toContain('dbt');
     });
 

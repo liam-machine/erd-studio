@@ -19,9 +19,10 @@ const NOT_WORDS = new Set(['command', 'id', 'when', 'url', 'fileMatch', 'view', 
 /**
  * The literal dbt `domain:*` tag the command strips is its name, not a diagram.
  * "Data model" is the whole design (the logical-first copy: "Design your data
- * model in Git"), never one table.
+ * model in Git"), never one table. A Power BI / Fabric "semantic model" is
+ * Microsoft's name for the thing Import Semantic Model… reads, never one table.
  */
-const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g, /\bdata models?\b/gi];
+const ALLOWED = [/\bLegacy Domain Tags\b/g, /\bdbt models?\b/gi, /\bdbt Model\b/g, /\bdata models?\b/gi, /\bsemantic models?\b/gi];
 
 function userText(node: unknown, at: string, out: Array<[string, string]>): void {
   if (typeof node === 'string') { out.push([at, node]); return; }
@@ -91,22 +92,28 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(storageClaims.map(([at, text]) => `${at}: ${text}`)).toEqual([]);
   });
 
-  it('keeps "an open format, no lock-in" where DBML import and export are offered', () => {
+  it('says "an open format, no lock-in" once, where DBML is introduced (the empty window), and the file sentence once', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    for (const entry of welcome.filter((w) => w.contents.includes('command:erdStudio.importDbml'))) {
-      expect(entry.contents).toContain('an open format, no lock-in');
-    }
+    const all = JSON.stringify(pkg.contributes);
+    expect(all.split('no lock-in').length - 1).toBe(1);
+    expect(welcome.find((w) => w.when === 'workspaceFolderCount == 0')?.contents).toContain('an open format, no lock-in');
+    // The Table Library's empty state is the one place that says each table is a file.
+    expect(all.split('Each table is a file').length - 1).toBe(1);
     const library = welcome.find((w) => w.contents.startsWith('No tables yet.'));
-    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit.');
+    expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit and review like code.');
   });
 
   it('the ERD Studio view says "Loading diagrams…" while it loads, and "No diagrams yet." only once loaded', () => {
     const diagrams = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
       .filter((w) => w.view === 'erdStudio.domainTree');
-    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.hasProject && erdStudio.diagramsLoading');
+    // Also while a folder without dbt waits for its suggested start (test/unit/startActions.test.ts).
+    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe(
+      'erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))',
+    );
+    // A folder without dbt (New Diagram, or one per direct import the folder suggests) and a dbt project.
     const empty = diagrams.filter((w) => w.contents.startsWith('No diagrams yet.'));
-    expect(empty).toHaveLength(2);
-    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.diagramsLoading$/);
+    expect(empty).toHaveLength(5);
+    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.diagramsLoading( &&|$)/);
   });
 
   it('the Table Library says "Loading tables…" while it loads, and its empty state only once loaded', () => {
@@ -237,12 +244,13 @@ describe('package.json: dbt shows up only in dbt projects', () => {
 
   it('keeps the dbt text in a dbt project', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading')?.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
+    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')?.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
     expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects')?.contents).toContain('[Select dbt Project](command:erdStudio.selectDbtProject)');
     const steps = (pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; when?: string }>);
     expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([
-      ['draw', 'Draw your dbt project — no AI needed'],
-      ['watch', 'Watch the one-minute tour'],
+      ['convertDbt', 'Convert to DBML'],
+      ['draw', 'Draw from dbt'],
+      ['watch', 'Watch the One-Minute Tour'],
     ]);
   });
 });

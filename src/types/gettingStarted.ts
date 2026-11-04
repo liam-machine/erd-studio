@@ -1,5 +1,5 @@
 /**
- * Welcome panel ("Welcome to ERD Studio") — the protocol between the panel's
+ * Welcome panel (the "ERD Studio Tour" tab) — the protocol between the panel's
  * webview and `GettingStartedPanel` (host), plus the pure HTML builder.
  *
  * Deliberately NOT part of the canvas `WebviewMessage` union: the canvas union
@@ -23,7 +23,16 @@ import {
   type AiAssistantId,
   type SkillHarnessTarget,
 } from './aiAssistants';
-import { START_ACTIONS, type StartAction, type StartStorage } from './startActions';
+import {
+  OPEN_FOLDER_LABEL,
+  START_ACTIONS,
+  START_ACTION_LABELS,
+  TOUR_LABEL,
+  type StartAction,
+  type StartIntent,
+  type StartStorage,
+} from './startActions';
+import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from './onboardingGuide';
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -96,13 +105,13 @@ export type GettingStartedToHost =
   | { type: 'openClaude' }
   /** Copy "/erd-studio-setup" and open Copilot Chat (`workbench.action.chat.open`). */
   | { type: 'openCopilotChat' }
-  /** Open a domain canvas, or create the first one. */
-  | { type: 'openDomain' }
   /**
    * One of the start screen's starts (`src/types/startActions.ts`): the host
    * counts it (`recordStart(action, 'welcome')`), runs the fixed command
-   * `START_ACTION_COMMANDS[action]` with no argument, then posts a fresh
-   * status. `action` is validated against `START_ACTIONS`; a command id is
+   * `START_ACTION_COMMANDS[action]` with its fixed argument, then posts a
+   * fresh status. Draft-first: only the no-folder page's example sends it
+   * (the tab holds no start card; "Open your diagrams" and the import
+   * guide's link went with it). `action` is validated against `START_ACTIONS`; a command id is
    * never taken from the webview.
    */
   | { type: 'start'; action: StartAction }
@@ -114,7 +123,12 @@ export type GettingStartedToHost =
   /** Logged only; the webview has already switched to the poster fallback. */
   | { type: 'videoError'; code: number }
   /** The video reached its half-way point or its end, once each per panel. Counted by usage telemetry only. */
-  | { type: 'videoProgress'; milestone: VideoMilestone };
+  | { type: 'videoProgress'; milestone: VideoMilestone }
+  /**
+   * **Show Me Around**: the host runs the fixed command `SHOW_ME_AROUND_COMMAND`
+   * (the interactive guide, which counts itself). No payload; a choice, so not passive.
+   */
+  | { type: 'showMeAround' };
 
 export type VideoMilestone = 'half' | 'end';
 
@@ -122,8 +136,8 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
-  'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'start',
-  'openExternal', 'trySample', 'openFolder', 'videoError',
+  'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'start',
+  'openExternal', 'trySample', 'openFolder', 'videoError', 'showMeAround',
 ];
 
 /**
@@ -131,7 +145,9 @@ export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] 
  * none of them is the viewer choosing something, so a panel closed after only
  * these counts as `welcomeLeftNoChoice`.
  */
-export const GETTING_STARTED_PASSIVE_TYPES: readonly GettingStartedToHostType[] = ['ready', 'refreshStatus', 'videoError', 'videoProgress'];
+export const GETTING_STARTED_PASSIVE_TYPES: readonly GettingStartedToHostType[] = [
+  'ready', 'refreshStatus', 'videoError', 'videoProgress',
+];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
 export type ClaudeAvailability = 'missing' | 'extension' | 'cli';
@@ -153,7 +169,7 @@ export interface GettingStartedStatus {
   hasProject: boolean;
   /**
    * The open folder has no `dbt_project.yml`: the page leads with New diagram
-   * and Import DBML in place of the dbt steps, and names no dbt anywhere.
+   * and Import in place of the dbt steps, and names no dbt anywhere.
    * Optional and additive: absent means a dbt project (the page as
    * it was before logical-only mode). The panel host fills it from
    * `GettingStartedDeps.logicalOnly` when `getStatus()` leaves it out.
@@ -180,9 +196,17 @@ export interface GettingStartedStatus {
    */
   storage?: StartStorage;
   /**
-   * The starts the page offers, primary first: `startActionsFor()` over
-   * `hasProject`, `!logicalOnly` and `storage`. Filled by the panel host on
-   * every status it posts; the page shows exactly these, in this order.
+   * The start the folder suggests (`startIntentFor()`: Convert, Draw from
+   * dbt, one of the three direct imports when the folder's quick look found
+   * that kind of file, else a blank diagram); absent with no folder open.
+   * Filled by the panel host. The start card's primary button and its reason
+   * line follow it.
+   */
+  intent?: StartIntent;
+  /**
+   * The starts the page offers, primary first: `startActionsForIntent(intent)`.
+   * Filled by the panel host on every status it posts; the page shows
+   * exactly these, in this order.
    */
   starts?: StartAction[];
   /**
@@ -248,9 +272,9 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'setupAiHelper':
     case 'openClaude':
     case 'openCopilotChat':
-    case 'openDomain':
     case 'trySample':
     case 'openFolder':
+    case 'showMeAround':
       return true;
     case 'start': {
       const action = (value as { action?: unknown }).action;
@@ -365,14 +389,14 @@ export function setupReadyMessage(assistants: readonly AiAssistantId[], opts: { 
   const purpose = opts.logicalOnly ? ' to design your data model with you' : '';
   if (assistants.length === 0) {
     return `AI helper ready for ${joinNames(AI_ASSISTANTS.map((a) => a.name))}. ` +
-      `Install one, then start the guided setup${purpose} (the Welcome panel shows what to type).`;
+      `Install one, then start the guided setup${purpose} (the ERD Studio Tour tab shows what to type).`;
   }
   if (assistants.length === 1) {
     return `AI helper ready for ${assistantInfo(assistants[0]).name}: ${startLine(assistants[0])} there${purpose} ` +
       "(restart it if it's already open).";
   }
   return `AI helper ready for ${joinNames(assistantNames(assistants))}. Start the guided setup in any of them${purpose} ` +
-    "(the Welcome panel shows what to type; restart your assistant if it's already open).";
+    "(the ERD Studio Tour tab shows what to type; restart your assistant if it's already open).";
 }
 
 function startLine(id: AiAssistantId): string {
@@ -705,6 +729,8 @@ body {
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
+.gs-step__reason { margin: -4px 0 12px; max-width: 72ch; font-weight: 600; color: var(--vscode-foreground); }
+.gs-around { margin: 26px 0 0; }
 .gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-steps + .gs-section-title { margin-top: 26px; }
 .gs-footer {
@@ -769,19 +795,18 @@ const SCRIPT = `
     if (source) { source.addEventListener('error', function () { fallBack(4); }); }
     setTimeout(function () { if (video.readyState < 1) { fallBack(0); } }, 5000);
 
-    // The narration is the point of the video, so start with sound. Only if the editor's
-    // autoplay policy refuses does it play muted (captions still carry it) behind a clear
-    // "Turn on sound" button — a muted start with a small corner button read as "no audio".
+    // Never by itself: the tour waits behind its play button on every page, and plays with
+    // sound once clicked. Only if the editor still refuses sound does it play muted
+    // (captions still carry it) behind a clear "Turn on sound" button.
     function startMuted() {
       video.muted = true;
       sound.hidden = false;
       var q = video.play();
       if (q && q.catch) { q.catch(function () { /* the viewer can press play */ }); }
     }
-    // The video plays by itself in an open folder: the dbt tour on the dbt page,
-    // the logical-first cut in a folder without dbt (the host picks the file by
-    // page). Without a folder the poster waits behind "Watch the one-minute
-    // tour" until the viewer asks for it.
+    // The dbt tour on the dbt page, the logical-first cut elsewhere (the host
+    // picks the file by page); either waits behind its play button until the
+    // viewer asks for it.
     startWithSound = function () {
       if (started || fellBack) { return; }
       started = true;
@@ -886,41 +911,6 @@ const SCRIPT = `
     return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
   }
 
-  // The starts the last status listed, primary first (startActionsFor on the host).
-  var starts = [];
-
-  // Each start group shows the starts listed, in that order, by moving the
-  // buttons rendered up front (never building any). A button whose data-modes
-  // leaves out this page (Draw from dbt without dbt) stays hidden whatever the
-  // list says. In the first card, the page's primary start is the primary button.
-  function renderStarts(mode) {
-    var groups = document.querySelectorAll('[data-start-group]');
-    for (var g = 0; g < groups.length; g++) {
-      var group = groups[g];
-      var btns = group.querySelectorAll('[data-start]');
-      var byAction = {};
-      for (var b = 0; b < btns.length; b++) {
-        btns[b].hidden = true;
-        byAction[btns[b].getAttribute('data-start')] = btns[b];
-      }
-      var shown = 0;
-      for (var i = 0; i < starts.length; i++) {
-        var btn = Object.prototype.hasOwnProperty.call(byAction, starts[i]) ? byAction[starts[i]] : null;
-        if (!btn) { continue; }
-        var modes = btn.getAttribute('data-modes');
-        if (modes && modes.split(' ').indexOf(mode) < 0) { continue; }
-        btn.hidden = false;
-        group.appendChild(btn);
-        if (group.getAttribute('data-start-group') === 'first') {
-          btn.classList.toggle('gs-btn--primary', starts[i] === starts[0]);
-        }
-        shown += 1;
-      }
-      var line = group.closest('.gs-start-more');
-      if (line) { line.hidden = shown === 0; }
-    }
-  }
-
   // The page's three states. Elements naming modes in data-modes show only in those.
   function applyMode(mode) {
     root.setAttribute('data-mode', mode);
@@ -928,8 +918,7 @@ const SCRIPT = `
     for (var i = 0; i < els.length; i++) {
       els[i].hidden = els[i].getAttribute('data-modes').split(' ').indexOf(mode) < 0;
     }
-    renderStarts(mode);
-    if (mode === 'dbt' || mode === 'logical') { startWithSound(); } else if (mode === 'nofolder') { offerTour(); }
+    offerTour();
   }
 
   function showStep(step, show) {
@@ -940,7 +929,6 @@ const SCRIPT = `
 
   function renderStatus(s) {
     var mode = !s.hasProject ? 'nofolder' : s.logicalOnly ? 'logical' : 'dbt';
-    starts = s.starts && s.starts.length ? s.starts.slice() : [];
     applyMode(mode);
     root.setAttribute('data-project', s.hasProject ? 'true' : 'false');
     var found = s.assistants.length > 0 ? 'found' : 'none';
@@ -959,13 +947,9 @@ const SCRIPT = `
     // Claude Code" would start /erd-studio-setup in a project without the skill.
     setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
     // The guided setup has a dbt route and a no-dbt one: it shows in both.
+    // Draft-first: no start, Convert or "Open your diagrams" card here (the draft,
+    // the sidebar and the Convert offer are the starts); the tour, the AI helper and Show Me Around.
     var start = showStep('start', true);
-    // A project from before 2.0 is offered Convert to DBML first, in a card of its own.
-    // Then a diagram: "Open your diagrams" leads once there is one (the other starts
-    // in one line under it), else the start card holds a button per start.
-    showStep('convert', starts.indexOf('convert') >= 0);
-    showStep('open', s.domainCount > 0);
-    showStep('begin', s.domainCount === 0);
     var summary = $('.gs-summary');
     var line = mode === 'dbt' && s.summary && s.summary.line ? s.summary.line : '';
     if (summary) { summary.textContent = line; summary.hidden = line === ''; }
@@ -974,7 +958,6 @@ const SCRIPT = `
     for (var j = 0; j < btns.length; j++) { btns[j].disabled = false; }
     text('.gs-setup-label', s.helper === 'ready' ? 'Reinstall my AI helper'
       : s.helper === 'update' ? 'Update my AI helper' : 'Set up my AI helper');
-    text('.gs-domain-count', s.domainCount === 1 ? 'You have 1 diagram.' : 'You have ' + s.domainCount + ' diagrams.');
     var p = s.project;
     var nested = !!(p && p.relativePath);
     text('.gs-project-name', p ? p.name : '');
@@ -1032,14 +1015,29 @@ const SCRIPT = `
 })();
 `;
 
-/** What each start's button says on the Welcome panel (HTML, fixed text). */
-export const START_LABELS: Readonly<Record<StartAction, string>> = {
-  convert: 'Convert to DBML',
-  drawFromDbt: 'Draw from dbt',
-  blank: 'New diagram',
-  import: 'Import DBML&hellip;',
-  example: 'Open an example&hellip;',
-};
+/** What each start's button says on the tab (HTML, fixed text): the one label per action. */
+export const START_LABELS: Readonly<Record<StartAction, string>> = Object.fromEntries(
+  START_ACTIONS.map((action) => [action, escapeHtml(START_ACTION_LABELS[action])]),
+) as Record<StartAction, string>;
+
+/** The tab's title: distinct from VS Code's own Welcome tab (the walkthrough's), named for the tour it leads with. */
+export const GETTING_STARTED_TAB_TITLE = 'ERD Studio Tour';
+
+/** The tab's heading. */
+export const GETTING_STARTED_HEADING = 'The one-minute tour';
+
+/**
+ * The Show Me Around section, on every page: the interactive guide (the
+ * `erdStudio.showMeAround` command) in place of the short per-start videos.
+ * No dbt word: it shows on every page.
+ */
+// One command id and one label (src/types/onboardingGuide.ts, the guide's own module).
+export { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL };
+export const SHOW_ME_AROUND_SECTION_TITLE = 'Find your way around';
+export const SHOW_ME_AROUND_SECTION_INTRO = 'Show Me Around points at each part of ERD Studio, using your own tables: where to bring in your data model, how to edit a table, and where your files go.';
+
+/** The upgrader's one notice (once per machine): what is new, in one line, and the tour. */
+export const UPGRADE_NOTICE_MESSAGE = 'ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.';
 
 /** Step 3's row for one assistant: what to type, Copy, and an Open button where the editor can open it. */
 function launchRow(id: AiAssistantId): string {
@@ -1069,8 +1067,6 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   /** `data-modes` for an element shown only on these pages, hidden up front when this is not one of them. */
   const only = (...modes: Array<GettingStartedPageMode | 'unknown'>): string =>
     `data-modes="${modes.join(' ')}"${modes.includes(mode) ? '' : ' hidden'}`;
-  /** `hidden` for a step card that the first status may still reveal. */
-  const hiddenUnless = (show: boolean): string => (show ? '' : ' hidden');
   /**
    * One start's button (`data-action="start"`). Inside a start group it is
    * hidden until a status lists it; Draw from dbt also carries the dbt-only
@@ -1081,9 +1077,6 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     const hidden = grouped ? ' hidden' : '';
     return `<button class="${className}" type="button" data-action="start" data-start="${action}"${dbtOnly}${hidden}>${START_LABELS[action]}</button>`;
   };
-  /** Every start but Convert (it has its own card), each hidden until a status lists it; the script orders them. */
-  const startButtons = (className: string): string => START_ACTIONS.filter((a) => a !== 'convert')
-    .map((a) => startButton(a, className, true)).join('\n            ');
   // No folder is known up front (the empty window), so its page shows from the first paint: the
   // open-a-folder cards, never the project steps (whose dbt cards would flash before the status).
   const initialProject = mode === 'nofolder' ? 'false' : 'unknown';
@@ -1099,7 +1092,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <source src="${escapeHtml(videoUri)}" type="video/mp4">
       </video>
       <button class="gs-video__sound" type="button" hidden>${ICON_SOUND}<span>Turn on sound</span></button>
-      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span ${only('unknown', 'dbt')}>Watch the one-minute dbt tour</span><span ${only('nofolder', 'logical')}>Watch the one-minute tour</span></button>`
+      <button class="gs-video__tour" type="button" hidden>${ICON_PLAY}<span>${escapeHtml(TOUR_LABEL)}</span></button>`
     : '';
   // The online copy of the cut this page plays: the host picks the logical cut for these pages.
   const videoOnlineTarget: GettingStartedExternalTarget = mode === 'logical' || mode === 'nofolder' ? 'videoOnlineLogical' : 'videoOnline';
@@ -1110,6 +1103,12 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `<button class="gs-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
   ).join('\n              ');
   const launchRows = AI_ASSISTANTS.map((a) => launchRow(a.id)).join('\n            ');
+  // Show Me Around (every page): the interactive guide replaces the short per-start videos.
+  const aroundSection = `<section class="gs-around" aria-label="${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}">
+    <h2 class="gs-section-title">${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}</h2>
+    <p class="gs-section-intro">${escapeHtml(SHOW_ME_AROUND_SECTION_INTRO)}</p>
+    <button class="gs-btn" type="button" data-action="showMeAround">${escapeHtml(SHOW_ME_AROUND_LABEL)}</button>
+  </section>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1117,19 +1116,19 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildGettingStartedCsp(cspSource, nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Welcome to ERD Studio</title>
+<title>${escapeHtml(GETTING_STARTED_TAB_TITLE)}</title>
 <style nonce="${n}">${STYLE}</style>
 </head>
 <body>
 <main class="gs" data-project="${initialProject}" data-mode="${mode}">
   <header class="gs-hero">
     <p class="gs-hero__kicker">ERD Studio</p>
-    <h1 class="gs-hero__title">Welcome to ERD Studio</h1>
+    <h1 class="gs-hero__title">${escapeHtml(GETTING_STARTED_HEADING)}</h1>
     <p class="gs-hero__sub" ${only('unknown', 'nofolder', 'logical')}>Design your data model in Git. Let your AI build from it.</p>
     <p class="gs-hero__sub" ${only('dbt')}>Turn the dbt project you already have into a data model you can see.</p>
   </header>
 
-  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="Getting-started video">
+  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="The one-minute tour">
     ${player}
     <div class="gs-video__fallback">
       ${fallbackPoster}
@@ -1146,59 +1145,21 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
-    <p class="gs-sample__text">Any folder works: your design is saved in <code>.erd-studio/</code>, next to your code (a new project as DBML, an open format; a project from an older ERD Studio keeps its YAML and JSON files).</p>
-    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
+    <p class="gs-sample__text">Any folder works: ERD Studio keeps your design in <code>.erd-studio/</code>, next to your code.</p>
+    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">${escapeHtml(OPEN_FOLDER_LABEL)}</button>
     <p class="gs-noproject__example">Or see a finished data model first: ${startButton('example', 'gs-btn', false)}</p>
   </section>
 
   <div class="gs-steps-wrap">
     <p class="gs-summary" role="status" hidden></p>
-    <h2 class="gs-section-title">Your diagram</h2>
     <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button>${codespacesButton}</p>
-    <div class="gs-steps">
-      <section class="gs-step" data-step="convert" data-state="loading" hidden>
-        <span class="gs-step__num">1</span>
-        <div class="gs-step__body">
-          <h3 class="gs-step__title">Move this project to DBML</h3>
-          <p class="gs-step__text">This project is from an older ERD Studio. Convert it once to DBML, an open format; your diagrams stay as they are.</p>
-          <div class="gs-step__actions">
-            ${startButton('convert', 'gs-btn gs-btn--primary', false)}
-          </div>
-        </div>
-      </section>
-
-      <section class="gs-step" data-step="open" data-state="loading" hidden>
-        <span class="gs-step__num">1</span>
-        <div class="gs-step__body">
-          <h3 class="gs-step__title">Open your diagrams</h3>
-          <p class="gs-step__text"><span class="gs-domain-count"></span> <span ${only('unknown', 'nofolder', 'dbt')}>Open one to see your diagram, and switch between Logical and Physical.</span><span ${only('logical')}>Open one to keep designing.</span></p>
-          <div class="gs-step__actions">
-            <button class="gs-btn gs-btn--primary" type="button" data-action="openDomain">Open your diagrams</button>
-          </div>
-          <p class="gs-step__hint gs-start-more">Start another: <span class="gs-start-more__links" data-start-group="more">${startButtons('gs-link')}</span></p>
-        </div>
-      </section>
-
-      <section class="gs-step" data-step="begin" data-state="loading"${hiddenUnless(mode === 'logical' || mode === 'dbt')}>
-        <span class="gs-step__num">1</span>
-        <div class="gs-step__body">
-          <h3 class="gs-step__title" ${only('unknown', 'nofolder', 'logical')}>Start your data model</h3>
-          <h3 class="gs-step__title" ${only('dbt')}>Draw your dbt project &mdash; no AI needed</h3>
-          <p class="gs-step__text" ${only('unknown', 'nofolder', 'logical')}>Add tables on a blank canvas, start from a DBML file, or open a finished example.</p>
-          <p class="gs-step__text" ${only('dbt')}>Copies your dbt models and tests into a diagram you can edit. Or start blank, from a DBML file, or from a finished example.</p>
-          <div class="gs-step__actions" data-start-group="first">
-            ${startButtons('gs-btn')}
-          </div>
-        </div>
-      </section>
-    </div>
 
     <h2 class="gs-section-title">Enrich with your AI assistant (optional)</h2>
     <p class="gs-section-intro" ${only('unknown', 'nofolder', 'dbt')}>Your assistant adds what dbt doesn't record: keys, grain, rationale and your team's modelling style.</p>
     <p class="gs-section-intro" ${only('logical')}>Your assistant reads and writes the same files as the canvas: ask it for tables, keys, grain and rationale, and review its edits like any other change.</p>
     <div class="gs-steps">
       <section class="gs-step" data-step="assistant" data-state="loading">
-        <span class="gs-step__num">2</span>
+        <span class="gs-step__num">1</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Your AI assistant</h3>
           <p class="gs-step__text" data-when="found" hidden><span ${only('unknown', 'nofolder', 'dbt')}>The guided setup runs inside your AI coding assistant.</span><span ${only('logical')}>ERD Studio works with the AI coding assistant you already use.</span> Found on this computer:</p>
@@ -1216,7 +1177,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       </section>
 
       <section class="gs-step" data-step="helper" data-state="loading">
-        <span class="gs-step__num">3</span>
+        <span class="gs-step__num">2</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Set up my AI helper</h3>
           <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool your assistant uses behind the scenes.</span></p>
@@ -1231,7 +1192,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       </section>
 
       <section class="gs-step" data-step="start" data-state="loading">
-        <span class="gs-step__num">4</span>
+        <span class="gs-step__num">3</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Start the guided setup</h3>
           <p class="gs-step__text" data-when="some none notready" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Your assistant checks your dbt setup, fills in keys, grain and rationale, works out how your project is modelled and checks with you, then checks the result against dbt, explaining each step.</span><span ${only('logical')}>${escapeHtml(LOGICAL_SETUP_TEXT)}</span></p>
@@ -1247,8 +1208,10 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     </div>
   </div>
 
+  ${aroundSection}
+
   <footer class="gs-footer">
-    <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: Watch Getting Started Video</em>.</span>
+    <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: ${escapeHtml(TOUR_LABEL)}</em>.</span>
     <button class="gs-link" type="button" data-action="openExternal" data-target="dbtInstallDocs" ${only('unknown', 'dbt')}>New to dbt? How to install it${ICON_EXTERNAL}</button>
   </footer>
 </main>

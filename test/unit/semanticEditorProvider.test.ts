@@ -1810,3 +1810,78 @@ describe('describeSkippedDbtModels', () => {
     expect(describeSkippedDbtModels(many)).toMatch(/and 2 more\.$/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The onboarding guide (Show Me Around): phase B on a canvas
+// ---------------------------------------------------------------------------
+
+describe('the onboarding guide on a canvas', () => {
+  afterEach(() => {
+    vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+  });
+
+  function fakeGuide(start?: { dbml: boolean; semanticDir: string }) {
+    return {
+      takeCanvas: vi.fn(() => start),
+      startOnCanvas: vi.fn(() => ({ dbml: true, semanticDir: '.erd-studio' })),
+      onCanvasAction: vi.fn(),
+    };
+  }
+
+  it('starts phase B once the diagram has loaded, when the host says it is due', async () => {
+    const opened = await openShowcase(root, { sendReady: false });
+    const guide = fakeGuide({ dbml: true, semanticDir: '.erd-studio' });
+    opened.provider.setOnboardingGuide(guide);
+    opened.panel._simulateMessage({ type: 'ready' });
+    await waitForType(opened.panel, 'guideStart');
+    const all = types(opened.panel);
+    expect(all.indexOf('guideStart')).toBeGreaterThan(all.indexOf('domainLoaded'));
+    expect(posted(opened.panel).find((m) => m.type === 'guideStart')?.payload).toEqual({ dbml: true, semanticDir: '.erd-studio' });
+    expect(guide.takeCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it('posts nothing when the guide is not due', async () => {
+    const opened = await openShowcase(root, { sendReady: false });
+    opened.provider.setOnboardingGuide(fakeGuide(undefined));
+    opened.panel._simulateMessage({ type: 'ready' });
+    await waitForType(opened.panel, 'domainLoaded');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(types(opened.panel)).not.toContain('guideStart');
+  });
+
+  it('hands each valid action to the host, on the physical stage too, and drops anything else', async () => {
+    const opened = await openShowcase(root);
+    const guide = fakeGuide(undefined);
+    opened.provider.setOnboardingGuide(guide);
+    opened.panel._simulateMessage({ type: 'guide', payload: { action: 'star' } });
+    opened.panel._simulateMessage({ type: 'guide', payload: { action: 'step', step: 'canvasTable', extra: 'x' } });
+    opened.panel._simulateMessage({ type: 'guide', payload: { action: 'openExternal', url: 'https://evil.example' } });
+    opened.panel._simulateMessage({ type: 'guide' });
+    await vi.waitFor(() => expect(guide.onCanvasAction).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(guide.onCanvasAction.mock.calls.map((c) => c[0])).toEqual([{ action: 'star' }, { action: 'step', step: 'canvasTable' }]);
+    expect(lastError(opened.panel)).toBeUndefined();
+  });
+
+  it('is allowed while the canvas shows the physical stage', async () => {
+    const opened = await openShowcase(root);
+    const guide = fakeGuide(undefined);
+    opened.provider.setOnboardingGuide(guide);
+    opened.panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await new Promise((r) => setTimeout(r, 50));
+    opened.panel._simulateMessage({ type: 'guide', payload: { action: 'skip' } });
+    await vi.waitFor(() => expect(guide.onCanvasAction).toHaveBeenCalledWith({ action: 'skip' }));
+  });
+
+  it('Show Me Around on the active canvas starts phase B there; with no canvas of ours active it says so', async () => {
+    const opened = await openShowcase(root);
+    const guide = fakeGuide(undefined);
+    opened.provider.setOnboardingGuide(guide);
+    vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+    expect(opened.provider.startGuideOnActiveCanvas()).toBe(false);
+    vscode.window.tabGroups.activeTabGroup.activeTab = { input: new vscode.TabInputCustom(opened.doc.uri, SUBJECT_AREA_EDITOR_VIEW_TYPE) };
+    expect(opened.provider.startGuideOnActiveCanvas()).toBe(true);
+    await waitForType(opened.panel, 'guideStart');
+    expect(guide.startOnCanvas).toHaveBeenCalledTimes(1);
+  });
+});

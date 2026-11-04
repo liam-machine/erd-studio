@@ -30,6 +30,22 @@ describe('OwnWriteTracker', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it('tells onRecorded listeners of every recorded write and delete, until disposed (Draft-first staleness sees own writes)', () => {
+    const file = path.join(tempDir, 'model.yml');
+    fs.writeFileSync(file, 'name: a\n');
+    const seen: string[] = [];
+    const sub = tracker.onRecorded((p) => seen.push(p));
+    tracker.onRecorded(() => { throw new Error('a listener that throws'); });
+    tracker.recordWrite(file);
+    tracker.recordDelete(file);
+    expect(seen).toEqual([path.normalize(file), path.normalize(file)]);
+    // A throwing listener does not stop the record.
+    expect(tracker.has(file)).toBe(true);
+    sub.dispose();
+    tracker.recordWrite(file);
+    expect(seen).toHaveLength(2);
+  });
+
   it('matches a recorded write while the file is unchanged, then consumes it', () => {
     const file = path.join(tempDir, 'model.yml');
     fs.writeFileSync(file, 'name: a\n');

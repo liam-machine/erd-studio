@@ -92,13 +92,15 @@ describe('resolveDbtProjectRoot', () => {
     expect(resolveDbtProjectRoot([root], '')).toBe(real);
   });
 
-  it('does not search deeper than the depth limit', () => {
-    makeDbtProject('l1/l2/l3/l4/project');
-    // Too deep to be found: the folder itself opens, logical-only.
+  it('does not walk deeper than the depth limit (six folders), but takes the host\'s deeper results', () => {
+    const deep = makeDbtProject('l1/l2/l3/l4/l5/l6/project');
+    // Too deep for the walk: the folder itself opens, logical-only.
     expect(findDbtProjectCandidates([root])).toEqual([]);
     expect(resolveDbtProjectRoot([root], '')).toBe(root);
-    const d3 = makeDbtProject('x1/x2/project3');
-    expect(resolveDbtProjectRoot([root], '')).toBe(d3);
+    // The host's own search (workspace.findFiles) has no depth limit.
+    expect(findDbtProjectCandidates([root], { hostCandidates: [path.join(deep, 'dbt_project.yml')] })).toEqual([deep]);
+    const d6 = makeDbtProject('x1/x2/x3/x4/x5/project6');
+    expect(resolveDbtProjectRoot([root], '')).toBe(d6);
   });
 
   it('checks every workspace folder in a multi-root workspace', () => {

@@ -1,0 +1,77 @@
+/// Everyone who has bought something.
+table Customer
+	lineageTag: 7a8b9c0d-0002-4000-8000-000000000000
+
+	column CustomerKey
+		dataType: int64
+		isKey
+		formatString: 0
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000001
+		summarizeBy: none
+		sourceColumn: CustomerKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Customer Name'
+		dataType: string
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: CustomerName
+
+		annotation SummarizationSetBy = Automatic
+
+	column City
+		dataType: string
+		dataCategory: City
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: City
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Country/Region'
+		dataType: string
+		dataCategory: Country
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: CountryRegion
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Yearly Income'
+		dataType: double
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: YearlyIncome
+
+		annotation SummarizationSetBy = Automatic
+
+	column Photo
+		dataType: binary
+		isHidden
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000006
+		summarizeBy: none
+		sourceColumn: Photo
+
+		annotation SummarizationSetBy = Automatic
+
+	column Note
+		dataType: string
+		lineageTag: 3c4d5e6f-0002-4000-8000-000000000007
+		summarizeBy: none
+		sourceColumn: Note
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Customer = m
+		mode: import
+		source = ```
+				let
+					Source = Sql.Database(ServerName, "AdventureWorksDW"),
+					dbo_DimCustomer = Source{[Schema="dbo",Item="DimCustomer"]}[Data]
+				in
+					dbo_DimCustomer
+				```
+
+	annotation PBI_ResultType = Table
+

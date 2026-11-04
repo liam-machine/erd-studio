@@ -1,19 +1,19 @@
 /**
- * GettingStartedPanel — the "Welcome to ERD Studio" webview panel: the
- * getting-started video, a one-line project summary, then a diagram first
- * (Open your diagrams, or Draw from dbt — no AI needed) and the optional AI
- * cards (your AI assistant, set up the AI helper, start the guided setup).
+ * GettingStartedPanel — the "ERD Studio Tour" webview panel (the Welcome tab): the
+ * getting-started video (the tour), a one-line project summary, the optional
+ * AI cards (your AI assistant, set up the AI helper, start the guided setup)
+ * and a **Show Me Around** button (the interactive guide). Draft-first (`docs/dev/draft-first.md`
+ * §10): it holds no start, Convert or "Open your diagrams" card — the draft,
+ * the sidebar and the Convert offer are the starts.
  *
  * A singleton, independent of the domain canvas: it has its own protocol
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
  * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
  * The page has three states (`GettingStartedPageMode`): no folder open
  * (`workspaceRoot: null`: "Open the folder your data model lives in", or an
- * example), a folder without dbt (`logicalOnly`: the start card and the AI
- * cards with the guided setup's no-dbt wording — no dbt text at all), and a
- * dbt project (the start card led by Draw from dbt, and the guided setup).
- * Which starts a page offers comes from `startActionsFor()`
- * (`src/types/startActions.ts`), the list every start surface shares.
+ * example), a folder without dbt (`logicalOnly`: the AI cards with the guided
+ * setup's no-dbt wording — no dbt text at all), and a dbt project (the
+ * guided setup and the sample project).
  * The dbt page plays the dbt tour; the other two play the logical-first cut
  * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
@@ -50,8 +50,16 @@ import {
   type GettingStartedToWebview,
   type ProjectSummary,
   type SetupOutcome,
+  GETTING_STARTED_TAB_TITLE,
+  SHOW_ME_AROUND_COMMAND,
 } from '../types/gettingStarted';
-import { START_ACTION_COMMANDS, startActionsFor } from '../types/startActions';
+import {
+  START_ACTION_COMMANDS,
+  startActionArgs,
+  startActionsForIntent,
+  startIntentFor,
+  type StartIntent,
+} from '../types/startActions';
 import { recordStart } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
@@ -74,7 +82,7 @@ import { hasDbtProjectFile } from '../services/projectDiscovery';
 import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
-export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
+export const GETTING_STARTED_TITLE = GETTING_STARTED_TAB_TITLE;
 
 /**
  * Shipped media, relative to the extension root (spec addendum V4/V5): the
@@ -709,14 +717,23 @@ export interface GettingStartedDeps {
   clipboardText(assistant?: AiAssistantId): string;
   /** The first workspace folder, for the nested-project hint in "Open Copilot Chat". */
   workspaceFolder?: string | null;
-  /** Open a domain canvas, or start the first one. */
-  openCanvas(): Promise<void>;
   /**
    * The one-line project summary (`computeProjectSummary`). Optional: without
    * it, or when it throws, the line is simply not shown. Never asked for in
    * the logical-only state (it describes dbt models).
    */
   getProjectSummary?(): Promise<ProjectSummary | null>;
+  /**
+   * The start the folder suggests, from the host's `StartIntentTracker`:
+   * `known()` at once (the first status), `refresh()` after the bounded look
+   * at the folder (a second status when it changed the suggestion).
+   * Optional: without it, the suggestion comes from the status alone
+   * (Convert, Draw from dbt or a blank diagram; no look).
+   */
+  startIntent?: {
+    known(): StartIntent | undefined;
+    refresh(): Promise<StartIntent | undefined>;
+  };
   /**
    * The open folder has no `dbt_project.yml` (contract 9): the page shows its
    * logical-only state. Used as the status's `logicalOnly` when `getStatus()`
@@ -821,21 +838,40 @@ export class GettingStartedPanel {
       const fetched = await this.deps.getStatus();
       if (!current()) { return; }
       const logicalOnly = fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true);
-      const status: GettingStartedStatus = {
-        ...fetched,
-        logicalOnly,
-        // The same list the walkthrough and the sidebar offer; no storage reads as dbml.
-        starts: startActionsFor({ hasProject: fetched.hasProject, hasDbt: !logicalOnly, storage: fetched.storage }),
+      const tracker = fetched.hasProject ? this.deps.startIntent : undefined;
+      // What the folder suggests (the same rule the walkthrough and the sidebar follow); no storage reads as dbml.
+      const intentNow: StartIntent | undefined = !fetched.hasProject
+        ? undefined
+        : tracker?.known() ?? startIntentFor({
+          hasProject: true, hasDbt: !logicalOnly, storage: fetched.storage, hasDiagrams: fetched.domainCount > 0,
+        });
+      const withIntent = (intent: StartIntent | undefined): GettingStartedStatus => {
+        const s: GettingStartedStatus = { ...fetched, logicalOnly, starts: startActionsForIntent(intent, fetched.hasProject && !logicalOnly) };
+        if (intent) { s.intent = intent; }
+        return s;
       };
-      // The cards go out at once; the summary line can need a manifest parse
-      // (seconds on a large project), so it follows in a second status when
-      // there is one, rather than holding the whole panel back. That second
-      // message is dropped if a newer postStatus (or a setup) started while
-      // the summary was being worked out — its `status` would be stale.
+      // The cards go out at once. Two things can follow in a second status
+      // rather than hold the whole panel back: the bounded look at the folder
+      // (it can change the suggestion), and the summary line, which can need
+      // a manifest parse (seconds on a large project). That second message is
+      // dropped if a newer postStatus (or a setup) started meanwhile — its
+      // `status` would be stale.
+      const status = withIntent(intentNow);
       this.post({ type: 'status', payload: { ...status, summary: null } });
-      if (gettingStartedPageMode(status) !== 'dbt') { return; }
-      const summary = await this.projectSummary();
-      if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
+      // No suggestion is shown here any more (no start card): nothing is counted as suggested.
+      const wantsSummary = gettingStartedPageMode(status) === 'dbt';
+      if (!tracker) {
+        if (!wantsSummary) { return; }
+        const summaryOnly = await this.projectSummary();
+        if (summaryOnly && current()) { this.post({ type: 'status', payload: { ...status, summary: summaryOnly } }); }
+        return;
+      }
+      const [intent, summary] = await Promise.all([
+        tracker.refresh().catch(() => intentNow),
+        wantsSummary ? this.projectSummary() : Promise.resolve(null),
+      ]);
+      if (!current()) { return; }
+      if (intent !== intentNow || summary) { this.post({ type: 'status', payload: { ...withIntent(intent), summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
       log.error('[GettingStarted] Status check failed:', err);
@@ -933,14 +969,11 @@ export class GettingStartedPanel {
           });
         }
         break;
-      case 'openDomain':
-        telemetry.feature('welcomeOpenDiagram');
-        await this.deps.openCanvas();
-        break;
       case 'start':
         recordStart(msg.action, 'welcome');
-        // A fixed command per start (never an id from the webview), run with no argument.
-        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action]);
+        // A fixed command per start (never an id from the webview), with a fixed argument:
+        // a direct import's quick path, nothing for the others.
+        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action], ...startActionArgs(msg.action));
         // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
         break;
@@ -959,6 +992,10 @@ export class GettingStartedPanel {
         break;
       case 'videoProgress':
         telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
+        break;
+      case 'showMeAround':
+        // The fixed command (never one from the webview); it counts its own use.
+        await vscode.commands.executeCommand(SHOW_ME_AROUND_COMMAND);
         break;
       default: {
         const unhandled: never = msg;

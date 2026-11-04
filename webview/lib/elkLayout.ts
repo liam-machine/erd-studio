@@ -291,6 +291,15 @@ function getElk(): IELK {
   return elkInstance;
 }
 
+/** The node placement a layout falls back to when the default one overflows the worker's stack. */
+export const STACK_SAFE_NODE_PLACEMENT = 'BRANDES_KOEPF';
+
+/** A layout that failed because the worker ran out of stack (V8: RangeError, Firefox: InternalError). */
+export function isStackOverflow(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Maximum call stack size exceeded|too much recursion/i.test(message);
+}
+
 /**
  * Run `elk.layout()` but guarantee the promise settles: it rejects if the
  * worker raises an uncaught error or the layout exceeds `LAYOUT_TIMEOUT_MS`,
@@ -476,7 +485,19 @@ export async function runElkLayout(
     edges: toElkEdges(edges),
   };
 
-  const layouted = await layoutWithGuard(elk, graph);
+  let layouted: ElkNode;
+  try {
+    layouted = await layoutWithGuard(elk, graph);
+  } catch (err) {
+    // NETWORK_SIMPLEX node placement recurses deeply on a large connected
+    // component (a 257-table SQL import) and overflows the worker's stack.
+    // Brandes–Köpf needs little stack: retry once with it rather than fail.
+    if (!isStackOverflow(err) || mergedOptions['elk.layered.nodePlacement.strategy'] === STACK_SAFE_NODE_PLACEMENT) throw err;
+    layouted = await layoutWithGuard(getElk(), {
+      ...graph,
+      layoutOptions: { ...mergedOptions, 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT },
+    });
+  }
 
   // Extract positions from the layouted graph
   const positions: Record<string, NodePosition> = {};

@@ -1,5 +1,9 @@
 /**
- * Open an Example Project… (`erdStudio.openExampleProject`): pick an example,
+ * Open an Example… (`erdStudio.openExampleProject`, Draft-first §9): the
+ * example draft (`openExampleDraft`, the coffee shop with the Example
+ * switcher over the projects), and Save This Example… — the write step
+ * below, resumed with the example chosen. Without a preview (the fallback):
+ * pick an example,
  * pick a folder, every file written into a new `<folder>/<id>` all or
  * nothing, the pending record stored, then the folder opened (a new window
  * when one is open). An existing copy is offered as it is; any other folder
@@ -17,6 +21,7 @@ import {
   OPEN_EXAMPLE_PROJECT_PLACEHOLDER,
   OPEN_EXAMPLE_PROJECT_TITLE,
   OPEN_IT_BUTTON,
+  openExampleDraft,
   openExampleProject,
   type ExampleQuickPickItem,
   type OpenExampleProjectDeps,
@@ -31,6 +36,7 @@ import {
 } from '../../src/services/exampleProjects';
 import type { FileWriteIo } from '../../src/services/fsFileWrites';
 import { telemetry } from '../../src/services/telemetryService';
+import { fakeDraftPreview } from './helpers/draftDriver';
 
 let tmp: string;
 let home: string;
@@ -280,5 +286,54 @@ describe('Open an Example Project…', () => {
     expect(ui.errorMessages[0].message).toContain('Nothing was left behind.');
     expect(ui.openedFolders).toEqual([]);
     expect(state.data.size).toBe(0);
+  });
+});
+
+describe('Open an Example…: the example draft (Draft-first §9)', () => {
+  it('is titled Open an Example… in the palette; Open Example Diagram stays registered but hidden', async () => {
+    const pkg = (await import('../../package.json')).default as {
+      contributes: { commands: Array<{ command: string; title: string }>; menus: { commandPalette: Array<{ command: string; when?: string }> } };
+    };
+    expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_PROJECT_COMMAND)?.title).toBe('Open an Example…');
+    expect(OPEN_EXAMPLE_PROJECT_TITLE).toBe('Open an Example');
+    expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: 'erdStudio.openExampleDiagram', when: 'false' });
+  });
+
+  it('no folder: the coffee shop planned in memory (nothing to keep into), with the Example switcher over every project; a project\'s Save This Example… runs the folder dialog onward', async () => {
+    const preview = fakeDraftPreview([{ scope: 'exampleProject:medallion' }, 'keep']);
+    const ui = fakeUi({ parent: undefined });
+    await openExampleDraft({ preview, trigger: 'example', importDeps: () => undefined, project: { globalState: memento(), ui, homeDir: home } });
+    await vi.waitFor(() => expect(preview.settled).toHaveLength(1));
+    const [coffee, project] = preview.drafts;
+    expect(coffee.source).toBe('example');
+    expect(coffee.keep).toEqual({ writer: 'none' });
+    expect(coffee.banner.primary).toBe('openFolder');
+    expect(coffee.scopes?.label).toBe('Example');
+    expect(coffee.scopes?.options.map((o) => o.id)).toEqual(['example:coffee-shop', ...EXAMPLE_PROJECTS.map((e) => `exampleProject:${e.id}`)]);
+    expect(project.source).toBe('exampleProject');
+    expect(project.keep).toEqual({ writer: 'exampleProject', exampleId: 'medallion' });
+    // Save This Example…: no example list (it is chosen), the folder dialog straight away; cancelled there, nothing written.
+    expect(ui.picks).toEqual([]);
+    expect(ui.folderDialogs).toEqual([{ defaultFolder: home, exampleId: 'medallion' }]);
+    expect(preview.settled).toEqual([{ kept: false }]);
+    expect(fs.readdirSync(home)).toEqual([]);
+  });
+
+  it('Save This Example… writes the project into a folder of its own, as Open an Example Project… did', async () => {
+    const parent = path.join(tmp, 'parent');
+    fs.mkdirSync(parent);
+    const preview = fakeDraftPreview([{ scope: 'exampleProject:medallion' }, 'keep']);
+    const ui = fakeUi({ parent });
+    await openExampleDraft({ preview, trigger: 'example', importDeps: () => undefined, project: { globalState: memento(), ui, homeDir: home, now: () => NOW } });
+    await vi.waitFor(() => expect(preview.settled).toEqual([{ kept: true }]));
+    expect(filesUnder(path.join(parent, 'medallion')).sort()).toEqual(Object.keys(exampleFiles('medallion')).sort());
+    expect(ui.openedFolders).toHaveLength(1);
+  });
+
+  it('openExampleProject resumed with an id it does not ship says so and writes nothing', async () => {
+    const ui = fakeUi({ parent: tmp });
+    expect(await openExampleProject({ globalState: memento(), ui, homeDir: home }, { id: 'nope' })).toBeUndefined();
+    expect(ui.errorMessages[0].message).toMatch(/no example by that name/);
+    expect(ui.folderDialogs).toEqual([]);
   });
 });

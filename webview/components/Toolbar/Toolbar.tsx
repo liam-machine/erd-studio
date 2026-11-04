@@ -20,6 +20,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
+import { GUIDE_TARGETS } from '../../../src/types/onboardingGuide';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import { useRevealTable } from '../../hooks/useRevealTable';
@@ -29,13 +30,13 @@ import {
   runElkLayout,
   detectLayerBound,
   detectStrategy,
-  SPACING_PRESETS,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
 } from '../../lib/elkLayout';
+import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
-import { fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
+import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
@@ -131,10 +132,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const [isLayouting, setIsLayouting] = useState(false);
   const [layoutOptionsOpen, setLayoutOptionsOpen] = useState(false);
   const [layoutDirty, setLayoutDirty] = useState(false);
-  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>('auto');
-  const [layerBound, setLayerBound] = useState(5);
-  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('RIGHT');
-  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>('M');
+  // The popover starts on the first-open layout's choices (lib/firstOpenLayout.ts,
+  // shared with the draft preview so a draft is laid out as its diagram will be).
+  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>(FIRST_OPEN_LAYOUT.partitionStrategy);
+  const [layerBound, setLayerBound] = useState(FIRST_OPEN_LAYOUT.layerBound);
+  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>(FIRST_OPEN_LAYOUT.direction);
+  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>(FIRST_OPEN_LAYOUT.spacing);
   const layoutGroupRef = useRef<HTMLDivElement>(null);
 
   // Refresh manifest state
@@ -219,7 +222,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // Top padding = the toolbar's own bottom edge, so Fit never leaves the top
   // row of cards under it (Logical and Physical alike).
   const handleFitView = useCallback(() => {
-    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), duration: 200 });
+    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM, duration: 200 });
   }, [fitView]);
 
   // --- Layout options click-outside handler --------------------------------
@@ -482,22 +485,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     };
 
     try {
-      const sp = SPACING_PRESETS[spacingPreset];
       // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
       const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
       const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
-      const effectiveBound = partitionStrategy === 'auto'
-        ? detectLayerBound(modelNodes.length)
-        : layerBound;
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
-        {
-          ...domain.viewConfig.layoutOptions,
-          'elk.direction': layoutDirection,
-          ...sp,
-          'elk.layered.layering.coffmanGraham.layerBound': String(effectiveBound),
-        },
+        buildLayoutOptions(
+          { partitionStrategy, layerBound, direction: layoutDirection, spacing: spacingPreset },
+          modelNodes.length,
+          domain.viewConfig.layoutOptions,
+        ),
         partitionStrategy,
       );
 
@@ -513,7 +511,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
       // Wait one frame for React to flush, then fit viewport
       requestAnimationFrame(() => {
-        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)) });
+        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM });
       });
 
       // Persist to extension host
@@ -616,7 +614,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const isReadOnly = domain.readOnly;
   const exportTitle = domain.stage === 'physical'
     ? 'Export the logical design as Mermaid or DBML (the physical stage is not exported)'
-    : 'Export as DBML or Mermaid — open formats, no lock-in';
+    : 'Export as DBML or Mermaid';
 
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation
@@ -719,7 +717,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
         {/* Auto Layout + options + Refresh Manifest */}
         <div className="toolbar__section">
-          <div className="toolbar__split-group" ref={layoutGroupRef}>
+          <div className="toolbar__split-group" ref={layoutGroupRef} data-guide={GUIDE_TARGETS.canvasLayout}>
             <button
               className={`toolbar__split-main${layoutDirty ? ' toolbar__split-main--dirty' : ''}`}
               onClick={handleAutoLayout}
@@ -994,6 +992,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               <div className="toolbar__dropdown" ref={modelDropdownRef}>
                 <button
                   className="toolbar__dropdown-trigger"
+                  data-guide={GUIDE_TARGETS.canvasAdd}
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                   title="Add table or relationship"
                   aria-label="Add table or relationship"
@@ -1060,6 +1059,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             <div className="toolbar__corner-menu" ref={cornerMenuRef}>
               <button
                 className={`toolbar__corner-trigger${cornerMenuOpen ? ' toolbar__corner-trigger--active' : ''}`}
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={() => setCornerMenuOpen((open) => !open)}
                 title="More actions"
                 aria-label="More actions"
@@ -1116,6 +1116,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               </button>
               <button
                 className="toolbar__corner-button"
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={handleViewFile}
                 title="Open file"
                 aria-label="Open the diagram's file in a text editor"

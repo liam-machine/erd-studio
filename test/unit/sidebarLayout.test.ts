@@ -44,7 +44,9 @@ describe('sidebar views', () => {
   it('give each view at most one title-bar icon (plus the filter toggle); everything else is in the + menu or under …', () => {
     // The filter is a toggle of its own: Filter…, or (while filtered) Clear Filter — see the next test.
     const isFilter = (m: MenuEntry): boolean => /^erdStudio\.(filter|clear)\w*(Diagrams|TableLibrary|Relationships)(Filter)?$/.test(m.command ?? '');
-    const titles = contributes.menus['view/title'].filter((m) => !isFilter(m));
+    // An empty window's own title bar (no + menu there): its one icon is ▶, the Welcome tab (checked below).
+    const emptyWindowOnly = (m: MenuEntry): boolean => (m.when ?? '').includes('!erdStudio.hasProject');
+    const titles = contributes.menus['view/title'].filter((m) => !isFilter(m) && !emptyWindowOnly(m));
     for (const view of contributes.views['erd-studio']) {
       // A toggle is one icon: only one of its two states shows at a time.
       const icons = titles.filter((m) => m.when?.startsWith(`view == ${view.id}`) && m.group?.startsWith('navigation')
@@ -58,6 +60,11 @@ describe('sidebar views', () => {
     ]);
     expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.domainTree') && m.group?.startsWith('navigation')))
       .toEqual([{ submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0' }]);
+    // With no folder open, the + menu is gone and the one icon is ▶ (Watch the One-Minute Tour): the
+    // Welcome tab one click away (onboarding story 09). In a project, Help & Feedback has that row.
+    expect(contributes.menus['view/title'].filter(emptyWindowOnly)).toEqual([
+      { command: 'erdStudio.showGettingStarted', when: 'view == erdStudio.domainTree && !erdStudio.hasProject', group: 'navigation@0' },
+    ]);
   });
 
   it('give Diagrams, the Table Library and Relationships one filter icon: Filter…, or Clear Filter while filtered (Filter… then under …)', () => {
@@ -85,8 +92,11 @@ describe('sidebar views', () => {
   it('put every way to start a diagram, and New Layer, in the + menu', () => {
     expect(contributes.submenus).toContainEqual({ id: 'erdStudio.newMenu', label: 'New…', icon: '$(add)' });
     expect(contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual([
-      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.addLayer',
+      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.addLayer',
     ]);
+    // The imports sit together, after Import DBML…, in the diagram group.
+    expect(contributes.menus['erdStudio.newMenu'].filter((m) => m.command?.startsWith('erdStudio.import')).map((m) => m.group))
+      .toEqual(['1_diagram@3', '1_diagram@4', '1_diagram@5']);
     expect(contributes.commands.find((c) => c.command === 'erdStudio.addLayer')?.title).toBe('New Layer…');
   });
 
@@ -149,7 +159,7 @@ describe('HelpTreeProvider', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Watch Getting Started Video', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Watch the One-Minute Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
     for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);
@@ -159,10 +169,10 @@ describe('HelpTreeProvider', () => {
   it('adds My Reports after Send Feedback once there is a report, with the open count', () => {
     const provider = new HelpTreeProvider(tracking([report(2), report(1, 'closed')]));
     const rows = provider.getChildren();
-    expect(rows[3]).toEqual({ type: 'reports' });
-    const item = provider.getTreeItem(rows[3]);
+    expect(rows[4]).toEqual({ type: 'reports' });
+    const item = provider.getTreeItem(rows[4]);
     expect([item.label, item.description, item.contextValue]).toEqual(['My Reports', '1 open', 'myReports']);
-    expect(provider.getChildren(rows[3]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
+    expect(provider.getChildren(rows[4]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
     provider.dispose();
   });
 });

@@ -139,6 +139,14 @@ body {
   /* Gold layer */
   --layer-gold: #d4a800;
   --layer-gold-bg: rgba(255, 215, 0, 0.2);
+
+  /* Star on GitHub (the onboarding guide's last step): GitHub's star gold */
+  --star-gold: #e3b341;
+  --star-gold-light: #f5d76e;
+  --star-gold-dark: #b8860b;
+  --star-gold-fg: #241a00;
+  --star-gold-glow: rgba(227, 179, 65, 0.5);
+  --star-gold-shine: rgba(255, 255, 255, 0.6);
 }
 
 /* A logical-only canvas draws its lines, their end labels, the moving

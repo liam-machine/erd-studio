@@ -538,7 +538,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the start-screen keys at the very end, after the native DBML ones: features and errors', () => {
     const at = FEATURES.indexOf('welcomeBlank');
     expect(at).toBe(FEATURES.indexOf('dbmlForeignFormatWarned') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('exampleDiagramShown') + 1)).toEqual([
       'welcomeBlank', 'welcomeImport', 'welcomeExample', 'welcomeConvert',
       'walkthroughBlank', 'walkthroughImport', 'walkthroughExample', 'walkthroughConvert', 'walkthroughDrawFromDbt',
       'sidebarBlank', 'sidebarImport', 'sidebarExample', 'sidebarConvert', 'sidebarDrawFromDbt',
@@ -548,8 +548,110 @@ describe('allowlists agree with the Worker', () => {
       'exampleDataVault', 'exampleGitlabStyle', 'exampleBigqueryVersioned', 'exampleDataMesh',
       'exampleDiagramShown',
     ]);
-    expect(ERROR_CODES.slice(-1)).toEqual(['exampleWriteFailed']);
     expect(ERROR_CODES.indexOf('exampleWriteFailed')).toBe(ERROR_CODES.indexOf('convertToDbmlFailed') + 1);
+  });
+
+  it('appends the import-source and first-run keys at the very end, after the start-screen ones: features and errors', () => {
+    const at = FEATURES.indexOf('importPickDbml');
+    expect(at).toBe(FEATURES.indexOf('exampleDiagramShown') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('walkthroughWaited') + 1)).toEqual([
+      'importPickDbml', 'importPickSqlDdl', 'importPickSemanticModel', 'importPickCancelled',
+      'importSqlDdl', 'importSqlDdlCancelled', 'importSqlDdlInvalid',
+      'importSqlDialectPostgres', 'importSqlDialectMysql', 'importSqlDialectSqlserver', 'importSqlDialectSnowflake', 'importSqlDialectDatabricks',
+      'importSemanticModel', 'importSemanticModelCancelled', 'importSemanticModelInvalid',
+      'firstRun', 'firstRunHasDiagrams', 'diagramsNudgeShown', 'diagramsNudgeOpened', 'walkthroughWaited',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'), ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual([
+      'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
+    ]);
+  });
+
+  it('appends the start-suggestion keys at the very end, after the first-run ones', () => {
+    const at = FEATURES.indexOf('welcomeImportSemanticModel');
+    expect(at).toBe(FEATURES.indexOf('walkthroughWaited') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('importReviewOpened') + 1)).toEqual([
+      'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
+      'walkthroughImportSemanticModel', 'walkthroughImportSqlDdl', 'walkthroughImportDbmlFile',
+      'sidebarImportSemanticModel', 'sidebarImportSqlDdl', 'sidebarImportDbmlFile',
+      'startSuggestedConvert', 'startSuggestedDrawFromDbt', 'startSuggestedImportSemanticModel',
+      'startSuggestedImportSqlDdl', 'startSuggestedImportDbmlFile', 'startSuggestedBlank',
+      'howToClipPlayed',
+      // The start suggestion and the quick import, appended after them.
+      'suggestPromptShown', 'suggestPromptAccepted', 'suggestPromptMore', 'suggestPromptOff', 'suggestPromptDismissed',
+      'startSuggestionsOff', 'quickImport', 'quickImportChangeOptions', 'quickImportFellBack', 'importReviewOpened',
+    ]);
+  });
+
+  it('appends the import guide and nothing-found keys after the start-suggestion ones', () => {
+    const at = FEATURES.indexOf('importGuideOpened');
+    expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('suggestPromptNothingOff') + 1)).toEqual([
+      'importGuideOpened',
+      'importGuideFromWelcome', 'importGuideFromWalkthrough', 'importGuideFromSidebar',
+      'importGuideFromPicker', 'importGuideFromStartPick', 'importGuideFromPrompt',
+      'importGuideActionFound', 'importGuideActionDbt', 'importGuideActionDatabricks', 'importGuideActionSnowflake',
+      'importGuideActionPowerBi', 'importGuideActionFabric', 'importGuideActionFabricWarehouse', 'importGuideActionSqlServer',
+      'importGuideActionPostgres', 'importGuideActionMysql', 'importGuideActionDbml', 'importGuideActionOtherTools',
+      'importGuideActionFeedback',
+      'importGuideCopied',
+      'suggestPromptNothingShown', 'suggestPromptNothingNewDiagram', 'suggestPromptNothingGuide', 'suggestPromptNothingOff',
+    ]);
+  });
+
+  it('appends the Draft-first keys after the nothing-found ones (which stay listed)', () => {
+    const at = FEATURES.indexOf('draftShown');
+    expect(at).toBe(FEATURES.indexOf('suggestPromptNothingOff') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('activatedDbt'))).toEqual([
+      'draftShown', 'draftShownAuto', 'draftExampleShown',
+      'draftSourceSqlDdl', 'draftSourceSemanticModel', 'draftSourceDbml', 'draftSourceDbt',
+      'draftKept', 'draftChangeOptions', 'draftDiscarded', 'draftClosed', 'draftOtherStart',
+      'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',
+      'suggestPromptShowMe', 'importGuideFromDraft',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
+  });
+
+  it('the Worker README documents the Draft-first keys: a Draft funnel row, and chose_start counts draftKept', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    for (const key of FEATURES.slice(FEATURES.indexOf('draftShown'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['draftBuildFailed', 'draftLayoutFailed']) expect(readme, code).toContain(`\`${code}\``);
+    expect(readme).toMatch(/^\| Draft \|/m);
+    const choseStart = readme.split('\n').find((l) => l.includes('AS chose_start'))!;
+    expect(choseStart).toContain("'draftKept'");
+    expect(choseStart).toContain("'suggestPromptShowMe'");
+  });
+
+  it('appends the per-window activation and unused-dbt keys at the very end, after the Draft-first ones', () => {
+    const at = FEATURES.indexOf('activatedDbt');
+    expect(at).toBe(FEATURES.indexOf('importGuideFromDraft') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtProjectUnused') + 1)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
+  });
+
+  it('appends the onboarding guide keys at the very end, after the activation ones, in their fixed order', () => {
+    const at = FEATURES.indexOf('guideStarted');
+    expect(at).toBe(FEATURES.indexOf('dbtProjectUnused') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('guideLeftDraft') + 1)).toEqual([
+      'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
+      'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
+      'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideStepDraftKeep',
+      'guideStepCanvasTable', 'guideStepCanvasRelationship', 'guideStepCanvasToolbar', 'guideStepCanvasStages',
+      'guideStepCanvasSidebar', 'guideStepCanvasFiles', 'guideStepCanvasFinish',
+      'guideBack', 'guideLeftDraft',
+    ]);
+    // The no-longer-sent clip key stays listed (append-only).
+    expect(FEATURES).toContain('howToClipPlayed');
+  });
+
+  it('appends the existing-diagrams notice\'s Show Me Around key at the very end, after the guide ones', () => {
+    expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
+    expect(FEATURES.at(-1)).toBe('draftAfterOpenFolder');
+    expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
+  });
+
+  it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Guide \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('guideStarted'))) expect(readme, key).toContain(`\`${key}\``);
   });
 
   it('telemetry.json documents every feature key', () => {

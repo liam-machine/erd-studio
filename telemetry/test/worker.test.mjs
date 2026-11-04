@@ -249,18 +249,18 @@ describe('routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('body size', () => {
-  it('accepts a body of exactly 8192 bytes', async () => {
+  it('accepts a body of exactly 16384 bytes', async () => {
     const base = JSON.stringify(heartbeat());
     // Pad with an unknown key (dropped) to hit the cap exactly.
-    const padding = 8192 - base.length - ',"pad":""'.length;
+    const padding = 16384 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
-    assert.equal(new TextEncoder().encode(body).byteLength, 8192);
+    assert.equal(new TextEncoder().encode(body).byteLength, 16384);
     assert.equal((await post(body)).status, 204);
   });
 
-  it('413s a body of 8193 bytes', async () => {
+  it('413s a body of 16385 bytes', async () => {
     const base = JSON.stringify(heartbeat());
-    const padding = 8193 - base.length - ',"pad":""'.length;
+    const padding = 16385 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
     const { status, env } = await post(body);
     assert.equal(status, 413);
@@ -274,7 +274,7 @@ describe('body size', () => {
 
   it('counts the stream rather than trusting a missing Content-Length', async () => {
     const env = makeEnv();
-    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(9000), '"}']), env);
+    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(17000), '"}']), env);
     assert.equal(response.status, 413);
     assert.equal(env.DB.statements.length, 0);
   });
@@ -400,7 +400,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 29);
+    assert.equal(params.length, 31);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -511,6 +511,9 @@ describe('validation — acceptance and normalisation', () => {
       // So are the physical tooling fields (migrations/0003).
       null,
       null,
+      // And the onboarding trail (migrations/0004).
+      null,
+      null,
     ]);
   });
 });
@@ -591,12 +594,12 @@ describe('optional physical tooling fields', () => {
       physicalTools: ['notebooks', 'dbt', 'fabric', 'dbt'],
       platforms: ['snowflake', 'databricks'],
     }));
-    assert.deepEqual(params.slice(27), ['["dbt","fabric","notebooks"]', '["databricks","snowflake"]']);
+    assert.deepEqual(params.slice(27, 29), ['["dbt","fabric","notebooks"]', '["databricks","snowflake"]']);
   });
 
   it('stores [] (looked, found nothing) apart from NULL (did not look)', async () => {
-    assert.deepEqual((await storedParams(heartbeat({ physicalTools: [], platforms: [] }))).slice(27), ['[]', '[]']);
-    assert.deepEqual((await storedParams(heartbeat({}))).slice(27), [null, null]);
+    assert.deepEqual((await storedParams(heartbeat({ physicalTools: [], platforms: [] }))).slice(27, 29), ['[]', '[]']);
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(27, 29), [null, null]);
   });
 
   it('accepts every value at once', async () => {
@@ -616,6 +619,74 @@ describe('optional physical tooling fields', () => {
     it(`refuses ${field} = ${JSON.stringify(value)} with 400 and no write`, async () => {
       const env = makeEnv();
       const response = await post(heartbeat({ [field]: value }), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The onboarding trail (migrations/0004)
+// ---------------------------------------------------------------------------
+
+describe('the onboarding trail', () => {
+  const TRAIL = [
+    ['windowOpened', 0, 1, 1],
+    ['draftShown', 2, 1, 1],
+    ['guideStarted', 0, 1, 1],
+    ['guideStepDraftBanner', 1, 1, 1],
+    ['windowAway', 34, 1, 1],
+    ['windowBack', 3600, 1, 1],
+    ['editLayout', 4, 2, 7],
+    ['!draftBuildFailed', 0, 1, 1],
+    ['layoutFailed', 1, 1, 1],
+    ['!layoutFailed', 0, 1, 1],
+  ];
+
+  it('stores it in order as JSON, with the dropped count, last', async () => {
+    const params = await storedParams(heartbeat({ trail: TRAIL, trailDropped: 3 }));
+    assert.equal(params.length, 31);
+    assert.deepEqual(JSON.parse(params[29]), TRAIL);
+    assert.equal(params[30], 3);
+  });
+
+  it('stores NULL for both when there is no trail, and 0 dropped when it is omitted', async () => {
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(29), [null, null]);
+    assert.deepEqual((await storedParams(heartbeat({ trail: [] }))).slice(29), ['[]', 0]);
+  });
+
+  it('drops an event it does not list (a newer extension\'s) and keeps the order of the rest', async () => {
+    const params = await storedParams(heartbeat({ trail: [['windowOpened', 0, 1, 1], ['someFutureEvent', 3, 1, 1], ['!someFutureError', 1, 1, 1], ['!compare', 1, 1, 1], ['canvasOpened', 5, 1, 1]] }));
+    assert.deepEqual(JSON.parse(params[29]), [['windowOpened', 0, 1, 1], ['canvasOpened', 5, 1, 1]]);
+  });
+
+  it('accepts 100 entries and every marker', async () => {
+    const markers = ['windowOpened', 'windowClosed', 'windowAway', 'windowBack', 'canvasOpened', 'canvasClosed', 'canvasHidden', 'canvasShown'];
+    const trail = Array.from({ length: 100 }, (_, i) => [markers[i % markers.length], i % 3600, 1 + (i % 20), 1 + (i % 100)]);
+    const params = await storedParams(heartbeat({ trail, trailDropped: 10000 }));
+    assert.equal(JSON.parse(params[29]).length, 100);
+  });
+
+  for (const [what, body] of [
+    ['a trail that is not an array', { trail: { windowOpened: 1 } }],
+    ['101 entries', { trail: Array.from({ length: 101 }, () => ['windowOpened', 0, 1, 1]) }],
+    ['an entry of three values', { trail: [['windowOpened', 0, 1]] }],
+    ['a path as the event', { trail: [['/Users/jane/acme/dim_customer.sql', 0, 1, 1]] }],
+    ['a table name with a dot as the event', { trail: [['sales.dim_customer', 0, 1, 1]] }],
+    ['two bangs before an event', { trail: [['!!draftBuildFailed', 0, 1, 1]] }],
+    ['a gap over an hour', { trail: [['windowOpened', 3601, 1, 1]] }],
+    ['a negative gap', { trail: [['windowOpened', -1, 1, 1]] }],
+    ['a fractional gap', { trail: [['windowOpened', 1.5, 1, 1]] }],
+    ['window 0', { trail: [['windowOpened', 0, 0, 1]] }],
+    ['window 21', { trail: [['windowOpened', 0, 21, 1]] }],
+    ['repeat 0', { trail: [['windowOpened', 0, 1, 0]] }],
+    ['repeat 101', { trail: [['windowOpened', 0, 1, 101]] }],
+    ['a dropped count without a trail', { trailDropped: 1 }],
+    ['a dropped count over the cap', { trail: [], trailDropped: 10001 }],
+  ]) {
+    it(`refuses ${what} with 400 and no write`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat(body), env);
       assert.equal(response.status, 400);
       assert.equal(env.DB.statements.length, 0);
     });

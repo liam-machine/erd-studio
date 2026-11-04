@@ -96,6 +96,7 @@ import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import { orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 import { evalWhen, type WhenContext } from './helpers/whenClause';
+import { START_INTENTS, START_INTENT_CONTEXT_KEY, moreStartsFor } from '../../src/types/startActions';
 
 // ---------------------------------------------------------------------------
 // The matcher
@@ -141,8 +142,13 @@ const PANEL_START_CONTROLS: Record<string, DbtControl> = {
   drawFromDbt: 'Draw from dbt',
 };
 
-type Surface = 'package.json' | 'gettingStarted' | 'trees' | 'canvas' | 'toasts' | 'harness' | 'cli';
-const SURFACES: Surface[] = ['package.json', 'gettingStarted', 'trees', 'canvas', 'toasts', 'harness', 'cli'];
+type Surface = 'package.json' | 'gettingStarted' | 'importGuide' | 'trees' | 'canvas' | 'toasts' | 'harness' | 'cli';
+const SURFACES: Surface[] = ['package.json', 'gettingStarted', 'importGuide', 'trees', 'canvas', 'toasts', 'harness', 'cli'];
+
+/** Import guide buttons (`data-guide-action="…"`) → the dbt control they are. */
+const GUIDE_CONTROLS: Record<string, DbtControl> = {
+  dbt: 'Draw from dbt',
+};
 
 interface Shown { where: string; text: string }
 interface Collected {
@@ -214,8 +220,11 @@ function contributesShown(base: WhenContext, out: Collected): void {
   /** The view a menu entry or welcome content belongs to, from `view == x` in its clause. */
   const viewOf = (when: string | undefined) => /\bview == ([\w.]+)/.exec(when ?? '')?.[1];
 
-  for (let mask = 0; mask < 1 << TOGGLES.length; mask++) {
-    const ctx: WhenContext = { ...base };
+  // The start screen's suggestion (`erdStudio.startIntent`) is swept too: unset (not looked yet) and every value.
+  const intents: Array<string | undefined> = [undefined, ...START_INTENTS];
+  for (let combo = 0; combo < (1 << TOGGLES.length) * intents.length; combo++) {
+    const mask = combo % (1 << TOGGLES.length);
+    const ctx: WhenContext = { ...base, [START_INTENT_CONTEXT_KEY]: intents[Math.floor(combo / (1 << TOGGLES.length))] };
     TOGGLES.forEach((key, i) => { ctx[key] = (mask & (1 << i)) !== 0; });
     const holds = (when: string | undefined) => evalWhen(when, ctx, WILDCARDS);
     const viewShown = (id: string | undefined) => id === undefined || (viewWhen.has(id) ? holds(viewWhen.get(id)) : true);
@@ -635,6 +644,34 @@ async function cliText(ws: string, out: Collected): Promise<void> {
   }
 }
 
+/** Bring In an Existing Data Model…: the page the host really builds for this window, its text and its buttons, in JSDOM. */
+async function importGuideText(out: Collected): Promise<void> {
+  const shown = vscode.commands.executeCommand('erdStudio.showImportGuide');
+  await vi.advanceTimersByTimeAsync(2_000);
+  await shown;
+  const panel = vscode.window._webviewPanels.find((p) => p.viewType === 'erdStudio.importGuide');
+  if (!panel) { throw new Error('the import guide did not open'); }
+  const dom = new JSDOM(panel.webview.html, {
+    runScripts: 'dangerously',
+    virtualConsole: new VirtualConsole(),
+    beforeParse(window) {
+      (window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({ postMessage: () => undefined });
+    },
+  });
+  try {
+    const win = dom.window as unknown as Window & typeof globalThis;
+    const doc = dom.window.document;
+    for (const t of domText(doc, win)) { out.text.importGuide.push({ where: 'import guide', text: t }); }
+    out.text.importGuide.push({ where: 'import guide title', text: doc.title });
+    for (const el of doc.querySelectorAll<HTMLElement>('[data-guide-action]')) {
+      const control = GUIDE_CONTROLS[el.dataset.guideAction ?? ''];
+      if (control) { out.controls.set(control, [...(out.controls.get(control) ?? []), 'import guide']); }
+    }
+  } finally {
+    dom.window.close();
+  }
+}
+
 async function collect(c: Case): Promise<Collected> {
   const out: Collected = {
     text: Object.fromEntries(SURFACES.map((s) => [s, []])) as unknown as Record<Surface, Shown[]>,
@@ -716,6 +753,7 @@ async function collect(c: Case): Promise<Collected> {
     }
 
     const welcome = await openGettingStarted();
+    await importGuideText(out);
 
     if (c.fixture && c.diagram) {
       const editorCall = registerEditor.mock.calls.find((call) => call[0] === SUBJECT_AREA_EDITOR_VIEW_TYPE);
@@ -812,6 +850,7 @@ describe.each([LOGICAL_YAML, LOGICAL_DBML, PLAIN_FOLDER, EMPTY_WINDOW])('$name: 
   it('read every surface it has (the sweep is not empty)', () => {
     expect(got.text['package.json'].length).toBeGreaterThan(20);
     expect(got.text.gettingStarted.length).toBeGreaterThan(10);
+    expect(got.text.importGuide.length).toBeGreaterThan(20);
     expect(got.text['package.json'].some((s) => s.where.startsWith('walkthrough step'))).toBe(true);
     if (c.fixture) {
       expect(got.text.trees.length).toBeGreaterThan(3);
@@ -871,11 +910,15 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
 
   it('package.json: the dbt walkthrough steps, welcome views and commands', () => {
     const shown = got.text['package.json'];
-    for (const step of ['watch', 'draw']) {
+    // The fixture is a project from before 2.0: its start step is Convert, with Draw from dbt under it.
+    for (const step of ['watch', 'convertDbt']) {
       expect(shown.some((s) => s.where === `walkthrough step ${step} title`), step).toBe(true);
     }
+    // Draw from dbt is one of its "More ways to start…" (the quick pick: moreStartsFor).
+    expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[More ways to start…]'))).toBe(true);
+    expect(moreStartsFor({ hasProject: true, hasDbt: true, storage: 'yaml' })).toContain('drawFromDbt');
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
-    expect(all('package.json')).toContain('draw your dbt project with Draw from dbt');
+    expect(all('package.json')).toContain('Draw your dbt project, explore the diagram');
     expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');
     expect(all('package.json')).toContain('ERD Studio: Regenerate dbt selectors.yml');
     expect(shown.some((s) => s.where.startsWith('viewsWelcome') && DBT_WORD.test(s.text))).toBe(true);
@@ -885,8 +928,6 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     const text = all('gettingStarted').replace(/\s+/g, ' ');
     for (const line of [
       'Turn the dbt project you already have into a data model you can see.',
-      'Draw your dbt project',
-      'Draw from dbt',
       'Your assistant checks your dbt setup',
       'New to dbt? How to install it',
     ]) {
@@ -894,8 +935,13 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     }
     expect(got.text.gettingStarted.some((s) => s.where === 'panel video' && /getting-started\.mp4/.test(s.text))).toBe(true);
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
-    // The start card's Draw from dbt button (`data-start="drawFromDbt"`) is reachable on the dbt page itself.
-    expect((got.controls.get('Draw from dbt') ?? []).some((where) => where.startsWith('panel '))).toBe(true);
+    // Draft-first: the tab holds no start card; Draw from dbt is the dbt project's draft (the sidebar, the
+    // popup's Show Me) and its own How-to clip, shown on the dbt page only (when the clips ship).
+  });
+
+  it('the import guide: the dbt card leads, with Draw from dbt', () => {
+    expect(all('importGuide')).toContain('Draw from dbt copies your dbt models');
+    expect(got.controls.get('Draw from dbt') ?? []).toContain('import guide');
   });
 
   it('the canvas: the dbt wording on the alias row and the New Relationship hint', () => {
