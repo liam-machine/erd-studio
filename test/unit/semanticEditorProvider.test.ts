@@ -35,6 +35,11 @@ import { SelectorsService } from '../../src/services/selectorsService';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import { hostErrorLog } from '../../src/services/feedbackService';
 import { telemetry } from '../../src/services/telemetryService';
+import { _resetDbtRunsForTests } from '../../src/commands/dbtTerminal';
+import { _resetDbtFlowsForTests, _resetDbtIdentityCacheForTests } from '../../src/commands/dbtCandidate';
+import { setDbtRunHost } from '../../src/commands/dbtRunHost';
+import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
+import { _openPty } from '../__mocks__/vscode';
 import { DBT_FIXTURES, dbtFixtureRoot, diagramPath, tableFilePath, type DbtStorage } from './helpers/dbtFixtures';
 
 // ---------------------------------------------------------------------------
@@ -861,7 +866,14 @@ describe.each(DBT_FIXTURES)('runDbtParse (#110) (%s storage)', (_storage, fixtur
     fs.rmSync(binDir, { recursive: true, force: true });
   });
 
-  it('is allowed on the physical stage and opens a terminal running dbt parse in the project root', async () => {
+  afterEach(() => {
+    _resetDbtRunsForTests();
+    _resetDbtFlowsForTests();
+    _resetDbtIdentityCacheForTests();
+    setDbtRunHost(undefined);
+  });
+
+  it('is allowed on the physical stage and opens a dbt parse terminal that runs dbt itself (no typed line)', async () => {
     const { panel } = await openShowcase(root);
     panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
     await waitForType(panel, 'stageData');
@@ -871,10 +883,65 @@ describe.each(DBT_FIXTURES)('runDbtParse (#110) (%s storage)', (_storage, fixtur
 
     await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));
     const terminal = vscode.window.terminals[0];
-    expect(terminal._options).toMatchObject({ name: 'dbt parse', cwd: root });
-    expect(terminal._sentText).toEqual(['dbt parse']);
+    expect(terminal._options).toMatchObject({ name: 'dbt parse', isTransient: true });
+    expect(terminal._pty).toBeDefined();
+    expect(terminal._sentText).toEqual([]);
     expect(feature).toHaveBeenCalledWith('dbtParse');
+    expect(feature).toHaveBeenCalledWith('dbtParseLaunched');
     expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+
+  // The fake dbt is a sh script, which Windows cannot run.
+  it.skipIf(process.platform === 'win32')('passes the canvas that asked as the origin for Open Physical view', async () => {
+    const { panel, doc } = await openShowcase(root);
+    const asked: Array<string | undefined> = [];
+    setDbtRunHost({
+      storageDir: path.join(root, '.global-storage'),
+      dbtConfig: () => defaultDbtProjectConfig(),
+      physicalTarget: (origin) => { asked.push(origin?.toString()); return undefined; },
+      originIsPhysical: (origin) => { asked.push(origin?.toString()); return false; },
+      openPhysical: () => {},
+    });
+    panel._simulateMessage({ type: 'runDbtParse' });
+    await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));
+    _openPty(vscode.window.terminals[0]);
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0), { timeout: 4000 });
+    expect(asked.every((u) => u === doc.uri.toString())).toBe(true);
+  });
+
+  it('routes runDbtCompile to the shared runner (a dbt compile pty terminal)', async () => {
+    const { panel } = await openShowcase(root);
+    const feature = vi.spyOn(telemetry, 'feature');
+    panel._simulateMessage({ type: 'runDbtCompile' });
+    await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));
+    expect(vscode.window.terminals[0]._options).toMatchObject({ name: 'dbt compile', isTransient: true });
+    expect(vscode.window.terminals[0]._sentText).toEqual([]);
+    expect(feature).toHaveBeenCalledWith('dbtCompile');
+    expect(feature).toHaveBeenCalledWith('dbtCompileLaunched');
+  });
+});
+
+describe.each(DBT_FIXTURES)('physicalSwitchTarget / originIsPhysical (%s storage)', (_storage, fixture) => {
+  useFixture(fixture);
+
+  it('returns a logical canvas only, and falls back to the last active one', async () => {
+    const { provider, panel, doc } = await openShowcase(root);
+    expect(provider.physicalSwitchTarget(doc.uri)?.toString()).toBe(doc.uri.toString());
+    expect(provider.physicalSwitchTarget(undefined)?.toString()).toBe(doc.uri.toString());
+    expect(provider.physicalSwitchTarget(vscode.Uri.file(path.join(root, 'nope.json')))?.toString()).toBe(doc.uri.toString());
+    expect(provider.originIsPhysical(doc.uri)).toBe(false);
+
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    expect(provider.physicalSwitchTarget(doc.uri)).toBeUndefined();
+    expect(provider.originIsPhysical(doc.uri)).toBe(true);
+    expect(provider.originIsPhysical(undefined)).toBe(false);
+  });
+
+  it('is undefined in a logical-only window', async () => {
+    const { provider, doc } = await openShowcase(root);
+    provider.setLogicalOnly(true);
+    expect(provider.physicalSwitchTarget(doc.uri)).toBeUndefined();
   });
 });
 
