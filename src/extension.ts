@@ -44,6 +44,7 @@ import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type Db
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
 import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
+import { workspaceFolderOf } from './commands/dbtCandidate';
 import { openPhysicalCanvas, setDbtRunHost } from './commands/dbtRunHost';
 import { disposeDbtRuns, isDbtRunActiveOrRecent } from './commands/dbtTerminal';
 import {
@@ -539,7 +540,7 @@ export function recordManifestMissingReasons(
   deps?: ManifestMissingReasonDeps,
 ): void {
   try {
-    for (const reason of manifestMissingReasons(root, dbtConfig, deps)) {
+    for (const reason of manifestMissingReasons(root, dbtConfig, { venvSearchUpTo: workspaceFolderOf(root), ...deps })) {
       telemetry.featureOnce(MANIFEST_MISSING_REASON_FEATURES[reason]);
     }
   } catch { /* telemetry must never break a manifest load */ }

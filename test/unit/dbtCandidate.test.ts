@@ -9,8 +9,12 @@ import * as path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as vscode from 'vscode';
+
 import {
   _resetDbtFlowsForTests,
+  chooseDbtCandidate,
+  USE_VENV,
   _resetDbtIdentityCacheForTests,
   claimDbtFlow,
   identifyDbt,
@@ -127,5 +131,35 @@ describe('the in-flight guard and the modal title', () => {
   it('names the command', () => {
     expect(trustModalTitle('parse')).toBe('Run dbt parse with the dbt inside this project?');
     expect(trustModalTitle('compile')).toBe('Run dbt compile with the dbt inside this project?');
+  });
+});
+
+describe('chooseDbtCandidate: a monorepo venv above the dbt project', () => {
+  it.skipIf(process.platform === 'win32')('finds repo/.venv for repo/transform, and still asks before running it', async () => {
+    const repo = path.join(tmp, 'repo');
+    const root = path.join(repo, 'transform');
+    fs.mkdirSync(path.join(repo, '.venv', 'bin'), { recursive: true });
+    fs.mkdirSync(root, { recursive: true });
+    const exe = path.join(repo, '.venv', 'bin', 'dbt');
+    fs.writeFileSync(exe, '', { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = '';
+    const modal = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(USE_VENV as never);
+    try {
+      const got = await chooseDbtCandidate(root, 'parse', { isTrusted: () => true, workspaceFolderOf: () => repo });
+      expect(got).not.toBe('noDbt');
+      expect(typeof got === 'object' && got.chosen).toEqual({ executable: exe, source: 'venv' });
+      expect(modal).toHaveBeenCalledTimes(1);
+
+      // An untrusted workspace never runs it, wherever the venv is.
+      modal.mockClear();
+      expect(await chooseDbtCandidate(root, 'parse', { isTrusted: () => false, workspaceFolderOf: () => repo })).not.toEqual(
+        expect.objectContaining({ chosen: expect.objectContaining({ executable: exe }) }),
+      );
+      expect(modal).not.toHaveBeenCalled();
+    } finally {
+      process.env.PATH = prevPath;
+      modal.mockRestore();
+    }
   });
 });

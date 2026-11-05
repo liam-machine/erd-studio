@@ -42,6 +42,21 @@ export interface DbtCandidateDeps {
   candidates?: (root: string) => DbtCandidate[];
   /** Test seam: whether the workspace is trusted. */
   isTrusted?: () => boolean;
+  /** Test seam: the workspace folder holding `root` (the venv search's upper bound). */
+  workspaceFolderOf?: (root: string) => string | undefined;
+}
+
+/**
+ * The workspace folder that holds `root`, or undefined: the highest folder
+ * `dbtExecutableCandidates` may look in for a venv (never above the folder the
+ * user opened).
+ */
+export function workspaceFolderOf(root: string): string | undefined {
+  try {
+    return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root))?.uri.fsPath;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ChosenDbt {
@@ -61,7 +76,8 @@ export async function chooseDbtCandidate(
   deps: DbtCandidateDeps = {},
 ): Promise<ChosenDbt | 'noDbt' | 'declined'> {
   const trusted = (deps.isTrusted ?? (() => vscode.workspace.isTrusted !== false))();
-  const all = (deps.candidates ?? ((r) => dbtExecutableCandidates(r)))(root);
+  const upTo = (deps.workspaceFolderOf ?? workspaceFolderOf)(root);
+  const all = (deps.candidates ?? ((r) => dbtExecutableCandidates(r, { venvSearchUpTo: upTo })))(root);
   // An untrusted workspace never runs anything the project itself ships.
   const candidates = trusted ? all : all.filter((c) => c.source !== 'venv');
 

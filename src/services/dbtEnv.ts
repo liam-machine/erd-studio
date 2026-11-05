@@ -203,16 +203,43 @@ function envBinDirs(prefix: string, platform: NodeJS.Platform): string[] {
 }
 
 /**
+ * The folders whose `.venv` / `venv` / `env` may hold the project's dbt, nearest
+ * first: the dbt project itself, then each parent up to and including `upTo`
+ * (the workspace folder the project was found in), never above it. A monorepo
+ * often keeps one venv at its root with the dbt project in a subfolder
+ * (`repo/.venv` + `repo/transform/dbt_project.yml`). Without `upTo`, or when
+ * `root` is not inside it, only `root`.
+ */
+export function venvSearchDirs(root: string, upTo?: string, platform: NodeJS.Platform = process.platform): string[] {
+  const p = pathFor(platform);
+  const start = p.resolve(root);
+  if (!upTo) { return [start]; }
+  const rel = p.relative(p.resolve(upTo), start);
+  if (rel.startsWith('..') || p.isAbsolute(rel)) { return [start]; }
+  const dirs = [start];
+  let cur = start;
+  for (let up = rel ? rel.split(/[\\/]+/).length : 0; up > 0; up--) {
+    cur = p.dirname(cur);
+    dirs.push(cur);
+  }
+  return dirs;
+}
+
+/**
  * Every dbt executable worth trying, most specific first, de-duplicated:
  * an explicit `override` path (an executable, or a directory holding one),
- * the project venv, `$VIRTUAL_ENV`, `$CONDA_PREFIX`, the first `dbt` on
+ * the project venv (then a venv in each parent up to `venvSearchUpTo`), `$VIRTUAL_ENV`, `$CONDA_PREFIX`, the first `dbt` on
  * `$PATH`, then pyenv shims and `~/.local/bin` (pipx) when those are not
  * already on `$PATH`. Only files that exist (and are executable off
  * Windows) are returned. Never runs anything.
  */
 export function dbtExecutableCandidates(
   root: string,
-  opts: DbtEnvOptions & { override?: string | null } = {},
+  opts: DbtEnvOptions & {
+    override?: string | null;
+    /** Also look for a venv in each parent of `root` up to this folder (see `venvSearchDirs`). */
+    venvSearchUpTo?: string;
+  } = {},
 ): DbtCandidate[] {
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
@@ -241,9 +268,11 @@ export function dbtExecutableCandidates(
     add(isExecutable(override) ? override : dbtIn(override, platform, env, isExecutable), 'override');
   }
 
-  for (const dir of VENV_CANDIDATES) {
-    for (const bin of envBinDirs(p.join(root, dir), platform)) {
-      add(dbtIn(bin, platform, env, isExecutable), 'venv');
+  for (const base of venvSearchDirs(root, opts.venvSearchUpTo, platform)) {
+    for (const dir of VENV_CANDIDATES) {
+      for (const bin of envBinDirs(p.join(base, dir), platform)) {
+        add(dbtIn(bin, platform, env, isExecutable), 'venv');
+      }
     }
   }
 
