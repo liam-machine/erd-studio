@@ -3,7 +3,7 @@
 // the side bar's New Diagram… button and VS Code's name box drops from the top: the real title,
 // placeholder and prompt (editor.js NEW_DIAGRAM). "Orders" is typed, the validator's Info line
 // follows it ("Saved as orders"), Enter, and the diagram's file lands beside the button. Then
-// the window follows: the side bar becomes the Diagrams tree (Silver, Gold › orders, New Layer…,
+// the window follows: the side bar becomes the Diagrams tree (Main › orders, New Layer…,
 // and the Table Library and Relationships views now .erd-studio exists), the example draft gives
 // way to the new orders diagram's empty canvas, and the tables scene takes it from there.
 // Shared by both cuts.

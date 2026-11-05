@@ -46,6 +46,11 @@ svg { display: block; }
 .chapters__bar i { display: block; height: 100%; background: var(--prog-on); }
 .chapters__lbl { margin-top: 16px; font-size: 22px; font-weight: 700; letter-spacing: .06em; color: var(--text-3); white-space: nowrap; }
 .chapters__lbl--on { color: var(--text); }
+/* A recorded cut (main.js adds body.rec): the headline and chapter bar make room for the real
+   VS Code window at the timeline's recording.inset (y 240-960). */
+body.rec .kicker { top: 44px; }
+body.rec .headline { top: 84px; font-size: 62px; }
+body.rec .chapters { bottom: 40px; }
 .preview-hud { position: absolute; right: 12px; top: 8px; font: 500 16px var(--mono); color: #fff8; }
 
 /* ---------- generic ---------- */
@@ -67,6 +72,7 @@ svg { display: block; }
 .badge--fk { background: var(--fk-bg); color: var(--fk-fg); }
 .badge--gld { background: var(--gld-bg); color: var(--gld-fg); }
 .badge--slv { background: var(--slv-bg); color: var(--slv-fg); }
+.badge--main { background: #2e2f6b; color: #c7c9ff; }   /* Main: layers.json colour #6366f1 */
 .badge--only { background: var(--amber); color: #1a1405; }
 .icon { display: inline-block; flex: none; }
 

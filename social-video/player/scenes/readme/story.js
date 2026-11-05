@@ -173,9 +173,11 @@ export function quickPick({ x, y, w, title = '', placeholder = '', query = '', i
   const rows = items.map((it, i) => {
     const on = i === sel;
     const glow = hot[i] ?? 0;
-    return `<div style="margin:0 10px;height:${rowH}px;border-radius:8px;display:flex;flex-direction:column;justify-content:center;padding:0 18px;white-space:nowrap;overflow:hidden;${on ? 'background:#04395e;box-shadow:inset 0 0 0 1px #0e639c;' : glow > 0 ? `background:rgba(244,180,44,${(0.14 * glow).toFixed(3)});` : ''}">
+    // it.h: this row's own height; it.indent: the detail's indent (under a big icon's label);
+    // it.extra: trusted HTML under the detail (e.g. a logo strip).
+    return `<div style="margin:0 10px;height:${it.h ?? rowH}px;border-radius:8px;display:flex;flex-direction:column;justify-content:center;padding:0 18px;white-space:nowrap;overflow:hidden;${on ? 'background:#04395e;box-shadow:inset 0 0 0 1px #0e639c;' : glow > 0 ? `background:rgba(244,180,44,${(0.14 * glow).toFixed(3)});` : ''}">
       <div style="display:flex;align-items:center;gap:12px;font-size:25px;font-weight:600">${it.icon ?? ''}${esc(it.label)}${it.desc ? `<span style="font-size:20px;font-weight:400;color:var(--text-2)">${esc(it.desc)}</span>` : ''}</div>
-      ${it.detail ? `<div style="margin-top:4px;font-size:19px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis">${esc(it.detail)}</div>` : ''}</div>`;
+      ${it.detail ? `<div style="margin-top:4px;${it.indent ? `margin-left:${it.indent}px;` : ''}font-size:19px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis">${esc(it.detail)}</div>` : ''}${it.extra ?? ''}</div>`;
   }).join('');
   return `<div class="abs" style="left:${x}px;top:${y}px;width:${w}px;border-radius:14px;background:#1f2126;border:1px solid #3a3d45;box-shadow:0 24px 60px #000c;padding-bottom:10px;overflow:hidden;${style}">${head}${input}${rows}</div>`;
 }

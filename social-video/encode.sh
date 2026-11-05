@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Encodes the LinkedIn explainer from build/master.mkv + build/narration.wav (+ build/music.wav),
+# Encodes the LinkedIn explainer from build/master.mkv + build/narration.wav (+ build/music.wav,
+# unless the script says `music: false`),
 # then asserts the result with ffprobe.
 #
 #   out/erd-studio-explainer[-<variant>].mp4  H.264 High 1080x1350 30 fps + AAC stereo 48 kHz, faststart
@@ -25,13 +26,25 @@ EXPECT_DUR=$(node -e "console.log(require('./'+process.env.B+'/timeline.json').t
 # Voice (mono, centred) over the stereo underscore at one steady level ~11 dB below it: no
 # ducking, so it never pumps between lines. A gentle compressor evens out the track's own
 # sections, then the mix is normalised once to LinkedIn/phone loudness.
-AUDIO_IN=$B/narration.wav
-if [[ -f $B/music.wav ]]; then
+# A cut whose script says `music: false` (timeline.json → music; the README cut) is voice only:
+# no bed is mixed even if a stale music.wav is lying in its build folder, and the voice alone is
+# centred and normalised to the same loudness.
+MUSIC=$(node -e "console.log(require('./'+process.env.B+'/timeline.json').music === false ? 'off' : 'on')")
+BED=none
+if [[ $MUSIC == on && -f $B/music.wav ]]; then
+  BED=mixed
   ffmpeg -v error -y -i $B/narration.wav -i $B/music.wav -filter_complex \
     "[0:a]aresample=48000,pan=stereo|c0=c0|c1=c0[voice];[1:a]aresample=48000,acompressor=threshold=-24dB:ratio=3:attack=20:release=300:makeup=2,volume=0.36[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000" \
     -ac 2 $B/mix.wav
-  AUDIO_IN=$B/mix.wav
+else
+  # Two-pass loudnorm (linear) on the voice alone: measure, then apply one gain, no pumping.
+  M=$(ffmpeg -hide_banner -i $B/narration.wav -af "aresample=48000,pan=stereo|c0=c0|c1=c0,loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json" -f null - 2>&1 | sed -n '/^{/,/^}/p')
+  lnv() { echo "$M" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)['$1']))"; }
+  ffmpeg -v error -y -i $B/narration.wav -af \
+    "aresample=48000,pan=stereo|c0=c0|c1=c0,loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=$(lnv input_i):measured_TP=$(lnv input_tp):measured_LRA=$(lnv input_lra):measured_thresh=$(lnv input_thresh):offset=$(lnv target_offset):linear=true,aresample=48000" \
+    -ac 2 $B/mix.wav
 fi
+AUDIO_IN=$B/mix.wav
 
 ffmpeg -v error -y -i $B/master.mkv -i "$AUDIO_IN" -map 0:v -map 1:a \
   -c:v libx264 -preset slow -tune animation -crf 17 -profile:v high -level 4.1 -pix_fmt yuv420p -r 30 -g 60 \
@@ -55,6 +68,12 @@ DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$MP4
 node -e "process.exit(Math.abs($DUR - $EXPECT_DUR) <= 0.25 ? 0 : 1)" || fail "duration $DUR s, expected $EXPECT_DUR s"
 node -e "const b=require('fs').readFileSync('$MP4');const m=b.indexOf('moov'),d=b.indexOf('mdat');process.exit(m>0&&m<d?0:1)" || fail "moov atom is not at the front (+faststart)"
 LUFS=$(ffmpeg -nostats -i "$MP4" -af ebur128 -f null - 2>&1 | sed -n 's/.*I: *\(-[0-9.]*\) LUFS.*/\1/p' | tail -1)
+node -e "process.exit(Math.abs($LUFS - -14) <= 1 ? 0 : 1)" || fail "loudness $LUFS LUFS, expected -14 ±1"
+if [[ $MUSIC == off ]]; then
+  # Voice only: between lines the track must be (near) silent, which a music bed never is.
+  QUIET=$(ffmpeg -nostats -i "$MP4" -af silencedetect=noise=-50dB:d=0.15 -f null - 2>&1 | grep -c 'silence_end' || true)
+  [[ $QUIET -ge 5 ]] || fail "voice-only cut has only $QUIET silent gaps: is a music bed mixed in?"
+fi
 SIZE=$(stat -f %z "$MP4" 2>/dev/null || stat -c %s "$MP4")
-echo "ok: $MP4 ($((SIZE / 1024)) KB, ${DUR}s, 1080x1350 h264 High + aac stereo, ${LUFS} LUFS, faststart)"
+echo "ok: $MP4 ($((SIZE / 1024)) KB, ${DUR}s, 1080x1350 h264 High + aac stereo, ${LUFS} LUFS, music $MUSIC (bed $BED), faststart)"
 echo "ok: $OUT/$NAME-thumb.jpg, $OUT/$NAME-end.jpg, $OUT/$NAME.srt"

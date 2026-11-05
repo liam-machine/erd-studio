@@ -2,7 +2,8 @@
 <!--
   README thumbnail for the getting-started video (docs/assets/getting-started-play.jpg), rendered by
   ../thumbnail.mjs. The background is the video's own diagram (the tables scene's last frame: two
-  tables and their relationship, drawn by the same scene module), dimmed and softened so the play
+  tables and their relationship; for the recorded default cut a real frame of the recording,
+  build/thumb-bg.png, otherwise drawn by the same scene module), dimmed and softened so the play
   button and the headline read. The duration comes from build/timeline.json, so it always matches
   the render.
 -->
@@ -36,9 +37,19 @@
   <div class="pill" id="pill"></div>
   <script type="module">
     const timeline = await (await fetch('/video/build/timeline.json', { cache: 'no-store' })).json();
-    const sc = timeline.scenes.find((s) => s.module === 'tour/tables');
-    const scene = (await import('./scenes/tour/tables.js')).default;
-    document.getElementById('bg').innerHTML = scene.render(sc.dur - 0.05, { beats: sc.beats, dur: sc.dur, t: sc.start + sc.dur, scene: sc });
+    if (timeline.recording) {
+      // a recorded cut: the real VS Code at the end of the tables scene (thumbnail.mjs extracts it)
+      const { w, h } = timeline.recording.inset;
+      const img = new Image();
+      img.src = '/video/build/thumb-bg.png';
+      img.style.cssText = `position:absolute;left:0;top:${(1080 - 1920 * h / w) / 2}px;width:1920px`;
+      await img.decode();
+      document.getElementById('bg').appendChild(img);
+    } else {
+      const sc = timeline.scenes.find((s) => s.module === 'tour/tables');
+      const scene = (await import('./scenes/tour/tables.js')).default;
+      document.getElementById('bg').innerHTML = scene.render(sc.dur - 0.05, { beats: sc.beats, dur: sc.dur, t: sc.start + sc.dur, scene: sc });
+    }
     // Honest numbers: the headline rounds to the nearest 5 s, the pill is the real m:ss.
     const secs = Math.round(timeline.total);
     const headline = Math.round(timeline.total / 5) * 5;

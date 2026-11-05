@@ -1,7 +1,7 @@
 // 5 · "Each table is a DBML file, to commit and review like code." The orders
 // canvas from the tables scene; on `files` the Explorer slides in over it with the .erd-studio
-// folder as ERD Studio 2.0 writes it (layer first: gold/diagrams/orders.dbml,
-// gold/relationships/gold.dbml, gold/tables/gold/<table>.dbml, plus the layers.json and README.md
+// folder as ERD Studio 2.0 writes it (layer first: main/diagrams/orders.dbml,
+// main/relationships/main.dbml, main/tables/main/<table>.dbml, plus the layers.json and README.md
 // New Diagram writes when it starts the project); the two table
 // files light on "Each table". Their text opens beside it (fct_order.dbml, then the
 // relationships file with the Ref the canvas drew), and on "…to commit" each new file gets the
@@ -16,33 +16,33 @@ import { TABLES, relEdge } from './tables.js';
 // formatWrittenDbml), which aligns the column types and the `from` clauses. `npm test` runs the
 // formatter over them.
 export const FILES = {
-  'gold/tables/gold/fct_order.dbml': [
-    'Table gold.fct_order {',
+  'main/tables/main/fct_order.dbml': [
+    'Table main.fct_order {',
     '  order_id     INTEGER [pk]',
     "  customer_key INTEGER [foreign_key: 'true']",
     '  order_date   DATE',
     '  amount       "DECIMAL(18,2)"',
     '}',
   ],
-  'gold/relationships/gold.dbml': [
+  'main/relationships/main.dbml': [
     '// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.',
-    "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'",
-    "use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'",
+    "use { table main.dim_customer } from '../tables/main/dim_customer.dbml'",
+    "use { table main.fct_order }    from '../tables/main/fct_order.dbml'",
     '',
-    'Ref: gold.fct_order.customer_key >? gold.dim_customer.customer_key',
+    'Ref: main.fct_order.customer_key >? main.dim_customer.customer_key',
   ],
 };
 // The Explorer rows, in VS Code's default order (folders first, then names without regard to
 // case): [depth, kind, label, lit on "Each table", new (untracked)].
 export const TREE = [
   [0, 'folder', '.erd-studio'],
-  [1, 'folder', 'gold'],
+  [1, 'folder', 'main'],
   [2, 'folder', 'diagrams'],
   [3, 'dbml', 'orders.dbml', false, true],
   [2, 'folder', 'relationships'],
-  [3, 'dbml', 'gold.dbml', false, true],
+  [3, 'dbml', 'main.dbml', false, true],
   [2, 'folder', 'tables'],
-  [3, 'folder', 'gold'],
+  [3, 'folder', 'main'],
   [4, 'dbml', 'dim_customer.dbml', true, true],
   [4, 'dbml', 'fct_order.dbml', true, true],
   [1, 'json', 'layers.json', false, true],
@@ -73,11 +73,11 @@ export default {
     const code1At = F + 0.9, code2At = F + 1.7;
     const newAt = F + 2.3;
 
-    let html = editorWindow({ tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › gold › diagrams › orders.dbml', bodyCls: 'grid-bg' });
+    let html = editorWindow({ tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › main › diagrams › orders.dbml', bodyCls: 'grid-bg' });
     html += toolbar({ x: CANVAS.toolbarX, y: CANVAS.toolbarY, logicalOnly: true, layout: 'idle', add: 'idle' });
     const [pts, many, one] = relEdge();
     html += edge(pts, { many, one });
-    for (const m of TABLES) html += node({ ...m, layer: 'GLD' });
+    for (const m of TABLES) html += node(m);
 
     // ---- the Explorer ----
     if (t >= treeAt) {
@@ -113,8 +113,8 @@ export default {
     // the canvas behind the text steps back, so nothing peeks between the two files
     const back = easeOut(seg(t, code1At, code1At + 0.35));
     if (back > 0) html += `<div class="abs" style="left:${BODY.x + 560}px;top:${BODY.y}px;right:${1920 - BODY.x - BODY.w}px;height:${BODY.h}px;border-radius:0 0 20px 0;background:rgba(22,23,27,${(0.88 * back).toFixed(3)})"></div>`;
-    html += codeCard(code1At, BODY.y + 22, 'gold/tables/gold/fct_order.dbml');
-    html += codeCard(code2At, BODY.y + 22 + 44 + 6 * 30 + 18 + 18, 'gold/relationships/gold.dbml');
+    html += codeCard(code1At, BODY.y + 22, 'main/tables/main/fct_order.dbml');
+    html += codeCard(code2At, BODY.y + 22 + 44 + 6 * 30 + 18 + 18, 'main/relationships/main.dbml');
     return html;
   },
 };

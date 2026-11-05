@@ -34,16 +34,9 @@ if [[ "${1:-}" == "--placeholder" ]]; then
 else
   [[ -f $B/master.mkv && -f $B/narration.wav ]] || { echo "run capture.mjs and build-timeline.mjs first" >&2; exit 1; }
   EXPECT_DUR=$(node -e "console.log(require('./'+process.env.B+'/timeline.json').total)")
-  # Background music (music.py) plays at one steady level under the voice, about 10 dB below
-  # it: no ducking, so it never pumps between lines. A gentle compressor evens out the track's
-  # own loud and quiet sections, then the mix is normalised once.
+  # Voice only, no background music: build-timeline.mjs already normalised build/narration.wav
+  # (two-pass linear loudnorm to -16 LUFS / -1.5 dBTP), so it goes in as it is.
   AUDIO_IN=$B/narration.wav
-  if [[ -f $B/music.wav ]]; then
-    ffmpeg -v error -y -i $B/narration.wav -i $B/music.wav -filter_complex \
-      "[0:a]aresample=48000[voice];[1:a]aresample=48000,acompressor=threshold=-24dB:ratio=3:attack=20:release=300:makeup=2,volume=0.33[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000" \
-      -ac 1 $B/mix.wav
-    AUDIO_IN=$B/mix.wav
-  fi
   for CRF in 20 22 24 26; do
     ffmpeg -v error -y -i $B/master.mkv -i "$AUDIO_IN" -map 0:v -map 1:a \
       "${VIDEO_OPTS[@]}" -crf "$CRF" "${AUDIO_OPTS[@]}" -movflags +faststart -shortest "$MP4"

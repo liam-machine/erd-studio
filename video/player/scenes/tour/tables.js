@@ -36,8 +36,8 @@ export const NEW_TABLE = {
   cancel: 'Cancel',
   create: 'Create Table',
   table: 'dim_customer',
-  schemaValue: 'gold',
-  creates: (name) => `Creates .erd-studio/gold/tables/gold/${name || 'table_name'}.dbml`,
+  schemaValue: 'main',
+  creates: (name) => `Creates .erd-studio/main/tables/main/${name || 'table_name'}.dbml`,
 };
 // The toolbar's "+ Add" menu (webview/components/Toolbar/Toolbar.tsx).
 export const ADD_MENU = ['New Table', 'Add Existing Tables', 'New Relationship', 'New Note'];
@@ -113,7 +113,7 @@ export default {
     const relCreate = M + 2.3, relOut = relCreate + 0.2;
     const edgeAt = relOut + 0.05;
 
-    let html = editorWindow({ tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › gold › diagrams › orders.dbml', bodyCls: 'grid-bg' });
+    let html = editorWindow({ tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › main › diagrams › orders.dbml', bodyCls: 'grid-bg' });
     const menuOpen = t >= menuAt && t < relAt;
     html += toolbar({ x: CANVAS.toolbarX, y: CANVAS.toolbarY, logicalOnly: true, layout: 'idle', add: menuOpen ? 'open' : 'idle' });
     const ADD = { x: CANVAS.toolbarX + 481, y: CANVAS.toolbarY + 33 };   // the "+ Add" button's centre (measured)
@@ -137,10 +137,10 @@ export default {
       const [pts, many, one] = relEdge();
       html += edge(pts, { progress: easeOut(seg(t, edgeAt, edgeAt + 0.55)), many, one });
     }
-    if (t >= dimAt) html += node({ ...dc, layer: 'GLD', style: appear(t, dimAt, { dy: 12 }) });
+    if (t >= dimAt) html += node({ ...dc, style: appear(t, dimAt, { dy: 12 }) });
     // fct_order as typed in has no FK yet: customer_key gets its FK badge with the relationship.
     const fkShown = t >= edgeAt + 0.25;
-    if (t >= fctAt) html += node({ ...fo, cols: fo.cols.map((c) => (c.key === 'FK' && !fkShown ? { ...c, key: undefined } : c)), layer: 'GLD', style: appear(t, fctAt, { dy: 12 }) });
+    if (t >= fctAt) html += node({ ...fo, cols: fo.cols.map((c) => (c.key === 'FK' && !fkShown ? { ...c, key: undefined } : c)), style: appear(t, fctAt, { dy: 12 }) });
 
     // ---- the New Table dialog ----
     if (t >= dlgAt && t < dlgOut + 0.15) {

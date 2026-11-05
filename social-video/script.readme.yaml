@@ -2,8 +2,9 @@
 # A DBML-first tour of the logical model for README visitors: why the model belongs in Git, the
 # DBML files behind the canvas (layer-first: <layer>/tables/<schema>/<table>.dbml,
 # <layer>/relationships/<layer>.dbml, <layer>/diagrams/<diagram>.dbml), editing either side, a
-# .dbml diff in a pull request, your own AI assistant, import and export, and dbt as a short last
-# beat. Per-scene direction: SCENES.readme.md. The scenes are player/scenes/readme/*.js (plus the
+# .dbml diff in a pull request, your own AI assistant, the ways to start (dbt, Power BI, SQL
+# scripts, DBML) and export, dbt as a short beat, and ERD Studio for Confluence for readers without
+# VS Code. Voice only: no music bed (`music: false`). Per-scene direction: SCENES.readme.md. The scenes are player/scenes/readme/*.js (plus the
 # shared endCard); the example they all draw is STORY in player/scenes/readme/story.js.
 #
 # Format: exactly as script.yaml (see its header). Wording follows docs/dev/onboarding-and-cli.md
@@ -12,7 +13,9 @@
 # label on screen is the product's own (src/types/startActions.ts, package.json, the webview).
 
 title: How ERD Studio works
-maxDuration: 105
+maxDuration: 112
+# Voice only (Liam, 2026-11-05): music.py writes no bed for this cut and encode.sh mixes none.
+music: false
 
 voice:
   engine: kokoro        # kokoro | say
@@ -27,7 +30,7 @@ timing:
   tail: 0.45
   fade: 0.25
 
-chapters: ["WHY", "DBML", "EDIT", "AI", "IMPORT", "DBT"]
+chapters: ["WHY", "DBML", "EDIT", "AI", "IMPORT", "DBT", "SHARE"]
 
 scenes:
   - id: hook
@@ -141,10 +144,11 @@ scenes:
     headline: ["Bring in", "{what you have}."]
     lines:
       - id: im_from
-        beat: from
-        caption: Already have a model? | Import {DBML}, {SQL scripts} | or a {Power BI} semantic model.
+        beat: from          # the Diagrams view's Draw from dbt, then the Import… picker on "import"
+        caption: Already have a model? | Draw it from {dbt}, or import | {Power BI}, {SQL scripts} or {DBML}.
       - id: im_draft
         beat: draft
+        pause: 0.6          # the SQL scripts stay picked, their dialects lit, before the draft
         caption: "You see a {draft} first: | nothing is written | until you keep it."
       - id: im_export
         beat: export
@@ -163,6 +167,20 @@ scenes:
       - id: d_compare
         beat: compare
         caption: "{Compare with dbt} | marks every difference."
+
+  - id: confluence
+    module: readme/confluence
+    chapter: 7
+    minDur: 10.6        # "No VS Code needed" holds ~2 s before the end card
+    accent: blue
+    headline: ["For the business:", "view it in {Confluence}."]
+    lines:
+      - id: cf_app
+        beat: app
+        caption: "For business users: | {ERD Studio for Confluence}, | on the Atlassian Marketplace,"
+      - id: cf_view
+        beat: view
+        caption: shows your diagrams | from {GitHub} in Confluence, | no VS Code needed.
 
   - id: end
     module: endCard

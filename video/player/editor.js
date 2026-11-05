@@ -21,12 +21,23 @@ export const editorWindow = ({ tabs, crumb = 'shop-analytics', body, style = '',
   card({ ...win, tabs, crumb, body, style, bodyCls });
 
 // ---------- activity bar ----------
+/** The body of media/icon-sidebar.svg, verbatim (inside its 24x24 viewBox). */
+export const ERD_SIDEBAR_ICON = `<g transform="translate(-2.08 -2.08) scale(.22)">
+    <g transform="translate(4 0) skewX(-8)">
+      <path d="M16 42H42V51H26V59H40V68H26V77H42V86H16Z" fill="currentColor"/>
+      <path fill-rule="evenodd" d="M48 86V42H65C76 42 82 48 82 57C82 64 79 68 73 70L84 86H72L62 71H58V86H48ZM58 51V62H64C69 62 72 60 72 56.5C72 53 69 51 64 51H58Z" fill="currentColor"/>
+      <path fill-rule="evenodd" d="M88 42H101C115 42 122 50 122 64C122 78 115 86 101 86H88V42ZM98 51V77H101C108 77 112 73 112 64C112 55 108 51 101 51H98Z" fill="currentColor"/>
+    </g>
+  </g>`;
 const ai = (d) => `<svg class="icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const ACT_ICONS = {
   files: ai('<path d="M13 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V9z"/><path d="M13 3v6h6"/>'),
   search: ai('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>'),
   ext: ai('<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/><rect x="14.5" y="2.5" width="7" height="7" rx="1" transform="rotate(12 18 6)"/>'),
-  erd: ai('<rect x="3" y="4" width="8" height="6" rx="1.2"/><rect x="13" y="14" width="8" height="6" rx="1.2"/><path d="M7 10v7h6"/>'),
+  // The real activity bar icon: media/icon-sidebar.svg (package.json contributes.viewsContainers),
+  // inlined so it takes currentColor like VS Code's own monochrome icon. test/pipeline.test.mjs
+  // checks these paths still match the file.
+  erd: `<svg class="icon" width="32" height="32" viewBox="0 0 24 24" fill="none">${ERD_SIDEBAR_ICON}</svg>`,
 };
 /** Activity bar row tops (body px): Explorer, Search, Extensions, ERD Studio. */
 export const ACT_Y = { files: 20, search: 84, ext: 148, erd: 212 };
@@ -87,6 +98,8 @@ export function fileTree(rows, { top = 58, rowH = 40, width = 560, indent = 26, 
 export const EXTENSION = {
   name: 'ERD Studio',
   publisher: 'liamwynne',
+  /** The Marketplace id (publisher.name): a search for the name alone also lists an unrelated extension. */
+  id: 'liamwynne.erd-studio',
 };
 /**
  * The listing's description up to (not including) the first sentence that names dbt: what the
@@ -114,18 +127,18 @@ export const HELP_ROWS = ['Set Up My AI Helper', 'Watch the One-Minute Tour', 'S
 export const NEW_MENU = ['New Diagram…', 'Import DBML…', 'Import SQL DDL…', 'Import Power BI or Fabric Semantic Model…', 'New Layer…'];
 
 const SB = { head: 40, row: 38 };
-/** A new project's layers (packages/core/src/types/layer.ts, a fresh folder's two): label, colour. */
-export const LAYERS = { Silver: '#a0a0a0', Gold: '#d4a800' };
+/** A new folder's layers without dbt (src/services/layerService.ts NEW_PROJECT_LAYERS_WITHOUT_DBT: one, Main): label, colour. */
+export const LAYERS = { Main: '#6366f1' };
 /** The layer row's swatch (src/providers/layerSwatch.ts: three stacked diamonds in the layer's colour). */
 const layerSwatch = (c, size = 20) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 16 16"><path d="M8 1.5 14.5 5 8 8.5 1.5 5Z" fill="${c}"/><path d="M3.4 7.6 1.5 8.6 8 12.1 14.5 8.6 12.6 7.6 8 10.1Z" fill="${c}" fill-opacity=".55"/><path d="M3.4 11 1.5 12 8 15.5 14.5 12 12.6 11 8 13.5Z" fill="${c}" fill-opacity=".3"/></svg>`;
 const filterGlyph = (size = 18) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/></svg>`;
 const newFolderGlyph = (size = 20) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10.5v5M9.5 13h5"/></svg>`;
 /** The Diagrams view's rows for a new project with one diagram (DomainTreeProvider rootChildren, compact rows). */
-export const ORDERS_TREE = [['Silver', []], ['Gold', ['orders']]];
+export const ORDERS_TREE = [['Main', ['orders']]];
 /** The Table Library's welcome text before its first table (package.json viewsWelcome, its two paragraphs). */
 export const LIBRARY_EMPTY = ['No tables yet.', "Each table is a file in .erd-studio/ you can commit and review like code. Add one on a diagram's canvas, or ask your AI assistant."];
 /** The Table Library's rows for the tour's two tables (ModelLibraryTreeProvider: the layer, then its tables). */
-export const ORDERS_LIBRARY = [['Gold', ['dim_customer', 'fct_order']]];
+export const ORDERS_LIBRARY = [['Main', ['dim_customer', 'fct_order']]];
 
 /**
  * The ERD Studio side bar, in body coordinates. `diagrams` null shows the start entry (startGlow /
@@ -230,7 +243,7 @@ export const newMenuRow = (at, i) => ({ x: at.x + 160, y: at.y + 22 + 6 + i * 40
 export const EXAMPLE_DRAFT = {
   tab: 'Example: Coffee shop',
   headline: 'Example: a coffee-shop star schema · 6 tables, 8 relationships · not saved',
-  detail: 'Keep saves it as coffee-shop in the Gold layer (.erd-studio/gold/diagrams/coffee-shop.dbml).',
+  detail: 'Keep saves it as coffee-shop in the Main layer (.erd-studio/main/diagrams/coffee-shop.dbml).',
   scope: { label: 'Example', value: 'Coffee shop · 6 tables' },
   // [label, kind]: the one primary (New Diagram…), the guide beside it, Keep (quiet), the menu, Discard.
   buttons: [['New Diagram…', 'primary'], ['Bring In Your Data Model…', 'secondary'], ['Keep This Example', 'quiet'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
@@ -253,7 +266,7 @@ export const SALES_DRAFT = {
   tab: 'Draft: sales',
   file: 'sales.dbml',
   headline: 'Draft from sales.dbml · 5 tables, 4 relationships · not saved',
-  detail: 'Keep saves it as sales in the Gold layer (.erd-studio/gold/diagrams/sales.dbml).',
+  detail: 'Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml).',
   // Keep is the primary; the other starts (FIND_STARTS) sit in the menu.
   buttons: [['Keep as Diagram', 'primary'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
   // An import's draft always carries its review (draftModel detailsFromImportReview): "Show details".
@@ -286,7 +299,7 @@ function draftDiagram(d, { op = 1 } = {}) {
     h += edge([[x0, y0], [mx, y0], [mx, y1], [x1, y1]], { width: 4, opacity: op });
   }
   for (const t of d.tables) {
-    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'GLD', cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
+    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'MAIN', cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
   }
   return h;
 }
@@ -332,15 +345,15 @@ export const quickPick = (title, inner, h, style = '') =>
     ${inner}</div>`;
 
 // ---------- New Diagram (erdStudio.createDomain), the first diagram ----------
-// The name box as a fresh DBML project shows it: no diagrams yet, so the first one goes in the
-// last creatable layer (Gold) by itself and the prompt says where (src/extension.ts). The
+// The name box as a fresh folder without dbt shows it: its one layer, Main
+// (NEW_PROJECT_LAYERS_WITHOUT_DBT), so there is no layer question and the prompt says where (src/extension.ts). The
 // validator's Info message says what the typed name is saved as (src/commands/diagramName.ts).
 export const NEW_DIAGRAM = {
   title: 'New Diagram',
   placeholder: 'e.g. Customer 360, Sales, Orders',
-  prompt: 'Name the diagram. Saved in the Gold layer — Move Diagram to Layer… changes it later.',
+  prompt: 'Name the diagram. It is saved in the Main layer.',
   savedAs: (slug) => `Saved as ${slug}`,
   name: 'Orders',
   /** The diagram file it writes, relative to the folder (`<layer>/diagrams/<slug>.dbml`). */
-  file: '.erd-studio/gold/diagrams/orders.dbml',
+  file: '.erd-studio/main/diagrams/orders.dbml',
 };

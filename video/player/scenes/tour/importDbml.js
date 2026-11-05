@@ -1,11 +1,11 @@
 // 6 · "Export to DBML or Mermaid any time. / Already have DBML? Import it, then keep the draft."
 // The window as the folder shows it now it has a diagram:
-// ERD Studio's side bar (Diagrams: Gold › orders) beside the orders canvas. On `export` the Export
+// ERD Studio's side bar (Diagrams: Main › orders) beside the orders canvas. On `export` the Export
 // Diagram command's format QuickPick drops in with its real rows (src/commands/exportDiagram.ts).
 // On `import` the pointer opens the Diagrams view's + menu (erdStudio.newMenu) and picks Import
-// DBML…, the step-by-step path (src/commands/importDbml.ts): a sales.dbml is picked, then, quickly,
-// the layer (asked here: the project has a diagram and two layers, so there is no default) and the
-// name box with the file's name. Its draft opens (src/services/draftModel.ts draftFromImportPlan):
+// DBML…, the step-by-step path (src/commands/importDbml.ts): a sales.dbml is picked, then the name
+// box with the file's name. There is no layer question: a new plain folder has one layer, Main
+// (layerService.ts NEW_PROJECT_LAYERS_WITHOUT_DBT), as the recorded cut shows. Its draft opens (src/services/draftModel.ts draftFromImportPlan):
 // the banner's headline and detail, Show details, Keep as Diagram, More ways to start, Discard,
 // over the diagram it would keep, drawn read-only. Nothing is written until Keep.
 // Shared by both cuts; the README GIF draws the same draft page.
@@ -24,13 +24,11 @@ export const EXPORT_PICK = {
   ],
 };
 
-// Import DBML…'s own questions (importDbml.ts: TITLE, the layer pick's placeholder
-// WHICH_LAYER_FOR_DIAGRAM from layerWording.ts, the name box's prompt and its suggested name).
+// Import DBML…'s own questions (importDbml.ts: TITLE, the name box's prompt and its suggested name;
+// one layer, so no layer pick).
 export const IMPORT_STEPS = {
   title: 'Import DBML',
-  layerPlaceholder: 'Which layer is this diagram for? A layer is a stage of your warehouse, such as Staging or Gold; a diagram can show tables from any layer.',
-  layers: ['Silver', 'Gold'],
-  namePrompt: 'Name the diagram. It is saved in the Gold layer.',
+  namePrompt: 'Name the diagram. It is saved in the Main layer.',
   name: 'sales',
 };
 
@@ -38,7 +36,7 @@ const LIST_Y = QP.title + QP.input + 22, ROW = 88;
 /** The orders canvas in the editor area beside the side bar: the tables scene's diagram, scaled. */
 export function ordersCanvas({ scale = 0.8, from = { x: 150, y: 470 } } = {}) {
   const [pts, many, one] = relEdge();
-  const inner = edge(pts, { many, one }) + TABLES.map((m) => node({ ...m, layer: 'GLD' })).join('');
+  const inner = edge(pts, { many, one }) + TABLES.map((m) => node(m)).join('');
   return `<div class="abs grid-bg" style="left:${ED}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
     <div class="abs" style="left:${ED + 40}px;top:110px;transform-origin:0 0;transform:scale(${scale}) translate(${-from.x}px,${-from.y}px)">${inner}</div>
     ${toolbar({ x: ED + 24, y: 16, logicalOnly: true, layout: 'idle', add: 'idle' })}`;
@@ -53,8 +51,7 @@ export default {
     const plusClick = M + 0.55, menuAt = plusClick + 0.1;
     const rowClick = M + 1.05;              // Import DBML…
     const fileAt = rowClick + 0.1;          // the file it picks
-    const layerAt = M + 1.45, layerHot = M + 1.62, layerOut = M + 1.82;   // the layer: Gold
-    const nameAt = M + 1.85, nameEnter = M + 2.12, nameOut = M + 2.2;     // the name: sales, Enter
+    const nameAt = M + 1.45, nameEnter = M + 1.98, nameOut = M + 2.1;     // the name: sales, Enter
     const draftAt = M + 2.25;
     const keepGlow = M + 2.65;              // "…keep the draft"
 
@@ -91,23 +88,14 @@ export default {
     if (t >= menuAt && t < rowClick + 0.2) {
       html += newMenu(plus, { hot: t >= rowClick - 0.3 ? 1 : -1, op: easeOut(seg(t, menuAt, menuAt + 0.12)) * (1 - seg(t, rowClick + 0.05, rowClick + 0.2)) });
     }
-    if (t >= fileAt && t < layerAt + 0.2) {
-      const op = Math.min(1, seg(t, fileAt, fileAt + 0.12)) * (1 - seg(t, layerAt, layerAt + 0.2));
+    if (t >= fileAt && t < nameAt + 0.2) {
+      const op = Math.min(1, seg(t, fileAt, fileAt + 0.12)) * (1 - seg(t, nameAt, nameAt + 0.2));
       html += `<div class="abs pill" style="left:${importRow.x - 60}px;top:${importRow.y - 26}px;height:52px;padding:0 20px 0 14px;font-size:22px;background:#1b2a40;color:#cfe3ff;border:2px solid var(--logical);box-shadow:0 12px 36px #000c;opacity:${op.toFixed(3)}"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 22 })}</span><span class="mono">${SALES_DRAFT.file}</span></div>`;
     }
 
-    // the layer pick, then the name box (Enter takes each)
-    const dimOp = Math.min(easeOut(seg(t, layerAt, layerAt + 0.12)), 1 - seg(t, nameOut, nameOut + 0.1));
+    // the name box (Enter takes it)
+    const dimOp = Math.min(easeOut(seg(t, nameAt, nameAt + 0.12)), 1 - seg(t, nameOut, nameOut + 0.1));
     if (dimOp > 0) html += `<div class="abs" style="left:${WIN.x}px;top:${WIN.y}px;width:${WIN.w}px;height:${WIN.h}px;border-radius:20px;background:rgba(10,11,14,${(0.45 * dimOp).toFixed(3)})"></div>`;
-    if (t >= layerAt && t < layerOut + 0.1) {
-      const pIn = easeOut(seg(t, layerAt, layerAt + 0.12)) * (1 - seg(t, layerOut, layerOut + 0.1));
-      let inner = `<div class="abs" style="left:14px;right:14px;top:${QP.title + 10}px;height:${QP.input}px;border-radius:5px;background:#3c3c3c;border:2px solid #0e639c;display:flex;align-items:center;padding:0 18px;font-size:21px;color:#9a9ea6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${IMPORT_STEPS.layerPlaceholder}</div>`;
-      IMPORT_STEPS.layers.forEach((label, i) => {
-        const focus = t >= layerHot ? i === 1 : i === 0;
-        inner += `<div class="abs" style="left:8px;right:8px;top:${LIST_Y + i * 50}px;height:46px;border-radius:6px;display:flex;align-items:center;padding-left:20px;font-size:24px;${focus ? 'background:#04395e;box-shadow:inset 0 0 0 2px #0e639c;' : ''}">${label}</div>`;
-      });
-      html += quickPick(IMPORT_STEPS.title, inner, LIST_Y + 2 * 50 + 10, `opacity:${pIn.toFixed(3)}`);
-    }
     if (t >= nameAt && t < nameOut + 0.08) {
       const pIn = easeOut(seg(t, nameAt, nameAt + 0.1)) * (1 - seg(t, nameOut, nameOut + 0.08));
       const flash = t >= nameEnter;
@@ -116,10 +104,10 @@ export default {
       html += quickPick(IMPORT_STEPS.title, inner, QP.title + QP.input + 22 + 46 + 18, `opacity:${pIn.toFixed(3)}`);
     }
 
-    // pointer: onto the +, then Import DBML… (the questions after it are answered with Enter)
-    if (t >= M - 0.2 && t < layerAt + 0.3) {
+    // pointer: onto the +, then Import DBML… (the name box after it is answered with Enter)
+    if (t >= M - 0.2 && t < nameAt + 0.3) {
       const pt = path(t, [{ t: M, x: 1100, y: 860 }, { t: plusClick - 0.1, ...plus }, { t: rowClick - 0.15, ...importRow }]);
-      const op = Math.min(seg(t, M - 0.2, M + 0.1), 1 - seg(t, fileAt + 0.1, layerAt + 0.2));
+      const op = Math.min(seg(t, M - 0.2, M + 0.1), 1 - seg(t, fileAt + 0.1, nameAt + 0.2));
       const press = Math.max(t >= plusClick && t < plusClick + 0.4 ? seg(t, plusClick, plusClick + 0.4) : 0, t >= rowClick && t < rowClick + 0.4 ? seg(t, rowClick, rowClick + 0.4) : 0);
       if (op > 0) html += `<div class="abs" style="left:0;top:0;opacity:${op.toFixed(3)}">${pointer(pt.x, pt.y, press)}</div>`;
     }

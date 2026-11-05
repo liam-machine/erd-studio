@@ -22,6 +22,11 @@ const scenesByName = Object.fromEntries(
 );
 
 const $ = (id) => document.getElementById(id);
+// A recorded cut (script.yaml `recording`): a smaller headline and a lower chapter bar leave room
+// for the real VS Code window between them (style.css body.rec).
+if (timeline.recording) document.body.classList.add('rec');
+/** Recorded scenes' footage runs on across scene changes: only the headline fades between them. */
+const isRec = (sc) => !!sc && sc.module.startsWith('rec/');
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), chapters: $('chapters'), hud: $('hud') };
 
 // Chapter spans: first scene start -> last scene end, per chapter number.
@@ -54,6 +59,10 @@ window.render = function render(t) {
   const pout = i === scs.length - 1 ? 0 : seg(lt, sc.dur - fade, sc.dur);
   const op = pin * (1 - pout);
   const rise = lerp(14, 0, pin);
+  // A recorded scene's window stays put next to another recorded scene (composite.mjs fades the
+  // footage only where the recording starts and ends, with these same fades).
+  const stageOp = !isRec(sc) ? op : (isRec(scs[i - 1]) ? 1 : pin) * (isRec(scs[i + 1]) ? 1 : 1 - pout);
+  const stageRise = isRec(sc) ? 0 : rise;
 
   // Accent (with an optional change on a beat, cross-faded over 0.4 s).
   let accent = ACCENT[sc.accent];
@@ -75,8 +84,8 @@ window.render = function render(t) {
 
   const html = scenesByName[sc.module].render(lt, { beats: sc.beats, dur: sc.dur, t, scene: sc });
   put('stage', els.stage, html);
-  els.stage.style.opacity = op.toFixed(3);
-  els.stage.style.transform = `translateY(${rise.toFixed(1)}px)`;
+  els.stage.style.opacity = stageOp.toFixed(3);
+  els.stage.style.transform = `translateY(${stageRise.toFixed(1)}px)`;
 
   // Chapter bar: done chapters full, the current one fills across its scenes, intro scenes show
   // none, outro scenes (after the last chapter) show all done.

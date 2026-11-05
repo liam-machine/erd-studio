@@ -68,7 +68,7 @@ export const ICON = {
   globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>', { sw: 1.8, ...o }),
   neq: (o) => svg('<path d="M5 9h14M5 15h14M16 4L8 20"/>', { sw: 2.4, ...o }),
   dot: (o) => svg('<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>', o),
-  /** ERD Studio's diagram mark (the activity bar icon, small). */
+  /** A small diagram glyph for the Diagrams view's rows (not the activity bar icon: that is editor.js ERD_SIDEBAR_ICON). */
   erdMark: (o) => svg('<rect x="3" y="4" width="8" height="6" rx="1.2"/><rect x="13" y="14" width="8" height="6" rx="1.2"/><path d="M7 10v7h6"/>', { sw: 2, ...o }),
   exportGlyph: (o) => svg('<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/>', { sw: 2.2, ...o }),
 };
@@ -109,9 +109,11 @@ export const rowY = (i, grain = true) => NODE.head + (grain ? NODE.grain : 0) + 
 /**
  * An ERD node. `stage` is neutral (a folder without dbt: the default), logical or physical, or a
  * 0..1 number to blend the border from logical to physical; `border` overrides it with a colour.
+ * `layer` is the header's layer badge ('MAIN', 'GLD', 'SLV'): none on a single-layer project's
+ * canvas (a new folder without dbt), but a draft page's nodes show it (MAIN).
  * cols: [{ name, type, key?: 'PK'|'FK', row?: 'amber'|'green', types?: [[label, value, colour]...], pill?: html, strike? }]
  */
-export function node({ x, y, w, name, stage = 'neutral', border: borderOverride = null, layer = 'GLD', grain, cols, style = '', lock = false }) {
+export function node({ x, y, w, name, stage = 'neutral', border: borderOverride = null, layer = null, grain, cols, style = '', lock = false }) {
   const border = borderOverride
     ?? (typeof stage === 'number' ? mix(COLORS.logical, COLORS.physical, stage) : ({ physical: COLORS.physical, logical: COLORS.logical }[stage] ?? COLORS.neutralBorder));
   const rows = cols
@@ -125,7 +127,7 @@ export function node({ x, y, w, name, stage = 'neutral', border: borderOverride 
     .join('');
   const lockTab = lock ? `<div class="node__lock" style="left:${x + 18}px;top:${y - 36}px;${style}">${ICON.lock({ size: 17 })}read-only</div>` : '';
   return `${lockTab}<div class="node" style="left:${x}px;top:${y}px;width:${w}px;border-color:${border};${style}">
-    <div class="node__head"><span class="node__name">${name}</span><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span></div>
+    <div class="node__head"><span class="node__name">${name}</span>${layer ? `<span class="badge badge--${{ SLV: 'slv', MAIN: 'main' }[layer] ?? 'gld'}">${layer}</span>` : ''}</div>
     ${grain ? `<div class="node__grain">${grain}</div>` : ''}${rows}</div>`;
 }
 
@@ -153,16 +155,17 @@ export const COMPARE_WORDS = { logical: 'Compare with dbt', physical: 'Compare w
 export const STAGE_TABS = [['logical', 'Logical', 'your design'], ['physical', 'Physical', 'read from dbt']];
 
 /**
- * Canvas toolbar: the diagram's name and its layer badge ("GLD Gold layer": a project with more
- * than one layer, as a new one is), then the Layout button, "+ Add ▾" and the Export glyph. A
+ * Canvas toolbar: the diagram's name, its layer badge only when given (`layer`: "GLD Gold layer" in a
+ * project with more than one layer; a new folder without dbt has one, Main, and no badge), then the Layout button, "+ Add ▾" and the Export glyph. A
  * folder without dbt (`logicalOnly`) has no stage tabs and nothing to compare (Toolbar.tsx renders
  * neither). A dbt project adds the Compare button (`compare`: 'off' or 'on') before "+ Add", and
  * the Logical · Physical tabs as their own pill in a second row, centred under the toolbar
  * (Toolbar.tsx "Row 2: Stage tabs (attached below toolbar)", `.toolbar-container`). The Physical
  * stage is read-only, so its toolbar has no "+ Add" (`{!isReadOnly && (`).
  */
-export function toolbar({ x, y, domain = 'orders', layer = 'GLD', layerLabel = 'Gold layer', stage = 'logical', compare = 'off', layout = null, t = 0, style = '', logicalOnly = true, add = null, exportGlyph = true }) {
-  const badge = `<span class="tb__layer"><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>${layerLabel}</span>`;
+export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = '', stage = 'logical', compare = 'off', layout = null, t = 0, style = '', logicalOnly = true, add = null, exportGlyph = true }) {
+  // a single-layer project (a new folder without dbt: Main) shows no layer badge (isSingleLayerProject)
+  const badge = layer ? `<span class="tb__layer"><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>${layerLabel}</span>` : '';
   // The Layout button ("⊞ Layout", a spinner while ELK runs) — only when a scene asks for it.
   const layoutBtn = layout
     ? `<span class="tb__diff${layout === 'busy' ? ' tb__diff--busy' : ''}">${layout === 'busy' ? spinner(t, 20, '#cfe3ff') : '<svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg>'}Layout</span>`

@@ -21,13 +21,13 @@ const BODYW = WIN.w - 2;
  * [depth, kind, label]; depth 0 is the folder's top level. sales.dbml is the file the draft reads. */
 export const HERO_TREE = [
   [0, 'folder', '.erd-studio'],
-  [1, 'folder', 'gold'],
+  [1, 'folder', 'main'],
   [2, 'folder', 'diagrams'],
   [3, 'dbml', 'orders.dbml'],
   [2, 'folder', 'relationships'],
-  [3, 'dbml', 'gold.dbml'],
+  [3, 'dbml', 'main.dbml'],
   [2, 'folder', 'tables'],
-  [3, 'folder', 'gold'],
+  [3, 'folder', 'main'],
   [4, 'dbml', 'dim_customer.dbml'],
   [4, 'dbml', 'dim_date.dbml'],
   [4, 'dbml', 'dim_product.dbml'],
@@ -56,7 +56,7 @@ const FILE_ROW = { dim_customer: 8, dim_date: 9, dim_product: 10, fct_order: 11 
 const SALES_ROW = 16;
 /** fct_order.dbml as ERD Studio writes it (formatDbml aligns the types; `npm test` checks it). */
 export const FCT_DBML = [
-  'Table gold.fct_order {',
+  'Table main.fct_order {',
   '  order_id     INTEGER [pk]',
   "  customer_key INTEGER [foreign_key: 'true']",
   "  date_key     INTEGER [foreign_key: 'true']",
@@ -87,7 +87,7 @@ function ordersCanvas(t) {
   for (const tb of T) {
     const g = lit(tb.name);
     const ring = g > 0 ? `box-shadow:0 0 0 ${(5 * g).toFixed(1)}px rgba(96,165,250,${(0.55 * g).toFixed(3)}),0 18px 44px #0009;` : '';
-    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, layer: 'GLD', cols: tb.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: ring });
+    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, cols: tb.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: ring });
   }
   let h = `<div class="abs grid-bg" style="left:${EDX}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
     <div class="abs" style="left:${EDX + 40}px;top:120px;transform-origin:0 0;transform:scale(0.62)">${inner}</div>
@@ -97,7 +97,7 @@ function ordersCanvas(t) {
     const op = Math.min(1, easeOut(seg(t, CODE_IN, CODE_IN + 0.3))) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
     const body = FCT_DBML.map((l, i) => `<div style="display:flex;height:28px;align-items:center"><span style="width:26px;text-align:right;margin-right:16px;color:var(--line-no)">${i + 1}</span><span style="white-space:pre">${dbmlLine(l)}</span></div>`).join('');
     h += `<div class="abs" style="right:24px;bottom:22px;width:560px;border-radius:12px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:0 18px 48px #000c;overflow:hidden;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
-      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 18 })}</span>.erd-studio/gold/tables/gold/fct_order.dbml</div>
+      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 18 })}</span>.erd-studio/main/tables/main/fct_order.dbml</div>
       <div class="mono" style="padding:8px 0 10px 4px;font-size:17px">${body}</div></div>`;
   }
   return h;
@@ -125,7 +125,7 @@ export function render(t) {
   body += explorer(t) + activityBar('files');
   const tabs = [{ label: 'orders.dbml', on: d < 0.5 }];
   if (d > 0) tabs.push({ label: SALES_DRAFT.tab, on: d >= 0.5 });
-  const html = card({ ...WIN, tabs, crumb: d < 0.5 ? '.erd-studio › gold › diagrams › orders.dbml' : 'shop-analytics', body });
+  const html = card({ ...WIN, tabs, crumb: d < 0.5 ? '.erd-studio › main › diagrams › orders.dbml' : 'shop-analytics', body });
   return html;
 }
 

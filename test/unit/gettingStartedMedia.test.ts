@@ -113,6 +113,17 @@ describe('getting-started media', () => {
       expect(audioObjectType(head)).toBe(0x6b);
     });
 
+    it.runIf(present(cut.video))('lasts the one-minute tour (50–65 s), and its last caption ends inside it', () => {
+      // mvhd (version 0): size, 'mvhd', version/flags, creation, modification, timescale, duration
+      const buf = fs.readFileSync(path.join(MEDIA, cut.video));
+      const mvhd = buf.indexOf('mvhd');
+      expect(buf[mvhd + 4]).toBe(0);
+      const seconds = buf.readUInt32BE(mvhd + 20) / buf.readUInt32BE(mvhd + 16);
+      expect(seconds).toBeGreaterThanOrEqual(50);
+      expect(seconds).toBeLessThanOrEqual(65);
+      expect(cut.cues[cut.cues.length - 1].end).toBeLessThanOrEqual(seconds);
+    });
+
     it.runIf(present(cut.poster))('poster is a JPEG', () => {
       const buf = fs.readFileSync(path.join(MEDIA, cut.poster));
       expect(buf[0]).toBe(0xff);

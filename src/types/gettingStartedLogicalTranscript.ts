@@ -13,8 +13,8 @@ export const LOGICAL_GETTING_STARTED_CUES: { start: number; end: number; text: s
   { start: 26.426, end: 30.769, text: 'Each table is a DBML file, to commit and review like code.' },
   { start: 31.826, end: 34.595, text: 'Export to DBML or Mermaid any time.' },
   { start: 34.645, end: 38.083, text: 'Already have DBML? Import it, then keep the draft.' },
-  { start: 38.826, end: 41.678, text: 'Want grain, keys and the why behind each table?' },
-  { start: 41.728, end: 47.145, text: 'Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.' },
+  { start: 38.826, end: 40.633, text: 'Want the why behind each table?' },
+  { start: 40.683, end: 46.1, text: 'Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.' },
   { start: 47.626, end: 51.02, text: 'ERD Studio is free to use. Install it today.' },
 ];
 
@@ -26,6 +26,6 @@ export const LOGICAL_GETTING_STARTED_TRANSCRIPT: string = [
   'Add a table, with starter columns if you like. Add another, then link the two with a relationship.',
   'Each table is a DBML file, to commit and review like code.',
   'Export to DBML or Mermaid any time. Already have DBML? Import it, then keep the draft.',
-  'Want grain, keys and the why behind each table? Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.',
+  'Want the why behind each table? Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.',
   'ERD Studio is free to use. Install it today.',
 ].join('\n\n');

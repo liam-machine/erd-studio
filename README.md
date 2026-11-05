@@ -46,8 +46,8 @@ Every import opens as a draft: nothing is written until you press **Keep as Diag
 **More ways to start…** lists the rest, including **Import…** and **Bring In Your Data Model…**: the export steps for Databricks, Snowflake, Fabric, SQL Server and more ([the guide](docs/import-existing-models.md)).
 
 <table align="center"><tr>
-<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the One-Minute Tour (1:00), a DBML tour of the logical model." /></a></td>
-<td><strong>Watch the One-Minute Tour (1:00).</strong> A DBML tour of the logical model: start a diagram, see its files, import and export, set up your AI helper. It is also in the sidebar's <strong>Help &amp; Feedback</strong>.</td>
+<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the One-Minute Tour (0:58): ERD Studio in VS Code, recorded, a DBML tour of the logical model." /></a></td>
+<td><strong>Watch the One-Minute Tour (0:58).</strong> A recording of ERD Studio in VS Code: start a diagram, see its files, import and export, set up your AI helper. It is also in the sidebar's <strong>Help &amp; Feedback</strong>.</td>
 </tr></table>
 
 ## What's in your repo

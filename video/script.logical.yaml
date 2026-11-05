@@ -10,7 +10,7 @@
 # the file, the modules and the rendered frames. "DBML", "Git", "repo", "AI" and "table" are fine.
 #
 # Length: at most 65 s (maxDuration). The walkthrough's watchLogical step and the Help & Feedback
-# view call this the "One-Minute Tour"; keep it between 50 and 60 s.
+# view call this the "One-Minute Tour"; keep it between 50 and 65 s, ideally about 60.
 
 title: ERD Studio — getting started, logical cut
 maxDuration: 65
@@ -118,7 +118,7 @@ scenes:
     lines:
       - id: e_want
         beat: want
-        caption: Want grain, keys and the why behind each table?
+        caption: Want the why behind each table?
       - id: e_setup
         beat: setup
         caption: Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.

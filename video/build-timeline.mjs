@@ -85,7 +85,9 @@ export function buildTimeline(script, durations) {
     clock += dur;
     return scene;
   });
-  return { fps: 30, width: 1920, height: 1080, fade, total: round(clock), chapters: script.chapters, scenes };
+  // A recorded cut (script.yaml `recording`) carries the inset its footage plays in: record/ and
+  // capture/composite read it from here.
+  return { fps: 30, width: 1920, height: 1080, fade, total: round(clock), chapters: script.chapters, recording: script.recording ?? null, scenes };
 }
 
 /** Splits text into caption-sized pieces at sentence, then clause, boundaries. */

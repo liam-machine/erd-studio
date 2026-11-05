@@ -25,6 +25,6 @@ export default {
       <div class="abs" style="left:0;right:0;top:600px;display:flex;justify-content:center;align-items:center;gap:22px">
         ${chip(a, false, 0.45)}${arrow(0.5)}${chip(b, false, 0.55)}${arrow(0.6)}${chip(c, true, 0.65)}</div>
       <div class="abs" style="left:0;right:0;top:744px;text-align:center;font-size:32px;font-weight:600;${appear(t, 0.8)}"><span style="color:var(--green);font-weight:700">${f0}</span><span style="color:var(--text-2)"> · ${rest.join(' · ')}</span></div>
-      <div class="abs" style="left:0;right:0;top:808px;text-align:center;font-size:26px;color:var(--text-2);${appear(t, 0.9)}">Search the Extensions view for <span style="color:var(--text);font-weight:600">${EXTENSION.name}</span>, then open the folder your data model lives in</div>`;
+      <div class="abs" style="left:0;right:0;top:808px;text-align:center;font-size:26px;color:var(--text-2);${appear(t, 0.9)}">Search the Extensions view for <span style="color:var(--text);font-weight:600">${EXTENSION.name}</span> (<span class="mono">${EXTENSION.id}</span>), then open the folder your data model lives in</div>`;
   },
 };

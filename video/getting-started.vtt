@@ -13,45 +13,45 @@ No AI needed, and nothing to configure.
 Install ERD Studio, open your folder, and click its icon.
 
 4
-00:00:14.826 --> 00:00:17.394
+00:00:13.326 --> 00:00:15.894
 Click New Diagram, and give it a name.
 
 5
-00:00:19.226 --> 00:00:21.861
+00:00:17.326 --> 00:00:19.961
 Add a table, with starter columns if you like.
 
 6
-00:00:21.911 --> 00:00:24.832
+00:00:20.011 --> 00:00:24.856
 Add another, then link the two with a relationship.
 
 7
-00:00:26.426 --> 00:00:30.769
+00:00:26.326 --> 00:00:30.669
 Each table is a DBML file, to commit and review like code.
 
 8
-00:00:31.826 --> 00:00:34.595
+00:00:31.226 --> 00:00:33.995
 Export to DBML or Mermaid any time.
 
 9
-00:00:34.645 --> 00:00:38.083
+00:00:34.045 --> 00:00:37.483
 Already have DBML? Import it, then keep the draft.
 
 10
-00:00:38.826 --> 00:00:41.678
-Want grain, keys and the why behind each table?
+00:00:39.026 --> 00:00:40.833
+Want the why behind each table?
 
 11
-00:00:41.728 --> 00:00:47.145
-Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
+00:00:40.883 --> 00:00:45.432
+Click Set Up My AI Helper, then start the guided setup in your assistant.
 
 12
-00:00:47.626 --> 00:00:51.761
+00:00:45.882 --> 00:00:50.017
 Using dbt? Then a Physical tab shows what dbt has.
 
 13
-00:00:51.811 --> 00:00:55.029
+00:00:50.067 --> 00:00:53.285
 Click Compare with dbt to mark every difference.
 
 14
-00:00:55.626 --> 00:00:59.020
+00:00:53.882 --> 00:00:57.276
 ERD Studio is free to use. Install it today.

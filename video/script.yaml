@@ -1,16 +1,20 @@
 # Getting-started video: the DEFAULT cut, and the single source of truth for its format. The
 # README links it (docs/assets/getting-started.mp4) and the Welcome panel plays it in a dbt project
-# (its 'dbt' page). It is the one-minute DBML tour of the logical model, the same tour as
-# script.logical.yaml scene for scene, with one more short beat before the end card: what a dbt
-# project adds (the Physical tab, Compare with dbt).
+# (its 'dbt' page). It is a RECORDING OF THE REAL VS CODE: ERD Studio built from this checkout,
+# driven by record/ in an isolated window, the footage set into the frame below the headline and
+# above the chapter bar (`recording.inset`). The tour is the logical cut's (script.logical.yaml,
+# still drawn in HTML), told as the real product shows it, with one more short beat before the end
+# card: what a dbt project adds (the Physical tab, Compare with dbt). See README.md, "Recording".
 #
 # Each scene has a headline (two lines; `{word}` is highlighted in the scene's accent colour),
-# the player module that draws it (player/scenes/<module>.js) and narration lines.
+# the player module that draws its frame (rec/window: the window the footage plays in; the end
+# card is HTML), narration lines, and `minDur`, which leaves the real UI time to do what the
+# line says. record/scenes.mjs performs each scene's clicks on its beats.
 #
 # A line is:
 #   id       stable file name for its voice clip (build/voice/<id>.wav) and cue
-#   beat     name the scene module keys its animation off (beats.<name>.t / .end, seconds
-#            from scene start, taken from the REAL audio duration)
+#   beat     name the recording keys its actions off (beats.<name>.t / .end, seconds from scene
+#            start, taken from the REAL audio duration)
 #   caption  what the viewer reads (captions, transcript) — Australian spelling
 #   say      optional: what the voice reads, when it must differ from the caption
 #            (pronunciation respellings — see the table in README.md)
@@ -20,14 +24,24 @@
 # starts `lead` seconds in; each further line follows `gap` seconds after the previous one;
 # the scene lasts max(minDur, lastLineEnd + tail).
 #
-# Words to keep out of every scene but the dbt beat (module dbt/*): dbt, Physical, Diff, manifest,
-# sample project — in narration, captions, headlines and anything drawn on screen. dbt is an
-# add-on: it shows up only at the end. `npm test` checks the file, the modules and the frames.
+# Words to keep out of every scene but the dbt beat (id dbt): dbt, Physical, Diff, manifest,
+# sample project — in narration, captions, headlines and anything on screen. dbt is an add-on: it
+# shows up only at the end. `npm test` checks the file and the text the recording saw on screen
+# (record/takes.json).
 #
-# Length: 50–60 s, at most 65 s (maxDuration): the product calls it the "One-Minute Tour".
+# Length: 50–65 s (maxDuration 65), ideally about 60: the product calls it the "One-Minute Tour".
 
 title: ERD Studio — getting started
 maxDuration: 65
+
+# The recorded window's place in the 1920x1080 frame (frame px). The isolated VS Code window is
+# 1440x600 CSS px (record/vscode.mjs WINDOW), filmed at 1.2x so it fills this rect exactly.
+recording:
+  inset: { x: 96, y: 240, w: 1728, h: 720 }
+  # A punch-in (record/composite.mjs): from `beat` + `offset` in `scene`, the region around `focus`
+  # (inset px) dissolves in at `scale`x and holds to the scene's end. Here: fct_order's marks and the
+  # comparison panel, whose small text needs it.
+  zoom: { scene: dbt, beat: compare, offset: 1.5, dur: 0.5, scale: 1.35, focus: [1180, 470] }
 
 voice:
   engine: kokoro        # kokoro | say
@@ -46,11 +60,14 @@ chapters: ["1 · OPEN", "2 · DRAW", "3 · SAVE", "4 · ENRICH"]
 
 scenes:
   - id: hook
-    module: tour/hook
+    module: rec/window
     chapter: 0
     minDur: 5
     accent: blue
     headline: ["Your data model,", "in {your repo}."]
+    # the finished diagram and its files; the claims sit right of the headline (beat, seconds after it)
+    props:
+      claims: [['DBML files in Git', model, 2.4], ['No AI needed', noai, 0.1], ['Nothing to configure', noai, 1.4]]
     lines:
       - id: h_model
         beat: model
@@ -60,9 +77,9 @@ scenes:
         caption: No AI needed, and nothing to configure.
 
   - id: install
-    module: tour/install
+    module: rec/window
     chapter: 1
-    minDur: 6.4
+    minDur: 4.9
     accent: blue
     headline: ["Install it, open a folder,", "click {its icon}."]
     lines:
@@ -71,9 +88,9 @@ scenes:
         caption: Install ERD Studio, open your folder, and click its icon.
 
   - id: newDiagram
-    module: tour/newDiagram
+    module: rec/window
     chapter: 2
-    minDur: 4.4
+    minDur: 4.0
     accent: blue
     headline: ["Click {New Diagram}.", "Give it a name."]
     lines:
@@ -85,23 +102,29 @@ scenes:
         caption: and give it a name.
 
   - id: tables
-    module: tour/tables
+    module: rec/window
     chapter: 2
-    minDur: 7.2
+    minDur: 9.0
     accent: blue
     headline: ["Add tables,", "then {connect them}."]
+    # the logical cut's one t_more line, split: the link is spoken as New Relationship opens (the
+    # second table takes its time in the real UI; one line would name the link seconds before it)
     lines:
       - id: t_table
         beat: table
         caption: Add a table, with starter columns if you like.
       - id: t_more
         beat: more
-        caption: Add another, then link the two with a relationship.
+        caption: Add another,
+      - id: t_rel
+        beat: rel
+        pause: 1.9
+        caption: then link the two with a relationship.
 
   - id: files
-    module: tour/files
+    module: rec/window
     chapter: 3
-    minDur: 5.4
+    minDur: 4.9
     accent: blue
     headline: ["Saved as {DBML},", "plain files in Git."]
     lines:
@@ -110,9 +133,9 @@ scenes:
         caption: Each table is a DBML file, to commit and review like code.
 
   - id: importDbml
-    module: tour/importDbml
+    module: rec/window
     chapter: 3
-    minDur: 7.0
+    minDur: 7.8
     accent: blue
     headline: ["DBML out,", "and {DBML in}."]
     lines:
@@ -124,23 +147,25 @@ scenes:
         caption: Already have DBML? Import it, then keep the draft.
 
   - id: enrich
-    module: tour/enrich
+    module: rec/window
     chapter: 4
-    minDur: 8.8
+    minDur: 6.4
     accent: blue
     headline: ["Want the why?", "Ask your {AI assistant}."]
     lines:
       - id: e_want
         beat: want
-        caption: Want grain, keys and the why behind each table?
+        caption: Want the why behind each table?
+      # Not the logical cut's "then type /erd-studio-setup…": that cut shows the command typed; here
+      # the real helper's toast is what is on screen, and it says to start the guided setup.
       - id: e_setup
         beat: setup
-        caption: Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
-        say: Click Set Up My AI Helper, then type slash ERD studio setup in your assistant.
+        caption: Click Set Up My AI Helper, then start the guided setup in your assistant.
 
   - id: dbt
-    module: dbt/compare
+    module: rec/window
     chapter: 0            # after the last chapter: the bar shows every chapter done (main.js)
+    # a separate take, in a dbt project (record/fixtures.mjs): the only scene that may name dbt
     minDur: 8.0
     accent: green
     headline: ["Using dbt?", "{Compare} with what it has."]
@@ -155,7 +180,7 @@ scenes:
   - id: end
     module: tour/endCard
     chapter: 0
-    minDur: 4.6
+    minDur: 4.0
     accent: green
     headline: null
     lines:

@@ -91,13 +91,13 @@ export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: 
 const TREE = [
   { d: 0, icon: 'folder', label: 'shop-analytics', open: true },
   { d: 1, icon: 'folder', label: '.erd-studio', open: true },
-  { d: 2, icon: 'folder', label: 'gold', open: true },
+  { d: 2, icon: 'folder', label: 'main', open: true },
   { d: 3, icon: 'folder', label: 'diagrams', open: true },
   { d: 4, icon: 'file', label: 'orders.dbml' },
   { d: 3, icon: 'folder', label: 'relationships', open: true },
-  { d: 4, icon: 'file', label: 'gold.dbml' },
+  { d: 4, icon: 'file', label: 'main.dbml' },
   { d: 3, icon: 'folder', label: 'tables', open: true },
-  { d: 4, icon: 'folder', label: 'gold', open: true },
+  { d: 4, icon: 'folder', label: 'main', open: true },
   // VS Code's order; each file flies to its own node (fct_order is the middle one)
   { d: 5, icon: 'file', label: 'dim_customer.dbml', fly: 0 },
   { d: 5, icon: 'file', label: 'dim_product.dbml', fly: 2 },
@@ -115,7 +115,7 @@ const NODES = [
 ];
 
 export default hookScene({
-  tree: TREE, nodes: NODES, tab: 'orders.dbml', crumb: '.erd-studio › gold › diagrams › orders.dbml', beat: 'model',
+  tree: TREE, nodes: NODES, tab: 'orders.dbml', crumb: '.erd-studio › main › diagrams › orders.dbml', beat: 'model',
   // h_model: "Your data model,"(+0.0–0.8) "as a diagram,"(+1.1–1.8) "saved as DBML files"(+2.1–3.1)
   // "in your repo."(+3.1–4.0); h_noai: "No AI needed,"(+0.0–1.09) "and nothing to configure."(+1.36–2.58)
   claims: [['DBML files in Git', 'model', 2.4], ['No AI needed', 'noai', 0.1], ['Nothing to configure', 'noai', 1.4]],
