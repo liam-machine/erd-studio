@@ -114,7 +114,11 @@ export interface DoctorResult extends Envelope {
   };
   profiles: ProfilesInfo;
   artifacts: {
-    manifest: { status: ArtifactStatus; path: string; modifiedAt: string | null; models: number | null; newestSourceChange: string | null };
+    manifest: {
+      status: ArtifactStatus; path: string; modifiedAt: string | null; models: number | null; newestSourceChange: string | null;
+      /** Only when Parse without your credentials wrote it (schemas left out). */
+      placeholderProfile?: true;
+    };
     catalog: { status: CatalogStatus; path: string; modifiedAt: string | null; nodes: number | null };
   };
   projectFiles: { schemaYmlFiles: number; sourceFiles: number; modelsDiscovered: number };

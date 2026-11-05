@@ -103,6 +103,7 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
       Object.values(raw.resourceDocs ?? {}).map((info) => [normaliseName(info.name), info]),
     ),
     ...(raw.compositeForeignKeys ? { compositeForeignKeys: raw.compositeForeignKeys } : {}),
+    ...(raw.placeholderProfile === true ? { placeholderProfile: true } : {}),
   };
 }
 
@@ -158,6 +159,14 @@ export class ManifestService {
   private _isMissing = false;
   get isMissing(): boolean {
     return this._isMissing;
+  }
+
+  /**
+   * Whether the last good load was written by Parse without your
+   * credentials (its schemas are placeholders, blanked on load).
+   */
+  get placeholderProfile(): boolean {
+    return this.lastKnownGood?.placeholderProfile === true;
   }
 
   /** Absolute path of the manifest this service reads for `projectPath`. */

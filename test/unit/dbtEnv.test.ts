@@ -8,7 +8,9 @@ import {
   dbtCommands,
   dbtExecutableCandidates,
   dbtInvocation,
+  dbtSpawnCommand,
   dbtVersionSpawn,
+  stripAnsi,
   detectDepsStatus,
   isUntrustedProjectExecutable,
   displayPath,
@@ -20,6 +22,7 @@ import {
   readDbtProjectIdentity,
   runDbtVersion,
   venvActivateCommand,
+  venvSearchDirs,
 } from '../../src/services/dbtEnv';
 
 const CORE_19 = `Core:
@@ -183,6 +186,41 @@ describe('dbtExecutableCandidates', () => {
     expect(isUntrustedProjectExecutable({ executable: venvDbt, source: 'override' })).toBe(false);
   });
 
+  it('finds a monorepo venv in a parent folder, up to the workspace folder and never above it', () => {
+    // repo/.venv holds dbt; the dbt project is repo/analytics/transform.
+    const repoDbt = write('repo/.venv/bin/dbt', '', 0o755);
+    write('.venv/bin/dbt', '', 0o755); // above the workspace folder: never used
+    const root = path.join(tmp, 'repo', 'analytics', 'transform');
+    fs.mkdirSync(root, { recursive: true });
+    const opts = { platform: 'linux' as const, homeDir: path.join(tmp, 'home'), env: { PATH: '' } };
+
+    const found = dbtExecutableCandidates(root, { ...opts, venvSearchUpTo: path.join(tmp, 'repo') });
+    expect(found).toEqual([{ executable: repoDbt, source: 'venv' }]);
+    // Still a dbt the project ships: the trust modal asks before running it.
+    expect(isUntrustedProjectExecutable(found[0])).toBe(true);
+
+    // Without a bound (the CLI, older callers) only the project folder is searched.
+    expect(dbtExecutableCandidates(root, opts)).toEqual([]);
+  });
+
+  it('prefers the project\'s own venv over a parent one', () => {
+    const own = write('repo/transform/.venv/bin/dbt', '', 0o755);
+    const parent = write('repo/.venv/bin/dbt', '', 0o755);
+    const got = dbtExecutableCandidates(path.join(tmp, 'repo', 'transform'), {
+      platform: 'linux', homeDir: path.join(tmp, 'home'), env: { PATH: '' }, venvSearchUpTo: path.join(tmp, 'repo'),
+    });
+    expect(got.map((c) => c.executable)).toEqual([own, parent]);
+  });
+
+  it('finds a parent venv on Windows', () => {
+    const present = new Set(['C:\\repo\\.venv\\Scripts\\dbt.exe']);
+    const got = dbtExecutableCandidates('C:\\repo\\transform', {
+      platform: 'win32', homeDir: 'C:\\Users\\me', env: { PATH: '', PATHEXT: '.EXE' },
+      isExecutable: (f) => present.has(f), venvSearchUpTo: 'c:\\Repo',
+    });
+    expect(got).toEqual([{ executable: 'C:\\repo\\.venv\\Scripts\\dbt.exe', source: 'venv' }]);
+  });
+
   it('uses Scripts and PATHEXT on Windows', () => {
     const present = new Set([
       'C:\\proj\\.venv\\Scripts\\dbt.exe',
@@ -257,6 +295,43 @@ describe('dbtVersionSpawn (cmd.exe quoting for .cmd / .bat shims)', () => {
     expect(dbtVersionSpawn('C:\\%PATH%\\dbt.bat')).toBeNull();
     expect(dbtVersionSpawn('C:\\a"b\\dbt.cmd')).toBeNull();
     expect(dbtVersionSpawn('C:\\a\nb\\dbt.cmd')).toBeNull();
+  });
+
+  it('refuses a shim path with ! (delayed expansion)', () => {
+    expect(dbtVersionSpawn('C:\\a!b\\dbt.bat')).toBeNull();
+  });
+});
+
+describe('dbtSpawnCommand', () => {
+  it('spawns a plain executable directly and never refuses it', () => {
+    expect(dbtSpawnCommand('C:\\a b\\dbt.exe', ['parse', '--profiles-dir', 'C:\\100% "x"!'])).toEqual({
+      file: 'C:\\a b\\dbt.exe', args: ['parse', '--profiles-dir', 'C:\\100% "x"!'], shell: false,
+    });
+    expect(dbtSpawnCommand('/usr/bin/dbt', [])).toEqual({ file: '/usr/bin/dbt', args: [], shell: false });
+  });
+
+  it('quotes a shim and every argument cmd.exe would split', () => {
+    expect(dbtSpawnCommand('C:\\s\\dbt.CMD', ['parse', '--profiles-dir', 'C:\\John Smith\\p', 'a&b', '(x)', 'a,b', 'a;b', 'a=b', 'a|b', '<', '^', ''])).toEqual({
+      file: '"C:\\s\\dbt.CMD"',
+      args: ['parse', '--profiles-dir', '"C:\\John Smith\\p"', '"a&b"', '"(x)"', '"a,b"', '"a;b"', '"a=b"', '"a|b"', '"<"', '"^"', '""'],
+      shell: true,
+    });
+  });
+
+  it('doubles a trailing backslash inside quotes', () => {
+    expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['C:\\A B\\'])!.args).toEqual(['"C:\\A B\\\\"']);
+    expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['C:\\AB\\'])!.args).toEqual(['C:\\AB\\']);
+  });
+
+  it('refuses a shim when its path or an argument holds " % ! or a line break', () => {
+    for (const bad of ['a"b', '%PATH%', 'a!b', 'a\nb', 'a\rb']) {
+      expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['parse', bad]), bad).toBeNull();
+      expect(dbtSpawnCommand(`C:\\${bad}\\dbt.bat`, ['parse']), bad).toBeNull();
+    }
+  });
+
+  it('stripAnsi removes colour codes', () => {
+    expect(stripAnsi('\u001b[0m12:00  \u001b[33mWARN\u001b[0m')).toBe('12:00  WARN');
   });
 
   it.skipIf(process.platform === 'win32')('runs an executable whose path has a space', async () => {
@@ -390,5 +465,20 @@ describe('displayPath', () => {
     expect(displayPath('/home/me/proj/profiles.yml', '/home/me/proj', '/home/me')).toBe('profiles.yml');
     expect(displayPath('/home/me/.dbt/profiles.yml', '/home/me/proj', '/home/me')).toBe('~/.dbt/profiles.yml');
     expect(displayPath('/etc/dbt/profiles.yml', '/home/me/proj', '/home/me')).toBe('/etc/dbt/profiles.yml');
+  });
+});
+
+describe('venvSearchDirs', () => {
+  it('walks from the dbt project up to the workspace folder, nearest first', () => {
+    expect(venvSearchDirs('/w/repo/a/b', '/w/repo', 'linux')).toEqual(['/w/repo/a/b', '/w/repo/a', '/w/repo']);
+  });
+  it('is just the project when it is the workspace folder, has no bound, or sits outside the bound', () => {
+    expect(venvSearchDirs('/w/repo', '/w/repo', 'linux')).toEqual(['/w/repo']);
+    expect(venvSearchDirs('/w/repo/a', undefined, 'linux')).toEqual(['/w/repo/a']);
+    expect(venvSearchDirs('/elsewhere/a', '/w/repo', 'linux')).toEqual(['/elsewhere/a']);
+    expect(venvSearchDirs('/w/repo-two/a', '/w/repo', 'linux')).toEqual(['/w/repo-two/a']);
+  });
+  it('compares Windows paths without case and stops at the bound', () => {
+    expect(venvSearchDirs('C:\\Repo\\a\\b', 'c:\\repo', 'win32')).toEqual(['C:\\Repo\\a\\b', 'C:\\Repo\\a', 'C:\\Repo']);
   });
 });

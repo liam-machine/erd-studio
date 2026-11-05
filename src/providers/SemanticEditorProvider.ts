@@ -74,9 +74,10 @@ import {
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
-import { findVenvActivate, findVenvDir } from '../services/dbtEnv';
+import { findVenvDir } from '../services/dbtEnv';
 import { claudeTerminalLaunch } from './GettingStartedPanel';
 import { runDbtParse } from '../commands/runDbtParse';
+import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
@@ -988,6 +989,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * of calling into a dead webview.
    */
   private readonly disposedWebviews = new WeakSet<vscode.Webview>();
+  /** The canvas most recently opened or focused (Run dbt parse's Open Physical view falls back to it). */
+  private lastActivePanelKey?: string;
 
   /**
    * Post a message to a webview, skipping disposed panels and observing the
@@ -1543,6 +1546,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
     this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
+    this.lastActivePanelKey = panelKey;
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
@@ -2286,13 +2290,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'runDbtCompile': {
             telemetry.feature('dbtCompile');
-            await this.handleRunDbtCompile();
+            // Awaits only the start; the run's follow-up settles on its own.
+            await runDbtCompile(this.workspaceRoot);
             break;
           }
           case 'runDbtParse': {
             // Records the `dbtParse` feature itself; the manifest watcher
-            // refreshes this canvas once manifest.json appears.
-            await runDbtParse(this.workspaceRoot);
+            // refreshes this canvas once manifest.json appears, and a parse
+            // that wrote it offers Open Physical view for this canvas.
+            await runDbtParse(this.workspaceRoot, { origin: document.uri });
             break;
           }
           case 'launchClaudeSync': {
@@ -2410,7 +2416,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     // The onboarding trail: the canvas went behind another tab and came back, or closed.
-    const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => telemetry.canvasVisible(panelKey, e.webviewPanel.visible));
+    const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => {
+      telemetry.canvasVisible(panelKey, e.webviewPanel.visible);
+      if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
+        this.lastActivePanelKey = panelKey;
+      }
+    });
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
@@ -4991,6 +5002,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.disposedWebviews.add(webview);
     // Only this panel's entry: another canvas of the same file may have replaced it.
     if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
+    if (this.lastActivePanelKey === panelKey && !this.openPanels.has(panelKey)) this.lastActivePanelKey = undefined;
     this.editedTablePaths.delete(panelKey);
     this.undoWhileHeld.delete(panelKey);
     clearTimeout(this.nativeUndoTimers.get(panelKey));
@@ -5018,6 +5030,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         log.error(`[SemanticEditorProvider] Refresh failed for ${fsPath}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+  }
+
+  /**
+   * The canvas Run dbt parse's **Open Physical view** would switch: the one
+   * that asked (`origin`) while it is open, else the canvas last active;
+   * only a live canvas on the Logical stage, and never in a logical-only
+   * window.
+   */
+  physicalSwitchTarget(origin?: vscode.Uri): vscode.Uri | undefined {
+    if (this.logicalOnly) return undefined;
+    const originKey = origin?.toString();
+    const key = originKey && this.openPanels.has(originKey) ? originKey : this.lastActivePanelKey;
+    const panel = key ? this.openPanels.get(key) : undefined;
+    if (!panel || this.disposedWebviews.has(panel.webview) || panel.activeStage !== 'logical') return undefined;
+    return panel.document.uri;
+  }
+
+  /** The canvas that asked is open on the Physical stage. */
+  originIsPhysical(origin?: vscode.Uri): boolean {
+    if (!origin) return false;
+    const panel = this.openPanels.get(origin.toString());
+    return !!panel && !this.disposedWebviews.has(panel.webview) && panel.activeStage === 'physical';
+  }
+
+  /**
+   * Bring the open canvas for `uri` to the front (its own editor group, with
+   * focus): Run dbt parse's **Open Physical view** can target a canvas in a
+   * background tab. False when no live canvas is open for it.
+   */
+  revealCanvas(uri: vscode.Uri): boolean {
+    const entry = this.openPanels.get(uri.toString());
+    if (!entry?.panel || this.disposedWebviews.has(entry.webview)) return false;
+    entry.panel.reveal(undefined, false);
+    return true;
   }
 
   /**
@@ -7484,17 +7530,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         payload: { message: `Failed to generate sync plan: ${msg}` },
       });
     }
-  }
-
-  /**
-   * Run `dbt compile` in a VS Code terminal.
-   * The existing FileWatcherService will detect manifest changes and refresh.
-   */
-  private async handleRunDbtCompile(): Promise<void> {
-    const terminal = vscode.window.createTerminal({ name: 'dbt compile', cwd: this.workspaceRoot });
-    terminal.show();
-    const activate = findVenvActivate(this.workspaceRoot);
-    terminal.sendText(activate ? `${activate} && dbt compile` : 'dbt compile');
   }
 
   /**
