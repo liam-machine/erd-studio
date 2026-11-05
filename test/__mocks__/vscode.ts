@@ -273,12 +273,24 @@ export const window = {
   },
   /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
   terminals: [] as MockTerminal[],
-  createTerminal: (options?: { name?: string; cwd?: string; env?: Record<string, string> }): MockTerminal => {
+  createTerminal: (options?: MockTerminalOptions): MockTerminal => {
     const terminal = createMockTerminal(options?.name ?? 'terminal');
     terminal._options = options;
+    const pty = options?.pty;
+    if (pty) {
+      terminal._pty = pty;
+      pty.onDidWrite((text: string) => { terminal._written.push(text); });
+      // The pty asked to close: VS Code disposes the terminal (no pty.close()) and fires onDidCloseTerminal.
+      pty.onDidClose?.((code?: number | void) => {
+        terminal._closedWith.push(code);
+        _removeTerminal(terminal, false);
+      });
+    }
     window.terminals.push(terminal);
     return terminal;
   },
+  /** `_closeTerminal` (and a pty terminal's dispose / close) fire these. */
+  onDidCloseTerminal: (listener: (t: unknown) => unknown) => _listen(_terminalCloseListeners, listener),
   /** Every panel createWebviewPanel returned, in order (reset with `_resetMockWebviewPanels`). */
   _webviewPanels: [] as MockWebviewPanel[],
   createWebviewPanel: (viewType: string, title: string, column?: unknown, options?: Record<string, unknown>): MockWebviewPanel => {
@@ -405,6 +417,47 @@ export const env = {
   }),
 };
 
+/** A pseudoterminal as `createTerminal({ pty })` receives it. */
+export interface MockPty {
+  onDidWrite: (listener: (text: string) => void) => unknown;
+  onDidClose?: (listener: (code?: number | void) => void) => unknown;
+  open: (dimensions: unknown) => void;
+  close: () => void;
+  handleInput?: (data: string) => void;
+}
+
+export interface MockTerminalOptions {
+  name?: string; cwd?: string; env?: Record<string, string>;
+  shellPath?: string; shellArgs?: string[]; pty?: MockPty; isTransient?: boolean;
+}
+
+const _terminalCloseListeners: Array<(t: unknown) => unknown> = [];
+
+/** Remove `terminal` (once), optionally telling its pty, and fire onDidCloseTerminal. */
+function _removeTerminal(terminal: MockTerminal, closePty: boolean): void {
+  const idx = window.terminals.indexOf(terminal);
+  if (idx === -1) return;
+  window.terminals.splice(idx, 1);
+  terminal.exitStatus = terminal.exitStatus ?? { code: undefined };
+  if (closePty) terminal._pty?.close();
+  for (const l of [..._terminalCloseListeners]) l(terminal);
+}
+
+/** Test helper: the user closed `terminal` (its pty's `close()` runs, onDidCloseTerminal fires). */
+export function _closeTerminal(terminal: MockTerminal): void {
+  _removeTerminal(terminal, true);
+}
+
+/** Test helper: VS Code opened a pty terminal (calls `pty.open`). */
+export function _openPty(terminal: MockTerminal): void {
+  terminal._pty?.open(undefined);
+}
+
+/** Test helper: the user typed `data` into a pty terminal. */
+export function _input(terminal: MockTerminal, data: string): void {
+  terminal._pty?.handleInput?.(data);
+}
+
 /** Minimal mock of vscode.Terminal for launch-in-terminal handlers. */
 export interface MockTerminal {
   name: string;
@@ -415,7 +468,13 @@ export interface MockTerminal {
   /** Test helper: every string passed to sendText, in order. */
   _sentText: string[];
   /** Test helper: the options createTerminal received. */
-  _options?: { name?: string; cwd?: string; env?: Record<string, string> };
+  _options?: MockTerminalOptions;
+  /** Test helper: the pseudoterminal, for `createTerminal({ pty })`. */
+  _pty?: MockPty;
+  /** Test helper: everything the pty wrote. */
+  _written: string[];
+  /** Test helper: each value the pty's onDidClose fired with. */
+  _closedWith: Array<number | void | undefined>;
 }
 
 export function createMockTerminal(name: string): MockTerminal {
@@ -430,11 +489,14 @@ export function createMockTerminal(name: string): MockTerminal {
       terminal._sentText.push(text);
     },
     dispose: () => {
+      if (terminal._pty) { _removeTerminal(terminal, true); }
       terminal.exitStatus = { code: undefined };
       const idx = window.terminals.indexOf(terminal);
       if (idx !== -1) window.terminals.splice(idx, 1);
     },
     _sentText: [],
+    _written: [],
+    _closedWith: [],
   };
   return terminal;
 }
