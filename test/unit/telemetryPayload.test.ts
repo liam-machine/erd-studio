@@ -13,6 +13,9 @@ import * as path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
+import { NO_CREDS_ADAPTER_FEATURES, THROWAWAY_ADAPTERS } from '../../src/services/dbtAdapters';
+import { DBT_PARSE_FAILURE_FEATURES } from '../../src/services/dbtFailure';
+
 import {
   ASSISTANTS,
   ERROR_CODES,
@@ -608,7 +611,7 @@ describe('allowlists agree with the Worker', () => {
       'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',
       'suggestPromptShowMe', 'importGuideFromDraft',
     ]);
-    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1, ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
   });
 
   it('the Worker README documents the Draft-first keys: a Draft funnel row, and chose_start counts draftKept', () => {
@@ -642,10 +645,45 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES).toContain('howToClipPlayed');
   });
 
-  it('appends the existing-diagrams notice\'s Show Me Around key at the very end, after the guide ones', () => {
+  it('appends the existing-diagrams notice\'s Show Me Around key after the guide ones', () => {
     expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
-    expect(FEATURES.at(-1)).toBe('draftAfterOpenFolder');
     expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
+  });
+
+  it('appends the Run dbt parse outcome keys at the very end, in order', () => {
+    const at = FEATURES.indexOf('dbtParseLaunched');
+    expect(at).toBe(FEATURES.indexOf('draftAfterOpenFolder') + 1);
+    expect(FEATURES.slice(at)).toEqual([
+      'dbtParseLaunched', 'dbtParseRefresh', 'dbtParseNoDbt', 'dbtParseVenvDeclined', 'dbtParseCloudCli',
+      'dbtParseBusy', 'dbtParseNoProfiles', 'dbtParseNoStart', 'dbtParseStopped', 'dbtParseExitOk',
+      'dbtParseExitFail', 'dbtParseOkNoManifest',
+      'dbtParseFailProfile', 'dbtParseFailTarget', 'dbtParseFailEnvVar', 'dbtParseFailAdapter',
+      'dbtParseFailAdapterDeps', 'dbtParseFailDeps', 'dbtParseFailCredentials', 'dbtParseFailNoProject',
+      'dbtParseFailDbtVersion', 'dbtParseFailProject', 'dbtParseFailOther',
+      'dbtParseShowOutput', 'dbtParseAdapterDocs',
+      'dbtParseNoCreds', 'dbtParseNoCredsAsked', 'dbtParseNoCredsUnsupported', 'dbtParseNoCredsOk', 'dbtParseNoCredsFail',
+      'dbtNoCredsDuckdb', 'dbtNoCredsPostgres', 'dbtNoCredsRedshift', 'dbtNoCredsSnowflake', 'dbtNoCredsDatabricks',
+      'dbtNoCredsBigquery', 'dbtNoCredsFabric', 'dbtNoCredsSqlserver', 'dbtNoCredsTrino', 'dbtNoCredsSpark',
+      'dbtParseDeps', 'dbtDepsExitOk', 'dbtDepsExitFail', 'dbtParseOpenPhysical',
+      'dbtCompileLaunched', 'dbtCompileNoDbt', 'dbtCompileVenvDeclined', 'dbtCompileExitOk', 'dbtCompileExitFail',
+      'dbtCompileStopped', 'dbtCompileNoStart',
+    ]);
+    expect(FEATURES.at(-1)).toBe('dbtCompileNoStart');
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed']);
+  });
+
+  it('every dbt parse failure category and placeholder adapter has its feature key', () => {
+    for (const key of Object.values(DBT_PARSE_FAILURE_FEATURES)) expect(FEATURES, key).toContain(key);
+    expect(new Set(Object.values(DBT_PARSE_FAILURE_FEATURES)).size).toBe(Object.keys(DBT_PARSE_FAILURE_FEATURES).length);
+    const adapterKeys = FEATURES.filter((f) => f.startsWith('dbtNoCreds'));
+    expect(adapterKeys).toEqual(THROWAWAY_ADAPTERS.map((a) => NO_CREDS_ADAPTER_FEATURES[a]));
+  });
+
+  it('the Worker README documents the Run dbt parse keys in a Run dbt parse funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Run dbt parse \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('dbtParseLaunched'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['dbtProfileWriteFailed', 'dbtRunFailed']) expect(readme, code).toContain(`\`${code}\``);
   });
 
   it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {
