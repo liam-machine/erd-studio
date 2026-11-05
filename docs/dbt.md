@@ -37,10 +37,32 @@ The [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sampl
 The Physical stage has no file of its own. It reads three files, and only the first is required:
 
 - your **schema YAMLs**, always on disk, so the stage works before you have ever run dbt;
-- **`manifest.json`**, written by `dbt compile`, `dbt run` or `dbt build`;
+- **`manifest.json`**, written by `dbt parse`, `dbt compile`, `dbt run` or `dbt build` (ERD Studio's **Run dbt parse** button runs `dbt parse` for you);
 - **`catalog.json`**, written by `dbt docs generate`: the only one of the three that has seen your warehouse.
 
 Each table shows where its shape came from, so a `varchar` on the canvas is never a guess: types are read from the warehouse when the catalog is there, otherwise from the `data_type:` you wrote, otherwise left blank rather than invented. A greyed-out table means it is genuinely not in your dbt project, not that you have not run dbt lately. The edges are the tests you already run (`relationships` for the links, `unique` for the cardinality), so the canvas shows what dbt enforces rather than a second copy that can drift. Nothing is ever written to disk.
+
+## Run dbt parse
+
+A fresh clone has no `manifest.json`, so the Physical stage cannot show your dbt models' columns and tests yet. **Run dbt parse** writes it. You find the button on the Logical stage's "no dbt manifest" strip, in the Physical stage's notice, and in the "no dbt manifest" notifications.
+
+- **Which dbt it uses.** The dbt in your project's own virtual environment (`.venv`, `venv` or `env`) if it has one, otherwise the dbt you would run in a terminal. A dbt inside the project that your shell would not run is used only after you agree, because a cloned project can ship any program there. The dbt Cloud CLI cannot run `dbt parse` on your machine: ERD Studio says so and uses dbt Core if you have it too.
+- **Where it runs.** In a **dbt parse** terminal you can watch, and stop with Ctrl+C or by closing it. dbt runs as its own program, with the environment VS Code started with: a variable you set only in your shell's startup files, or in `terminal.integrated.env.*`, is not seen.
+- **When it fails, it says why.** ERD Studio reads dbt's exit code and output on your machine and names the cause in one line: no dbt profile, a missing target or environment variable, an adapter that isn't installed, packages that need `dbt deps`, a problem in the project's files, or a dbt version the project does not accept. The notification offers the next step: **Parse without your credentials**, **Run dbt deps** (then dbt parse runs again), **How to install an adapter**, **How to set up a profile** or **Show output**.
+- **When it works,** the diagram refreshes, and **Open Physical view** switches it to the Physical stage in one click.
+
+**Run dbt compile** (the Compare panel's button when the manifest is out of date) runs the same way, and also asks before it uses a dbt inside the project.
+
+### Parse without your credentials
+
+`dbt parse` never connects to your warehouse, but it still reads your dbt profile, so on a machine with no `profiles.yml` it stops. **Parse without your credentials** runs it with placeholder connection details instead:
+
+- the placeholder profile is kept in ERD Studio's own storage, never in your project, and holds no secrets: nothing in it connects anywhere;
+- Run dbt parse never reads your `profiles.yml` (it only checks whether one exists);
+- it needs dbt Core installed with one of these adapters: DuckDB, Postgres, Redshift, Snowflake, Databricks, BigQuery, Microsoft Fabric, SQL Server, Trino or Spark (Spark needs `dbt-spark[PyHive]`). When more than one is installed and the project does not say which it uses, ERD Studio asks;
+- schema names are left out of the Physical stage, because they would come from the placeholder details. A `catalog.json` from `dbt docs generate` still supplies them;
+- models that depend on `target.name`, `target.schema` or a custom `generate_schema_name` may come out differently from your real target;
+- the next `dbt parse` with your own profile replaces the manifest (it parses the whole project again, because the profile changed). Before it replaces a manifest written with your profile, ERD Studio asks.
 
 ## Compare and sync
 

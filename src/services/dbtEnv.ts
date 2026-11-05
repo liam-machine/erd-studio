@@ -2,8 +2,8 @@
  * dbtEnv — where the dbt project, its Python environment, the `dbt`
  * executable and `profiles.yml` are, and which dbt this is.
  *
- * Used by the canvas (venv activation before `dbt compile` / Claude sync) and
- * by the `erd-studio doctor` CLI. Every function takes its environment
+ * Used by the canvas (the dbt Run dbt parse / compile spawn, venv activation
+ * for Claude sync) and by the `erd-studio doctor` CLI. Every function takes its environment
  * (env vars, platform, home dir) as optional inputs so it can be tested
  * without touching the real machine.
  *
