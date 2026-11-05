@@ -6,13 +6,16 @@
 import { clamp, seg, easeOut, lerp, mix, ACCENT } from './lib.js';
 
 const params = new URLSearchParams(location.search);
-// ?variant=logical renders build-logical/ (script.logical.yaml); the default is the dbt cut in build/.
+// ?variant=logical renders build-logical/ (script.logical.yaml); the default cut (script.yaml, the
+// same tour ending on a short dbt beat) is build/.
 const VARIANT = params.get('variant') ?? '';
 const BUILD = `/video/${VARIANT ? `build-${VARIANT}` : 'build'}`;
 const timeline = await (await fetch(`${BUILD}/timeline.json`, { cache: 'no-store' })).json();
 window.TIMELINE = timeline;
+// The extension listing the install scene shows is package.json's own description, read once.
+globalThis.PACKAGE_DESCRIPTION = (await (await fetch('/package.json', { cache: 'no-store' })).json()).description;
 
-// Scene modules come from the timeline itself (a cut's own scenes live in a sub-folder, e.g. logical/hook).
+// Scene modules come from the timeline itself (tour/ holds the scenes both cuts share, dbt/ the default cut's dbt beat).
 const MODULES = [...new Set(timeline.scenes.map((s) => s.module))];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
@@ -23,8 +26,8 @@ const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), c
 
 // Chapter spans: first scene start -> last scene end, per chapter number.
 const spans = {};
-// Scenes after the last chaptered one (the sample-project scene, the end card) show every
-// chapter done; scenes before the first one (intro, two-ways) show none.
+// Scenes after the last chaptered one (the default cut's dbt beat, the end card) show every
+// chapter done; scenes before the first one (the hook) show none.
 const lastChaptered = timeline.scenes.findLastIndex((s) => s.chapter);
 for (const sc of timeline.scenes) {
   if (!sc.chapter) continue;

@@ -13,11 +13,10 @@ electronic track in A minor (Am - F - C - G): four-on-the-floor kick, claps, 16t
 pumping supersaw pad, a driving offbeat bass and a plucky arpeggio with echo. It follows
 build/timeline.json so the energy lands on the story:
 
-  hook      filtered pad + riser, then the beat drops as the first scene cuts in
-  canvas    the arpeggio enters as the diagram lays itself out
-  physical  impact on the switch to Physical
+  hook      filtered pad + riser, then the beat drops as the install scene cuts in
+  tables    the arpeggio enters as the first tables go down
   enrich    breakdown (no kick) under the optional AI step, riser into the next scene
-  sample    full drop again
+  dbt       (default cut only) impact as the dbt beat starts, full beat again
   end       final hit, the chord rings out
 
 Deterministic: the same timeline always produces the same file. encode.sh ducks it under the
@@ -181,10 +180,10 @@ def main() -> None:
         return
     starts = {s['id']: s['start'] for s in tl['scenes']}
     drop = starts.get('install', 6.4)
-    arp_in = starts.get('canvas', 18.9)
-    brk_a, brk_b = starts.get('enrich', 40.5), starts.get('sample', 49.8)
-    verify = starts.get('physical', 33.3)
-    end = starts.get('end', 54.7)
+    arp_in = starts.get('tables', 18.7)
+    brk_a, brk_b = starts.get('enrich', 38.4), starts.get('dbt', starts.get('end', 47.7))
+    verify = starts.get('dbt')  # the default cut's dbt beat; the logical cut has none
+    end = starts.get('end', 55.4)
 
     grid0 = drop - BAR * np.floor(drop / BAR)  # a downbeat lands exactly on the drop
     n = int((total + 3) * SR)
@@ -251,11 +250,17 @@ def main() -> None:
     add(fx, drop - 3.0, riser(3.0), 0.30)
     add(fx, drop, impact(), 0.40)
     add(fx, brk_b - 2.0, riser(2.0), 0.28)
-    add(fx, brk_b, impact(), 0.30)
-    add(fx, verify, impact(), 0.40)
-    add(fx, end, impact(), 0.55)
+    # One hit per instant, the loudest: the breakdown's end is the dbt beat's start (default cut)
+    # or the end card's (logical cut), so the hits there would otherwise stack.
+    hits = {drop: 0.40}
+    for at, gain in ((brk_b, 0.30), (verify, 0.40), (end, 0.55)):
+        if at is not None:
+            hits[at] = max(hits.get(at, 0), gain)
+    for at, gain in sorted(hits.items()):
+        if at != drop:
+            add(fx, at, impact(), gain)
     for sid, t0 in starts.items():  # a soft whoosh on every other scene change
-        if sid not in ('hook', 'install', 'sample', 'physical', 'end') and t0 > 1:
+        if sid not in ('hook', 'install', 'dbt', 'end') and t0 > 1:
             add(fx, t0 - 0.6, riser(0.6), 0.12)
 
     # Intro: the pad starts muffled and opens up into the drop.

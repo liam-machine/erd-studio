@@ -4,7 +4,8 @@
 // cta:  the brand block eases up, a VS Code-style Extensions search types "ERD Studio" and the
 //       result row appears, then "Link in the comments" with a down chevron. All landed by cta+1.5.
 //       A cut can replace that line (`props.link: { text, chevron }`; the README cut says where
-//       else it is published and drops the chevron).
+//       else it is published and drops the chevron), the tagline (`props.tagline`) and the two
+//       pills (`props.pills`).
 import { appear, appIcon, caret, easeInOut, ICON, lerp, seg, typed } from '../lib.js';
 
 const QUERY = 'ERD Studio';
@@ -16,6 +17,8 @@ export default {
     // Tagline: [plain, highlighted]. A cut can override it (script `props.tagline`).
     const [tagA, tagB] = scene?.props?.tagline ?? ['The logical model, ', 'in your repo.'];
     const link = { text: 'Link in the comments', chevron: true, ...scene?.props?.link };
+    // The two pills under the tagline. A cut can override them (script `props.pills`).
+    const [pillA, pillB] = scene?.props?.pills ?? ['Free VS Code extension', 'Source on GitHub'];
     const name = beats.name.t, cta = beats.cta.t;
     // The brand block starts centred in the frame and eases up to make room for the CTA.
     const lift = easeInOut(seg(t, cta - 0.05, cta + 0.45));
@@ -36,8 +39,8 @@ export default {
     // "source" ≈ name+3.1). "Free" is attached to the VS Code extension on purpose: it is what is
     // free, and the pill says so without implying anything about the Confluence app.
     html += `<div class="abs" style="left:0;right:0;top:${g(560)}px;display:flex;justify-content:center;gap:16px">
-      ${pill('Free VS Code extension', name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('Source on GitHub', name + 3.1, { green: true, icon: ICON.check({ size: 24 }) })}</div>`;
+      ${pill(pillA, name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
+      ${pill(pillB, name + 3.1, { green: true, icon: ICON.check({ size: 24 }) })}</div>`;
 
     // ---- CTA: Extensions search ----
     const cardAt = cta + 0.3;             // once the brand block has mostly lifted

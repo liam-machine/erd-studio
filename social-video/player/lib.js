@@ -24,6 +24,14 @@ export function appear(t, at, { dur = 0.35, dy = 14, dx = 0 } = {}) {
   if (p >= 1) return 'opacity:1;';
   return `opacity:${p.toFixed(3)};transform:translate(${(dx * (1 - p)).toFixed(1)}px,${(dy * (1 - p)).toFixed(1)}px);`;
 }
+/** Just the entrance's alpha (0..1), to multiply with a fade-out when one element has both. */
+export const appearA = (t, at, dur = 0.35) => easeOut(seg(t, at, at + dur));
+/** appear() with its opacity multiplied by `alpha` (a fade-out): one opacity declaration, not two. */
+export function appearFade(t, at, alpha, opts = {}) {
+  const { dur = 0.35, dy = 14, dx = 0 } = opts;
+  const p = easeOut(seg(t, at, at + dur));
+  return `opacity:${(p * alpha).toFixed(3)};transform:translate(${(dx * (1 - p)).toFixed(1)}px,${(dy * (1 - p)).toFixed(1)}px);`;
+}
 /** Fade-out from `at`. */
 export const fadeOut = (t, at, dur = 0.3) => 1 - seg(t, at, at + dur);
 export const on = (t, at) => t >= at;

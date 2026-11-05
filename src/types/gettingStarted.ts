@@ -804,9 +804,9 @@ const SCRIPT = `
       var q = video.play();
       if (q && q.catch) { q.catch(function () { /* the viewer can press play */ }); }
     }
-    // The dbt tour on the dbt page, the logical-first cut elsewhere (the host
-    // picks the file by page); either waits behind its play button until the
-    // viewer asks for it.
+    // The default cut (the DBML tour plus a short dbt beat) on the dbt page,
+    // the logical-first cut elsewhere (the host picks the file by page); either
+    // waits behind its play button until the viewer asks for it.
     startWithSound = function () {
       if (started || fellBack) { return; }
       started = true;

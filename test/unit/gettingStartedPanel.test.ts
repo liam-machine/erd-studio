@@ -1795,7 +1795,9 @@ describe('GettingStartedPanel', () => {
       expect(html).not.toContain('media/onboarding/getting-started.mp4');
       expect(html).not.toContain('media/onboarding/getting-started-poster.jpg');
       expect(html).toContain(escaped(LOGICAL_GETTING_STARTED_CUES[0].text));
-      expect(html).not.toContain(escaped(GETTING_STARTED_CUES[0].text));
+      // The two cuts share every scene but the default cut's dbt beat: its captions stay off these pages.
+      const dbtCue = GETTING_STARTED_CUES.find((c) => /\bdbt\b/.test(c.text))!;
+      expect(html).not.toContain(JSON.stringify(dbtCue.text).slice(1, -1));
       vscode.window._webviewPanels[0].dispose();
     }
   });

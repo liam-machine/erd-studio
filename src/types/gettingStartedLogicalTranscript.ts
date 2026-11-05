@@ -4,28 +4,28 @@
 
 /** Caption cues for media/onboarding/getting-started-logical.mp4, in seconds. */
 export const LOGICAL_GETTING_STARTED_CUES: { start: number; end: number; text: string }[] = [
-  { start: 0.35, end: 4.524, text: 'Your data model, as a diagram, saved as plain files in your repo.' },
-  { start: 4.574, end: 7.061, text: 'No AI, and nothing to configure.' },
-  { start: 7.511, end: 12.035, text: 'Install ERD Studio, and open the folder your data model lives in.' },
-  { start: 12.085, end: 14.399, text: 'The Get started guide opens by itself.' },
-  { start: 14.849, end: 17.417, text: 'Click New Diagram, and give it a name.' },
-  { start: 20.049, end: 22.684, text: 'Add a table, with starter columns if you like.' },
-  { start: 22.734, end: 25.655, text: 'Add another, then link the two with a relationship.' },
-  { start: 29.049, end: 34.667, text: 'Each table is a plain DBML file in your repo, to commit and review like code.' },
-  { start: 35.449, end: 39.543, text: 'Already have DBML? Import it, and export back any time.' },
-  { start: 40.649, end: 43.501, text: 'Want grain, keys and the why behind each table?' },
-  { start: 43.551, end: 48.968, text: 'Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.' },
-  { start: 49.949, end: 54.523, text: 'ERD Studio is free. Install it, and draw your data model today.' },
+  { start: 0.35, end: 4.997, text: 'Your data model, as a diagram, saved as DBML files in your repo.' },
+  { start: 5.047, end: 7.976, text: 'No AI needed, and nothing to configure.' },
+  { start: 8.426, end: 12.54, text: 'Install ERD Studio, open your folder, and click its icon.' },
+  { start: 14.826, end: 17.394, text: 'Click New Diagram, and give it a name.' },
+  { start: 19.226, end: 21.861, text: 'Add a table, with starter columns if you like.' },
+  { start: 21.911, end: 24.832, text: 'Add another, then link the two with a relationship.' },
+  { start: 26.426, end: 30.769, text: 'Each table is a DBML file, to commit and review like code.' },
+  { start: 31.826, end: 34.595, text: 'Export to DBML or Mermaid any time.' },
+  { start: 34.645, end: 38.083, text: 'Already have DBML? Import it, then keep the draft.' },
+  { start: 38.826, end: 41.678, text: 'Want grain, keys and the why behind each table?' },
+  { start: 41.728, end: 47.145, text: 'Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.' },
+  { start: 47.626, end: 51.02, text: 'ERD Studio is free to use. Install it today.' },
 ];
 
 /** The narration as plain text, one paragraph per scene, for the Welcome panel's Transcript. */
 export const LOGICAL_GETTING_STARTED_TRANSCRIPT: string = [
-  'Your data model, as a diagram, saved as plain files in your repo. No AI, and nothing to configure.',
-  'Install ERD Studio, and open the folder your data model lives in. The Get started guide opens by itself.',
+  'Your data model, as a diagram, saved as DBML files in your repo. No AI needed, and nothing to configure.',
+  'Install ERD Studio, open your folder, and click its icon.',
   'Click New Diagram, and give it a name.',
   'Add a table, with starter columns if you like. Add another, then link the two with a relationship.',
-  'Each table is a plain DBML file in your repo, to commit and review like code.',
-  'Already have DBML? Import it, and export back any time.',
+  'Each table is a DBML file, to commit and review like code.',
+  'Export to DBML or Mermaid any time. Already have DBML? Import it, then keep the draft.',
   'Want grain, keys and the why behind each table? Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.',
-  'ERD Studio is free. Install it, and draw your data model today.',
+  'ERD Studio is free to use. Install it today.',
 ].join('\n\n');

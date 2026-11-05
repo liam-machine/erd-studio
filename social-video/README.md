@@ -8,7 +8,7 @@ never publishes a release), and no build, tsconfig or test run refers to it.
 |---|---|---|---|---|
 | **pro** | `pro` (default) | `script.yaml`, `SCENES.md`, `player/scenes/*.js` | data engineers: logical vs physical, dbt, YAML/JSON, Diff, PRs | ~121 s |
 | **simple** | `simple` | `script.simple.yaml`, `SCENES.simple.md`, `player/scenes/simple/*.js` | anyone: no jargon, one analogy (blueprints in a different city to the building site) | ~85 s |
-| **readme** | `readme` | `script.readme.yaml`, the pro cut's scenes | README visitors: "How ERD Studio works" — the pro story without the social-only scenes (Confluence, "not on dbt?", launch traction, "link in the comments") | ~102 s |
+| **readme** | `readme` | `script.readme.yaml`, `SCENES.readme.md`, `player/scenes/readme/*.js` | README visitors: "How ERD Studio works" — a DBML-first tour of the logical model (why it belongs in Git, the layer-first `.dbml` files, editing either side, a `.dbml` diff in a PR, your AI assistant, import and export), with dbt as a short last beat (the Physical tab and Compare with dbt) | ~97 s |
 
 `VARIANT` selects the script, the build folder (`build/` or `build-simple/`) and the output
 names (`erd-studio-explainer[-simple].*`). Both cuts share the player, `lib.js`, the voice, the
@@ -32,6 +32,9 @@ Playwright), re-laid out for a phone feed:
 
 The narration is `script.yaml`; the per-scene direction is `SCENES.md`; the example every scene
 uses (tables, YAML, JSON, drift, PR) is `STORY` in `player/lib.js`, in the real v5 file formats.
+The README cut tells its own story in the 2.0 format: its example (a gold layer, `dim_customer`,
+`fct_order`, the `sales` diagram, in the DBML layout ERD Studio writes) is `R` and the file
+excerpts in `player/scenes/readme/story.js`.
 
 ## Render
 
@@ -59,17 +62,19 @@ Outputs, in `out/` (gitignored; `-simple` for the plain cut):
 ## The README cut
 
 `VARIANT=readme` is the only cut that is committed: the README embeds it from
-`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**; ~13 MB now)
+`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**, which `npm run size:readme` checks; 11.4 MB for the 1:37 cut)
 behind the poster `docs/assets/how-it-works-play.jpg`.
 
 ```bash
-npm run readme        # all:readme, copy the mp4 into docs/assets/, then thumb:readme
+npm run readme        # all:readme, copy the mp4 into docs/assets/, size:readme, then thumb:readme
+npm run size:readme   # fails if docs/assets/how-it-works.mp4 is 18 MB or more
 npm run qa:readme     # contact sheet + A/V onset check, as for the other cuts
 npm run thumb:readme  # just the poster (needs only tts + timeline)
 ```
 
-`thumb.mjs` renders the poster in the player page itself: the Diff scene once all three
-differences are lit (`--t` picks another time), the headline, caption and chapter chrome hidden,
+`thumb.mjs` renders the poster in the player page itself: the frame a scene names with
+`props.poster: { beat, offset }` in the script (the README cut: the canvas with its `.dbml` file
+open beneath it; `--t` picks another time), the headline, caption and chapter chrome hidden,
 the scene dimmed, then the title, a play button dead centre and the real running time from
 `timeline.json`. The JPEG quality steps down until the file is under 250 KB (`--max-kb`).
 `--out`, `--title` and `--sub` override the rest. Re-run it whenever the cut's length changes.

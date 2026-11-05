@@ -2198,8 +2198,8 @@ describe('Welcome panel: first run', () => {
     });
     // The tagline: short enough that VS Code's Welcome page never cuts it off.
     expect(walkthrough.description).toBe('Design your data model in Git. Let your AI build from it.');
-    // The dbt tour is unchanged in a dbt project; a folder without dbt gets the same video under neutral words.
-    expect(step('watch').description).toContain('Draw your dbt project, explore the diagram');
+    // A dbt project's tour is the DBML tour with a short dbt beat last; a folder without dbt gets the cut without it, under neutral words.
+    expect(step('watch').description).toContain('see the DBML files it saves in Git, then compare it with what dbt has');
     expect(step('watchLogical').title).toBe('Watch the One-Minute Tour');
     // Show Me Around (the onboarding guide) is the tour steps' one quiet link: it replaced the short per-start videos.
     expect(step('watchLogical').description).toBe('Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');

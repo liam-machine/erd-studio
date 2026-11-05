@@ -1,26 +1,27 @@
-# Getting-started video
+# Getting-started video and README GIF
 
-Source and render pipeline for the one-minute getting-started tours that the **Welcome to ERD Studio** panel plays (the dbt cut is also the one the README links to). There are two cuts, picked with `VARIANT` (`build-timeline.mjs` `CUTS` lists them):
+Source and render pipeline for the one-minute getting-started tours (**Watch the One-Minute Tour**) and the README's hero GIF. Both tours are the same DBML tour of the logical model, scene for scene; the default cut adds one short dbt beat before its end card. They are picked with `VARIANT` (`build-timeline.mjs` `CUTS` lists them):
 
 | Cut | `VARIANT` | Script | Build folder | Plays where | Length |
 |---|---|---|---|---|---|
-| dbt tour | unset | `script.yaml` | `build/` | a dbt project (the panel's `dbt` page) | 60.2 s |
-| logical-first | `logical` | `script.logical.yaml` | `build-logical/` | a folder without `dbt_project.yml`, and an empty window (`logical`, `nofolder`) | 54.6 s |
+| default | unset | `script.yaml` | `build/` | the README link, and the Welcome panel in a dbt project (its `dbt` page) | 59.9 s (the dbt beat 8 s) |
+| logical | `logical` | `script.logical.yaml` | `build-logical/` | the Welcome panel in a folder without `dbt_project.yml` and in an empty window (`logical`, `nofolder`) | 51.9 s |
 
-The **dbt tour** is hyper-focused on the no-AI first run: install, the **Get started with ERD Studio** walkthrough, **Draw from dbt**, the laid-out Logical diagram, Physical and Diff, then one optional line on the AI helper and one on the sample project. The **logical-first cut** never mentions dbt (its script's header lists the words to keep out, and `npm test` checks the script, its scene modules and every rendered frame): install in a plain folder, the walkthrough as that folder shows it, **New Diagram**, a blank canvas, two tables from the **New Table** dialog and a relationship from **New Relationship**, the DBML files that writes under `.erd-studio/` (layer first: `gold/tables/gold/<table>.dbml`, `gold/relationships/gold.dbml`, `gold/diagrams/orders.dbml`), Import DBML and Export Diagram, the AI helper (the setup skill's plain-folder opening line), and an end card ending on **New Diagram**. Its own scenes are in `player/scenes/logical/`; `install`, `enrich` and `endCard` are shared and take the scene's `props` from the script, and `logical/hook` is the shared hook (`hookScene`) on another tree.
+**The tour** (`player/scenes/tour/`, shared): the hook (a plain folder whose `.erd-studio/gold/tables/gold/*.dbml` files fly into a diagram); install, open a folder and click the ERD Studio icon, which shows the Diagrams view's start entry ("No diagrams yet.", **New Diagram…**, "Or: More ways to start…"; no Table Library or Relationships view yet, as there is no `.erd-studio`) beside the example draft a folder's first visit opens (the walkthrough opens by itself only in an empty window); **New Diagram…** and its name box, after which the side bar lists every layer (Silver with its "New Diagram… none in this layer yet" row, Gold › orders, **New Layer…**) and the empty Table Library; two tables from **New Table** and a relationship from **New Relationship** (fct_order's FK badge arrives with it); the layer-first DBML files that writes (`gold/diagrams/orders.dbml`, `gold/relationships/gold.dbml`, `gold/tables/gold/<table>.dbml`, `layers.json`, `README.md`), their text exactly as ERD Studio formats it; **Export Diagram…** and the Diagrams view's + menu → **Import DBML…**, which picks `sales.dbml`, asks the layer and the name, and ends on its draft (nothing saved until **Keep as Diagram**); **Set Up My AI Helper** from Help & Feedback and `/erd-studio-setup`; the end card. Every canvas in the tour is drawn as a plain folder draws it: neutral grey tables and lines, no stage colours. **The dbt beat** (`player/scenes/dbt/compare.js`, default cut only, 8 s): in a dbt project the canvas takes the logical stage's blue, the toolbar gains **Compare with dbt** and, as a second row, the **Logical · your design** / **Physical · read from dbt** tabs; Physical (read-only, so no **+ Add**) shows what dbt has, and **Compare with dbt** marks each difference ("only here", "logical:" / "physical:" types, the discrepancy panel).
 
-The dbt tour was last rendered before the walkthrough dropped its sample step and the toolbar's Diff became **Compare with dbt**: `npm test` lists both as todos. Re-rendering it means re-wording its `physical` and `sample` scenes (and their narration) first.
+dbt is an add-on: the logical cut never names it, and the default cut names it only in its dbt beat. Each script's header lists the words to keep out, and `npm test` checks both scripts, every `tour/` module's source and every rendered frame outside the dbt beat.
 
-Both walkthrough "watch" steps (`watch`, `watchLogical`) and the sidebar welcome views call these "one-minute" videos; keep each `maxDuration` at 65 s or reword them. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. Each cut writes its committed outputs (plus, for the dbt cut, the README copy and thumbnail, see [Thumbnail](#readme-thumbnail)):
+Help & Feedback, the walkthrough's `watch` / `watchLogical` steps and **Watch the One-Minute Tour** call these "one-minute" videos; keep each between 50 and 60 s and its `maxDuration` at 65 s, or reword them. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. Each cut writes its committed outputs (plus, for the default cut, the README copy and thumbnail, see [Thumbnail](#readme-thumbnail)):
 
 | Output | Used by |
 |---|---|
-| `media/onboarding/getting-started.mp4` | the Welcome panel's `<video>` (ships) |
+| `media/onboarding/getting-started.mp4` | the Welcome panel's `<video>` on the dbt page (ships) |
 | `media/onboarding/getting-started-poster.jpg` | the poster and the "can't play here" fallback (ships) |
 | `docs/assets/getting-started.mp4` | the README's link: the same video with **AAC** audio, because Safari and QuickTime play MP3-in-MP4 silently (not shipped; `docs/**` is excluded from the VSIX) |
 | `src/types/gettingStartedTranscript.ts` | `GETTING_STARTED_CUES` (the panel adds them as `VTTCue`s) and `GETTING_STARTED_TRANSCRIPT` (the **Transcript** section). Generated; do not edit by hand. |
-| `media/onboarding/getting-started-logical.mp4`, `-poster.jpg` | the logical-first cut and its poster (ship) |
+| `media/onboarding/getting-started-logical.mp4`, `-poster.jpg` | the logical cut and its poster (ship) |
 | `src/types/gettingStartedLogicalTranscript.ts` | `LOGICAL_GETTING_STARTED_CUES` and `LOGICAL_GETTING_STARTED_TRANSCRIPT`, the same shapes for the logical cut. Generated. |
+| `media/demo.gif` | the README's hero GIF (`npm run gif`, see [README GIF](#readme-gif); not shipped) |
 
 `video/getting-started.vtt` (and `getting-started-logical.vtt`) is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
 
@@ -40,14 +41,15 @@ cd video
 npm run all        # tts → timeline → music → capture → encode (also writes the AAC copy, build/getting-started-share.mp4 → docs/assets/getting-started.mp4)
 npm run qa         # contact sheet + per-scene stills in build/qa/, and the A/V onset check
 npm test           # pipeline self-tests (node:test), incl. that every mock uses the real product copy:
-                   # the extension listing and the walkthrough (package.json), the Draw from dbt
-                   # QuickPick, progress and name box (src/commands/drawFromDbt.ts,
-                   # src/providers/dbtDraftPicker.ts), the toolbar, detail panel and discrepancy panel
-                   # (webview/, packages/renderer), the setup command and the enrich route's opening
-                   # line (src/types/aiAssistants.ts, the setup skill's SKILL.md) and the sample confirm
-                   # (src/providers/GettingStartedPanel.ts). Reword any of them and the video must be
-                   # re-rendered.
+                   # the extension listing, the side bar's views, start entry, + menu and Help &
+                   # Feedback rows (package.json, src/types/startActions.ts, HelpTreeProvider.ts), the
+                   # example and Import DBML drafts (src/services/draftModel.ts, webview-draft/), the
+                   # New Diagram name box, the New Table / New Relationship dialogs, the toolbar, stage
+                   # tabs and discrepancy panel (webview/), Export Diagram (src/commands/exportDiagram.ts)
+                   # and the setup command and its plain-folder opening line (src/types/aiAssistants.ts,
+                   # the setup skill). Reword any of them and the video must be re-rendered.
 npm run thumbnail  # docs/assets/getting-started-play.jpg, the README's play-button image
+npm run gif        # media/demo.gif, the README's hero GIF (no audio, no timeline needed)
 
 npm run all:logical   # the logical-first cut: the same steps with VARIANT=logical (build-logical/ in and out;
                       # its AAC share copy stays in build-logical/, the README links none)
@@ -61,11 +63,11 @@ Every step reads `VARIANT` (`tts.py`, `build-timeline.mjs`, `music.py`, `capture
 |---|---|---|
 | tts | `uv run tts.py` | Voices each `lines[].say` (or `caption`) from `script.yaml` into `build/voice/<id>.wav`. A line is re-voiced only when its text, voice, speed or engine changed. |
 | timeline | `node build-timeline.mjs` | Lays the scenes out from the **measured** clip durations, then writes `build/timeline.json`, `build/narration.wav` (two-pass loudnorm to −16 LUFS / −1.5 dBTP, 48 kHz mono), `getting-started.vtt` and `src/types/gettingStartedTranscript.ts`. It fails if the total is over `maxDuration` (65 s). |
-| music | `uv run music.py` | Writes the background track, `build/music.wav`, trimmed to the timeline, faded in (0.5 s) and out (4 s), and levelled to −14.5 LUFS. The source, in order: a `music/background.{m4a,mp3,wav,flac}` file if one exists (only ever music you are licensed to redistribute publicly); otherwise `music/synth_music.py`, the maintainer's original "demo audio kit" underscore (part 1: warm ambient, D major, 96 BPM; numpy/scipy; deterministic), which it runs into `build/music_raw.wav`; otherwise its own built-in synth: an upbeat 120 BPM electronic track in A minor — kick, claps, hats, pumping supersaw pad, offbeat bass, plucky arp with echo — arranged on `build/timeline.json` (beat drops on the first scene cut, arp enters with the canvas, an impact on the switch to Physical, breakdown under the AI-helper scene, a final hit on the end card). `encode.sh` mixes it at one steady level about 12 dB under the voice (−28 vs −16 LUFS; no ducking, so it never pumps between lines), with a gentle compressor to even out the track's own sections, then normalises the mix to −16 LUFS. Delete `build/music.wav` for a voice-only render. |
+| music | `uv run music.py` | Writes the background track, `build/music.wav`, trimmed to the timeline, faded in (0.5 s) and out (4 s), and levelled to −14.5 LUFS. The source, in order: a `music/background.{m4a,mp3,wav,flac}` file if one exists (only ever music you are licensed to redistribute publicly); otherwise `music/synth_music.py`, the maintainer's original "demo audio kit" underscore (part 1: warm ambient, D major, 96 BPM; numpy/scipy; deterministic), which it runs into `build/music_raw.wav`; otherwise its own built-in synth: an upbeat 120 BPM electronic track in A minor — kick, claps, hats, pumping supersaw pad, offbeat bass, plucky arp with echo — arranged on `build/timeline.json` (beat drops on the first scene cut, arp enters with the tables, breakdown under the AI-helper scene, an impact on the default cut's dbt beat, a final hit on the end card). `encode.sh` mixes it at one steady level about 12 dB under the voice (−28 vs −16 LUFS; no ducking, so it never pumps between lines), with a gentle compressor to even out the track's own sections, then normalises the mix to −16 LUFS. Delete `build/music.wav` for a voice-only render. |
 | capture | `node capture.mjs [--draft] [--jobs N] [--scale 0.6667]` | Renders every frame of `player/` at 1920×1080 and 30 fps and pipes it into a lossless master, `build/master.mkv`. `render(t)` is pure, so `--jobs` renders ranges in parallel and concatenates them. `--draft` pipes JPEG q95 instead of PNG. `--stills 3.2,41` writes single frames to `build/stills/`. |
 | encode | `bash encode.sh` | Produces the mp4 and the poster, then asserts them with ffprobe (see *Size budget and checks*). `--placeholder` makes a 2-second test pattern through the same path. |
 
-The timeline rules are that a scene starts where the previous one ends, and its first line starts `timing.lead` (0.45 s) into it. Every later line starts `timing.gap` (0.25 s) after the one before, or after the line's own `pause` if it sets one. A scene lasts `max(minDur, lastLineEnd + tail)`. Each line's `beat` becomes `beats.<name> = { t, end }` in scene-local seconds, and the scene modules key every animation off those values. That means editing a line and re-running `tts` and `timeline` moves the visuals with the voice. Some beats sit a fixed offset after a line starts so they land on a particular word, for example the pointer clicking Draw from dbt on "…Draw from dbt". Those offsets are commented in the scene module. If you reword a line, check them with `npm run preview`.
+The timeline rules are that a scene starts where the previous one ends, and its first line starts `timing.lead` (0.35 s) into it. Every later line starts `timing.gap` (0.2 s) after the one before, or after the line's own `pause` if it sets one. A scene lasts `max(minDur, lastLineEnd + tail)`. Each line's `beat` becomes `beats.<name> = { t, end }` in scene-local seconds, and the scene modules key every animation off those values. That means editing a line and re-running `tts` and `timeline` moves the visuals with the voice. Some beats sit a fixed offset after a line starts so they land on a particular word, for example the pointer clicking the ERD Studio icon on "…its icon". Those offsets are commented in the scene module. If you reword a line, check them with `npm run preview`.
 
 ### Preview
 
@@ -76,14 +78,14 @@ npm run preview    # serves the repo root on 127.0.0.1:4173
 - `http://127.0.0.1:4173/video/player/index.html?preview=1` plays the narration and drives `t` from `audio.currentTime`. Click to play or pause, and use ←/→ to seek 5 s.
 - `…/index.html?t=42.5` freezes on one frame.
 
-The player is plain ES modules. `main.js` owns the persistent chrome (kicker, headline, chapter bar). Each `player/scenes/<module>.js` exports `render(localT, { beats, dur })` and returns HTML. `lib.js` holds the shared pieces: the node card, the canvas toolbar, edges, the pointer and the easing helpers. `editor.js` holds the VS Code window every scene plays in: the activity bar and Explorer, the walkthrough page (with the real `media/walkthrough/*.svg` images, fetched once and inlined so they use the video's fonts), the orders canvas the canvas, design and physical scenes share, the QuickPick shell, and the product copy the tests check. There are no CSS transitions, `@keyframes`, timers or randomness anywhere, and `npm test` enforces that.
+The player is plain ES modules. `main.js` owns the persistent chrome (kicker, headline, chapter bar) and reads `package.json`'s description once, for the extension listing. Each `player/scenes/<folder>/<module>.js` exports `render(localT, { beats, dur, scene })` and returns HTML: `tour/` holds the scenes both cuts share, `dbt/` the default cut's dbt beat. `lib.js` holds the shared pieces: the node card, the canvas toolbar (logical-only, or with the stage tabs and Compare), edges, the pointer and the easing helpers. `editor.js` holds the VS Code window every scene plays in: the activity bar, the Explorer and its file tree, ERD Studio's side bar (Diagrams with its start entry or its tree, Table Library, Relationships, Help & Feedback, the + menu), the draft page (the example and an Import DBML… draft), the QuickPick shell, and the product copy the tests check. There are no CSS transitions, `@keyframes`, timers or randomness anywhere, and `npm test` enforces that.
 
 ## Voice
 
-The default is Kokoro v1.0 voice **`af_heart`** at speed 1.0 (set in `script.yaml → voice`). Kokoro has no Australian voice. `af_heart` was the clearest of the voices auditioned (`af_heart`, `af_bella`, `af_nicole`, `bf_emma`, `bm_george`, `am_michael`), and `bf_emma` is the closest non-American alternative.
+The default is Kokoro v1.0 voice **`af_heart`** at speed 1.04 (set in `script.yaml → voice`). Kokoro has no Australian voice. `af_heart` was the clearest of the voices auditioned (`af_heart`, `af_bella`, `af_nicole`, `bf_emma`, `bm_george`, `am_michael`), and `bf_emma` is the closest non-American alternative.
 
 - To audition another voice: `uv run tts.py --voice bf_emma --force && node build-timeline.mjs`.
-- To switch permanently, edit `voice.kokoro` (and `speed`, anywhere from 0.95 to 1.0) in `script.yaml`.
+- To switch permanently, edit `voice.kokoro` (and `speed`, anywhere from 0.95 to 1.05) in `script.yaml`.
 - For a fallback without Kokoro, use macOS `say -v Karen -r 175` (en-AU): `npm run tts:say`. It is genuinely Australian but noticeably more robotic.
 
 Kokoro has two environment traps, and `tts.py` handles both:
@@ -98,6 +100,8 @@ Captions show the real text. When the voice needs something different, the line'
 | Written | Kokoro reads it as | Respelling used |
 |---|---|---|
 | ERD Studio | "E-R-D studio" | none needed |
+| DBML | "D-B-M-L" | none needed |
+| Mermaid | "mermaid" | none needed |
 | dbt | "D-B-T" | none needed |
 | YAML | "yammel" | none needed |
 | SQL | "S-Q-L" | none needed |
@@ -109,14 +113,18 @@ To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Toke
 ## Size budget and checks
 
 - **Codec:** MP4 container, **H.264** High profile, yuv420p, `+faststart`, with **MP3** audio (64 kbps, mono, 44.1 kHz): the audio codec VS Code's webview guide documents for video. VS Code's bundled ffmpeg has **no AAC decoder**, so AAC audio plays silently. Opus-in-MP4 shipped first and a user heard no voice, so stay on MP3. Never switch the audio to AAC.
-- **Ceiling: 8 MB** (8 MiB) for the mp4, and 65 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current render is about 4.4 MiB (4.64 MB, 60.2 s) at CRF 20, well under the ceiling.
+- **Ceiling: 8 MB** (8 MiB) for the mp4, and 65 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current renders are 4.9 MiB (default cut, 59.9 s) and 4.4 MiB (logical cut, 51.9 s) at CRF 20, well under the ceiling.
 - `encode.sh` asserts: `h264` / `High` / `yuv420p`, `mp3` / 44100 / mono, size ≤ 8 MB, duration within 0.25 s of the timeline, the moov atom before mdat, and a 1280×720 JPEG poster.
 - `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: the two cuts' videos and posters in `media/onboarding/`, ≤ 8 MB, cues ending by 65 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
 - The poster is the opening (hook) scene's last frame, once every element has landed: never the end card, whose "Install ERD Studio" chip reads wrong in an editor that already has it.
 
+## README GIF
+
+`npm run gif` (`hero-gif.mjs`) renders `media/demo.gif`, the README's hero image, from `player/hero.html` + `player/hero.js`: the same editor pieces as the video, laid out at 1440×900 and drawn frame by frame (`render(t)` is pure, so every run gives the same GIF). It shows ERD Studio in a plain folder (no stage tabs, neutral grey tables and lines, nothing about dbt), the Explorer's layer-first `.erd-studio/gold/tables/gold/*.dbml` tree (in VS Code's order, with `sales.dbml` in the folder's top level) beside the orders diagram (a `fct_order` star with its keys); the table files light one by one with their tables, `fct_order.dbml`'s formatted text shows, then `sales.dbml` lights and the editor switches to Import DBML…'s draft of it (its summary and **Show details**, before anything is written; none of its tables is already in the library, so nothing is reused) and back. A 12 s seamless loop at 12 fps, scaled to 800 px wide (the README shows it at `width="800"`), one palette for the loop, no dithering, only each frame's changed rectangle stored: about 0.66 MB. `npm test` renders every quarter second of the loop and fails on any dbt word or a blue table border. The script fails over 2 MB. `node hero-gif.mjs --frames 0.5,8` writes stills to `build/hero/` for review. Re-render it when the canvas, the side bar, the draft page or the file layout changes, and look at it.
+
 ## README thumbnail
 
-`npm run thumbnail` (`thumbnail.mjs`) renders `docs/assets/getting-started-play.jpg`, the image the README links to the video with: 1280×720 JPEG, under 300 KB (the script lowers the quality until it fits, and fails if it cannot). The page is `player/thumbnail.html`: the canvas scene's last frame, drawn by the same scene module, scaled up, softened and dimmed behind a large play button dead centre, the headline "Get started in N seconds" (the timeline's total rounded to the nearest 5 s) and a duration pill with the real m:ss, both read from `build/timeline.json`. Run it after every render that changes the length or the canvas, and look at the result.
+`npm run thumbnail` (`thumbnail.mjs`) renders `docs/assets/getting-started-play.jpg`, the image the README links to the video with: 1280×720 JPEG, under 300 KB (the script lowers the quality until it fits, and fails if it cannot). The page is `player/thumbnail.html`: the tables scene's last frame, drawn by the same scene module, scaled up, softened and dimmed behind a large play button dead centre, the headline "Get started in N seconds" (the timeline's total rounded to the nearest 5 s) and a duration pill with the real m:ss, both read from `build/timeline.json`. Run it after every render that changes the length or the canvas, and look at the result.
 
 ## Licences
 
@@ -131,4 +139,5 @@ To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Toke
 - [ ] It plays **with sound** in the Extension Development Host on macOS, Windows and Linux (it starts with sound; if an editor blocks that, the panel shows **Turn on sound**).
 - [ ] It falls back gracefully in VSCodium, with the poster, "Watch in your browser" and the transcript.
 - [ ] Captions line up with the voice, including after seeking.
-- [ ] `npm test` here, and `npx vitest run test/unit/gettingStartedMedia.test.ts` at the repo root.
+- [ ] `npm test` here, and `npx vitest run test/unit/gettingStartedMedia.test.ts test/unit/gettingStartedPanel.test.ts` at the repo root.
+- [ ] After `npm run gif`, open `media/demo.gif` and watch one full loop.

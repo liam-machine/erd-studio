@@ -4,6 +4,7 @@
 // "Get started in N seconds" and the real duration. Needs build/timeline.json (npm run timeline).
 //
 //   node thumbnail.mjs            (npm run thumbnail)
+//   node thumbnail.mjs --out x.jpg   a review copy somewhere else
 import { chromium } from 'playwright';
 import { statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -11,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = join(HERE, '..', 'docs', 'assets', 'getting-started-play.jpg');
+const outAt = process.argv.indexOf('--out');
+const OUT = outAt < 0 ? join(HERE, '..', 'docs', 'assets', 'getting-started-play.jpg') : process.argv[outAt + 1];
 const MAX_BYTES = 300 * 1024;
 
 const server = await startServer(0);

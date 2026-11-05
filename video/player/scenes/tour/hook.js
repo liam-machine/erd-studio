@@ -1,39 +1,20 @@
-// 1 · The hook: "Your dbt project, as a diagram, in about a minute. / No AI, and nothing to
-// configure." A dbt file tree whose model files fly into three ERD nodes, which then connect;
-// on `noai` three plain claims land top right, above the canvas.
+// 1 · The hook: "Your data model, as a diagram, saved as DBML files in your repo. / No AI needed,
+// and nothing to configure." A plain folder's Explorer: its .erd-studio folder holds one .dbml file
+// per table (the 2.0 layer-first layout: <layer>/tables/<schema>/<table>.dbml, beside
+// <layer>/diagrams/ and <layer>/relationships/), and those table files fly into three nodes on
+// "…as a diagram", which then connect. The claims land on "…DBML files", "No AI" and
+// "…nothing to configure". Shared by both cuts.
 //
-// `hookScene(data)` draws the same scene from another tree, nodes and claims: the logical cut's
-// hook (scenes/logical/hook.js) is a plain folder whose .dbml table files fly into the nodes.
-import { appear, appIcon, card, easeInOut, edge, ICON, lerp, node, nodeHeight, rowY, seg, COLORS } from '../lib.js';
+// `hookScene(data)` draws the scene from any tree, nodes and claims.
+import { appear, appIcon, card, easeInOut, edge, ICON, lerp, node, nodeHeight, rowY, seg } from '../../lib.js';
 
-const TREE = [
-  { d: 0, icon: 'folder', label: 'jaffle-shop', open: true },
-  { d: 1, icon: 'folder', label: 'models', open: true },
-  { d: 2, icon: 'folder', label: 'staging', open: true },
-  { d: 3, icon: 'file', label: 'stg_customers.sql' },
-  { d: 3, icon: 'file', label: 'stg_orders.sql' },
-  { d: 2, icon: 'folder', label: 'marts', open: true },
-  { d: 3, icon: 'file', label: 'dim_customers.sql', fly: 0 },
-  { d: 3, icon: 'file', label: 'fct_orders.sql', fly: 1 },
-  { d: 3, icon: 'file', label: 'dim_products.sql', fly: 2 },
-  { d: 3, icon: 'file', label: 'schema.yml', yml: true },
-  { d: 1, icon: 'file', label: 'dbt_project.yml', yml: true },
-];
 const TREE_X = 96, TREE_Y = 322, TREE_W = 560, ROW = 44, ROW0 = TREE_Y + 64 + 26;
 
-const CANVAS = { x: 704, y: 322, w: 1120, h: 600 };
+const CANVAS_BOX = { x: 704, y: 322, w: 1120, h: 600 };
 const W = 350;
-const NODES = [
-  { name: 'dim_customers', x: CANVAS.x + 20, y: CANVAS.y + 92,
-    cols: [{ key: 'PK', name: 'customer_id', type: 'VARCHAR' }, { name: 'customer_name', type: 'VARCHAR' }, { name: 'first_ordered_at', type: 'DATE' }] },
-  { name: 'fct_orders', x: CANVAS.x + 385, y: CANVAS.y + 222,
-    cols: [{ key: 'PK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'customer_id', type: 'VARCHAR' }, { key: 'FK', name: 'product_id', type: 'VARCHAR' }, { name: 'order_total', type: 'DECIMAL' }] },
-  { name: 'dim_products', x: CANVAS.x + 750, y: CANVAS.y + 92,
-    cols: [{ key: 'PK', name: 'product_id', type: 'VARCHAR' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'product_price', type: 'DECIMAL' }] },
-];
 
 /**
- * The hook scene for one cut. `tree` rows ({ d, icon, label, open?, fly?, yml? }; a `fly: k` row's
+ * The hook scene for one cut. `tree` rows ({ d, icon, label, open?, fly? }; a `fly: k` row's
  * chip flies to node k), three `nodes` (the middle one has FKs in rows 1 and 2), the canvas card's
  * `tab` and `crumb`, the `beat` the files start flying on (+0.9 s, "…as a diagram") and `claims`
  * ([label, beat, offset]).
@@ -50,7 +31,7 @@ export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: 
       const y = ROW0 + i * ROW;
       const at = 0.15 + i * 0.07;
       const hot = r.fly !== undefined ? seg(t, flyAt(r.fly) - 0.15, flyAt(r.fly)) : 0;
-      const colour = r.icon === 'folder' ? '#7f8792' : r.yml ? '#c9a24b' : '#5ca2f8';
+      const colour = r.icon === 'folder' ? '#7f8792' : '#5ca2f8';
       const chev = r.open ? ICON.chevDown({ size: 18, sw: 2.6 }) : '<span style="width:18px"></span>';
       rows += `<div class="abs" style="left:${TREE_X + 12}px;top:${y - 22}px;width:${TREE_W - 24}px;height:${ROW}px;border-radius:8px;background:rgba(92,162,248,${(0.16 * hot).toFixed(3)});${appear(t, at, { dy: 0, dx: -10 })}"></div>
         <div class="abs" style="left:${TREE_X + 28 + r.d * 30}px;top:${y - 16}px;display:flex;align-items:center;gap:10px;font-size:23px;color:${r.icon === 'folder' ? 'var(--text)' : '#c9ced6'};white-space:nowrap;${appear(t, at, { dy: 0, dx: -10 })}">
@@ -60,12 +41,12 @@ export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: 
     const tree = card({ x: TREE_X, y: TREE_Y, w: TREE_W, h: 600, tabs: [{ label: 'EXPLORER', on: true }], headStyle: 'letter-spacing:.08em;font-size:19px' });
 
     // Canvas + nodes
-    const canvas = card({ x: CANVAS.x, y: CANVAS.y, w: CANVAS.w, h: CANVAS.h, tabs: [{ label: tab, on: true }], crumb, bodyCls: 'grid-bg', style: appear(t, 0.2) });
+    const canvas = card({ x: CANVAS_BOX.x, y: CANVAS_BOX.y, w: CANVAS_BOX.w, h: CANVAS_BOX.h, tabs: [{ label: tab, on: true }], crumb, bodyCls: 'grid-bg', style: appear(t, 0.2) });
 
     // Until the first model lands, the empty canvas carries the app mark.
     const markOut = 1 - seg(t, flyAt(0), flyAt(0) + 0.4);
     const mark = markOut > 0
-      ? `<div class="abs" style="left:${CANVAS.x}px;top:${CANVAS.y + 64}px;width:${CANVAS.w}px;height:${CANVAS.h - 64}px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${markOut.toFixed(3)}">
+      ? `<div class="abs" style="left:${CANVAS_BOX.x}px;top:${CANVAS_BOX.y + 64}px;width:${CANVAS_BOX.w}px;height:${CANVAS_BOX.h - 64}px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${markOut.toFixed(3)}">
           <div style="${appear(t, beats[beat].t - 0.25, { dy: 12, dur: 0.5 })}">${appIcon(132)}</div>
           <div style="font-size:52px;font-weight:800;letter-spacing:-.03em;${appear(t, beats[beat].t - 0.05, { dy: 12, dur: 0.5 })}">ERD Studio</div></div>`
       : '';
@@ -94,8 +75,8 @@ export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: 
     const e1 = edge([[dc.x + 60, dc.y + dh], [dc.x + 60, c1y], [f.x, c1y]], { progress: seg(t, eAt, eAt + 0.55), one: [dc.x + 72, dc.y + dh + 26], many: [f.x - 26, c1y - 6] });
     const e2 = edge([[dp.x + W - 60, dp.y + ph], [dp.x + W - 60, c2y], [f.x + W, c2y]], { progress: seg(t, eAt + 0.2, eAt + 0.75), one: [dp.x + W - 50, dp.y + ph + 26], many: [f.x + W + 10, c2y - 6] });
 
-    // "No AI, and nothing to configure." — three claims, top right above the canvas
-    // "…in about a minute" (+2.3 s into the first line), then "No AI" and "nothing to configure"
+    // "No AI needed, and nothing to configure." — three claims, top right above the canvas
+    // "…DBML files" (+2.4 s into the first line), then "No AI needed" and "nothing to configure"
     const claims = CLAIMS.map(([label, b, offset]) => [label, beats[b].t + offset])
       .map(([label, at]) => `<span class="pill" style="font-size:26px;padding:12px 24px;background:#13301f;border:2px solid #1f6b3a;color:#dff7e8;${appear(t, at, { dy: 10 })}"><span style="color:var(--green);display:flex">${ICON.check({ size: 24 })}</span>${label}</span>`)
       .join('');
@@ -106,8 +87,36 @@ export function hookScene({ tree: TREE, nodes: NODES, tab, crumb, beat, claims: 
   };
 }
 
+
+const TREE = [
+  { d: 0, icon: 'folder', label: 'shop-analytics', open: true },
+  { d: 1, icon: 'folder', label: '.erd-studio', open: true },
+  { d: 2, icon: 'folder', label: 'gold', open: true },
+  { d: 3, icon: 'folder', label: 'diagrams', open: true },
+  { d: 4, icon: 'file', label: 'orders.dbml' },
+  { d: 3, icon: 'folder', label: 'relationships', open: true },
+  { d: 4, icon: 'file', label: 'gold.dbml' },
+  { d: 3, icon: 'folder', label: 'tables', open: true },
+  { d: 4, icon: 'folder', label: 'gold', open: true },
+  // VS Code's order; each file flies to its own node (fct_order is the middle one)
+  { d: 5, icon: 'file', label: 'dim_customer.dbml', fly: 0 },
+  { d: 5, icon: 'file', label: 'dim_product.dbml', fly: 2 },
+  { d: 5, icon: 'file', label: 'fct_order.dbml', fly: 1 },
+];
+
+const CANVAS = { x: 704, y: 322 };
+const NODES = [
+  { name: 'dim_customer', x: CANVAS.x + 20, y: CANVAS.y + 92,
+    cols: [{ key: 'PK', name: 'customer_key', type: 'INTEGER' }, { name: 'customer_id', type: 'VARCHAR' }, { name: 'name', type: 'VARCHAR' }] },
+  { name: 'fct_order', x: CANVAS.x + 385, y: CANVAS.y + 222,
+    cols: [{ key: 'PK', name: 'order_id', type: 'INTEGER' }, { key: 'FK', name: 'customer_key', type: 'INTEGER' }, { key: 'FK', name: 'product_key', type: 'INTEGER' }, { name: 'amount', type: 'DECIMAL' }] },
+  { name: 'dim_product', x: CANVAS.x + 750, y: CANVAS.y + 92,
+    cols: [{ key: 'PK', name: 'product_key', type: 'INTEGER' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'price', type: 'DECIMAL' }] },
+];
+
 export default hookScene({
-  tree: TREE, nodes: NODES, tab: 'orders.json', crumb: '.erd-studio › gold › orders.json', beat: 'minute',
-  // "…in about a minute" (+2.3 s into the first line), then "No AI" and "nothing to configure"
-  claims: [['About a minute', 'minute', 2.3], ['No AI needed', 'noai', 0.1], ['Nothing to configure', 'noai', 0.9]],
+  tree: TREE, nodes: NODES, tab: 'orders.dbml', crumb: '.erd-studio › gold › diagrams › orders.dbml', beat: 'model',
+  // h_model: "Your data model,"(+0.0–0.8) "as a diagram,"(+1.1–1.8) "saved as DBML files"(+2.1–3.1)
+  // "in your repo."(+3.1–4.0); h_noai: "No AI needed,"(+0.0–1.09) "and nothing to configure."(+1.36–2.58)
+  claims: [['DBML files in Git', 'model', 2.4], ['No AI needed', 'noai', 0.1], ['Nothing to configure', 'noai', 1.4]],
 });

@@ -14,7 +14,7 @@ import { BODY, CANVAS, editorWindow } from '../../editor.js';
 // empty Table Library.
 export const EMPTY_CANVAS = {
   title: 'This diagram is empty',
-  body: 'Add your first table. Each one is a file you can commit.',
+  body: 'Add your first table.',
   button: 'New Table',
   hint: 'Or let your AI assistant draw it:',
   link: 'set it up in the Welcome panel',
@@ -59,7 +59,9 @@ export const NEW_RELATIONSHIP = {
   create: 'Create Relationship',
 };
 
-// The two tables: dim_customer as the Dimension template makes it, fct_order as typed in.
+// The two tables: dim_customer as the Dimension template makes it, fct_order as typed in (its
+// customer_key is an FK once the relationship exists; this is the state after it). Drawn neutral:
+// a plain folder has no stage colours.
 export const TABLES = [
   { name: 'dim_customer', x: 210, y: 486, w: 470, cols: [
     { key: 'PK', name: 'customer_key', type: 'INTEGER' }, { name: 'customer_id', type: 'VARCHAR' }, { name: 'name', type: 'VARCHAR' },
@@ -114,7 +116,7 @@ export default {
     let html = editorWindow({ tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › gold › diagrams › orders.dbml', bodyCls: 'grid-bg' });
     const menuOpen = t >= menuAt && t < relAt;
     html += toolbar({ x: CANVAS.toolbarX, y: CANVAS.toolbarY, logicalOnly: true, layout: 'idle', add: menuOpen ? 'open' : 'idle' });
-    const ADD = { x: CANVAS.toolbarX + 375, y: CANVAS.toolbarY + 33 };   // the "+ Add" button's centre (measured)
+    const ADD = { x: CANVAS.toolbarX + 481, y: CANVAS.toolbarY + 33 };   // the "+ Add" button's centre (measured)
 
     // ---- the empty-canvas card, until the first table lands ----
     const cardOp = 1 - seg(t, newClick + 0.05, newClick + 0.25);
@@ -136,7 +138,9 @@ export default {
       html += edge(pts, { progress: easeOut(seg(t, edgeAt, edgeAt + 0.55)), many, one });
     }
     if (t >= dimAt) html += node({ ...dc, layer: 'GLD', style: appear(t, dimAt, { dy: 12 }) });
-    if (t >= fctAt) html += node({ ...fo, layer: 'GLD', style: appear(t, fctAt, { dy: 12 }) });
+    // fct_order as typed in has no FK yet: customer_key gets its FK badge with the relationship.
+    const fkShown = t >= edgeAt + 0.25;
+    if (t >= fctAt) html += node({ ...fo, cols: fo.cols.map((c) => (c.key === 'FK' && !fkShown ? { ...c, key: undefined } : c)), layer: 'GLD', style: appear(t, fctAt, { dy: 12 }) });
 
     // ---- the New Table dialog ----
     if (t >= dlgAt && t < dlgOut + 0.15) {

@@ -1,4 +1,8 @@
-# Getting-started video: the single source of truth.
+# Getting-started video: the DEFAULT cut, and the single source of truth for its format. The
+# README links it (docs/assets/getting-started.mp4) and the Welcome panel plays it in a dbt project
+# (its 'dbt' page). It is the one-minute DBML tour of the logical model, the same tour as
+# script.logical.yaml scene for scene, with one more short beat before the end card: what a dbt
+# project adds (the Physical tab, Compare with dbt).
 #
 # Each scene has a headline (two lines; `{word}` is highlighted in the scene's accent colour),
 # the player module that draws it (player/scenes/<module>.js) and narration lines.
@@ -15,6 +19,12 @@
 # Timing (build-timeline.mjs): a scene starts where the previous one ended; its first line
 # starts `lead` seconds in; each further line follows `gap` seconds after the previous one;
 # the scene lasts max(minDur, lastLineEnd + tail).
+#
+# Words to keep out of every scene but the dbt beat (module dbt/*): dbt, Physical, Diff, manifest,
+# sample project — in narration, captions, headlines and anything drawn on screen. dbt is an
+# add-on: it shows up only at the end. `npm test` checks the file, the modules and the frames.
+#
+# Length: 50–60 s, at most 65 s (maxDuration): the product calls it the "One-Minute Tour".
 
 title: ERD Studio — getting started
 maxDuration: 65
@@ -32,100 +42,91 @@ timing:
   tail: 0.45
   fade: 0.25
 
-chapters: ["1 · OPEN", "2 · DRAW", "3 · EXPLORE", "4 · ENRICH"]
+chapters: ["1 · OPEN", "2 · DRAW", "3 · SAVE", "4 · ENRICH"]
 
 scenes:
   - id: hook
-    module: hook
+    module: tour/hook
     chapter: 0
     minDur: 5
     accent: blue
-    headline: ["Your dbt project,", "as a {diagram}."]
+    headline: ["Your data model,", "in {your repo}."]
     lines:
-      - id: h_minute
-        beat: minute
-        caption: Your dbt project, as a diagram, in about a minute.
+      - id: h_model
+        beat: model
+        caption: Your data model, as a diagram, saved as DBML files in your repo.
       - id: h_noai
         beat: noai
-        caption: No AI, and nothing to configure.
+        caption: No AI needed, and nothing to configure.
 
   - id: install
-    module: install
+    module: tour/install
     chapter: 1
-    minDur: 6
+    minDur: 6.4
     accent: blue
-    headline: ["Install it, and a guide", "{opens by itself}."]
+    headline: ["Install it, open a folder,", "click {its icon}."]
     lines:
       - id: i_install
         beat: install
-        caption: Install ERD Studio, and open your dbt project.
-      - id: i_guide
-        beat: guide
-        caption: The Get started guide opens by itself.
+        caption: Install ERD Studio, open your folder, and click its icon.
 
-  - id: draw
-    module: draw
+  - id: newDiagram
+    module: tour/newDiagram
     chapter: 2
-    minDur: 5.8
+    minDur: 4.4
     accent: blue
-    headline: ["Click {Draw from dbt}.", "Pick a folder."]
+    headline: ["Click {New Diagram}.", "Give it a name."]
     lines:
-      - id: d_click
+      - id: n_click
         beat: click
-        caption: Click Draw from dbt,
-      - id: d_pick
-        beat: pick
-        caption: and pick a folder, like your marts.
+        caption: Click New Diagram,
+      - id: n_name
+        beat: name
+        caption: and give it a name.
 
-  - id: canvas
-    module: canvas
+  - id: tables
+    module: tour/tables
     chapter: 2
-    minDur: 6.0
+    minDur: 7.2
     accent: blue
-    headline: ["Your models and tests,", "{laid out for you}."]
+    headline: ["Add tables,", "then {connect them}."]
     lines:
-      - id: c_reads
-        beat: reads
-        caption: It reads your models and their relationship tests,
-      - id: c_layout
-        beat: layout
-        caption: and lays out the diagram for you.
+      - id: t_table
+        beat: table
+        caption: Add a table, with starter columns if you like.
+      - id: t_more
+        beat: more
+        caption: Add another, then link the two with a relationship.
 
-  - id: design
-    module: design
+  - id: files
+    module: tour/files
     chapter: 3
-    minDur: 8
+    minDur: 5.4
     accent: blue
-    headline: ["That's your", "{Logical} design."]
+    headline: ["Saved as {DBML},", "plain files in Git."]
     lines:
-      - id: g_design
-        beat: design
-        caption: That's your Logical design.
-      - id: g_click
-        beat: click
-        caption: Click a table to see its columns and keys.
-      - id: g_files
+      - id: f_files
         beat: files
-        caption: It's saved as plain files in your repo, next to your SQL.
+        caption: Each table is a DBML file, to commit and review like code.
 
-  - id: physical
-    module: physical
+  - id: importDbml
+    module: tour/importDbml
     chapter: 3
-    minDur: 7
-    accent: green
-    headline: ["Physical shows what", "{dbt actually built}."]
+    minDur: 7.0
+    accent: blue
+    headline: ["DBML out,", "and {DBML in}."]
     lines:
-      - id: p_switch
-        beat: switch
-        caption: Switch to Physical to see what dbt actually built.
-      - id: p_diff
-        beat: diff
-        caption: Diff compares the two, and flags anywhere they disagree.
+      - id: m_export
+        beat: export
+        caption: Export to DBML or Mermaid any time.
+      - id: m_import
+        beat: import
+        caption: Already have DBML? Import it, then keep the draft.
 
   - id: enrich
-    module: enrich
+    module: tour/enrich
     chapter: 4
-    minDur: 9.3
+    minDur: 8.8
     accent: blue
     headline: ["Want the why?", "Ask your {AI assistant}."]
     lines:
@@ -137,24 +138,27 @@ scenes:
         caption: Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
         say: Click Set Up My AI Helper, then type slash ERD studio setup in your assistant.
 
-  - id: sample
-    module: sample
+  - id: dbt
+    module: dbt/compare
     chapter: 0            # after the last chapter: the bar shows every chapter done (main.js)
-    minDur: 4.9
+    minDur: 8.0
     accent: green
-    headline: ["No dbt project?", "Try the {sample}."]
+    headline: ["Using dbt?", "{Compare} with what it has."]
     lines:
-      - id: s_sample
-        beat: sample
-        caption: No dbt project? Try the sample project.
+      - id: k_tabs
+        beat: tabs
+        caption: Using dbt? Then a Physical tab shows what dbt has.
+      - id: k_compare
+        beat: compare
+        caption: Click Compare with dbt to mark every difference.
 
   - id: end
-    module: endCard
+    module: tour/endCard
     chapter: 0
-    minDur: 5
+    minDur: 4.6
     accent: green
     headline: null
     lines:
       - id: x_cta
         beat: cta
-        caption: ERD Studio is free. Install it, and draw your dbt project today.
+        caption: ERD Studio is free to use. Install it today.

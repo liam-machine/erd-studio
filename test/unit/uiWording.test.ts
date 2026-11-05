@@ -74,12 +74,16 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
   userText({ description: pkg.description, displayName: pkg.displayName }, 'package', texts);
   userText(pkg.contributes, 'contributes', texts);
 
-  it('describes new projects as DBML, an open format, and says YAML/JSON projects keep working, on the Marketplace', () => {
+  it('leads the Marketplace with one idea: logical data modelling in Git, stored as DBML, an open format, with dbt last', () => {
     expect(pkg.description).toBe(
-      'Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.',
+      'Logical data modeling in Git, stored as DBML, an open format. Draw ERDs in VS Code as files your AI assistant reads and writes. Import DBML, SQL or Power BI; compare with dbt.',
     );
-    // Not "saved as DBML" for every project: a YAML/JSON project keeps writing YAML and JSON.
-    expect(pkg.description).not.toMatch(/saved as DBML/);
+    // "Stored as DBML" is the product's one idea (every new project). That a YAML/JSON project from before
+    // 2.0 keeps working, and keeps writing YAML and JSON, lives in the README and docs/faq.md
+    // (pinned by readmeWording.test.ts), not in the listing.
+    expect(pkg.description.length).toBeLessThanOrEqual(200);
+    expect(pkg.description.indexOf('dbt')).toBeGreaterThan(pkg.description.indexOf('AI assistant'));
+    expect(pkg.keywords).toContain('dbt');
     expect(pkg.keywords).toContain('dbml editor');
     expect(pkg.keywords.length).toBeLessThanOrEqual(30);
   });

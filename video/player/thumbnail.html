@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <!--
   README thumbnail for the getting-started video (docs/assets/getting-started-play.jpg), rendered by
-  ../thumbnail.mjs. The background is the video's own laid-out diagram (the canvas scene's last
-  frame, drawn by the same scene module), dimmed and softened so the play button and the headline
-  read. The duration comes from build/timeline.json, so it always matches the render.
+  ../thumbnail.mjs. The background is the video's own diagram (the tables scene's last frame: two
+  tables and their relationship, drawn by the same scene module), dimmed and softened so the play
+  button and the headline read. The duration comes from build/timeline.json, so it always matches
+  the render.
 -->
 <html lang="en">
 <head>
@@ -30,13 +31,13 @@
   <div class="shade"></div>
   <div class="title" id="title"></div>
   <div class="play"><svg width="116" height="116" viewBox="0 0 24 24" style="margin-left:14px"><path d="M6 3.8v16.4a1 1 0 0 0 1.5.86l13.2-8.2a1 1 0 0 0 0-1.72L7.5 2.94A1 1 0 0 0 6 3.8z" fill="#111317"/></svg></div>
-  <div class="sub">Draw your dbt project — <span>no AI needed</span></div>
+  <div class="sub">Your data model in Git, as DBML — <span>no AI needed</span></div>
   <div class="brand"><img src="/media/icon.png" width="64" height="64" style="border-radius:14px">ERD Studio</div>
   <div class="pill" id="pill"></div>
   <script type="module">
     const timeline = await (await fetch('/video/build/timeline.json', { cache: 'no-store' })).json();
-    const sc = timeline.scenes.find((s) => s.module === 'canvas');
-    const scene = (await import('./scenes/canvas.js')).default;
+    const sc = timeline.scenes.find((s) => s.module === 'tour/tables');
+    const scene = (await import('./scenes/tour/tables.js')).default;
     document.getElementById('bg').innerHTML = scene.render(sc.dur - 0.05, { beats: sc.beats, dur: sc.dur, t: sc.start + sc.dur, scene: sc });
     // Honest numbers: the headline rounds to the nearest 5 s, the pill is the real m:ss.
     const secs = Math.round(timeline.total);

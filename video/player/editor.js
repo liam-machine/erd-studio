@@ -1,10 +1,12 @@
-// Shared pieces of the VS Code window the scenes play in: the window frame, activity bar, the
-// real "Get started with ERD Studio" walkthrough page, the orders canvas every canvas scene
-// shares (so cuts between them are seamless) and VS Code's QuickPick shell.
+// Shared pieces of the VS Code window the scenes play in: the window frame, the activity bar, the
+// Explorer, ERD Studio's own side bar (Diagrams with its start entry, Table Library, Relationships,
+// Help & Feedback), the draft page an import or the example opens, VS Code's QuickPick shell and
+// the product copy every scene shows.
 //
-// Product copy here is verbatim: `npm test` checks each constant against its source
-// (package.json, src/commands/drawFromDbt.ts, src/providers/dbtDraftPicker.ts, the webview).
-import { card, COLORS, ICON, esc, node } from './lib.js';
+// Product copy here is verbatim: `npm test` checks each constant against its source (package.json,
+// src/types/startActions.ts, src/providers/HelpTreeProvider.ts, src/services/draftModel.ts,
+// webview-draft/, src/extension.ts).
+import { card, edge, esc, ICON, node } from './lib.js';
 
 // ---------- the window (frame px) ----------
 export const WIN = { x: 96, y: 322, w: 1728, h: 600 };
@@ -12,9 +14,11 @@ export const WIN = { x: 96, y: 322, w: 1728, h: 600 };
 export const BODY = { x: WIN.x + 1, y: WIN.y + 65, w: WIN.w - 2, h: WIN.h - 66 };
 export const ACT = 72;          // activity bar width
 export const SIDE = 400;        // side bar width
+/** Left edge of the editor area beside the side bar, in body px. */
+export const ED = ACT + SIDE;
 
-export const editorWindow = ({ tabs, crumb = 'jaffle-shop', body, style = '', bodyCls = '' }) =>
-  card({ ...WIN, tabs, crumb, body, style, bodyCls });
+export const editorWindow = ({ tabs, crumb = 'shop-analytics', body, style = '', bodyCls = '', win = WIN }) =>
+  card({ ...win, tabs, crumb, body, style, bodyCls });
 
 // ---------- activity bar ----------
 const ai = (d) => `<svg class="icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -24,270 +28,302 @@ const ACT_ICONS = {
   ext: ai('<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/><rect x="14.5" y="2.5" width="7" height="7" rx="1" transform="rotate(12 18 6)"/>'),
   erd: ai('<rect x="3" y="4" width="8" height="6" rx="1.2"/><rect x="13" y="14" width="8" height="6" rx="1.2"/><path d="M7 10v7h6"/>'),
 };
-/** Activity bar in body coordinates; `erd` adds ERD Studio's icon (fading in with erdOp). */
-export function activityBar(active, { erd = true, erdOp = 1 } = {}) {
-  const items = [['files', 20], ['search', 84], ['ext', 148]];
-  if (erd) items.push(['erd', 212]);
+/** Activity bar row tops (body px): Explorer, Search, Extensions, ERD Studio. */
+export const ACT_Y = { files: 20, search: 84, ext: 148, erd: 212 };
+/** Activity bar in body coordinates; `erd` adds ERD Studio's icon (fading in with erdOp), `erdGlow` rings it. */
+export function activityBar(active, { erd = true, erdOp = 1, erdGlow = 0 } = {}) {
+  const items = ['files', 'search', 'ext'];
+  if (erd) items.push('erd');
   let h = `<div class="abs" style="left:0;top:0;width:${ACT}px;bottom:0;background:#131619;border-right:1px solid var(--card-border)"></div>`;
-  for (const [k, y] of items) {
+  for (const k of items) {
+    const y = ACT_Y[k];
     const on = k === active;
     h += `<div class="abs" style="left:0;top:${y}px;width:${ACT}px;height:48px;display:flex;align-items:center;justify-content:center;color:${on ? 'var(--text)' : 'var(--text-3)'};${k === 'erd' ? `opacity:${erdOp.toFixed(3)};` : ''}">${ACT_ICONS[k]}</div>`;
     if (on) h += `<div class="abs" style="left:0;top:${y}px;width:3px;height:48px;background:var(--text)"></div>`;
+    if (k === 'erd' && erdGlow > 0) h += `<div class="abs" style="left:10px;top:${y - 2}px;width:52px;height:52px;border-radius:12px;box-shadow:0 0 0 3px rgba(55,148,255,${erdGlow.toFixed(3)}),0 0 22px rgba(55,148,255,${(0.5 * erdGlow).toFixed(3)})"></div>`;
   }
   return h;
 }
 
 // ---------- the Explorer side bar (body coordinates) ----------
-// The dbt cut opens the jaffle-shop dbt project (dbt_project.yml lights on "…your dbt project");
-// the logical cut opens a plain folder with no dbt_project.yml (PLAIN_EXPLORER).
-const JAFFLE_EXPLORER = {
-  root: 'JAFFLE-SHOP',
-  rows: [['models', true], ['seeds', true], ['target', true], ['dbt_project.yml', false, true], ['packages.yml', false]],
-};
+// Every cut opens a plain folder: no dbt_project.yml (the dbt beat at the end of the default cut
+// is the only place a dbt project appears).
 export const PLAIN_EXPLORER = {
   root: 'SHOP-ANALYTICS',
   rows: [['docs', true], ['src', true], ['.gitignore', false], ['README.md', false]],
 };
-export function explorerSide({ hot = 0, op = 1, tree = JAFFLE_EXPLORER } = {}) {
-  const row = (y, label, { folder = false, lit = 0 } = {}) =>
-    `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:44px;background:rgba(27,42,64,${lit.toFixed(3)});${lit > 0 ? `box-shadow:inset 4px 0 0 rgba(96,165,250,${lit.toFixed(3)});` : ''}display:flex;align-items:center;gap:10px;padding-left:${folder ? 18 : 50}px;font-size:23px;white-space:nowrap">
+export function explorerSide({ op = 1, tree = PLAIN_EXPLORER } = {}) {
+  const row = (y, label, folder) =>
+    `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:44px;display:flex;align-items:center;gap:10px;padding-left:${folder ? 18 : 50}px;font-size:23px;white-space:nowrap">
       ${folder ? `<span style="color:var(--text-2)">${ICON.chevRight({ size: 20 })}</span><span style="color:#d9b35a">${ICON.folder({ size: 24 })}</span>` : `<span style="color:#c490e8">${ICON.file({ size: 24 })}</span>`}${label}</div>`;
   return `<div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;background:#16181b;border-right:1px solid var(--card-border)"></div>
     <div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;opacity:${op.toFixed(3)}">
     <div class="abs" style="left:24px;top:20px;font-size:20px;font-weight:700;letter-spacing:.08em;color:var(--text-2)">EXPLORER</div>
     <div class="abs" style="left:14px;top:62px;display:flex;align-items:center;gap:6px;font-size:21px;font-weight:800;letter-spacing:.04em">${ICON.chevDown({ size: 20 })}${tree.root}</div>
-    ${tree.rows.map(([label, folder, lit], i) => row(100 + i * 44, label, { folder, lit: lit ? hot : 0 })).join('')}</div>`;
+    ${tree.rows.map(([label, folder], i) => row(100 + i * 44, label, folder)).join('')}</div>`;
+}
+
+/**
+ * An Explorer file tree (for the files scene and the README GIF). `rows` are
+ * [depth, kind ('folder' | 'dbml' | 'json' | 'md'), label, closed?] (a closed folder's chevron points
+ * right); `lit(i)` 0..1 highlights row i,
+ * `badge(i)` returns HTML at its right (the Source Control "U"). Rows are `rowH` apart from `top`.
+ */
+export function fileTree(rows, { top = 58, rowH = 40, width = 560, indent = 26, font = 22, lit = () => 0, badge = () => '', style = () => '', colour = () => null } = {}) {
+  const ICOL = { folder: '#d9b35a', json: '#e8c46a', dbml: '#5ca2f8', md: '#8b9099' };
+  let r = '';
+  rows.forEach(([d, kind, label, closed], i) => {
+    const y = top + i * rowH;
+    const h = lit(i);
+    r += `<div class="abs" style="left:0;top:${y}px;width:${width}px;height:${rowH}px;background:rgba(96,165,250,${(0.16 * h).toFixed(3)});${h > 0 ? `box-shadow:inset 4px 0 0 rgba(96,165,250,${h.toFixed(3)});` : ''}${style(i)}"></div>
+      <div class="abs" style="left:${20 + d * indent}px;right:0;top:${y + (rowH - font - 10) / 2}px;display:flex;align-items:center;gap:10px;font-size:${font}px;white-space:nowrap;color:${colour(i) ?? (kind === 'folder' ? 'var(--text)' : '#c9ced6')};${style(i)}">
+        <span style="color:var(--text-3);width:18px;display:flex">${kind === 'folder' ? (closed ? ICON.chevRight({ size: 18, sw: 2.6 }) : ICON.chevDown({ size: 18, sw: 2.6 })) : ''}</span>
+        <span style="color:${ICOL[kind] ?? '#c9ced6'};display:flex">${kind === 'folder' ? ICON.folder({ size: font }) : ICON.file({ size: font })}</span>${label}${badge(i)}</div>`;
+  });
+  return r;
 }
 
 // ---------- the extension listing (package.json) ----------
 export const EXTENSION = {
   name: 'ERD Studio',
   publisher: 'liamwynne',
-  description: 'Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.',
 };
 /**
  * The listing's description up to (not including) the first sentence that names dbt: what the
- * logical cut shows, so a folder without dbt sees no dbt wording. The real words, fewer of them.
+ * videos show (the listing's own words, fewer of them), so nothing before the default cut's last
+ * beat names dbt. The description itself is read from package.json at runtime (main.js sets
+ * window.PACKAGE_DESCRIPTION) and by the tests.
  */
-export const descriptionWithoutDbt = (d = EXTENSION.description) => {
+export const descriptionWithoutDbt = (d = globalThis.PACKAGE_DESCRIPTION ?? '') => {
   const sentences = d.match(/[^.]+(?:\.|$)\s*/g) ?? [d];
   const i = sentences.findIndex((x) => /\bdbt\b/i.test(x));
   return (i < 0 ? sentences : sentences.slice(0, i)).join('').trim();
 };
 
-// ---------- the walkthrough (package.json contributes.walkthroughs, id erdStudio.getStarted) ----------
-// Every step, in order, with its real `when` clause; a window shows only the steps whose clause
-// holds there. VS Code renders a step's command link that sits on its own line as a button;
-// `text` is the rest of the description (set only for the steps a scene opens), and `more` the
-// description's second paragraph and button, when it has one.
-export const WALKTHROUGH = {
-  title: 'Get started with ERD Studio',
-  description: 'Design your data model in Git, from scratch or from DBML, then let your AI assistant fill in the detail.',
-  steps: [
-    { id: 'watch', when: 'erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
-    { id: 'watchLogical', when: '!erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
-    { id: 'openProject', when: 'workspaceFolderCount == 0', title: 'Open the folder your data model lives in', svg: 'open-project' },
-    { id: 'openDiagram', when: 'erdStudio.hasDiagrams', title: 'Open a diagram from this project', svg: 'sample' },
-    {
-      id: 'newDiagram', when: '!erdStudio.hasDbtProject && !erdStudio.hasDiagrams', title: 'Draw your first data model', svg: 'new-diagram', button: 'New Diagram',
-      text: 'Start a blank diagram and add tables on the canvas. Each table is a file in .erd-studio/ you can commit and review like code.',
-      more: { text: 'New to data modelling? Start from a small coffee-shop star schema instead.', button: 'Open Example Diagram' },
-    },
-    {
-      id: 'draw', when: 'erdStudio.hasDbtProject && !erdStudio.hasDiagrams', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
-      text: 'Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.',
-    },
-    {
-      id: 'importDbml', title: 'Start from a DBML file', svg: 'import-dbml', button: 'Import DBML…',
-      text: 'From dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.',
-    },
-    {
-      id: 'enrich', title: 'Enrich it with your AI assistant', svg: 'enrich', button: 'Set Up My AI Helper',
-      text: "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.",
-    },
+// ---------- ERD Studio's side bar (package.json views + viewsWelcome, HelpTreeProvider) ----------
+/** The views of the ERD Studio container, in order (package.json contributes.views['erd-studio']). */
+export const ERD_VIEWS = ['Diagrams', 'Table Library', 'Relationships', 'Help & Feedback'];
+/**
+ * The Diagrams view's start entry in a folder with no diagram and nothing to import (viewsWelcome,
+ * `erdStudio.startIntent == blank`): one sentence, one button, one quiet link.
+ */
+export const SIDEBAR_START = { text: 'No diagrams yet.', button: 'New Diagram…', or: 'Or:', more: 'More ways to start…' };
+/** The Help & Feedback view's rows (HELP_ACTIONS). */
+export const HELP_ROWS = ['Set Up My AI Helper', 'Watch the One-Minute Tour', 'Show Me Around', 'Send Feedback', 'Show Logs'];
+/** The Diagrams view's + (New…) menu in a folder without dbt (erdStudio.newMenu; Draw from dbt… shows only in a dbt project). */
+export const NEW_MENU = ['New Diagram…', 'Import DBML…', 'Import SQL DDL…', 'Import Power BI or Fabric Semantic Model…', 'New Layer…'];
+
+const SB = { head: 40, row: 38 };
+/** A new project's layers (packages/core/src/types/layer.ts, a fresh folder's two): label, colour. */
+export const LAYERS = { Silver: '#a0a0a0', Gold: '#d4a800' };
+/** The layer row's swatch (src/providers/layerSwatch.ts: three stacked diamonds in the layer's colour). */
+const layerSwatch = (c, size = 20) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 16 16"><path d="M8 1.5 14.5 5 8 8.5 1.5 5Z" fill="${c}"/><path d="M3.4 7.6 1.5 8.6 8 12.1 14.5 8.6 12.6 7.6 8 10.1Z" fill="${c}" fill-opacity=".55"/><path d="M3.4 11 1.5 12 8 15.5 14.5 12 12.6 11 8 13.5Z" fill="${c}" fill-opacity=".3"/></svg>`;
+const filterGlyph = (size = 18) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/></svg>`;
+const newFolderGlyph = (size = 20) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10.5v5M9.5 13h5"/></svg>`;
+/** The Diagrams view's rows for a new project with one diagram (DomainTreeProvider rootChildren, compact rows). */
+export const ORDERS_TREE = [['Silver', []], ['Gold', ['orders']]];
+/** The Table Library's welcome text before its first table (package.json viewsWelcome, its two paragraphs). */
+export const LIBRARY_EMPTY = ['No tables yet.', "Each table is a file in .erd-studio/ you can commit and review like code. Add one on a diagram's canvas, or ask your AI assistant."];
+/** The Table Library's rows for the tour's two tables (ModelLibraryTreeProvider: the layer, then its tables). */
+export const ORDERS_LIBRARY = [['Gold', ['dim_customer', 'fct_order']]];
+
+/**
+ * The ERD Studio side bar, in body coordinates. `diagrams` null shows the start entry (startGlow /
+ * startPress on its button); otherwise the Diagrams tree as DomainTreeProvider draws it, every
+ * layer of layers.json ([[layer, [diagram, ...]], ...]): a layer row with its swatch and "Layer",
+ * its diagrams, "New Diagram…  none in this layer yet" under a layer with none, and "New Layer…"
+ * last. Table Library and Relationships exist only once .erd-studio does (`library`, by default
+ * when there are diagrams; erdStudio.hasLogicalModelsDir): Table Library opens expanded with
+ * `tables` unless `libraryOpen` is false (a scene that needs the room), Relationships collapsed.
+ * `help` opens Help & Feedback with its rows (`helpHot` = index lit, `helpPress` 0..1). The
+ * Diagrams header always has its + (New…) and filter actions (a folder is open). Returns
+ * { html, geo } where geo holds frame-space points the scenes aim the pointer at.
+ */
+export function erdSide({ diagrams = null, library = diagrams !== null, libraryOpen = true, tables = ORDERS_LIBRARY, startGlow = 0, startPress = 0, help = false, helpHot = -1, helpPress = 0, plusHot = 0, selected = null, op = 1 } = {}) {
+  const x0 = ACT;
+  const geo = {};
+  const icon = (inner, hot = 0) => `<span style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text);${hot > 0 ? `background:rgba(90,93,100,${(0.6 * hot).toFixed(3)});` : ''}">${inner}</span>`;
+  const header = (y, label, open, actions = '') => `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:${SB.head}px;display:flex;align-items:center;gap:6px;padding-left:10px;font-size:18px;font-weight:800;letter-spacing:.05em;border-top:1px solid #2a2c31;white-space:nowrap">
+      <span style="color:var(--text-2);display:flex">${open ? ICON.chevDown({ size: 18, sw: 2.6 }) : ICON.chevRight({ size: 18, sw: 2.6 })}</span>${label.toUpperCase()}
+      ${actions ? `<span style="margin-left:auto;margin-right:10px;display:flex;gap:6px">${actions}</span>` : ''}</div>`;
+  const row = (y, indent, glyph, label, desc = '', sel = false) => `${sel ? `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:${SB.row}px;background:#04395e"></div>` : ''}
+      <div class="abs" style="left:${indent}px;top:${y}px;height:${SB.row}px;display:flex;align-items:center;gap:10px;font-size:20px;white-space:nowrap">${glyph}${label}${desc ? `<span style="font-size:17px;color:var(--text-3);margin-left:4px">${desc}</span>` : ''}</div>`;
+  const chev = (open) => `<span style="color:var(--text-2);display:flex">${open ? ICON.chevDown({ size: 18, sw: 2.6 }) : ICON.chevRight({ size: 18, sw: 2.6 })}</span>`;
+  let h = `<div class="abs" style="left:0;top:0;width:${SIDE}px;height:52px;display:flex;align-items:center;padding-left:24px;font-size:20px;font-weight:700;letter-spacing:.08em;color:var(--text-2)">ERD STUDIO</div>`;
+  let y = 52;
+  // view/title: the + (New…) submenu (navigation@0), then Filter Diagrams… (navigation@1)
+  h += header(y, ERD_VIEWS[0], true, icon(ICON.plus({ size: 18, sw: 2.6 }), plusHot) + icon(filterGlyph()));
+  geo.plus = { x: BODY.x + x0 + SIDE - 10 - 30 - 6 - 15, y: BODY.y + y + SB.head / 2 };
+  y += SB.head;
+  if (diagrams === null) {
+    h += `<div class="abs" style="left:24px;top:${y + 14}px;font-size:20px;color:var(--text-2);white-space:nowrap">${SIDEBAR_START.text}</div>`;
+    const by = y + 54;
+    const bg = startPress > 0 && startPress < 1 ? '#0b4f7d' : '#0e639c';
+    h += `<div class="abs" style="left:20px;right:20px;top:${by}px;height:44px;border-radius:4px;background:${bg};color:#fff;font-size:20px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 ${(3 * startGlow).toFixed(1)}px rgba(55,148,255,${(0.6 * startGlow).toFixed(3)}),0 0 ${(24 * startGlow).toFixed(1)}px rgba(55,148,255,${(0.5 * startGlow).toFixed(3)})">${SIDEBAR_START.button}</div>`;
+    geo.start = { x: BODY.x + x0 + SIDE / 2, y: BODY.y + by + 22 };
+    h += `<div class="abs" style="left:24px;top:${by + 60}px;font-size:19px;color:var(--text-2);white-space:nowrap">${SIDEBAR_START.or} <span style="color:#3794ff">${SIDEBAR_START.more}</span></div>`;
+    y = by + 108;
+  } else {
+    for (const [layer, items] of diagrams) {
+      h += row(y, 14, `${chev(true)}<span style="display:flex">${layerSwatch(LAYERS[layer] ?? '#8a94a3')}</span>`, layer, 'Layer');
+      y += SB.row;
+      for (const d of items) {
+        h += row(y, 52, `<span style="color:#5ca2f8;display:flex">${ICON.erdMark({ size: 20 })}</span>`, d, '', d === selected);
+        y += SB.row;
+      }
+      if (items.length === 0) {
+        h += row(y, 52, `<span style="color:var(--text-2);display:flex">${ICON.plus({ size: 18, sw: 2.4 })}</span>`, 'New Diagram…', 'none in this layer yet');
+        y += SB.row;
+      }
+    }
+    h += row(y, 22, `<span style="color:var(--text-2);display:flex">${newFolderGlyph()}</span>`, 'New Layer…');
+    y += SB.row + 6;
+  }
+  if (library) {
+    h += header(y, ERD_VIEWS[1], libraryOpen); y += SB.head;
+    if (libraryOpen && tables.length === 0) {
+      // its welcome text while the library is empty (viewsWelcome, the pane clips what does not fit)
+      h += `<div class="abs" style="left:24px;right:20px;top:${y + 8}px;font-size:19px;color:var(--text-2);white-space:nowrap">${LIBRARY_EMPTY[0]}</div>
+        <div class="abs" style="left:24px;right:20px;top:${y + 38}px;height:48px;overflow:hidden;font-size:16px;line-height:24px;color:var(--text-3)">${LIBRARY_EMPTY[1]}</div>`;
+      y += 94;
+    } else if (libraryOpen) {
+      for (const [layer, names] of tables) {
+        h += row(y, 14, `${chev(true)}<span style="display:flex">${layerSwatch(LAYERS[layer] ?? '#8a94a3')}</span>`, layer, 'Layer');
+        y += SB.row;
+        for (const n of names) {
+          h += row(y, 52, `<span style="color:#5ca2f8;display:flex">${ICON.table({ size: 20 })}</span>`, n);
+          y += SB.row;
+        }
+      }
+      y += 6;
+    }
+    h += header(y, ERD_VIEWS[2], false); y += SB.head;
+  }
+  h += header(y, ERD_VIEWS[3], help); y += SB.head;
+  if (help) {
+    HELP_ROWS.forEach((label, i) => {
+      const hot = i === helpHot;
+      h += `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:${SB.row}px;${hot ? `background:${helpPress > 0 && helpPress < 1 ? '#0b4f7d' : '#04395e'};` : ''}"></div>
+        <div class="abs" style="left:34px;top:${y}px;height:${SB.row}px;display:flex;align-items:center;gap:12px;font-size:20px;white-space:nowrap;color:var(--text)"><span style="color:${i === 0 ? '#c490e8' : 'var(--text-2)'};display:flex">${i === 0 ? ICON.sparkle({ size: 20 }) : i === 1 ? ICON.playCircle({ size: 20 }) : ICON.dot({ size: 20 })}</span>${label}</div>`;
+      if (i === 0) geo.aiHelper = { x: BODY.x + x0 + 150, y: BODY.y + y + SB.row / 2 };
+      y += SB.row;
+    });
+  }
+  const html = `<div class="abs" style="left:${x0}px;top:0;width:${SIDE}px;bottom:0;background:#16181b;border-right:1px solid var(--card-border)"></div>
+    <div class="abs" style="left:${x0}px;top:0;width:${SIDE}px;bottom:0;overflow:hidden;opacity:${op.toFixed(3)}">${h}</div>`;
+  return { html, geo };
+}
+
+/** The + (New…) menu under the Diagrams view's title, at frame point `at` (the + icon). `hot` = row lit. */
+export function newMenu(at, { hot = -1, op = 1 } = {}) {
+  const items = NEW_MENU.map((label, i) => `${i === NEW_MENU.length - 1 ? '<div style="height:1px;margin:6px 0;background:#3a3c42"></div>' : ''}<div style="height:40px;display:flex;align-items:center;padding:0 16px;border-radius:4px;font-size:19px;white-space:nowrap;${i === hot ? 'background:#04395e;' : ''}">${label}</div>`).join('');
+  return `<div class="abs" style="left:${at.x - 24}px;top:${at.y + 22}px;width:470px;padding:6px;border-radius:8px;background:#252526;border:1px solid #454545;box-shadow:0 14px 40px #000c;opacity:${op.toFixed(3)}">${items}</div>`;
+}
+/** Frame centre of menu row i, for a menu opened at `at`. */
+export const newMenuRow = (at, i) => ({ x: at.x + 160, y: at.y + 22 + 6 + i * 40 + 20 });
+
+// ---------- the draft page (webview-draft: DraftBanner, a read-only canvas) ----------
+// What opens when a start reads something in (src/services/draftModel.ts): the banner's
+// headline and detail, its buttons, and the diagram it would keep, drawn read-only. Nothing is
+// written until Keep.
+/** The coffee-shop example a plain folder's first visit opens (the automatic example draft). */
+export const EXAMPLE_DRAFT = {
+  tab: 'Example: Coffee shop',
+  headline: 'Example: a coffee-shop star schema · 6 tables, 8 relationships · not saved',
+  detail: 'Keep saves it as coffee-shop in the Gold layer (.erd-studio/gold/diagrams/coffee-shop.dbml).',
+  scope: { label: 'Example', value: 'Coffee shop · 6 tables' },
+  // [label, kind]: the one primary (New Diagram…), the guide beside it, Keep (quiet), the menu, Discard.
+  buttons: [['New Diagram…', 'primary'], ['Bring In Your Data Model…', 'secondary'], ['Keep This Example', 'quiet'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
+  // The example's six tables and all eight of its relationships (openExampleDiagram.ts EXAMPLE_DBML:
+  // fct_orders has three refs, fct_order_items five), a few columns each.
+  details: true,
+  tables: [
+    { name: 'dim_customers', x: 0, y: 0, cols: [['PK', 'customer_id', 'varchar'], [null, 'customer_name', 'varchar'], [null, 'customer_type', 'varchar']] },
+    { name: 'dim_locations', x: 0, y: 330, cols: [['PK', 'location_id', 'varchar'], [null, 'location_name', 'varchar']] },
+    { name: 'fct_orders', x: 520, y: 40, cols: [['PK', 'order_id', 'varchar'], ['FK', 'customer_id', 'varchar'], ['FK', 'location_id', 'varchar'], ['FK', 'order_date', 'date'], [null, 'order_total', 'decimal']] },
+    { name: 'dim_dates', x: 1560, y: 420, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
+    { name: 'fct_order_items', x: 1040, y: 260, cols: [['PK', 'order_item_id', 'varchar'], ['FK', 'order_id', 'varchar'], ['FK', 'customer_id', 'varchar'], ['FK', 'location_id', 'varchar'], ['FK', 'product_id', 'varchar'], ['FK', 'order_date', 'date']] },
+    { name: 'dim_products', x: 1560, y: 0, cols: [['PK', 'product_id', 'varchar'], [null, 'product_name', 'varchar'], [null, 'product_price', 'decimal']] },
   ],
+  // [from table, from row, to table, to row]
+  rels: [[2, 1, 0, 0], [2, 2, 1, 0], [2, 3, 3, 0], [4, 1, 2, 0], [4, 2, 0, 0], [4, 3, 1, 0], [4, 4, 5, 0], [4, 5, 3, 0]],
+};
+/** What Import DBML… shows for a sales.dbml before anything is written (draftFromImportPlan). */
+export const SALES_DRAFT = {
+  tab: 'Draft: sales',
+  file: 'sales.dbml',
+  headline: 'Draft from sales.dbml · 5 tables, 4 relationships · not saved',
+  detail: 'Keep saves it as sales in the Gold layer (.erd-studio/gold/diagrams/sales.dbml).',
+  // Keep is the primary; the other starts (FIND_STARTS) sit in the menu.
+  buttons: [['Keep as Diagram', 'primary'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
+  // An import's draft always carries its review (draftModel detailsFromImportReview): "Show details".
+  details: true,
+  // No name the tour's library already has (dim_customer, fct_order, nor the README GIF's dim_date):
+  // a name that is would be reused, and the detail would say so.
+  tables: [
+    { name: 'dim_store', x: 0, y: 0, cols: [['PK', 'store_id', 'int'], [null, 'store_name', 'varchar'], [null, 'region', 'varchar']] },
+    { name: 'dim_staff', x: 0, y: 330, cols: [['PK', 'staff_id', 'int'], [null, 'staff_name', 'varchar']] },
+    { name: 'fct_sale', x: 520, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'store_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
+    { name: 'dim_calendar', x: 1040, y: 0, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
+    { name: 'fct_refund', x: 1040, y: 300, cols: [['PK', 'refund_id', 'int'], ['FK', 'sale_id', 'int'], [null, 'refunded', 'decimal(12,2)']] },
+  ],
+  rels: [[2, 1, 0, 0], [2, 2, 1, 0], [2, 3, 3, 0], [4, 1, 2, 0]],
 };
 
-// The two windows the videos show, before their first diagram: the dbt cut runs in the
-// jaffle-shop dbt project; the logical cut in a folder without dbt.
-export const DBT_PROJECT = { 'erdStudio.hasDbtProject': true, 'erdStudio.hasDiagrams': false, workspaceFolderCount: 1 };
-export const PLAIN_FOLDER = { 'erdStudio.hasDbtProject': false, 'erdStudio.hasDiagrams': false, workspaceFolderCount: 1 };
-/** The plain folder once its first diagram exists: openDiagram replaces newDiagram. */
-export const PLAIN_FOLDER_WITH_DIAGRAM = { ...PLAIN_FOLDER, 'erdStudio.hasDiagrams': true };
-/** The windows by name, for a scene's `props.window` in a script. */
-export const WINDOWS = { dbt: DBT_PROJECT, plain: PLAIN_FOLDER, plainWithDiagram: PLAIN_FOLDER_WITH_DIAGRAM };
+/** DraftBanner's link to the draft's details (webview-draft/lib/wording.ts SHOW_DETAILS). */
+export const SHOW_DETAILS = 'Show details';
 
-/**
- * Evaluates the walkthrough's `when` clauses: terms `key`, `!key` and `key == n`, joined by `&&`.
- * Anything else (`||`, brackets, other operators, a key the context does not set) throws.
- */
-export function whenHolds(when, ctx) {
-  if (when === undefined) return true;
-  return when.split(' && ').every((term) => {
-    let m;
-    if ((m = term.match(/^(!?)([\w.]+)$/))) {
-      if (!(m[2] in ctx)) throw new Error(`unknown context key ${m[2]}`);
-      return Boolean(ctx[m[2]]) !== (m[1] === '!');
-    }
-    if ((m = term.match(/^([\w.]+) == (\d+)$/))) {
-      if (!(m[1] in ctx)) throw new Error(`unknown context key ${m[1]}`);
-      return ctx[m[1]] === Number(m[2]);
-    }
-    throw new Error(`unsupported when clause: ${when}`);
-  });
-}
-/** The steps a window with this context shows, in order. */
-export const visibleSteps = (ctx = DBT_PROJECT) => WALKTHROUGH.steps.filter((s) => whenHolds(s.when, ctx));
-
-// The step images are the real media/walkthrough/*.svg files, inlined (an <img> could not use the
-// page's fonts, and the video uses OFL fonts only). Fetched once, before the first frame.
-const SVG_NAMES = [...new Set(WALKTHROUGH.steps.map((s) => s.svg))];
-export const WALK_SVG = Object.fromEntries(await Promise.all(SVG_NAMES.map(async (n) => {
-  const txt = await (await fetch(`/media/walkthrough/${n}.svg`, { cache: 'no-store' })).text();
-  return [n, txt.replace(/font-family="[^"]*"/, 'font-family="Inter, sans-serif"')];
-})));
-/** A walkthrough image at width w (the sources are 480x300). */
-export const walkSvg = (name, w) =>
-  WALK_SVG[name].replace(/width="480" height="300"/, `width="${w}" height="${Math.round((w * 300) / 480)}"`);
-
-/**
- * Geometry of the walkthrough page, in coordinates relative to its own left edge / the body top.
- * `wide` (no side bar) gives the step column and the image more room; `dense` (with `wide`) a
- * wider step column, slightly tighter rows and lines, so a step with two paragraphs and two
- * buttons (newDiagram) still fits the window. `steps` overrides the step list (see sample.js).
- */
-export function wtGeom({ wide = false, dense = false, open = 'draw', ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
-  const W = wide ? BODY.w - ACT : BODY.w - ACT - SIDE;
-  const g = { W, SX: 48, SW: wide ? 760 : 640, ROW: 48, STEPS_Y: 104, INDENT: 52, TEXT_W: wide ? 680 : 560, TEXT_LH: 28, BTN_H: 46 };
-  if (wide && dense) Object.assign(g, { SW: 980, TEXT_W: 900, TEXT_LH: 27, ROW: 46, STEPS_Y: 100 });
-  g.IMG_X = g.SX + g.SW + 44;
-  g.IMG_W = Math.min(W - g.IMG_X - 48, wide ? 760 : 520);
-  const idx = steps.findIndex((s) => s.id === open);
-  if (idx < 0) throw new Error(`walkthrough step ${open} is not shown in this window`);
-  g.OPEN_Y = g.STEPS_Y + idx * g.ROW;
-  const step = steps[idx];
-  const perLine = g.TEXT_W / 9.6;                      // ~characters per line at 19 px Inter
-  g.TEXT_LINES = step?.text ? Math.ceil(step.text.length / perLine) : 0;
-  g.BTN_Y = 54 + g.TEXT_LINES * g.TEXT_LH + 14;         // relative to the open step's top
-  g.OPEN_H = g.BTN_Y + g.BTN_H + 18;
-  if (step?.more) {
-    // the second paragraph and its button, below the first button
-    g.MORE_LINES = Math.ceil(step.more.text.length / perLine);
-    g.MORE_Y = g.BTN_Y + g.BTN_H + 14;
-    g.MORE_BTN_Y = g.MORE_Y + g.MORE_LINES * g.TEXT_LH + 10;
-    g.OPEN_H = g.MORE_BTN_Y + g.BTN_H + 18;
+const MINI_W = 400;
+const miniRowY = (top, i) => top + 62 + i * 46 + 23;
+/** A draft's diagram at full node scale, in local coordinates (scaled by draftPage). */
+function draftDiagram(d, { op = 1 } = {}) {
+  let h = '';
+  for (const [a, ar, b, br] of d.rels) {
+    const A = d.tables[a], B = d.tables[b];
+    const rightward = B.x > A.x;
+    const x0 = rightward ? A.x + MINI_W : A.x, x1 = rightward ? B.x : B.x + MINI_W;
+    const y0 = miniRowY(A.y, ar), y1 = miniRowY(B.y, br), mx = (x0 + x1) / 2;
+    h += edge([[x0, y0], [mx, y0], [mx, y1], [x1, y1]], { width: 4, opacity: op });
   }
-  g.BOTTOM = g.STEPS_Y + (steps.length - 1) * g.ROW + g.OPEN_H + 6;
-  return g;
-}
-
-const doneDot = (size) =>
-  `<span style="width:${size}px;height:${size}px;border-radius:50%;background:#3794ff;color:#0b1422;display:flex;align-items:center;justify-content:center;flex:none">${ICON.check({ size: Math.round(size * 0.68) })}</span>`;
-const openDot = (size) => `<span style="width:${size}px;height:${size}px;border-radius:50%;display:block;border:2.5px solid #6c6f76;flex:none;box-sizing:border-box"></span>`;
-
-/**
- * The Welcome editor's walkthrough page (origin = its top-left inside the body).
- * @param o.open   id of the expanded step   @param o.done  completed step ids
- * @param o.glow   0..1 highlight on the open step   @param o.press 0..1 click on its button
- * @param o.img    0..1 opacity of the step's image
- * @param o.ctx    the window's context keys (DBT_PROJECT or PLAIN_FOLDER): which steps show
- * @param o.steps  the step list, when it is not the walkthrough's own (see sample.js)
- */
-export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wide = false, dense = false, img = 1, ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
-  const g = wtGeom({ wide, dense, open, ctx, steps });
-  const button = (y, label, bg) => `<div class="abs" style="left:${g.INDENT}px;top:${y}px;height:${g.BTN_H}px;padding:0 22px;border-radius:5px;background:${bg};color:#fff;font-size:21px;font-weight:600;display:flex;align-items:center;white-space:nowrap">${label}</div>`;
-  let h = `<div class="abs" style="left:0;top:0;width:${g.W}px;bottom:0;background:var(--card)"></div>`;
-  h += `<div class="abs" style="left:${g.SX}px;top:18px;font-size:32px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${WALKTHROUGH.title}</div>`;
-  h += `<div class="abs" style="left:${g.SX}px;top:62px;font-size:20px;color:var(--text-2);white-space:nowrap">${WALKTHROUGH.description}</div>`;
-  let y = g.STEPS_Y;
-  for (const s of steps) {
-    const dot = done.includes(s.id) ? doneDot(26) : openDot(26);
-    if (s.id === open) {
-      const bw = `rgba(55,148,255,${(0.3 + 0.7 * glow).toFixed(2)})`;
-      const btnBg = press > 0 && press < 1 ? '#0b4f7d' : '#0e639c';
-      const more = s.more
-        ? `<div class="abs" style="left:${g.INDENT}px;top:${g.MORE_Y}px;width:${g.TEXT_W}px;font-size:19px;line-height:${g.TEXT_LH}px;color:var(--text-2)">${esc(s.more.text)}</div>${button(g.MORE_BTN_Y, s.more.button, '#0e639c')}`
-        : '';
-      h += `<div class="abs" style="left:${g.SX}px;top:${y}px;width:${g.SW}px;height:${g.OPEN_H}px;border-radius:10px;background:#ffffff0c;border:2px solid ${bw};box-shadow:0 0 ${(26 * glow).toFixed(1)}px rgba(55,148,255,${(0.35 * glow).toFixed(2)})">
-        <div class="abs" style="left:13px;top:14px">${dot}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:10px;font-size:23px;line-height:34px;font-weight:700;white-space:nowrap">${esc(s.title)}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:54px;width:${g.TEXT_W}px;font-size:19px;line-height:${g.TEXT_LH}px;color:var(--text-2)">${esc(s.text)}</div>
-        ${button(g.BTN_Y, s.button, btnBg)}${more}
-      </div>`;
-      y += g.OPEN_H + 6;
-    } else {
-      h += `<div class="abs" style="left:${g.SX}px;top:${y}px;width:${g.SW}px;height:${g.ROW}px;display:flex;align-items:center;gap:14px;padding-left:13px;font-size:21px;white-space:nowrap;color:${done.includes(s.id) ? 'var(--text-2)' : 'var(--text)'}">${dot}${esc(s.title)}</div>`;
-      y += g.ROW;
-    }
-  }
-  const step = steps.find((s) => s.id === open);
-  if (step && img > 0) {
-    h += `<div class="abs" style="left:${g.IMG_X}px;top:${g.STEPS_Y}px;opacity:${img.toFixed(3)}">${walkSvg(step.svg, g.IMG_W)}</div>`;
+  for (const t of d.tables) {
+    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'GLD', cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
   }
   return h;
 }
-/** Frame-space centre of the open step's button. `left` = the walkthrough's left edge in body px. */
-export function walkButton({ wide = false, dense = false, open = 'draw', left = ACT + SIDE, ctx = DBT_PROJECT, steps = visibleSteps(ctx) } = {}) {
-  const g = wtGeom({ wide, dense, open, ctx, steps });
-  const step = steps.find((s) => s.id === open);
-  const w = 22 * 2 + step.button.length * 11.2;
-  return { x: BODY.x + left + g.SX + g.INDENT + w / 2, y: BODY.y + g.OPEN_Y + g.BTN_Y + g.BTN_H / 2 };
-}
-
-// ---------- the orders canvas (Draw from dbt on a small jaffle-shop project's marts folder) ----------
-// Four marts models, so the picker's "4 models" and the canvas agree. Keys come from the unique
-// and relationship tests (markDraftKeys), types from each column's data_type in the schema .yml.
-export const CANVAS = { toolbarX: BODY.x + 24, toolbarY: BODY.y + 16 };
-export const MODELS = [
-  { name: 'dim_customers', x: 135, y: 530, w: 350, cols: [{ key: 'PK', name: 'customer_id', type: 'VARCHAR' }, { name: 'customer_name', type: 'VARCHAR' }] },
-  { name: 'fct_orders', x: 560, y: 490, w: 350, cols: [{ key: 'PK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'customer_id', type: 'VARCHAR' }, { name: 'ordered_at', type: 'DATE' }, { name: 'order_total', type: 'DECIMAL' }] },
-  { name: 'fct_order_items', x: 985, y: 530, w: 370, cols: [{ key: 'PK', name: 'order_item_id', type: 'VARCHAR' }, { key: 'FK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'product_id', type: 'VARCHAR' }] },
-  { name: 'dim_products', x: 1430, y: 510, w: 350, cols: [{ key: 'PK', name: 'product_id', type: 'VARCHAR' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'product_price', type: 'DECIMAL' }] },
-];
-/** Frame y of the centre of column row i of a node at `top` (no grain line: a draft has none). */
-export const ry = (top, i) => top + 62 + i * 46 + 23;
-export const nodeH = (m) => 62 + m.cols.length * 46 + 6;
 
 /**
- * The three relationship edges as orthogonal paths: [points, manyMark, oneMark].
- * `pos` overrides model positions (for the layout glide).
+ * The draft editor, in body coordinates from `left` to the body's right edge: the banner (two
+ * rows: the text, then the switcher and buttons) over the draft's read-only diagram. `press` is
+ * [buttonIndex, 0..1] for a click, `glow` rings the primary; `diagramOp` fades the diagram in.
  */
-export function orderEdges(pos = MODELS) {
-  const [dc, fo, fi, dp] = pos.map((p, i) => ({ ...MODELS[i], ...p }));
-  const jog = (a, b) => (a + b) / 2;
-  const e = (from, fr, to, tr, dir) => {
-    // from.side: the many end; dir -1 = to the left, +1 = to the right
-    const x0 = dir < 0 ? from.x : from.x + from.w;
-    const x1 = dir < 0 ? to.x + to.w : to.x;
-    const y0 = ry(from.y, fr), y1 = ry(to.y, tr);
-    const mx = jog(x0, x1);
-    return [[[x0, y0], [mx, y0], [mx, y1], [x1, y1]], [dir < 0 ? x0 - 22 : x0 + 6, y0 - 8], [dir < 0 ? x1 + 8 : x1 - 20, y1 - 10]];
-  };
-  return [e(fo, 1, dc, 0, -1), e(fi, 1, fo, 0, -1), e(fi, 2, dp, 0, +1)];
+export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17 } = {}) {
+  // DraftBanner: the headline, the detail, then (a draft with details) a "Show details" line.
+  const BAN = d.details ? 162 : 132;
+  const bx = 28;
+  const btnHtml = d.buttons.map(([label, kind], i) => {
+    const pressed = press && press[0] === i && press[1] > 0 && press[1] < 1;
+    const bg = kind === 'primary' ? (pressed ? '#0b4f7d' : '#0e639c') : kind === 'quiet' ? 'transparent' : '#3a3d41';
+    const ring = kind === 'primary' && glow > 0 ? `box-shadow:0 0 0 3px rgba(55,148,255,${(0.6 * glow).toFixed(3)}),0 0 22px rgba(55,148,255,${(0.5 * glow).toFixed(3)});` : '';
+    return `<span style="height:36px;padding:0 13px;border-radius:4px;background:${bg};${kind === 'quiet' ? 'border:1px solid #4a4d55;' : ''}color:${kind === 'primary' ? '#fff' : 'var(--text)'};font-weight:${kind === 'primary' ? 600 : 500};display:flex;align-items:center;gap:6px;${ring}">${esc(label)}${kind === 'menu' ? ICON.chevDown({ size: 15, sw: 2.6 }) : ''}</span>`;
+  }).join('');
+  const scope = d.scope
+    ? `<span style="display:flex;align-items:center;gap:8px;margin-right:8px"><span style="color:var(--text-2)">${d.scope.label}</span><span style="height:34px;display:flex;align-items:center;gap:8px;padding:0 8px 0 10px;border-radius:4px;background:#2a2b30;border:1px solid #3c3d44">${esc(d.scope.value)}${ICON.chevDown({ size: 15, sw: 2.6 })}</span></span>`
+    : '';
+  const html = `<div class="abs" style="left:${left}px;top:0;width:${width}px;bottom:0;background:var(--card);opacity:${op.toFixed(3)};overflow:hidden">
+      <div class="abs grid-bg" style="left:0;right:0;top:${BAN}px;bottom:0"></div>
+      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp })}</div>
+      <div class="abs" style="left:0;right:0;top:0;height:${BAN}px;background:#1d2633;border-bottom:1px solid #2d4a70"></div>
+      <div class="abs" style="left:${bx}px;top:14px;right:20px;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.headline)}</div>
+      <div class="abs" style="left:${bx}px;top:46px;right:20px;font-size:17px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.detail)}</div>
+      ${d.details ? `<div class="abs" style="left:${bx}px;top:74px;font-size:17px;color:#3794ff;white-space:nowrap">${SHOW_DETAILS}</div>` : ''}
+      <div class="abs" style="left:${bx}px;top:${BAN - 52}px;display:flex;align-items:center;gap:8px;font-size:${font}px;white-space:nowrap">${scope}${btnHtml}</div></div>`;
+  return { html };
 }
 
-/** A node with the canvas' layer badge. */
-export const orderNode = (m, opts = {}) => node({ x: m.x, y: m.y, w: m.w, name: m.name, layer: 'GLD', cols: m.cols, ...opts });
-
-export const STAGE_BLUE = COLORS.logical;
+// ---------- the canvas ----------
+export const CANVAS = { toolbarX: BODY.x + 24, toolbarY: BODY.y + 16 };
 
 // ---------- VS Code QuickPick ----------
-// The first QuickPick, as the command lists this project (dbtDraft.ts listDraftScopes: one row per
-// folder, presentation folders first; detail = the first names, best-connected first).
-export const DRAW_PICK = {
-  title: 'Draw from dbt',
-  placeholder: 'Which dbt models should the diagram start from?',
-  rows: [
-    { label: 'marts', description: '4 models', detail: 'fct_order_items, fct_orders, dim_customers, dim_products' },
-    { label: 'staging', description: '4 models', detail: 'stg_customers, stg_order_items, stg_orders, stg_products' },
-  ],
-  choose: { label: 'Choose models…', description: 'pick up to 15 of 8' },
-  progress: 'Reading your dbt project…',
-  namePrompt: 'Name the diagram. It is saved in the Gold layer.',
-  suggested: 'marts',
-  name: 'orders',
-};
-
 export const QP = { x: WIN.x + (WIN.w - 900) / 2, y: WIN.y + 8, w: 900, title: 46, input: 56 };
 /** QuickPick box with its title bar; `inner` is positioned inside it. */
 export const quickPick = (title, inner, h, style = '') =>
@@ -295,10 +331,10 @@ export const quickPick = (title, inner, h, style = '') =>
     <div class="abs" style="left:0;right:0;top:0;height:${QP.title}px;display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600;color:var(--text-2);background:#1f1f20;border-bottom:1px solid #3a3a3c">${title}</div>
     ${inner}</div>`;
 
-// ---------- New Diagram (erdStudio.createDomain), the logical cut's first diagram ----------
+// ---------- New Diagram (erdStudio.createDomain), the first diagram ----------
 // The name box as a fresh DBML project shows it: no diagrams yet, so the first one goes in the
 // last creatable layer (Gold) by itself and the prompt says where (src/extension.ts). The
-// validator's Info message says what the typed name is saved as (slugFromName).
+// validator's Info message says what the typed name is saved as (src/commands/diagramName.ts).
 export const NEW_DIAGRAM = {
   title: 'New Diagram',
   placeholder: 'e.g. Customer 360, Sales, Orders',

@@ -1,49 +1,49 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:04.524
-Your data model, as a diagram, saved as plain files in your repo.
+00:00:00.350 --> 00:00:04.997
+Your data model, as a diagram, saved as DBML files in your repo.
 
 2
-00:00:04.574 --> 00:00:07.061
-No AI, and nothing to configure.
+00:00:05.047 --> 00:00:07.976
+No AI needed, and nothing to configure.
 
 3
-00:00:07.511 --> 00:00:12.035
-Install ERD Studio, and open the folder your data model lives in.
+00:00:08.426 --> 00:00:12.540
+Install ERD Studio, open your folder, and click its icon.
 
 4
-00:00:12.085 --> 00:00:14.399
-The Get started guide opens by itself.
-
-5
-00:00:14.849 --> 00:00:17.417
+00:00:14.826 --> 00:00:17.394
 Click New Diagram, and give it a name.
 
-6
-00:00:20.049 --> 00:00:22.684
+5
+00:00:19.226 --> 00:00:21.861
 Add a table, with starter columns if you like.
 
-7
-00:00:22.734 --> 00:00:25.655
+6
+00:00:21.911 --> 00:00:24.832
 Add another, then link the two with a relationship.
 
+7
+00:00:26.426 --> 00:00:30.769
+Each table is a DBML file, to commit and review like code.
+
 8
-00:00:29.049 --> 00:00:34.667
-Each table is a plain DBML file in your repo, to commit and review like code.
+00:00:31.826 --> 00:00:34.595
+Export to DBML or Mermaid any time.
 
 9
-00:00:35.449 --> 00:00:39.543
-Already have DBML? Import it, and export back any time.
+00:00:34.645 --> 00:00:38.083
+Already have DBML? Import it, then keep the draft.
 
 10
-00:00:40.649 --> 00:00:43.501
+00:00:38.826 --> 00:00:41.678
 Want grain, keys and the why behind each table?
 
 11
-00:00:43.551 --> 00:00:48.968
+00:00:41.728 --> 00:00:47.145
 Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
 
 12
-00:00:49.949 --> 00:00:54.523
-ERD Studio is free. Install it, and draw your data model today.
+00:00:47.626 --> 00:00:51.020
+ERD Studio is free to use. Install it today.

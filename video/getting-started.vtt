@@ -1,61 +1,57 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:03.723
-Your dbt project, as a diagram, in about a minute.
+00:00:00.350 --> 00:00:04.997
+Your data model, as a diagram, saved as DBML files in your repo.
 
 2
-00:00:03.773 --> 00:00:06.260
-No AI, and nothing to configure.
+00:00:05.047 --> 00:00:07.976
+No AI needed, and nothing to configure.
 
 3
-00:00:06.710 --> 00:00:10.630
-Install ERD Studio, and open your dbt project.
+00:00:08.426 --> 00:00:12.540
+Install ERD Studio, open your folder, and click its icon.
 
 4
-00:00:10.680 --> 00:00:12.994
-The Get started guide opens by itself.
+00:00:14.826 --> 00:00:17.394
+Click New Diagram, and give it a name.
 
 5
-00:00:13.444 --> 00:00:17.184
-Click Draw from dbt, and pick a folder, like your marts.
+00:00:19.226 --> 00:00:21.861
+Add a table, with starter columns if you like.
 
 6
-00:00:19.244 --> 00:00:24.162
-It reads your models and their relationship tests, and lays out the diagram for you.
+00:00:21.911 --> 00:00:24.832
+Add another, then link the two with a relationship.
 
 7
-00:00:25.244 --> 00:00:26.957
-That's your Logical design.
+00:00:26.426 --> 00:00:30.769
+Each table is a DBML file, to commit and review like code.
 
 8
-00:00:27.007 --> 00:00:29.435
-Click a table to see its columns and keys.
+00:00:31.826 --> 00:00:34.595
+Export to DBML or Mermaid any time.
 
 9
-00:00:29.485 --> 00:00:33.211
-It's saved as plain files in your repo, next to your SQL.
+00:00:34.645 --> 00:00:38.083
+Already have DBML? Import it, then keep the draft.
 
 10
-00:00:33.661 --> 00:00:36.968
-Switch to Physical to see what dbt actually built.
-
-11
-00:00:37.018 --> 00:00:40.424
-Diff compares the two, and flags anywhere they disagree.
-
-12
-00:00:40.874 --> 00:00:43.726
+00:00:38.826 --> 00:00:41.678
 Want grain, keys and the why behind each table?
 
-13
-00:00:43.776 --> 00:00:49.193
+11
+00:00:41.728 --> 00:00:47.145
 Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
 
-14
-00:00:50.174 --> 00:00:53.673
-No dbt project? Try the sample project.
+12
+00:00:47.626 --> 00:00:51.761
+Using dbt? Then a Physical tab shows what dbt has.
 
-15
-00:00:55.074 --> 00:01:00.120
-ERD Studio is free. Install it, and draw your dbt project today.
+13
+00:00:51.811 --> 00:00:55.029
+Click Compare with dbt to mark every difference.
+
+14
+00:00:55.626 --> 00:00:59.020
+ERD Studio is free to use. Install it today.
