@@ -512,6 +512,44 @@ const FEATURES = [
   // A draft's Open Folder… reloaded the window into a folder, and that folder's
   // draft showed at once (the no-folder example's route; the guide carries on).
   'draftAfterOpenFolder',
+  // Run dbt parse outcomes. `dbtParse` stays the click (#113 continuity).
+  'dbtParseLaunched',        // a dbt parse process started (any mode, also the rerun after dbt deps or Parse without your credentials)
+  'dbtParseRefresh',         // …with a manifest.json already there (a refresh, can never be manifestAfterParse)
+  'dbtParseNoDbt',           // no dbt found; the install message showed
+  'dbtParseVenvDeclined',    // the project-venv modal was dismissed
+  'dbtParseCloudCli',        // only the dbt Cloud CLI was found; not run
+  'dbtParseBusy',            // a dbt run (parse, compile or deps) was already going, or starting, for the project
+  'dbtParseNoProfiles',      // no profiles.yml anywhere: Parse without your credentials offered before any run
+  'dbtParseNoStart',         // the executable could not be started, or cmd.exe could not quote a path it needs
+  'dbtParseStopped',         // the user stopped it (closed the terminal, Ctrl+C)
+  'dbtParseExitOk',
+  'dbtParseExitFail',
+  'dbtParseOkNoManifest',    // exit 0 but no manifest where ERD Studio reads it
+  // why a dbt parse failed, by fixed category (dbt's output never leaves the machine)
+  'dbtParseFailProfile', 'dbtParseFailTarget', 'dbtParseFailEnvVar', 'dbtParseFailAdapter',
+  'dbtParseFailAdapterDeps', 'dbtParseFailDeps', 'dbtParseFailCredentials', 'dbtParseFailNoProject',
+  'dbtParseFailDbtVersion', 'dbtParseFailProject', 'dbtParseFailOther',
+  'dbtParseShowOutput',
+  'dbtParseAdapterDocs',
+  'dbtParseNoCreds',         // Parse without your credentials was chosen
+  'dbtParseNoCredsAsked',    // its adapter pick list was shown
+  'dbtParseNoCredsUnsupported', // no adapter it knows was installed
+  'dbtParseNoCredsOk',
+  'dbtParseNoCredsFail',
+  // which adapter the placeholder profile used, by fixed product name
+  'dbtNoCredsDuckdb', 'dbtNoCredsPostgres', 'dbtNoCredsRedshift', 'dbtNoCredsSnowflake', 'dbtNoCredsDatabricks',
+  'dbtNoCredsBigquery', 'dbtNoCredsFabric', 'dbtNoCredsSqlserver', 'dbtNoCredsTrino', 'dbtNoCredsSpark',
+  'dbtParseDeps',            // Run dbt deps was chosen
+  'dbtDepsExitOk',
+  'dbtDepsExitFail',
+  'dbtParseOpenPhysical',    // Open Physical view was pressed after a parse
+  'dbtCompileLaunched',
+  'dbtCompileNoDbt',
+  'dbtCompileVenvDeclined',
+  'dbtCompileExitOk',
+  'dbtCompileExitFail',
+  'dbtCompileStopped',       // the user stopped Run dbt compile
+  'dbtCompileNoStart',       // Run dbt compile's executable could not be started or quoted
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -610,6 +648,10 @@ const ERROR_CODES = [
   // Draft-first: a draft could not be built (ours); the preview's layout failed.
   'draftBuildFailed',
   'draftLayoutFailed',
+  // Run dbt parse: the placeholder profile could not be written to ERD Studio's
+  // storage; ERD Studio's own Run dbt parse / compile code threw (never dbt's failure).
+  'dbtProfileWriteFailed',
+  'dbtRunFailed',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
