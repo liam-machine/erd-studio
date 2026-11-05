@@ -52,7 +52,7 @@ export const PhysicalSourceNotice: React.FC = () => {
           columns and tests.
         </span>{' '}
         <span className="physical-source-notice__hint">
-          Needs a working dbt profile. For real column types, run <code>dbt docs generate</code> afterwards.
+          Without a dbt profile, it offers Parse without your credentials. For real column types, run <code>dbt docs generate</code> afterwards (that one connects to your warehouse).
         </span>
       </span>
       <button

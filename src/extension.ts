@@ -44,6 +44,8 @@ import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type Db
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
 import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
+import { setDbtRunHost } from './commands/dbtRunHost';
+import { disposeDbtRuns, isDbtRunActiveOrRecent } from './commands/dbtTerminal';
 import {
   manifestAppearanceFeature,
   manifestMissingReasons,
@@ -1734,6 +1736,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   editorProvider.setReportTracking(trackingService);
   editorProvider.setCatalogService(catalogService);
   editorProvider.setLogicalOnly(!hasDbt);
+  // Run dbt parse / compile: their children are killed and terminals closed on deactivate.
+  context.subscriptions.push({ dispose: disposeDbtRuns });
+  if (hasDbt) {
+    // Parse without your credentials keeps its placeholder profile in the
+    // extension's own storage, never the workspace; Open Physical view
+    // switches a canvas through the existing stage switch.
+    setDbtRunHost({
+      storageDir: context.globalStorageUri.fsPath,
+      dbtConfig: () => dbtConfig,
+      physicalTarget: (origin) => editorProvider.physicalSwitchTarget(origin),
+      originIsPhysical: (origin) => editorProvider.originIsPhysical(origin),
+      openPhysical: (uri) => {
+        manifestService.invalidate();
+        editorProvider.switchStageForUri(uri, 'physical');
+      },
+    });
+    context.subscriptions.push({ dispose: () => setDbtRunHost(undefined) });
+  }
   // Read the table library in the background, a few milliseconds at a time
   // (reads only), so the first diagram opened finds its tables already read;
   // it steps aside whenever a canvas is working.
@@ -1951,6 +1971,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let manifestChangeGen = 0;
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
+      // Captured before any await: the refresh below can outlast the grace on a
+      // large project. A Run dbt parse / compile run says it finished itself.
+      const fromDbtRun = isDbtRunActiveOrRecent(workspaceRoot);
       const gen = ++manifestChangeGen;
       // isMissing reflects the last load, before this change (#113).
       const wasMissing = manifestService.isMissing;
@@ -1974,7 +1997,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showWarningMessage(
           `dbt manifest removed (${manifestDisplayPath(workspaceRoot, dbtConfig)}). ` +
             'Your dbt models and relationships still come from your schema .yml files. ' +
-            'Run dbt parse to write it again (needs a working dbt profile), or dbt docs generate for warehouse types.',
+            'Run dbt parse to write it again, or dbt docs generate for warehouse types.',
           RUN_DBT_PARSE_ACTION,
         ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
         return;
@@ -1991,9 +2014,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             // Superseded by a newer event during retry
             if (retryGen !== manifestChangeGen) { return; }
             if (!manifestService.isStale) {
-              void vscode.window.showInformationMessage(
-                'dbt manifest updated. Graphs refreshed with latest dbt model data.',
-              );
+              if (!fromDbtRun) {
+                void vscode.window.showInformationMessage(
+                  'dbt manifest updated. Graphs refreshed with latest dbt model data.',
+                );
+              }
             } else {
               void vscode.window.showWarningMessage(
                 'dbt manifest still updating — graph may show stale data. Run dbt compile to refresh.',
@@ -2003,7 +2028,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             log.error('[ERD Studio] Manifest retry failed:', err);
           }
         }, 2000);
-      } else {
+      } else if (!fromDbtRun) {
         void vscode.window.showInformationMessage(
           'dbt manifest updated. Graphs refreshed with latest dbt model data.',
         );
@@ -3774,7 +3799,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             void vscode.window.showWarningMessage(
               `No dbt manifest yet (${manifestDisplayPath(workspaceRoot, dbtConfig)}) — dbt hasn't been run in this project. ` +
                 'Your dbt models and relationships still come from your schema .yml files. ' +
-                'Run dbt parse to read columns and tests (needs a working dbt profile), or dbt docs generate for warehouse types.',
+                'Run dbt parse to read columns and tests, or dbt docs generate for warehouse types.',
               RUN_DBT_PARSE_ACTION,
             ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
           } else if (manifestService.isStale) {

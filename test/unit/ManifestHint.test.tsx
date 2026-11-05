@@ -51,7 +51,7 @@ describe('ManifestHint', () => {
     render(<ManifestHint />);
     const text = document.body.textContent ?? '';
     expect(text).toContain(LEAD);
-    expect(text).toContain('Needs a working dbt profile.');
+    expect(text).toContain('Without a dbt profile, it offers Parse without your credentials.');
   });
 
   it('"Run dbt parse" posts runDbtParse', () => {
