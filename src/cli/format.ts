@@ -137,6 +137,9 @@ export function formatDoctor(r: DoctorResult, p: Paint, options: { mentionDbt?: 
     }
     lines.push(`${ok(r.artifacts.manifest.status === 'ok')} manifest ${r.artifacts.manifest.status}`
       + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
+    if (r.artifacts.manifest.placeholderProfile) {
+      lines.push('  manifest.json was written by Parse without your credentials (schemas left out)');
+    }
     lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   }
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'diagram')}, ${plural(r.erd.logicalModels, 'table')}`

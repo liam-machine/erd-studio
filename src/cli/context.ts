@@ -72,6 +72,8 @@ export interface ManifestInputInfo {
   /** Model count when a manifest was parsed (a stale one included), else null. */
   models: number | null;
   newestSourceChange: string | null;
+  /** Present (true) only when Parse without your credentials wrote the manifest: its schemas were left out. */
+  placeholderProfile?: true;
 }
 
 export interface CatalogInputInfo {
@@ -325,6 +327,7 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
       modifiedAt: iso(manifestMtime),
       models: manifestStatus === 'missing' || manifestStatus === 'unreadable' ? null : manifest.models.size,
       newestSourceChange,
+      ...(manifest.placeholderProfile === true ? { placeholderProfile: true as const } : {}),
     },
     ymlData,
     catalog,

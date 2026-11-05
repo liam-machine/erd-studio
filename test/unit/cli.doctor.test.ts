@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDoctor, type DoctorResult } from '../../src/cli/doctor';
 import { main } from '../../src/cli/index';
+import { formatDoctor, makePaint } from '../../src/cli/format';
 import { unimportedRelationshipsMessage } from '../../src/services/domainService';
 import { HARNESS_VERSION } from '../../src/services/harnessService';
 
@@ -194,6 +195,20 @@ describe('doctor', () => {
     fs.rmSync(path.join(root, 'target', 'manifest.json'));
     const r2 = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
     expect(r2.artifacts.manifest).toMatchObject({ status: 'missing', models: null, modifiedAt: null });
+  });
+
+  it('says when Parse without your credentials wrote the manifest (schemas left out)', async () => {
+    const root = copyFixture('dbt-project');
+    const before = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(before.artifacts.manifest.placeholderProfile).toBeUndefined();
+    expect(formatDoctor(before, makePaint(false))).not.toContain('Parse without your credentials');
+    const file = path.join(root, 'target', 'manifest.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+    json.metadata = { ...(json.metadata ?? {}), env: { ERD_STUDIO_THROWAWAY_PROFILE: '1' } };
+    fs.writeFileSync(file, JSON.stringify(json));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.artifacts.manifest.placeholderProfile).toBe(true);
+    expect(formatDoctor(r, makePaint(false))).toContain('manifest.json was written by Parse without your credentials (schemas left out)');
   });
 
   it('reports a manifest dbt changed after as stale, a fresh one as ok', async () => {
