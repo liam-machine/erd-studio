@@ -49,7 +49,7 @@ Greet the user in about four short lines:
 - You will design one diagram with them, write its files, check them, and open it on the canvas.
   Nothing outside `.erd-studio/` changes.
 - Want to see a finished one first? **ERD Studio: Open an Example…** (Command Palette) opens
-  a small coffee-shop model — no AI needed.
+  a small coffee-shop model to explore by hand.
 
 Then look before asking. Say "Checking this folder," and run
 `~/.erd-studio-cli/bin/erd-studio doctor --json --semantic-dir .erd-studio` — every time, even in

@@ -7,7 +7,7 @@ import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { workbench } from './driver.mjs';
 
-export async function startScreencast(dir, { width, height, quality = 92 } = {}) {
+export async function startScreencast(dir, { width, height, quality = 95 } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const log = join(dir, 'frames.jsonl');

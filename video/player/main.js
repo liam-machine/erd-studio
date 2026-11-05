@@ -3,19 +3,18 @@
 //
 // Persistent chrome (kicker, chapter bar) lives here; each scene module only returns the HTML
 // for its own content: `render(localT, ctx) -> string`, ctx = { beats, dur, t }.
-import { clamp, seg, easeOut, lerp, mix, ACCENT } from './lib.js';
+import { clamp, seg, easeOut, lerp, mix, ACCENT as DARK_ACCENT, ACCENT_LIGHT } from './lib.js';
 
 const params = new URLSearchParams(location.search);
 // ?variant=logical renders build-logical/ (script.logical.yaml); the default cut (script.yaml, the
-// same tour ending on a short dbt beat) is build/.
+// same tour with a short dbt beat before Confluence) is build/.
 const VARIANT = params.get('variant') ?? '';
 const BUILD = `/video/${VARIANT ? `build-${VARIANT}` : 'build'}`;
 const timeline = await (await fetch(`${BUILD}/timeline.json`, { cache: 'no-store' })).json();
 window.TIMELINE = timeline;
-// The extension listing the install scene shows is package.json's own description, read once.
-globalThis.PACKAGE_DESCRIPTION = (await (await fetch('/package.json', { cache: 'no-store' })).json()).description;
 
-// Scene modules come from the timeline itself (tour/ holds the scenes both cuts share, dbt/ the default cut's dbt beat).
+// Scene modules come from the timeline itself (rec/window: the frame both cuts' recorded footage plays in;
+// tour/: their HTML scenes, Confluence and the end card).
 const MODULES = [...new Set(timeline.scenes.map((s) => s.module))];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
@@ -25,6 +24,8 @@ const $ = (id) => document.getElementById(id);
 // A recorded cut (script.yaml `recording`): a smaller headline and a lower chapter bar leave room
 // for the real VS Code window between them (style.css body.rec).
 if (timeline.recording) document.body.classList.add('rec');
+/** The headline's highlight colours: the light frame's for a recorded cut, else the dark frame's. */
+const ACCENT = timeline.recording ? ACCENT_LIGHT : DARK_ACCENT;
 /** Recorded scenes' footage runs on across scene changes: only the headline fades between them. */
 const isRec = (sc) => !!sc && sc.module.startsWith('rec/');
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), chapters: $('chapters'), hud: $('hud') };

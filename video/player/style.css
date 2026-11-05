@@ -22,6 +22,7 @@
   --syn-key: #78c0f4; --syn-val: #eca86c; --syn-str: #a4d0a8; --syn-kw: #c490e8; --syn-punc: #8b9099;
   --prog-on: #e9ecef; --prog-off: #292a30; --link: #3794ff;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --chip: #1c1e23; --chip-border: #34363d; --chip-green: #13301f; --chip-green-border: #1f6b3a;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -48,6 +49,17 @@ svg { display: block; }
 .chapters__lbl--on { color: var(--text); }
 /* A recorded cut (main.js adds body.rec): the headline and chapter bar make room for the real
    VS Code window at the timeline's recording.inset (y 240-960). */
+/* ...and is light, to match VS Code's Light Modern it is filmed in: off-white, dark text, the
+   accents darkened enough to read on it (main.js ACCENT_LIGHT for the headline's highlight). */
+body.rec {
+  --bg-0: #eceff3; --bg-1: #f6f7f9; --bg-glow: #ffffff;
+  --card: #ffffff; --card-head: #f3f4f6; --card-border: #d0d7de; --card-inner: #f6f8fa; --row-line: #e5e7eb;
+  --text: #1f2328; --text-2: #57606a; --text-3: #8c959f; --line-no: #8c959f;
+  --blue: #2563eb; --green: #16a34a; --amber: #b45309;
+  --prog-on: #1f2328; --prog-off: #d5dae0; --link: #0969da;
+  --chip: #ffffff; --chip-border: #d0d7de; --chip-green: #e8f6ed; --chip-green-border: #9ad5ae;
+  background: radial-gradient(1400px 700px at 50% -10%, var(--bg-glow) 0%, var(--bg-1) 45%, var(--bg-0) 100%);
+}
 body.rec .kicker { top: 44px; }
 body.rec .headline { top: 84px; font-size: 62px; }
 body.rec .chapters { bottom: 40px; }

@@ -46,8 +46,8 @@ Every import opens as a draft: nothing is written until you press **Keep as Diag
 **More ways to start…** lists the rest, including **Import…** and **Bring In Your Data Model…**: the export steps for Databricks, Snowflake, Fabric, SQL Server and more ([the guide](docs/import-existing-models.md)).
 
 <table align="center"><tr>
-<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the One-Minute Tour (0:58): ERD Studio in VS Code, recorded, a DBML tour of the logical model." /></a></td>
-<td><strong>Watch the One-Minute Tour (0:58).</strong> A recording of ERD Studio in VS Code: start a diagram, see its files, import and export, set up your AI helper. It is also in the sidebar's <strong>Help &amp; Feedback</strong>.</td>
+<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the Tour (2:01): ERD Studio recorded in VS Code's light theme. It imports a data model exported from another tool, shows its DBML files next to the code, edits the diagram by hand and then with an AI assistant, compares the design with what the code builds, and ends on ERD Studio for Confluence showing the diagram from the GitHub repo." /></a></td>
+<td><strong>Watch the Tour (2:01).</strong> A recording of ERD Studio in VS Code: import the data model you already have, see its DBML files next to your code, edit it by hand or with your AI assistant, compare the design with what your code builds, then see it on a Confluence page with ERD Studio for Confluence. It is also in the sidebar's <strong>Help &amp; Feedback</strong>.</td>
 </tr></table>
 
 ## What's in your repo
@@ -97,7 +97,7 @@ Its changes are file edits you review like any other. The helper also adds a gui
 
 ## Using dbt?
 
-dbt is optional. Open the folder that holds your `dbt_project.yml` and the start screen leads with **Draw from dbt**, which turns your dbt models into a first diagram, no AI needed. The canvas gets two tabs, **Logical** (your design) · **Physical** (read from dbt), and **Compare with dbt** highlights missing columns, type differences and relationship mismatches. No dbt project to hand? Run **ERD Studio: Try the Sample Project**. [Using ERD Studio with dbt](docs/dbt.md) covers the rest. Another stack? [Propose an integration](https://github.com/liam-machine/erd-studio/issues).
+dbt is optional. Open the folder that holds your `dbt_project.yml` and the start screen leads with **Draw from dbt**, which turns your dbt models into a first diagram to refine by hand or with your AI assistant. The canvas gets two tabs, **Logical** (your design) · **Physical** (read from dbt), and **Compare with dbt** highlights missing columns, type differences and relationship mismatches. No dbt project to hand? Run **ERD Studio: Try the Sample Project**. [Using ERD Studio with dbt](docs/dbt.md) covers the rest. Another stack? [Propose an integration](https://github.com/liam-machine/erd-studio/issues).
 
 ## Learn more
 

@@ -72,7 +72,7 @@ export const MORE_STARTS_LABEL = 'More ways to start…';
 export const START_PICK_TITLE = 'More ways to start';
 export const START_PICK_PLACEHOLDER = 'Choose how to start your data model';
 /** The one name of the getting-started video, `erdStudio.showGettingStarted`'s title. */
-export const TOUR_LABEL = 'Watch the One-Minute Tour';
+export const TOUR_LABEL = 'Watch the Tour';
 /** Opening a folder, wherever ERD Studio offers it (VS Code's own command). */
 export const OPEN_FOLDER_LABEL = 'Open Folder…';
 

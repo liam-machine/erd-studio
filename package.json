@@ -393,7 +393,7 @@
       },
       {
         "command": "erdStudio.showGettingStarted",
-        "title": "Watch the One-Minute Tour",
+        "title": "Watch the Tour",
         "category": "ERD Studio",
         "icon": "$(play-circle)"
       },
@@ -708,7 +708,7 @@
           {
             "id": "draw",
             "title": "Draw from dbt",
-            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit. No AI needed.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit, by hand or with your AI assistant.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
             "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed",
             "media": {
               "svg": "media/walkthrough/draw.svg",
@@ -737,8 +737,8 @@
           },
           {
             "id": "watch",
-            "title": "Watch the One-Minute Tour",
-            "description": "Start a diagram, see the DBML files it saves in Git, then compare it with what dbt has. No AI needed.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, edit it by hand or with AI, then compare it with what dbt builds.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",
@@ -750,11 +750,11 @@
           },
           {
             "id": "watchLogical",
-            "title": "Watch the One-Minute Tour",
-            "description": "Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, and edit it by hand or with your AI assistant.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
-              "svg": "media/walkthrough/watch.svg",
+              "svg": "media/walkthrough/watch-logical.svg",
               "altText": "A video player showing a small diagram of three related tables."
             },
             "completionEvents": [

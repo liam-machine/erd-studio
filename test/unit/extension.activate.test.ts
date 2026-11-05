@@ -2199,12 +2199,15 @@ describe('Welcome panel: first run', () => {
     // The tagline: short enough that VS Code's Welcome page never cuts it off.
     expect(walkthrough.description).toBe('Design your data model in Git. Let your AI build from it.');
     // A dbt project's tour is the DBML tour with a short dbt beat last; a folder without dbt gets the cut without it, under neutral words.
-    expect(step('watch').description).toContain('see the DBML files it saves in Git, then compare it with what dbt has');
-    expect(step('watchLogical').title).toBe('Watch the One-Minute Tour');
+    expect(step('watch').description).toContain('see its DBML files next to your code, edit it by hand or with AI, then compare it with what dbt builds');
+    // ERD Studio works by hand or with your AI assistant: no step says otherwise (onboarding-and-cli.md → User-facing wording).
+    for (const s of walkthrough.steps) expect(s.description, s.id).not.toMatch(/no AI (needed|required)|without AI|nothing to configure/i);
+    expect(step('draw').description).toContain('a diagram you can edit, by hand or with your AI assistant.');
+    expect(step('watchLogical').title).toBe('Watch the Tour');
     // Show Me Around (the onboarding guide) is the tour steps' one quiet link: it replaced the short per-start videos.
-    expect(step('watchLogical').description).toBe('Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');
+    expect(step('watchLogical').description).toBe('Bring in your data model, see its DBML files next to your code, and edit it by hand or with your AI assistant.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');
     expect(step('watch').description).toContain('\nOr: [Show Me Around](command:erdStudio.showMeAround)');
-    expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch.svg');
+    expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch-logical.svg');
     expect(step('watchLogical').completionEvents).toEqual(['onCommand:erdStudio.showGettingStarted']);
     // Every start is one click through erdStudio.start, which counts where it came from: one button,
     // titled with its one label, and one quiet "More ways to start…" link to the rest (a quick pick).
@@ -2273,12 +2276,12 @@ describe('Welcome panel: first run', () => {
 
     expect(panelsOfType()).toHaveLength(0);
     expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
-    const notices = info.mock.calls.filter((c) => String(c[0]).includes('one-minute tour'));
+    const notices = info.mock.calls.filter((c) => String(c[0]).includes('a short tour'));
     expect(notices).toHaveLength(1);
     // One line, no list of assistants.
-    expect(notices[0][0]).toBe('ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.');
+    expect(notices[0][0]).toBe('ERD Studio has a short tour, and can set up your AI assistant to work on the same files.');
     expect(String(notices[0][0])).not.toMatch(/Claude|Copilot|Codex|Gemini|Cursor/);
-    expect(notices[0].slice(1)).toEqual(['Watch the One-Minute Tour', 'Not now']);
+    expect(notices[0].slice(1)).toEqual(['Watch the Tour', 'Not now']);
   });
 
   it('"Watch" on the upgrade notice opens the panel', async () => {
@@ -2286,7 +2289,7 @@ describe('Welcome panel: first run', () => {
     openWorkspace(root);
     context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]) });
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
-      (message.includes('one-minute tour') ? 'Watch the One-Minute Tour' : undefined)) as never);
+      (message.includes('a short tour') ? 'Watch the Tour' : undefined)) as never);
 
     await activate(context);
     await vi.waitFor(() => expect(panelsOfType()).toHaveLength(1));
@@ -3169,7 +3172,7 @@ describe('one activation prompt per window', () => {
     openWorkspace(root);
   });
 
-  const UPGRADE = 'one-minute tour';
+  const UPGRADE = 'a short tour';
   const NUDGE = 'This project has';
   const OFFER = 'Let your AI assistant';
   const shown = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.map((c) => String(c[0]))

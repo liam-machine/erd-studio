@@ -1024,7 +1024,7 @@ export const START_LABELS: Readonly<Record<StartAction, string>> = Object.fromEn
 export const GETTING_STARTED_TAB_TITLE = 'ERD Studio Tour';
 
 /** The tab's heading. */
-export const GETTING_STARTED_HEADING = 'The one-minute tour';
+export const GETTING_STARTED_HEADING = 'The tour';
 
 /**
  * The Show Me Around section, on every page: the interactive guide (the
@@ -1037,7 +1037,7 @@ export const SHOW_ME_AROUND_SECTION_TITLE = 'Find your way around';
 export const SHOW_ME_AROUND_SECTION_INTRO = 'Show Me Around points at each part of ERD Studio, using your own tables: where to bring in your data model, how to edit a table, and where your files go.';
 
 /** The upgrader's one notice (once per machine): what is new, in one line, and the tour. */
-export const UPGRADE_NOTICE_MESSAGE = 'ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.';
+export const UPGRADE_NOTICE_MESSAGE = 'ERD Studio has a short tour, and can set up your AI assistant to work on the same files.';
 
 /** Step 3's row for one assistant: what to type, Copy, and an Open button where the editor can open it. */
 function launchRow(id: AiAssistantId): string {
@@ -1128,7 +1128,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     <p class="gs-hero__sub" ${only('dbt')}>Turn the dbt project you already have into a data model you can see.</p>
   </header>
 
-  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="The one-minute tour">
+  <section class="gs-video${videoUri ? '' : ' gs-video--fallback'}" aria-label="${escapeHtml(GETTING_STARTED_HEADING)}">
     ${player}
     <div class="gs-video__fallback">
       ${fallbackPoster}

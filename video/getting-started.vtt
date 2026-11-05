@@ -1,57 +1,117 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:04.997
-Your data model, as a diagram, saved as DBML files in your repo.
+00:00:00.350 --> 00:00:04.930
+Your data model as a diagram, saved as DBML files in your repo.
 
 2
-00:00:05.047 --> 00:00:07.976
-No AI needed, and nothing to configure.
+00:00:04.980 --> 00:00:07.546
+Edit it by hand, or with your AI assistant,
 
 3
-00:00:08.426 --> 00:00:12.540
-Install ERD Studio, open your folder, and click its icon.
+00:00:07.596 --> 00:00:10.562
+through a built-in skill it uses by itself.
 
 4
-00:00:13.326 --> 00:00:15.894
-Click New Diagram, and give it a name.
+00:00:11.012 --> 00:00:17.176
+Most teams already have one, in Snowflake, Databricks, dbt, Power BI, Fabric or SQL.
 
 5
-00:00:17.326 --> 00:00:19.961
-Add a table, with starter columns if you like.
+00:00:17.226 --> 00:00:19.592
+Open your project, and click Import.
 
 6
-00:00:20.011 --> 00:00:24.856
-Add another, then link the two with a relationship.
+00:00:20.212 --> 00:00:25.277
+Import reads DBML, SQL scripts, or a Power BI or Fabric model.
 
 7
-00:00:26.326 --> 00:00:30.669
-Each table is a DBML file, to commit and review like code.
+00:00:25.327 --> 00:00:30.816
+From Snowflake or Databricks, import the exported DDL. It works out the dialect.
 
 8
-00:00:31.226 --> 00:00:33.995
-Export to DBML or Mermaid any time.
+00:00:31.266 --> 00:00:34.076
+You get a draft of every table and relationship.
 
 9
-00:00:34.045 --> 00:00:37.483
-Already have DBML? Import it, then keep the draft.
+00:00:34.626 --> 00:00:36.578
+Keep it, and it's your diagram.
 
 10
-00:00:39.026 --> 00:00:40.833
-Want the why behind each table?
+00:00:37.266 --> 00:00:42.804
+Each table is now a DBML file, an open format, next to the code that builds it.
 
 11
-00:00:40.883 --> 00:00:45.432
-Click Set Up My AI Helper, then start the guided setup in your assistant.
+00:00:42.854 --> 00:00:46.092
+Review a change to the model in the same pull request.
 
 12
-00:00:45.882 --> 00:00:50.017
-Using dbt? Then a Physical tab shows what dbt has.
+00:00:46.542 --> 00:00:48.256
+Edit it by hand, on the canvas.
 
 13
-00:00:50.067 --> 00:00:53.285
-Click Compare with dbt to mark every difference.
+00:00:48.306 --> 00:00:51.985
+Add a table, with starter columns if you like, and lay it out.
 
 14
-00:00:53.882 --> 00:00:57.276
-ERD Studio is free to use. Install it today.
+00:00:52.035 --> 00:00:54.103
+Every edit is saved to its file.
+
+15
+00:00:54.553 --> 00:00:58.184
+Or ask your AI assistant. Click Set Up My AI Helper.
+
+16
+00:00:58.234 --> 00:01:03.749
+It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
+
+17
+00:01:04.199 --> 00:01:07.191
+Ask Claude Code for a change, in plain words.
+
+18
+00:01:07.341 --> 00:01:09.777
+It loads the ERD Studio skill by itself,
+
+19
+00:01:09.827 --> 00:01:13.395
+and a pre-tool hook makes sure it has, before any edit,
+
+20
+00:01:13.445 --> 00:01:16.743
+so what it writes is a diagram you can see, right away.
+
+21
+00:01:19.699 --> 00:01:24.408
+Using dbt? Draw from dbt turns your models into a diagram.
+
+22
+00:01:24.458 --> 00:01:27.857
+To check your design against them, click Run dbt parse.
+
+23
+00:01:27.907 --> 00:01:32.819
+It writes manifest.json, a description of every model your project builds.
+
+24
+00:01:32.869 --> 00:01:36.398
+The Physical tab shows what it describes, as a diagram.
+
+25
+00:01:37.248 --> 00:01:40.577
+Compare with dbt marks every difference from your design.
+
+26
+00:01:41.027 --> 00:01:46.678
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+27
+00:01:46.728 --> 00:01:49.932
+ERD Studio for Confluence reads them from GitHub,
+
+28
+00:01:49.982 --> 00:01:52.988
+and shows the diagram to business users.
+
+29
+00:01:54.327 --> 00:01:58.621
+ERD Studio is free to use in VS Code. Install it today.

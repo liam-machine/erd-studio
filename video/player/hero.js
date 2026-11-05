@@ -1,5 +1,5 @@
 // The README's hero GIF (media/demo.gif), drawn by ../hero-gif.mjs from player/hero.html with the
-// video's own pieces (editor.js, lib.js, the tour's tables): ERD Studio in a plain folder (no
+// video's own pieces (editor.js, lib.js): ERD Studio in a plain folder (no
 // stage tabs, nothing to compare), the Explorer showing the layer-first .erd-studio tree beside the
 // orders diagram, a fct_order star schema with its keys, drawn neutral (a plain folder has no
 // stage colours). The table files light one by one with their tables, fct_order.dbml's text
@@ -8,8 +8,7 @@
 // library), and back: a seamless loop.
 // render(t) is pure, like the video's.
 import { card, easeOut, edge, ICON, node, seg, toolbar } from './lib.js';
-import { SALES_DRAFT, activityBar, draftPage, fileTree } from './editor.js';
-import { dbmlLine } from './scenes/tour/files.js';
+import { SALES_DRAFT, activityBar, dbmlLine, draftPage, fileTree } from './editor.js';
 
 export const HERO = { w: 1440, h: 900, fps: 12, loop: 12 };
 const WIN = { x: 20, y: 20, w: HERO.w - 40, h: HERO.h - 40 };

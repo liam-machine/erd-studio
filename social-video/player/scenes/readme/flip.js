@@ -1,5 +1,5 @@
-// readme · 2 · flip — "So keep it next to the code." The repo's Explorer: the code is there
-// (sql/, README.md); on "in Git" the .erd-studio folder slides in at the top (VS Code sorts dot
+// readme · 3 · flip — "Keep it as DBML, next to the code." The repo's Explorer: the code is there
+// (sql/, README.md); on "DBML" the .erd-studio folder slides in at the top (VS Code sorts dot
 // folders first), green, and on "right next to the code" a bracket spans the model and the SQL:
 // same repo, same pull request. The card is where tree.js picks up, so the cut is seamless.
 import { appear, appearFade, card, easeOut, ICON, lerp, seg } from '../../lib.js';
@@ -12,7 +12,7 @@ const GREEN = '34,197,94';
 
 export default {
   render(t, { scene }) {
-    const insertAt = wordAt(scene, 'repo', 'Git') - 0.25;
+    const insertAt = wordAt(scene, 'repo', 'DBML') - 0.25;
     const bracketAt = wordAt(scene, 'repo', 'next');
     const ins = (k) => easeOut(seg(t, insertAt + k * 0.12, insertAt + k * 0.12 + 0.32));
     const glow = 1 - 0.4 * seg(t, bracketAt + 0.8, bracketAt + 1.6);

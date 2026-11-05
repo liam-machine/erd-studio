@@ -1,4 +1,5 @@
-// Re-shoots player/assets/confluence-sales.png, the diagram on the README cut's Confluence page
+// Re-shoots player/assets/confluence-sales.png and confluence-sales-before.png (the same diagram
+// without fct_order's `status`, before the scene's commit lands), the diagram on the README cut's Confluence page
 // (player/scenes/readme/confluence.js): @erd-studio/renderer's ErdCanvas in viewer mode, as the
 // ERD Studio for Confluence macro draws it, rendered from this repo's own packages (no Confluence
 // app code) with a light theme, 880x555 at 2x.
@@ -25,8 +26,13 @@ writeFileSync(join(OUT, 'entry.tsx'), `import { createRoot } from 'react-dom/cli
 import { ErdCanvas } from '@erd-studio/renderer';
 import '@erd-studio/renderer/styles.css';
 import domain from ${JSON.stringify(join(ASSETS, 'confluence-sales.display.json'))};
+// #before: the diagram before the commit that adds fct_order's status column.
+const before = location.hash === '#before';
+const shown = before
+  ? { ...domain, models: domain.models.map((m: any) => (m.name === 'fct_order' ? { ...m, columns: m.columns.filter((c: any) => c.name !== 'status') } : m)) }
+  : domain;
 createRoot(document.getElementById('root')!).render(
-  <ErdCanvas domain={domain as never} onReady={() => { (window as any).__ready = true; }} />,
+  <ErdCanvas domain={shown as never} onReady={() => { (window as any).__ready = true; }} />,
 );
 `);
 
@@ -62,11 +68,14 @@ await build({
 });
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 880, height: 555 }, deviceScaleFactor: 2 });
-page.on('pageerror', (e) => { console.error(e); process.exitCode = 1; });
-await page.goto('file://' + join(OUT, 'index.html'));
-await page.waitForFunction(() => window.__ready === true, null, { timeout: 15000 });
-await page.waitForTimeout(800);
-await page.screenshot({ path: join(ASSETS, 'confluence-sales.png') });
+for (const [hash, file] of [['', 'confluence-sales.png'], ['#before', 'confluence-sales-before.png']]) {
+  const page = await browser.newPage({ viewport: { width: 880, height: 555 }, deviceScaleFactor: 2 });
+  page.on('pageerror', (e) => { console.error(e); process.exitCode = 1; });
+  await page.goto('file://' + join(OUT, 'index.html') + hash);
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 15000 });
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: join(ASSETS, file) });
+  await page.close();
+  console.log(`confluence-shot: player/assets/${file} (1760x1110)`);
+}
 await browser.close();
-console.log('confluence-shot: player/assets/confluence-sales.png (1760x1110)');

@@ -1,8 +1,9 @@
 // readme · 4 · files — "One table, one file." Three real DBML files, in the layout ERD Studio
 // writes. `table`: fct_order.dbml reveals line by line; COLUMNS, KEYS and GRAIN tag their lines
 // on their words. `ref`: the table file folds to its tab strip and relationships/gold.dbml
-// arrives, its Ref line lit ("one Ref line"). `layout`: diagrams/sales.dbml below it — the use
-// lines are its tables, and the erd_layout block lights up as "positions".
+// arrives, its Ref line lit ("one Ref line"); then, unnarrated (the tree scene already named the
+// diagrams), diagrams/sales.dbml below it — the use lines are its tables, and the erd_layout
+// block lights up as "positions".
 import { appear, appearFade, card, easeInOut, easeOut, lerp, seg } from '../../lib.js';
 import { DIAGRAM_DBML, dbmlLine, FCT_DBML, FILE_COL, RELS_DBML, wordAt } from './story.js';
 
@@ -35,13 +36,15 @@ function code(lines, { font, pitch, top = 18, t, revealAt, per, hl = () => null,
 
 export default {
   render(t, { beats, scene }) {
-    const T = beats.table.t, Rf = beats.ref.t, L = beats.layout.t;
+    const Rf = beats.ref.t;
     const colsAt = wordAt(scene, 'table', 'columns');
     const keysAt = wordAt(scene, 'table', 'keys');
     const grainAt = wordAt(scene, 'table', 'grain');
     const refAt = wordAt(scene, 'ref', 'Ref');
-    const posAt = wordAt(scene, 'layout', 'positions');
-    const tablesAt = wordAt(scene, 'layout', 'tables');
+    // The diagram file follows the Ref line by itself (no line of its own since the cut to ~2:50).
+    const L = refAt + 0.7;
+    const tablesAt = L + 0.5;
+    const posAt = L + 1.1;
     const fold = easeInOut(seg(t, Rf - 0.2, Rf + 0.3));
 
     let html = '';

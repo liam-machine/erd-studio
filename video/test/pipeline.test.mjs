@@ -18,7 +18,7 @@ const scriptSrc = readFileSync(join(HERE, '..', 'script.yaml'), 'utf8');
 const SCENES = join(HERE, '..', 'player', 'scenes');
 /** Scene module files (no extension) directly in `dir` under player/scenes/. */
 const modulesIn = (dir = '') => readdirSync(join(SCENES, dir)).filter((f) => f.endsWith('.js')).map((f) => (dir ? `${dir}/` : '') + f.replace(/\.js$/, ''));
-/** tour/: the logical cut's HTML scenes (no dbt anywhere; the end card is both cuts'). rec/: the frame the default cut's recorded footage plays in. */
+/** rec/: the frame both cuts' recorded footage plays in. tour/: their HTML scenes (Confluence, the end card; no dbt anywhere). */
 const ALL_MODULES = [...modulesIn('tour'), ...modulesIn('rec')];
 
 const mini = {
@@ -161,52 +161,76 @@ const NEW_LAYER = (() => {
   return { id: ids[0][1], label: ids[0][2], count: ids.length };
 })();
 
-const TOUR = ['tour/hook', 'tour/install', 'tour/newDiagram', 'tour/tables', 'tour/files', 'tour/importDbml', 'tour/enrich'];
+/** The name box every import ends on in a new folder without dbt: one layer, Main. */
+const IMPORT_NAME_PROMPT = `Name the diagram. It is saved in the ${NEW_LAYER.label} layer.`;
 
-test('the two cuts: the same tour, scene for scene; the default cut is recorded and adds one dbt beat before its end card', () => {
-  assert.deepEqual(logical.scenes.map((s) => s.module), [...TOUR, 'tour/endCard']);
-  // the default cut: the same scenes (ids, chapters, headlines) as real footage, then the dbt beat
-  assert.deepEqual(script.scenes.map((s) => s.id), [...logical.scenes.slice(0, -1).map((s) => s.id), 'dbt', 'end']);
-  assert.deepEqual(script.scenes.map((s) => s.module), [...Array(TOUR.length + 1).fill('rec/window'), 'tour/endCard']);
-  for (const sc of logical.scenes) {
-    const twin = script.scenes.find((s) => s.id === sc.id);
-    assert.deepEqual([twin.chapter, twin.headline, twin.accent], [sc.chapter, sc.headline, sc.accent], sc.id);
-    // the same words: a line may be split in two (tables: the link is spoken as the real dialog opens);
-    // the one line that differs is the default cut's setup line, which names what its toast says
-    // ("start the guided setup") where the logical cut shows /erd-studio-setup typed
-    const said = (lines) => lines.filter((l) => l.id !== 'e_setup').map((l) => l.caption).join(' ');
-    assert.equal(said(twin.lines), said(sc.lines), `${sc.id}: the two cuts say the same`);
-    for (const l of sc.lines) assert.equal(twin.lines.find((x) => x.id === l.id)?.beat, l.beat, `${sc.id}: ${l.id}`);
-  }
-  const setupLine = (sc) => sc.scenes.find((s) => s.id === 'enrich').lines.find((l) => l.id === 'e_setup').caption;
-  assert.match(setupLine(logical), /type \/erd-studio-setup in your assistant/);
-  assert.match(setupLine(script), /start the guided setup in your assistant/);
-  // the end card is the same scene in both
-  assert.deepEqual(script.scenes.at(-1).lines, logical.scenes.at(-1).lines);
+test('both cuts lead with importing what you have, then by hand, with AI and Confluence; only the default cut has a dbt beat', () => {
+  // the default cut: the hook, the import (picker, the SQL a project holds, its draft), its files, an
+  // edit by hand, the same kind of edit by Claude Code, dbt, Confluence, the end card
+  assert.deepEqual(script.scenes.map((s) => s.id), ['hook', 'bring', 'importSql', 'draft', 'files', 'byHand', 'aiSetup', 'aiRun', 'dbt', 'confluence', 'end']);
+  assert.deepEqual(script.scenes.map((s) => s.module), [...Array(9).fill('rec/window'), 'tour/confluence', 'tour/endCard']);
+  const at = (id) => script.scenes.findIndex((s) => s.id === id);
+  assert.ok(at('importSql') < at('byHand') && at('draft') < at('byHand'), 'the import comes before any table built by hand');
+  // the logical cut: the same scenes, minus the dbt beat
+  assert.deepEqual(logical.scenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => id !== 'dbt'));
+  assert.deepEqual(logical.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/confluence', 'tour/endCard']);
   assert.deepEqual(logical.voice, script.voice);
   assert.deepEqual(logical.timing, script.timing);
-  assert.deepEqual(logical.chapters, script.chapters);
-  // no unused modules, and nothing left at the top of scenes/
+  // no unused modules (the old HTML tour is retired: both cuts are recordings), nothing at the top of scenes/
   assert.deepEqual(modulesIn(), []);
-  assert.deepEqual(modulesIn('tour').sort(), [...TOUR, 'tour/endCard'].sort());
+  assert.deepEqual(modulesIn('tour').sort(), ['tour/confluence', 'tour/endCard']);
   assert.deepEqual(modulesIn('rec'), ['rec/window']);
   assert.equal(existsSync(join(SCENES, 'dbt')) && readdirSync(join(SCENES, 'dbt')).length > 0, false, 'the HTML dbt beat is gone: the default cut films the real one');
-  // one-minute videos: the scenes' minimum lengths alone already fit (so a script edit fails here
-  // even without a build), and a rendered timeline, when there is one, is 50–60 s with the dbt beat
-  // 7.5–10 s
-  for (const [sc, cut] of [[script, CUTS['']], [logical, CUTS.logical]]) {
-    assert.ok(sc.maxDuration <= 65);
-    const floor = sc.scenes.reduce((n, s) => n + s.minDur, 0);
-    assert.ok(floor <= 60 && floor <= sc.maxDuration, `${cut.build}: the minDurs add up to ${floor}s`);
-    const dbtScene = sc.scenes.find(isDbtBeat);
-    if (dbtScene) assert.ok(dbtScene.minDur >= 7.5 && dbtScene.minDur <= 10, `dbt beat minDur ${dbtScene.minDur}`);
-    const built = join(HERE, '..', cut.build, 'timeline.json');
-    if (!existsSync(built)) continue;
-    const tl = JSON.parse(readFileSync(built, 'utf8'));
-    assert.ok(tl.total >= 50 && tl.total <= 60, `${cut.build}: ${tl.total}s`);
-    const beat = tl.scenes.find(isDbtBeat);
-    if (beat) assert.ok(beat.dur >= 7.5 && beat.dur <= 10, `dbt beat ${beat.dur}s`);
+  // "Watch the Tour" names no length: the default cut may run 80–130 s (maxDuration), the dbt beat
+  // 12–18 s; the scenes' minimum lengths alone already fit, so a script edit fails here without a build
+  assert.ok(script.maxDuration <= 130);
+  const floor = script.scenes.reduce((n, s) => n + s.minDur, 0);
+  assert.ok(floor <= script.maxDuration, `the minDurs add up to ${floor}s`);
+  assert.ok(logical.maxDuration <= 130);
+  const floorL = logical.scenes.reduce((n, s) => n + s.minDur, 0);
+  assert.ok(floorL <= logical.maxDuration, `the logical minDurs add up to ${floorL}s`);
+  const builtL = join(HERE, '..', 'build-logical', 'timeline.json');
+  if (existsSync(builtL)) {
+    const tl = JSON.parse(readFileSync(builtL, 'utf8'));
+    assert.ok(tl.total >= 80 && tl.total <= 130, `build-logical: ${tl.total}s`);
+    const draft = tl.scenes.find((s) => s.id === 'draft');
+    assert.ok(draft.start + draft.beats.keep.t < 40, `logical: Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
   }
+  const built = join(HERE, '..', 'build', 'timeline.json');
+  if (existsSync(built)) {
+    const tl = JSON.parse(readFileSync(built, 'utf8'));
+    assert.ok(tl.total >= 80 && tl.total <= 130, `build: ${tl.total}s`);
+    const beat = tl.scenes.find(isDbtBeat);
+    // Draw from dbt, Run dbt parse, the Physical tab held, Compare with dbt: short beside the tour, but each one seen
+    assert.ok(beat.dur >= 12 && beat.dur <= 24, `dbt beat ${beat.dur}s`);
+    // the import's draft is kept within the first 40 s
+    const draft = tl.scenes.find((s) => s.id === 'draft');
+    assert.ok(draft.start + draft.beats.keep.t < 40, `Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
+  }
+});
+
+test('never "No AI needed": the default cut, the end card and the thumbnail say by hand or with AI', async () => {
+  const NO_AI = /no AI needed|nothing to configure|without AI/i;
+  for (const sc of [script, logical]) assert.doesNotMatch(JSON.stringify(sc.scenes), NO_AI);
+  const { FACTS } = await import('../player/scenes/tour/endCard.js');
+  assert.doesNotMatch(FACTS.join(' '), NO_AI);
+  assert.ok(FACTS.some((f) => /by hand or with AI/.test(f)));
+  assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', 'thumbnail.html'), 'utf8'), NO_AI);
+  // the hook says both ways, and that the assistant's skill is built in
+  const hook = script.scenes[0].lines.map((l) => l.caption).join(' ');
+  assert.match(hook, /by hand/);
+  assert.match(hook, /AI assistant/);
+  assert.match(hook, /skill/);
+  assert.match(JSON.stringify(script.scenes[0].props.claims), /By hand or with AI/);
+  // the Confluence scene names the app, GitHub, the single source of truth and business users
+  const share = script.scenes.find((s) => s.id === 'confluence').lines.map((l) => l.caption).join(' ');
+  for (const w of ['ERD Studio for Confluence', 'GitHub', 'single source of truth', 'business users']) assert.ok(share.includes(w), w);
+  assert.doesNotMatch(share, /\bfree\b|price|\$/i, 'never says the Confluence app is free, nor its price');
+  // the end line: free to use, in VS Code
+  for (const sc of [script, logical]) assert.match(sc.scenes.at(-1).lines[0].caption, /free to use in VS Code/);
+  // the logical cut says the same: its hook, its Confluence scene (script.yaml's own lines)
+  assert.deepEqual(logical.scenes[0].lines, script.scenes[0].lines);
+  assert.deepEqual(logical.scenes.find((s) => s.id === 'confluence').lines, script.scenes.find((s) => s.id === 'confluence').lines);
 });
 
 // dbt is an add-on: no dbt in the logical cut at all, and in the default cut only in its dbt beat.
@@ -214,8 +238,10 @@ const NO_DBT = /\bdbt\b|Physical|manifest/i;
 const NO_DBT_ON_SCREEN = /\bdbt\b|Physical|manifest|\bDiff\b|sample project/i;
 /** The default cut's dbt beat: its own take, in a dbt project, the one scene that may name dbt. */
 const isDbtBeat = (sc) => sc.id === 'dbt';
+/** The import scene names dbt among the tools a data model already lives in (its narration and logo row). */
+const namesDbt = (sc) => isDbtBeat(sc) || sc.id === 'bring';
 
-test('no line of script.logical.yaml or of a tour scene module names dbt; script.yaml only in its dbt beat', () => {
+test('no line of script.logical.yaml or of a tour scene module names dbt; script.yaml only in its dbt beat and the import\'s list of tools', () => {
   // only the leading header comment may name them (it lists the words to keep out)
   const lines = logicalSrc.split('\n');
   const body = lines.slice(lines.findIndex((l) => !l.startsWith('#')));
@@ -223,9 +249,11 @@ test('no line of script.logical.yaml or of a tour scene module names dbt; script
   for (const m of modulesIn('tour')) {
     sceneSrc(m).split('\n').forEach((l, i) => assert.doesNotMatch(l, NO_DBT, `${m}.js:${i + 1}: ${l}`));
   }
-  for (const sc of script.scenes.filter((s) => !isDbtBeat(s))) {
+  for (const sc of script.scenes.filter((s) => !namesDbt(s))) {
     assert.doesNotMatch(JSON.stringify(sc), NO_DBT, `script.yaml scene ${sc.id}`);
   }
+  // the import names dbt only as a tool, never Physical or the manifest
+  assert.doesNotMatch(JSON.stringify(script.scenes.find((s) => s.id === 'bring')), /Physical|manifest|\bDiff\b/);
   for (const c of script.chapters) assert.doesNotMatch(c, NO_DBT_ON_SCREEN);
   // both headers name the forbidden words (that is their job)
   assert.match(logicalSrc, /^# .*dbt, Physical, Diff, manifest, sample project/m);
@@ -254,35 +282,6 @@ test('the logical cut\'s generated transcript names no dbt', () => {
   if (existsSync(ts)) assert.doesNotMatch(readFileSync(ts, 'utf8'), NO_DBT);
 });
 
-test('the extension listing, ERD Studio\'s side bar and its start entry use the real package.json copy', () => {
-  const { EXTENSION, ERD_VIEWS, SIDEBAR_START, NEW_MENU } = editor;
-  assert.equal(EXTENSION.name, pkg.displayName);
-  assert.equal(EXTENSION.publisher, pkg.publisher);
-  // the listing's own sentences, up to the first one that names dbt
-  const short = editor.descriptionWithoutDbt();
-  assert.ok(pkg.description.startsWith(short) && short.length > 40, short);
-  assert.doesNotMatch(short, /\bdbt\b/i);
-  assert.deepEqual(pkg.contributes.views['erd-studio'].map((v) => v.name), ERD_VIEWS);
-  // the Diagrams view's start entry in a folder with nothing to import
-  const entry = pkg.contributes.viewsWelcome.find((w) => w.view === 'erdStudio.domainTree' && /startIntent == blank/.test(w.when));
-  const [text, button, more] = entry.contents.split('\n\n');
-  assert.equal(text, SIDEBAR_START.text);
-  assert.equal(button.match(/^\[([^\]]+)\]\(command:erdStudio\.start\?/)[1], SIDEBAR_START.button);
-  assert.ok(decodeURIComponent(button).includes('"action":"blank"'));
-  const m = more.match(/^(\w+:) \[([^\]]+)\]/);
-  assert.equal(`${m[1]} ${m[2]}`, `${SIDEBAR_START.or} ${SIDEBAR_START.more}`);
-  assert.equal(SIDEBAR_START.button, START_LABELS.blank);
-  assert.equal(SIDEBAR_START.more, tsConst('src/types/startActions.ts', 'MORE_STARTS_LABEL'));
-  // the automatic draft: a blank folder's first visit opens the example (draftTriggers.ts)
-  assert.match(read('src', 'services', 'draftTriggers.ts'), /if \(intent === 'blank'\) \{\s*return input\.exampleShownOnMachine \? undefined : 'example';/);
-  // the walkthrough opens by itself only in an empty window: a folder starts in the side bar
-  assert.match(read('src', 'services', 'draftTriggers.ts'), /return input\.owed && !input\.hasFolder;/);
-  // the + (New…) menu, as a folder without dbt shows it
-  const menu = pkg.contributes.menus['erdStudio.newMenu'].filter((e) => !/hasDbtProject/.test(e.when)).map((e) => cmdTitle(e.command));
-  assert.deepEqual(menu, NEW_MENU);
-  assert.ok(pkg.contributes.menus['view/title'].some((e) => e.submenu === 'erdStudio.newMenu' && /domainTree/.test(e.when)));
-});
-
 test('the activity bar draws the real ERD Studio icon (package.json contributes it)', () => {
   const container = pkg.contributes.viewsContainers.activitybar.find((c) => c.id === 'erd-studio');
   const file = read(...container.icon.split('/'));
@@ -308,30 +307,12 @@ test('the Help & Feedback rows are HelpTreeProvider\'s', () => {
   assert.equal(editor.HELP_ROWS[0], cmdTitle('erdStudio.setupAiHelper'));
 });
 
-test('the draft pages use draftModel\'s words: the coffee-shop example and an imported DBML file', () => {
+test('the README GIF\'s draft page uses draftModel\'s words: an imported DBML file', () => {
   const dm = read('src', 'services', 'draftModel.ts');
   const wording = read('webview-draft', 'lib', 'wording.ts');
-  const { EXAMPLE_DRAFT: ex, SALES_DRAFT: sales } = editor;
-  const example = read('src', 'commands', 'openExampleDiagram.ts');
-  const dbml = example.slice(example.indexOf('EXAMPLE_DBML = `'), example.indexOf('`;', example.indexOf('EXAMPLE_DBML = `')));
-  const tables = (dbml.match(/^Table /gm) ?? []).length;
-  const rels = (dbml.match(/ref: >/g) ?? []).length + (dbml.match(/^Ref/gm) ?? []).length;
-  assert.equal(ex.tab, `Example: ${tsConst('src/services/draftModel.ts', 'EXAMPLE_COFFEE_SHOP_LABEL')}`);
-  assert.ok(dm.includes("case 'example': return 'Example: a coffee-shop star schema';"));
+  const { SALES_DRAFT: sales } = editor;
   assert.ok(dm.includes('return `${draftWhat(input)} · ${counts} · not saved`;'));
-  assert.equal(ex.headline, `Example: a coffee-shop star schema · ${tables} tables, ${rels} relationships · not saved`);
-  assert.equal(ex.tables.length, tables);
   assert.ok(dm.includes('parts.push(`Keep saves it as ${name} in the ${layerLabel} layer (${diagramFile}).`);'));
-  assert.match(dbml, /`Project "coffee-shop" \{/);
-  // a new folder without dbt has one layer, Main, so the example (EXAMPLE_LAYER 'gold' only when the project has it) goes there
-  assert.ok(example.includes("EXAMPLE_LAYER = 'gold'") && example.includes('...(hasExampleLayer ? { layer: EXAMPLE_LAYER } : {})'));
-  assert.equal(ex.detail, `Keep saves it as coffee-shop in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/coffee-shop.dbml).`);
-  assert.equal(ex.scope.value, `${tsConst('src/services/draftModel.ts', 'EXAMPLE_COFFEE_SHOP_LABEL')} · ${dm.match(/EXAMPLE_COFFEE_SHOP_TABLES = (\d+)/)[1]} tables`);
-  assert.ok(dm.includes("return { label: 'Example',"));
-  // the example in a folder: New Diagram… primary, the guide beside it, Keep quiet, the menu, Discard
-  assert.ok(dm.includes("keepLabel: KEEP_THIS_EXAMPLE, primary: 'blank', changeOptions: false, shownStarts: ['guide']"));
-  assert.deepEqual(ex.buttons, [[START_LABELS.blank, 'primary'], [tsConst('src/types/startActions.ts', 'IMPORT_GUIDE_LABEL'), 'secondary'],
-    [tsConst('src/services/draftModel.ts', 'KEEP_THIS_EXAMPLE'), 'quiet'], [tsConst('webview-draft/lib/wording.ts', 'OTHER_WAYS_TO_START'), 'menu'], [tsConst('webview-draft/lib/wording.ts', 'DISCARD'), 'secondary']]);
   // Import DBML…'s draft of sales.dbml: Keep as Diagram primary, the rest in the menu
   assert.ok(dm.includes("case 'dbml': return input.origin ? `Draft ${input.origin}` : `Draft from ${input.fileName ?? 'your DBML file'}`;"));
   assert.equal(sales.headline, `Draft from ${sales.file} · ${sales.tables.length} tables, ${sales.rels.length} relationships · not saved`);
@@ -341,22 +322,34 @@ test('the draft pages use draftModel\'s words: the coffee-shop example and an im
   assert.ok(dm.includes('shownStarts: [],'));
   assert.deepEqual(sales.buttons.map(([l]) => l), [tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM'), tsConst('webview-draft/lib/wording.ts', 'OTHER_WAYS_TO_START'), tsConst('webview-draft/lib/wording.ts', 'DISCARD')]);
   assert.ok(wording.includes("export const DISCARD = 'Discard';"));
-  // the quick path's layer: the file's, else New Diagram's default (the last creatable layer, Gold)
-  assert.ok(read('src', 'commands', 'importDbml.ts').includes("the layer the file names, else New Diagram's default (the last creatable layer)"));
-  assert.equal(cmdTitle('erdStudio.importDbml'), editor.NEW_MENU[1]);
+  assert.equal(cmdTitle('erdStudio.importDbml'), 'Import DBML…');
 });
 
-test('the watch steps and the Help row call these the One-Minute Tour', () => {
+test('the watch steps and the Help row call it "Watch the Tour", with no length in its name', () => {
   const tour = tsConst('src/types/startActions.ts', 'TOUR_LABEL');
-  assert.match(tour, /One-Minute/);
+  assert.equal(tour, 'Watch the Tour');
   for (const id of ['watch', 'watchLogical']) assert.equal(wt.steps.find((s) => s.id === id).title, tour);
   assert.equal(cmdTitle('erdStudio.showGettingStarted'), tour);
-  assert.ok(script.maxDuration <= 65 && logical.maxDuration <= 65, 'one-minute videos');
-  assert.match(read('media', 'walkthrough', 'watch.svg'), />1:0\d</);
+  assert.doesNotMatch(JSON.stringify(pkg), /One-Minute|one-minute/);
+  assert.doesNotMatch(read('src', 'types', 'gettingStarted.ts'), /one-minute/i);
   assert.doesNotMatch(wt.steps.find((s) => s.id === 'watchLogical').description, /\bdbt\b/i);
-  // The dbt project's watch step describes the default cut: the DBML tour, with dbt last.
-  assert.doesNotMatch(wt.steps.find((s) => s.id === 'watch').description, /Draw your dbt project/);
-  assert.match(wt.steps.find((s) => s.id === 'watch').description, /DBML/);
+  // the dbt project's watch step describes the default cut: bring it in, its files, by hand or with AI, then dbt
+  const watch = wt.steps.find((s) => s.id === 'watch').description;
+  assert.match(watch, /DBML/);
+  assert.match(watch, /by hand or with AI/);
+  assert.doesNotMatch(watch, /No AI needed/i);
+  // the walkthrough's pictures of a player show each cut's real length: watch.svg the default cut
+  // (the dbt project's step), watch-logical.svg the logical cut (watchLogical)
+  for (const [step, svg, build] of [['watch', 'watch.svg', 'build'], ['watchLogical', 'watch-logical.svg', 'build-logical']]) {
+    assert.equal(wt.steps.find((s) => s.id === step).media.svg, `media/walkthrough/${svg}`);
+    const svgTime = read('media', 'walkthrough', svg).match(/>(\d+):(\d\d)</);
+    assert.ok(svgTime, `a m:ss duration on ${svg}`);
+    const built = join(HERE, '..', build, 'timeline.json');
+    if (existsSync(built)) {
+      const secs = Math.round(JSON.parse(readFileSync(built, 'utf8')).total);
+      assert.equal(`${svgTime[1]}:${svgTime[2]}`, `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, svg);
+    }
+  }
 });
 
 test('the canvas toolbar and the stage tabs use the webview\'s words', () => {
@@ -376,138 +369,34 @@ test('the canvas toolbar and the stage tabs use the webview\'s words', () => {
   assert.match(lib.toolbar({ x: 0, y: 0, logicalOnly: false, stage: 'logical', add: 'idle' }), /\+ Add/);
 });
 
-test('the enrich scene types the real setup command and replies in the skill\'s words', async () => {
-  const { PROMPT, REPLY } = await import('../player/scenes/tour/enrich.js');
-  assert.ok(read('src', 'types', 'aiAssistants.ts').includes(`'${PROMPT}'`), 'setup prompt');
-  const route = flat(read('src', 'harness', 'claude', 'erd-studio-setup', 'references', 'without-dbt.md'));
-  // the reference's example names its own diagram: the sales diagram (6 tables)
-  const said = REPLY.replace(/<\/?b>/g, '**').replace('**orders** diagram (2 tables)', '**sales** diagram (6 tables)');
-  assert.ok(route.includes(said), 'the Without dbt route\'s "Enriching existing tables" opening line');
-  const { TABLES } = await import('../player/scenes/tour/tables.js');
-  assert.match(REPLY, new RegExp(`\\(${TABLES.length} tables\\)`));
-  // the logical cut shows the command typed and says it; the recorded cut says what its toast says
-  const line = logical.scenes.find((s) => s.id === 'enrich').lines.find((l) => l.beat === 'setup');
-  assert.ok(line.caption.includes(PROMPT) && line.caption.includes(editor.HELP_ROWS[0]));
-});
-
 test('the end card names the real steps and the tagline', async () => {
   const { STEPS, TAGLINE, FACTS } = await import('../player/scenes/tour/endCard.js');
   assert.equal(STEPS[0], `Install ${pkg.displayName}`);
   assert.equal(STEPS[1], wt.steps.find((s) => s.id === 'openProject').title);
-  assert.equal(STEPS[2], START_LABELS.blank);
+  assert.equal(STEPS[2], START_LABELS.import);
   assert.equal(TAGLINE.join(' '), wt.description);
   assert.equal(FACTS[0], 'Free to use');
+  assert.equal(editor.EXTENSION.name, pkg.displayName);
+  assert.equal(editor.EXTENSION.publisher, pkg.publisher);
   // the search hint names the Marketplace id, publisher.name
   assert.equal(editor.EXTENSION.id, `${pkg.publisher}.${pkg.name}`);
   assert.ok(readFileSync(join(SCENES, 'tour', 'endCard.js'), 'utf8').includes('${EXTENSION.id}'));
 });
 
-test('New Diagram, the empty canvas, New Table and New Relationship use the product\'s words', async () => {
-  const ext = read('src', 'extension.ts');
-  const errors = read('src', 'services', 'diagramCommandErrors.ts');
-  const { NEW_DIAGRAM } = editor;
-  assert.ok(errors.includes(`NEW_DIAGRAM_TITLE = '${NEW_DIAGRAM.title}'`), 'name box title');
-  assert.ok(ext.includes(`placeHolder: '${NEW_DIAGRAM.placeholder}'`), 'name box placeholder');
-  // a new folder without dbt: one layer (Main), no layer question, and the prompt says where
-  assert.ok(ext.includes(': `Name the diagram. It is saved in the ${layerLabel} layer.`,'));
-  assert.ok(ext.includes('layerService.useDefaultLayers(NEW_PROJECT_LAYERS_WITHOUT_DBT);'));
-  assert.equal(NEW_DIAGRAM.prompt, `Name the diagram. It is saved in the ${NEW_LAYER.label} layer.`);
-  assert.ok(read('src', 'commands', 'diagramName.ts').includes('{ message: `Saved as ${slug}`, severity: vscode.InputBoxValidationSeverity.Info }'), 'the Info line');
-  assert.equal(NEW_DIAGRAM.savedAs('orders'), 'Saved as orders');
-  assert.equal(NEW_DIAGRAM.file, `.erd-studio/${NEW_LAYER.id}/diagrams/${NEW_DIAGRAM.name.toLowerCase()}.dbml`);
-  assert.equal(cmdTitle('erdStudio.createDomain'), `${NEW_DIAGRAM.title}…`);
-
-  const { EMPTY_CANVAS, NEW_TABLE, ADD_MENU, NEW_RELATIONSHIP, TABLES } = await import('../player/scenes/tour/tables.js');
-  const empty = read('webview', 'components', 'EmptyCanvas', 'EmptyCanvas.tsx');
-  for (const s of [`>${EMPTY_CANVAS.title}<`, `'${EMPTY_CANVAS.body}'`, `Or let your AI assistant draw it:{' '}`, EMPTY_CANVAS.link]) assert.ok(empty.includes(s), s);
-  assert.ok(flat(empty).includes(`> ${EMPTY_CANVAS.button} </button>`), 'New Table button');
-  assert.ok(empty.includes("!logicalOnly ? 'dbt' : 'new'"), 'New Table is the primary action without dbt');
-
-  const dlg = flat(read('webview', 'components', 'NewModelDialog', 'NewModelDialog.tsx'));
-  for (const s of [`>${NEW_TABLE.title}</h3>`, `> ${NEW_TABLE.name} </label>`, `> ${NEW_TABLE.schema} </label>`, `STARTER_COLUMNS_LABEL = '${NEW_TABLE.starter}'`,
-    `> ${NEW_TABLE.cancel} </button>`, `> ${NEW_TABLE.create} </button>`, `> ${NEW_TABLE.addColumn} </button>`, `>${NEW_TABLE.fromTemplate}<`,
-    `blank: 'no columns yet'`, `dimension: 'something you describe (customer, product)'`, 'Table names start with {template.prefix}',
-    'No columns yet. Click "Add Column" to add columns to this table.', 'Columns ({resolvedColumns.length})', '`Creates ${newTablePathPreview(']) assert.ok(dlg.includes(s), s);
-  const templates = read('src', 'services', 'templateService.ts');
-  assert.ok(templates.includes("label: 'Blank'") && templates.includes("label: 'Dimension',") && templates.includes("prefix: 'dim_',"));
-  assert.equal(NEW_TABLE.blank, 'Blank — no columns yet');
-  assert.equal(NEW_TABLE.dimension, 'Dimension — something you describe (customer, product)');
-  // the Dimension template's columns, {name} = customer, are the node the dialog makes
-  const dimBlock = templates.slice(templates.indexOf("id: 'dimension'"), templates.indexOf("id: 'fact'"));
-  const tmplCols = [...dimBlock.matchAll(/\{ name: '([^']+)', dataType: '([^']+)'/g)].map(([, n, ty]) => [n.replace('{name}', 'customer'), ty]);
-  assert.deepEqual(TABLES[0].cols.map((c) => [c.name, c.type]), tmplCols);
-  assert.equal(TABLES[0].name, NEW_TABLE.table);
-  const preview = read('src', 'types', 'schemaFolder.ts');
-  assert.ok(preview.includes("return `${dir ? `${dir}/` : ''}${layer}/tables/${listed}/${name}.dbml`;"));
-  assert.equal(NEW_TABLE.creates('dim_customer'), `Creates .erd-studio/${NEW_LAYER.id}/tables/${NEW_LAYER.id}/dim_customer.dbml`);
-  assert.equal(NEW_TABLE.schemaValue, NEW_LAYER.id);
-
-  const tb = read('webview', 'components', 'Toolbar', 'Toolbar.tsx');
-  assert.ok(flat(tb).includes('+ Add <span'), '+ Add');
-  for (const item of ADD_MENU) assert.ok(flat(tb).includes(`> ${item} </button>`), item);
-  assert.ok(tb.includes('{!logicalOnly && <StageTabs'), 'no stage tabs without dbt');
-
-  const fk = flat(read('webview', 'components', 'NewFkDialog', 'NewFkDialog.tsx'));
-  const rel = read('webview', 'lib', 'relationshipDialog.ts');
-  assert.ok(rel.includes("return `${editing ? 'Edit' : 'New'} ${pairCount > 1 ? 'Composite ' : ''}Relationship`;"));
-  assert.equal(NEW_RELATIONSHIP.title, 'New Relationship');
-  for (const [label, , emptyOpt] of NEW_RELATIONSHIP.fields.slice(0, 4)) {
-    assert.ok(fk.includes(`> ${label} </label>`), label);
-    assert.ok(fk.includes(`>${emptyOpt}</option>`), emptyOpt);
-  }
-  assert.ok(rel.includes(`HOW_MANY_LABEL = '${NEW_RELATIONSHIP.fields[4][0]}'`));
-  assert.ok(rel.includes("text: named ? `Many ${from} rows → one ${to}` : 'Many → one'"));
-  assert.equal(NEW_RELATIONSHIP.fields[4][1], 'Many fct_order rows → one dim_customer');
-  for (const s of [`>${NEW_RELATIONSHIP.preview}<`, `'${NEW_RELATIONSHIP.create}'`, `> ${NEW_RELATIONSHIP.cancel} </button>`]) assert.ok(fk.includes(s), s);
-});
-
-test('the files are the 2.0 layer-first DBML a new project writes', async () => {
-  const { FILES, TREE } = await import('../player/scenes/tour/files.js');
-  const { TABLES } = await import('../player/scenes/tour/tables.js');
-  const header = read('packages', 'core', 'src', 'dbmlRichProperties.ts');
+test('the files the recording\'s import wrote are the 2.0 layer-first DBML a new folder gets', async () => {
+  // what the real take wrote in a new plain folder (record/fixtures.erd.mjs, a copy of it)
+  const { DBT_ERD } = await import('../record/fixtures.erd.mjs');
   const L = NEW_LAYER.id;   // main: the layer folder, the schema and the relationships file's name
-  const rels = FILES[`${L}/relationships/${L}.dbml`];
-  assert.ok(header.includes(`'${rels[0]}'`), 'the relationships file header line');
-  // the shape (header, use lines, Ref) is the native fixture's, in its gold layer
-  const fixture = read('test', 'fixtures', 'dbml-native', '.erd-studio', 'gold', 'relationships', 'gold.dbml');
-  assert.ok(fixture.startsWith(rels[0]));
+  const rels = DBT_ERD[`${L}/relationships/${L}.dbml`].split('\n');
+  assert.ok(read('packages', 'core', 'src', 'dbmlRichProperties.ts').includes(`'${rels[0]}'`), 'the relationships file header line');
   for (const l of rels.filter((x) => x.startsWith('use '))) assert.match(l, new RegExp(`^use \\{ table ${L}\\.\\w+ \\} +from '\\.\\./tables/${L}/\\w+\\.dbml'$`));
-  assert.match(fixture, /^Ref: gold\.fct_order\.customer_key >\? gold\.dim_customer\.customer_key$/m);
-  assert.equal(rels.at(-1), `Ref: ${L}.fct_order.customer_key >? ${L}.dim_customer.customer_key`);
-  // and what the real recording's take wrote in a new plain folder (record/fixtures.mjs mirrors it)
-  assert.ok(read('video', 'record', 'fixtures.mjs').includes(`Ref: ${L}.fct_order.date_key >? ${L}.dim_date.date_key`));
-  const fct = FILES[`${L}/tables/${L}/fct_order.dbml`];
-  assert.equal(fct[0], `Table ${L}.fct_order {`);
-  assert.equal(fct.length, TABLES[1].cols.length + 2);
-  TABLES[1].cols.forEach((c, i) => assert.match(fct[i + 1], new RegExp(`^  ${c.name} +${(/\W/.test(c.type) ? `"${c.type}"` : c.type).replace(/[()]/g, '\\$&')}`), c.name));
+  assert.ok(rels.includes(`Ref: ${L}.fct_order.date_key >? ${L}.dim_date.date_key`));
+  assert.match(DBT_ERD[`${L}/tables/${L}/fct_order.dbml`], new RegExp(`^Table ${L}\\.fct_order \\{`));
   assert.match(read('packages', 'core', 'src', 'dbml', 'writeTable.ts'), /\[pk/);
-  // New Diagram starting a DBML project writes layers.json and the folder's README.md
+  // the first diagram starting a DBML project writes layers.json and the folder's README.md
   const ext = read('src', 'extension.ts');
   assert.ok(ext.includes('if (createdSemanticDir && dbml) {') && ext.includes('semanticReadmeCreate(fullSemanticDirPath'));
-  // the Explorer lists exactly these files, at their 2.0 paths
-  const paths = [];
-  const stack = [];
-  for (const [d, kind, label] of TREE) {
-    stack[d] = label;
-    if (kind !== 'folder') paths.push(stack.slice(1, d + 1).join('/'));
-  }
-  assert.deepEqual(paths.sort(), ['README.md', `${L}/diagrams/orders.dbml`, `${L}/relationships/${L}.dbml`, `${L}/tables/${L}/dim_customer.dbml`, `${L}/tables/${L}/fct_order.dbml`, 'layers.json'].sort());
-  assert.ok(Object.keys(FILES).every((f) => paths.includes(f)));
-});
-
-test('the Export Diagram pick uses the command\'s real rows', async () => {
-  const { EXPORT_PICK } = await import('../player/scenes/tour/importDbml.js');
-  const src = read('src', 'commands', 'exportDiagram.ts');
-  assert.ok(src.includes(`EXPORT_TITLE = '${EXPORT_PICK.title}'`));
-  assert.ok(src.includes('placeHolder: `Export the design of "${name}" as…`'));
-  assert.equal(EXPORT_PICK.placeholder, 'Export the design of "orders" as…');
-  const ext = read('packages', 'core', 'src', 'exportDiagram.ts');
-  for (const r of EXPORT_PICK.rows) {
-    assert.ok(src.includes(JSON.stringify(r.detail)) || src.includes(`'${r.detail}'`), r.detail);
-    assert.ok(src.includes(`label: '${r.label}'`) || src.includes(`'dbml-rich': '${r.label}'`), r.label);
-  }
-  assert.ok(ext.includes("mermaid: 'mmd'") && ext.includes("dbml: 'dbml'"));
-  assert.deepEqual(EXPORT_PICK.rows.map((r) => r.description), ['.mmd', '.dbml', '.dbml']);
+  for (const f of ['layers.json', 'README.md', `${L}/diagrams/sales.dbml`]) assert.ok(DBT_ERD[f], f);
 });
 
 test('the README GIF is drawn from the same pieces: a plain folder, no dbt, the layer-first tree', async () => {
@@ -534,15 +423,14 @@ test('nothing calls ERD Studio open source (the licence is PolyForm Shield: sour
   for (const [file, sc] of Object.entries(SCRIPTS)) assert.doesNotMatch(JSON.stringify(sc), /open[ -]source/i, file);
 });
 
-// The DBML on screen is byte for byte what a user's file holds: the host formats every file it
+// The DBML the README GIF shows is byte for byte what a user's file holds: the host formats every file it
 // writes (src/services/dbmlWriters.ts formatWrittenDbml), so formatting the shown text changes
 // nothing. Runs core's formatDbml through the root's tsx; skipped when the root has no node_modules.
-test('the DBML text on screen is already formatted, as ERD Studio writes it', async (t) => {
+test('the DBML text the README GIF shows is already formatted, as ERD Studio writes it', async (t) => {
   const tsx = join(REPO, 'node_modules', '.bin', 'tsx');
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
-  const { FILES } = await import('../player/scenes/tour/files.js');
   const { FCT_DBML } = await import('../player/hero.js');
-  const texts = [...Object.values(FILES), FCT_DBML].map((lines) => `${lines.join('\n')}\n`);
+  const texts = [FCT_DBML].map((lines) => `${lines.join('\n')}\n`);
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
     const texts = JSON.parse(process.argv[1]);
@@ -553,36 +441,6 @@ test('the DBML text on screen is already formatted, as ERD Studio writes it', as
     assert.equal(r.skipped, null, `text ${i} did not format`);
     assert.ok(r.same, `text ${i} is not what formatDbml writes`);
   }
-});
-
-test('the side bar is the product\'s: views only once .erd-studio exists, every layer, New Diagram… and New Layer… rows', () => {
-  const views = pkg.contributes.views['erd-studio'];
-  for (const name of ['Table Library', 'Relationships']) assert.equal(views.find((v) => v.name === name).when, 'erdStudio.hasLogicalModelsDir', name);
-  assert.equal(views.find((v) => v.name === 'Table Library').visibility, undefined, 'Table Library opens expanded');
-  assert.equal(views.find((v) => v.name === 'Relationships').visibility, 'collapsed');
-  // no Table Library or Relationships header before the first diagram writes .erd-studio
-  const start = editor.erdSide().html;
-  assert.doesNotMatch(start, /TABLE LIBRARY|RELATIONSHIPS/);
-  const after = editor.erdSide({ diagrams: editor.ORDERS_TREE }).html;
-  assert.match(after, /TABLE LIBRARY/);
-  // the Diagrams header's actions: + (New…) and Filter Diagrams… whenever a folder is open
-  const titles = pkg.contributes.menus['view/title'];
-  assert.ok(titles.some((e) => e.submenu === 'erdStudio.newMenu' && e.when === 'view == erdStudio.domainTree && erdStudio.hasProject'));
-  assert.ok(titles.some((e) => e.command === 'erdStudio.filterDiagrams' && /hasProject && !erdStudio\.diagramsFiltered/.test(e.when)));
-  // DomainTreeProvider's rows: every layer (a new folder without dbt has one, Main), New Diagram… under an empty one, New Layer… last
-  const tree = read('src', 'providers', 'DomainTreeProvider.ts');
-  for (const s of ["'New Diagram…',", "item.description = 'none in this layer yet';", "new vscode.TreeItem('New Layer…'", "? 'Layer'", "{ type: 'newLayer' }]"]) assert.ok(tree.includes(s), s);
-  assert.deepEqual(editor.ORDERS_TREE.map(([l]) => l), Object.keys(editor.LAYERS));
-  const layers = read('src', 'services', 'layerService.ts');
-  for (const [label, colour] of Object.entries(editor.LAYERS)) assert.match(layers, new RegExp(`label: '${label}', abbreviation: '\\w+', color: '${colour}'`), label);
-  assert.ok(after.includes('New Layer…'));
-  // a layer with no diagram yet gets the New Diagram… row
-  const empty = editor.erdSide({ diagrams: [[editor.ORDERS_TREE[0][0], []]] }).html;
-  for (const s of ["New Diagram…", "none in this layer yet", "New Layer…"]) assert.ok(empty.includes(s), s);
-  // an empty library shows its welcome text
-  const welcome = pkg.contributes.viewsWelcome.find((w) => w.view === 'erdStudio.modelLibrary' && w.when === '!erdStudio.tablesLoading');
-  assert.equal(welcome.contents, editor.LIBRARY_EMPTY.join('\n\n'));
-  assert.match(editor.erdSide({ diagrams: editor.ORDERS_TREE, tables: [] }).html, /No tables yet\./);
 });
 
 test('a folder without dbt draws no stage colours (the renderer\'s neutral canvas)', () => {
@@ -597,48 +455,35 @@ test('a folder without dbt draws no stage colours (the renderer\'s neutral canva
   }
 });
 
-test('the draft pages match what the product draws: Show details, all eight example relationships, no reused table', async () => {
-  const { EXAMPLE_DRAFT: ex, SALES_DRAFT: sales, SHOW_DETAILS } = editor;
+test('the README GIF\'s draft matches what the product draws: Show details, no reused table', async () => {
+  const { SALES_DRAFT: sales, SHOW_DETAILS } = editor;
   assert.equal(SHOW_DETAILS, tsConst('webview-draft/lib/wording.ts', 'SHOW_DETAILS'));
   assert.ok(read('webview-draft', 'components', 'DraftBanner.tsx').includes('const showSecondLine = banner.changeOptions || counts !== \'\' || hasDetails;'));
-  assert.ok(ex.details && sales.details, 'an import draft (the example is one) always has details');
-  const example = read('src', 'commands', 'openExampleDiagram.ts');
-  const fk = (table) => (example.slice(example.indexOf(`Table ${table} `), example.indexOf('\n}', example.indexOf(`Table ${table} `))).match(/ref: >/g) ?? []).length;
-  assert.equal(ex.rels.length, fk('fct_orders') + fk('fct_order_items'));
-  for (const name of ['fct_orders', 'fct_order_items']) {
-    const tb = ex.tables.find((x) => x.name === name);
-    assert.equal(tb.cols.filter(([k]) => k === 'FK').length, fk(name), name);
-  }
+  assert.ok(sales.details, 'an import draft always has details');
   // a name already in the library would be reused (dbmlImport.ts) and the detail would say so
   const { HERO_TREE } = await import('../player/hero.js');
-  const { TABLES } = await import('../player/scenes/tour/tables.js');
-  const library = new Set([...TABLES.map((x) => x.name), ...HERO_TREE.filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, ''))]);
+  const library = new Set(HERO_TREE.filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, '')));
   for (const tb of sales.tables) assert.ok(!library.has(tb.name), `${tb.name} is already in the library`);
 });
 
-test('Import DBML… asks only the name: a new folder without dbt has one layer', async () => {
-  const { IMPORT_STEPS } = await import('../player/scenes/tour/importDbml.js');
+test('an import in a new folder without dbt asks only the name: one layer', () => {
   const src = read('src', 'commands', 'importDbml.ts');
-  assert.ok(src.includes(`const TITLE = '${IMPORT_STEPS.title}';`));
   assert.ok(src.includes("prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,"));
-  assert.equal(IMPORT_STEPS.namePrompt, `Name the diagram. It is saved in the ${NEW_LAYER.label} layer.`);
-  assert.ok(!('layers' in IMPORT_STEPS) && !('layerPlaceholder' in IMPORT_STEPS), 'no layer pick with one layer');
-  assert.equal(`${IMPORT_STEPS.name}.dbml`, editor.SALES_DRAFT.file);
   // one creatable layer: it is the default and nothing is asked (layerWording.ts)
   assert.ok(read('src', 'services', 'layerWording.ts').includes('if (creatableIds.length === 1) return creatableIds[0];'));
-  // the recording saw the same prompt in the real product (record/takes.json)
-  assert.ok(takes.importDbml.screenText.some((x) => x.startsWith(IMPORT_STEPS.namePrompt)));
+  // the recording saw that prompt in the real product, from Import SQL DDL (record/takes.json)
+  assert.ok(takes.importSql.screenText.some((x) => x.startsWith(IMPORT_NAME_PROMPT)));
 });
 
-test('the HTML mocks use the layer a new folder without dbt really gets (Main), as the recording shows', async () => {
+test('the README GIF uses the layer a new folder without dbt really gets (Main), as the recording shows', async () => {
   // layerService.ts NEW_PROJECT_LAYERS_WITHOUT_DBT is one layer
   assert.equal(NEW_LAYER.count, 1);
-  assert.deepEqual(Object.keys(editor.LAYERS), [NEW_LAYER.label]);
-  assert.deepEqual(editor.ORDERS_TREE.map(([l]) => l), [NEW_LAYER.label]);
-  assert.deepEqual(editor.ORDERS_LIBRARY.map(([l]) => l), [NEW_LAYER.label]);
+  const { HERO_TREE } = await import('../player/hero.js');
+  assert.ok(HERO_TREE.some(([d, k, l]) => d === 1 && k === 'folder' && l === NEW_LAYER.id));
+  // the recording's plain folder got the same one layer: the import's draft and name box say Main
   const shown = Object.values(takes).flatMap((s) => s.take === 'plain' ? s.screenText : []);
-  for (const s of [editor.EXAMPLE_DRAFT.detail, editor.SALES_DRAFT.detail, editor.NEW_DIAGRAM.prompt]) assert.ok(shown.some((x) => x.startsWith(s)), s);
-  // no Silver or Gold anywhere in the player's tour scenes or the GIF
+  for (const s of [`Keep saves it as sales in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/sales.dbml).`, IMPORT_NAME_PROMPT]) assert.ok(shown.some((x) => x.startsWith(s)), s);
+  // no Silver or Gold anywhere in the player's HTML scenes or the GIF
   for (const f of [...readdirSync(join(HERE, '..', 'player', 'scenes', 'tour')).map((x) => join('scenes', 'tour', x)), 'hero.js', 'editor.js']) {
     assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /\b(Gold|Silver|GLD|SLV)\b|gold\//, f);
   }
@@ -658,10 +503,10 @@ test('the README GIF never shows dbt in any frame', async () => {
 const takes = JSON.parse(readFileSync(join(HERE, '..', 'record', 'takes.json'), 'utf8'));
 const recScenes = script.scenes.filter((s) => s.module.startsWith('rec/'));
 
-test('the default cut films the real VS Code: every scene but the end card, in one of the takes, at the inset\'s size', async () => {
+test('the default cut films the real VS Code, in its light theme: every scene before Confluence, in one of the takes, at the inset\'s size', async () => {
   const { SCENES: ACTIONS, TAKES } = await import('../record/scenes.mjs');
   const { WINDOW, SETTINGS } = await import('../record/vscode.mjs');
-  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.slice(0, -1).map((s) => s.id));
+  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.slice(0, -2).map((s) => s.id));
   const filmed = Object.values(TAKES).flatMap((t) => t.scenes);
   assert.deepEqual([...filmed].sort(), recScenes.map((s) => s.id).sort(), 'each recorded scene in exactly one take');
   for (const s of recScenes) assert.equal(typeof ACTIONS[s.id]?.run, 'function', `record/scenes.mjs has no ${s.id}`);
@@ -672,12 +517,44 @@ test('the default cut films the real VS Code: every scene but the end card, in o
   assert.ok(x >= 0 && x + w <= 1920 && y >= 230 && y + h <= 965, 'clear of the headline and the chapter bar');
   const css = readFileSync(join(HERE, '..', 'player', 'style.css'), 'utf8');
   assert.match(css, /body\.rec \.headline \{ top: 84px; font-size: 62px; \}/);
-  // a clean, quiet, isolated editor: no telemetry, no AI chat UI, ERD Studio's own telemetry off, DOM menus (CDP films those)
-  for (const [k, v] of Object.entries({ 'telemetry.telemetryLevel': 'off', 'erdStudio.telemetry.enabled': false, 'chat.disableAIFeatures': true, 'window.menuStyle': 'custom', 'window.dialogStyle': 'custom', 'files.simpleDialog.enable': true })) assert.deepEqual(SETTINGS[k], v, k);
+  // the frame is light, as the window is: off-white, dark text
+  const rec = css.slice(css.indexOf('body.rec {'), css.indexOf('}', css.indexOf('body.rec {')));
+  assert.match(rec, /--text: #1f2328;/);
+  assert.match(rec, /--bg-1: #f6f7f9;/);
+  assert.equal(SETTINGS['workbench.colorTheme'], 'Default Light Modern');
+  // a clean, quiet, isolated editor: no telemetry, no AI chat UI, ERD Studio's own telemetry off, DOM menus (CDP films those),
+  // the import clicked by hand (no automatic draft), a terminal the privacy check can read
+  for (const [k, v] of Object.entries({ 'telemetry.telemetryLevel': 'off', 'erdStudio.telemetry.enabled': false, 'chat.disableAIFeatures': true, 'window.menuStyle': 'custom',
+    'window.dialogStyle': 'custom', 'files.simpleDialog.enable': true, 'erdStudio.startSuggestions': false, 'terminal.integrated.gpuAcceleration': 'off',
+    'terminal.integrated.shellIntegration.enabled': false })) assert.deepEqual(SETTINGS[k], v, k);
   const vs = readFileSync(join(HERE, '..', 'record', 'vscode.mjs'), 'utf8');
   assert.match(vs, /--use-mock-keychain/);
   assert.doesNotMatch(vs.replace(/^\s*\/\/.*$/gm, ''), /9333/, 'never the shared CDP port');
   assert.match(readFileSync(join(HERE, '..', 'record', 'driver.mjs'), 'utf8'), /CDP_PORT \|\| 9555/);
+  // the window keeps its own environment (VSCODE_CLI=1: no login-shell PATH, so no dbt of yours) and HOME
+  assert.match(vs, /VSCODE_CLI: '1'/);
+  assert.match(vs, /const HOME = join\(PROFILE, 'home'\)/);
+});
+
+test('Claude Code runs on the existing login with none of your user config, edits only, and a clean prompt', async () => {
+  const { CLAUDE_FLAGS, terminalEnv, SETTINGS } = await import('../record/vscode.mjs');
+  const flag = (f) => CLAUDE_FLAGS[CLAUDE_FLAGS.indexOf(f) + 1];
+  assert.equal(flag('--setting-sources'), 'project,local');
+  assert.ok(CLAUDE_FLAGS.includes('--strict-mcp-config'));
+  assert.equal(flag('--mcp-config'), '{"mcpServers":{}}');
+  assert.equal(flag('--permission-mode'), 'acceptEdits');
+  assert.equal(flag('--disallowedTools'), 'Bash');
+  assert.ok(!CLAUDE_FLAGS.some((f) => /dangerously|bypass/i.test(f)));
+  // the terminal: your real HOME (the login lives there; nothing logs in), our own zsh config, prompt "$ "
+  const env = terminalEnv();
+  assert.ok(env.HOME && env.ZDOTDIR.startsWith('/tmp/erdrec'));
+  const vs = readFileSync(join(HERE, '..', 'record', 'vscode.mjs'), 'utf8');
+  assert.match(vs, /PS1='\$ '/);
+  assert.match(vs, /export IS_DEMO=1/);
+  assert.doesNotMatch(vs, /\/login|setup-token|ANTHROPIC_API_KEY/);
+  assert.equal(SETTINGS['terminal.integrated.profiles.osx'].tour.path, '/bin/zsh');
+  // the banner (it names the plan the login is on) is cleared before the take starts
+  assert.match(readFileSync(join(HERE, '..', 'record', 'scenes.mjs'), 'utf8'), /await clearTerminal\(d\);/);
 });
 
 test('record/takes.json: every recorded scene was filmed for its scene\'s length, its clicks on time and done before the cut', () => {
@@ -687,8 +564,15 @@ test('record/takes.json: every recorded scene was filmed for its scene\'s length
     assert.ok(take.busy <= take.dur, `${s.id}: the clicks ran ${take.busy}s into a ${take.dur}s scene`);
     assert.ok(take.late <= 0.6, `${s.id}: a click ran ${take.late}s late`);
     assert.ok(take.screenText.length > 10, s.id);
+    // a fast-forward only where the script asks for one, inside its scene
+    if (take.ff) {
+      assert.ok(s.props?.fastForward, `${s.id} was sped up without props.fastForward`);
+      assert.ok(take.ff.a < take.ff.o && take.ff.o < take.dur && take.ff.b >= take.ff.o, `${s.id}: ${JSON.stringify(take.ff)}`);
+    }
   }
   assert.deepEqual(Object.keys(takes).sort(), recScenes.map((s) => s.id).sort());
+  // Claude Code's wait is what is sped up
+  assert.ok(takes.aiRun.ff && takes.aiRun.ff.b - takes.aiRun.ff.a > takes.aiRun.ff.o - takes.aiRun.ff.a, 'aiRun: Claude Code took longer than its window, so it is sped up');
   // the footage matches the timeline it is laid on, when there is one
   const built = join(HERE, '..', 'build', 'timeline.json');
   if (existsSync(built)) {
@@ -697,42 +581,132 @@ test('record/takes.json: every recorded scene was filmed for its scene\'s length
   }
 });
 
+test('the terminal never showed an account, a plan, an email or a home folder', () => {
+  const rows = Object.values(takes).flatMap((s) => s.terminalText ?? []);
+  assert.ok(takes.aiRun.terminalText?.length > 5, 'the aiRun take sampled the terminal');
+  const home = process.env.HOME ?? '/Users/';
+  for (const r of rows) {
+    assert.doesNotMatch(r, /Claude (Max|Pro|Ultra|Team|Enterprise)\b|Organization|@[\w-]+\.\w|\/Users\/|API Usage Billing/i, r);
+    assert.ok(!r.includes(home), r);
+    assert.doesNotMatch(r, /Claude Code v\d/, `the banner was on camera: ${r}`);
+  }
+  // what the line says: the request, the skill loaded by itself, the edit to the .dbml files
+  const ai = takes.aiRun.terminalText.join('\n');
+  assert.match(ai, /Add a dim_customer table, linked to fct_order/);
+  assert.match(ai, /Skill\(erd-studio\)/);
+  assert.match(ai, /\.erd-studio\/main\/.*\.dbml/);
+});
+
 test('the recording shows dbt only in the dbt beat, and there shows what the line says', () => {
   for (const s of recScenes.filter((x) => !isDbtBeat(x))) {
     for (const text of takes[s.id].screenText) assert.doesNotMatch(text, NO_DBT_ON_SCREEN, `${s.id} showed "${text}"`);
   }
   const dbt = new Set(takes.dbt.screenText);
-  // "a Physical tab shows what dbt has", "Click Compare with dbt to mark every difference"
+  // "Draw from dbt… click Run dbt parse. It writes manifest.json… The Physical tab shows what it describes… Compare with dbt marks every difference"
   for (const [, label, hint] of lib.STAGE_TABS) { assert.ok(dbt.has(label), label); assert.ok(dbt.has(`· ${hint}`), hint); }
-  for (const w of [lib.COMPARE_WORDS.logical, lib.COMPARE_WORDS.stop, 'only here', 'Only in Logical', 'Only in Physical']) assert.ok(dbt.has(w), w);
+  for (const w of ['Run dbt parse', 'Open Physical view', lib.COMPARE_WORDS.logical, lib.COMPARE_WORDS.stop, 'Only in Logical', 'Only in Physical']) assert.ok(dbt.has(w), w);
+  assert.ok([...dbt].some((t) => t.startsWith('dbt parse finished.')), 'Run dbt parse ran dbt for real');
+  // "Draw from dbt turns your models into a diagram": the Diagrams view's New… menu showed it, under the
+  // command's own title, and the line uses the start's one label (src/types/startActions.ts)
+  assert.ok(dbt.has(cmdTitle('erdStudio.drawFromDbt')), cmdTitle('erdStudio.drawFromDbt'));
+  assert.match(read('src', 'types', 'startActions.ts'), /drawFromDbt: 'Draw from dbt',/);
+  assert.ok(script.scenes.find(isDbtBeat).lines[0].caption.includes('Draw from dbt'), 'the dbt beat names Draw from dbt');
+  assert.match(read('src', 'commands', 'runDbtParse.ts'), /RUN_DBT_PARSE_ACTION = 'Run dbt parse'/);
+  // "manifest.json": what dbt parse writes (runDbtParse.ts says so)
+  assert.match(read('src', 'commands', 'runDbtParse.ts'), /writes `\{target-path\}\/manifest\.json`/);
+});
+
+test('the logical cut plays the default cut\'s plain take: its recorded scenes are script.yaml\'s, minus dbt', async () => {
+  const { checkFootage, footageVariant } = await import('../record/composite.mjs');
+  assert.equal(logical.recording.footage, 'default');
+  assert.equal(footageVariant(logical.recording.footage), '');
+  assert.deepEqual(logical.recording.inset, script.recording.inset);
+  assert.equal(logical.recording.zoom, undefined, 'the punch-in is the dbt beat\'s');
+  // the chapters: script.yaml's without COMPARE, renumbered
+  assert.deepEqual(logical.chapters.map((c) => c.replace(/^\d+ · /, '')), script.chapters.map((c) => c.replace(/^\d+ · /, '')).filter((c) => c !== 'COMPARE'));
+  const byId = Object.fromEntries(script.scenes.map((s) => [s.id, s]));
+  for (const sc of logical.scenes.filter((s) => s.module.startsWith('rec/'))) {
+    const d = byId[sc.id];
+    // filmed in the plain take, a folder without dbt_project.yml
+    assert.equal(takes[sc.id].take, 'plain', sc.id);
+    if (sc.id !== 'bring') { assert.deepEqual(sc, d, `${sc.id} is script.yaml's scene`); continue; }
+    // the import: its first line names no dbt, its logo row has no dbt mark, and the pause puts `open` back
+    const { lines, props, ...rest } = sc;
+    const { lines: dl, props: dp, ...drest } = d;
+    assert.deepEqual(rest, drest);
+    assert.doesNotMatch(lines[0].caption, NO_DBT);
+    assert.deepEqual(props.logos.map(([id]) => id), dp.logos.map(([id]) => id).filter((id) => id !== 'dbt'));
+    const { pause, ...open } = lines[1];
+    const { pause: dpause, ...dopen } = dl[1];
+    assert.deepEqual(open, dopen);
+    assert.ok(pause > (dpause ?? script.timing.gap), 'b_have is shorter, so the pause is longer');
+  }
+  // the non-recorded scenes are the default cut's, but for the chapter number
+  for (const id of ['confluence', 'end']) {
+    const { chapter, ...a } = logical.scenes.find((s) => s.id === id);
+    const { chapter: _, ...b } = byId[id];
+    assert.deepEqual(a, b, id);
+  }
+  // with both builds there, the footage fits this cut's clock exactly
+  const [bl, bd] = [join(HERE, '..', 'build-logical', 'timeline.json'), join(HERE, '..', 'build', 'timeline.json')];
+  if (existsSync(bl) && existsSync(bd)) assert.deepEqual(checkFootage(JSON.parse(readFileSync(bl, 'utf8')), JSON.parse(readFileSync(bd, 'utf8'))), []);
+  // and checkFootage catches a beat that moved
+  const mk = (t) => ({ scenes: [{ id: 'a', module: 'rec/window', dur: 5, beats: { x: { t } } }, { id: 'e', module: 'tour/endCard', dur: 2, beats: {} }] });
+  assert.deepEqual(checkFootage(mk(1), mk(1)), []);
+  assert.match(checkFootage(mk(1.2), mk(1)).join(), /a: beat x at 1.2s here, 1s in the footage/);
+  // only the default cut is ever recorded
+  assert.match(readFileSync(join(HERE, '..', 'record', 'record.mjs'), 'utf8'), /if \(process\.env\.VARIANT\) throw/);
+});
+
+test('nothing the logical cut films shows dbt: on screen or in the terminal', () => {
+  for (const sc of logical.scenes.filter((s) => s.module.startsWith('rec/'))) {
+    for (const text of [...takes[sc.id].screenText, ...(takes[sc.id].terminalText ?? [])]) assert.doesNotMatch(text, NO_DBT_ON_SCREEN, `${sc.id} showed "${text}"`);
+  }
+  for (const c of logical.chapters) assert.doesNotMatch(c, NO_DBT_ON_SCREEN);
 });
 
 test('each recorded scene shows the product labels its narration names', () => {
   const shown = (id) => new Set(takes[id].screenText);
   const cmd = (id) => pkg.contributes.commands.find((c) => c.command === id).title;
+  const { HAND_TABLE } = { HAND_TABLE: 'dim_promotion' };
   const expect = {
-    install: [pkg.displayName, editor.SIDEBAR_START.text, START_LABELS.blank, tsConst('src/services/draftModel.ts', 'KEEP_THIS_EXAMPLE')],
-    newDiagram: [tsConst('src/services/diagramCommandErrors.ts', 'NEW_DIAGRAM_TITLE'), 'orders', 'This diagram is empty', 'New Table'],
-    tables: ['New Table', 'Create Table', 'Starter columns (optional)', 'New Relationship', 'Create Relationship', 'dim_date', 'fct_order', '1 relationship'],
-    files: ['tables', 'dim_date.dbml', 'fct_order.dbml', 'DBML Table'],
-    hook: ['dim_date.dbml', 'fct_order.dbml', 'orders.dbml', '2 tables', '1 relationship'],
-    importDbml: [cmd('erdStudio.exportDiagram'), 'Mermaid', 'DBML', 'Rich DBML', cmd('erdStudio.importDbml'), 'sales.dbml', tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM'), '5 tables'],
-    enrich: [cmd('erdStudio.setupAiHelper'), ...editor.HELP_ROWS],
-    dbt: [lib.COMPARE_WORDS.logical, 'Physical', 'NUMBER(12,2)', 'order_status'],
+    hook: ['dim_customer.dbml', 'fct_order.dbml', 'sales.dbml', '6 tables'],
+    bring: ['sales.sql', 'No diagrams yet. This folder has CREATE TABLE scripts.', START_LABELS.importSqlDdl, tsConst('src/types/startActions.ts', 'MORE_STARTS_LABEL'), START_LABELS.import, tsConst('src/types/startActions.ts', 'IMPORT_GUIDE_LABEL')],
+    importSql: ['SQL DDL scripts', 'Power BI or Fabric semantic model', 'Import SQL DDL', 'Databricks / Spark SQL'],
+    draft: ['Draft from 1 SQL file (Snowflake) · 4 tables, 3 relationships · not saved', tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM')],
+    files: ['.erd-studio', 'fct_order.dbml', 'pipelines', 'DBML Table'],
+    byHand: ['Starter columns (optional)', HAND_TABLE],
+    aiSetup: [cmd('erdStudio.setupAiHelper'), ...editor.HELP_ROWS],
+    aiRun: ['dim_customer', 'customer_id', '6 tables'],
+    dbt: [lib.COMPARE_WORDS.logical, 'Physical', 'NUMBER(18,2)', 'order_status'],
   };
   assert.deepEqual(Object.keys(expect).sort(), recScenes.map((s) => s.id).sort());
   for (const [id, labels] of Object.entries(expect)) for (const l of labels) assert.ok(shown(id).has(l), `${id} never showed "${l}"`);
-  // the setup line's command is the one the helper's toast and the setup skill use
-  const setup = script.scenes.find((s) => s.id === 'enrich').lines.find((l) => l.beat === 'setup');
-  assert.ok(setup.caption.includes(cmd('erdStudio.setupAiHelper')));
-  // "…then start the guided setup in your assistant": what the helper's toast on screen says
-  assert.ok(setup.caption.includes('start the guided setup'));
-  assert.ok([...shown('enrich')].some((t) => /^AI helper ready for .*Start the guided setup/.test(t)), 'the toast says to start the guided setup');
-  assert.ok([...shown('enrich')].some((t) => /^AI helper ready for /.test(t)), 'Set Up My AI Helper\'s toast');
+  // the import picker's rows are importModel.ts's; the dialect was detected
+  const picker = read('src', 'commands', 'importModel.ts');
+  for (const r of ['SQL DDL scripts', 'DBML file', 'Power BI or Fabric semantic model']) assert.ok(picker.includes(`label: '$(`) && picker.includes(` ${r}'`), r);
+  assert.ok([...shown('importSql')].some((t) => /^Snowflake/.test(t)) || [...shown('importSql')].includes('Snowflakedetected') || [...shown('importSql')].includes('detected'), 'the Snowflake row');
+  assert.ok([...shown('importSql')].some((t) => t.startsWith(IMPORT_NAME_PROMPT)));
+  // Set Up My AI Helper's toast names the assistant it set up
+  assert.ok([...shown('aiSetup')].some((t) => /^AI helper ready for Claude Code/.test(t)), 'Set Up My AI Helper\'s toast');
+  // the narration's labels are the product's
+  const said = script.scenes.flatMap((s) => s.lines.map((l) => l.caption)).join(' ');
+  for (const l of [cmd('erdStudio.setupAiHelper'), 'Import', 'Run dbt parse', 'Compare with dbt', 'Physical tab']) assert.ok(said.includes(l), l);
 });
 
-test('the recorded frame: the window\'s bezel and the hook\'s claims, nothing about dbt, the footage fading only where it starts and ends', async () => {
+test('the AI helper is what the narration says: plain markdown skill files, and in Claude Code a pre-tool hook', () => {
+  const svc = read('src', 'services', 'harnessService.ts');
+  assert.match(svc, /PreToolUse/);
+  assert.match(svc, /enforce-skill\.sh/);
+  assert.ok(existsSync(join(REPO, 'src', 'harness', 'claude', 'erd-studio', 'SKILL.md')) || /SKILL\.md/.test(svc), 'the skill is markdown');
+  const ai = script.scenes.filter((s) => s.id.startsWith('ai')).flatMap((s) => s.lines.map((l) => l.caption)).join(' ');
+  assert.match(ai, /plain markdown files/);
+  assert.match(ai, /pre-tool hook/);
+});
+
+test('the recorded frame: the window\'s bezel, the hook\'s claims and the import\'s logos, nothing about dbt but its logo, the footage fading only where it starts and ends', async () => {
   const mod = (await import('../player/scenes/rec/window.js')).default;
+  const { LOGOS } = await import('../player/scenes/rec/window.js');
   globalThis.TIMELINE = { recording: script.recording };
   const durations = Object.fromEntries(script.scenes.flatMap((s) => s.lines.map((l) => [l.id, 2.5])));
   const tl = buildTimeline(script, durations);
@@ -743,10 +717,38 @@ test('the recorded frame: the window\'s bezel and the hook\'s claims, nothing ab
   assert.doesNotMatch(html.replace(/<[^>]+>/g, ' '), NO_DBT_ON_SCREEN);
   const { x, y, w, h } = script.recording.inset;
   assert.ok(html.includes(`left:${x}px;top:${y}px;width:${w}px;height:${h}px`), 'the inset the footage covers');
+  // the logos: each one's file is there, vetted in LOGOS.md, and the line names each
+  const bring = tl.scenes.find((s) => s.id === 'bring');
+  const logoHtml = mod.render(bring.dur - 0.1, { beats: bring.beats, dur: bring.dur, scene: bring });
+  const notes = readFileSync(join(HERE, '..', 'player', 'assets', 'logos', 'LOGOS.md'), 'utf8');
+  for (const [id] of bring.props.logos) {
+    const l = LOGOS[id];
+    assert.ok(logoHtml.includes(l.name), l.name);
+    // a chip naming two products (Power BI / Fabric) is named word for word in the line, each of them
+    for (const name of l.name.split(' / ')) assert.ok(bring.lines[0].caption.includes(name), `the line names ${name}`);
+    if (l.file) { assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'logos', l.file)), l.file); assert.ok(notes.includes(`\`${l.file}\``), `${l.file} in LOGOS.md`); }
+  }
+  // video/ never loads anything from social-video/ at run time
+  for (const f of ['scenes/rec/window.js', 'scenes/tour/confluence.js']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /social-video/, f);
   const main = readFileSync(join(HERE, '..', 'player', 'main.js'), 'utf8');
   assert.match(main, /isRec\(scs\[i - 1\]\) \? 1 : pin\) \* \(isRec\(scs\[i \+ 1\]\) \? 1 : 1 - pout\)/);
   const comp = readFileSync(join(HERE, '..', 'record', 'composite.mjs'), 'utf8');
   assert.match(comp, /fade=t=in:st=\$\{start\}:d=\$\{fade\}:alpha=1,fade=t=out:st=\$\{\(end - fade\)/);
+});
+
+test('the Confluence scene: the real render of the tour\'s diagram, a read-only viewer reading the repo', async () => {
+  const src = readFileSync(join(HERE, '..', 'player', 'scenes', 'tour', 'confluence.js'), 'utf8');
+  for (const w of ['ERD Studio for Confluence', 'Read-only', 'confluence.svg', 'github.svg', 'confluence-sales.png']) assert.ok(src.includes(w), w);
+  assert.doesNotMatch(src.replace(/^\s*\/\/.*$/gm, ''), /\bfree\b|price|\$\d/i);
+  assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'confluence-sales.png')), 'node confluence-shot.mjs');
+  const shot = readFileSync(join(HERE, '..', 'confluence-shot.mjs'), 'utf8');
+  assert.match(shot, /<ErdCanvas domain=\{domain\} viewer/);
+  assert.match(shot, /loadDisplaySubjectArea/);
+  // the scene's words are timed to its lines
+  const { phraseAt } = await import('../player/scenes/tour/confluence.js');
+  const durations = Object.fromEntries(script.scenes.flatMap((s) => s.lines.map((l) => [l.id, 4])));
+  const sc = buildTimeline(script, durations).scenes.find((s) => s.id === 'confluence');
+  for (const [beat, p] of [['truth', 'just DBML'], ['confluence', 'from GitHub'], ['confluence', 'business users']]) assert.ok(phraseAt(sc, beat, p) > 0);
 });
 
 test('composite lays each scene\'s footage on the video clock: the latest painted frame, from the scene\'s own mark', async () => {
@@ -775,6 +777,38 @@ test('composite lays each scene\'s footage on the video clock: the latest painte
   const inOrder = { plain: { frames, scenes: [{ id: 'b', t0: 100, dur: 0.5 }, { id: 'a', t0: 100.6, dur: 0.3 }] } };
   assert.deepEqual(framePlan(tl, inOrder).cuts, []);
   assert.throws(() => framePlan(tl, { plain: { frames, scenes: [{ id: 'a', t0: 100, dur: 0.3 }, { id: 'b', t0: 101, dur: 0.7 }] } }), /record again/);
+});
+
+test('a fast-forward plays the take\'s wait faster, in its window, and the take runs on in real time after it; the badge says so', async () => {
+  const { takeClock, framePlan, fastForwards, badgeLabel, pointerTerms, pointerFromTerms, pointerAt } = await import('../record/composite.mjs');
+  const ff = { a: 2, b: 22, o: 6 };   // 20 s of waiting in 4 s of video: 5x
+  const clock = takeClock(ff);
+  assert.equal(clock(1), 1);
+  assert.equal(clock(4), 12);
+  assert.equal(clock(6), 22);
+  assert.equal(clock(8), 24);
+  assert.equal(takeClock(null)(3.3), 3.3);
+  // the frames: the scene shows its take's frame at clock(u); the next scene follows on from the filmed end
+  const tl = { fps: 2, scenes: [{ id: 's', module: 'rec/window', start: 0, dur: 8 }, { id: 'n', module: 'rec/window', start: 8, dur: 1 }] };
+  const frames = Array.from({ length: 30 }, (_, i) => ({ f: `f${i}.jpg`, t: 100 + i }));
+  const takes = { p: { frames, scenes: [{ id: 's', t0: 100, dur: 8, filmed: 24, ff }, { id: 'n', t0: 124.1, dur: 1 }] } };
+  const plan = framePlan(tl, takes);
+  assert.equal(plan.frames[8].file, `f${Math.floor(clock(4.25))}.jpg`);
+  assert.deepEqual(plan.cuts, [], 'the next scene follows the filmed length, not the video length');
+  const [f] = fastForwards(tl, takes);
+  assert.deepEqual([f.from, f.to, f.speed], [2, 6, 5]);
+  assert.equal(badgeLabel(f.speed), 'Sped up 5×');
+  // the real speed, to one decimal: 2.4x footage never reads as 2x
+  assert.equal(badgeLabel(2.4017), 'Sped up 2.4×');
+  assert.equal(badgeLabel(2.96), 'Sped up 3×');
+  // the pointer: real-time glides keep their timing on either side of the fast-forward
+  const trail = [{ s: 99, d: 0, x0: 5, y0: 5, x1: 5, y1: 5 }, { s: 100.5, d: 1, x0: 5, y0: 5, x1: 105, y1: 5 }, { s: 122.5, d: 1, x0: 105, y0: 5, x1: 105, y1: 105 }];
+  const terms = pointerTerms(tl, takes, { p: trail });
+  for (const u of [0.25, 1.25, 1.75, 6.6, 7.2, 7.9]) {
+    const want = pointerAt(trail, 100 + clock(u));
+    const got = pointerFromTerms(terms, u);
+    assert.ok(Math.abs(got.x - want.x) < 1e-6 && Math.abs(got.y - want.y) < 1e-6, `u=${u}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
+  }
 });
 
 test('composite draws the pointer from the driver\'s path, on the video clock: each scene from where its take\'s pointer was', async () => {
@@ -820,28 +854,41 @@ test('the punch-in on the dbt beat\'s comparison panel stays inside the window a
   }
 });
 
-test('the fixtures are what ERD Studio writes, and the import scene\'s file is new to the library', async () => {
+test('the fixtures: a project folder holding Snowflake\'s exported DDL, and a dbt project that differs from the design on purpose', async () => {
   const fx = readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8');
-  // the plain folder opens with nothing to import: sales.dbml arrives just before its scene
+  // the plain folder opens with nothing ERD Studio wrote and no dbt
   const plain = fx.slice(fx.indexOf('const PLAIN = {'), fx.indexOf('};', fx.indexOf('const PLAIN = {')));
-  assert.doesNotMatch(plain, /\.dbml|dbt_project/);
-  const { SALES_DBML } = await import('../record/fixtures.mjs');
-  for (const t of ['dim_date', 'fct_order']) assert.doesNotMatch(SALES_DBML, new RegExp(`Table ${t} `));
-  // every ref optional, as ERD Studio saves them: the draft shows no note about it
-  assert.equal((SALES_DBML.match(/\[ref: >\? /g) ?? []).length, 4);
-  assert.doesNotMatch(SALES_DBML, /\[ref: > /);
-  // the dbt project's design differs from its schema yml on purpose: Compare with dbt has differences to mark
-  assert.match(fx, /- name: order_status\n\s+data_type: VARCHAR/);
-  assert.match(fx, /amount {10}"DECIMAL\(18,2\)"/);
-  assert.match(fx, /data_type: NUMBER\(12,2\)/);
+  assert.doesNotMatch(plain, /\.erd-studio|dbt_project/);
+  const { SALES_SQL, dimCustomerYml, DBT_ERD } = await import('../record/fixtures.mjs');
+  // GET_DDL's shape: create or replace TABLE, Snowflake types, declared keys; four tables, three foreign keys
+  assert.equal((SALES_SQL.match(/^create or replace TABLE /gm) ?? []).length, 4);
+  assert.equal((SALES_SQL.match(/foreign key \(/g) ?? []).length, 3);
+  assert.match(SALES_SQL, /NUMBER\(38,0\)/);
+  assert.doesNotMatch(SALES_SQL, /\/Users\/|@/);
+  // no scratch or home paths in committed code
+  for (const f of ['fixtures.mjs', 'scenes.mjs', 'vscode.mjs', 'record.mjs']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'record', f), 'utf8'), /\/Users\/|scratchpad|claude-501/, f);
+  // the design the dbt take starts from: the import, the table added by hand, the one Claude Code added
+  for (const t of ['fct_order', 'dim_store', 'dim_product', 'dim_date', 'dim_promotion', 'dim_customer']) assert.ok(DBT_ERD[`main/tables/main/${t}.dbml`], t);
+  // the dbt project's models differ on purpose: an extra order_status, amount NUMBER(18,2), no dim_promotion
+  assert.match(fx, /- name: order_status\n\s+data_type: VARCHAR\(20\)/);
+  assert.match(fx, /- name: amount\n\s+data_type: NUMBER\(18,2\)/);
+  assert.match(DBT_ERD['main/tables/main/fct_order.dbml'], /amount +"NUMBER\(12,2\)"/);
+  assert.doesNotMatch(fx, /- name: dim_promotion/);
+  // dim_customer's model follows the design's columns (Claude Code chose them)
+  assert.match(dimCustomerYml('Table main.dim_customer {\n  customer_id "NUMBER(38,0)" [pk]\n  email       VARCHAR\n}\n'), /- name: customer_id\n {8}data_type: NUMBER\(38,0\)\n {8}data_tests: \[unique, not_null\]\n {6}- name: email\n {8}data_type: VARCHAR/);
+  // Run dbt parse on camera: real dbt Core, pinned, and a profile in the project that connects nowhere
+  const { DBT_UVX_ARGS } = await import('../record/vscode.mjs');
+  assert.ok(DBT_UVX_ARGS.some((a) => /^dbt-core==\d/.test(a)) && DBT_UVX_ARGS.some((a) => /^dbt-duckdb==\d/.test(a)));
+  assert.match(fx, /type: duckdb\\n {6}path: ":memory:"/);
 });
 
-test('the fixtures\' DBML is formatted as ERD Studio writes it', async (t) => {
+test('the design the take wrote is formatted as ERD Studio writes it, but for the files Claude Code edited', async (t) => {
   const tsx = join(REPO, 'node_modules', '.bin', 'tsx');
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
-  const fx = readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8');
-  const texts = [...fx.matchAll(/'\.erd-studio\/main\/[^']+\.dbml': `([\s\S]*?)`,\n/g)].map((m) => m[1].replace(/\\`/g, '`'));
-  assert.equal(texts.length, 4);
+  const { DBT_ERD } = await import('../record/fixtures.mjs');
+  // ERD Studio formats every file it writes (Claude Code edited fct_order, the relationships and dim_customer; Layout rewrote the diagram after it)
+  const ours = ['main/tables/main/dim_store.dbml', 'main/tables/main/dim_product.dbml', 'main/tables/main/dim_date.dbml', 'main/tables/main/dim_promotion.dbml', 'main/diagrams/sales.dbml'];
+  const texts = ours.map((f) => DBT_ERD[f]);
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
     const texts = JSON.parse(process.argv[1]);
@@ -849,7 +896,30 @@ test('the fixtures\' DBML is formatted as ERD Studio writes it', async (t) => {
   const run = spawnSync(tsx, ['--eval', code, JSON.stringify(texts)], { cwd: REPO, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   for (const [i, r] of JSON.parse(run.stdout.trim().split('\n').at(-1)).entries()) {
-    assert.equal(r.skipped, null, `fixture text ${i} did not format`);
-    assert.ok(r.same, `fixture text ${i} is not what formatDbml writes`);
+    assert.equal(r.skipped, null, `${ours[i]} did not format`);
+    assert.ok(r.same, `${ours[i]} is not what formatDbml writes`);
+  }
+});
+
+test('the footage is filmed at the inset\'s own size, scaled down from a 2x window, never up', async () => {
+  const { WINDOW, DPR } = await import('../record/vscode.mjs');
+  const { inset } = parse(readFileSync(join(HERE, '..', 'script.yaml'), 'utf8')).recording;
+  // the window renders at DPR (--force-device-scale-factor), so its pixels cover the inset
+  assert.ok(WINDOW.width * DPR >= inset.w && WINDOW.height * DPR >= inset.h, `${WINDOW.width}x${WINDOW.height} at ${DPR}x covers ${inset.w}x${inset.h}`);
+  assert.equal(WINDOW.width / WINDOW.height, inset.w / inset.h, 'the window and the inset have one aspect ratio');
+  assert.match(readFileSync(join(HERE, '..', 'record', 'vscode.mjs'), 'utf8'), /`--force-device-scale-factor=\$\{DPR\}`/);
+  // a raw take's frames (when there is one here) are the inset's size: composite never upscales them
+  const jpegSize = (buf) => {
+    for (let i = 2; i < buf.length;) {
+      const marker = buf[i + 1], len = buf.readUInt16BE(i + 2);
+      if (marker >= 0xc0 && marker <= 0xc2) return { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+      i += 2 + len;
+    }
+    return null;
+  };
+  for (const take of ['plain', 'dbt']) {
+    const f = join(HERE, '..', 'build', 'rec', take, 'f00010.jpg');
+    if (!existsSync(f)) continue;
+    assert.deepEqual(jpegSize(readFileSync(f)), { w: inset.w, h: inset.h }, `${take}'s frames`);
   }
 });

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Renders the README's play-button thumbnail, docs/assets/getting-started-play.jpg (1280x720
-// JPEG), from player/thumbnail.html: the video's own diagram (a real recorded frame for a recorded
-// cut, build/thumb-bg.png; else the tables scene drawn in HTML) behind a large play button,
-// "Get started in N seconds" and the real duration. Needs build/timeline.json (npm run timeline).
+// JPEG), from player/thumbnail.html: the video's own diagram (a real recorded frame of the default
+// cut, build/thumb-bg.png) behind a large play button, "Watch the tour" and the real duration. Needs build/timeline.json (npm run timeline).
 //
 //   node thumbnail.mjs            (npm run thumbnail)
 //   node thumbnail.mjs --out x.jpg   a review copy somewhere else
@@ -18,14 +17,14 @@ const outAt = process.argv.indexOf('--out');
 const OUT = outAt < 0 ? join(HERE, '..', 'docs', 'assets', 'getting-started-play.jpg') : process.argv[outAt + 1];
 const MAX_BYTES = 300 * 1024;
 
-// A recorded cut's thumbnail shows a real frame: the end of the tables scene (two tables and their
-// relationship on the real canvas), taken from the footage composite.mjs laid out on the clock.
+// A recorded cut's thumbnail shows a real frame: the end of its opening scene (the finished diagram
+// beside its files, in VS Code's light theme), taken from the footage composite.mjs laid out on the clock.
 const timeline = JSON.parse(readFileSync(join(HERE, 'build', 'timeline.json'), 'utf8'));
 if (timeline.recording) {
-  const sc = timeline.scenes.find((s) => s.id === 'tables');
+  const sc = timeline.scenes[0];
   const rec = join(HERE, 'build', 'recording.mkv');
   if (!existsSync(rec)) throw new Error('no build/recording.mkv: run `npm run composite` first');
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-ss', (sc.start + sc.dur - 0.1).toFixed(3), '-i', rec, '-frames:v', '1', join(HERE, 'build', 'thumb-bg.png')]);
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-ss', (sc.start + sc.dur - 0.6).toFixed(3), '-i', rec, '-frames:v', '1', join(HERE, 'build', 'thumb-bg.png')]);
 }
 
 const server = await startServer(0);

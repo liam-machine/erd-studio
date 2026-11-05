@@ -4,17 +4,17 @@ import { appear, appIcon, ICON } from '../../lib.js';
 import { EXTENSION } from '../../editor.js';
 
 // The chips name the real steps: the extension, the walkthrough's open-a-folder step (its title)
-// and the start a folder with nothing to import offers (START_ACTION_LABELS.blank).
-export const STEPS = ['Install ERD Studio', 'Open the folder your data model lives in', 'New Diagram…'];
+// and Import… (START_ACTION_LABELS.import): most people bring in the model they already have.
+export const STEPS = ['Install ERD Studio', 'Open the folder your data model lives in', 'Import…'];
 /** The product's tagline (the walkthrough's subtitle): the first part bright, the second dimmed. */
 export const TAGLINE = ['Design your data model in Git.', 'Let your AI build from it.'];
-/** What it is: free to use, source available under the PolyForm Shield License. */
-export const FACTS = ['Free to use', 'source available', 'VS Code extension', 'no AI needed'];
+/** What it is: free to use, source available under the PolyForm Shield License; edited by hand or by your AI assistant. */
+export const FACTS = ['Free to use', 'source available', 'VS Code extension', 'by hand or with AI'];
 
 export default {
   render(t) {
     const [l1, l2] = TAGLINE;
-    const chip = (label, green, at) => `<span class="pill" style="background:${green ? '#13301f' : '#1c1e23'};border:2px solid ${green ? '#1f6b3a' : '#34363d'};color:${green ? 'var(--green)' : 'var(--text)'};font-size:30px;padding:16px 28px;border-radius:16px;${appear(t, at, { dy: 10 })}">${green ? ICON.check({ size: 26 }) : ''}${label}</span>`;
+    const chip = (label, green, at) => `<span class="pill" style="background:${green ? 'var(--chip-green)' : 'var(--chip)'};border:2px solid ${green ? 'var(--chip-green-border)' : 'var(--chip-border)'};color:${green ? 'var(--green)' : 'var(--text)'};font-size:30px;padding:16px 28px;border-radius:16px;${appear(t, at, { dy: 10 })}">${green ? ICON.check({ size: 26 }) : ''}${label}</span>`;
     const arrow = (at) => `<span style="color:var(--text-3);${appear(t, at, { dy: 0 })}">${ICON.arrow({ size: 32 })}</span>`;
     const [a, b, c] = STEPS;
     const [f0, ...rest] = FACTS;

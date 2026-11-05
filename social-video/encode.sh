@@ -45,10 +45,15 @@ else
     -ac 2 $B/mix.wav
 fi
 AUDIO_IN=$B/mix.wav
+# CRF and the AAC bitrate can be overridden per cut: the README cut is served by jsDelivr, which
+# caps a file at 18 MB, so `npm run all:readme` passes CRF=19 ABR=128k (a voice-only track needs no
+# more, and the frames are mostly flat UI).
+CRF="${CRF:-17}"
+ABR="${ABR:-192k}"
 
 ffmpeg -v error -y -i $B/master.mkv -i "$AUDIO_IN" -map 0:v -map 1:a \
-  -c:v libx264 -preset slow -tune animation -crf 17 -profile:v high -level 4.1 -pix_fmt yuv420p -r 30 -g 60 \
-  -c:a aac -b:a 192k -ac 2 -ar 48000 -movflags +faststart -shortest "$MP4"
+  -c:v libx264 -preset slow -tune animation -crf "$CRF" -profile:v high -level 4.1 -pix_fmt yuv420p -r 30 -g 60 \
+  -c:a aac -b:a "$ABR" -ac 2 -ar 48000 -movflags +faststart -shortest "$MP4"
 
 ffmpeg -v error -y -ss 0 -i $B/master.mkv -frames:v 1 -vf "format=yuvj420p" -q:v 2 "$OUT/$NAME-thumb.jpg"
 END_T=$(node -e "const t=require('./'+process.env.B+'/timeline.json');console.log((t.total-0.2).toFixed(3))")

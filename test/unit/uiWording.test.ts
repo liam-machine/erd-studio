@@ -254,7 +254,7 @@ describe('package.json: dbt shows up only in dbt projects', () => {
     expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([
       ['convertDbt', 'Convert to DBML'],
       ['draw', 'Draw from dbt'],
-      ['watch', 'Watch the One-Minute Tour'],
+      ['watch', 'Watch the Tour'],
     ]);
   });
 });

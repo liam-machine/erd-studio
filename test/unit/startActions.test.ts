@@ -483,7 +483,7 @@ describe('one label per action, on every surface', () => {
     for (const old of [
       'See how to bring it in', 'Show Me How', 'Bring In an Existing Data Model', 'Bring In My Model', 'Start Blank', 'See an Example',
       'Other Ways to Start', 'Create Diagram', 'Start from your SQL scripts', 'Start your data model', 'Watch Getting Started Video',
-      'Watch the video', 'one-minute dbt tour', 'Welcome to ERD Studio', 'Get started</a>', '[Get started]',
+      'Watch the video', 'one-minute dbt tour', 'Watch the One-Minute Tour', 'one-minute tour', 'Welcome to ERD Studio', 'Get started</a>', '[Get started]',
     ]) expect(text, old).not.toContain(old);
   });
 

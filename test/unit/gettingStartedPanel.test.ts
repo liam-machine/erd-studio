@@ -192,7 +192,7 @@ describe('buildGettingStartedHtml', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
     // Its own name: never a second tab called Welcome beside VS Code's.
     expect(html).toContain('<title>ERD Studio Tour</title>');
-    expect(html).toContain('<h1 class="gs-hero__title">The one-minute tour</h1>');
+    expect(html).toContain('<h1 class="gs-hero__title">The tour</h1>');
     expect(html).not.toMatch(/Welcome to ERD Studio|getting-started video/i);
     expect(html).toContain('Turn the dbt project you already have into a data model you can see.');
     const order = ['assistant', 'helper', 'start'].map((step) => html.indexOf(`data-step="${step}"`));
@@ -205,7 +205,7 @@ describe('buildGettingStartedHtml', () => {
     }
     expect(html).toContain('Enrich with your AI assistant (optional)');
     expect(html).toContain('keys, grain, rationale and your team\'s modelling style');
-    expect(html).toContain('ERD Studio: Watch the One-Minute Tour');
+    expect(html).toContain('ERD Studio: Watch the Tour');
     expect(html).toContain('Open the folder your data model lives in');
     expect(html).toContain('Any folder works');
     expect(html).toContain('data-action="openFolder"');
@@ -611,7 +611,7 @@ describe('panel script', () => {
         expect(p.player.hasAttribute('autoplay'), String(mode)).toBe(false);
         expect(p.tour.hidden, String(mode)).toBe(false);
         // One name for the tour, on every page.
-        expect(p.tourLabel(), String(mode)).toBe('Watch the One-Minute Tour');
+        expect(p.tourLabel(), String(mode)).toBe('Watch the Tour');
         // A status (the dbt page, a folder without dbt) never starts it either.
         for (const payload of [STATUS, { ...STATUS, logicalOnly: true }]) {
           p.dom.window.dispatchEvent(new p.dom.window.MessageEvent('message', { data: { type: 'status', payload } }));

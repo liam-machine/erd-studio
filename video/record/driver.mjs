@@ -246,6 +246,14 @@ export async function driver() {
       for (const v of views) { try { vText.push(...(await v.s.evaluate(`(() => { const D = document.querySelector('iframe#active-frame').contentDocument; return ${VISIBLE}; })()`))); } catch {} }
       return [...new Set([...wbText, ...vText])].filter((x) => x !== '');
     },
+    /** The rows the integrated terminal shows (screenText skips them: xterm marks its rows aria-hidden). */
+    async terminalText() {
+      return ev("[...document.querySelectorAll('.part.panel .xterm-rows > div')].filter((r) => r.getBoundingClientRect().height > 0).map((r) => r.textContent.replace(/\\s+$/, '')).filter((r) => r.trim())");
+    },
+    /** A mouse-wheel turn at p (workbench px; the real mouse moves there, the drawn pointer does not): the canvas zooms about p. */
+    async wheel(p, deltaY) { await w.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: p.x, y: p.y, deltaX: 0, deltaY }); },
+    /** Moves only the real mouse (not the drawn pointer) to p: off a row whose hover tooltip would cover something. */
+    async parkMouse(p) { await w.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); },
     async selectAll() { await d.key('a', { code: 'KeyA', keyCode: 65, modifiers: 4 }); },
     close: () => { for (const s of sessions.values()) s.close(); w.close(); },
   };

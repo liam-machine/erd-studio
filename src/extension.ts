@@ -1163,7 +1163,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // "Watch the One-Minute Tour" works without a project too: the panel
+  // "Watch the Tour" works without a project too: the panel
   // asks for a folder. The project path fills in
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;

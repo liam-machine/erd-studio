@@ -8,7 +8,7 @@ never publishes a release), and no build, tsconfig or test run refers to it.
 |---|---|---|---|---|
 | **pro** | `pro` (default) | `script.yaml`, `SCENES.md`, `player/scenes/*.js` | data engineers: logical vs physical, dbt, YAML/JSON, Diff, PRs | ~121 s |
 | **simple** | `simple` | `script.simple.yaml`, `SCENES.simple.md`, `player/scenes/simple/*.js` | anyone: no jargon, one analogy (blueprints in a different city to the building site) | ~85 s |
-| **readme** | `readme` | `script.readme.yaml`, `SCENES.readme.md`, `player/scenes/readme/*.js` | README visitors: "How ERD Studio works" — a DBML-first tour of the logical model (why it belongs in Git, the layer-first `.dbml` files, editing either side, a `.dbml` diff in a PR, your AI assistant, the ways to start — Draw from dbt and the Import… picker's DBML, SQL DDL and Power BI or Fabric sources, with official logos — and export), dbt as a short beat (the Physical tab and Compare with dbt), then ERD Studio for Confluence for readers without VS Code. **Voice only**, no music | ~109 s |
+| **readme** | `readme` | `script.readme.yaml`, `SCENES.readme.md`, `player/scenes/readme/*.js` | README visitors: "How ERD Studio works" — an argument, then a tour. ERD Studio is a free-to-use VS Code extension; why keep the data model in a separate tool or remote database, versioned apart from the code, when it can be DBML files (an open format) next to that code, reviewed in the same PR? Then the layer-first `.dbml` files, editing either side, a `.dbml` diff in a PR, the imports that build the logical model (DBML, SQL DDL incl. DDL exported from Snowflake or Databricks, Power BI or Fabric, Draw from dbt, the import guide — official logos) and the draft, Set Up My AI Helper (a markdown skill; in Claude Code a pre-tool hook), dbt parse → `manifest.json` → Compare with dbt, and ERD Studio for Confluence reading the GitHub repo as the single source of truth. **Voice only**, no music | ~172 s |
 
 `VARIANT` selects the script, the build folder (`build/` or `build-simple/`) and the output
 names (`erd-studio-explainer[-simple].*`). The cuts share the player, `lib.js`, the voice and
@@ -65,7 +65,7 @@ Outputs, in `out/` (gitignored; `-simple` for the plain cut):
 ## The README cut
 
 `VARIANT=readme` is the only cut that is committed: the README embeds it from
-`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**, which `npm run size:readme` checks; 12.5 MB for the 1:49 cut)
+`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**, which `npm run size:readme` checks; the 2:53 cut is 16.4 MB, encoded at CRF 19 with 128 kb/s AAC — `all:readme` passes `CRF=19 ABR=128k` to `encode.sh`, whose defaults stay CRF 17 and 192k for the LinkedIn cuts)
 behind the poster `docs/assets/how-it-works-play.jpg`.
 
 ```bash
@@ -73,7 +73,7 @@ npm run readme        # all:readme, copy the mp4 into docs/assets/, size:readme,
 npm run size:readme   # fails if docs/assets/how-it-works.mp4 is 18 MB or more
 npm run qa:readme     # contact sheet + A/V onset check, as for the other cuts
 npm run thumb:readme  # just the poster (needs only tts + timeline)
-node confluence-shot.mjs  # re-render player/assets/confluence-sales.png, the Confluence scene's diagram
+node confluence-shot.mjs  # re-render player/assets/confluence-sales.png and confluence-sales-before.png (the Confluence scene's diagram, after and before its commit)
 ```
 
 `thumb.mjs` renders the poster in the player page itself: the frame a scene names with

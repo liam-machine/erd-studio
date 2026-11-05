@@ -16,13 +16,16 @@
 // `recording.zoom` punches in on part of the window (a panel whose text is small) from its beat
 // to the scene's end. The footage fades in and out with the frame's own fades (main.js: only
 // where the recording starts and ends). A cut without `recording` has nothing to composite:
-// capture wrote its master.mkv already.
+// capture wrote its master.mkv already. A cut whose `recording.footage` names another cut (the
+// logical cut: `default`) plays that cut's takes (its build/rec/), and only when each of its
+// recorded scenes has the same length and beats there (checkFootage): the clicks were timed to them.
 //
 //   node record/composite.mjs            VARIANT picks the cut, as everywhere else
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cutOf } from '../build-timeline.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VARIANT = process.env.VARIANT ?? '';
@@ -37,6 +40,42 @@ const CURSOR = { size: 24, tip: { x: 4, y: 2 }, pad: 8 };
 
 const ease = (k) => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
 const clip = (v, a, b) => Math.min(b, Math.max(a, v));
+
+/**
+ * A scene's clock: output (video) seconds → take seconds, from the scene's start. Without a
+ * fast-forward they are the same. With one (`props.fastForward`), the take's [a, b] (marked by the
+ * scene's ff.start() / ff.end(), the wait for Claude Code or dbt) plays in the video's [a, o], where
+ * o is `until` ([beat, offset]) in the scene's own time, and after it the take runs on in real time.
+ */
+export function takeClock(ff) {
+  if (!ff) return (u) => u;
+  const { a, b, o } = ff;
+  return (u) => (u <= a ? u : u >= o ? b + (u - o) : a + ((u - a) * (b - a)) / (o - a));
+}
+
+/** The VARIANT `recording.footage` names ('default' is the default cut, ''). */
+export const footageVariant = (footage) => (footage === 'default' ? '' : footage);
+
+/**
+ * A cut that plays another cut's footage (`recording.footage`): every recorded scene of `tl` must be
+ * in `src` (that cut's timeline) with the same length and every beat at the same time, because the
+ * take's clicks were timed to those beats. Returns the mismatches (empty when the footage fits).
+ */
+export function checkFootage(tl, src) {
+  const bad = [];
+  const byId = Object.fromEntries(src.scenes.map((s) => [s.id, s]));
+  for (const s of tl.scenes.filter((x) => x.module.startsWith('rec/'))) {
+    const o = byId[s.id];
+    if (!o || !o.module.startsWith('rec/')) { bad.push(`${s.id}: not a recorded scene of the footage's cut`); continue; }
+    if (Math.abs(o.dur - s.dur) > 0.002) bad.push(`${s.id}: ${s.dur}s here, filmed for ${o.dur}s`);
+    for (const [k, b] of Object.entries(s.beats)) {
+      if (!o.beats[k]) bad.push(`${s.id}: beat ${k} is not in the footage's cut`);
+      else if (Math.abs(o.beats[k].t - b.t) > 0.002) bad.push(`${s.id}: beat ${k} at ${b.t}s here, ${o.beats[k].t}s in the footage`);
+    }
+    for (const k of Object.keys(o.beats)) if (!s.beats[k]) bad.push(`${s.id}: the footage's beat ${k} is missing here`);
+  }
+  return bad;
+}
 
 /** Where each recorded scene sits: in the timeline (start, dur) and in its take (name, t0). */
 function layout(tl, takes) {
@@ -78,14 +117,14 @@ export function framePlan(tl, takes) {
   const { rec, where, start, end, n } = L;
   const fps = tl.fps;
   const sceneOf = (t) => rec.find((x) => t < x.start + x.dur) ?? rec.at(-1);
-  const pick = (i, s) => { const t = start + (i + 0.5) / fps; const w = where[s.id]; return frameAt(takes, w.name, w.t0 + (t - s.start)); };
+  const pick = (i, s) => { const t = start + (i + 0.5) / fps; const w = where[s.id]; return frameAt(takes, w.name, w.t0 + takeClock(w.ff)(t - s.start)); };
   const frames = [];
   for (let i = 0; i < n; i++) frames.push(pick(i, sceneOf(start + (i + 0.5) / fps)));
   // the cuts: where the next scene is not the take's next stretch of film
   const cuts = [];
   for (let k = 1; k < rec.length; k++) {
     const a = where[rec[k - 1].id], b = where[rec[k].id];
-    if (a.name !== b.name || Math.abs(b.t0 - (a.t0 + a.dur)) > JUMP_S) cuts.push({ at: Math.round((rec[k].start - start) * fps), before: rec[k - 1], after: rec[k] });
+    if (a.name !== b.name || Math.abs(b.t0 - (a.t0 + (a.filmed ?? a.dur))) > JUMP_S) cuts.push({ at: Math.round((rec[k].start - start) * fps), before: rec[k - 1], after: rec[k] });
   }
   const H = XFADE / 2;
   const segments = [];
@@ -130,18 +169,37 @@ export function pointerTerms(tl, takes, trails) {
     const w = where[s.id];
     const trail = trails[w.name] ?? [];
     const o = s.start - start;            // the scene's start, on the output clock
-    const shift = o - w.t0;               // take time + shift = output time
-    const p = pointerAt(trail, w.t0);
-    terms.push({ at: o, dx: p.x - (cur?.x ?? 0), dy: p.y - (cur?.y ?? 0) });
-    cur = p;
-    for (const g of trail) {
-      if (g.d <= 0 || g.s + g.d <= w.t0 || g.s >= w.t0 + s.dur) continue;
-      const from = Math.max(g.s, w.t0) + shift, to = Math.min(g.s + g.d, w.t0 + s.dur) + shift;
-      terms.push({ s: g.s + shift, d: g.d, from, to, dx: g.x1 - g.x0, dy: g.y1 - g.y0 });
+    // the scene's stretches: real time, and (with a fast-forward) the sped-up wait, where the pointer
+    // only jumps to where the take's pointer is at its end (it rests while Claude Code or dbt works)
+    const pieces = !w.ff ? [{ u0: 0, u1: s.dur, T0: 0, real: true }]
+      : [{ u0: 0, u1: w.ff.a, T0: 0, real: true }, { u0: w.ff.a, u1: w.ff.o, T0: w.ff.a, real: false }, { u0: w.ff.o, u1: s.dur, T0: w.ff.b, real: true }];
+    for (const pc of pieces) {
+      const T0 = w.t0 + pc.T0;            // take time at the piece's start
+      const shift = o + pc.u0 - T0;       // take time + shift = output time (real pieces)
+      const p = pointerAt(trail, T0);
+      terms.push({ at: o + pc.u0, dx: p.x - (cur?.x ?? 0), dy: p.y - (cur?.y ?? 0) });
+      cur = p;
+      if (!pc.real) continue;
+      const T1 = T0 + (pc.u1 - pc.u0);
+      for (const g of trail) {
+        if (g.d <= 0 || g.s + g.d <= T0 || g.s >= T1) continue;
+        const from = Math.max(g.s, T0) + shift, to = Math.min(g.s + g.d, T1) + shift;
+        terms.push({ s: g.s + shift, d: g.d, from, to, dx: g.x1 - g.x0, dy: g.y1 - g.y0 });
+      }
+      cur = pointerAt(trail, T1);         // where its glides, held to the piece, leave it
     }
-    cur = pointerAt(trail, w.t0 + s.dur);   // where its glides, held to the scene, leave it
   }
   return terms;
+}
+
+/** The sped-up stretches on the output clock (seconds from the recording's start) and how fast: [{ from, to, speed }]. */
+export function fastForwards(tl, takes) {
+  const L = layout(tl, takes);
+  if (!L) return [];
+  return L.rec.filter((s) => L.where[s.id].ff).map((s) => {
+    const { a, b, o } = L.where[s.id].ff;
+    return { scene: s.id, from: s.start - L.start + a, to: s.start - L.start + o, speed: (b - a) / (o - a) };
+  }).filter((f) => f.speed > 1.05);
 }
 
 /** Evaluates pointerTerms at output time t (what the ffmpeg expression computes; for the test and checks). */
@@ -184,11 +242,34 @@ async function cursorPng(file, scale) {
   } finally { await browser.close(); }
 }
 
+/** The "sped up" badge (light, as the frame is): a pill with a fast-forward mark and the real speed, to one decimal (2.4×, never rounded down to 2×; 5× for 5.0). */
+export const badgeLabel = (speed) => `Sped up ${+speed.toFixed(1)}×`;
+async function badgePng(file, label, scale) {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 400, height: 80 }, deviceScaleFactor: scale });
+    await page.setContent(`<html><body style="margin:0;background:transparent;font-family:-apple-system,'Helvetica Neue',sans-serif">
+      <div id="b" style="display:inline-flex;align-items:center;gap:8px;margin:6px;padding:7px 14px 7px 11px;border-radius:999px;background:#1f2328;color:#fff;font-size:16px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.25)">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path d="M3 5.5v13l8.5-6.5zM12 5.5v13l8.5-6.5z" fill="#fbbf24"/></svg>${label}</div></body></html>`);
+    const box = await page.locator('#b').boundingBox();
+    await page.screenshot({ path: file, omitBackground: true, clip: { x: 0, y: 0, width: box.x + box.width + 6, height: box.y + box.height + 6 } });
+  } finally { await browser.close(); }
+}
+
 async function main() {
   const timeline = JSON.parse(readFileSync(join(BUILD, 'timeline.json'), 'utf8'));
   if (!timeline.recording) { console.log('composite: this cut has no recording; capture wrote master.mkv'); return; }
-  const recDir = join(BUILD, 'rec');
-  if (!existsSync(recDir)) throw new Error('no build/rec: run `node record/record.mjs` first');
+  // the takes: this cut's own, or (recording.footage) another cut's, if they fit this timeline
+  const footage = timeline.recording.footage;
+  const SRC = footage ? join(HERE, '..', cutOf(footageVariant(footage)).build) : BUILD;
+  if (footage) {
+    const src = JSON.parse(readFileSync(join(SRC, 'timeline.json'), 'utf8'));
+    const bad = checkFootage(timeline, src);
+    if (bad.length) throw new Error(`recording.footage ${footage}: this cut's scenes do not match the footage's (record the default cut again, or match script.yaml):\n  ${bad.join('\n  ')}`);
+  }
+  const recDir = join(SRC, 'rec');
+  if (!existsSync(recDir)) throw new Error(`no ${recDir}: run \`node record/record.mjs\` first`);
   const takes = {}, trails = {};
   for (const name of readdirSync(recDir)) {
     const dir = join(recDir, name);
@@ -247,6 +328,17 @@ async function main() {
     g.push(`[za][zz]overlay=0:0:format=auto,format=yuv444p[z]`);
     last = 'z';
   }
+  // the "sped up" badge while the footage runs faster than real time (in the window's empty title bar, top left)
+  const ffs = fastForwards(timeline, takes);
+  for (const [k, f] of ffs.entries()) {
+    const file = join(BUILD, `badge.${k}.png`);
+    await badgePng(file, badgeLabel(f.speed), scale);
+    inputs.push('-loop', '1', '-framerate', String(fps), '-i', file);
+    const idx = segments.length + 1 + k;
+    g.push(`[${idx}:v]format=rgba[bd${k}]`);
+    g.push(`[${last}][bd${k}]overlay=x=${Math.round(56 * scale)}:y=${Math.round(1 * scale)}:enable='between(t,${f.from.toFixed(3)},${f.to.toFixed(3)})':shortest=1:format=auto,format=yuv444p[f${k}]`);
+    last = `f${k}`;
+  }
   g.push(`[${last}]setparams=range=tv[v]`);
   const script = join(BUILD, 'recording.filter');
   writeFileSync(script, g.join(';\n') + '\n');
@@ -258,7 +350,7 @@ async function main() {
     + `[0:v][r]overlay=x=${x}:y=${y}:eof_action=pass:format=auto,format=yuv444p,setparams=range=tv[v]`;
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(BUILD, 'chrome.mkv'), '-i', recording, '-filter_complex', graph, '-map', '[v]',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '0', '-pix_fmt', 'yuv444p', '-color_range', 'tv', '-r', String(fps), join(BUILD, 'master.mkv')], { stdio: 'inherit' });
-  console.log(`composite: ${frames.length} recorded frames (${start}s–${end}s), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zoom ? `, punch-in on ${zoom.scene}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
+  console.log(`composite: ${footage ? `the ${footage} cut's footage, ` : ''}${frames.length} recorded frames (${start}s–${end}s), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zoom ? `, punch-in on ${zoom.scene}` : ''}${ffs.length ? `, sped up: ${ffs.map((f) => `${f.scene} ${f.speed.toFixed(1)}x`).join(', ')}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

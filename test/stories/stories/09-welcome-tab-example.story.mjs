@@ -1,6 +1,6 @@
 // No folder open, and ERD Studio's tour tab ("ERD Studio Tour", the Getting
 // Started panel, a webview of its own), opened from the Diagrams view's ▶
-// (Watch the One-Minute Tour, its one title-bar icon with no folder open).
+// (Watch the Tour, its one title-bar icon with no folder open).
 // With no folder it offers Open Folder… and, under "Or see a finished data
 // model first:", Open an Example… — a start button that posts `start` /
 // `example` to the host, which opens the example draft. Proves the button
@@ -22,7 +22,7 @@ export default story({
   id: 'welcome-tab-example',
   title: 'Open the Kimball example from the tour',
   persona: 'As someone new to data modelling with no project of my own yet',
-  want: 'I want to open a finished example from the one-minute tour',
+  want: 'I want to open a finished example from the tour',
   soThat: 'so that I can see what a good data model looks like',
   workspace: 'empty',
   steps: async (s) => {
@@ -35,10 +35,10 @@ export default story({
       s.expect(!title.includes(' — '), `expected an empty window, but the title is "${title}"`);
     });
 
-    const PLAY = s.sel.viewAction('Watch the One-Minute Tour');
+    const PLAY = s.sel.viewAction('Watch the Tour');
     await s.step('When I open the ERD Studio sidebar and press its ▶ button', async () => {
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(PLAY, { what: 'the ▶ (Watch the One-Minute Tour) button on the Diagrams view' });
+      await s.expectVisible(PLAY, { what: 'the ▶ (Watch the Tour) button on the Diagrams view' });
       await s.wb.highlight(PLAY);
       await s.pause(1200);
       await s.wb.unhighlight();
@@ -49,7 +49,7 @@ export default story({
     let tour;
     await s.step('Then the tour offers "Open an Example…" to see a finished data model first', async () => {
       tour = await s.webview();
-      await tour.waitFor(`doc.body.innerText.includes('The one-minute tour') && ${OPEN_EXAMPLE}`, { what: 'the tour tab with its "Open an Example…" button' });
+      await tour.waitFor(`doc.body.innerText.includes('The tour') && ${OPEN_EXAMPLE}`, { what: 'the tour tab with its "Open an Example…" button' });
       const text = await tour.ev('doc.body.innerText');
       s.expect(text.includes('Or see a finished data model first:'), 'the tour tab should say "Or see a finished data model first:"');
       s.expect(!/\bdbt\b/i.test(text), 'with no folder open the tour tab must show no dbt word');

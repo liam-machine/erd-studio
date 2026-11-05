@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 <!--
   README thumbnail for the getting-started video (docs/assets/getting-started-play.jpg), rendered by
-  ../thumbnail.mjs. The background is the video's own diagram (the tables scene's last frame: two
-  tables and their relationship; for the recorded default cut a real frame of the recording,
-  build/thumb-bg.png, otherwise drawn by the same scene module), dimmed and softened so the play
-  button and the headline read. The duration comes from build/timeline.json, so it always matches
-  the render.
+  ../thumbnail.mjs. The background is the video's own diagram: for the recorded default cut a real
+  frame of the recording (its opening scene's end, build/thumb-bg.png: the finished diagram in VS
+  Code's light theme), and the page is light to match (body.rec). Softened behind the play button and the headline. The duration comes
+  from build/timeline.json, so it always matches the render.
 -->
 <html lang="en">
 <head>
@@ -25,6 +24,15 @@
       background: rgba(255,255,255,.96); box-shadow: 0 0 0 16px rgba(255,255,255,.16), 0 0 0 34px rgba(92,162,248,.14), 0 24px 70px #000c; display: flex; align-items: center; justify-content: center; }
     .brand { position: absolute; left: 60px; bottom: 52px; display: flex; align-items: center; gap: 18px; font-size: 38px; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
     .pill { position: absolute; right: 60px; bottom: 58px; display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-radius: 16px; background: rgba(0,0,0,.72); border: 1px solid #ffffff22; color: #fff; font-size: 36px; font-weight: 700; font-feature-settings: 'tnum'; }
+    /* the light page a recorded cut's thumbnail is (its footage is VS Code's light theme) */
+    body.rec .bg { filter: blur(1.6px) saturate(1.05); }
+    body.rec .shade { background:
+      radial-gradient(ellipse 820px 440px at 50% 52%, rgba(246,247,249,.35), rgba(246,247,249,.62) 70%, rgba(246,247,249,.85) 100%),
+      linear-gradient(180deg, rgba(246,247,249,.94) 0%, rgba(246,247,249,.45) 30%, rgba(246,247,249,.4) 70%, rgba(246,247,249,.94) 100%); }
+    body.rec .title, body.rec .sub, body.rec .brand { text-shadow: 0 2px 18px rgba(255,255,255,.9); }
+    body.rec .play { background: #1f2328; box-shadow: 0 0 0 16px rgba(31,35,40,.08), 0 0 0 34px rgba(37,99,235,.12), 0 24px 60px rgba(31,35,40,.3); }
+    body.rec .play path { fill: #ffffff; }
+    body.rec .pill { background: #1f2328; border-color: transparent; }
   </style>
 </head>
 <body>
@@ -32,13 +40,14 @@
   <div class="shade"></div>
   <div class="title" id="title"></div>
   <div class="play"><svg width="116" height="116" viewBox="0 0 24 24" style="margin-left:14px"><path d="M6 3.8v16.4a1 1 0 0 0 1.5.86l13.2-8.2a1 1 0 0 0 0-1.72L7.5 2.94A1 1 0 0 0 6 3.8z" fill="#111317"/></svg></div>
-  <div class="sub">Your data model in Git, as DBML — <span>no AI needed</span></div>
+  <div class="sub" id="sub"></div>
   <div class="brand"><img src="/media/icon.png" width="64" height="64" style="border-radius:14px">ERD Studio</div>
   <div class="pill" id="pill"></div>
   <script type="module">
     const timeline = await (await fetch('/video/build/timeline.json', { cache: 'no-store' })).json();
     if (timeline.recording) {
-      // a recorded cut: the real VS Code at the end of the tables scene (thumbnail.mjs extracts it)
+      document.body.classList.add('rec');
+      // a recorded cut: the real VS Code at the end of its opening scene (thumbnail.mjs extracts it)
       const { w, h } = timeline.recording.inset;
       const img = new Image();
       img.src = '/video/build/thumb-bg.png';
@@ -46,14 +55,12 @@
       await img.decode();
       document.getElementById('bg').appendChild(img);
     } else {
-      const sc = timeline.scenes.find((s) => s.module === 'tour/tables');
-      const scene = (await import('./scenes/tour/tables.js')).default;
-      document.getElementById('bg').innerHTML = scene.render(sc.dur - 0.05, { beats: sc.beats, dur: sc.dur, t: sc.start + sc.dur, scene: sc });
+      throw new Error('the README thumbnail is made from the recorded default cut (build/timeline.json has no recording)');
     }
-    // Honest numbers: the headline rounds to the nearest 5 s, the pill is the real m:ss.
+    // Honest numbers: the pill is the real m:ss.
     const secs = Math.round(timeline.total);
-    const headline = Math.round(timeline.total / 5) * 5;
-    document.getElementById('title').innerHTML = `Get started in <em>${headline} seconds</em>`;
+    document.getElementById('title').innerHTML = 'Watch the <em>tour</em>';
+    document.getElementById('sub').innerHTML = 'Your data model as DBML, in your repo — <span>by hand or with AI</span>';
     document.getElementById('pill').innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24"><path d="M6 3.8v16.4l14-8.2z" fill="#fff"/></svg>${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     await document.fonts.ready;
     window.__ready = true;

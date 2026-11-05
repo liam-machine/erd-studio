@@ -918,7 +918,7 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[More ways to start…]'))).toBe(true);
     expect(moreStartsFor({ hasProject: true, hasDbt: true, storage: 'yaml' })).toContain('drawFromDbt');
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
-    expect(all('package.json')).toContain('then compare it with what dbt has');
+    expect(all('package.json')).toContain('then compare it with what dbt builds');
     expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');
     expect(all('package.json')).toContain('ERD Studio: Regenerate dbt selectors.yml');
     expect(shown.some((s) => s.where.startsWith('viewsWelcome') && DBT_WORD.test(s.text))).toBe(true);

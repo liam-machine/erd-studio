@@ -35,6 +35,8 @@ export function mix(a, b, p) {
   return '#' + A.map((v, i) => Math.round(lerp(v, B[i], clamp(p))).toString(16).padStart(2, '0')).join('');
 }
 export const ACCENT = { blue: '#5ca2f8', amber: '#f4b42c', green: '#22c55e' };
+/** The accents on the light frame a recorded cut uses (style.css body.rec): darker, so they read on off-white. */
+export const ACCENT_LIGHT = { blue: '#2563eb', amber: '#b45309', green: '#15803d' };
 export const COLORS = { logical: '#60a5fa', physical: '#20c05a', amber: '#f4b42c', green: '#22c55e', text: '#e9ecef', text2: '#8b9099',
   // A folder without dbt draws no stage colours (packages/renderer theme.css, `editor-canvas--neutral`):
   // relationship lines and their end labels in --canvas-neutral-line (#8a94a3), table borders in

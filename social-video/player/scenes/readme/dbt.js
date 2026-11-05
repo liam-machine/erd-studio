@@ -1,14 +1,16 @@
-// readme · 9 · dbt — the short last beat. The same diagram (status included), now in a folder
-// with a dbt project: on "Open the project" the toolbar gains Compare with dbt and the second
-// row of stage tabs ("Logical · your design", "Physical · read from dbt" — dbt projects only).
+// readme · 14 · dbt — "Compare what dbt builds with your design." The same diagram (status
+// included), in the dbt project parse.js ran dbt parse in: the toolbar has Compare with dbt and
+// the second row of stage tabs ("Logical · your design", "Physical · read from dbt" — dbt
+// projects only); a note says what ERD Studio read (target/manifest.json).
 // On "Physical" the canvas flips to the read-only Physical stage (green, the lock on its tab, no
-// + Add): what the dbt project has — order_date a TIMESTAMP, an extra loaded_at column, and no
-// relationship (no relationships test). Back on Logical, Compare with dbt marks the three
-// differences the way the canvas draws them (packages/renderer ModelNode): the two types stacked,
-// loaded_at as a ghost row under "only in physical" with its "physical only" badge, and the
-// relationship dbt lacks as a dashed amber edge. The DiscrepancyPanel (bottom right) carries
-// the counts in its own labels: "Logical (current) vs Physical (target)", matched, type diff,
-// col diff, rel diff, ⊕ Sync.
+// + Add): what the dbt project has — an extra loaded_at column (declared in its schema yml, so
+// manifest.json has it) and no relationship (no relationships test). Back on Logical, Compare
+// with dbt marks the two differences the way the canvas draws them (packages/renderer
+// ModelNode): loaded_at as a ghost row under "only in physical" with its "physical only" badge,
+// and the relationship dbt lacks as a dashed amber edge. No type difference: dbt parse alone
+// does not know the warehouse's types (catalog.json, from dbt docs generate, does). The
+// DiscrepancyPanel (bottom right) carries the counts in its own labels: "Logical (current) vs
+// Physical (target)", matched, col diff, rel diff, ⊕ Sync.
 import { appear, appearFade, card, COLORS, easeInOut, easeOut, edge, ICON, node, path, pointer, rowY, seg } from '../../lib.js';
 import { FILE_COL, R, TB, toolbar2, viewFileBtn, wordAt } from './story.js';
 import { GEO } from './canvas.js';
@@ -29,9 +31,9 @@ const circlePlus = svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12
 export default {
   render(t, { beats, scene }) {
     const Cm = beats.compare.t;
-    const tabsAt = wordAt(scene, 'open', 'project') - 0.1;
+    const tabsAt = -1;                 // a dbt project from the start: parse.js showed its tabs
     const physAt = wordAt(scene, 'open', 'Physical') - 0.05;
-    const hasAt = wordAt(scene, 'open', 'shows');
+    const hasAt = wordAt(scene, 'open', 'read-only');
     const backAt = beats.open.end + 0.05;
     const pressAt = Cm + 0.15;
     const diffAt = wordAt(scene, 'compare', 'marks');
@@ -42,7 +44,7 @@ export default {
     const physical = p > 0.5;
     const comparing = t >= pressAt + 0.1;
     const lit = (at) => easeOut(seg(t, at, at + 0.3));
-    const m1 = lit(diffAt), m2 = lit(diffAt + 0.3), m3 = lit(diffAt + 0.6);
+    const m2 = lit(diffAt), m3 = lit(diffAt + 0.4);
 
     let html = card({
       x: CX, y: CY, w: CW, h: CH, tabs: [{ label: 'sales.dbml', on: true, icon: `<span style="color:${FILE_COL.dbml}">${ICON.file({ size: 20 })}</span>` }],
@@ -56,7 +58,7 @@ export default {
     // Notes on the tab row's right: "dbt_project.yml found", then "read-only · read from dbt".
     const noteY = TBY + TB.tabsDy + 6;
     if (t >= tabsAt && t < physAt + 0.1) {
-      html += `<div class="abs" style="right:${RIGHT}px;top:${noteY}px;${appear(t, tabsAt, { dy: 6 })}"><span class="pill" style="font-size:22px;padding:5px 16px;background:#1c1e23;border:1px solid #34363d;color:var(--text-2)"><span class="mono">dbt_project.yml</span> found</span></div>`;
+      html += `<div class="abs" style="right:${RIGHT}px;top:${noteY}px;${appear(t, tabsAt, { dy: 6 })}"><span class="pill" style="font-size:22px;padding:5px 16px;background:#1c1e23;border:1px solid #34363d;color:var(--text-2)">reads <span class="mono">target/manifest.json</span></span></div>`;
     }
     if (t >= hasAt - 0.3 && t < backAt) {
       html += `<div class="abs" style="right:${RIGHT}px;top:${noteY}px;${appearFade(t, hasAt - 0.3, 1 - seg(t, backAt - 0.25, backAt), { dy: 6 })}"><span class="pill" style="font-size:22px;padding:5px 16px;background:#13301f;color:var(--green);border:1px solid #1f5a35">${ICON.lock({ size: 18 })}read-only · read from dbt</span></div>`;
@@ -70,19 +72,13 @@ export default {
 
     // ---- nodes: fct_order keeps the status column the canvas and PR scenes added ----
     const hot = (a) => (a > 0 ? `background:rgba(56,48,28,${a.toFixed(3)});box-shadow:inset 5px 0 0 rgba(244,180,44,${a.toFixed(3)});` : '');
-    const [orderId, customerId, , orderTotal] = R.fct_order.cols;
+    const [orderId, customerId, orderDate, orderTotal] = R.fct_order.cols;
     const status = { name: R.newCol.name, type: R.newCol.type };
     let cols;
     if (physical) {
-      cols = [orderId, customerId, { name: D.typeCol, type: D.typePhysical }, orderTotal, status, { name: D.physOnly.name, type: D.physOnly.type }];
+      cols = [orderId, customerId, orderDate, orderTotal, status, { name: D.physOnly.name, type: D.physOnly.type }];
     } else {
-      cols = [
-        orderId, customerId,
-        m1 > 0
-          ? { name: D.typeCol, types: [['logical', D.typeLogical, COLORS.logical], ['physical', D.typePhysical, COLORS.physical]], rowStyle: hot(m1) }
-          : { name: D.typeCol, type: D.typeLogical },
-        orderTotal, status,
-      ];
+      cols = [orderId, customerId, orderDate, orderTotal, status];
       if (m2 > 0) {
         cols.push({ name: '<span style="font-size:15px;font-weight:700;letter-spacing:.06em;color:var(--text-3)">ONLY IN PHYSICAL</span>', type: '', rowStyle: `height:${(30 * m2).toFixed(1)}px;overflow:hidden;opacity:${m2.toFixed(3)};border-top:1px dashed #3a3d45` });
         cols.push({
@@ -109,7 +105,7 @@ export default {
           <span style="display:flex;align-items:center;gap:6px;padding:4px 14px;border-radius:8px;border:1px solid #3a3d45;font-size:20px;font-weight:600">${circlePlus}Sync</span>
           <span style="color:var(--text-3);display:flex">${ICON.x({ size: 18 })}</span></div>
         <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
-          ${stat(2, 'matched', 'var(--text)', 0)}${stat(1, 'type diff', 'var(--amber)', glow(diffAt))}${stat(1, 'col diff', 'var(--amber)', glow(diffAt + 0.3))}${stat(1, 'rel diff', 'var(--amber)', glow(diffAt + 0.6))}</div></div>`;
+          ${stat(2, 'matched', 'var(--text)', 0)}${stat(1, 'col diff', 'var(--amber)', glow(diffAt))}${stat(1, 'rel diff', 'var(--amber)', glow(diffAt + 0.4))}</div></div>`;
     }
 
     // Tab clicks (Physical, then Logical) and the Compare press: one pointer.

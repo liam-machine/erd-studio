@@ -22,7 +22,8 @@
     "all:logical": "VARIANT=logical npm run all",
     "qa:logical": "VARIANT=logical npm run qa",
     "preview:logical": "echo 'open http://127.0.0.1:4173/video/player/index.html?variant=logical&preview=1' && node serve.mjs",
-    "gif": "node hero-gif.mjs"
+    "gif": "node hero-gif.mjs",
+    "confluence": "node confluence-shot.mjs"
   },
   "devDependencies": {
     "playwright": "1.63.0",

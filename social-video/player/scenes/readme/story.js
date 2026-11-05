@@ -32,11 +32,13 @@ export const R = {
   newCol: { name: 'status', type: 'VARCHAR' },
   pr: { number: 128, title: 'Add status to fct_order', branch: 'feat/order-status', sql: 'sql/orders.sql' },
   /**
-   * What dbt has (scenes/readme/dbt.js): the drift Compare with dbt marks — three differences, as
-   * the product counts them (no rename detection): a type diff, a column only in physical (a load
-   * audit column the design never named) and the relationship dbt has no relationships test for.
+   * What dbt has (scenes/readme/dbt.js): the drift Compare with dbt marks — two differences, as
+   * the product counts them: a column only in physical (a load audit column orders.sql added and
+   * the design never named, declared in the model's schema yml, so dbt parse's manifest.json has
+   * it) and the relationship dbt has no relationships test for. No type difference: real
+   * warehouse types come from catalog.json (dbt docs generate), which this tour does not run.
    */
-  drift: { typeCol: 'order_date', typeLogical: 'DATE', typePhysical: 'TIMESTAMP', physOnly: { name: 'loaded_at', type: 'TIMESTAMP' } },
+  drift: { physOnly: { name: 'loaded_at', type: 'TIMESTAMP' } },
 };
 
 export const PATH = {

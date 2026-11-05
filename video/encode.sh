@@ -19,7 +19,7 @@ VARIANT="${VARIANT:-}"
 if [[ -z "$VARIANT" ]]; then B=build; NAME=getting-started; else B="build-$VARIANT"; NAME="getting-started-$VARIANT"; fi
 MP4="$OUT/$NAME.mp4"
 POSTER="$OUT/$NAME-poster.jpg"
-MAX_BYTES=$((8 * 1024 * 1024))
+MAX_BYTES=$((9 * 1024 * 1024))
 mkdir -p "$OUT" "$B"
 export B
 
@@ -60,7 +60,7 @@ probe() { ffprobe -v error -select_streams "$1" -show_entries "stream=$2" -of de
 [[ "$(probe a:0 sample_rate "$MP4")" == 44100 ]] || fail "audio is not 44.1 kHz"
 [[ "$(probe a:0 channels "$MP4")" == 1 ]] || fail "audio is not mono"
 SIZE=$(stat -f %z "$MP4" 2>/dev/null || stat -c %s "$MP4")
-(( SIZE <= MAX_BYTES )) || fail "mp4 is $SIZE bytes, over the 8 MB ceiling even at crf 26"
+(( SIZE <= MAX_BYTES )) || fail "mp4 is $SIZE bytes, over the 9 MiB ceiling even at crf 26"
 DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$MP4")
 node -e "process.exit(Math.abs($DUR - $EXPECT_DUR) <= 0.25 ? 0 : 1)" || fail "duration $DUR s, expected $EXPECT_DUR s"
 # faststart: the moov atom must precede mdat so the webview can start playing before the end loads
@@ -77,10 +77,9 @@ if [[ "${1:-}" != "--placeholder" ]]; then
   ffmpeg -v error -y -i "$MP4" -i "${AUDIO_IN:-$B/narration.wav}" -map 0:v -map 1:a -c:v copy \
     -c:a aac -b:a 128k -ac 1 -ar 48000 -movflags +faststart -shortest "$B/$NAME-share.mp4"
   echo "ok: $B/$NAME-share.mp4 (AAC copy for QuickTime and sharing; not shipped)"
-  # The README links the dbt cut's copy, not the MP3 one: Safari and QuickTime play MP3-in-MP4
-  # silently. Other cuts keep their share copy in their build folder (the README links none).
-  if [[ -z "$VARIANT" ]]; then
-    cp build/getting-started-share.mp4 ../docs/assets/getting-started.mp4
-    echo "ok: docs/assets/getting-started.mp4 (the README's copy; AAC)"
-  fi
+  # docs/assets/ keeps each cut's AAC copy (the README links the default cut's; the logical cut's
+  # is its copy for Safari and sharing), never the MP3 one: Safari and QuickTime play MP3-in-MP4
+  # silently. docs/** is not in the VSIX.
+  cp "$B/$NAME-share.mp4" "../docs/assets/$NAME.mp4"
+  echo "ok: docs/assets/$NAME.mp4 (AAC; not shipped)"
 fi
