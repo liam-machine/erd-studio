@@ -83,7 +83,7 @@ describe('runDbtInTerminal', () => {
 
   it('footers for a failure, a signal, a stop and a start error', async () => {
     const cases: Array<[Partial<DbtProcessResult>, string]> = [
-      [{ exitCode: 2 }, '✗ dbt deps stopped with exit code 2.'],
+      [{ exitCode: 2 }, '✗ dbt deps failed with exit code 2.'],
       [{ exitCode: null }, '✗ dbt deps ended without an exit code.'],
       [{ outcome: 'stopped', exitCode: null }, 'dbt deps was stopped.'],
       [{ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' }, 'Couldn\'t start dbt (ENOENT).'],

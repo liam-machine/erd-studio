@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyDbtFailure,
   DBT_PARSE_FAILURE_FEATURES,
+  envVarFailedAfterAdapterLoad,
   envVarUsedInProjectFile,
   failureNotice,
   missingAdapterType,
@@ -31,6 +32,7 @@ describe('classifyDbtFailure (real dbt output)', () => {
     ['C3_notargetkey', 'target'],
     ['D_envprofiles', 'envVar'],
     ['E2_envproject', 'envVar'],
+    ['E3_envmodel', 'envVar'],
     ['F_adapter', 'adapterMissing'],
     ['F2_notype', 'profile'],
     ['G_packages', 'depsMissing'],
@@ -43,6 +45,9 @@ describe('classifyDbtFailure (real dbt output)', () => {
     ['M_versionreq', 'dbtVersion'],
     ['N_badref', 'projectError'],
     ['rec18_fabric', 'adapterDeps'],
+    // A profile with no `schema`: dbt-databricks 1.11 and dbt-sqlserver 1.10 say "Parsing Error", but the cause is the profile.
+    ['min_databricks_schema', 'credentials'],
+    ['min_sqlserver_schema', 'credentials'],
   ];
   for (const [name, category] of cases) {
     it(`${name} → ${category}`, () => {
@@ -119,6 +124,18 @@ describe('extractors (local display only)', () => {
   });
 });
 
+describe('envVarFailedAfterAdapterLoad', () => {
+  it('is true only when dbt had loaded the profile before the error (an env var in a model file)', () => {
+    expect(envVarFailedAfterAdapterLoad(OUT.E3_envmodel)).toBe(true);
+    // In profiles.yml, or dbt_project.yml's `profile:`: dbt never got to the adapter.
+    expect(envVarFailedAfterAdapterLoad(OUT.D_envprofiles)).toBe(false);
+    expect(envVarFailedAfterAdapterLoad(OUT.E2_envproject)).toBe(false);
+    expect(envVarFailedAfterAdapterLoad('')).toBe(false);
+    // "Registered adapter" after the error does not count.
+    expect(envVarFailedAfterAdapterLoad(`${OUT.D_envprofiles}Registered adapter: duckdb=1.11.1\n`)).toBe(false);
+  });
+});
+
 describe('DBT_PARSE_FAILURE_FEATURES', () => {
   it('maps every category to a distinct listed feature key', () => {
     const values = Object.values(DBT_PARSE_FAILURE_FEATURES);
@@ -150,6 +167,16 @@ describe('failureNotice', () => {
       expect(failureNotice(c, { ...base, mode: 'noCreds' }).actions, c).not.toContain('noCreds');
     }
     expect(failureNotice('envVar', { ...base, envVar: 'X', envVarInProject: true }).actions).toEqual(['showOutput']);
+  });
+
+  it('an env var outside the project, with no Parse without your credentials, still says what to do', () => {
+    const compile = failureNotice('envVar', { ...base, command: 'compile', noCredsAvailable: false, envVar: 'SNOWFLAKE_PASSWORD' });
+    expect(compile).toEqual({
+      message: 'dbt needs the environment variable SNOWFLAKE_PASSWORD, which isn\'t set where VS Code started. Set it, restart VS Code, and try Run dbt compile again.',
+      actions: ['showOutput'],
+    });
+    expect(failureNotice('envVar', { ...base, noCredsAvailable: false, envVar: 'X' }).message)
+      .toBe('dbt needs the environment variable X, which isn\'t set where VS Code started. Set it, restart VS Code, and try Run dbt parse again.');
   });
 
   it('names the env var and the adapter when known', () => {

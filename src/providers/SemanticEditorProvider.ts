@@ -5055,6 +5055,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Bring the open canvas for `uri` to the front (its own editor group, with
+   * focus): Run dbt parse's **Open Physical view** can target a canvas in a
+   * background tab. False when no live canvas is open for it.
+   */
+  revealCanvas(uri: vscode.Uri): boolean {
+    const entry = this.openPanels.get(uri.toString());
+    if (!entry?.panel || this.disposedWebviews.has(entry.webview)) return false;
+    entry.panel.reveal(undefined, false);
+    return true;
+  }
+
+  /**
    * Switch the stage of an open editor panel identified by its document URI.
    * Called by extension.ts when opening a domain from the tree in physical stage.
    * Uses a small delay to allow the webview to initialise first.

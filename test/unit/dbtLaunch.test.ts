@@ -114,6 +114,18 @@ describe('childEnv', () => {
     }
   });
 
+  it('drops a log level of none (it prints nothing, so a failure has no cause), and keeps every other level', () => {
+    for (const mode of ['normal', 'noCreds'] as const) {
+      const silenced = childEnv(posixVenv, mode, { DBT_LOG_LEVEL: ' None ', DBT_ENGINE_LOG_LEVEL: 'none' }, 'linux');
+      expect(silenced.DBT_LOG_LEVEL).toBeUndefined();
+      expect(silenced.DBT_ENGINE_LOG_LEVEL).toBeUndefined();
+      const kept = childEnv(posixVenv, mode, { DBT_LOG_LEVEL: 'error', DBT_ENGINE_LOG_LEVEL: 'warn', DBT_QUIET: 'true' }, 'linux');
+      expect(kept).toMatchObject({ DBT_LOG_LEVEL: 'error', DBT_ENGINE_LOG_LEVEL: 'warn', DBT_QUIET: 'true' });
+    }
+    // Windows keys are case-insensitive.
+    expect(childEnv(winVenv, 'normal', { dbt_log_level: 'NONE' }, 'win32').dbt_log_level).toBeUndefined();
+  });
+
   it('normal mode removes an inherited placeholder marker and keeps the user\'s profile settings', () => {
     const env = childEnv(posixVenv, 'normal', { [THROWAWAY_MARKER_ENV]: '1', DBT_PROFILES_DIR: '/p', DATABRICKS_HOST: 'h', DBT_SEND_ANONYMOUS_USAGE_STATS: 'true' }, 'linux');
     expect(env[THROWAWAY_MARKER_ENV]).toBeUndefined();

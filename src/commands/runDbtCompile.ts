@@ -14,6 +14,7 @@ import * as vscode from 'vscode';
 import type { DbtCandidate } from '../services/dbtEnv';
 import {
   classifyDbtFailure,
+  envVarFailedAfterAdapterLoad,
   envVarUsedInProjectFile,
   failureNotice,
   missingAdapterType,
@@ -42,7 +43,7 @@ import {
 } from './runDbtParse';
 
 export const DBT_COMPILE_NOT_FOUND_MESSAGE =
-  'ERD Studio couldn\'t find dbt on this machine. Install dbt (or activate the environment it is in), then try Run dbt compile again.';
+  'ERD Studio couldn\'t find dbt on this machine. Install it in the project\'s .venv, or install it elsewhere and restart VS Code, then try Run dbt compile again.';
 export const COMPILE_OK_MESSAGE = 'dbt compile finished. Diagrams refreshed with the new manifest.';
 
 const LABELS: Record<Exclude<DbtFailureAction, 'noCreds'>, string> = {
@@ -78,13 +79,19 @@ export async function runDbtCompile(root: string, deps: RunDbtCompileDeps = {}):
     showDbtBusy(root);
     return NOT_STARTED;
   }
-  claimDbtFlow(root);
+  const claim = claimDbtFlow(root);
+  if (!claim) {
+    showDbtBusy(root);
+    return NOT_STARTED;
+  }
   try {
     const picked = await chooseDbtCandidate(root, 'compile', deps);
     if (picked === 'noDbt') {
       telemetry.feature('dbtCompileNoDbt');
-      const pick = await vscode.window.showInformationMessage(DBT_COMPILE_NOT_FOUND_MESSAGE, DBT_INSTALL_ACTION);
-      if (pick === DBT_INSTALL_ACTION) void vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs));
+      // Never awaited while the project is claimed: an unanswered notice would make every later click "busy".
+      void vscode.window.showInformationMessage(DBT_COMPILE_NOT_FOUND_MESSAGE, DBT_INSTALL_ACTION).then((pick) => {
+        if (pick === DBT_INSTALL_ACTION) void vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs));
+      });
       return NOT_STARTED;
     }
     if (picked === 'declined') {
@@ -103,7 +110,7 @@ export async function runDbtCompile(root: string, deps: RunDbtCompileDeps = {}):
     recordDbtRunFailure(err);
     return NOT_STARTED;
   } finally {
-    releaseDbtFlow(root);
+    releaseDbtFlow(claim);
   }
 }
 
@@ -149,8 +156,9 @@ async function handleCompileResult(flow: CompileFlow, r: DbtProcessResult): Prom
   log.info(`[dbt] compile failed: ${category}`);
   telemetry.feature('dbtCompileExitFail');
   const envVar = missingEnvVarName(r.tail);
-  let envVarInProject = false;
-  if (envVar) {
+  // In the project's files: dbt got past the profile, or dbt_project.yml uses it.
+  let envVarInProject = category === 'envVar' && envVarFailedAfterAdapterLoad(r.tail);
+  if (envVar && !envVarInProject) {
     try { envVarInProject = envVarUsedInProjectFile(flow.readProjectFile(flow.root), envVar); } catch { /* none */ }
   }
   const notice = failureNotice(category, {

@@ -143,19 +143,32 @@ export async function identifyDbt(candidate: DbtCandidate, root: string, deps: I
   return identity;
 }
 
-/** Roots whose Run dbt parse / compile is still before its run (modals, the probe, a prompt). */
-const inFlight = new Set<string>();
+/** One flow's hold on a root (from `claimDbtFlow`); only its holder can release it. */
+export type DbtFlowClaim = { readonly root: string };
 
-/** Claim `root` for a flow's pre-run steps; false when another flow holds it. */
-export function claimDbtFlow(root: string): boolean {
+/**
+ * Roots whose Run dbt parse / compile is still before its run (the trust
+ * modal, the probe, a modal or quick pick), each with the claim that holds it.
+ * A flow never holds a root while it waits on a non-modal notification: those
+ * can sit unanswered in the notification centre for as long as the window is
+ * open.
+ */
+const inFlight = new Map<string, DbtFlowClaim>();
+
+/** Claim `root` for a flow's pre-run steps; null when another flow holds it. */
+export function claimDbtFlow(root: string): DbtFlowClaim | null {
   const key = pathKey(root);
-  if (inFlight.has(key)) return false;
-  inFlight.add(key);
-  return true;
+  if (inFlight.has(key)) return null;
+  const claim: DbtFlowClaim = { root };
+  inFlight.set(key, claim);
+  return claim;
 }
 
-export function releaseDbtFlow(root: string): void {
-  inFlight.delete(pathKey(root));
+/** Release `claim`; a no-op when it was already released or another flow's claim holds the root now. */
+export function releaseDbtFlow(claim: DbtFlowClaim | null): void {
+  if (!claim) return;
+  const key = pathKey(claim.root);
+  if (inFlight.get(key) === claim) inFlight.delete(key);
 }
 
 export function isDbtFlowStarting(root: string): boolean {

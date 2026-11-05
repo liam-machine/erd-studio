@@ -852,7 +852,8 @@ describe.each(DBT_FIXTURES)('runDbtParse (#110) (%s storage)', (_storage, fixtur
     // A fake `dbt` alone on PATH, so the test never depends on this machine.
     binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbt-bin-'));
     const dbt = path.join(binDir, process.platform === 'win32' ? 'dbt.exe' : 'dbt');
-    fs.writeFileSync(dbt, '#!/bin/sh\n');
+    // Like dbt parse, it rewrites the manifest (a success must leave a new one, not the old file); PATH holds only binDir.
+    fs.writeFileSync(dbt, '#!/bin/sh\nif [ -f target/manifest.json ]; then /usr/bin/touch target/manifest.json; fi\n');
     fs.chmodSync(dbt, 0o755);
     process.env.PATH = binDir;
     delete process.env.VIRTUAL_ENV;
@@ -942,6 +943,13 @@ describe.each(DBT_FIXTURES)('physicalSwitchTarget / originIsPhysical (%s storage
     const { provider, doc } = await openShowcase(root);
     provider.setLogicalOnly(true);
     expect(provider.physicalSwitchTarget(doc.uri)).toBeUndefined();
+  });
+  it('revealCanvas brings the canvas to the front (Open Physical view can target a background tab)', async () => {
+    const { provider, panel, doc } = await openShowcase(root);
+    const before = panel._reveals.length;
+    expect(provider.revealCanvas(doc.uri)).toBe(true);
+    expect(panel._reveals.length).toBe(before + 1);
+    expect(provider.revealCanvas(vscode.Uri.file(path.join(root, 'nope.json')))).toBe(false);
   });
 });
 

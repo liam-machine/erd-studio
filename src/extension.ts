@@ -1749,6 +1749,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       originIsPhysical: (origin) => editorProvider.originIsPhysical(origin),
       openPhysical: (uri) => {
         manifestService.invalidate();
+        // The target can be a background tab (the last active canvas, or one the user left during a long parse).
+        editorProvider.revealCanvas(uri);
         editorProvider.switchStageForUri(uri, 'physical');
       },
     });

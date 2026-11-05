@@ -45,7 +45,12 @@ const RULES: ReadonlyArray<readonly [Exclude<DbtFailureCategory, 'other'>, reado
     /DLL load failed while importing pyodbc/,
   ]],
   ['depsMissing', ['Run "dbt deps"', /package\(s\) installed in /]],
-  ['credentials', [(t) => t.includes('Credentials in profile') && t.includes('invalid'), 'default auth:']],
+  ['credentials', [
+    (t) => t.includes('Credentials in profile') && t.includes('invalid'),
+    'default auth:',
+    // A profile with no `schema` (dbt-databricks, dbt-sqlserver); the exact type text, so a project config error is not read as one.
+    /at path \['schema'\]: None is not of type 'string'/,
+  ]],
   ['noProject', ['No dbt_project.yml found']],
   // Not the 1.10 banner "This version of dbt is deprecated".
   ['dbtVersion', ['This version of dbt is not supported']],
@@ -99,6 +104,21 @@ export function missingAdapterType(output: string): string | null {
     ?? null;
 }
 
+const REGISTERED_ADAPTER = 'Registered adapter:';
+
+/**
+ * Whether dbt had already loaded the profile when the run's fatal error came:
+ * it prints `Registered adapter:` only after profiles.yml and dbt_project.yml
+ * have rendered. A missing env var after that point is in a model, macro or
+ * schema file, so Parse without your credentials would fail the same way.
+ */
+export function envVarFailedAfterAdapterLoad(output: string): boolean {
+  const text = stripAnsi(output);
+  const at = text.lastIndexOf(ENCOUNTERED);
+  if (at < 0) return false;
+  return text.lastIndexOf(REGISTERED_ADAPTER, at) >= 0;
+}
+
 /**
  * Whether `dbt_project.yml`'s text uses `env_var('NAME')`. dbt renders
  * `profile:` even when `--profile` is passed, so a variable used there blocks
@@ -136,6 +156,7 @@ export interface FailureContext {
   /** Parse without your credentials can run: parse, normal mode, dbt Core, host storage. */
   noCredsAvailable: boolean;
   envVar: string | null;
+  /** The variable is used in the project's own files (dbt_project.yml, or dbt failed after loading the profile). */
   envVarInProject: boolean;
   adapterType: string | null;
 }
@@ -170,7 +191,9 @@ export function failureNotice(
         };
       }
       return {
-        message: `dbt needs ${named}, which isn't set where VS Code started.`,
+        message: noCreds
+          ? `dbt needs ${named}, which isn't set where VS Code started.`
+          : `dbt needs ${named}, which isn't set where VS Code started. Set it, restart VS Code, and try ${Cmd} again.`,
         actions: withNoCreds(['showOutput']),
       };
     }

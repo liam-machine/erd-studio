@@ -65,6 +65,8 @@ function pathFor(platform: NodeJS.Platform): path.PlatformPath {
 
 /** Child env variables dropped in every mode. */
 const ALWAYS_DROPPED = ['DBT_LOG_FORMAT', 'DBT_ENGINE_LOG_FORMAT', 'DBT_PROJECT_DIR', 'DBT_ENGINE_PROJECT_DIR'];
+/** Dropped only when set to `none` (every other level is the user's choice and stays). */
+const SILENCING_LOG_LEVELS = ['DBT_LOG_LEVEL', 'DBT_ENGINE_LOG_LEVEL'];
 /** Dropped in noCreds mode: the flags win anyway (belt and braces). */
 const NO_CREDS_DROPPED = [
   'DBT_PROFILES_DIR', 'DBT_ENGINE_PROFILES_DIR', 'DBT_PROFILE', 'DBT_TARGET', 'DBT_ENGINE_PROFILE', 'DBT_ENGINE_TARGET',
@@ -82,7 +84,9 @@ const NO_CREDS_DROPPED = [
  *   `PYTHONIOENCODING=utf-8`; `DBT_LOG_FORMAT` / `DBT_ENGINE_LOG_FORMAT`
  *   removed (the failure classifier reads plain text) and `DBT_PROJECT_DIR` /
  *   `DBT_ENGINE_PROJECT_DIR` removed (the cwd is the project ERD Studio
- *   reads); on Windows `NoDefaultCurrentDirectoryInExePath=1`, so cmd.exe
+ *   reads); `DBT_LOG_LEVEL` / `DBT_ENGINE_LOG_LEVEL` removed only when
+ *   set to `none`, which prints nothing (any other level stays); on Windows
+ *   `NoDefaultCurrentDirectoryInExePath=1`, so cmd.exe
  *   and the executable search never pick a program out of the project root;
  * - normal mode removes an inherited placeholder marker; noCreds mode sets
  *   it, turns dbt's anonymous usage stats off, and removes every
@@ -150,6 +154,11 @@ export function childEnv(
   set('PYTHONUNBUFFERED', '1');
   set('PYTHONIOENCODING', 'utf-8');
   for (const name of ALWAYS_DROPPED) { del(name); }
+  // A log level of `none` prints nothing at all, so the failure would have no cause and no output to show.
+  for (const name of SILENCING_LOG_LEVELS) {
+    const v = get(name);
+    if (v !== undefined && v.trim().toLowerCase() === 'none') { del(name); }
+  }
   if (win) { set('NoDefaultCurrentDirectoryInExePath', '1'); }
 
   if (mode === 'normal') {

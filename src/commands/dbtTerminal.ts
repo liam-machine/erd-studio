@@ -74,7 +74,7 @@ function footer(kind: DbtCommandKind, r: DbtProcessResult): string {
   } else if (r.exitCode === null) {
     line = `${RED}✗ dbt ${kind} ended without an exit code.${RESET}`;
   } else {
-    line = `${RED}✗ dbt ${kind} stopped with exit code ${r.exitCode}.${RESET}`;
+    line = `${RED}✗ dbt ${kind} failed with exit code ${r.exitCode}.${RESET}`;
   }
   return `\r\n${line}\r\n${DIM}Press any key to close this terminal.${RESET}\r\n`;
 }

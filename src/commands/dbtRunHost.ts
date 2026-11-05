@@ -20,7 +20,7 @@ export interface DbtRunHost {
   physicalTarget(origin?: vscode.Uri): vscode.Uri | undefined;
   /** The canvas that asked is already on the Physical stage. */
   originIsPhysical(origin?: vscode.Uri): boolean;
-  /** Re-read the manifest and switch `uri`'s canvas to Physical. */
+  /** Re-read the manifest, bring `uri`'s canvas to the front and switch it to Physical. */
   openPhysical(uri: vscode.Uri): void;
 }
 

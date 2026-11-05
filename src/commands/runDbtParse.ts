@@ -44,6 +44,7 @@ import { displayPath, isUntrustedProjectExecutable, type DbtCandidate } from '..
 import {
   classifyDbtFailure,
   DBT_PARSE_FAILURE_FEATURES,
+  envVarFailedAfterAdapterLoad,
   envVarUsedInProjectFile,
   failureNotice,
   missingAdapterType,
@@ -66,13 +67,14 @@ import {
   isDbtFlowStarting,
   releaseDbtFlow,
   type DbtCandidateDeps,
+  type DbtFlowClaim,
   type DbtIdentity,
 } from './dbtCandidate';
 import { getDbtRunHost, type DbtRunHost } from './dbtRunHost';
 import { isDbtRunActive, runDbtInTerminal, showDbtOutput } from './dbtTerminal';
 
 export const DBT_NOT_FOUND_MESSAGE =
-  'ERD Studio couldn\'t find dbt on this machine. Install dbt (or activate the environment it is in), then try Run dbt parse again.';
+  'ERD Studio couldn\'t find dbt on this machine. Install it in the project\'s .venv, or install it elsewhere and restart VS Code, then try Run dbt parse again.';
 export const DBT_INSTALL_ACTION = 'How to install dbt';
 export const RUN_DBT_PARSE_ACTION = 'Run dbt parse';
 export const NO_CREDS_ACTION = 'Parse without your credentials';
@@ -115,6 +117,8 @@ const ACTION_LABELS: Record<DbtFailureAction, string> = {
 export interface DbtParseFs {
   existsSync(p: string): boolean;
   isFile(p: string): boolean;
+  /** The file's modification time, or undefined when it is missing. */
+  mtimeMs(p: string): number | undefined;
   readTextStart(p: string, chars: number): Promise<string>;
   readdirSync(p: string): string[];
   readFileSync(p: string, enc: 'utf8'): string;
@@ -127,6 +131,7 @@ export interface DbtParseFs {
 const defaultFs: DbtParseFs = {
   existsSync: (p) => fs.existsSync(p),
   isFile: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
+  mtimeMs: (p) => { try { return fs.statSync(p).mtimeMs; } catch { return undefined; } },
   readTextStart: (p, chars) => readTextStart(p, chars),
   readdirSync: (p) => fs.readdirSync(p),
   readFileSync: (p, enc) => fs.readFileSync(p, enc),
@@ -240,23 +245,39 @@ export async function runDbtParse(root: string, opts: RunDbtParseOptions = {}, d
     showDbtBusy(root);
     return NOT_STARTED;
   }
-  claimDbtFlow(root);
+  const claim = claimDbtFlow(root);
+  if (!claim) {
+    showDbtBusy(root);
+    return NOT_STARTED;
+  }
   try {
-    return await parseFlow(root, opts, deps);
+    return await parseFlow(root, opts, deps, claim);
   } catch (err) {
     recordDbtRunFailure(err);
     return NOT_STARTED;
   } finally {
-    releaseDbtFlow(root);
+    // A no-op when parseFlow already released it (and another click may hold the root now).
+    releaseDbtFlow(claim);
   }
 }
 
-async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtParseDeps): Promise<DbtParseStart> {
+/** A non-modal notice whose only button opens the dbt install docs; never awaited (see `claimDbtFlow`). */
+function showInstallNotice(show: typeof vscode.window.showInformationMessage, message: string): void {
+  void show(message, DBT_INSTALL_ACTION).then((pick) => {
+    if (pick === DBT_INSTALL_ACTION) openUrl(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs);
+  });
+}
+
+/**
+ * The steps before the run, holding `claim`. A non-modal notification can
+ * sit unanswered in the notification centre indefinitely, so none is awaited
+ * while the claim is held: a later click would be told dbt is busy.
+ */
+async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtParseDeps, claim: DbtFlowClaim): Promise<DbtParseStart> {
   const picked = await chooseDbtCandidate(root, 'parse', deps);
   if (picked === 'noDbt') {
     telemetry.feature('dbtParseNoDbt');
-    const pick = await vscode.window.showInformationMessage(DBT_NOT_FOUND_MESSAGE, DBT_INSTALL_ACTION);
-    if (pick === DBT_INSTALL_ACTION) openUrl(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs);
+    showInstallNotice(vscode.window.showInformationMessage, DBT_NOT_FOUND_MESSAGE);
     return NOT_STARTED;
   }
   if (picked === 'declined') {
@@ -282,8 +303,7 @@ async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtPar
     }
     if (!found) {
       telemetry.feature('dbtParseCloudCli');
-      const pick = await vscode.window.showWarningMessage(DBT_CLOUD_CLI_MESSAGE, DBT_INSTALL_ACTION);
-      if (pick === DBT_INSTALL_ACTION) openUrl(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs);
+      showInstallNotice(vscode.window.showWarningMessage, DBT_CLOUD_CLI_MESSAGE);
       return NOT_STARTED;
     }
   }
@@ -298,20 +318,25 @@ async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtPar
     host,
     cfg,
     manifestPath: resolveManifestPath(root, cfg),
-    noCredsAvailable: !!host && identity.flavour === 'core-v1',
+    noCredsAvailable: false,
     run: deps.run ?? runDbtInTerminal,
     env: deps.env ?? process.env,
     platform: deps.platform ?? process.platform,
     homeDir: deps.homeDir ?? os.homedir(),
     fs: { ...defaultFs, ...deps.fs },
   };
+  // Only when a supported adapter is installed: otherwise the offer would end at "needs one of these adapters".
+  flow.noCredsAvailable = !!host && identity.flavour === 'core-v1'
+    && chooseThrowawayAdapter(identity.adapters, { manifest: null, files: await adapterFileHints(flow) }).kind !== 'none';
 
   // No profiles.yml anywhere: the normal run is certain to fail, so offer the route that works first.
   const profileFound = profilesYmlWouldBeFound(root, { env: flow.env, homeDir: flow.homeDir, isFile: (p) => flow.fs.isFile(p) });
   if (!profileFound && flow.noCredsAvailable) {
     telemetry.feature('dbtParseNoProfiles');
+    // The notice can wait unanswered: let go of the project first. The run it leads to claims it again.
+    releaseDbtFlow(claim);
     const pick = await vscode.window.showInformationMessage(NO_PROFILES_MESSAGE, NO_CREDS_ACTION, PROFILE_DOCS_ACTION);
-    if (pick === NO_CREDS_ACTION) return parseWithoutCredentials(flow);
+    if (pick === NO_CREDS_ACTION) return followUp(flow, () => parseWithoutCredentials(flow));
     if (pick === PROFILE_DOCS_ACTION) openUrl(DBT_DOCS_URLS.profiles);
     return NOT_STARTED;
   }
@@ -329,7 +354,9 @@ function launchParse(flow: ParseFlow, mode: DbtRunMode): DbtParseStart {
     showCouldNotStart(flow.chosen.executable, flow.root, 'refused');
     return NOT_STARTED;
   }
-  const hadManifest = flow.fs.existsSync(flow.manifestPath);
+  // The manifest's modification time before the run: a success must leave a new one, not the old file.
+  const before = flow.fs.mtimeMs(flow.manifestPath);
+  const hadManifest = before !== undefined;
   const start = flow.run(flow.root, 'parse', mode, plan);
   if (start.kind === 'busy') {
     showDbtBusy(flow.root);
@@ -343,12 +370,13 @@ function launchParse(flow: ParseFlow, mode: DbtRunMode): DbtParseStart {
     () => start.run.result,
   );
   const settled = Promise.resolve(result)
-    .then((r) => handleParseResult(flow, mode, hadManifest, r))
+    .then((r) => handleParseResult(flow, mode, before, r))
     .catch(recordDbtRunFailure);
   return { started: true, settled };
 }
 
-async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, hadManifest: boolean, r: DbtProcessResult): Promise<void> {
+async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: number | undefined, r: DbtProcessResult): Promise<void> {
+  const hadManifest = before !== undefined;
   if (r.outcome === 'notStarted') {
     telemetry.feature('dbtParseNoStart');
     showCouldNotStart(flow.chosen.executable, flow.root, r.startError ?? 'unknown');
@@ -362,7 +390,9 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, hadManifest:
     log.info('[dbt] parse exited 0');
     telemetry.feature('dbtParseExitOk');
     if (mode === 'noCreds') telemetry.feature('dbtParseNoCredsOk');
-    if (!flow.fs.existsSync(flow.manifestPath)) {
+    // dbt rewrites manifest.json on every successful parse; one left unchanged means dbt wrote somewhere else.
+    const after = flow.fs.mtimeMs(flow.manifestPath);
+    if (after === undefined || after === before) {
       telemetry.feature('dbtParseOkNoManifest');
       const pick = await vscode.window.showWarningMessage(
         `dbt parse finished, but there's no manifest at ${manifestDisplayPath(flow.root, flow.cfg)}. ` +
@@ -392,8 +422,9 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, hadManifest:
   if (mode === 'noCreds') telemetry.feature('dbtParseNoCredsFail');
 
   const envVar = missingEnvVarName(r.tail);
-  let envVarInProject = false;
-  if (envVar) {
+  // In the project's files: dbt got past the profile (so a placeholder profile can't help), or dbt_project.yml uses it.
+  let envVarInProject = category === 'envVar' && envVarFailedAfterAdapterLoad(r.tail);
+  if (envVar && !envVarInProject) {
     try {
       envVarInProject = envVarUsedInProjectFile(flow.fs.readFileSync(path.join(flow.root, 'dbt_project.yml'), 'utf8'), envVar);
     } catch { /* no project file: not used there */ }
@@ -456,14 +487,15 @@ async function offerPhysical(flow: ParseFlow, message: string): Promise<void> {
  * meanwhile is told dbt is busy.
  */
 async function followUp(flow: ParseFlow, start: () => Promise<DbtParseStart>): Promise<DbtParseStart> {
-  if (isDbtRunActive(flow.root) || !claimDbtFlow(flow.root)) {
+  const claim = isDbtRunActive(flow.root) ? null : claimDbtFlow(flow.root);
+  if (!claim) {
     showDbtBusy(flow.root);
     return NOT_STARTED;
   }
   try {
     return await start();
   } finally {
-    releaseDbtFlow(flow.root);
+    releaseDbtFlow(claim);
   }
 }
 
@@ -517,8 +549,8 @@ async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> 
   return launchParse(flow, 'noCreds');
 }
 
-/** The placeholder adapter: from what is installed with dbt and the project's non-secret files; asks when it can't tell. */
-async function pickAdapter(flow: ParseFlow, manifestStart: string | null): Promise<ThrowawayAdapter | undefined> {
+/** Adapters the project's requirements-style files name (never a profiles.yml). */
+async function adapterFileHints(flow: ParseFlow): Promise<ThrowawayAdapter[]> {
   const files: ThrowawayAdapter[] = [];
   const candidates = REQUIREMENTS_FILES.map((f) => path.join(flow.root, f));
   try {
@@ -535,9 +567,16 @@ async function pickAdapter(flow: ParseFlow, manifestStart: string | null): Promi
       }
     } catch { /* missing: skipped */ }
   }
+  return files;
+}
 
+/** The placeholder adapter: from what is installed with dbt and the project's non-secret files; asks when it can't tell. */
+async function pickAdapter(flow: ParseFlow, manifestStart: string | null): Promise<ThrowawayAdapter | undefined> {
+  const files = await adapterFileHints(flow);
+  // A placeholder manifest's adapter_type is only the last placeholder pick, not evidence about the project.
+  const fromUserProfile = !!manifestStart && !manifestStart.includes(`"${THROWAWAY_MARKER_KEY}"`);
   const choice = chooseThrowawayAdapter(flow.identity.adapters, {
-    manifest: manifestStart ? adapterTypeFromManifestStart(manifestStart) : null,
+    manifest: fromUserProfile && manifestStart ? adapterTypeFromManifestStart(manifestStart) : null,
     files,
   });
   if (choice.kind === 'one') return choice.adapter;

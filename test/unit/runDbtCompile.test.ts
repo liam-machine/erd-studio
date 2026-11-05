@@ -96,6 +96,40 @@ describe('runDbtCompile', () => {
     expect(shown[0].message).toBe(DBT_COMPILE_NOT_FOUND_MESSAGE);
   });
 
+  it('the not-found message never says to activate an environment (the runner cannot see one)', () => {
+    expect(DBT_COMPILE_NOT_FOUND_MESSAGE).not.toMatch(/activate/i);
+    expect(DBT_COMPILE_NOT_FOUND_MESSAGE).toContain('restart VS Code');
+  });
+
+  it('an unanswered dbt-not-found notice never holds the project: the next click runs', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((() => new Promise(() => {})) as never);
+    expect((await runDbtCompile(ROOT, deps({ candidates: () => [] }))).started).toBe(false);
+    const d = deps({ candidates: () => [onPath] });
+    expect((await runDbtCompile(ROOT, d)).started).toBe(true);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseBusy');
+  });
+
+  it('an env var a model file uses says the project uses it; one in the profile says to set it and restart', async () => {
+    const shown = answer();
+    const d = deps({ candidates: () => [onPath] });
+    const start = await runDbtCompile(ROOT, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.E3_envmodel });
+    await start.settled;
+    expect(shown.at(-1)?.message).toBe(
+      'dbt needs the environment variable ERD_MODEL_VAR, which your project\'s files use. Set it where VS Code starts, restart VS Code, and try Run dbt compile again.',
+    );
+    _resetDbtFlowsForTests();
+    const d2 = deps({ candidates: () => [onPath] });
+    const start2 = await runDbtCompile(ROOT, d2);
+    d2.calls[0].finish({ exitCode: 2, tail: OUT.D_envprofiles });
+    await start2.settled;
+    expect(shown.at(-1)).toEqual({
+      message: 'dbt needs the environment variable ERD_PROTO_DUCKDB_PATH, which isn\'t set where VS Code started. Set it, restart VS Code, and try Run dbt compile again.',
+      items: ['Show output'],
+    });
+  });
+
   it.each([
     [{ exitCode: 0 }, 'dbtCompileExitOk'],
     [{ exitCode: 2, tail: OUT.H_jinja }, 'dbtCompileExitFail'],

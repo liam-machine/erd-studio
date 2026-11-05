@@ -78,12 +78,29 @@ describe('identifyDbt', () => {
 
 describe('the in-flight guard and the modal title', () => {
   it('claims a root once until released', () => {
-    expect(claimDbtFlow('/p')).toBe(true);
+    const p = claimDbtFlow('/p');
+    expect(p).not.toBeNull();
     expect(isDbtFlowStarting('/p')).toBe(true);
-    expect(claimDbtFlow('/p')).toBe(false);
-    expect(claimDbtFlow('/q')).toBe(true);
-    releaseDbtFlow('/p');
+    expect(claimDbtFlow('/p')).toBeNull();
+    const q = claimDbtFlow('/q');
+    expect(q).not.toBeNull();
+    releaseDbtFlow(p);
     expect(isDbtFlowStarting('/p')).toBe(false);
+    releaseDbtFlow(q);
+  });
+
+  it('only the claim that holds a root releases it', () => {
+    const first = claimDbtFlow('/r');
+    releaseDbtFlow(first);
+    const second = claimDbtFlow('/r');
+    expect(second).not.toBeNull();
+    // The first flow's late release (its finally) must not drop the second's claim.
+    releaseDbtFlow(first);
+    expect(isDbtFlowStarting('/r')).toBe(true);
+    expect(claimDbtFlow('/r')).toBeNull();
+    releaseDbtFlow(second);
+    expect(isDbtFlowStarting('/r')).toBe(false);
+    releaseDbtFlow(null);
   });
 
   it('names the command', () => {

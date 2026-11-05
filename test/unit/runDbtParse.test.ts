@@ -14,7 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { parse as parseYaml } from 'yaml';
 
-import { _resetDbtFlowsForTests, _resetDbtIdentityCacheForTests, type DbtIdentity } from '../../src/commands/dbtCandidate';
+import {
+  _resetDbtFlowsForTests,
+  _resetDbtIdentityCacheForTests,
+  claimDbtFlow,
+  isDbtFlowStarting,
+  releaseDbtFlow,
+  type DbtIdentity,
+} from '../../src/commands/dbtCandidate';
 import type { DbtRunHost } from '../../src/commands/dbtRunHost';
 import { _resetDbtRunsForTests, type runDbtInTerminal } from '../../src/commands/dbtTerminal';
 import {
@@ -34,6 +41,7 @@ import {
   PARSE_OK_MESSAGE,
   PARSE_OK_ON_PHYSICAL_MESSAGE,
   PARSE_REFRESH_MESSAGE,
+  PROFILE_DOCS_ACTION,
   PROFILE_WRITE_FAILED_MESSAGE,
   REPLACE_MANIFEST_ACTION,
   RUN_DBT_DEPS_ACTION,
@@ -151,11 +159,16 @@ function answer(answers: Record<string, string | undefined> = {}) {
   return shown;
 }
 
-const writeManifest = (marker = false) => {
+/** Each write gets a later modification time, as a real dbt run (seconds long) would. */
+let manifestWrites = 0;
+const writeManifest = (marker = false, adapterType = 'duckdb') => {
   fs.mkdirSync(path.join(root, 'target'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'target', 'manifest.json'), JSON.stringify({
-    metadata: { adapter_type: 'duckdb', env: marker ? { ERD_STUDIO_THROWAWAY_PROFILE: '1' } : {} }, nodes: {},
+  const file = path.join(root, 'target', 'manifest.json');
+  fs.writeFileSync(file, JSON.stringify({
+    metadata: { adapter_type: adapterType, env: marker ? { ERD_STUDIO_THROWAWAY_PROFILE: '1' } : {} }, nodes: {},
   }));
+  const t = new Date(Date.UTC(2026, 0, 1) + (++manifestWrites) * 1000);
+  fs.utimesSync(file, t, t);
 };
 
 const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true })
@@ -178,8 +191,76 @@ describe('runDbtParse: before the run', () => {
     expect(start.started).toBe(false);
     expect(feature).toHaveBeenCalledWith('dbtParseNoDbt');
     expect(shown[0]).toMatchObject({ message: DBT_NOT_FOUND_MESSAGE, items: [DBT_INSTALL_ACTION] });
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
     expect(String(open.mock.calls[0][0])).toContain(new URL(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs).host);
     expect(d.calls).toHaveLength(0);
+  });
+
+  it('the not-found message never tells the user to activate an environment (the runner cannot see one)', () => {
+    expect(DBT_NOT_FOUND_MESSAGE).not.toMatch(/activate/i);
+    expect(DBT_NOT_FOUND_MESSAGE).toContain('restart VS Code');
+  });
+
+  it('an unanswered notice never holds the project: a later click runs (dbt not found, the Cloud CLI, no profiles.yml)', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    // Every non-modal notice stays pending, as one waiting in the notification centre does.
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((() => new Promise(() => {})) as never);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockImplementation((() => new Promise(() => {})) as never);
+
+    const noDbt = await runDbtParse(root, {}, deps({ candidates: () => [] }));
+    expect(noDbt.started).toBe(false);
+    const d = deps();
+    expect((await runDbtParse(root, {}, d)).started).toBe(true);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseBusy');
+    d.calls[0].finish({ outcome: 'stopped', exitCode: null });
+    _resetDbtRunsForTests();
+
+    const cloud = await runDbtParse(root, {}, deps({ identify: async () => ({ flavour: 'cloud-cli', adapters: [], via: 'version' }) }));
+    expect(cloud.started).toBe(false);
+    expect(feature).toHaveBeenCalledWith('dbtParseCloudCli');
+    const d2 = deps();
+    expect((await runDbtParse(root, {}, d2)).started).toBe(true);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseBusy');
+    _resetDbtRunsForTests();
+
+    fs.rmSync(path.join(home, '.dbt'), { recursive: true });
+    void runDbtParse(root, {}, deps()); // M2 waits, unanswered
+    await vi.waitFor(() => expect(feature).toHaveBeenCalledWith('dbtParseNoProfiles'));
+    fs.mkdirSync(path.join(home, '.dbt'));
+    fs.writeFileSync(path.join(home, '.dbt', 'profiles.yml'), `proj: ${SENTINEL}\n`);
+    const d3 = deps();
+    expect((await runDbtParse(root, {}, d3)).started).toBe(true);
+    expect(d3.calls[0].mode).toBe('normal');
+    expect(feature).not.toHaveBeenCalledWith('dbtParseBusy');
+  });
+
+  it('M2 answered after another click started dbt: busy, not a second run', async () => {
+    fs.rmSync(path.join(home, '.dbt'), { recursive: true });
+    const feature = vi.spyOn(telemetry, 'feature');
+    let answerM2!: (v: unknown) => void;
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(((message: string) =>
+      (message === NO_PROFILES_MESSAGE ? new Promise((r) => { answerM2 = r; }) : Promise.resolve(undefined))) as never);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    const shared = fakeRun();
+    const first = runDbtParse(root, {}, deps({ run: shared.run }));
+    await vi.waitFor(() => expect(answerM2).toBeDefined());
+    // A second click meanwhile is not blocked: it reaches M2 too and is answered there.
+    const firstAnswer = answerM2;
+    const second = runDbtParse(root, {}, deps({ run: shared.run }));
+    await vi.waitFor(() => expect(answerM2).not.toBe(firstAnswer));
+    answerM2(NO_CREDS_ACTION);
+    expect((await second).started).toBe(true);
+    expect(shared.calls).toHaveLength(1);
+    expect(shared.calls[0].mode).toBe('noCreds');
+    // The first notice answered while another flow holds the project: its follow-up re-checks and is busy.
+    const held = claimDbtFlow(root);
+    firstAnswer(NO_CREDS_ACTION);
+    expect((await first).started).toBe(false);
+    expect(feature).toHaveBeenCalledWith('dbtParseBusy');
+    expect(shared.calls).toHaveLength(1);
+    // The first click's own release (its finally) left the other flow's claim alone.
+    expect(isDbtFlowStarting(root)).toBe(true);
+    releaseDbtFlow(held);
   });
 
   it('asks before a project venv dbt; dismissing records dbtParseVenvDeclined and runs nothing', async () => {
@@ -332,9 +413,25 @@ describe('runDbtParse: the run and its success', () => {
     _resetDbtFlowsForTests();
     const d3 = deps();
     const s3 = await runDbtParse(root, { origin: vscode.Uri.file(path.join(root, 'd.dbml')) }, d3);
+    writeManifest();
     d3.calls[0].finish();
     await s3.settled;
     expect(shown.at(-1)).toMatchObject({ message: PARSE_REFRESH_MESSAGE, items: [OPEN_PHYSICAL_ACTION] });
+  });
+
+  it('exit 0 that leaves an existing manifest unchanged is not a refresh: dbtParseOkNoManifest (M4)', async () => {
+    writeManifest();
+    const feature = vi.spyOn(telemetry, 'feature');
+    const shown = answer();
+    const d = deps();
+    const s = await runDbtParse(root, { origin: vscode.Uri.file(path.join(root, 'd.dbml')) }, d);
+    expect(feature).toHaveBeenCalledWith('dbtParseRefresh');
+    d.calls[0].finish({ exitCode: 0 }); // dbt wrote somewhere else
+    await s.settled;
+    expect(feature).toHaveBeenCalledWith('dbtParseExitOk');
+    expect(feature).toHaveBeenCalledWith('dbtParseOkNoManifest');
+    expect(shown.some((m) => m.message === PARSE_REFRESH_MESSAGE)).toBe(false);
+    expect(shown.at(-1)?.message).toMatch(/^dbt parse finished, but there's no manifest at target\/manifest\.json\./);
   });
 
   it('exit 0 with no manifest: dbtParseOkNoManifest', async () => {
@@ -495,6 +592,29 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
     expect(shown.at(-1)?.items).toEqual([SHOW_OUTPUT_ACTION]);
   });
 
+  it('an env var a model file uses (dbt failed after loading the profile) offers no Parse without your credentials', async () => {
+    const shown = answer();
+    const d = deps();
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.E3_envmodel });
+    await s.settled;
+    expect(shown.at(-1)?.message).toBe(
+      'dbt needs the environment variable ERD_MODEL_VAR, which your project\'s files use. Set it where VS Code starts, restart VS Code, and try Run dbt parse again.',
+    );
+    expect(shown.at(-1)?.items).toEqual([SHOW_OUTPUT_ACTION]);
+  });
+
+  it('a profile without `schema` is a credentials failure and offers Parse without your credentials', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const shown = answer();
+    const d = deps();
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.min_databricks_schema });
+    await s.settled;
+    expect(feature).toHaveBeenCalledWith('dbtParseFailCredentials');
+    expect(shown.at(-1)).toMatchObject({ message: 'dbt rejected the connection details in your dbt profile.', items: [NO_CREDS_ACTION, SHOW_OUTPUT_ACTION] });
+  });
+
   it('a manifest written with the user\'s profile asks before it is replaced; declining writes nothing', async () => {
     writeManifest(false);
     const shown = answer({ 'dbt parse needs a dbt profile': NO_CREDS_ACTION });
@@ -547,16 +667,63 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
     expect(d.calls[1].plan.args[2]).toBe(path.join(storage, 'dbt-parse-profile', 'snowflake'));
   });
 
-  it('no supported adapter: dbtParseNoCredsUnsupported', async () => {
+  it('no supported adapter: Parse without your credentials is never offered (it would end at M5)', async () => {
     const feature = vi.spyOn(telemetry, 'feature');
-    const shown = answer({ 'dbt parse needs a dbt profile': NO_CREDS_ACTION });
+    const shown = answer();
     const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['oracle'], via: 'stat' }) });
     const s = await runDbtParse(root, {}, d);
     d.calls[0].finish({ exitCode: 2, tail: OUT.B_profilename });
     await s.settled;
-    await vi.waitFor(() => expect(feature).toHaveBeenCalledWith('dbtParseNoCredsUnsupported'));
-    expect(shown.at(-1)?.message).toBe(NO_CREDS_UNSUPPORTED_MESSAGE);
-    expect(d.calls).toHaveLength(1);
+    expect(shown.at(-1)?.message).toMatch(/^dbt parse needs a dbt profile/);
+    expect(shown.at(-1)?.items).toEqual([PROFILE_DOCS_ACTION, SHOW_OUTPUT_ACTION]);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseNoCredsUnsupported');
+    expect(shown.some((m) => m.message === NO_CREDS_UNSUPPORTED_MESSAGE)).toBe(false);
+  });
+
+  it('no supported adapter and no profiles.yml: a normal run, not M2 (synapse drops its implied fabric)', async () => {
+    fs.rmSync(path.join(home, '.dbt'), { recursive: true });
+    const feature = vi.spyOn(telemetry, 'feature');
+    const shown = answer();
+    const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['synapse', 'fabric'], via: 'stat' }) });
+    await runDbtParse(root, {}, d);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseNoProfiles');
+    expect(shown.some((m) => m.message === NO_PROFILES_MESSAGE)).toBe(false);
+    expect(d.calls[0].mode).toBe('normal');
+  });
+
+  it('a requirements file naming the implied adapter alone keeps Parse without your credentials available', async () => {
+    fs.rmSync(path.join(home, '.dbt'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'requirements.txt'), 'dbt-fabric\n');
+    const feature = vi.spyOn(telemetry, 'feature');
+    answer();
+    const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['synapse', 'fabric'], via: 'stat' }) });
+    await runDbtParse(root, {}, d);
+    expect(feature).toHaveBeenCalledWith('dbtParseNoProfiles');
+  });
+
+  it('a placeholder manifest\'s adapter is not reused as the hint: the picker shows again', async () => {
+    writeManifest(true, 'duckdb');
+    const feature = vi.spyOn(telemetry, 'feature');
+    answer({ 'dbt parse needs a dbt profile': NO_CREDS_ACTION });
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined as never);
+    const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['duckdb', 'snowflake'], via: 'stat' }) });
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.B_profilename });
+    await s.settled;
+    expect(feature).toHaveBeenCalledWith('dbtParseNoCredsAsked');
+    expect(pick).toHaveBeenCalledTimes(1);
+  });
+
+  it('a manifest written with the user\'s own profile still decides the adapter', async () => {
+    writeManifest(false, 'snowflake');
+    answer({ 'dbt parse needs a dbt profile': NO_CREDS_ACTION, 'Replace': REPLACE_MANIFEST_ACTION });
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['duckdb', 'snowflake'], via: 'stat' }) });
+    void await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.B_profilename });
+    await vi.waitFor(() => expect(d.calls).toHaveLength(2));
+    expect(pick).not.toHaveBeenCalled();
+    expect(d.calls[1].plan.args[2]).toBe(path.join(storage, 'dbt-parse-profile', 'snowflake'));
   });
 
   it('a profile write failure is dbtProfileWriteFailed, logged by code only', async () => {
