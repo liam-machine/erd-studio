@@ -268,7 +268,9 @@ export function chooseThrowawayAdapter(
   let supported = installed.filter(isThrowawayAdapter).filter((a, i, all) => all.indexOf(a) === i);
   for (const [parent, child] of IMPLIED) {
     if (installed.includes(parent) && supported.includes(child)) {
-      const hintedAlone = hints.files.includes(child) && !hints.files.includes(parent as ThrowawayAdapter);
+      // The manifest's adapter_type (written with a real profile) names the child outright; a requirements file names it alone.
+      const hintedAlone = hints.manifest === child
+        || (hints.files.includes(child) && !hints.files.includes(parent as ThrowawayAdapter));
       if (!hintedAlone) supported = supported.filter((a) => a !== child);
     }
   }

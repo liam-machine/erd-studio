@@ -11,14 +11,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { coreInstallOf } from '../services/dbtAdapters';
 import type { DbtCandidate } from '../services/dbtEnv';
 import {
   classifyDbtFailure,
+  ENV_VAR_PROJECT_FILES,
   envVarFailedAfterAdapterLoad,
   envVarUsedInProjectFile,
   failureNotice,
   missingAdapterType,
   missingEnvVarName,
+  profileUnreadable,
   type DbtFailureAction,
 } from '../services/dbtFailure';
 import { planDbtSpawn } from '../services/dbtLaunch';
@@ -57,8 +60,10 @@ export interface RunDbtCompileDeps extends DbtCandidateDeps {
   run?: typeof runDbtInTerminal;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
-  /** Test seam: dbt_project.yml's text (for an env var the project uses). */
-  readProjectFile?: (root: string) => string;
+  /** Test seam: a project file's text (`ENV_VAR_PROJECT_FILES`, for an env var the project uses). */
+  readProjectFile?: (root: string, file: string) => string;
+  /** Test seam: the executable is a dbt Core 1.5+ install found by stat (so it takes `LOG_ARGS`). */
+  isCoreInstall?: (executable: string, platform: NodeJS.Platform) => boolean;
 }
 
 interface CompileFlow {
@@ -67,7 +72,9 @@ interface CompileFlow {
   run: typeof runDbtInTerminal;
   env: NodeJS.ProcessEnv;
   platform: NodeJS.Platform;
-  readProjectFile: (root: string) => string;
+  readProjectFile: (root: string, file: string) => string;
+  /** Pass `LOG_ARGS` (dbt Core 1.5+, found by stat: compile has no `--version` probe). */
+  logFlags: boolean;
 }
 
 const NOT_STARTED: DbtParseStart = { started: false, settled: Promise.resolve() };
@@ -98,13 +105,16 @@ export async function runDbtCompile(root: string, deps: RunDbtCompileDeps = {}):
       telemetry.feature('dbtCompileVenvDeclined');
       return NOT_STARTED;
     }
+    const platform = deps.platform ?? process.platform;
+    const isCore = deps.isCoreInstall ?? ((exe: string, p: NodeJS.Platform) => coreInstallOf(exe, p) !== null);
     return launchCompile({
       root,
       chosen: picked.chosen,
       run: deps.run ?? runDbtInTerminal,
       env: deps.env ?? process.env,
-      platform: deps.platform ?? process.platform,
-      readProjectFile: deps.readProjectFile ?? ((r) => fs.readFileSync(path.join(r, 'dbt_project.yml'), 'utf8')),
+      platform,
+      readProjectFile: deps.readProjectFile ?? ((r, f) => fs.readFileSync(path.join(r, f), 'utf8')),
+      logFlags: isCore(picked.chosen.executable, platform),
     });
   } catch (err) {
     recordDbtRunFailure(err);
@@ -115,7 +125,9 @@ export async function runDbtCompile(root: string, deps: RunDbtCompileDeps = {}):
 }
 
 function launchCompile(flow: CompileFlow): DbtParseStart {
-  const plan = planDbtSpawn(flow.chosen, 'compile', 'normal', { root: flow.root, env: flow.env, platform: flow.platform });
+  const plan = planDbtSpawn(flow.chosen, 'compile', 'normal', {
+    root: flow.root, env: flow.env, platform: flow.platform, logFlags: flow.logFlags,
+  });
   if ('refused' in plan) {
     telemetry.feature('dbtCompileNoStart');
     showCouldNotStart(flow.chosen.executable, flow.root, 'refused');
@@ -123,7 +135,7 @@ function launchCompile(flow: CompileFlow): DbtParseStart {
   }
   const start = flow.run(flow.root, 'compile', 'normal', plan);
   if (start.kind === 'busy') {
-    showDbtBusy(flow.root);
+    showDbtBusy(flow.root, 'dbtParseBusy', true);
     return NOT_STARTED;
   }
   telemetry.feature('dbtCompileLaunched');
@@ -156,14 +168,16 @@ async function handleCompileResult(flow: CompileFlow, r: DbtProcessResult): Prom
   log.info(`[dbt] compile failed: ${category}`);
   telemetry.feature('dbtCompileExitFail');
   const envVar = missingEnvVarName(r.tail);
-  // In the project's files: dbt got past the profile, or dbt_project.yml uses it.
+  // In the project's files: dbt got past the profile, or a project file dbt renders first uses it.
   let envVarInProject = category === 'envVar' && envVarFailedAfterAdapterLoad(r.tail);
   if (envVar && !envVarInProject) {
-    try { envVarInProject = envVarUsedInProjectFile(flow.readProjectFile(flow.root), envVar); } catch { /* none */ }
+    envVarInProject = ENV_VAR_PROJECT_FILES.some((f) => {
+      try { return envVarUsedInProjectFile(flow.readProjectFile(flow.root, f), envVar); } catch { return false; }
+    });
   }
   const notice = failureNotice(category, {
     command: 'compile', mode: 'normal', exitCode: r.exitCode, noCredsAvailable: false,
-    envVar, envVarInProject, adapterType: missingAdapterType(r.tail),
+    envVar, envVarInProject, profileUnreadable: profileUnreadable(r.tail), adapterType: missingAdapterType(r.tail),
   });
   const actions = notice.actions.filter((a): a is Exclude<DbtFailureAction, 'noCreds'> => a !== 'noCreds');
   const pick = await vscode.window.showWarningMessage(notice.message, ...actions.map((a) => LABELS[a]));
@@ -172,7 +186,7 @@ async function handleCompileResult(flow: CompileFlow, r: DbtProcessResult): Prom
     case 'deps': {
       if (isDbtRunActive(flow.root) || isDbtFlowStarting(flow.root)) { showDbtBusy(flow.root); return; }
       const deps = await runDbtDeps({
-        root: flow.root, chosen: flow.chosen, mode: 'normal', run: flow.run, env: flow.env, platform: flow.platform,
+        root: flow.root, chosen: flow.chosen, mode: 'normal', run: flow.run, env: flow.env, platform: flow.platform, logFlags: flow.logFlags,
         stoppedKey: 'dbtCompileStopped', noStartKey: 'dbtCompileNoStart', busyKey: 'dbtParseBusy',
         then: async () => { await launchCompile(flow).settled; },
       });

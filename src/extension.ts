@@ -44,7 +44,7 @@ import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type Db
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
 import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
-import { setDbtRunHost } from './commands/dbtRunHost';
+import { openPhysicalCanvas, setDbtRunHost } from './commands/dbtRunHost';
 import { disposeDbtRuns, isDbtRunActiveOrRecent } from './commands/dbtTerminal';
 import {
   manifestAppearanceFeature,
@@ -1749,9 +1749,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       originIsPhysical: (origin) => editorProvider.originIsPhysical(origin),
       openPhysical: (uri) => {
         manifestService.invalidate();
-        // The target can be a background tab (the last active canvas, or one the user left during a long parse).
-        editorProvider.revealCanvas(uri);
-        editorProvider.switchStageForUri(uri, 'physical');
+        // The target can be a background tab, or closed since the notice appeared (then another canvas, or the diagram reopened).
+        return openPhysicalCanvas(editorProvider, uri, async (u) => {
+          if (u.scheme === 'file' && !fs.existsSync(u.fsPath)) return false;
+          try {
+            await vscode.commands.executeCommand('vscode.openWith', u, SUBJECT_AREA_EDITOR_VIEW_TYPE);
+            return true;
+          } catch {
+            return false;
+          }
+        });
       },
     });
     context.subscriptions.push({ dispose: () => setDbtRunHost(undefined) });

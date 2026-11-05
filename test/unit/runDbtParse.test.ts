@@ -29,6 +29,7 @@ import {
   ADAPTER_DOCS_ACTION,
   DBT_BUSY_MESSAGE,
   DBT_CLOUD_CLI_MESSAGE,
+  DBT_STARTING_MESSAGE,
   DBT_DOCS_URLS,
   DBT_INSTALL_ACTION,
   DBT_NOT_FOUND_MESSAGE,
@@ -53,7 +54,7 @@ import {
 import { MANIFEST_FAILURE_CODES, manifestFailureCode } from '../../src/extension';
 import { throwawayProfileYaml } from '../../src/services/dbtAdapters';
 import type { DbtCandidate } from '../../src/services/dbtEnv';
-import { THROWAWAY_MARKER_ENV, type DbtCommandKind, type DbtRunMode, type DbtSpawnPlan } from '../../src/services/dbtLaunch';
+import { LOG_ARGS, THROWAWAY_MARKER_ENV, type DbtCommandKind, type DbtRunMode, type DbtSpawnPlan } from '../../src/services/dbtLaunch';
 import type { DbtProcessResult } from '../../src/services/dbtProcess';
 import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
 import { log } from '../../src/services/logger';
@@ -112,7 +113,7 @@ function fakeHost(over: Partial<DbtRunHost> = {}): DbtRunHost & { opened: vscode
     dbtConfig: () => defaultDbtProjectConfig(),
     physicalTarget: (origin) => origin,
     originIsPhysical: () => false,
-    openPhysical: (uri) => { opened.push(uri); },
+    openPhysical: async (uri) => { opened.push(uri); return true; },
     opened,
     ...over,
   };
@@ -284,7 +285,7 @@ describe('runDbtParse: before the run', () => {
     const d = deps({ candidates: () => [venv, onPath] });
     await runDbtParse(root, {}, d);
     expect(d.calls[0].plan.file).toBe(venv.executable);
-    expect(d.calls[0].plan.args).toEqual(['parse']);
+    expect(d.calls[0].plan.args).toEqual(['parse', ...LOG_ARGS]);
     _resetDbtFlowsForTests();
     vi.restoreAllMocks();
     answer({ 'Run dbt parse with the dbt inside this project?': 'Use my dbt' });
@@ -331,8 +332,26 @@ describe('runDbtParse: before the run', () => {
     await runDbtParse(root, {}, d);
     expect(modal).toHaveBeenCalledTimes(1);
     expect(feature).toHaveBeenCalledWith('dbtParseBusy');
-    expect(info).toHaveBeenCalledWith(DBT_BUSY_MESSAGE);
+    // No dbt process and no terminal yet: the notice doesn't point at one.
+    expect(info).toHaveBeenCalledWith(DBT_STARTING_MESSAGE);
+    expect(info).not.toHaveBeenCalledWith(DBT_BUSY_MESSAGE);
     release(undefined);
+    await first;
+  });
+
+  it('a second click while the adapter list is open says ERD Studio is starting dbt, not that a terminal shows it', async () => {
+    fs.rmSync(path.join(home, '.dbt'), { recursive: true });
+    const feature = vi.spyOn(telemetry, 'feature');
+    let pickAdapter!: (v: unknown) => void;
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((() => new Promise((r) => { pickAdapter = r; })) as never);
+    const shown = answer({ [NO_PROFILES_MESSAGE]: NO_CREDS_ACTION });
+    const d = deps({ identify: async () => ({ flavour: 'core-v1', adapters: ['duckdb', 'postgres'], via: 'stat' }) });
+    const first = runDbtParse(root, {}, d);
+    await vi.waitFor(() => expect(quickPick).toHaveBeenCalledTimes(1));
+    await runDbtParse(root, {}, d);
+    expect(feature).toHaveBeenCalledWith('dbtParseBusy');
+    expect(shown.at(-1)?.message).toBe(DBT_STARTING_MESSAGE);
+    pickAdapter(undefined);
     await first;
   });
 
@@ -372,7 +391,7 @@ describe('runDbtParse: the run and its success', () => {
     answer({ 'Run dbt parse with the dbt inside this project?': 'Use the project\'s dbt' });
     const d = deps({ candidates: () => [{ executable: 'C:\\proj\\.venv\\Scripts\\dbt.exe', source: 'venv' }], platform: 'win32', env: { Path: 'C:\\Windows' } });
     await runDbtParse(root, {}, d);
-    expect(d.calls[0].plan).toMatchObject({ file: 'C:\\proj\\.venv\\Scripts\\dbt.exe', args: ['parse'], shell: false });
+    expect(d.calls[0].plan).toMatchObject({ file: 'C:\\proj\\.venv\\Scripts\\dbt.exe', args: ['parse', ...LOG_ARGS], shell: false });
     expect(d.calls[0].plan.args).not.toContain('&&');
   });
 
@@ -390,6 +409,21 @@ describe('runDbtParse: the run and its success', () => {
     expect(shown.at(-1)).toMatchObject({ message: PARSE_OK_MESSAGE, items: [OPEN_PHYSICAL_ACTION] });
     expect(host.opened.map(String)).toEqual([String(origin)]);
     expect(feature).toHaveBeenCalledWith('dbtParseOpenPhysical');
+  });
+
+  it('Open Physical view that switched no canvas (the diagram closed and could not reopen) is not counted', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    answer({ [PARSE_OK_MESSAGE]: OPEN_PHYSICAL_ACTION });
+    const asked: vscode.Uri[] = [];
+    const host = fakeHost({ openPhysical: async (uri) => { asked.push(uri); return false; } });
+    const origin = vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'a.dbml'));
+    const d = deps({ host });
+    const start = await runDbtParse(root, { origin }, d);
+    writeManifest();
+    d.calls[0].finish({ exitCode: 0 });
+    await start.settled;
+    expect(asked.map(String)).toEqual([String(origin)]);
+    expect(feature).not.toHaveBeenCalledWith('dbtParseOpenPhysical');
   });
 
   it('no Open Physical view without a logical canvas; S1p on Physical; S2 on a refresh', async () => {
@@ -497,7 +531,7 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
     expect(walk(root)).toEqual(before);
     const noCreds = d.calls[1];
     expect(noCreds.mode).toBe('noCreds');
-    expect(noCreds.plan.args).toEqual(['parse', '--profiles-dir', dir, '--profile', 'erd_studio', '--target', 'erd_studio']);
+    expect(noCreds.plan.args).toEqual(['parse', '--profiles-dir', dir, '--profile', 'erd_studio', '--target', 'erd_studio', ...LOG_ARGS]);
     expect(noCreds.plan.env[THROWAWAY_MARKER_ENV]).toBe('1');
     expect(noCreds.plan.env.DBT_SEND_ANONYMOUS_USAGE_STATS).toBe('false');
 
@@ -545,7 +579,7 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
     expect(feature).toHaveBeenCalledWith('dbtParseFailDeps');
     expect(feature).toHaveBeenCalledWith('dbtParseDeps');
     expect(d.calls[1].kind).toBe('deps');
-    expect(d.calls[1].plan.args).toEqual(['deps']);
+    expect(d.calls[1].plan.args).toEqual(['deps', ...LOG_ARGS]);
     d.calls[1].finish({ exitCode: 0 });
     await vi.waitFor(() => expect(d.calls).toHaveLength(3));
     expect(feature).toHaveBeenCalledWith('dbtDepsExitOk');
@@ -602,6 +636,33 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
       'dbt needs the environment variable ERD_MODEL_VAR, which your project\'s files use. Set it where VS Code starts, restart VS Code, and try Run dbt parse again.',
     );
     expect(shown.at(-1)?.items).toEqual([SHOW_OUTPUT_ACTION]);
+  });
+
+  it.each(['packages.yml', 'dependencies.yml'])('an env var %s uses (a private package token) offers no Parse without your credentials', async (file) => {
+    // dbt renders packages.yml before it loads the profile, so a placeholder profile fails the same way.
+    fs.writeFileSync(path.join(root, file), 'packages:\n  - git: "https://{{ env_var(\'DBT_ENV_SECRET_GIT_TOKEN\') }}@github.com/acme/macros.git"\n');
+    const shown = answer();
+    const d = deps();
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.D_envprofiles.replace('ERD_PROTO_DUCKDB_PATH', 'DBT_ENV_SECRET_GIT_TOKEN') });
+    await s.settled;
+    expect(shown.at(-1)?.message).toBe(
+      'dbt needs the environment variable DBT_ENV_SECRET_GIT_TOKEN, which your project\'s files use. Set it where VS Code starts, restart VS Code, and try Run dbt parse again.',
+    );
+    expect(shown.at(-1)?.items).toEqual([SHOW_OUTPUT_ACTION]);
+    expect(shown.at(-1)?.items).not.toContain(NO_CREDS_ACTION);
+  });
+
+  it.each([['L_profilesyaml'], ['F2_notype']] as const)('a profiles.yml dbt found but could not read (%s) is not called missing', async (key) => {
+    const shown = answer();
+    const d = deps();
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT[key] });
+    await s.settled;
+    expect(shown.at(-1)).toMatchObject({
+      message: 'dbt couldn\'t read your dbt profile (profiles.yml). The output shows the line.',
+      items: [NO_CREDS_ACTION, SHOW_OUTPUT_ACTION],
+    });
   });
 
   it('a profile without `schema` is a credentials failure and offers Parse without your credentials', async () => {

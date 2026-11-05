@@ -16,6 +16,7 @@ import {
   identifyDbt,
   isDbtFlowStarting,
   releaseDbtFlow,
+  takesLogFlags,
   trustModalTitle,
 } from '../../src/commands/dbtCandidate';
 import { VERSION_DBT_DATABRICKS } from './dbtOutputFixtures';
@@ -55,7 +56,7 @@ describe('identifyDbt', () => {
     let mtime = 1;
     const c = { executable: path.join(tmp, 'shims', 'dbt'), source: 'shim' as const };
     const opts = { runVersion, mtimeMs: () => mtime, platform: 'linux' as const, env: {} };
-    expect(await identifyDbt(c, tmp, opts)).toEqual({ flavour: 'core-v1', adapters: ['databricks', 'spark'], via: 'version' });
+    expect(await identifyDbt(c, tmp, opts)).toEqual({ flavour: 'core-v1', adapters: ['databricks', 'spark'], via: 'version', version: '1.10.23' });
     await identifyDbt(c, tmp, opts);
     expect(runVersion).toHaveBeenCalledTimes(1);
     mtime = 2; // reinstalled
@@ -71,8 +72,28 @@ describe('identifyDbt', () => {
     expect(await identifyDbt(c, tmp, { runVersion: none, mtimeMs: () => undefined })).toEqual({ flavour: 'unknown', adapters: [], via: 'version' });
     await identifyDbt(c, tmp, { runVersion: none, mtimeMs: () => undefined });
     expect(none).toHaveBeenCalledTimes(2);
+    // A failed or timed-out probe (no output) is never cached, even with an mtime: the next click probes again.
+    const timedOut = vi.fn(async () => ({ output: null, error: 'timeout' }));
+    const shim = { executable: '/home/u/.pyenv/shims/dbt', source: 'shim' as const };
+    expect((await identifyDbt(shim, tmp, { runVersion: timedOut, mtimeMs: () => 7 })).flavour).toBe('unknown');
+    await identifyDbt(shim, tmp, { runVersion: timedOut, mtimeMs: () => 7 });
+    expect(timedOut).toHaveBeenCalledTimes(2);
+    const recovered = vi.fn(async () => ({ output: VERSION_DBT_DATABRICKS }));
+    expect((await identifyDbt(shim, tmp, { runVersion: recovered, mtimeMs: () => 7 })).flavour).toBe('core-v1');
     const cloud = vi.fn(async () => ({ output: 'dbt Cloud CLI - 0.40.14 (abc)\n' }));
     expect((await identifyDbt({ executable: '/opt/homebrew/bin/dbt', source: 'path' }, tmp, { runVersion: cloud, mtimeMs: () => 5 })).flavour).toBe('cloud-cli');
+  });
+});
+
+describe('takesLogFlags', () => {
+  it('dbt Core 1.5+ only: by stat, or a --version of 1.5 or later', () => {
+    expect(takesLogFlags({ flavour: 'core-v1', adapters: [], via: 'stat' })).toBe(true);
+    expect(takesLogFlags({ flavour: 'core-v1', adapters: [], via: 'version', version: '1.10.23' })).toBe(true);
+    expect(takesLogFlags({ flavour: 'core-v1', adapters: [], via: 'version', version: '1.5.0' })).toBe(true);
+    expect(takesLogFlags({ flavour: 'core-v1', adapters: [], via: 'version', version: '1.4.9' })).toBe(false);
+    expect(takesLogFlags({ flavour: 'core-v1', adapters: [], via: 'version' })).toBe(false);
+    expect(takesLogFlags({ flavour: 'fusion-v2', adapters: [], via: 'version', version: '2.0.1' })).toBe(false);
+    expect(takesLogFlags({ flavour: 'unknown', adapters: [], via: 'version' })).toBe(false);
   });
 });
 

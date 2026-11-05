@@ -14,6 +14,8 @@ import {
   failureNotice,
   missingAdapterType,
   missingEnvVarName,
+  profileUnreadable,
+  ENV_VAR_PROJECT_FILES,
   stripAnsi,
   type DbtFailureCategory,
   type FailureContext,
@@ -202,6 +204,22 @@ describe('failureNotice', () => {
     expect(failureNotice('other', { ...base, exitCode: null }).message).toBe('dbt parse ended without an exit code.');
     expect(failureNotice('other', { ...base, command: 'compile', exitCode: 1 }).message).toBe('dbt compile failed (exit code 1).');
     expect(failureNotice('profile', { ...base, command: 'compile' }).message).toBe('dbt compile needs a dbt profile for this project, and dbt couldn\'t find one.');
+  });
+
+  it('a profiles.yml dbt found but could not read or use is not called missing', () => {
+    expect(profileUnreadable(OUT.L_profilesyaml)).toBe(true);
+    expect(profileUnreadable(OUT.F2_notype)).toBe(true);
+    expect(profileUnreadable(OUT.B_profilename)).toBe(false);
+    expect(profileUnreadable(OUT.A_noprofiles)).toBe(false);
+    for (const command of ['parse', 'compile'] as const) {
+      expect(failureNotice('profile', { ...base, command, profileUnreadable: true }).message)
+        .toBe('dbt couldn\'t read your dbt profile (profiles.yml). The output shows the line.');
+    }
+  });
+
+  it('the project files checked for an env var are dbt_project.yml, packages.yml and dependencies.yml, never a profiles.yml', () => {
+    expect(ENV_VAR_PROJECT_FILES).toEqual(['dbt_project.yml', 'packages.yml', 'dependencies.yml']);
+    expect(envVarUsedInProjectFile('packages:\n  - git: "https://{{ env_var(\'DBT_ENV_SECRET_GIT_TOKEN\') }}@github.com/a/b.git"\n', 'DBT_ENV_SECRET_GIT_TOKEN')).toBe(true);
   });
 
   it('never quotes dbt output', () => {

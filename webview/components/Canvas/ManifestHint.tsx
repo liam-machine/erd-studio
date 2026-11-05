@@ -47,7 +47,7 @@ export const ManifestHint: React.FC = () => {
           dbt hasn&apos;t parsed this project yet. Your diagram is fine, but the Physical view can&apos;t
           show columns and tests without it.
         </span>{' '}
-        <span className="manifest-hint__hint">Without a dbt profile, it offers Parse without your credentials.</span>
+        <span className="manifest-hint__hint">No dbt profile? Run dbt parse can parse without your credentials when dbt Core and your adapter are installed.</span>
       </span>
       <button
         type="button"

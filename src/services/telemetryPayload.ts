@@ -452,7 +452,7 @@ export const FEATURES = [
   'dbtParseDeps',            // Run dbt deps was chosen
   'dbtDepsExitOk',
   'dbtDepsExitFail',
-  'dbtParseOpenPhysical',    // Open Physical view was pressed after a parse
+  'dbtParseOpenPhysical',    // Open Physical view was pressed after a parse and switched a diagram
   'dbtCompileLaunched',
   'dbtCompileNoDbt',
   'dbtCompileVenvDeclined',

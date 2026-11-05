@@ -179,6 +179,13 @@ describe('chooseThrowawayAdapter', () => {
     expect(chooseThrowawayAdapter(['databricks', 'spark'], { manifest: null, files: ['spark'] })).toEqual({ kind: 'one', adapter: 'spark' });
     expect(chooseThrowawayAdapter(['databricks', 'spark'], { manifest: null, files: ['spark', 'databricks'] })).toEqual({ kind: 'one', adapter: 'databricks' });
   });
+  it('a manifest written with a real profile keeps an implied child adapter (postgres under redshift, spark under databricks)', () => {
+    expect(chooseThrowawayAdapter(['postgres', 'redshift'], { manifest: 'postgres', files: [] })).toEqual({ kind: 'one', adapter: 'postgres' });
+    expect(chooseThrowawayAdapter(['databricks', 'spark'], { manifest: 'spark', files: [] })).toEqual({ kind: 'one', adapter: 'spark' });
+    expect(chooseThrowawayAdapter(['fabric', 'sqlserver'], { manifest: 'fabric', files: ['sqlserver'] })).toEqual({ kind: 'one', adapter: 'fabric' });
+    // A manifest naming the parent still drops the child.
+    expect(chooseThrowawayAdapter(['postgres', 'redshift'], { manifest: 'redshift', files: [] })).toEqual({ kind: 'one', adapter: 'redshift' });
+  });
   it('the manifest hint wins, then a file hint narrows', () => {
     expect(chooseThrowawayAdapter(['duckdb', 'snowflake'], { manifest: 'snowflake', files: ['duckdb'] })).toEqual({ kind: 'one', adapter: 'snowflake' });
     expect(chooseThrowawayAdapter(['duckdb', 'snowflake'], { manifest: 'oracle', files: ['duckdb'] })).toEqual({ kind: 'one', adapter: 'duckdb' });

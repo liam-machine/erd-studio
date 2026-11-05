@@ -34,17 +34,38 @@ export const THROWAWAY_PROFILE_DIR_NAME = 'dbt-parse-profile';
 export const THROWAWAY_MARKER_ENV = `DBT_ENV_CUSTOM_ENV_${THROWAWAY_MARKER_KEY}`;
 
 /**
- * dbt's arguments. Only `parse` in noCreds mode carries the profile flags
- * (explicit flags beat `DBT_PROFILE`, `DBT_TARGET` and `DBT_PROFILES_DIR`).
- * `deps` never does: dbt 1.8+ loads no profile for it. A noCreds `compile`,
- * or a noCreds `parse` without a profiles dir, is a programming error.
+ * Global flags that keep dbt's output plain, readable text whatever
+ * `dbt_project.yml`'s `flags:`, `DBT_QUIET` or a `warn` / `none` log level
+ * say: the failure classifier reads it, and `Registered adapter:` (an info
+ * line) tells a project env var from a profile one. Command-line flags beat
+ * env vars and project flags. dbt Core 1.5+ only (`takesLogFlags`).
  */
-export function dbtArgs(kind: DbtCommandKind, mode: DbtRunMode, profilesDir?: string): string[] {
-  if (kind === 'deps') { return ['deps']; }
-  if (mode === 'normal') { return [kind]; }
+export const LOG_ARGS: readonly string[] = ['--log-format', 'text', '--log-level', 'info', '--no-quiet'];
+
+/** `LOG_ARGS`, without `--log-level info` when the user asked for `debug` (more output, never less). */
+export function logArgs(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+  const win = platform === 'win32';
+  const debug = Object.entries(env).some(([k, v]) => {
+    const name = win ? k.toUpperCase() : k;
+    return (name === 'DBT_LOG_LEVEL' || name === 'DBT_ENGINE_LOG_LEVEL') && typeof v === 'string' && v.trim().toLowerCase() === 'debug';
+  });
+  return debug ? ['--log-format', 'text', '--no-quiet'] : [...LOG_ARGS];
+}
+
+/**
+ * dbt's arguments: the subcommand, then (noCreds `parse` only) the profile
+ * flags (explicit flags beat `DBT_PROFILE`, `DBT_TARGET` and
+ * `DBT_PROFILES_DIR`), then `log` (`logArgs`, or none for a dbt that may not
+ * take them). `deps` never carries profile flags: dbt 1.8+ loads no profile
+ * for it. A noCreds `compile`, or a noCreds `parse` without a profiles dir,
+ * is a programming error.
+ */
+export function dbtArgs(kind: DbtCommandKind, mode: DbtRunMode, profilesDir?: string, log: readonly string[] = []): string[] {
+  if (kind === 'deps') { return ['deps', ...log]; }
+  if (mode === 'normal') { return [kind, ...log]; }
   if (kind !== 'parse') { throw new Error(`dbtArgs: ${kind} has no noCreds mode`); }
   if (!profilesDir) { throw new Error('dbtArgs: noCreds parse needs a profiles dir'); }
-  return ['parse', '--profiles-dir', profilesDir, '--profile', THROWAWAY_PROFILE_NAME, '--target', THROWAWAY_TARGET_NAME];
+  return ['parse', '--profiles-dir', profilesDir, '--profile', THROWAWAY_PROFILE_NAME, '--target', THROWAWAY_TARGET_NAME, ...log];
 }
 
 export interface DbtSpawnPlan {
@@ -154,7 +175,8 @@ export function childEnv(
   set('PYTHONUNBUFFERED', '1');
   set('PYTHONIOENCODING', 'utf-8');
   for (const name of ALWAYS_DROPPED) { del(name); }
-  // A log level of `none` prints nothing at all, so the failure would have no cause and no output to show.
+  // A log level of `none` prints nothing at all, so the failure would have no cause and no output to show
+  // (belt and braces where `LOG_ARGS` are passed; the only guard for a dbt that doesn't take them).
   for (const name of SILENCING_LOG_LEVELS) {
     const v = get(name);
     if (v !== undefined && v.trim().toLowerCase() === 'none') { del(name); }
@@ -191,17 +213,22 @@ export function planDbtSpawn(
   candidate: DbtCandidate,
   kind: DbtCommandKind,
   mode: DbtRunMode,
-  opts: { root: string; profilesDir?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform },
+  opts: {
+    root: string; profilesDir?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform;
+    /** Add `logArgs` (dbt Core 1.5+ only: an older dbt or Fusion may reject them). */
+    logFlags?: boolean;
+  },
 ): DbtSpawnPlan | { refused: 'unquotable' } {
   const platform = opts.platform ?? process.platform;
-  const args = dbtArgs(kind, mode, opts.profilesDir);
+  const env = opts.env ?? process.env;
+  const args = dbtArgs(kind, mode, opts.profilesDir, opts.logFlags ? logArgs(env, platform) : []);
   const spawn = dbtSpawnCommand(candidate.executable, args);
   if (!spawn) { return { refused: 'unquotable' }; }
   return {
     file: spawn.file,
     args: spawn.args,
     shell: spawn.shell,
-    env: childEnv(candidate, mode, opts.env ?? process.env, platform),
+    env: childEnv(candidate, mode, env, platform),
     cwd: opts.root,
     display: `${dbtInvocation(candidate, opts.root, platform)} ${args.map(displayArg).join(' ')}`,
   };

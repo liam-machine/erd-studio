@@ -9,6 +9,8 @@ import type { DbtCandidate } from '../../src/services/dbtEnv';
 import {
   childEnv,
   dbtArgs,
+  LOG_ARGS,
+  logArgs,
   planDbtSpawn,
   THROWAWAY_MARKER_ENV,
   toTerminalText,
@@ -28,6 +30,24 @@ describe('dbtArgs', () => {
     expect(dbtArgs('deps', 'normal')).toEqual(['deps']);
     expect(dbtArgs('deps', 'noCreds')).toEqual(['deps']);
     expect(dbtArgs('deps', 'noCreds', '/s/p')).toEqual(['deps']);
+  });
+
+  it('appends the log flags after the subcommand (and after the profile flags)', () => {
+    expect(LOG_ARGS).toEqual(['--log-format', 'text', '--log-level', 'info', '--no-quiet']);
+    expect(dbtArgs('parse', 'normal', undefined, LOG_ARGS)).toEqual(['parse', ...LOG_ARGS]);
+    expect(dbtArgs('compile', 'normal', undefined, LOG_ARGS)).toEqual(['compile', ...LOG_ARGS]);
+    expect(dbtArgs('deps', 'noCreds', '/s/p', LOG_ARGS)).toEqual(['deps', ...LOG_ARGS]);
+    expect(dbtArgs('parse', 'noCreds', '/s/p', LOG_ARGS))
+      .toEqual(['parse', '--profiles-dir', '/s/p', '--profile', 'erd_studio', '--target', 'erd_studio', ...LOG_ARGS]);
+  });
+
+  it('logArgs keeps a debug log level the user asked for (never less output)', () => {
+    expect(logArgs({}, 'linux')).toEqual([...LOG_ARGS]);
+    expect(logArgs({ DBT_LOG_LEVEL: 'warn' }, 'linux')).toEqual([...LOG_ARGS]);
+    expect(logArgs({ DBT_LOG_LEVEL: 'debug' }, 'linux')).toEqual(['--log-format', 'text', '--no-quiet']);
+    expect(logArgs({ DBT_ENGINE_LOG_LEVEL: ' DEBUG ' }, 'darwin')).toEqual(['--log-format', 'text', '--no-quiet']);
+    expect(logArgs({ dbt_log_level: 'debug' }, 'win32')).toEqual(['--log-format', 'text', '--no-quiet']);
+    expect(logArgs({ dbt_log_level: 'debug' }, 'linux')).toEqual([...LOG_ARGS]);
   });
 
   it('refuses noCreds without a dir, and noCreds compile', () => {
@@ -155,6 +175,15 @@ describe('planDbtSpawn', () => {
     expect(plan.args).toEqual(['parse']);
     expect(plan.cwd).toBe('C:\\proj');
     expect(plan.display).toBe('.venv/Scripts/dbt.exe parse');
+  });
+
+  it('logFlags adds the log flags to the args and the header; without it nothing is added', () => {
+    const plan = planDbtSpawn(posixVenv, 'parse', 'normal', { root: '/proj', env: {}, platform: 'darwin', logFlags: true }) as DbtSpawnPlan;
+    expect(plan.args).toEqual(['parse', ...LOG_ARGS]);
+    expect(plan.display).toBe('.venv/bin/dbt parse --log-format text --log-level info --no-quiet');
+    const deps = planDbtSpawn(posixVenv, 'deps', 'normal', { root: '/proj', env: { DBT_LOG_LEVEL: 'debug' }, platform: 'darwin', logFlags: true }) as DbtSpawnPlan;
+    expect(deps.args).toEqual(['deps', '--log-format', 'text', '--no-quiet']);
+    expect((planDbtSpawn(posixVenv, 'compile', 'normal', { root: '/proj', env: {}, platform: 'darwin' }) as DbtSpawnPlan).args).toEqual(['compile']);
   });
 
   it('noCreds parse carries the profile flags and shows the profiles dir', () => {

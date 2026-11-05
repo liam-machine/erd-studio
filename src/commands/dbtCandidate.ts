@@ -94,6 +94,21 @@ export interface DbtIdentity {
   flavour: DbtFlavour;
   adapters: string[];
   via: 'stat' | 'version';
+  /** The version `dbt --version` printed (`via: 'version'` only). */
+  version?: string | null;
+}
+
+/**
+ * Whether this dbt takes global flags after the subcommand (`dbt parse
+ * --log-format text`): dbt Core 1.5+, the click CLI. Identified by stat
+ * means `dbt/cli/main.py` is there, so 1.5+; Fusion and the Cloud CLI are
+ * never given them.
+ */
+export function takesLogFlags(identity: DbtIdentity): boolean {
+  if (identity.flavour !== 'core-v1') return false;
+  if (identity.via === 'stat') return true;
+  const m = /^1\.(\d+)\./.exec(identity.version ?? '');
+  return !!m && Number(m[1]) >= 5;
 }
 
 export interface IdentifyDeps {
@@ -136,9 +151,12 @@ export async function identifyDbt(candidate: DbtCandidate, root: string, deps: I
     { location: vscode.ProgressLocation.Window, title: 'Checking dbt…' },
     () => run(candidate.executable, { cwd: root, env }),
   );
-  const identity: DbtIdentity = output === null
-    ? { flavour: 'unknown', adapters: [], via: 'version' }
-    : { flavour: classifyDbtVersion(output).flavour, adapters: pluginsFromVersionOutput(output), via: 'version' };
+  if (output === null) {
+    // A timeout (a cold Python start) or a spawn error can be transient: never cached, so the next click probes again.
+    return { flavour: 'unknown', adapters: [], via: 'version' };
+  }
+  const info = classifyDbtVersion(output);
+  const identity: DbtIdentity = { flavour: info.flavour, adapters: pluginsFromVersionOutput(output), via: 'version', version: info.version };
   if (key) versionCache.set(key, identity);
   return identity;
 }

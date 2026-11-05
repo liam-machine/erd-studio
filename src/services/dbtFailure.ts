@@ -106,6 +106,12 @@ export function missingAdapterType(output: string): string | null {
 
 const REGISTERED_ADAPTER = 'Registered adapter:';
 
+/** A profile failure where profiles.yml was found but dbt couldn't use it (a YAML error, a target with no `type`). */
+export function profileUnreadable(output: string): boolean {
+  const text = stripAnsi(output);
+  return text.includes('trying to read your profiles.yml') || text.includes('required field "type" not found');
+}
+
 /**
  * Whether dbt had already loaded the profile when the run's fatal error came:
  * it prints `Registered adapter:` only after profiles.yml and dbt_project.yml
@@ -120,10 +126,18 @@ export function envVarFailedAfterAdapterLoad(output: string): boolean {
 }
 
 /**
- * Whether `dbt_project.yml`'s text uses `env_var('NAME')`. dbt renders
- * `profile:` even when `--profile` is passed, so a variable used there blocks
- * Parse without your credentials too. Reads dbt_project.yml only (it holds no
- * credentials), never a profiles.yml.
+ * The project files whose `env_var()` calls dbt renders before it loads the
+ * profile: `dbt_project.yml` (dbt renders `profile:` even when `--profile` is
+ * passed) and `packages.yml` / `dependencies.yml` (dbt 1.6+; dbt's own
+ * pattern for a private package's git token). A variable used in any of them
+ * blocks Parse without your credentials too. None holds credentials; a
+ * profiles.yml is never one of them.
+ */
+export const ENV_VAR_PROJECT_FILES: readonly string[] = ['dbt_project.yml', 'packages.yml', 'dependencies.yml'];
+
+/**
+ * Whether a project file's text (`ENV_VAR_PROJECT_FILES`) uses
+ * `env_var('NAME')`. Matched on this machine only.
  */
 export function envVarUsedInProjectFile(dbtProjectYml: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -156,8 +170,10 @@ export interface FailureContext {
   /** Parse without your credentials can run: parse, normal mode, dbt Core, host storage. */
   noCredsAvailable: boolean;
   envVar: string | null;
-  /** The variable is used in the project's own files (dbt_project.yml, or dbt failed after loading the profile). */
+  /** The variable is used in the project's own files (`ENV_VAR_PROJECT_FILES`, or dbt failed after loading the profile). */
   envVarInProject: boolean;
+  /** A `profile` failure: dbt found profiles.yml but couldn't read or use it (`profileUnreadable`). */
+  profileUnreadable?: boolean;
   adapterType: string | null;
 }
 
@@ -174,7 +190,9 @@ export function failureNotice(
   switch (category) {
     case 'profile':
       return {
-        message: `${cmd} needs a dbt profile for this project, and dbt couldn't find one.`,
+        message: ctx.profileUnreadable
+          ? 'dbt couldn\'t read your dbt profile (profiles.yml). The output shows the line.'
+          : `${cmd} needs a dbt profile for this project, and dbt couldn't find one.`,
         actions: withNoCreds(['profileDocs', 'showOutput']),
       };
     case 'target':

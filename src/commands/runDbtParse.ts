@@ -45,10 +45,12 @@ import {
   classifyDbtFailure,
   DBT_PARSE_FAILURE_FEATURES,
   envVarFailedAfterAdapterLoad,
+  ENV_VAR_PROJECT_FILES,
   envVarUsedInProjectFile,
   failureNotice,
   missingAdapterType,
   missingEnvVarName,
+  profileUnreadable,
   type DbtFailureAction,
 } from '../services/dbtFailure';
 import { planDbtSpawn, THROWAWAY_PROFILE_DIR_NAME, type DbtRunMode } from '../services/dbtLaunch';
@@ -66,6 +68,7 @@ import {
   identifyDbt,
   isDbtFlowStarting,
   releaseDbtFlow,
+  takesLogFlags,
   type DbtCandidateDeps,
   type DbtFlowClaim,
   type DbtIdentity,
@@ -91,8 +94,11 @@ export const DBT_DOCS_URLS = {
 } as const;
 
 export const DBT_BUSY_MESSAGE = 'dbt is already running for this project. Its terminal shows how far it got.';
+/** Busy before any dbt process exists: the dbt check, the adapter list or another step before the run. */
+export const DBT_STARTING_MESSAGE =
+  'ERD Studio is already starting dbt for this project. Wait for it, or finish the step it\'s asking about (such as the adapter list) first.';
 export const DBT_CLOUD_CLI_MESSAGE =
-  'The dbt on this machine is the dbt Cloud CLI. Run dbt parse needs dbt Core installed with your adapter, for example pip install dbt-core dbt-snowflake.';
+  'The dbt on this machine is the dbt Cloud CLI. Run dbt parse needs dbt Core: install it with your adapter in the project\'s .venv (for example pip install dbt-core dbt-snowflake), then try again.';
 export const NO_PROFILES_MESSAGE =
   'There\'s no dbt profile on this machine (profiles.yml), so dbt parse would stop. Parse without your credentials uses placeholder connection details instead: nothing connects to your warehouse.';
 export const PARSE_OK_MESSAGE = 'dbt parse finished. The Physical view can now show your dbt models\' columns and tests.';
@@ -195,11 +201,15 @@ function openUrl(url: string): void {
   void vscode.env.openExternal(vscode.Uri.parse(url));
 }
 
-/** B1: a dbt run is already going for the project (or about to). */
-export function showDbtBusy(root: string, key: TelemetryFeature = 'dbtParseBusy'): void {
+/**
+ * B1: a dbt run is already going for the project (`running`: the runner said
+ * so, or a run is registered), or a flow is still before its run (no dbt
+ * process and no terminal yet). One telemetry key either way.
+ */
+export function showDbtBusy(root: string, key: TelemetryFeature = 'dbtParseBusy', running = isDbtRunActive(root)): void {
   telemetry.feature(key);
-  if (isDbtRunActive(root)) showDbtOutput(root);
-  void vscode.window.showInformationMessage(DBT_BUSY_MESSAGE);
+  if (running && isDbtRunActive(root)) showDbtOutput(root);
+  void vscode.window.showInformationMessage(running ? DBT_BUSY_MESSAGE : DBT_STARTING_MESSAGE);
 }
 
 /** M3: the executable could not be started (`startError`) or quoted (`refused`). */
@@ -347,7 +357,7 @@ async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtPar
 /** Start `dbt parse` in `mode` for `flow`; the follow-up is `settled`. */
 function launchParse(flow: ParseFlow, mode: DbtRunMode): DbtParseStart {
   const plan = planDbtSpawn(flow.chosen, 'parse', mode, {
-    root: flow.root, profilesDir: flow.profilesDir, env: flow.env, platform: flow.platform,
+    root: flow.root, profilesDir: flow.profilesDir, env: flow.env, platform: flow.platform, logFlags: takesLogFlags(flow.identity),
   });
   if ('refused' in plan) {
     telemetry.feature('dbtParseNoStart');
@@ -359,7 +369,7 @@ function launchParse(flow: ParseFlow, mode: DbtRunMode): DbtParseStart {
   const hadManifest = before !== undefined;
   const start = flow.run(flow.root, 'parse', mode, plan);
   if (start.kind === 'busy') {
-    showDbtBusy(flow.root);
+    showDbtBusy(flow.root, 'dbtParseBusy', true);
     return NOT_STARTED;
   }
   telemetry.feature('dbtParseLaunched');
@@ -422,12 +432,16 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: numb
   if (mode === 'noCreds') telemetry.feature('dbtParseNoCredsFail');
 
   const envVar = missingEnvVarName(r.tail);
-  // In the project's files: dbt got past the profile (so a placeholder profile can't help), or dbt_project.yml uses it.
+  // In the project's files: dbt got past the profile (so a placeholder profile can't help), or a project file dbt renders first uses it.
   let envVarInProject = category === 'envVar' && envVarFailedAfterAdapterLoad(r.tail);
   if (envVar && !envVarInProject) {
-    try {
-      envVarInProject = envVarUsedInProjectFile(flow.fs.readFileSync(path.join(flow.root, 'dbt_project.yml'), 'utf8'), envVar);
-    } catch { /* no project file: not used there */ }
+    envVarInProject = ENV_VAR_PROJECT_FILES.some((f) => {
+      try {
+        return envVarUsedInProjectFile(flow.fs.readFileSync(path.join(flow.root, f), 'utf8'), envVar);
+      } catch {
+        return false; // no such file: not used there
+      }
+    });
   }
   const notice = failureNotice(category, {
     command: 'parse',
@@ -436,6 +450,7 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: numb
     noCredsAvailable: flow.noCredsAvailable && mode === 'normal',
     envVar,
     envVarInProject,
+    profileUnreadable: profileUnreadable(r.tail),
     adapterType: missingAdapterType(r.tail),
   });
   const pick = await vscode.window.showWarningMessage(notice.message, ...notice.actions.map((a) => ACTION_LABELS[a]));
@@ -448,7 +463,7 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: numb
       telemetry.feature('dbtParseDeps');
       await (await followUp(flow, async () => runDbtDeps({
         root: flow.root, chosen: flow.chosen, mode, profilesDir: flow.profilesDir,
-        run: flow.run, env: flow.env, platform: flow.platform,
+        run: flow.run, env: flow.env, platform: flow.platform, logFlags: takesLogFlags(flow.identity),
         stoppedKey: 'dbtParseStopped', noStartKey: 'dbtParseNoStart', busyKey: 'dbtParseBusy',
         then: async () => { await launchParse(flow, mode).settled; },
       }))).settled;
@@ -475,9 +490,9 @@ async function offerPhysical(flow: ParseFlow, message: string): Promise<void> {
   const pick = target
     ? await vscode.window.showInformationMessage(message, OPEN_PHYSICAL_ACTION)
     : await vscode.window.showInformationMessage(message);
-  if (target && pick === OPEN_PHYSICAL_ACTION) {
-    telemetry.feature('dbtParseOpenPhysical');
-    flow.host?.openPhysical(target);
+  if (target && pick === OPEN_PHYSICAL_ACTION && flow.host) {
+    // Counted only when a canvas switched (the one named may have closed while the notice waited).
+    if (await flow.host.openPhysical(target)) telemetry.feature('dbtParseOpenPhysical');
   }
 }
 
@@ -508,7 +523,7 @@ async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> 
   if (!host) return NOT_STARTED;
   telemetry.feature('dbtParseNoCreds');
 
-  // A manifest written with the user's own profile is replaced only if they agree.
+  // A manifest written with a real profile (the user's, or committed / copied from CI) is replaced only if they agree.
   let manifestStart: string | null = null;
   if (flow.fs.existsSync(flow.manifestPath)) {
     try { manifestStart = await flow.fs.readTextStart(flow.manifestPath, 16 * 1024); } catch { manifestStart = null; }
@@ -518,7 +533,7 @@ async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> 
         `Replace ${shown}?`,
         {
           modal: true,
-          detail: 'It was written with your dbt profile. Parsing without your credentials replaces it, and schema names are left out until dbt parses with your profile again.',
+          detail: 'dbt wrote it with a real dbt profile. Parsing without your credentials replaces it, and schema names are left out until dbt parses with a real profile again.',
         },
         REPLACE_MANIFEST_ACTION,
       );
@@ -606,6 +621,8 @@ export interface DepsRun {
   run: typeof runDbtInTerminal;
   env: NodeJS.ProcessEnv;
   platform: NodeJS.Platform;
+  /** The dbt takes `LOG_ARGS` (dbtLaunch.ts). */
+  logFlags?: boolean;
   stoppedKey: TelemetryFeature;
   noStartKey: TelemetryFeature;
   busyKey: TelemetryFeature;
@@ -615,7 +632,7 @@ export interface DepsRun {
 
 /** **Run dbt deps**, then the command that needed it again. */
 export async function runDbtDeps(d: DepsRun): Promise<DbtParseStart> {
-  const plan = planDbtSpawn(d.chosen, 'deps', d.mode, { root: d.root, env: d.env, platform: d.platform });
+  const plan = planDbtSpawn(d.chosen, 'deps', d.mode, { root: d.root, env: d.env, platform: d.platform, logFlags: d.logFlags });
   if ('refused' in plan) {
     telemetry.feature(d.noStartKey);
     showCouldNotStart(d.chosen.executable, d.root, 'refused');
@@ -623,7 +640,7 @@ export async function runDbtDeps(d: DepsRun): Promise<DbtParseStart> {
   }
   const start = d.run(d.root, 'deps', d.mode, plan);
   if (start.kind === 'busy') {
-    showDbtBusy(d.root, d.busyKey);
+    showDbtBusy(d.root, d.busyKey, true);
     return NOT_STARTED;
   }
   const result = vscode.window.withProgress(

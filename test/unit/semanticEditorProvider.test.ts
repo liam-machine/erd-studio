@@ -901,7 +901,7 @@ describe.each(DBT_FIXTURES)('runDbtParse (#110) (%s storage)', (_storage, fixtur
       dbtConfig: () => defaultDbtProjectConfig(),
       physicalTarget: (origin) => { asked.push(origin?.toString()); return undefined; },
       originIsPhysical: (origin) => { asked.push(origin?.toString()); return false; },
-      openPhysical: () => {},
+      openPhysical: async () => true,
     });
     panel._simulateMessage({ type: 'runDbtParse' });
     await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));

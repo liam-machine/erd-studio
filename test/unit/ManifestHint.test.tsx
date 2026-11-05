@@ -51,7 +51,7 @@ describe('ManifestHint', () => {
     render(<ManifestHint />);
     const text = document.body.textContent ?? '';
     expect(text).toContain(LEAD);
-    expect(text).toContain('Without a dbt profile, it offers Parse without your credentials.');
+    expect(text).toContain('No dbt profile? Run dbt parse can parse without your credentials when dbt Core and your adapter are installed.');
   });
 
   it('"Run dbt parse" posts runDbtParse', () => {

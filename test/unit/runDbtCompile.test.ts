@@ -12,7 +12,7 @@ import { _resetDbtRunsForTests, type runDbtInTerminal } from '../../src/commands
 import { COMPILE_OK_MESSAGE, DBT_COMPILE_NOT_FOUND_MESSAGE, runDbtCompile, type RunDbtCompileDeps } from '../../src/commands/runDbtCompile';
 import { DBT_BUSY_MESSAGE, RUN_DBT_DEPS_ACTION } from '../../src/commands/runDbtParse';
 import type { DbtCandidate } from '../../src/services/dbtEnv';
-import type { DbtCommandKind, DbtRunMode, DbtSpawnPlan } from '../../src/services/dbtLaunch';
+import { LOG_ARGS, type DbtCommandKind, type DbtRunMode, type DbtSpawnPlan } from '../../src/services/dbtLaunch';
 import type { DbtProcessResult } from '../../src/services/dbtProcess';
 import { telemetry } from '../../src/services/telemetryService';
 import { DBT_FAILURE_OUTPUTS as OUT } from './dbtOutputFixtures';
@@ -171,6 +171,36 @@ describe('runDbtCompile', () => {
     expect(d.calls[2].kind).toBe('compile');
     d.calls[2].finish({ exitCode: 0 });
     await start.settled;
+  });
+
+  it('a dbt Core install found by stat gets the log flags; any other dbt (maybe Fusion) does not', async () => {
+    const d = deps({ candidates: () => [onPath], isCoreInstall: () => true });
+    await runDbtCompile(ROOT, d);
+    expect(d.calls[0].plan.args).toEqual(['compile', ...LOG_ARGS]);
+    _resetDbtFlowsForTests();
+    const d2 = deps({ candidates: () => [onPath], isCoreInstall: () => false });
+    await runDbtCompile(ROOT, d2);
+    expect(d2.calls[0].plan.args).toEqual(['compile']);
+  });
+
+  it('an env var packages.yml uses says the project uses it', async () => {
+    const shown = answer();
+    const files: string[] = [];
+    const d = deps({
+      candidates: () => [onPath],
+      readProjectFile: (_r, f) => {
+        files.push(f);
+        if (f === 'packages.yml') return 'packages:\n  - git: "https://{{ env_var(\'DBT_ENV_SECRET_GIT_TOKEN\') }}@github.com/a/b.git"\n';
+        return 'name: p\n';
+      },
+    });
+    const start = await runDbtCompile(ROOT, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.D_envprofiles.replace('ERD_PROTO_DUCKDB_PATH', 'DBT_ENV_SECRET_GIT_TOKEN') });
+    await start.settled;
+    expect(shown.at(-1)?.message).toBe(
+      'dbt needs the environment variable DBT_ENV_SECRET_GIT_TOKEN, which your project\'s files use. Set it where VS Code starts, restart VS Code, and try Run dbt compile again.',
+    );
+    expect(files).not.toContain('profiles.yml');
   });
 
   it('busy gives dbtParseBusy (the shared "a dbt run was already going" key)', async () => {
