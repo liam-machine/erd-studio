@@ -8,7 +8,9 @@ import {
   dbtCommands,
   dbtExecutableCandidates,
   dbtInvocation,
+  dbtSpawnCommand,
   dbtVersionSpawn,
+  stripAnsi,
   detectDepsStatus,
   isUntrustedProjectExecutable,
   displayPath,
@@ -257,6 +259,43 @@ describe('dbtVersionSpawn (cmd.exe quoting for .cmd / .bat shims)', () => {
     expect(dbtVersionSpawn('C:\\%PATH%\\dbt.bat')).toBeNull();
     expect(dbtVersionSpawn('C:\\a"b\\dbt.cmd')).toBeNull();
     expect(dbtVersionSpawn('C:\\a\nb\\dbt.cmd')).toBeNull();
+  });
+
+  it('refuses a shim path with ! (delayed expansion)', () => {
+    expect(dbtVersionSpawn('C:\\a!b\\dbt.bat')).toBeNull();
+  });
+});
+
+describe('dbtSpawnCommand', () => {
+  it('spawns a plain executable directly and never refuses it', () => {
+    expect(dbtSpawnCommand('C:\\a b\\dbt.exe', ['parse', '--profiles-dir', 'C:\\100% "x"!'])).toEqual({
+      file: 'C:\\a b\\dbt.exe', args: ['parse', '--profiles-dir', 'C:\\100% "x"!'], shell: false,
+    });
+    expect(dbtSpawnCommand('/usr/bin/dbt', [])).toEqual({ file: '/usr/bin/dbt', args: [], shell: false });
+  });
+
+  it('quotes a shim and every argument cmd.exe would split', () => {
+    expect(dbtSpawnCommand('C:\\s\\dbt.CMD', ['parse', '--profiles-dir', 'C:\\John Smith\\p', 'a&b', '(x)', 'a,b', 'a;b', 'a=b', 'a|b', '<', '^', ''])).toEqual({
+      file: '"C:\\s\\dbt.CMD"',
+      args: ['parse', '--profiles-dir', '"C:\\John Smith\\p"', '"a&b"', '"(x)"', '"a,b"', '"a;b"', '"a=b"', '"a|b"', '"<"', '"^"', '""'],
+      shell: true,
+    });
+  });
+
+  it('doubles a trailing backslash inside quotes', () => {
+    expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['C:\\A B\\'])!.args).toEqual(['"C:\\A B\\\\"']);
+    expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['C:\\AB\\'])!.args).toEqual(['C:\\AB\\']);
+  });
+
+  it('refuses a shim when its path or an argument holds " % ! or a line break', () => {
+    for (const bad of ['a"b', '%PATH%', 'a!b', 'a\nb', 'a\rb']) {
+      expect(dbtSpawnCommand('C:\\s\\dbt.bat', ['parse', bad]), bad).toBeNull();
+      expect(dbtSpawnCommand(`C:\\${bad}\\dbt.bat`, ['parse']), bad).toBeNull();
+    }
+  });
+
+  it('stripAnsi removes colour codes', () => {
+    expect(stripAnsi('\u001b[0m12:00  \u001b[33mWARN\u001b[0m')).toBe('12:00  WARN');
   });
 
   it.skipIf(process.platform === 'win32')('runs an executable whose path has a space', async () => {

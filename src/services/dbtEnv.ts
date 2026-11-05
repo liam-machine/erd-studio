@@ -294,6 +294,11 @@ export interface DbtVersionInfo {
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
+/** `text` without terminal colour / cursor escapes (dbt colours piped output too). */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE, '');
+}
+
 /**
  * Classify `dbt --version` output.
  *
@@ -304,7 +309,7 @@ const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
  *   anything else                           → unknown
  */
 export function classifyDbtVersion(output: string): DbtVersionInfo {
-  const text = output.replace(ANSI_ESCAPE, '').replace(/\r\n?/g, '\n');
+  const text = stripAnsi(output).replace(/\r\n?/g, '\n');
 
   const cloud = /^\s*(dbt )?Cloud CLI - (\S+)/m.exec(text);
   if (cloud) { return { flavour: 'cloud-cli', version: cloud[2] }; }
@@ -408,21 +413,46 @@ export interface DbtVersionRun {
   error?: string;
 }
 
+/** cmd.exe cannot quote these inside `"…"`: `%VAR%` and `!VAR!` (delayed expansion) still expand, and `"` / line breaks end the quoting. */
+const CMD_UNQUOTABLE = /["%!\r\n]/;
+/** An argument cmd.exe would split or act on unless it is double-quoted. */
+const CMD_NEEDS_QUOTES = /[\s&|<>^(),;=]/;
+
 /**
- * How to spawn `<executable> --version`. `.cmd` / `.bat` shims (pyenv-win's
- * are `.bat`) cannot be spawned without a shell on Windows, and with
- * `shell: true` Node hands cmd.exe the command and its arguments joined by
- * spaces — so the path is double-quoted (a space in `C:\Users\John Smith`
- * would otherwise split it, and `&` in a folder name would start a second
- * command). Inside double quotes cmd still expands `%VAR%`, and a `"` or a
- * line break cannot be quoted at all, so such a path is refused (null).
+ * How to spawn `<executable> <args…>`.
+ *
+ * An ordinary executable is spawned directly (`shell: false`) and never
+ * refused: Node quotes argv for `CreateProcess` itself. A `.cmd` / `.bat`
+ * shim (pyenv-win's are `.bat`) cannot be spawned without a shell on
+ * Windows, and with `shell: true` Node hands cmd.exe the command and its
+ * arguments joined by spaces — so the path is double-quoted (a space in
+ * `C:\Users\John Smith` would otherwise split it, and `&` in a folder name
+ * would start a second command), as is every argument that is empty or holds
+ * whitespace or any of `& | < > ^ ( ) , ; =`, with a trailing run of
+ * backslashes doubled so it cannot escape the closing quote. Inside double
+ * quotes cmd still expands `%VAR%` (and `!VAR!` when delayed expansion is on),
+ * and a `"` or a line break cannot be quoted at all, so a shim whose path or
+ * arguments hold one is refused (null). Refusal applies to shims only.
  */
-export function dbtVersionSpawn(executable: string): { file: string; args: string[]; shell: boolean } | null {
+export function dbtSpawnCommand(
+  executable: string,
+  args: readonly string[],
+): { file: string; args: string[]; shell: boolean } | null {
   if (!/\.(cmd|bat)$/i.test(executable)) {
-    return { file: executable, args: ['--version'], shell: false };
+    return { file: executable, args: [...args], shell: false };
   }
-  if (/["%\r\n]/.test(executable)) { return null; }
-  return { file: `"${executable}"`, args: ['--version'], shell: true };
+  if (CMD_UNQUOTABLE.test(executable) || args.some((a) => CMD_UNQUOTABLE.test(a))) { return null; }
+  const quoteArg = (a: string): string => {
+    if (a !== '' && !CMD_NEEDS_QUOTES.test(a)) { return a; }
+    const trailing = /\\*$/.exec(a)?.[0] ?? '';
+    return `"${a}${trailing}"`;
+  };
+  return { file: `"${executable}"`, args: args.map(quoteArg), shell: true };
+}
+
+/** How to spawn `<executable> --version` ({@link dbtSpawnCommand}). */
+export function dbtVersionSpawn(executable: string): { file: string; args: string[]; shell: boolean } | null {
+  return dbtSpawnCommand(executable, ['--version']);
 }
 
 /**
