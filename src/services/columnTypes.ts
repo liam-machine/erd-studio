@@ -1,7 +1,7 @@
 /**
  * Where a dbt column's data type comes from — one rule, shared by the physical
  * stage (`SubjectAreaService.buildPhysicalSubjectArea`) and the seeding of a logical
- * model from dbt (`seedTableFromDbt`: Draw from dbt, Add models from dbt, Add
+ * model from dbt (`seedTableFromDbt`: Import from dbt, Add models from dbt, Add
  * Existing Model), so a freshly drawn model starts with the types the physical
  * stage would show for it and a Compare does not open on invented differences.
  *

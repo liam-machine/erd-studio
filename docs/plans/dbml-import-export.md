@@ -32,10 +32,10 @@ dbdiagram push silver.dbml --name "Silver"   # picks up silver.dbdiagram (positi
 3. **Refs use the optional form** `>?` / `?<` / `-?`. Since DBML 9, a bare `>` asserts the FK is NOT NULL, which ERD Studio doesn't record (a bare `>` gives an info diagnostic per FK in dbdiagram). One-to-one FK columns get `unique`.
 4. **One flattened `.dbml` per subject area** (no `use` imports) — the only multi-tool-safe shape. "Export all" writes one file per subject area.
 5. **Layout travels in a sidecar next to the `.dbml`:** dbdiagram's `<name>.dbdiagram` (v3: `defaultView.tablePositions[{name, schemaName, x, y}]`), so `dbdiagram push` carries positions. *(Resolved: Liam chose to commit to `.dbdiagram`, with no Holistics gate and no `.dbml.layout.json` fallback.)*
-6. **Import is an editor command, not a CLI subcommand or AI-only flow.** `ERD Studio: Import DBML…`, built like Draw from dbt: a vscode-free planner in `src/services/dbmlImport.ts`, files created via the same path Draw from dbt uses (`saveTable`, domain file written with `wx`, `ownWrites`, rollback on failure).
+6. **Import is an editor command, not a CLI subcommand or AI-only flow.** `ERD Studio: Import DBML…`, built like Import from dbt: a vscode-free planner in `src/services/dbmlImport.ts`, files created via the same path Import from dbt uses (`saveTable`, domain file written with `wx`, `ownWrites`, rollback on failure).
 7. **Parser: `@dbml/parse` only, exact pin, extension bundle only.** 10.3.1, a root dependency; about 434 KB in `dist/extension.js` (vs 15.7 MB for `@dbml/core`), none in `dist/cli.js`. Never a runtime dependency of `@erd-studio/core` (runtime deps stay `yaml` only). Core's devDependencies pin 9.1.1 (`dbml-parse-v9`), 10.3.1 and 11.0.0 (`dbml-parse-v11`) for the golden checks.
-8. **No positions is a first-class case.** An imported subject area with `viewConfig: {}` gets ELK auto-layout on first open, saved as one undo step — already how Draw from dbt works.
-9. **Existing library tables are reused, never overwritten.** Same as Draw from dbt (`libraryHas` → reused). Case-only differences take the library's spelling.
+8. **No positions is a first-class case.** An imported subject area with `viewConfig: {}` gets ELK auto-layout on first open, saved as one undo step — already how Import from dbt works.
+9. **Existing library tables are reused, never overwritten.** Same as Import from dbt (`libraryHas` → reused). Case-only differences take the library's spelling.
 
 ## Mapping
 

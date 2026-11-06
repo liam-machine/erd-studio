@@ -167,41 +167,48 @@ const IMPORT_NAME_PROMPT = `Name the diagram. It is saved in the ${NEW_LAYER.lab
 test('both cuts lead with importing what you have, then by hand, with AI and Confluence; only the default cut has a dbt beat', () => {
   // the default cut: the hook, the import (picker, the SQL a project holds, its draft), its files, an
   // edit by hand, the same kind of edit by Claude Code, dbt, Confluence, the end card
-  assert.deepEqual(script.scenes.map((s) => s.id), ['hook', 'bring', 'importSql', 'draft', 'files', 'byHand', 'aiSetup', 'aiRun', 'dbt', 'confluence', 'end']);
-  assert.deepEqual(script.scenes.map((s) => s.module), [...Array(9).fill('rec/window'), 'tour/confluence', 'tour/endCard']);
+  // edit by Claude Code, what it changed (held), that change and its code in one pull request, dbt, Confluence, the end card
+  assert.deepEqual(script.scenes.map((s) => s.id), ['hook', 'bring', 'importSql', 'draft', 'files', 'byHand', 'aiSetup', 'aiRun', 'aiShow', 'pr', 'dbt', 'confluence', 'end']);
+  assert.deepEqual(script.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'rec/window', 'tour/confluence', 'tour/endCard']);
   const at = (id) => script.scenes.findIndex((s) => s.id === id);
   assert.ok(at('importSql') < at('byHand') && at('draft') < at('byHand'), 'the import comes before any table built by hand');
   // the logical cut: the same scenes, minus the dbt beat
   assert.deepEqual(logical.scenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => id !== 'dbt'));
-  assert.deepEqual(logical.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/confluence', 'tour/endCard']);
+  assert.deepEqual(logical.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'tour/confluence', 'tour/endCard']);
+  // the AI change is held right after it, then the pull request
+  for (const sc of [script, logical]) {
+    const ids = sc.scenes.map((s) => s.id);
+    assert.equal(ids.indexOf('aiShow'), ids.indexOf('aiRun') + 1);
+    assert.equal(ids.indexOf('pr'), ids.indexOf('aiShow') + 1);
+  }
   assert.deepEqual(logical.voice, script.voice);
   assert.deepEqual(logical.timing, script.timing);
   // no unused modules (the old HTML tour is retired: both cuts are recordings), nothing at the top of scenes/
   assert.deepEqual(modulesIn(), []);
-  assert.deepEqual(modulesIn('tour').sort(), ['tour/confluence', 'tour/endCard']);
+  assert.deepEqual(modulesIn('tour').sort(), ['tour/aiChange', 'tour/confluence', 'tour/endCard', 'tour/pullRequest']);
   assert.deepEqual(modulesIn('rec'), ['rec/window']);
   assert.equal(existsSync(join(SCENES, 'dbt')) && readdirSync(join(SCENES, 'dbt')).length > 0, false, 'the HTML dbt beat is gone: the default cut films the real one');
-  // "Watch the Tour" names no length: the default cut may run 80–130 s (maxDuration), the dbt beat
-  // 12–18 s; the scenes' minimum lengths alone already fit, so a script edit fails here without a build
-  assert.ok(script.maxDuration <= 130);
+  // "Watch the Tour" names no length: the default cut may run 80–140 s (maxDuration), the dbt beat
+  // 12–24 s; the scenes' minimum lengths alone already fit, so a script edit fails here without a build
+  assert.ok(script.maxDuration <= 140);
   const floor = script.scenes.reduce((n, s) => n + s.minDur, 0);
   assert.ok(floor <= script.maxDuration, `the minDurs add up to ${floor}s`);
-  assert.ok(logical.maxDuration <= 130);
+  assert.ok(logical.maxDuration <= 140);
   const floorL = logical.scenes.reduce((n, s) => n + s.minDur, 0);
   assert.ok(floorL <= logical.maxDuration, `the logical minDurs add up to ${floorL}s`);
   const builtL = join(HERE, '..', 'build-logical', 'timeline.json');
   if (existsSync(builtL)) {
     const tl = JSON.parse(readFileSync(builtL, 'utf8'));
-    assert.ok(tl.total >= 80 && tl.total <= 130, `build-logical: ${tl.total}s`);
+    assert.ok(tl.total >= 80 && tl.total <= 140, `build-logical: ${tl.total}s`);
     const draft = tl.scenes.find((s) => s.id === 'draft');
     assert.ok(draft.start + draft.beats.keep.t < 40, `logical: Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
   }
   const built = join(HERE, '..', 'build', 'timeline.json');
   if (existsSync(built)) {
     const tl = JSON.parse(readFileSync(built, 'utf8'));
-    assert.ok(tl.total >= 80 && tl.total <= 130, `build: ${tl.total}s`);
+    assert.ok(tl.total >= 80 && tl.total <= 140, `build: ${tl.total}s`);
     const beat = tl.scenes.find(isDbtBeat);
-    // Draw from dbt, Run dbt parse, the Physical tab held, Compare with dbt: short beside the tour, but each one seen
+    // Import from dbt, Run dbt parse, the Physical tab held, Compare with dbt: short beside the tour, but each one seen
     assert.ok(beat.dur >= 12 && beat.dur <= 24, `dbt beat ${beat.dur}s`);
     // the import's draft is kept within the first 40 s
     const draft = tl.scenes.find((s) => s.id === 'draft');
@@ -212,9 +219,8 @@ test('both cuts lead with importing what you have, then by hand, with AI and Con
 test('never "No AI needed": the default cut, the end card and the thumbnail say by hand or with AI', async () => {
   const NO_AI = /no AI needed|nothing to configure|without AI/i;
   for (const sc of [script, logical]) assert.doesNotMatch(JSON.stringify(sc.scenes), NO_AI);
-  const { FACTS } = await import('../player/scenes/tour/endCard.js');
-  assert.doesNotMatch(FACTS.join(' '), NO_AI);
-  assert.ok(FACTS.some((f) => /by hand or with AI/.test(f)));
+  const { LINE, FREE } = await import('../player/scenes/tour/endCard.js');
+  assert.doesNotMatch(`${LINE} ${FREE}`, NO_AI);
   assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', 'thumbnail.html'), 'utf8'), NO_AI);
   // the hook says both ways, and that the assistant's skill is built in
   const hook = script.scenes[0].lines.map((l) => l.caption).join(' ');
@@ -369,13 +375,18 @@ test('the canvas toolbar and the stage tabs use the webview\'s words', () => {
   assert.match(lib.toolbar({ x: 0, y: 0, logicalOnly: false, stage: 'logical', add: 'idle' }), /\+ Add/);
 });
 
-test('the end card names the real steps and the tagline', async () => {
-  const { STEPS, TAGLINE, FACTS } = await import('../player/scenes/tour/endCard.js');
-  assert.equal(STEPS[0], `Install ${pkg.displayName}`);
-  assert.equal(STEPS[1], wt.steps.find((s) => s.id === 'openProject').title);
-  assert.equal(STEPS[2], START_LABELS.import);
-  assert.equal(TAGLINE.join(' '), wt.description);
-  assert.equal(FACTS[0], 'Free to use');
+test('the end card is short: the name, one line, free to use in VS Code, the extension id', async () => {
+  const { LINE, FREE } = await import('../player/scenes/tour/endCard.js');
+  // the hook's own idea ("Your data model, in your repo."), in five words
+  assert.equal(LINE.replace(/[{}]/g, ''), 'Your data model, in Git.');
+  assert.equal(FREE, 'Free to use in VS Code');
+  for (const sc of [script, logical]) assert.ok(sc.scenes.at(-1).lines[0].caption.includes(FREE.replace('Free', 'free')));
+  // nothing else to read: no steps, no list of facts, nothing about the Confluence app
+  const src = readFileSync(join(SCENES, 'tour', 'endCard.js'), 'utf8').replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(src, /STEPS|TAGLINE|FACTS|Confluence|source available/);
+  const mod = (await import('../player/scenes/tour/endCard.js')).default;
+  const words = mod.render(5).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().split(' ');
+  assert.ok(words.length <= 14, `${words.length} words on the end card: ${words.join(' ')}`);
   assert.equal(editor.EXTENSION.name, pkg.displayName);
   assert.equal(editor.EXTENSION.publisher, pkg.publisher);
   // the search hint names the Marketplace id, publisher.name
@@ -506,7 +517,8 @@ const recScenes = script.scenes.filter((s) => s.module.startsWith('rec/'));
 test('the default cut films the real VS Code, in its light theme: every scene before Confluence, in one of the takes, at the inset\'s size', async () => {
   const { SCENES: ACTIONS, TAKES } = await import('../record/scenes.mjs');
   const { WINDOW, SETTINGS } = await import('../record/vscode.mjs');
-  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.slice(0, -2).map((s) => s.id));
+  // every scene but the AI change's still, the pull request, Confluence and the end card (HTML)
+  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => !['aiShow', 'pr', 'confluence', 'end'].includes(id)));
   const filmed = Object.values(TAKES).flatMap((t) => t.scenes);
   assert.deepEqual([...filmed].sort(), recScenes.map((s) => s.id).sort(), 'each recorded scene in exactly one take');
   for (const s of recScenes) assert.equal(typeof ACTIONS[s.id]?.run, 'function', `record/scenes.mjs has no ${s.id}`);
@@ -602,15 +614,15 @@ test('the recording shows dbt only in the dbt beat, and there shows what the lin
     for (const text of takes[s.id].screenText) assert.doesNotMatch(text, NO_DBT_ON_SCREEN, `${s.id} showed "${text}"`);
   }
   const dbt = new Set(takes.dbt.screenText);
-  // "Draw from dbt… click Run dbt parse. It writes manifest.json… The Physical tab shows what it describes… Compare with dbt marks every difference"
+  // "Import from dbt… click Run dbt parse. It writes manifest.json… The Physical tab shows what it describes… Compare with dbt marks every difference"
   for (const [, label, hint] of lib.STAGE_TABS) { assert.ok(dbt.has(label), label); assert.ok(dbt.has(`· ${hint}`), hint); }
   for (const w of ['Run dbt parse', 'Open Physical view', lib.COMPARE_WORDS.logical, lib.COMPARE_WORDS.stop, 'Only in Logical', 'Only in Physical']) assert.ok(dbt.has(w), w);
   assert.ok([...dbt].some((t) => t.startsWith('dbt parse finished.')), 'Run dbt parse ran dbt for real');
-  // "Draw from dbt turns your models into a diagram": the Diagrams view's New… menu showed it, under the
+  // "Import from dbt turns your models into a diagram": the Diagrams view's New… menu showed it, under the
   // command's own title, and the line uses the start's one label (src/types/startActions.ts)
   assert.ok(dbt.has(cmdTitle('erdStudio.drawFromDbt')), cmdTitle('erdStudio.drawFromDbt'));
-  assert.match(read('src', 'types', 'startActions.ts'), /drawFromDbt: 'Draw from dbt',/);
-  assert.ok(script.scenes.find(isDbtBeat).lines[0].caption.includes('Draw from dbt'), 'the dbt beat names Draw from dbt');
+  assert.match(read('src', 'types', 'startActions.ts'), /drawFromDbt: 'Import from dbt',/);
+  assert.ok(script.scenes.find(isDbtBeat).lines[0].caption.includes('Import from dbt'), 'the dbt beat names Import from dbt');
   assert.match(read('src', 'commands', 'runDbtParse.ts'), /RUN_DBT_PARSE_ACTION = 'Run dbt parse'/);
   // "manifest.json": what dbt parse writes (runDbtParse.ts says so)
   assert.match(read('src', 'commands', 'runDbtParse.ts'), /writes `\{target-path\}\/manifest\.json`/);
@@ -642,7 +654,7 @@ test('the logical cut plays the default cut\'s plain take: its recorded scenes a
     assert.ok(pause > (dpause ?? script.timing.gap), 'b_have is shorter, so the pause is longer');
   }
   // the non-recorded scenes are the default cut's, but for the chapter number
-  for (const id of ['confluence', 'end']) {
+  for (const id of ['aiShow', 'pr', 'confluence', 'end']) {
     const { chapter, ...a } = logical.scenes.find((s) => s.id === id);
     const { chapter: _, ...b } = byId[id];
     assert.deepEqual(a, b, id);
@@ -731,9 +743,10 @@ test('the recorded frame: the window\'s bezel, the hook\'s claims and the import
   // video/ never loads anything from social-video/ at run time
   for (const f of ['scenes/rec/window.js', 'scenes/tour/confluence.js']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /social-video/, f);
   const main = readFileSync(join(HERE, '..', 'player', 'main.js'), 'utf8');
-  assert.match(main, /isRec\(scs\[i - 1\]\) \? 1 : pin\) \* \(isRec\(scs\[i \+ 1\]\) \? 1 : 1 - pout\)/);
+  assert.match(main, /holdsWindow\(scs\[i - 1\]\) \? 1 : pin\) \* \(holdsWindow\(scs\[i \+ 1\]\) \? 1 : 1 - pout\)/);
   const comp = readFileSync(join(HERE, '..', 'record', 'composite.mjs'), 'utf8');
-  assert.match(comp, /fade=t=in:st=\$\{start\}:d=\$\{fade\}:alpha=1,fade=t=out:st=\$\{\(end - fade\)/);
+  assert.match(comp, /holdsWindow\(r\.before\) \? '' : `,fade=t=in:st=\$\{a\.toFixed\(3\)\}:d=\$\{fade\}:alpha=1`/);
+  assert.match(comp, /holdsWindow\(r\.after\) \? '' : `,fade=t=out:st=\$\{\(b - fade\)\.toFixed\(3\)\}:d=\$\{fade\}:alpha=1`/);
 });
 
 test('the Confluence scene: the real render of the tour\'s diagram, a read-only viewer reading the repo', async () => {
@@ -922,4 +935,100 @@ test('the footage is filmed at the inset\'s own size, scaled down from a 2x wind
     if (!existsSync(f)) continue;
     assert.deepEqual(jpegSize(readFileSync(f)), { w: inset.w, h: inset.h }, `${take}'s frames`);
   }
+});
+
+// ---- the AI change, held; one pull request; the assistants Set Up My AI Helper sets up ----------
+
+test('the AI change is held on a still of the take\'s last frame, showing the lines Claude Code really wrote', async () => {
+  const { CHANGE, NEW_TABLE, LINK } = await import('../player/scenes/tour/aiChange.js');
+  const { DBT_ERD } = await import('../record/fixtures.erd.mjs');
+  for (const sc of [script, logical]) {
+    const show = sc.scenes.find((s) => s.id === 'aiShow');
+    assert.equal(show.props.still, 'aiRun', 'a still of the AI take');
+    assert.ok(show.minDur >= 6, 'held for a while');
+  }
+  assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'still-aiRun.jpg')), 'npm run still');
+  // the new table's file, whole, and its Ref line, as the take wrote them (record/fixtures.erd.mjs: a copy of it)
+  const rel = (p) => p.replace(/^\.erd-studio\//, '');
+  assert.equal(DBT_ERD[rel(CHANGE.table.path)].trimEnd(), CHANGE.table.lines.join('\n'));
+  assert.ok(DBT_ERD[rel(CHANGE.ref.path)].split('\n').includes(CHANGE.ref.line));
+  // and the terminal showed Claude Code writing them
+  const term = takes.aiRun.terminalText.join('\n');
+  assert.match(term, /Write\(\.erd-studio\/main\/tables\/main\/dim_customer\.dbml\)/);
+  assert.match(term, /Update\(\.erd-studio\/main\/relationships\/main\.dbml\)/);
+  for (const l of CHANGE.table.lines.slice(1, -1)) assert.ok(term.includes(l.trim()), l);
+  // the marks sit inside the window
+  const { w, h } = script.recording.inset;
+  assert.ok(NEW_TABLE.x + NEW_TABLE.w < w && NEW_TABLE.y + NEW_TABLE.h < h);
+  for (const [x, y] of LINK) assert.ok(x >= 0 && x <= w && y >= 0 && y <= h);
+  // the narration says what the card shows
+  const said = script.scenes.find((s) => s.id === 'aiShow').lines.map((l) => l.caption).join(' ');
+  assert.match(said, /new table file/);
+  assert.match(said, /the line that links it/);
+  // and the relationships file's two added lines (its badge says +2) are both on the card
+  assert.ok(DBT_ERD[rel(CHANGE.ref.path)].replace(/ +from/g, ' from').split('\n').includes(CHANGE.ref.use));
+});
+
+test('one pull request: the .dbml change and the SQL that builds the table, in the tour folder\'s own code folder', async () => {
+  const { DESIGN, CODE, TITLE } = await import('../player/scenes/tour/pullRequest.js');
+  const { CHANGE } = await import('../player/scenes/tour/aiChange.js');
+  const { CLAUDE_REQUEST } = await import('../record/scenes.mjs');
+  assert.equal(TITLE, CLAUDE_REQUEST);
+  assert.ok(DESIGN.every((f) => f.path.startsWith('.erd-studio/') && f.path.endsWith('.dbml')));
+  assert.deepEqual(DESIGN[0].lines, CHANGE.table.lines);
+  assert.ok(DESIGN[1].lines.includes(CHANGE.ref.line));
+  // the code: a .sql in pipelines/, the plain folder's code folder (record/fixtures.mjs), building the same table and columns
+  assert.match(readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8'), /'pipelines\//);
+  assert.match(CODE.path, /^pipelines\/dim_customer\.sql$/);
+  assert.match(CODE.lines[0], /table dim_customer/);
+  for (const col of ['customer_id', 'customer_name', 'email', 'city', 'region']) assert.ok(CODE.lines.some((l) => l.includes(col)), col);
+  // and fct_order's new key has code too: the loader the plain folder already has, one line changed
+  const { CODE_ALSO, FILES, ADDED } = await import('../player/scenes/tour/pullRequest.js');
+  assert.match(readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8'), new RegExp(`'${CODE_ALSO.path}'`));
+  assert.equal(FILES, 6);
+  assert.equal(ADDED, 21);
+  // no repo address, no user: the GitHub mark only
+  const src = readFileSync(join(SCENES, 'tour', 'pullRequest.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(src, /github\.com|@[a-z]/i);
+  const pr = script.scenes.find((s) => s.id === 'pr');
+  assert.deepEqual(pr.headline, ['One pull request:', 'the {design} and the {code}.']);
+  assert.match(pr.lines.map((l) => l.caption).join(' '), /same pull request as the code that builds it/);
+});
+
+test('Set Up My AI Helper\'s scene names the assistants it sets up (shown, not said), and claims the hook only for Claude Code', () => {
+  const names = [...read('src', 'types', 'aiAssistants.ts').matchAll(/^ {4}name: '([^']+)'/gm)].map((m) => m[1]);
+  for (const sc of [script, logical]) {
+    const setup = sc.scenes.find((s) => s.id === 'aiSetup');
+    assert.deepEqual(setup.props.assistants[2], names);
+    assert.ok(setup.lines.some((l) => l.beat === setup.props.assistants[0]));
+  }
+  const hookLines = script.scenes.flatMap((s) => s.lines).filter((l) => /hook/.test(l.caption));
+  assert.ok(hookLines.every((l) => l.id === 'r_hook'), 'the pre-tool hook is said once, about Claude Code');
+});
+
+test('composite: HTML scenes between recorded ones hide the footage; a still takes over with no fade', async () => {
+  const { framePlan, runsOf, holdsWindow, XFADE } = await import('../record/composite.mjs');
+  const tl = { fps: 10, scenes: [
+    { id: 'a', module: 'rec/window', start: 0, dur: 1, props: {} },
+    { id: 's', module: 'tour/aiChange', start: 1, dur: 1, props: { still: 'a' } },
+    { id: 'p', module: 'tour/pullRequest', start: 2, dur: 1, props: {} },
+    { id: 'b', module: 'rec/window', start: 3, dur: 1, props: {} },
+    { id: 'c', module: 'tour/confluence', start: 4, dur: 1, props: {} },
+  ] };
+  const runs = runsOf(tl);
+  assert.deepEqual(runs.map((r) => [r.from, r.to, r.before?.id ?? null, r.after?.id ?? null]), [[0, 1, null, 's'], [3, 4, 'p', 'c']]);
+  assert.ok(holdsWindow(tl.scenes[1]) && !holdsWindow(tl.scenes[2]) && holdsWindow(tl.scenes[0]));
+  const frames = Array.from({ length: 60 }, (_, i) => ({ f: `f${i}.jpg`, t: 100 + i / 10 }));
+  const takes = { p: { frames, scenes: [{ id: 'a', t0: 100, dur: 1 }, { id: 'b', t0: 103, dur: 1 }] } };
+  const plan = framePlan(tl, takes);
+  assert.equal(plan.frames.length, 40);
+  // the gap holds a's last frame, then b's first; the cut sits in its middle, out of sight
+  assert.equal(plan.frames[15].file, 'f9.jpg');
+  assert.equal(plan.frames[25].file, 'f30.jpg');
+  assert.deepEqual(plan.cuts.map((c) => [c.at, c.gap]), [[20, true]]);
+  assert.equal(plan.segments.reduce((n, sg) => n + sg.frames.length, 0) - XFADE * plan.cuts.length, plan.frames.length);
+  // a still right after the footage's end: two frames more of the last one, for the overlap
+  const tail = { fps: 10, scenes: tl.scenes.slice(0, 2) };
+  assert.equal(framePlan(tail, takes).frames.length, 12);
+  assert.equal(framePlan(tail, takes).frames.at(-1).file, 'f9.jpg');
 });

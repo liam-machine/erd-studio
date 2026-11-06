@@ -158,7 +158,7 @@ afterEach(() => {
 });
 
 describe('the quick-path argument', () => {
-  it('only the three direct imports take it, from a start, with the draft\'s trigger (Draw from dbt: the trigger alone)', () => {
+  it('only the three direct imports take it, from a start, with the draft\'s trigger (Import from dbt: the trigger alone)', () => {
     expect(startActionArgs('importSqlDdl')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'start' }]);
     expect(startActionArgs('importSemanticModel')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'start' }]);
     expect(startActionArgs('importDbmlFile', 'prompt')).toEqual([{ ...QUICK_IMPORT_ARG, draft: 'prompt' }]);

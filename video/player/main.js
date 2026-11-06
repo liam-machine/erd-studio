@@ -28,6 +28,8 @@ if (timeline.recording) document.body.classList.add('rec');
 const ACCENT = timeline.recording ? ACCENT_LIGHT : DARK_ACCENT;
 /** Recorded scenes' footage runs on across scene changes: only the headline fades between them. */
 const isRec = (sc) => !!sc && sc.module.startsWith('rec/');
+/** The window stays put across these too: an HTML scene that draws a still of the footage's last frame where it was (props.still, the AI change; composite.mjs holdsWindow). */
+const holdsWindow = (sc) => isRec(sc) || !!sc?.props?.still;
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), chapters: $('chapters'), hud: $('hud') };
 
 // Chapter spans: first scene start -> last scene end, per chapter number.
@@ -60,10 +62,11 @@ window.render = function render(t) {
   const pout = i === scs.length - 1 ? 0 : seg(lt, sc.dur - fade, sc.dur);
   const op = pin * (1 - pout);
   const rise = lerp(14, 0, pin);
-  // A recorded scene's window stays put next to another recorded scene (composite.mjs fades the
-  // footage only where the recording starts and ends, with these same fades).
-  const stageOp = !isRec(sc) ? op : (isRec(scs[i - 1]) ? 1 : pin) * (isRec(scs[i + 1]) ? 1 : 1 - pout);
-  const stageRise = isRec(sc) ? 0 : rise;
+  // A recorded scene's window stays put next to another recorded scene, or a still of it
+  // (composite.mjs fades each run of footage only where it starts and ends, with these same fades,
+  // and cuts to a still with no fade).
+  const stageOp = !holdsWindow(sc) ? op : (holdsWindow(scs[i - 1]) ? 1 : pin) * (holdsWindow(scs[i + 1]) ? 1 : 1 - pout);
+  const stageRise = holdsWindow(sc) ? 0 : rise;
 
   // Accent (with an optional change on a beat, cross-faded over 0.4 s).
   let accent = ACCENT[sc.accent];

@@ -1,5 +1,5 @@
 /**
- * Draw from dbt in an existing DBML project (native DBML storage, S6, §5.7,
+ * Import from dbt in an existing DBML project (native DBML storage, S6, §5.7,
  * §9.6 "DBML-project cases"): end to end through `drawFromDbt` on a copy of
  * `test/fixtures/dbml-native`, with the real services. The new diagram is a
  * `.dbml`, its relationships go to the library, another diagram whose member's
@@ -100,7 +100,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('Draw from dbt in a DBML project', () => {
+describe('Import from dbt in a DBML project', () => {
   it('writes a .dbml diagram, stores the relationship in the library, settles the other diagram and names what it left out', async () => {
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
@@ -142,14 +142,14 @@ describe('Draw from dbt in a DBML project', () => {
     await expect(drawFromDbt(deps())).resolves.toBeUndefined();
 
     expect(error.mock.calls.map((c) => String(c[0]))).toEqual([
-      'Draw from dbt: silver/diagrams/plain.dbml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
+      'Import from dbt: silver/diagrams/plain.dbml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
     ]);
     expect(snapshot()).toEqual(before);
     expect(tab.getText()).toBe(`${PLAIN}// my unsaved note\n`);
   });
 });
 
-describe('Draw from dbt: where a new DBML table goes (§2.4)', () => {
+describe('Import from dbt: where a new DBML table goes (§2.4)', () => {
   const visit = { name: 'fct_visit', columns: [{ name: 'visit_key', dataType: 'INT', description: '', isPrimaryKey: true }] };
 
   it('a model with a dbt custom schema (configuredSchema) goes in that schema\'s folder of the layer, never the schema it is built in', async () => {
@@ -184,7 +184,7 @@ describe('Draw from dbt: where a new DBML table goes (§2.4)', () => {
   });
 });
 
-describe('Draw from dbt ending in the draft (Draft-first §5.2)', () => {
+describe('Import from dbt ending in the draft (Draft-first §5.2)', () => {
   it('nothing written before Keep; Keep writes exactly what the draft-less flow writes, byte for byte', async () => {
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
     const before = snapshot();

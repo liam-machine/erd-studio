@@ -1101,7 +1101,7 @@ describe('Import DBML — contributed', () => {
     const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')!;
     expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
     // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
-    expect(dbt.contents).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
+    expect(dbt.contents).toContain(`[Import from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
     // The other starts (New Diagram…, Import…, whose first source is this command) are behind "More ways to start…".
     expect(dbt.contents).toContain(`[More ways to start…](${moreStartsCommandLink('sidebar')})`);
     expect(moreStartsFor({ hasProject: true, hasDbt: true })).toEqual(['blank', 'import', 'example']);

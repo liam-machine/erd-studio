@@ -3,9 +3,10 @@
 # 'nofolder' pages). It is the same recording of the real VS Code, in its light theme: bring in the
 # model you have (Import…, a project folder's exported SQL DDL, its draft, Keep as Diagram), the
 # DBML files that saves next to the code, an edit by hand, the same kind of edit by Claude Code (Set
-# Up My AI Helper's skill, its pre-tool hook, the diagram updating), and ERD Studio for Confluence
-# showing the diagram from the repo. script.yaml is the same tour with one more beat, about what a
-# dbt project adds, before Confluence.
+# Up My AI Helper's skill, its pre-tool hook, the diagram updating), what it changed (held: the lines
+# it wrote, the new table on the canvas), that change and the code that builds it in one pull
+# request, and ERD Studio for Confluence showing the diagram from the repo. script.yaml is the same
+# tour with one more beat, about what a dbt project adds, before Confluence.
 #
 # Format: exactly as script.yaml (see its header), with one addition: `recording.footage` names the
 # cut whose takes this one plays. The plain take script.yaml's footage was filmed in (record/,
@@ -23,11 +24,11 @@
 # "DBML", "Git", "repo", "AI" and "table" are fine. Never "No AI needed": the tour shows both ways,
 # by hand and with an AI assistant.
 #
-# Length: 80–130 s (maxDuration 130). The walkthrough's watchLogical step and the Help & Feedback
+# Length: 80–140 s (maxDuration 140). The walkthrough's watchLogical step and the Help & Feedback
 # view call it "Watch the Tour", with no length in the name.
 
 title: ERD Studio — getting started, logical cut
-maxDuration: 130
+maxDuration: 140
 
 recording:
   inset: { x: 96, y: 240, w: 1728, h: 720 }
@@ -118,7 +119,7 @@ scenes:
   - id: files
     module: rec/window
     chapter: 2
-    minDur: 6.5
+    minDur: 9.276   # the length the take was filmed for (f_review was reworded shorter after it; record/takes.json)
     accent: blue
     headline: ["Saved as {DBML},", "next to your code."]
     lines:
@@ -127,7 +128,7 @@ scenes:
         caption: Each table is now a DBML file, an open format, next to the code that builds it.
       - id: f_review
         beat: review
-        caption: Review a change to the model in the same pull request.
+        caption: Change it, and Git shows exactly what changed.
 
   - id: byHand
     module: rec/window
@@ -149,6 +150,11 @@ scenes:
     minDur: 7
     accent: blue
     headline: ["Or ask your", "{AI assistant}."]
+    # the assistants Set Up My AI Helper sets up (src/types/aiAssistants.ts AI_ASSISTANTS, its names),
+    # each lit after "teach your assistant" (beat, seconds after it). Shown, not said: the narration
+    # stays on Claude Code, and nothing claims the pre-tool hook for the others.
+    props:
+      assistants: [skill, 2.4, ['Claude Code', 'GitHub Copilot', 'Codex', 'Gemini CLI', 'Cursor']]
     lines:
       - id: a_or
         beat: or
@@ -177,6 +183,41 @@ scenes:
         beat: live
         caption: so what it writes is a diagram you can see, right away.
 
+  - id: aiShow
+    module: tour/aiChange
+    chapter: 3
+    minDur: 9.6    # the change held: what it wrote, then the canvas punched in on the new table, about 1.9 s in silence after its last line
+    accent: blue
+    headline: ["See what it {changed}:", "in the {files}, on the {canvas}."]
+    # a still of aiRun's last frame where the footage was (composite.mjs cuts to it with no fade;
+    # player/assets/still-aiRun.jpg, `npm run still`), then the lines Claude Code wrote (its own
+    # edits, word for word: record/takes.json) and the new table and its relationship, punched in
+    props:
+      still: aiRun
+    lines:
+      - id: w_files
+        beat: files
+        caption: "Here's the change: a new table file, and the line that links it to the orders table."
+      - id: w_canvas
+        beat: canvas
+        caption: On the canvas, the new table and its relationship.
+
+  - id: pr
+    module: tour/pullRequest
+    chapter: 3
+    minDur: 8.6    # the review held after its last line
+    accent: blue
+    headline: ["One pull request:", "the {design} and the {code}."]
+    # a code review's Files changed: the .dbml lines Claude Code wrote beside the SQL that builds the
+    # table (pipelines/, the project's own code folder), one pull request
+    lines:
+      - id: p_one
+        beat: one
+        caption: The design change goes in the same pull request as the code that builds it,
+      - id: p_review
+        beat: review
+        caption: so your team reviews both together.
+
   - id: confluence
     module: tour/confluence
     chapter: 4
@@ -194,10 +235,10 @@ scenes:
   - id: end
     module: tour/endCard
     chapter: 0
-    minDur: 6.6    # a silent hold of about 2.3 s on the end card after its line
+    minDur: 5.2    # a silent hold of about 2.4 s on the end card after its line
     accent: green
     headline: null
     lines:
       - id: x_cta
         beat: cta
-        caption: ERD Studio is free to use in VS Code. Install it today.
+        caption: ERD Studio is free to use in VS Code.

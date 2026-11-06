@@ -6,9 +6,10 @@
 # <layer>/tables/<schema>/<table>.dbml, <layer>/relationships/<layer>.dbml,
 # <layer>/diagrams/<diagram>.dbml), editing either side, a .dbml diff in a pull request, the
 # imports that build the logical model (DBML, SQL DDL incl. DDL exported from Snowflake or
-# Databricks, a Power BI / Fabric semantic model, Draw from dbt, the import guide) and the draft,
-# Set Up My AI Helper (a markdown skill; in Claude Code a PreToolUse hook), dbt parse →
-# manifest.json → Compare with dbt, and ERD Studio for Confluence reading the repo as the single
+# Databricks, a Power BI / Fabric semantic model, Import from dbt, the import guide) and the draft,
+# Set Up My AI Helper (found in the ERD Studio sidebar's Help & Feedback view; a markdown skill for
+# every assistant; in Claude Code, GitHub Copilot, Codex and Gemini CLI a pre-tool hook), if you use dbt:
+# dbt parse → manifest.json → Compare with dbt (dbt first, more physical sources to follow), and ERD Studio for Confluence reading the repo as the single
 # source of truth. Voice only: no music bed (`music: false`). Per-scene direction:
 # SCENES.readme.md. The scenes are player/scenes/readme/*.js (plus the shared endCard); the
 # example they all draw is R in player/scenes/readme/story.js.
@@ -20,7 +21,7 @@
 # ERD Studio for Confluence is never called free and has no price here. No competitor is named.
 
 title: How ERD Studio works
-maxDuration: 180
+maxDuration: 190
 # Voice only (Liam, 2026-11-05): music.py writes no bed for this cut and encode.sh mixes none.
 music: false
 
@@ -108,10 +109,10 @@ scenes:
   - id: canvas
     module: readme/canvas
     chapter: 3
-    minDur: 9.2
+    minDur: 7.6           # under 1 s of quiet after "follows" (voice only: a longer hold reads as dead air)
     accent: blue
     props:
-      poster: { beat: keep, offset: 1.5 }   # thumb.mjs: the README poster frame
+      poster: { beat: sync, offset: 3.0 }   # thumb.mjs: the README poster frame (the file open, the row grown)
     headline: ["The files become", "a {diagram}."]
     lines:
       - id: c_draw
@@ -120,9 +121,6 @@ scenes:
       - id: c_sync
         beat: sync
         caption: Edit the canvas or the file, | and the other {follows}.
-      - id: c_keep
-        beat: keep
-        caption: Your comments | and hand edits {stay}.
 
   - id: pr
     module: readme/pr
@@ -161,7 +159,7 @@ scenes:
         caption: "or a {Power BI} or {Fabric} | semantic model."
       - id: im_dbt
         beat: dbt
-        caption: "In a dbt project, | {Draw from dbt} | draws it from your models."
+        caption: "In a dbt project, | {Import from dbt} | builds it from your models."
       - id: im_guide
         beat: guide
         caption: "Not a file yet? | The guide, | {Bring In Your Data Model…}, | shows how to export it, | tool by tool."
@@ -186,11 +184,12 @@ scenes:
     chapter: 5
     minDur: 7
     accent: blue
-    headline: ["Set Up My AI Helper", "adds {a skill}."]
+    headline: ["Set Up My AI Helper,", "in the {ERD Studio} sidebar."]
     lines:
       - id: ai_setup
         beat: setup
-        caption: "{Set Up My AI Helper} adds a skill | for Claude Code, Copilot, Codex, | Gemini CLI or Cursor."
+        caption: "In the ERD Studio sidebar, | under {Help & Feedback}, | {Set Up My AI Helper} adds a skill | for Claude Code, GitHub Copilot, | Codex, Gemini CLI or Cursor."
+        say: "In the ERD Studio side bar, under Help and Feedback, Set Up My AI Helper adds a skill for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor."
 
   - id: skill
     module: readme/skill
@@ -204,31 +203,35 @@ scenes:
         caption: "A skill is just a {markdown file} | the model loads. | It teaches the DBML layout, | so what your AI writes | {renders as a diagram}."
       - id: sk_hook
         beat: hook
-        caption: "In Claude Code, | a {pre-tool hook} | stops the first edit | to the .erd-studio folder | each session, | and tells your AI | to load the skill first."
-        say: "In Claude Code, a pre-tool hook stops the first edit to the E R D Studio folder, each session, and tells your AI to load the skill first."
+        caption: "In Claude Code, GitHub Copilot, | Codex and Gemini CLI, | a {pre-tool hook} | pauses the first edit | to the .erd-studio folder | each session, | and tells your AI | to load the skill first."
+        say: "In Claude Code, GitHub Copilot, Codex and Gemini CLI, a pre-tool hook pauses the first edit to the E R D Studio folder, each session, and tells your AI to load the skill first."
 
   - id: aiwrite
     module: readme/aiwrite
     chapter: 5
-    minDur: 6
+    minDur: 8             # a short hold on the new table; the new Ref keeps pulsing through it
     accent: blue
     headline: ["Your AI writes", "{the same files}."]
     lines:
       - id: ai_write
         beat: write
-        caption: Then your assistant writes {DBML}, | and you see its change | on the canvas | before you commit.
+        caption: Whichever assistant you use, | it writes {DBML}, | and you see its change | on the canvas | before you commit.
 
   - id: parse
     module: readme/parse
     chapter: 6
     minDur: 9.2
     accent: green
-    headline: ["Using dbt?", "Run {dbt parse}."]
+    headline: ["If you use dbt,", "run {dbt parse}."]
     lines:
+      - id: p_if
+        beat: if
+        caption: "If you use {dbt}, | ERD Studio can compare your design | with the {physical model}: | dbt first, | with {more to follow}."
       - id: p_parse
         beat: parse
-        caption: "Using {dbt}? | Run dbt parse, | and dbt writes {manifest.json}, | describing every model | your project builds."
-        say: "Using dbt? Run dbt parse, and dbt writes manifest dot json, describing every model your project builds."
+        pause: 0.8          # the PHYSICAL MODEL panel holds on "more to follow" before Run dbt parse
+        caption: "Run dbt parse, | and dbt writes {manifest.json}, | describing every model | your project builds."
+        say: "Run dbt parse, and dbt writes manifest dot json, describing every model your project builds."
 
   - id: dbt
     module: readme/dbt
@@ -271,12 +274,13 @@ scenes:
     headline: null
     props:
       tagline: ["Design your data model ", "in Git."]
-      pills: ["Free to use", "Source available"]
+      pills: ["Free to use in VS Code", "Source available"]
+      pillWords: ["free", "source"]         # endCard: each pill lands on its word in e_name
       link: { text: Also on Open VSX, chevron: false }
     lines:
       - id: e_name
         beat: name
-        caption: ERD Studio for VS Code. | {Free to use}, | source available on GitHub.
+        caption: ERD Studio is {free to use} | in VS Code, | source available on GitHub.
       - id: e_cta
         beat: cta
         caption: Search {ERD Studio} | in the VS Code Extensions view.

@@ -39,7 +39,7 @@ describe('the README', () => {
     expect(words.length).toBeLessThanOrEqual(800);
   });
 
-  it('names the starts with the start screen\'s own labels, and lists neither Convert nor Draw from dbt as a start', () => {
+  it('names the starts with the start screen\'s own labels, and lists neither Convert nor Import from dbt as a start', () => {
     const starts = section(README, 'The ways to start');
     for (const label of [
       START_ACTION_LABELS.blank, START_ACTION_LABELS.importDbmlFile, START_ACTION_LABELS.importSqlDdl,

@@ -114,7 +114,7 @@ erwin Data Modeler, ER/Studio, DbSchema, DBeaver, DataGrip, Visual Paradigm and 
 
 ## dbt
 
-dbt is optional. If your folder is a dbt project, **Draw from dbt** copies your dbt models and their relationship tests into a diagram, with no export step: see [Using ERD Studio with dbt](dbt.md).
+dbt is optional. If your folder is a dbt project, **Import from dbt** copies your dbt models and their relationship tests into a diagram, with no export step: see [Using ERD Studio with dbt](dbt.md).
 
 ## Not yet
 

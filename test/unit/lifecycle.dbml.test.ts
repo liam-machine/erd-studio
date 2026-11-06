@@ -4,7 +4,7 @@
  * library batch with its settle, the README on create and a rollback for
  * every write kind), the lifecycle planners (`src/commands/dbmlLifecycle.ts`:
  * rename, a diagram's move, Organise's moves, Give Duplicate's qualified
- * re-spelling), Draw from dbt's schema choice (`configuredSchema`) and DBML
+ * re-spelling), Import from dbt's schema choice (`configuredSchema`) and DBML
  * refusals, Import DBML's, sync plans' new-table paths and the Export refusal
  * inside the semantic dir.
  */
@@ -339,7 +339,7 @@ describe('command errors see through a rollback that could not finish', () => {
   });
 });
 
-describe('Draw from dbt and Import DBML in a DBML project (§5.7)', () => {
+describe('Import from dbt and Import DBML in a DBML project (§5.7)', () => {
   it('Draw skips a library table stored as YAML, with its reason; a new table named _relationships is an ordinary table', () => {
     const draft = buildDbtDraft({
       modelNames: ['dim_yaml', '_relationships', 'fct_new'],

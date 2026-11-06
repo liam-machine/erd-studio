@@ -234,7 +234,7 @@ describe.each([
     if (storage === 'dbml') expect(read(root, 'silver/tables/payments/stg_raw_refunds.dbml')).toMatch(/^Table payments\.stg_raw_refunds \{/m);
   });
 
-  it('Draw from dbt files each new table by its configured schema in the chosen layer, else that layer\'s default', async () => {
+  it('Import from dbt files each new table by its configured schema in the chosen layer, else that layer\'s default', async () => {
     _resetMockWorkspace();
     const root = copyFixture(fixture);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('payments_drawn' as never);

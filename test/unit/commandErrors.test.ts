@@ -39,8 +39,8 @@ describe('classifyWriteFailure', () => {
 describe('ours', () => {
   it('never shows the raw error; the report carries it with every path redacted', () => {
     const err = new Error('boom reading /home/someone/project/.erd-studio/x.yml');
-    expect(oursMessage('Draw from dbt', 'while saving the diagram', 'nothing was changed')).not.toContain('boom');
-    const prefill = feedbackPrefill('Draw from dbt', 'while saving the diagram', err);
+    expect(oursMessage('Import from dbt', 'while saving the diagram', 'nothing was changed')).not.toContain('boom');
+    const prefill = feedbackPrefill('Import from dbt', 'while saving the diagram', err);
     expect(prefill.kind).toBe('bug');
     expect(prefill.description).toContain('boom reading');
     expect(prefill.description).not.toContain('/home/someone');

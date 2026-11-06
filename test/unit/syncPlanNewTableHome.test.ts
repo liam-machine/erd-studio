@@ -1,6 +1,6 @@
 /**
  * Where a sync plan says a table with no file yet goes (`logicalModelPath`
- * of a member drawn as missing): where Draw from dbt and Add Tables from dbt
+ * of a member drawn as missing): where Import from dbt and Add Tables from dbt
  * put the same table — the diagram's layer, and on a DBML diagram its dbt
  * custom schema's folder when the developer configured one (§2.4). Never the
  * first layer of `layers.json` because nothing named one. The canvas and the
@@ -73,7 +73,7 @@ async function planPath(root: string, diagram: string, model: string): Promise<{
   };
 }
 
-describe('a sync plan puts a new table where Draw from dbt would', () => {
+describe('a sync plan puts a new table where Import from dbt would', () => {
   it('DBML: the diagram\'s layer, not the first layer of layers.json', async () => {
     const root = dbmlWithMissingGoldMember();
     const got = await planPath(root, '.erd-studio/gold/diagrams/finance.dbml', 'fct_task_event');

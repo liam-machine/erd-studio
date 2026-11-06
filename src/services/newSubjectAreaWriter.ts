@@ -1,6 +1,6 @@
 /**
  * Writing a NEW subject area and the table files it needs, all or nothing —
- * the one write path **Draw from dbt…** (`src/commands/drawFromDbt.ts`) and
+ * the one write path **Import from dbt…** (`src/commands/drawFromDbt.ts`) and
  * **Import DBML…** (`src/commands/importDbml.ts`) share.
  *
  * In order: the default `layers.json` when the project has no ERD folder yet

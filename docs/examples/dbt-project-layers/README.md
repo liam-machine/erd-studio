@@ -55,7 +55,7 @@ The structure dbt Labs recommends in [How we structure our dbt projects](https:/
 - **Prefixes are optional.** The marts follow the guide's plain entity names and still carry a Kimball role (`customers` is a `conformed-dim`, `invoices` a `transaction-fact`), so the canvas shows what each table is without a `dim_` or `fct_` in the name.
 - **A table shared by two departments is one file.** The guide warns against a copy per department (`finance_orders`, `marketing_orders`); here one `customers` file is on both the **finance** and **marketing** diagrams.
 - **Intermediate models can be drawn with what they read.** The **revenue** diagram shows `int_invoices_allocated_to_months` beside the staging model it reads, across layers.
-- **Using dbt?** Open its folder to compare your design with what dbt has, on the **Physical** tab and with **Compare with dbt**. **ERD Studio: Draw from dbt…** draws a first diagram from your models.
+- **Using dbt?** Open its folder to compare your design with what dbt has, on the **Physical** tab and with **Compare with dbt**. **ERD Studio: Import from dbt…** draws a first diagram from your models.
 
 ## When to choose it
 

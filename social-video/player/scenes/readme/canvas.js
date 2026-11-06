@@ -2,8 +2,8 @@
 // tab is sales.dbml; a folder without dbt, so no Logical/Physical tabs): toolbar, then the two
 // tables land, each labelled with its .dbml file, and the relationship draws in on "diagram".
 // `sync`: fct_order.dbml opens under the canvas; `status VARCHAR` is typed into the file and the
-// fct_order node grows the row on "follows". `keep`: the hand-written comment on line 1 is
-// untouched by the edit — it lights up, "kept".
+// fct_order node grows the row on "follows", and "file ⇄ diagram" holds to the end of the scene
+// (the README poster frame).
 import { appear, appearFade, appIcon, card, caret, COLORS, easeOut, edge, ICON, node, NODE, rowY, seg, typed } from '../../lib.js';
 import { dbmlLine, FCT_DBML, FCT_STATUS_LINE, FILE_COL, R, toolbar2, viewFileBtn, wordAt } from './story.js';
 
@@ -19,7 +19,7 @@ const swapIcon = (size, col) => `<svg class="icon" width="${size}" height="${siz
 
 export default {
   render(t, { beats, scene }) {
-    const d = beats.draw.t, sy = beats.sync.t, k = beats.keep.t;
+    const d = beats.draw.t, sy = beats.sync.t;
     const nodesAt = d + 0.6;
     const edgeAt = wordAt(scene, 'draw', 'diagram') - 0.1;
     const vsAt = wordAt(scene, 'draw', 'VS Code');
@@ -32,8 +32,6 @@ export default {
     const growAt = Math.max(saveAt + 0.15, wordAt(scene, 'sync', 'follows') - 0.1);
     const grow = easeOut(seg(t, growAt, growAt + 0.3));
     const hot = 1 - 0.6 * seg(t, growAt + 0.9, growAt + 1.6);
-    const keptAt = wordAt(scene, 'keep', 'comments');
-    const kept = easeOut(seg(t, keptAt, keptAt + 0.3));
 
     let html = card({
       x: CX, y: CY, w: CW, h: CH, tabs: [{ label: 'sales.dbml', on: true, icon: dbmlIcon(20) }],
@@ -67,7 +65,7 @@ export default {
       const sY = CY + CH + 18, sh = 1088 - sY, P = 34, T0 = 10;
       // Lines shown: 1 (the comment), 8, 9 and the new 10.
       const shown = [
-        { n: 1, s: FCT_DBML[0], comment: true },
+        { n: 1, s: FCT_DBML[0] },
         { n: 8, s: FCT_DBML[7] },
         { n: 9, s: FCT_DBML[8] },
         { n: 10, s: FCT_STATUS_LINE, isNew: true },
@@ -79,19 +77,15 @@ export default {
         const y = T0 + row * P;
         row += 1;
         if (ln.isNew) body += `<div class="abs" style="left:0;top:${y}px;width:${CW - 2}px;height:${P}px;background:rgba(19,48,31,${hot.toFixed(3)});border-left:5px solid var(--green)"></div>`;
-        if (ln.comment && kept > 0) body += `<div class="abs" style="left:0;top:${y}px;width:${CW - 2}px;height:${P}px;background:rgba(34,197,94,${(0.14 * kept).toFixed(3)});border-left:5px solid rgba(34,197,94,${kept.toFixed(3)})"></div>`;
         const text = ln.isNew
           ? (t < typedEnd ? `<span style="color:var(--text)">${typed(ln.s, t, typeAt, 24)}</span>${caret(t, typedEnd, 'var(--green)')}` : dbmlLine(ln.s))
           : dbmlLine(ln.s);
         body += `<div class="abs mono" style="left:18px;top:${y}px;width:40px;text-align:right;font-size:22px;line-height:${P}px;color:var(--line-no)">${ln.n}</div>`;
-        body += `<div class="abs mono" style="left:84px;top:${y}px;font-size:22px;line-height:${P}px;white-space:pre;opacity:${ln.comment || ln.isNew || kept === 0 ? 1 : 1 - 0.4 * kept}">${text}</div>`;
+        body += `<div class="abs mono" style="left:84px;top:${y}px;font-size:22px;line-height:${P}px;white-space:pre">${text}</div>`;
       });
-      // "files ⇄ diagram" once the node has grown; "kept" on the comment.
-      if (t >= growAt && kept === 0) {
+      // "file ⇄ diagram" once the node has grown.
+      if (t >= growAt) {
         body += `<div class="abs" style="right:24px;top:${T0 + 2 * P - 12}px;height:52px;padding:0 22px;border-radius:999px;background:#13301f;border:2px solid var(--green);color:var(--green);display:flex;align-items:center;gap:12px;font-size:25px;font-weight:800;white-space:nowrap;${appear(t, growAt + 0.1, { dy: 0, dx: 12 })}">file${swapIcon(28, '#22c55e')}diagram</div>`;
-      }
-      if (kept > 0) {
-        body += `<div class="abs" style="right:24px;top:${T0 - 6}px;height:46px;padding:0 20px;border-radius:999px;background:#13301f;border:2px solid var(--green);color:var(--green);display:flex;align-items:center;gap:10px;font-size:23px;font-weight:800;white-space:nowrap;${appear(t, keptAt + 0.05, { dy: 0, dx: 12 })}">${ICON.check({ size: 22 })}your comment, kept</div>`;
       }
       const dirty = t >= typeAt && t < saveAt;
       const dot = dirty ? '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--text);margin-left:12px"></span>' : '';

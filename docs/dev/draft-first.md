@@ -11,7 +11,7 @@ Draft-first turns that round: **the first time someone deliberately turns to ERD
 Rules that hold everywhere:
 
 1. **Nothing is written before an explicit Keep**, and nothing on activation (no `.erd-studio/`, no `layers.json`, no workspace file). Building a draft reads files only, through the same bounded reads the imports use today.
-2. **One writer per kind.** Keep runs the existing write step of Import DBML (`writeNewSubjectArea` via `importDbml`), Draw from dbt (`writeNewSubjectArea` via `drawFromDbt`) or Open an Example Project (`writeFilesWithRollback`). No draft code writes a file.
+2. **One writer per kind.** Keep runs the existing write step of Import DBML (`writeNewSubjectArea` via `importDbml`), Import from dbt (`writeNewSubjectArea` via `drawFromDbt`) or Open an Example Project (`writeFilesWithRollback`). No draft code writes a file.
 3. **One activation-time prompt per window** (`SessionPromptGate`). The automatic draft is a prompt too: it claims the gate.
 4. **Nothing about the user's files leaves the machine.** Telemetry gets fixed keys only (append-only, §11).
 5. **The page is a webview with a nonce-only CSP**, no inline style or handler, every command and URL fixed on the host, every message validated (`parseDraftToHost`).
@@ -78,7 +78,7 @@ Buttons (Title Case, one primary):
 
 A labelled `<select>` in the banner, only when there is a choice:
 
-- **dbt** (`Folder`): the models folders (`listDraftScopes` folder scopes), ranked by `folderRank` (marts / gold first, staging last), then by model count, at most 12, each `marts/finance` · `12 models`. The draft starts on the first. Keep names the diagram after the folder (`suggestSubjectAreaName`). Hand-picking models, or a connected cluster, is **Change options…** (Draw from dbt's own picker).
+- **dbt** (`Folder`): the models folders (`listDraftScopes` folder scopes), ranked by `folderRank` (marts / gold first, staging last), then by model count, at most 12, each `marts/finance` · `12 models`. The draft starts on the first. Keep names the diagram after the folder (`suggestSubjectAreaName`). Hand-picking models, or a connected cluster, is **Change options…** (Import from dbt's own picker).
 - **Several semantic models** (`Model`): each model the folder holds, by path, at most 12; the draft starts on the first.
 - **Examples** (`Example`): `Coffee shop` (6 tables) then the eight `docs/examples` projects in `docs/examples/README.md`'s order.
 
@@ -86,7 +86,7 @@ Changing it answers `scope`; the page shows **Drawing…** until the flow asks w
 
 ### 2.3 Large drafts and the schema panel
 
-`DRAFT_LARGE_TABLES = 60`. At or above it the schema panel starts open; with more than one schema the canvas first shows only the biggest schema's tables (`focusSchema`) and the panel says `Showing sales: 80 of 257 tables`. The panel lists **All tables (257)** then each schema with its count, biggest first; clicking one redraws the canvas with that schema's tables and the relationships between them (page-local, never posted: P2's `filterDisplayToSchema`). Below the cap the panel is collapsed (`«` / `»` toggles it). The panel and the drawer are views only: **Keep keeps every table**. Bringing in fewer is Change options… (SQL's file pick, Draw from dbt's picker).
+`DRAFT_LARGE_TABLES = 60`. At or above it the schema panel starts open; with more than one schema the canvas first shows only the biggest schema's tables (`focusSchema`) and the panel says `Showing sales: 80 of 257 tables`. The panel lists **All tables (257)** then each schema with its count, biggest first; clicking one redraws the canvas with that schema's tables and the relationships between them (page-local, never posted: P2's `filterDisplayToSchema`). Below the cap the panel is collapsed (`«` / `»` toggles it). The panel and the drawer are views only: **Keep keeps every table**. Bringing in fewer is Change options… (SQL's file pick, Import from dbt's picker).
 
 ### 2.4 The details drawer
 
@@ -104,7 +104,7 @@ Changing it answers `scope`; the page shows **Drawing…** until the flow asks w
 |---|---|---|
 | `sidebar` — **the only automatic one** | The empty Diagrams view is drawn in this window (the tree's `onLoadingChange(false)`: the ERD Studio icon), after the tracker's bounded look, when `autoDraftDue` holds (§3.2) | Claims kind `draft`, only once activation's own prompt is decided (`activationPromptsSettled`); never when another prompt showed this window |
 | `prompt` | The start suggestion's **Show Me** | Already holds the gate (`startSuggestion`) |
-| `start` | A start surface's primary import or Draw from dbt (walkthrough, empty Diagrams view, start quick pick) | Explicit: never checks the gate; claims `draft` if free, so nothing pops over it |
+| `start` | A start surface's primary import or Import from dbt (walkthrough, empty Diagrams view, start quick pick) | Explicit: never checks the gate; claims `draft` if free, so nothing pops over it |
 | `palette` | Import DBML… / Import SQL DDL… / Import Semantic Model… run step by step | Explicit, as above |
 | `changeOptions` | The step-by-step flow a draft's Change options… ran | Explicit |
 | `example` | **Open an Example…**, a draft's **Open an Example…** | Explicit |

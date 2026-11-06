@@ -55,7 +55,7 @@ export const START_ACTION_COMMANDS: Readonly<Record<StartAction, string>> = {
  */
 export const START_ACTION_LABELS: Readonly<Record<StartAction, string>> = {
   convert: 'Convert to DBML…',
-  drawFromDbt: 'Draw from dbt',
+  drawFromDbt: 'Import from dbt',
   importSemanticModel: 'Import your Power BI semantic model',
   importSqlDdl: 'Import your SQL scripts',
   importDbmlFile: 'Import your DBML file',
@@ -126,7 +126,7 @@ const QUICK_STARTS: ReadonlySet<StartAction> = new Set<StartAction>(['importSema
 
 /**
  * The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start:
- * a direct import's quick path, and for it and Draw from dbt the draft's
+ * a direct import's quick path, and for it and Import from dbt the draft's
  * trigger (`start` by default, `prompt` for Show Me); none for the others.
  */
 export function startActionArgs(action: StartAction, trigger: StartDraftTrigger = 'start'): unknown[] {
@@ -137,7 +137,7 @@ export function startActionArgs(action: StartAction, trigger: StartDraftTrigger 
 
 /**
  * What the open folder suggests as its first start, strongest first: a project
- * from before 2.0 converts, a dbt project draws from dbt, then the files the
+ * from before 2.0 converts, a dbt project imports from dbt, then the files the
  * bounded look found (a Power BI / Fabric semantic model, CREATE TABLE
  * scripts, a DBML file), else a blank diagram. Each names its primary start.
  */
@@ -217,7 +217,7 @@ export const MAX_STARTS = 4;
 /**
  * The starts for an intent, primary first (`undefined`: no folder open, only
  * the example). Convert, in a project from before 2.0, leads what that
- * project would otherwise offer (Draw from dbt's starts with dbt, a blank
+ * project would otherwise offer (Import from dbt's starts with dbt, a blank
  * diagram's without), cut to {@link MAX_STARTS}: the project keeps working
  * as it is, so its other starts stay, quieter.
  */

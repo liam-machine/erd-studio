@@ -14,15 +14,20 @@
 // is drawn here, from the path the driver logged (build/rec/<take>/pointer.json), on the video's
 // own clock: the screencast's ~25 frames a second would make a filmed pointer judder. A
 // `recording.zoom` punches in on part of the window (a panel whose text is small) from its beat
-// to the scene's end. The footage fades in and out with the frame's own fades (main.js: only
-// where the recording starts and ends). A cut without `recording` has nothing to composite:
+// to the scene's end. HTML scenes may sit between recorded ones (the AI change and the pull
+// request, before the dbt beat): each run of recorded scenes (runsOf) is laid over the frame on its
+// own and fades in and out with the frame's own fades (main.js), except into a scene that holds the
+// window (holdsWindow: an HTML still of the footage's last frame, props.still), where it cuts with
+// no fade. A cut without `recording` has nothing to composite:
 // capture wrote its master.mkv already. A cut whose `recording.footage` names another cut (the
 // logical cut: `default`) plays that cut's takes (its build/rec/), and only when each of its
 // recorded scenes has the same length and beats there (checkFootage): the clicks were timed to them.
 //
 //   node record/composite.mjs            VARIANT picks the cut, as everywhere else
+//   node record/composite.mjs --stills   (npm run still) writes the stills HTML scenes draw
+//                                        (player/assets/still-<scene>.jpg/.json), then stops
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cutOf } from '../build-timeline.mjs';
@@ -30,6 +35,8 @@ import { cutOf } from '../build-timeline.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VARIANT = process.env.VARIANT ?? '';
 const BUILD = join(HERE, '..', VARIANT ? `build-${VARIANT}` : 'build');
+/** --stills: write the stills the HTML scenes draw (props.still), then stop. */
+const STILLS = process.argv.includes('--stills');
 
 /** Frames the footage cross-fades over where it jumps (1/3 s at 30 fps). Even: half each side of the cut. */
 export const XFADE = 10;
@@ -77,13 +84,15 @@ export function checkFootage(tl, src) {
   return bad;
 }
 
-/** Where each recorded scene sits: in the timeline (start, dur) and in its take (name, t0). */
+/**
+ * Where each recorded scene sits: in the timeline (start, dur) and in its take (name, t0). HTML
+ * scenes may sit between two recorded ones (the AI change and the pull request, before the dbt
+ * beat): the footage is hidden there (main() lays each run of recorded scenes over the frame on its
+ * own, runsOf), and the recording's clock runs on through them.
+ */
 function layout(tl, takes) {
   const rec = tl.scenes.filter((s) => s.module.startsWith('rec/'));
   if (!rec.length) return null;
-  const first = tl.scenes.indexOf(rec[0]);
-  const last = tl.scenes.indexOf(rec.at(-1));
-  for (let i = first; i <= last; i++) if (!tl.scenes[i].module.startsWith('rec/')) throw new Error(`scene ${tl.scenes[i].id} interrupts the recording`);
   const where = {};
   for (const [name, take] of Object.entries(takes)) for (const s of take.scenes) where[s.id] = { name, ...s };
   for (const s of rec) {
@@ -92,8 +101,40 @@ function layout(tl, takes) {
   }
   const start = rec[0].start;
   const end = rec.at(-1).start + rec.at(-1).dur;
-  return { rec, where, start, end, n: Math.round((end - start) * tl.fps) };
+  // into a still at the very end of the footage (the logical cut's aiRun → aiShow), two frames more of
+  // the last one, so main() can run the footage on over the still: never a frame of the empty window
+  const tail = holdsWindow(tl.scenes[tl.scenes.indexOf(rec.at(-1)) + 1]) ? 2 : 0;
+  return { rec, where, start, end, n: Math.round((end - start) * tl.fps) + tail };
 }
+
+/**
+ * The runs of consecutive recorded scenes, in seconds from the first one's start: [{ from, to,
+ * before, after }], `before` / `after` the scenes either side of the run (null at the video's ends).
+ * Each run is laid over the frame on its own, fading in and out with it, except next to a scene
+ * that holds the window (holdsWindow): there it cuts, with no fade. Pure (exported for the test).
+ */
+export function runsOf(tl) {
+  const rec = tl.scenes.filter((s) => s.module.startsWith('rec/'));
+  if (!rec.length) return [];
+  const start = rec[0].start;
+  const runs = [];
+  tl.scenes.forEach((s, i) => {
+    if (!s.module.startsWith('rec/')) return;
+    const prev = tl.scenes[i - 1] ?? null;
+    const to = +(s.start + s.dur - start).toFixed(3), after = tl.scenes[i + 1] ?? null;
+    if (prev && prev.module.startsWith('rec/')) Object.assign(runs.at(-1), { to, after });
+    else runs.push({ from: +(s.start - start).toFixed(3), to, before: prev, after });
+  });
+  return runs;
+}
+
+/**
+ * Whether a scene carries the window on from the recording: a recorded scene, or an HTML scene
+ * that draws a still of the footage's last frame where the footage was (`props.still: <scene>`, the
+ * AI change). The footage cuts to such a scene with no fade, and main.js keeps the window's frame
+ * still across the change.
+ */
+export const holdsWindow = (sc) => !!sc && (sc.module.startsWith('rec/') || !!sc.props?.still);
 
 /** The take frame painted by `at` in take `name` (binary search; frames are in time order). */
 function frameAt(takes, name, at) {
@@ -116,15 +157,33 @@ export function framePlan(tl, takes) {
   if (!L) return { frames: [], end: 0, cuts: [], segments: [] };
   const { rec, where, start, end, n } = L;
   const fps = tl.fps;
-  const sceneOf = (t) => rec.find((x) => t < x.start + x.dur) ?? rec.at(-1);
-  const pick = (i, s) => { const t = start + (i + 0.5) / fps; const w = where[s.id]; return frameAt(takes, w.name, w.t0 + takeClock(w.ff)(t - s.start)); };
+  // A gap: HTML scenes between two recorded ones, where the footage is hidden. Its first half holds
+  // the outgoing scene's last frame, its second the incoming scene's first, and the cut (with its
+  // cross-fade) sits in the middle, out of sight.
+  const gapAfter = (k) => k + 1 < rec.length && rec[k + 1].start - (rec[k].start + rec[k].dur) > 0.001;
+  const sceneOf = (t) => {
+    for (let k = 0; k < rec.length; k++) {
+      const x = rec[k];
+      if (t < x.start + x.dur) return { s: x };
+      if (gapAfter(k) && t < rec[k + 1].start) return t < (x.start + x.dur + rec[k + 1].start) / 2 ? { s: x, hold: 'end' } : { s: rec[k + 1], hold: 'start' };
+    }
+    return { s: rec.at(-1), hold: 'end' };
+  };
+  const pick = (i, s, hold = null) => {
+    const w = where[s.id];
+    let u = start + (i + 0.5) / fps - s.start;
+    if (hold === 'end') u = Math.min(u, s.dur - 0.5 / fps);
+    if (hold === 'start') u = Math.max(u, 0);
+    return frameAt(takes, w.name, w.t0 + takeClock(w.ff)(u));
+  };
   const frames = [];
-  for (let i = 0; i < n; i++) frames.push(pick(i, sceneOf(start + (i + 0.5) / fps)));
-  // the cuts: where the next scene is not the take's next stretch of film
+  for (let i = 0; i < n; i++) { const o = sceneOf(start + (i + 0.5) / fps); frames.push(pick(i, o.s, o.hold)); }
+  // the cuts: where the next scene is not the take's next stretch of film, and in every gap
   const cuts = [];
   for (let k = 1; k < rec.length; k++) {
     const a = where[rec[k - 1].id], b = where[rec[k].id];
-    if (a.name !== b.name || Math.abs(b.t0 - (a.t0 + (a.filmed ?? a.dur))) > JUMP_S) cuts.push({ at: Math.round((rec[k].start - start) * fps), before: rec[k - 1], after: rec[k] });
+    if (gapAfter(k - 1)) cuts.push({ at: Math.round(((rec[k - 1].start + rec[k - 1].dur + rec[k].start) / 2 - start) * fps), before: rec[k - 1], after: rec[k], gap: true });
+    else if (a.name !== b.name || Math.abs(b.t0 - (a.t0 + (a.filmed ?? a.dur))) > JUMP_S) cuts.push({ at: Math.round((rec[k].start - start) * fps), before: rec[k - 1], after: rec[k] });
   }
   const H = XFADE / 2;
   const segments = [];
@@ -133,13 +192,28 @@ export function framePlan(tl, takes) {
     const from = k === 0 ? 0 : a - H, to = k === cuts.length ? n : b + H;
     const list = [];
     for (let i = from; i < to; i++) {
-      if (i < a) list.push(pick(i, cuts[k - 1].after));          // the incoming scene, filmed before its mark
-      else if (i >= b) list.push(pick(i, cuts[k].before));       // the outgoing scene, filmed on past its end
+      if (i < a) list.push(pick(i, cuts[k - 1].after, cuts[k - 1].gap ? 'start' : null));   // the incoming scene, filmed before its mark
+      else if (i >= b) list.push(pick(i, cuts[k].before, cuts[k].gap ? 'end' : null));      // the outgoing scene, filmed on past its end
       else list.push(frames[i]);
     }
     segments.push({ from, to, frames: list });
   }
   return { frames, start, end, cuts, segments };
+}
+
+/**
+ * The take frame a still scene draws (`props.still: <scene>`): the last frame that scene's footage
+ * shows, so the cut from the footage to the still is invisible. Returns { take, file, at } (at: take seconds).
+ */
+export function stillFrame(tl, takes, sceneId) {
+  const s = tl.scenes.find((x) => x.id === sceneId && x.module.startsWith('rec/'));
+  if (!s) throw new Error(`props.still: ${sceneId} is not a recorded scene`);
+  const [name, take] = Object.entries(takes).find(([, t]) => t.scenes.some((x) => x.id === sceneId)) ?? [];
+  if (!take) throw new Error(`scene ${sceneId} was never recorded: run \`node record/record.mjs\``);
+  const w = take.scenes.find((x) => x.id === sceneId);
+  if (Math.abs(w.dur - s.dur) > 0.01) throw new Error(`scene ${sceneId} was filmed for ${w.dur}s but the timeline gives it ${s.dur}s: record again`);
+  const at = w.t0 + takeClock(w.ff)(s.dur - 0.5 / tl.fps);
+  return { ...frameAt(takes, name, at), at };
 }
 
 /** The pointer's position at take time T, from a driver trail (glides { s, d, x0, y0, x1, y1 }). */
@@ -281,6 +355,22 @@ async function main() {
     if (!existsSync(join(dir, 'pointer.json'))) throw new Error(`no ${join(dir, 'pointer.json')}: record again (the pointer is drawn from it)`);
     trails[name] = JSON.parse(readFileSync(join(dir, 'pointer.json'), 'utf8'));
   }
+  // npm run still: the still a scene with props.still draws (player/assets/still-<scene>.jpg, committed;
+  // capture renders it, so run this after every new take of that scene and before capture)
+  if (STILLS) {
+    for (const sc of timeline.scenes.filter((s) => s.props?.still)) {
+      const f = stillFrame(timeline, takes, sc.props.still);
+      const out = join(HERE, '..', 'player', 'assets', `still-${sc.props.still}.jpg`);
+      copyFileSync(join(recDir, f.take, f.file), out);
+      // where composite's pointer is on that frame (its tip, inset px), so the still can draw it and move it away
+      const { WINDOW } = await import('./vscode.mjs');
+      const k = timeline.recording.inset.w / WINDOW.width;
+      const p = pointerAt(trails[f.take] ?? [], f.at);
+      writeFileSync(out.replace(/\.jpg$/, '.json'), JSON.stringify({ frame: `${f.take}/${f.file}`, pointer: { x: +(p.x * k).toFixed(1), y: +(p.y * k).toFixed(1) } }) + '\n');
+      console.log(`still: ${sc.id} draws ${sc.props.still}'s last frame (${f.take}/${f.file}) -> ${out}`);
+    }
+    return;
+  }
   const { frames, start, end, cuts, segments } = framePlan(timeline, takes);
   const fps = timeline.fps;
   const { x, y, w, h } = timeline.recording.inset;
@@ -325,7 +415,7 @@ async function main() {
     const zx = Math.round(clip(zoom.focus[0] - zw / 2, 0, w - zw)), zy = Math.round(clip(zoom.focus[1] - zh / 2, 0, h - zh));
     g.push(`[${last}]split[za][zb]`);
     g.push(`[zb]crop=${zw}:${zh}:${zx}:${zy},scale=${w}:${h}:flags=lanczos,format=yuva444p,fade=t=in:st=${at.toFixed(3)}:d=${zoom.dur}:alpha=1[zz]`);
-    g.push(`[za][zz]overlay=0:0:format=auto,format=yuv444p[z]`);
+    g.push(`[za][zz]overlay=0:0:enable='between(t,${at.toFixed(3)},${(sc.start - start + sc.dur).toFixed(3)})':format=auto,format=yuv444p[z]`);
     last = 'z';
   }
   // the "sped up" badge while the footage runs faster than real time (in the window's empty title bar, top left)
@@ -345,12 +435,27 @@ async function main() {
   const recording = join(BUILD, 'recording.mkv');
   execFileSync('ffmpeg', ['-v', 'error', '-y', ...inputs, '-/filter_complex', script, '-map', '[v]',
     '-frames:v', String(frames.length), '-c:v', 'libx264', '-preset', 'medium', '-crf', '8', '-pix_fmt', 'yuv444p', '-color_range', 'tv', recording], { stdio: 'inherit' });
+  // each run of recorded scenes over the frame on its own, fading in and out where the frame does
+  // (main.js), or cutting with no fade next to a scene that holds the window (the AI change's still)
   const fade = timeline.fade;
-  const graph = `[1:v]setpts=PTS+${start}/TB,format=yuva444p,fade=t=in:st=${start}:d=${fade}:alpha=1,fade=t=out:st=${(end - fade).toFixed(3)}:d=${fade}:alpha=1[r];`
-    + `[0:v][r]overlay=x=${x}:y=${y}:eof_action=pass:format=auto,format=yuv444p,setparams=range=tv[v]`;
+  const runs = runsOf(timeline);
+  const og = [`[1:v]split=${runs.length}${runs.map((_, k) => `[rs${k}]`).join('')}`];
+  let base = '0:v';
+  runs.forEach((r, k) => {
+    const a = start + r.from, b = start + r.to;
+    const fin = holdsWindow(r.before) ? '' : `,fade=t=in:st=${a.toFixed(3)}:d=${fade}:alpha=1`;
+    const fout = holdsWindow(r.after) ? '' : `,fade=t=out:st=${(b - fade).toFixed(3)}:d=${fade}:alpha=1`;
+    // into a still, the footage runs on two frames over it (the same picture): never a frame of the empty window between
+    const to = holdsWindow(r.after) ? +(r.to + 2 / fps).toFixed(3) : r.to;
+    og.push(`[rs${k}]trim=start=${r.from}:end=${to},setpts=PTS-STARTPTS+${a}/TB,format=yuva444p${fin}${fout}[r${k}]`);
+    og.push(`[${base}][r${k}]overlay=x=${x}:y=${y}:eof_action=pass:format=auto,format=yuv444p[o${k}]`);
+    base = `o${k}`;
+  });
+  og.push(`[${base}]setparams=range=tv[v]`);
+  const graph = og.join(';');
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(BUILD, 'chrome.mkv'), '-i', recording, '-filter_complex', graph, '-map', '[v]',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '0', '-pix_fmt', 'yuv444p', '-color_range', 'tv', '-r', String(fps), join(BUILD, 'master.mkv')], { stdio: 'inherit' });
-  console.log(`composite: ${footage ? `the ${footage} cut's footage, ` : ''}${frames.length} recorded frames (${start}s–${end}s), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zoom ? `, punch-in on ${zoom.scene}` : ''}${ffs.length ? `, sped up: ${ffs.map((f) => `${f.scene} ${f.speed.toFixed(1)}x`).join(', ')}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
+  console.log(`composite: ${footage ? `the ${footage} cut's footage, ` : ''}${frames.length} recorded frames (${start}s–${end}s, ${runs.length} run${runs.length > 1 ? 's' : ''}), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zoom ? `, punch-in on ${zoom.scene}` : ''}${ffs.length ? `, sped up: ${ffs.map((f) => `${f.scene} ${f.speed.toFixed(1)}x`).join(', ')}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

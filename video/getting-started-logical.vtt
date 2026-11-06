@@ -41,8 +41,8 @@ Keep it, and it's your diagram.
 Each table is now a DBML file, an open format, next to the code that builds it.
 
 11
-00:00:42.854 --> 00:00:46.092
-Review a change to the model in the same pull request.
+00:00:42.854 --> 00:00:45.807
+Change it, and Git shows exactly what changed.
 
 12
 00:00:46.542 --> 00:00:48.256
@@ -81,17 +81,33 @@ and a pre-tool hook makes sure it has, before any edit,
 so what it writes is a diagram you can see, right away.
 
 21
-00:01:19.699 --> 00:01:25.350
-Your repo is the single source of truth: just DBML files, no modelling database.
+00:01:19.699 --> 00:01:24.421
+Here's the change: a new table file, and the line that links it to the orders table.
 
 22
-00:01:25.400 --> 00:01:28.604
-ERD Studio for Confluence reads them from GitHub,
+00:01:24.471 --> 00:01:27.432
+On the canvas, the new table and its relationship.
 
 23
-00:01:28.654 --> 00:01:31.660
-and shows the diagram to business users.
+00:01:29.299 --> 00:01:33.463
+The design change goes in the same pull request as the code that builds it,
 
 24
-00:01:32.999 --> 00:01:37.293
-ERD Studio is free to use in VS Code. Install it today.
+00:01:33.513 --> 00:01:35.661
+so your team reviews both together.
+
+25
+00:01:37.899 --> 00:01:43.550
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+26
+00:01:43.600 --> 00:01:46.804
+ERD Studio for Confluence reads them from GitHub,
+
+27
+00:01:46.854 --> 00:01:49.860
+and shows the diagram to business users.
+
+28
+00:01:51.199 --> 00:01:54.358
+ERD Studio is free to use in VS Code.

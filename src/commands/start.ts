@@ -118,7 +118,7 @@ export function recordStart(action: StartAction, from: StartSurface): void {
  * guide's `importGuideFrom<Surface>`). Anything else (a stray link, an old
  * keybinding) shows every start that applies here and the guide, and counts
  * no start (the guide counts `importGuideFromStartPick`).
- * A direct import runs its quick path and Draw from dbt its folder draft
+ * A direct import runs its quick path and Import from dbt its folder draft
  * either way, each ending in the draft preview (`startActionArgs`, trigger
  * `start`): nothing is written until Keep.
  */

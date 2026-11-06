@@ -60,7 +60,7 @@ describe.each(CUTS)('getting-started captions: $name', (cut) => {
       expect(cue.text.length).toBeLessThanOrEqual(84);
       prevEnd = cue.end;
     }
-    expect(prevEnd).toBeLessThanOrEqual(130); // the scripts' maxDuration (video/script*.yaml): "Watch the Tour" names no length
+    expect(prevEnd).toBeLessThanOrEqual(140); // the scripts' maxDuration (video/script*.yaml): "Watch the Tour" names no length
   });
 
   it('transcript carries every cue, in order', () => {
@@ -114,14 +114,14 @@ describe('getting-started media', () => {
       expect(audioObjectType(head)).toBe(0x6b);
     });
 
-    it.runIf(present(cut.video))('lasts the tour (50–130 s), and its last caption ends inside it', () => {
+    it.runIf(present(cut.video))('lasts the tour (50–140 s), and its last caption ends inside it', () => {
       // mvhd (version 0): size, 'mvhd', version/flags, creation, modification, timescale, duration
       const buf = fs.readFileSync(path.join(MEDIA, cut.video));
       const mvhd = buf.indexOf('mvhd');
       expect(buf[mvhd + 4]).toBe(0);
       const seconds = buf.readUInt32BE(mvhd + 20) / buf.readUInt32BE(mvhd + 16);
       expect(seconds).toBeGreaterThanOrEqual(50);
-      expect(seconds).toBeLessThanOrEqual(130);
+      expect(seconds).toBeLessThanOrEqual(140);
       expect(cut.cues[cut.cues.length - 1].end).toBeLessThanOrEqual(seconds);
     });
 

@@ -12,8 +12,8 @@
 //          (the import guide's own route for both: export the DDL, save it as .sql)
 //   pbi    a <Name>.SemanticModel folder (TMDL or model.bim), from Power BI or Fabric
 //   dbt    the empty Diagrams view of a dbt project (package.json viewsWelcome): "No diagrams
-//          yet. This folder is a dbt project.", Draw from dbt, "Or: More ways to start…" — the
-//          picker dims, because Draw from dbt is its own start, not an Import… source
+//          yet. This folder is a dbt project.", Import from dbt, "Or: More ways to start…" — the
+//          picker dims, because Import from dbt is its own start, not an Import… source
 //   guide  Bring In Your Data Model… (src/services/importGuide.ts): its card titles
 // MySQL has no logo (Oracle allows its mark only under a written agreement) and DBML has none of
 // its own: LOGOS.md. draft.js picks up with the draft preview.
@@ -107,7 +107,7 @@ function panel(which, t, at) {
           <div style="padding:12px 24px 0">
             <div style="font-size:23px;color:var(--text);white-space:nowrap">No diagrams yet. This folder is a dbt project.</div>
             <div style="margin-top:12px;display:flex;align-items:center;gap:14px">${logo('dbt.svg', 40)}
-              <span class="btn btn--primary" style="flex:1;justify-content:center;font-size:23px;height:52px;padding:0 20px;box-shadow:0 0 0 ${(3 * glow).toFixed(2)}px rgba(244,180,44,${(0.9 * glow).toFixed(3)}), 0 0 ${Math.round(30 * glow)}px rgba(244,180,44,${(0.45 * glow).toFixed(3)})">Draw from dbt</span></div>
+              <span class="btn btn--primary" style="flex:1;justify-content:center;font-size:23px;height:52px;padding:0 20px;box-shadow:0 0 0 ${(3 * glow).toFixed(2)}px rgba(244,180,44,${(0.9 * glow).toFixed(3)}), 0 0 ${Math.round(30 * glow)}px rgba(244,180,44,${(0.45 * glow).toFixed(3)})">Import from dbt</span></div>
             <div style="margin-top:10px;font-size:21px;color:var(--text-2);white-space:nowrap">Or: <span style="color:var(--blue)">More ways to start…</span></div>
           </div></div></div>`;
     }
@@ -133,7 +133,7 @@ export default {
 
     // ---- the Import… picker ----
     const pickerAt = 0.1;
-    // Draw from dbt is its own start, not an Import… source: the picker dims while it shows.
+    // Import from dbt is its own start, not an Import… source: the picker dims while it shows.
     const dbtDim = BEATS[cur] === 'dbt' ? easeOut(seg(t, at.dbt - lead, at.dbt + 0.2))
       : BEATS[cur] === 'guide' ? 1 - easeOut(seg(t, at.guide - lead, at.guide + 0.2)) : 0;
     if (t >= pickerAt) {

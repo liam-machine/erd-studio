@@ -93,7 +93,7 @@ export const FEATURES = [
   'harnessInstallAgents',
   // Getting-started funnel: where a new user stops, and the routes taken.
   // User choices and project states only — anything that broke is an ERROR_CODE.
-  // Draw from dbt (the command, also reached from the Welcome panel and the walkthrough).
+  // Import from dbt (the command, also reached from the Welcome panel and the walkthrough).
   'drawStarted',
   'drawNoModels',
   'drawNoLayers',
@@ -489,7 +489,7 @@ export const ERROR_CODES = [
   // Getting started: each one means something broke on a new user's path.
   // The walkthrough command threw (the Welcome panel opened instead).
   'walkthroughFailed',
-  // Draw from dbt threw, or could not write the diagram.
+  // Import from dbt threw, or could not write the diagram.
   'drawFromDbtFailed',
   'drawWriteFailed',
   // Add models from dbt on a canvas threw (a rejected edit is `editRejected`).

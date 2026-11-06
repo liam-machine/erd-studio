@@ -1,30 +1,22 @@
-// End card: icon, name, the tagline, the three steps as chips, what it is and where to find it.
-// Everything is on screen within ~1 s. Shared by both cuts.
+// End card: the icon, the name, one line, and where to get it. Little to read, so it lands at once:
+// everything is on screen within ~0.6 s. Shared by both cuts.
 import { appear, appIcon, ICON } from '../../lib.js';
 import { EXTENSION } from '../../editor.js';
 
-// The chips name the real steps: the extension, the walkthrough's open-a-folder step (its title)
-// and Import… (START_ACTION_LABELS.import): most people bring in the model they already have.
-export const STEPS = ['Install ERD Studio', 'Open the folder your data model lives in', 'Import…'];
-/** The product's tagline (the walkthrough's subtitle): the first part bright, the second dimmed. */
-export const TAGLINE = ['Design your data model in Git.', 'Let your AI build from it.'];
-/** What it is: free to use, source available under the PolyForm Shield License; edited by hand or by your AI assistant. */
-export const FACTS = ['Free to use', 'source available', 'VS Code extension', 'by hand or with AI'];
+/** The one line: what it is, in the hook's words (its headline is "Your data model, in your repo."). The `{…}` part is in the accent. */
+export const LINE = 'Your data model, {in Git}.';
+/** Where and on what terms: free to use, in VS Code (never a word about the Confluence app here). */
+export const FREE = 'Free to use in VS Code';
 
 export default {
   render(t) {
-    const [l1, l2] = TAGLINE;
-    const chip = (label, green, at) => `<span class="pill" style="background:${green ? 'var(--chip-green)' : 'var(--chip)'};border:2px solid ${green ? 'var(--chip-green-border)' : 'var(--chip-border)'};color:${green ? 'var(--green)' : 'var(--text)'};font-size:30px;padding:16px 28px;border-radius:16px;${appear(t, at, { dy: 10 })}">${green ? ICON.check({ size: 26 }) : ''}${label}</span>`;
-    const arrow = (at) => `<span style="color:var(--text-3);${appear(t, at, { dy: 0 })}">${ICON.arrow({ size: 32 })}</span>`;
-    const [a, b, c] = STEPS;
-    const [f0, ...rest] = FACTS;
+    const line = LINE.replace(/\{([^}]+)\}/, '<span style="color:var(--blue)">$1</span>');
     return `
-      <div class="abs" style="left:0;right:0;top:150px;display:flex;justify-content:center;${appear(t, 0.05, { dy: 16 })}">${appIcon(176)}</div>
-      <div class="abs" style="left:0;right:0;top:362px;text-align:center;font-size:104px;font-weight:800;letter-spacing:-.035em;${appear(t, 0.15, { dy: 16 })}">${EXTENSION.name}</div>
-      <div class="abs" style="left:0;right:0;top:492px;text-align:center;font-size:42px;font-weight:700;letter-spacing:-.01em;color:var(--text);${appear(t, 0.3)}">${l1} <span style="color:var(--text-2)">${l2}</span></div>
-      <div class="abs" style="left:0;right:0;top:600px;display:flex;justify-content:center;align-items:center;gap:22px">
-        ${chip(a, false, 0.45)}${arrow(0.5)}${chip(b, false, 0.55)}${arrow(0.6)}${chip(c, true, 0.65)}</div>
-      <div class="abs" style="left:0;right:0;top:744px;text-align:center;font-size:32px;font-weight:600;${appear(t, 0.8)}"><span style="color:var(--green);font-weight:700">${f0}</span><span style="color:var(--text-2)"> · ${rest.join(' · ')}</span></div>
-      <div class="abs" style="left:0;right:0;top:808px;text-align:center;font-size:26px;color:var(--text-2);${appear(t, 0.9)}">Search the Extensions view for <span style="color:var(--text);font-weight:600">${EXTENSION.name}</span> (<span class="mono">${EXTENSION.id}</span>), then open the folder your data model lives in</div>`;
+      <div class="abs" style="left:0;right:0;top:196px;display:flex;justify-content:center;${appear(t, 0.05, { dy: 16 })}">${appIcon(168)}</div>
+      <div class="abs" style="left:0;right:0;top:396px;text-align:center;font-size:112px;font-weight:800;letter-spacing:-.035em;${appear(t, 0.15, { dy: 16 })}">${EXTENSION.name}</div>
+      <div class="abs" style="left:0;right:0;top:546px;text-align:center;font-size:56px;font-weight:700;letter-spacing:-.02em;color:var(--text);${appear(t, 0.3)}">${line}</div>
+      <div class="abs" style="left:0;right:0;top:690px;display:flex;justify-content:center;${appear(t, 0.5)}">
+        <span class="pill" style="font-size:28px;padding:12px 24px;gap:10px;background:var(--chip-green);border:2px solid var(--chip-green-border);color:var(--green);font-weight:700">${ICON.check({ size: 24 })}${FREE}</span></div>
+      <div class="abs mono" style="left:0;right:0;top:784px;text-align:center;font-size:24px;color:var(--text-2);${appear(t, 0.6)}">${EXTENSION.id}</div>`;
   },
 };

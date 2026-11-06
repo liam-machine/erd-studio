@@ -100,7 +100,7 @@
     "commands": [
       {
         "command": "erdStudio.drawFromDbt",
-        "title": "Draw from dbt…",
+        "title": "Import from dbt…",
         "category": "ERD Studio",
         "icon": "$(wand)"
       },
@@ -563,7 +563,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
         "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed"
       },
       {
@@ -707,8 +707,8 @@
           },
           {
             "id": "draw",
-            "title": "Draw from dbt",
-            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit, by hand or with your AI assistant.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "title": "Import from dbt",
+            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit, by hand or with your AI assistant.\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
             "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed",
             "media": {
               "svg": "media/walkthrough/draw.svg",

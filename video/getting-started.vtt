@@ -41,8 +41,8 @@ Keep it, and it's your diagram.
 Each table is now a DBML file, an open format, next to the code that builds it.
 
 11
-00:00:42.854 --> 00:00:46.092
-Review a change to the model in the same pull request.
+00:00:42.854 --> 00:00:45.807
+Change it, and Git shows exactly what changed.
 
 12
 00:00:46.542 --> 00:00:48.256
@@ -81,37 +81,53 @@ and a pre-tool hook makes sure it has, before any edit,
 so what it writes is a diagram you can see, right away.
 
 21
-00:01:19.699 --> 00:01:24.408
-Using dbt? Draw from dbt turns your models into a diagram.
+00:01:19.699 --> 00:01:24.421
+Here's the change: a new table file, and the line that links it to the orders table.
 
 22
-00:01:24.458 --> 00:01:27.857
-To check your design against them, click Run dbt parse.
+00:01:24.471 --> 00:01:27.432
+On the canvas, the new table and its relationship.
 
 23
-00:01:27.907 --> 00:01:32.819
-It writes manifest.json, a description of every model your project builds.
+00:01:29.299 --> 00:01:33.463
+The design change goes in the same pull request as the code that builds it,
 
 24
-00:01:32.869 --> 00:01:36.398
-The Physical tab shows what it describes, as a diagram.
+00:01:33.513 --> 00:01:35.661
+so your team reviews both together.
 
 25
-00:01:37.248 --> 00:01:40.577
-Compare with dbt marks every difference from your design.
+00:01:37.899 --> 00:01:42.820
+Using dbt? Import from dbt turns your models into a diagram.
 
 26
-00:01:41.027 --> 00:01:46.678
-Your repo is the single source of truth: just DBML files, no modelling database.
+00:01:42.870 --> 00:01:46.269
+To check your design against them, click Run dbt parse.
 
 27
-00:01:46.728 --> 00:01:49.932
-ERD Studio for Confluence reads them from GitHub,
+00:01:46.319 --> 00:01:51.231
+It writes manifest.json, a description of every model your project builds.
 
 28
-00:01:49.982 --> 00:01:52.988
-and shows the diagram to business users.
+00:01:51.281 --> 00:01:54.810
+The Physical tab shows what it describes, as a diagram.
 
 29
-00:01:54.327 --> 00:01:58.621
-ERD Studio is free to use in VS Code. Install it today.
+00:01:55.660 --> 00:01:58.989
+Compare with dbt marks every difference from your design.
+
+30
+00:01:59.439 --> 00:02:05.090
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+31
+00:02:05.140 --> 00:02:08.344
+ERD Studio for Confluence reads them from GitHub,
+
+32
+00:02:08.394 --> 00:02:11.400
+and shows the diagram to business users.
+
+33
+00:02:12.739 --> 00:02:15.898
+ERD Studio is free to use in VS Code.

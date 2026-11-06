@@ -60,7 +60,7 @@ export const SAMPLE_CODESPACES_URL = 'https://codespaces.new/liam-machine/erd-st
  * devcontainer and diagram are on its `main`: before that the link starts a
  * bare Codespace with no ERD Studio, no dbt and no diagram. The release order
  * is: publish this extension (the devcontainer installs the Marketplace build,
- * and the sample's README names Draw from dbt), merge the sample branch, then
+ * and the sample's README names Import from dbt), merge the sample branch, then
  * flip this and restore the walkthrough / README links in a follow-up release.
  */
 export const SAMPLE_CODESPACES_LIVE = false;
@@ -196,7 +196,7 @@ export interface GettingStartedStatus {
    */
   storage?: StartStorage;
   /**
-   * The start the folder suggests (`startIntentFor()`: Convert, Draw from
+   * The start the folder suggests (`startIntentFor()`: Convert, Import from
    * dbt, one of the three direct imports when the folder's quick look found
    * that kind of file, else a blank diagram); absent with no folder open.
    * Filled by the panel host. The start card's primary button and its reason
@@ -247,7 +247,7 @@ export interface SetupOutcome {
 /**
  * Which of the panel's three pages shows: `nofolder` (empty window: open a
  * folder), `logical` (a folder without dbt: design from scratch or DBML) or
- * `dbt` (a dbt project: Draw from dbt and the guided setup).
+ * `dbt` (a dbt project: Import from dbt and the guided setup).
  */
 export type GettingStartedPageMode = 'nofolder' | 'logical' | 'dbt';
 
@@ -1069,7 +1069,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     `data-modes="${modes.join(' ')}"${modes.includes(mode) ? '' : ' hidden'}`;
   /**
    * One start's button (`data-action="start"`). Inside a start group it is
-   * hidden until a status lists it; Draw from dbt also carries the dbt-only
+   * hidden until a status lists it; Import from dbt also carries the dbt-only
    * `data-modes`, so no status can make it reachable on a page without dbt.
    */
   const startButton = (action: StartAction, className: string, grouped: boolean): string => {

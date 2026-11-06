@@ -138,7 +138,7 @@ describe('startActionsFor', () => {
     expect(START_ACTION_COMMANDS.importDbmlFile).toBe('erdStudio.importDbml');
   });
 
-  it('puts Draw from dbt first in a dbt project', () => {
+  it('puts Import from dbt first in a dbt project', () => {
     expect(startActionsFor({ hasProject: true, hasDbt: true, storage: 'dbml' })).toEqual(['drawFromDbt', 'blank', 'import', 'example']);
   });
 
@@ -195,7 +195,7 @@ describe('erdStudio.start', () => {
     const keys = START_SURFACES.flatMap((from) => START_ACTIONS.map((action) => START_FEATURES[from][action]));
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) expect(FEATURES).toContain(key);
-    // The Welcome panel's Draw from dbt keeps the key it has always counted.
+    // The Welcome panel's Import from dbt keeps the key it has always counted.
     expect(START_FEATURES.welcome.drawFromDbt).toBe('welcomeDrawFromDbt');
     // The direct imports are named for the start, never for a file.
     expect(START_FEATURES.sidebar.importSqlDdl).toBe('sidebarImportSqlDdl');

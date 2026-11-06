@@ -680,7 +680,7 @@ describe('panel script', () => {
     const variants = (base: GettingStartedStatus): GettingStartedStatus[] => [
       base,
       { ...base, domainCount: 2 },
-      // A YAML project from before 2.0 (the Convert card), and a status listing every start: Draw from dbt
+      // A YAML project from before 2.0 (the Convert card), and a status listing every start: Import from dbt
       // is gated to the dbt page by its data-modes, so even a wrong list cannot show it elsewhere.
       { ...base, storage: 'yaml' },
       { ...base, starts: [...START_ACTIONS] },
@@ -1571,7 +1571,7 @@ describe('GettingStartedPanel', () => {
     expect(feature).not.toHaveBeenCalled();
   });
 
-  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Draw from dbt with dbt, only the example with no folder', async () => {
+  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Import from dbt with dbt, only the example with no folder', async () => {
     const deps = makeDeps();
     GettingStartedPanel.createOrShow(makeContext(), deps);
     const panel = vscode.window._webviewPanels[0];

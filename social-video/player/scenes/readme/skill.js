@@ -4,9 +4,13 @@
 // the other assistants). "just markdown" tags it on its word, "the model loads" names who reads
 // it, and on "renders as a diagram" the strip below shows the point: DBML written to the format
 // in the skill → a table on the canvas.
-// `hook`: in Claude Code only, the PreToolUse hook Set Up My AI Helper registers
-// (.claude/settings.local.json → .claude/skills/erd-studio/enforce-skill.sh). A Claude Code
-// transcript: the first Edit to a .erd-studio file in the session is denied with the hook's own
+// `hook`: the pre-tool hook Set Up My AI Helper registers in Claude Code, GitHub Copilot, Codex and
+// Gemini CLI (the assistant-hooks PR, docs/ai-assistants.md → "The safety check"; Cursor has no
+// hook yet and relies on the skill alone). The narration names the four and a "pre-tool hook in"
+// row at the foot of the transcript lights each on its name; the conditions (Codex asks you to
+// trust a new hook in /hooks, the Windows limits) are left to docs/ai-assistants.md;
+// the transcript itself is Claude Code's (.claude/settings.local.json →
+// .claude/skills/erd-studio/enforce-skill.sh), as the example: the first Edit to a .erd-studio file in the session is denied with the hook's own
 // reason (load the /erd-studio skill first), the skill loads, and the Edit goes through. The hook
 // only ever denies — once per session — and never approves anything (src/harness/CLAUDE.md); it
 // does not check that the skill was loaded, so the narration says it "tells your AI to load the
@@ -46,15 +50,15 @@ export default {
     const loadsAt = wordAt(scene, 'md', 'loads');
     const rendersAt = wordAt(scene, 'md', 'renders') - 0.2;
     const hookAt = wordAt(scene, 'hook', 'pre-tool') - 0.1;
-    const heldAt = wordAt(scene, 'hook', 'stops');
+    const heldAt = wordAt(scene, 'hook', 'pauses');
     const loadedAt = wordAt(scene, 'hook', 'to load') + 0.2;
     const toHook = easeOut(seg(t, H - 0.3, H + 0.2));
 
     let html = '';
     // ---- SKILL.md ----
-    // Shrinks to end exactly on a line boundary (head 64 + top 16 + 9 lines of 29), and the lines
+    // Shrinks to end exactly on a line boundary (head 64 + top 16 + 8 lines of 29, ending y 612 above the transcript at 650), and the lines
     // below it fade as it shrinks, so no line is ever cut through.
-    const KEEP = 9;
+    const KEEP = 8;
     const mdH = Math.round(470 - (470 - (64 + 16 + KEEP * 29)) * toHook);
     const lines = MD.map((l, i) => `<div style="height:29px;white-space:pre;overflow:hidden;text-overflow:ellipsis;${i >= KEEP ? `opacity:${(1 - toHook).toFixed(3)};` : ''}">${l[0] ? `<span style="display:inline-block;width:40px;color:var(--line-no);text-align:right;margin-right:18px">${i + 1}</span>` : ''}${mdLine(l)}</div>`).join('');
     html += card({
@@ -82,7 +86,7 @@ export default {
 
     // ---- hook: a Claude Code transcript ----
     if (t >= H - 0.3) {
-      const TY = 680;
+      const TY = 650;
       const row = (y, html2, at) => `<div class="abs mono" style="left:26px;right:26px;top:${y}px;display:flex;align-items:center;gap:12px;font-size:21px;white-space:nowrap;${appear(t, at, { dy: 0, dx: -10, dur: 0.3 })}">${html2}</div>`;
       const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
       let b = '';
@@ -92,11 +96,18 @@ export default {
         const held = t >= heldAt;
         b += `<div class="abs" style="left:26px;right:26px;top:66px;padding:12px 16px;border-radius:10px;background:${held ? '#2b230f' : '#1c1e23'};border:1px solid ${held ? '#6b5418' : '#3a3d45'};${appear(t, hookAt, { dy: 8, dur: 0.3 })}">
           <div style="display:flex;align-items:center;gap:12px;font-size:22px;font-weight:700;white-space:nowrap"><span style="color:var(--claude);display:flex">${ICON.lock({ size: 20 })}</span>PreToolUse hook<span class="mono" style="font-weight:400;font-size:19px;color:var(--text-2)">enforce-skill.sh</span>
-            ${held ? `<span class="pill" style="margin-left:auto;font-size:19px;padding:3px 12px;background:#3d3113;color:var(--amber);${appear(t, heldAt, { dy: 0 })}">${ICON.warn({ size: 18 })}first edit stopped</span>` : ''}</div>
+            ${held ? `<span class="pill" style="margin-left:auto;font-size:19px;padding:3px 12px;background:#3d3113;color:var(--amber);${appear(t, heldAt, { dy: 0 })}">${ICON.warn({ size: 18 })}first edit paused</span>` : ''}</div>
           ${held ? `<div class="mono" style="margin-top:8px;font-size:18px;color:#e9d6a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${appear(t, heldAt, { dy: 0 })}">load the /erd-studio skill (file-format rules) before editing .erd-studio files</div>` : ''}</div>`;
       }
       if (t >= loadedAt - 0.5) b += row(198, `${dot('var(--green)')}<span style="color:var(--text)">Skill</span><span style="color:var(--text-2)">(/erd-studio)</span><span style="color:var(--green);font-family:Inter;font-size:20px">loaded</span>${tick('ok')}`, loadedAt - 0.5);
       if (t >= loadedAt + 0.15) b += row(250, `${dot('var(--green)')}<span style="color:var(--text)">Edit</span><span style="color:var(--text-2)">(${editPath})</span>${tick('ok')}`, loadedAt + 0.15);
+      // The assistants that get the hook, each on its name.
+      const chip = (name, word) => {
+        const at = wordAt(scene, 'hook', word);
+        const on = t >= at;
+        return `<span class="pill" style="font-size:19px;padding:4px 14px;background:${on ? '#2a1d17' : 'transparent'};color:${on ? '#f3c3ab' : 'var(--text-3)'};border:1px solid ${on ? '#6b3f2a' : '#34363d'};${appear(t, Math.min(at, H), { dy: 0, dur: 0.25 })}">${name}</span>`;
+      };
+      b += `<div class="abs" style="left:26px;right:26px;top:316px;display:flex;align-items:center;gap:10px;white-space:nowrap;padding-top:12px;border-top:1px solid var(--row-line);${appear(t, H - 0.1, { dy: 0 })}"><span style="font-size:19px;color:var(--text-2);margin-right:4px">pre-tool hook in</span>${chip('Claude Code', 'Claude')}${chip('GitHub Copilot', 'Copilot')}${chip('Codex', 'Codex')}${chip('Gemini CLI', 'Gemini')}</div>`;
       html += card({
         x: X, y: TY, w: W, h: 1088 - TY, dots: true,
         tabs: [{ label: 'Claude Code', on: true, icon: `<span style="color:var(--claude)">${ICON.claude({ size: 20 })}</span>` }],

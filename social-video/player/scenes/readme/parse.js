@@ -1,4 +1,10 @@
-// readme · 13 · parse — "Using dbt? Run dbt parse." The same sales diagram, now in a dbt project
+// readme · 13 · parse — "If you use dbt, run dbt parse." `if`: the caveat first — comparing with
+// the physical model is for dbt projects, dbt is the first physical source and more are to follow.
+// Below the canvas a PHYSICAL MODEL panel: the dbt tile (its official mark; manifest.json ·
+// catalog.json, the files ERD Studio reads) lit on "dbt", "compared with your design" on
+// "physical model", and dashed "more to follow" tiles on their words (no source is named: none is
+// promised). It gives way to the terminal before Run dbt parse is pressed.
+// `parse`: the same sales diagram, now in a dbt project
 // (the stage tabs and Compare with dbt appear only there) before dbt has run: the logical stage's
 // ManifestHint strip (webview/components/Canvas/ManifestHint.tsx — its own words and its Run dbt
 // parse button). The pointer presses Run dbt parse on "Run"; the host runs `dbt parse` in a VS
@@ -7,7 +13,7 @@
 // come from the warehouse are catalog.json's, from dbt docs generate — not claimed here). dbt
 // parse needs no warehouse connection, so nothing here says it reads one. The terminal's two
 // output lines are illustrative (dbt's own opening lines, not a captured run).
-import { appear, card, caret, easeOut, ICON, jsonLine, path, pointer, seg, typed } from '../../lib.js';
+import { appear, appearFade, card, caret, easeOut, ICON, jsonLine, path, pointer, seg, typed } from '../../lib.js';
 import { FILE_COL, R, toolbar2, viewFileBtn, wordAt } from './story.js';
 
 const X = 64, W = 952;
@@ -30,6 +36,10 @@ export default {
     const everyAt = wordAt(scene, 'parse', 'every model');
     const pressAt = runAt + 0.15;
     const ran = t >= pressAt + 0.1;
+    const dbtAt = wordAt(scene, 'if', 'dbt');
+    const physAt = wordAt(scene, 'if', 'physical');
+    const moreAt = wordAt(scene, 'if', 'more');
+    const firstAt = wordAt(scene, 'if', 'first');
 
     // ---- the canvas, logical stage, with the hint strip ----
     let body = '';
@@ -79,11 +89,31 @@ export default {
       }
     }
 
-    // The pointer onto Run dbt parse.
+    // ---- if: the physical model, dbt first, more to follow ----
+    if (t < runAt) {
+      const gone = seg(t, runAt - 0.5, runAt - 0.1);   // p_parse's pause holds the panel past "more to follow"
+      const PY = 660, PH = 1088 - PY;
+      const tileBox = (inner, at, { dashed = false, w = 420 } = {}) => `<div style="flex:none;width:${w}px;height:220px;border-radius:16px;${dashed ? 'border:2px dashed #3a3d45;background:transparent;' : 'background:#13301f;border:2px solid #1f6b3a;'}display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;${appear(t, at, { dy: 12 })}">${inner}</div>`;
+      const dbtTile = tileBox(`<span style="width:84px;height:84px;border-radius:18px;background:#f4f5f7;display:flex;align-items:center;justify-content:center"><img src="/social-video/player/assets/logos/dbt.svg" width="60" height="60" style="display:block"></span>
+          <span style="font-size:30px;font-weight:800">dbt</span><span class="mono" style="font-size:19px;color:var(--text-2)">manifest.json · catalog.json</span>`, dbtAt);
+      const moreTile = tileBox(`<span style="width:84px;height:84px;border-radius:18px;border:2px dashed #4a4e53;display:flex;align-items:center;justify-content:center;color:var(--text-3)">${ICON.plus({ size: 36 })}</span>
+          <span style="font-size:28px;font-weight:700;color:var(--text-2)">more to follow</span>`, moreAt - 0.1, { dashed: true });
+      html += `<div class="abs" style="left:${X}px;top:${PY}px;width:${W}px;height:${PH}px;border-radius:18px;background:var(--card);border:1px solid var(--card-border);box-shadow:0 24px 60px #000a;${appearFade(t, dbtAt - 0.3, 1 - gone, { dy: 16 })}">
+        <div style="padding:22px 28px 0;display:flex;align-items:center;gap:14px;white-space:nowrap"><span style="font-size:21px;font-weight:800;letter-spacing:.08em;color:var(--green)">PHYSICAL MODEL</span>
+          ${t >= physAt - 0.1 ? `<span style="font-size:22px;color:var(--text-2);${appear(t, physAt - 0.1, { dy: 0, dx: -8 })}">compared with your design</span>` : ''}</div>
+        <div style="position:absolute;left:28px;right:28px;top:96px;display:flex;gap:28px;justify-content:center">${dbtTile}${moreTile}</div>
+        ${t >= firstAt - 0.1 ? `<div class="abs" style="left:0;right:0;bottom:30px;display:flex;justify-content:center;${appear(t, firstAt - 0.1, { dy: 8 })}"><span class="pill" style="font-size:22px;padding:6px 18px;background:#13301f;color:var(--green);border:1px solid #1f5a35">${ICON.check({ size: 18 })}dbt first</span></div>` : ''}
+      </div>`;
+    }
+
+    // The pointer onto Run dbt parse. It appears only once the PHYSICAL MODEL panel has gone
+    // (gone ends at runAt - 0.1), and from above the panel's box, so it never crosses the
+    // "more to follow" tile.
     const bx = X + W - 230, by = CY + 64 + 150 + 44;
-    if (t >= runAt - 0.9 && t < pressAt + 1.0) {
-      const pt = path(t, [{ t: runAt - 0.9, x: 640, y: 980 }, { t: pressAt - 0.02, x: bx, y: by }, { t: pressAt + 0.4, x: bx, y: by }, { t: pressAt + 1.0, x: bx - 120, y: by + 240 }]);
-      const op = Math.min(seg(t, runAt - 0.9, runAt - 0.6), 1 - seg(t, pressAt + 0.5, pressAt + 1.0));
+    const ptrFrom = runAt - 0.4;
+    if (t >= ptrFrom && t < pressAt + 1.0) {
+      const pt = path(t, [{ t: ptrFrom, x: 990, y: 612 }, { t: pressAt - 0.02, x: bx, y: by }, { t: pressAt + 0.4, x: bx, y: by }, { t: pressAt + 1.0, x: bx - 120, y: by + 240 }]);
+      const op = Math.min(seg(t, ptrFrom, ptrFrom + 0.25), 1 - seg(t, pressAt + 0.5, pressAt + 1.0));
       html += `<div class="abs" style="left:0;top:0;opacity:${op.toFixed(3)}">${pointer(pt.x, pt.y, t >= pressAt ? seg(t, pressAt, pressAt + 0.35) : 0)}</div>`;
     }
     return html;

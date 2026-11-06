@@ -1,6 +1,6 @@
 /**
  * Draft-first: building a Draft (docs/dev/draft-first.md §2, §13 P1) from an
- * import plan (the 257-table SQL fixture, the coffee shop), from Draw from
+ * import plan (the 257-table SQL fixture, the coffee shop), from Import from
  * dbt's draft, from every bundled example project, and the page protocol's
  * validation (`parseDraftToHost`, in the contract).
  */

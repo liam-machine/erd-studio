@@ -1,6 +1,6 @@
 /**
  * The one definition of a layer, for every prompt that explains one (New
- * Diagram, New Layer, Import DBML, Draw from dbt). Free of `vscode`.
+ * Diagram, New Layer, Import DBML, Import from dbt). Free of `vscode`.
  */
 
 /** What a layer is, in full: where there is room for a sentence (an input box prompt). */

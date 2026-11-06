@@ -187,7 +187,7 @@ describe('activate() with no folder open (empty window)', () => {
     );
   });
 
-  it('Draw from dbt gets the no-project stub and no legacy alias', async () => {
+  it('Import from dbt gets the no-project stub and no legacy alias', async () => {
     expect(CONTRIBUTED).toContain('erdStudio.drawFromDbt');
     expect(NO_LEGACY_ALIAS.has('erdStudio.drawFromDbt')).toBe(true);
     await activate(context);
@@ -752,11 +752,11 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
   });
 
-  it('Draw from dbt explains that it needs a dbt project and writes nothing', async () => {
+  it('Import from dbt explains that it needs a dbt project and writes nothing', async () => {
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
     expect(info).toHaveBeenCalledWith(
-      'Draw from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.',
+      'Import from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.',
     );
     expect(pick).not.toHaveBeenCalled();
     expect(listTree(ws)).toEqual([]);
@@ -2221,8 +2221,8 @@ describe('Welcome panel: first run', () => {
     for (const s of walkthrough.steps) expect(s.description, s.id).not.toContain('no lock-in');
     // The direct imports reuse the import picture: no new file in the VSIX.
     for (const id of ['importSemanticModel', 'importSqlDdl', 'importDbmlFile']) expect(step(id).media.svg).toBe('media/walkthrough/import-dbml.svg');
-    expect(step('draw').title).toBe('Draw from dbt');
-    expect(step('draw').description).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
+    expect(step('draw').title).toBe('Import from dbt');
+    expect(step('draw').description).toContain(`[Import from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
     expect(step('convert').title).toBe('Convert to DBML');
     expect(step('convert').description).toContain(`[Convert to DBML…](${startCommandLink('convert', 'walkthrough')})`);
     // An empty window: Open Folder…, and the example among the more ways to start (it lands in a folder of its own).
@@ -2398,7 +2398,7 @@ describe('erdStudio.drawFromDbt', () => {
     expect(count('dbtSemantic.drawFromDbt')).toBe(0);
   });
 
-  /** Run Draw from dbt from the palette to its draft (the top-ranked folder, nothing asked). */
+  /** Run Import from dbt from the palette to its draft (the top-ranked folder, nothing asked). */
   async function drawToDraft() {
     const run = vscode.commands.executeCommand('erdStudio.drawFromDbt');
     const draft = await nextDraft();
@@ -2616,7 +2616,7 @@ describe('ERD Studio diagrams status bar item', () => {
     expect(quickPick).toHaveBeenCalledTimes(1);
   });
 
-  it('is hidden with no diagrams and appears once Draw from dbt creates one', async () => {
+  it('is hidden with no diagrams and appears once Import from dbt creates one', async () => {
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
     const items = spyStatusBar();
     await activate(context);

@@ -5,7 +5,7 @@
  * relationships and, from the file's own `erd_layout` when it has one, the
  * canvas positions and sticky notes. The reading half is
  * `src/services/dbmlImportParse.ts`; the command writes what this plans the
- * way Draw from dbt writes a draft (`saveTable`, the subject area file created
+ * way Import from dbt writes a draft (`saveTable`, the subject area file created
  * with `wx`, rollback on failure).
  *
  * The mapping is the rich export's (`toDbmlRich` in `@erd-studio/core`) in
@@ -152,7 +152,7 @@ export interface PlanDbmlImportInput {
   /**
    * Relationships go to their FK tables' library files (true), or into the
    * new subject area's `logical.relationships` (false). The command decides
-   * with `usesLibraryRelationships`, as Draw from dbt does.
+   * with `usesLibraryRelationships`, as Import from dbt does.
    */
   libraryRelationships: boolean;
   /** `drawnDiagramCopies(...)` of the project's other diagrams: a link one keeps a copy of stays in this file (see `routeToLibrary`). */

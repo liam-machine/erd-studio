@@ -211,7 +211,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
 // ---------------------------------------------------------------------------
 
 export interface ProjectSummaryInput {
-  /** `listDraftModels()` — the dbt models Draw from dbt can offer (yml ∪ manifest, minus disabled). */
+  /** `listDraftModels()` — the dbt models Import from dbt can offer (yml ∪ manifest, minus disabled). */
   models: readonly DraftModelEntry[];
   /** For each model's schema (a medallion schema token counts as a layer). */
   manifest?: ManifestData;
@@ -728,7 +728,7 @@ export interface GettingStartedDeps {
    * `known()` at once (the first status), `refresh()` after the bounded look
    * at the folder (a second status when it changed the suggestion).
    * Optional: without it, the suggestion comes from the status alone
-   * (Convert, Draw from dbt or a blank diagram; no look).
+   * (Convert, Import from dbt or a blank diagram; no look).
    */
   startIntent?: {
     known(): StartIntent | undefined;

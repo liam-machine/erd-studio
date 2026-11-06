@@ -25,7 +25,7 @@ const STARTER = wv('select.new-model-dialog__select');
 const TERMINAL = wb('.part.panel .xterm');
 /** Where the drawn pointer waits off camera: past the window's right edge (composite clips it there). */
 const OFF_WINDOW = { x: 1480, y: 300 };
-/** The Diagrams view's New… menu (its title bar's +) and its Draw from dbt… item. */
+/** The Diagrams view's New… menu (its title bar's +) and its Import from dbt… item. */
 const NEW_MENU = wb('.part.sidebar .pane-header .action-label[aria-label^="New…"]');
 const menuItem = (re) => wb('.monaco-menu .action-label', { re });
 
@@ -131,7 +131,7 @@ export const TAKES = {
       // a first-open toast ("This project has 1 ERD Studio diagram", which can take a few seconds) is not part of the tour
       const notNow = wb('.notifications-toasts .monaco-button', { text: 'Not now' });
       await d.waitFor(notNow, 8000).then(() => d.click(notNow, { ms: 1 })).catch(() => {});
-      // the side bar stays open (its New… menu is where Draw from dbt is); the scene hides it before
+      // the side bar stays open (its New… menu is where Import from dbt is); the scene hides it before
       // Run dbt parse, so the comparison's marks and panel get the window's width
       await d.click(button('Fit'), { ms: 1 });
       await sleep(800);
@@ -351,10 +351,10 @@ export const SCENES = {
       await d.glide(OFF_WINDOW, 1000, { hover: false });
     },
   },
-  // "Using dbt? Draw from dbt turns your models into a diagram. To check your design against them,
+  // "Using dbt? Import from dbt turns your models into a diagram. To check your design against them,
   // click Run dbt parse. It writes manifest.json, a description of every model your project builds.
   // The Physical tab shows what it describes, as a diagram. Compare with dbt marks every difference
-  // from your design." The side bar's New… menu, its Draw from dbt… item pointed at (not run: this
+  // from your design." The side bar's New… menu, its Import from dbt… item pointed at (not run: this
   // project's diagram exists already), the side bar hidden; then dbt runs for real in its terminal
   // (sped up while it does, if it takes longer than its line), the terminal closed as it finishes,
   // Open Physical view held while its line plays, back to Logical and Compare with dbt.
@@ -362,9 +362,9 @@ export const SCENES = {
     async run(d, { at, beats, ff }) {
       await at(beats.draw.t + 0.9);
       await d.click(NEW_MENU, { ms: 600, synthetic: true });
-      const draw = menuItem('^Draw from dbt');
+      const draw = menuItem('^Import from dbt');
       await d.waitFor(draw, 5000);
-      await at(beats.draw.t + 1.9);   // "Draw from dbt"
+      await at(beats.draw.t + 1.9);   // "Import from dbt"
       await d.moveTo(draw, { ms: 550, dx: 0.6 });   // past the label's end: the pointer does not cover it
       await at(beats.draw.end + 0.1);
       await d.escape();

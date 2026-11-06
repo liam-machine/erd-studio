@@ -1,7 +1,11 @@
 // readme · 12 · aiwrite — "Your AI writes the same files." `write`: a Claude Code session is asked
 // for a date dimension; it writes dim_date.dbml and edits the relationships and diagram files (the
 // real files an added, linked table touches), and the canvas below shows the new table and its
-// relationship, with "review it, then commit", before anything is committed.
+// relationship, with "review it, then commit", before anything is committed. Claude Code is the
+// example: on "Whichever assistant" a pill on the session's tab row names the others the same
+// skill works in. The scene holds briefly (minDur) on the canvas with the new table lit, and keeps
+// moving through the hold — a light runs along the new Ref and the table's glow breathes — so the
+// change the AI made reads before the dbt chapter without a still, silent frame.
 import { appear, card, caret, COLORS, easeOut, edge, ICON, lerp, node, rowY, seg, spinner, tick, typed } from '../../lib.js';
 import { FILE_COL, PATH, R, wordAt } from './story.js';
 
@@ -31,8 +35,14 @@ export default {
       html += card({
         x: X, y: TY, w: W, h: TH, dots: true,
         tabs: [{ label: 'Claude Code', on: true, icon: `<span style="color:var(--claude)">${ICON.claude({ size: 20 })}</span>` }],
-        crumb: R.repo, headStyle: 'font-size:22px', body: tb, style: appear(t, 0, { dy: 30, dur: 0.4 }),
+        // No repo crumb: the "or GitHub Copilot …" pill sits on the tab row.
+        crumb: '', headStyle: 'font-size:22px', body: tb,
+        style: appear(t, 0, { dy: 30, dur: 0.4 }),
       });
+      const anyAt = wordAt(scene, 'write', 'assistant') - 0.2;
+      if (t >= anyAt) {
+        html += `<div class="abs" style="right:${1080 - (X + W) + 18}px;top:${TY + 13}px;${appear(t, anyAt, { dy: 0, dx: 10 })}"><span class="pill" style="font-size:18px;padding:5px 14px;background:#1c1e23;color:var(--text-2);border:1px solid #34363d">or GitHub Copilot · Codex · Gemini CLI · Cursor</span></div>`;
+      }
 
       // The canvas: the new table and its relationship, not committed yet.
       const CY = TY + TH + 20, CH = 1088 - CY;
@@ -54,14 +64,25 @@ export default {
       let g = '';
       g += edge([[CUX + CUW, cy1], [cmid, cy1], [cmid, fy1], [FX, fy1]], { color: COLORS.logical, one: [CUX + CUW + 6, cy1 - 10], many: [FX - 22, fy1 - 8] });
       const np = easeOut(seg(t, newAt, newAt + 0.4));
+      const refPts = [[FX + FW, ey1], [mid, ey1], [mid, ey2], [DX, ey2]];
       if (np > 0) {
-        g += edge([[FX + FW, ey1], [mid, ey1], [mid, ey2], [DX, ey2]], { color: COLORS.logical, progress: easeOut(seg(t, newAt + 0.3, newAt + 0.8)), many: [FX + FW + 6, ey1 - 10], one: [DX - 20, ey2 - 10] });
+        g += edge(refPts, { color: COLORS.logical, progress: easeOut(seg(t, newAt + 0.3, newAt + 0.8)), many: [FX + FW + 6, ey1 - 10], one: [DX - 20, ey2 - 10] });
+      }
+      // Through the hold: a green light runs along the new Ref, order_date → dim_date, every 1.4 s.
+      const pulseFrom = newAt + 1.0;
+      if (t >= pulseFrom) {
+        let len = 0;
+        for (let i = 1; i < refPts.length; i++) len += Math.hypot(refPts[i][0] - refPts[i - 1][0], refPts[i][1] - refPts[i - 1][1]);
+        const ph = ((t - pulseFrom) % 1.4) / 1.4;
+        const head = ph * (len + 90);
+        const d = refPts.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join(' ');
+        g += `<svg class="abs" style="left:0;top:0;overflow:visible;opacity:${(Math.min(1, seg(t, pulseFrom, pulseFrom + 0.3))).toFixed(3)}" width="1" height="1"><path d="${d}" fill="none" stroke="#4ade80" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0 ${Math.max(0, head - 90).toFixed(1)} ${Math.min(90, head).toFixed(1)} ${(len + 200).toFixed(1)}" style="filter:drop-shadow(0 0 8px rgba(34,197,94,.8))"/></svg>`;
       }
       g += node({ x: CUX, y: ny, w: CUW, name: R.dim_customer.name, layer: R.badge, grain: R.dim_customer.grain, cols: R.dim_customer.cols });
       g += node({ x: FX, y: ny, w: FW, name: R.fct_order.name, layer: R.badge, grain: R.fct_order.grain, cols: fcols });
       if (np > 0) {
         g += node({ x: DX, y: ny, w: DW, name: R.dim_date.name, layer: R.badge, grain: R.dim_date.grain, cols: R.dim_date.cols,
-          style: `opacity:${np.toFixed(3)};transform:translateY(${lerp(18, 0, np).toFixed(1)}px);box-shadow:0 0 0 ${(6 * (1 - 0.5 * seg(t, newAt + 1, newAt + 2))).toFixed(1)}px rgba(34,197,94,.45),0 18px 44px #0009;border-color:var(--green)` });
+          style: `opacity:${np.toFixed(3)};transform:translateY(${lerp(18, 0, np).toFixed(1)}px);box-shadow:0 0 0 ${(t < newAt + 1 ? 6 : 4.5 + 1.5 * Math.cos((t - newAt - 1) * Math.PI / 0.7)).toFixed(1)}px rgba(34,197,94,.45),0 18px 44px #0009;border-color:var(--green)` });
         g += `<div class="abs" style="left:${DX + DW - 120}px;top:${ny - 50}px;${appear(t, newAt + 0.2, { dy: 6 })}"><span class="pill" style="font-size:24px;padding:4px 14px;background:#13301f;color:var(--green);border:1px solid #1f6b3a">${ICON.plus({ size: 18 })}new</span></div>`;
       }
       cv += `<div class="abs" style="left:${ox}px;top:${oy}px;width:1260px;height:420px;transform:scale(${S8});transform-origin:0 0">${g}</div>`;
