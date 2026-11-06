@@ -126,7 +126,7 @@ export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
   const args = parseStartArgs(arg);
   if (args) {
     recordStart(args.action, args.from);
-    await deps.executeCommand(START_ACTION_COMMANDS[args.action], ...startActionArgs(args.action));
+    await runStartCommand(deps, args.action);
     return;
   }
   // "More ways to start…" under a surface's button: the other starts, counted as that surface's.
@@ -140,5 +140,15 @@ export async function runStart(arg: unknown, deps: StartDeps): Promise<void> {
     return;
   }
   if (from) recordStart(choice.action, from);
-  await deps.executeCommand(START_ACTION_COMMANDS[choice.action], ...startActionArgs(choice.action));
+  await runStartCommand(deps, choice.action);
+}
+
+/** Run a start's fixed command; a throw counts `startCommandFailed` (B18) and is rethrown unchanged. */
+async function runStartCommand(deps: StartDeps, action: StartAction): Promise<void> {
+  try {
+    await deps.executeCommand(START_ACTION_COMMANDS[action], ...startActionArgs(action));
+  } catch (err) {
+    telemetry.error('startCommandFailed');
+    throw err;
+  }
 }

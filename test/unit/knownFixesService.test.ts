@@ -112,6 +112,19 @@ describe('startKnownFixes', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['Update', 'knownFixUpdate'],
+    [undefined, 'knownFixDismissed'],
+  ] as const)('records the prompt and its answer (%s) as features (B18)', async (picked, answer) => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(picked as never);
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const feature = vi.spyOn(telemetry, 'feature');
+    start();
+    telemetry.error('domainLoadJson');
+    await settle();
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(['knownFixOffered', answer]);
+  });
+
   it('Update opens ERD Studio in the Extensions view', async () => {
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Update' as never);
     const run = vi.spyOn(vscode.commands, 'executeCommand');
@@ -139,11 +152,13 @@ describe('startKnownFixes', () => {
     fs.mkdirSync(path.join(root, `${EXTENSION_ID}-1.7.0`));
     const shown = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Reload Window' as never);
     const run = vi.spyOn(vscode.commands, 'executeCommand');
+    const feature = vi.spyOn(telemetry, 'feature');
     start('1.6.9', path.join(root, `${EXTENSION_ID}-1.6.9`));
     telemetry.error('domainLoadJson');
     await settle();
     expect(shown).toHaveBeenCalledWith(expect.any(String), 'Reload Window', 'Not now');
     expect(run).toHaveBeenCalledWith('workbench.action.reloadWindow');
+    expect(feature.mock.calls.map((c) => c[0])).toEqual(['knownFixOffered', 'knownFixReload']);
   });
 
   it('stops listening once the extension is disposed', async () => {

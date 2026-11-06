@@ -57,7 +57,7 @@ export function refuseOverlaps<T>(file: string, write: () => T): T {
     return write();
   } catch (err) {
     if (err instanceof Error && !(err instanceof DbmlEditRefused) && err.message.startsWith('DBML writer: overlapping')) {
-      throw new DbmlEditRefused(file, `ERD Studio could not apply this change to ${file} safely, so nothing was written. Make the change in the file by hand.`);
+      throw new DbmlEditRefused(file, `ERD Studio could not apply this change to ${file} safely, so nothing was written. Make the change in the file by hand.`, undefined, 'overlap');
     }
     throw err;
   }

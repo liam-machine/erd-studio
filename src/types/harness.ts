@@ -77,4 +77,8 @@ export interface RecommendedInstallResult {
    */
   skippedHooks?: SkippedAssistantHook[];
   error?: string;
+  /** `failed`: the skill folder whose install failed, for usage telemetry (B16). */
+  failedTarget?: 'claude' | 'agents';
+  /** `failed`: the failure's errno (`EACCES`, …) when it had one; never a path. */
+  errno?: string;
 }

@@ -172,6 +172,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **The “Welcome to ERD Studio” dialog** that covered a diagram the first time you opened one. The Get Started walkthrough and the **ERD Studio Tour** tab cover the same ground.
 
 ### Fixed
+- **The Diagrams view no longer shows its empty start buttons when listing your diagrams fails.** It keeps saying "Loading diagrams…" instead of offering New Diagram over a project that may already have diagrams; the failure is in the ERD Studio log.
 - **The canvas's relationship count matches the lines it draws.** The "N relationships" at the bottom left no longer counts a relationship whose other table is not on the diagram (an old diagram file can still list one).
 - **Import DBML and Open Example Diagram never end in VS Code's generic "command failed" (#236).** A problem in ERD Studio during an import (Import SQL DDL… and Import Semantic Model… included) now says it is ERD Studio's, not yours, and whether anything was changed, with **Send Feedback** and **Try Again**. When the diagram was already saved and only opening it failed, the message says it was created and offers **Open Diagram**.
 - **Export All Diagrams offers Open File for a diagram it skipped because of a mistake in its file (#236),** at the mistake's line, beside Send Feedback when a skip was ERD Studio's.

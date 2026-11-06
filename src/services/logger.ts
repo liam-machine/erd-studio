@@ -53,12 +53,48 @@ const BUFFERED: ReadonlySet<LogLevel> = new Set<LogLevel>(['info', 'warn', 'erro
 
 let sink: LogSink | undefined;
 const buffer: string[] = [];
+/** Told the source of every `error` line (see {@link setErrorHook}); never its text. */
+let errorHook: ((source: string) => void) | undefined;
+/** Set while the hook runs, so a hook that logs an error cannot recurse. */
+let inErrorHook = false;
 
 /** Plug in (or, with `undefined`, remove) the sink. Returns the previous one. */
 export function setLogSink(next: LogSink | undefined): LogSink | undefined {
   const previous = sink;
   sink = next;
   return previous;
+}
+
+/**
+ * Plug in (or, with `undefined`, remove) the hook told about every `error`
+ * line, with only its **source**: the `[tag]` the line starts with (a
+ * `createLogger` scope, or the tag an unscoped line names), else `''`. The
+ * text after the tag is never passed. Usage telemetry maps the source to a
+ * fixed area code (`loggedErrorCodes`); the CLI, the worker and the MCP
+ * server never set one. A hook that throws, or logs an error itself, never
+ * reaches the caller.
+ */
+export function setErrorHook(hook: ((source: string) => void) | undefined): void {
+  errorHook = hook;
+}
+
+/** The tag an error line starts with (`[Canvas] …` → `Canvas`), else `''`. */
+export function logSourceOf(message: string): string {
+  const match = typeof message === 'string' ? /^\[([^\]\r\n]{1,60})\]/.exec(message) : null;
+  return match ? match[1] : '';
+}
+
+function tellErrorHook(message: string): void {
+  const hook = errorHook;
+  if (!hook || inErrorHook) return;
+  inErrorHook = true;
+  try {
+    hook(logSourceOf(message));
+  } catch {
+    // Counting a failure must never become one.
+  } finally {
+    inErrorHook = false;
+  }
 }
 
 /** Whether a sink is plugged in (callers may skip building costly detail without one). */
@@ -107,6 +143,7 @@ export function writeLog(
   } catch {
     // A line that cannot be formatted is not worth a crash.
   }
+  if (level === 'error') tellErrorHook(message);
   if (sink) {
     try {
       sink[level](message, ...args);

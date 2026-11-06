@@ -2007,7 +2007,8 @@ describe('getting-started telemetry', () => {
     await runSetupAiHelper(setupDeps({
       results: [{ status: 'failed', unmanaged: [], filesWritten: [], targets: ['claude'], error: 'disk full' }],
     }).deps);
-    expect(keys(error)).toEqual(['setupHarnessFailed']);
+    // No failed target or errno reported: the total only (B16).
+    expect(keys(error)).toEqual(['setupHarnessFailed', 'harnessInstallFailed']);
 
     error.mockClear();
     await runSetupAiHelper(setupDeps({ launcherOk: false }).deps);
@@ -2018,6 +2019,29 @@ describe('getting-started telemetry', () => {
     deps.harness.installRecommended = () => { throw new Error('boom'); };
     await runSetupAiHelper(deps);
     expect(keys(error)).toEqual(['setupFailed']);
+  });
+
+  it('setup: a failed install names its target and write class, never the message (B16)', async () => {
+    const { feature, error } = spies();
+    await runSetupAiHelper(setupDeps({
+      results: [{
+        status: 'failed', unmanaged: [], filesWritten: [], targets: ['claude', 'agents'],
+        error: "EACCES: permission denied, open '/secret/path/SKILL.md'", failedTarget: 'agents', errno: 'EACCES',
+      }],
+    }).deps);
+    expect(keys(error)).toEqual(['setupHarnessFailed', 'harnessInstallFailed', 'harnessInstallFailedAgents']);
+    expect(keys(feature)).toEqual(['writeFailedPermission']);
+  });
+
+  it('setup: hooks left out on purpose are presence flags by reason and by tool (B16)', async () => {
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await runSetupAiHelper(setupDeps({
+      results: [{
+        status: 'unchanged', unmanaged: [], filesWritten: [], targets: ['agents'],
+        skippedHooks: [{ id: 'copilot', reason: 'jsonc' }, { id: 'gemini', reason: 'jsonc' }],
+      }],
+    }).deps);
+    expect(featureOnce.mock.calls.map((c) => c[0])).toEqual(['hookSkippedJsonc', 'hookSkippedCopilot', 'hookSkippedGemini']);
   });
 
   it('setup: a clean run records no error', async () => {
@@ -2110,6 +2134,43 @@ describe('getting-started telemetry', () => {
     info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(undefined);
     await trySampleProject();
     expect(keys(error)).toEqual(['sampleCloneFailed']);
+  });
+
+  it('Try the sample: a git.clone that resolves, a zip and the GitHub page are each counted (B18)', async () => {
+    const { feature } = spies();
+    vscode._setMockExtensions(['vscode.git']);
+    vscode.commands.registerCommand('git.clone', vi.fn(async () => undefined));
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never);
+    vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleCloned']);
+
+    feature.mockClear();
+    vscode._resetRegisteredCommands();
+    vscode._setMockExtensions([]);
+    info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce('Download ZIP' as never);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleNoGit', 'trySampleZip']);
+
+    feature.mockClear();
+    info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(SAMPLE_OPEN_ON_GITHUB_ACTION as never);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleNoGit', 'trySampleGithub']);
+  });
+
+  it('a Welcome button whose handler throws names the button, beside welcomePanelFailed (B18)', async () => {
+    const { error } = spies();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    GettingStartedPanel.createOrShow(makeContext(), makeDeps());
+    const panel = vscode.window._webviewPanels[0];
+    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, () => { throw new Error('/private/path broke'); });
+    vscode.commands.registerCommand(START_ACTION_COMMANDS.blank, () => { throw new Error('boom'); });
+
+    await panel._simulateMessage({ type: 'trySample' });
+    await vi.waitFor(() => expect(keys(error)).toEqual(['welcomePanelFailed', 'welcomeFailedSample']));
+    error.mockClear();
+    await panel._simulateMessage({ type: 'start', action: 'blank' });
+    await vi.waitFor(() => expect(keys(error)).toEqual(['welcomePanelFailed', 'welcomeFailedStart']));
   });
 });
 

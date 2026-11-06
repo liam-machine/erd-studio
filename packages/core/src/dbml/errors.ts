@@ -12,6 +12,13 @@ export class DbmlEditRefused extends Error {
     message: string,
     /** 1-based line of the problem, when there is one. */
     readonly line?: number,
+    /**
+     * Why, when a host needs to tell: `overlap` when a writer's own edits
+     * overlapped (a writer bug, refused by `refuseOverlaps`) rather than
+     * anything in the file. Optional; absent from older cores and from every
+     * other refusal. The message is the same either way.
+     */
+    readonly reason?: 'overlap' | 'other',
   ) {
     super(message);
     this.name = 'DbmlEditRefused';

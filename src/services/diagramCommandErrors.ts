@@ -24,6 +24,7 @@ import {
   projectRelative,
 } from './commandErrors';
 import { LayersFileUnreadableError } from './layerService';
+import type { TelemetryErrorCode, TelemetryFeature } from './telemetryPayload';
 
 /** Reveals the folder a write was refused in. */
 export const SHOW_FOLDER_BUTTON = 'Show Folder';
@@ -41,6 +42,11 @@ export interface CommandFailure {
   /** Where Open File puts the cursor. */
   line?: number;
   column?: number;
+  /**
+   * Internal, never shown: the usage-telemetry key `showCommandFailure`
+   * records for this failure (B10), an error code or a feature. Fixed keys only.
+   */
+  code?: TelemetryErrorCode | TelemetryFeature;
 }
 
 /** The commands' titles, as the sidebar and palette say them. */
@@ -49,6 +55,16 @@ export const DELETE_DIAGRAM_TITLE = 'Delete Diagram';
 export const RENAME_DIAGRAM_TITLE = 'Rename Diagram';
 export const SET_UP_TITLE = 'Set up ERD Studio';
 export const SELECTORS_TITLE = 'Regenerate dbt selectors.yml';
+
+/** The usage-telemetry code of a write failure, by the command it stopped (B10). */
+const WRITE_FAILURE_CODES: Readonly<Record<string, TelemetryErrorCode>> = {
+  [NEW_DIAGRAM_TITLE]: 'newDiagramWriteFailed',
+};
+
+/** `failure` with its usage-telemetry code (unless it already has one). */
+function withCode(failure: CommandFailure, code: TelemetryErrorCode | TelemetryFeature | undefined): CommandFailure {
+  return code === undefined || failure.code !== undefined ? failure : { ...failure, code };
+}
 
 /**
  * A write the environment refused (a folder the user may not write, a full
@@ -63,23 +79,24 @@ export function writeFailure(
 ): CommandFailure {
   const failure = classifyWriteFailure(err);
   const retry = ctx.retry ? [TRY_AGAIN_BUTTON] : [];
+  const code = Object.prototype.hasOwnProperty.call(WRITE_FAILURE_CODES, title) ? WRITE_FAILURE_CODES[title] : undefined;
   if (failure === 'other') {
-    return { title, message: oursMessage(title, ctx.doing, clause(ctx.outcome)), buttons: [SEND_FEEDBACK_BUTTON, ...retry], doing: ctx.doing };
+    return withCode({ title, message: oursMessage(title, ctx.doing, clause(ctx.outcome)), buttons: [SEND_FEEDBACK_BUTTON, ...retry], doing: ctx.doing }, code);
   }
   if (failure === 'disk-full') {
-    return { title, message: `${title}: the disk is full. Free up some space, then try again. ${ctx.outcome}`, buttons: retry };
+    return withCode({ title, message: `${title}: the disk is full. Free up some space, then try again. ${ctx.outcome}`, buttons: retry }, code);
   }
   // The folder the write was refused in: the parent of what the error names
   // (mkdir names the folder it could not make, a write the file).
   const at = failedPath(err);
   const folder = at ? path.dirname(at) : path.dirname(ctx.target);
-  return {
+  return withCode({
     title,
     message: `${title}: ERD Studio isn't allowed to write to ${shownFolder(ctx.workspaceRoot, folder)}. ` +
       `Check the folder's permissions, then try again. ${ctx.outcome}`,
     buttons: [SHOW_FOLDER_BUTTON, ...retry],
     target: folder,
-  };
+  }, code);
 }
 
 /** `layers.json` could not be read or written, for the layer commands. */
@@ -89,6 +106,7 @@ export function layersFailure(
   ctx: { workspaceRoot: string; layersPath: string; doing: string; outcome: string },
 ): CommandFailure {
   if (err instanceof LayersFileUnreadableError) {
+    // The user's own mistake in the file: said in words, not counted as a failure.
     if (!err.cannotRead) return layersFileMistake(title, ctx);
     const shown = projectRelative(ctx.workspaceRoot, ctx.layersPath);
     return {
@@ -96,9 +114,13 @@ export function layersFailure(
       message: `${title}: ERD Studio can't read ${shown}, so ${clause(ctx.outcome)}. Check the file's permissions, then try again.`,
       buttons: [SHOW_FILE_BUTTON],
       target: ctx.layersPath,
+      code: 'layersFileFailed',
     };
   }
-  return writeFailure(title, err, { workspaceRoot: ctx.workspaceRoot, target: ctx.layersPath, doing: ctx.doing, outcome: ctx.outcome, retry: false });
+  return withCode(
+    writeFailure(title, err, { workspaceRoot: ctx.workspaceRoot, target: ctx.layersPath, doing: ctx.doing, outcome: ctx.outcome, retry: false }),
+    'layersFileFailed',
+  );
 }
 
 /** `layers.json` has a mistake in it, so ERD Studio won't overwrite it with its default layers. */
@@ -130,6 +152,7 @@ export function deleteFailure(name: string, filePath: string, err: unknown): Com
       message: `"${name}" couldn't be deleted: another program may have it open, or ERD Studio isn't allowed to change that folder. Nothing was deleted.`,
       buttons: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
       target: filePath,
+      code: 'deleteDiagramFailed',
     };
   }
   const doing = 'while deleting the file';
@@ -138,6 +161,7 @@ export function deleteFailure(name: string, filePath: string, err: unknown): Com
     message: oursMessage(DELETE_DIAGRAM_TITLE, doing, 'nothing was deleted'),
     buttons: [SEND_FEEDBACK_BUTTON, TRY_AGAIN_BUTTON],
     doing,
+    code: 'deleteDiagramFailed',
   };
 }
 
@@ -147,6 +171,7 @@ export function unsavedSaveFailure(name: string, operation: 'deleting' | 'renami
     title: operation === 'deleting' ? DELETE_DIAGRAM_TITLE : RENAME_DIAGRAM_TITLE,
     message: `"${name}" couldn't be saved, so it wasn't ${operation === 'deleting' ? 'deleted' : 'renamed'}. Your changes are still in its tab.`,
     buttons: [SHOW_FILE_BUTTON],
+    code: operation === 'deleting' ? 'deleteDiagramFailed' : 'renameDiagramFailed',
   };
 }
 
@@ -156,13 +181,17 @@ export function renameReadFailure(filePath: string, err: unknown, workspaceRoot:
   const problem = describeDiagramFileProblem(err, filePath, shown);
   if (!problem) {
     const doing = 'while reading the diagram file';
-    return { title: RENAME_DIAGRAM_TITLE, message: oursMessage(RENAME_DIAGRAM_TITLE, doing, 'nothing was changed'), buttons: [SEND_FEEDBACK_BUTTON], doing };
+    return {
+      title: RENAME_DIAGRAM_TITLE, message: oursMessage(RENAME_DIAGRAM_TITLE, doing, 'nothing was changed'), buttons: [SEND_FEEDBACK_BUTTON], doing,
+      code: 'renameDiagramFailed',
+    };
   }
   return {
     title: RENAME_DIAGRAM_TITLE,
     message: `${shown} can't be renamed because the diagram file has a problem: ${problem.reason}.`,
     buttons: problem.openable ? [OPEN_FILE_BUTTON] : [],
     target: filePath,
+    code: 'renameDiagramFailed',
     ...(problem.line !== undefined ? { line: problem.line } : {}),
     ...(problem.column !== undefined ? { column: problem.column } : {}),
   };
@@ -176,6 +205,7 @@ export function renameRefused(oldName: string, newName: string): CommandFailure 
       "or ERD Studio isn't allowed to write to that folder. Nothing was changed.",
     buttons: [TRY_AGAIN_BUTTON, SEND_FEEDBACK_BUTTON],
     doing: 'while renaming the file',
+    code: 'renameDiagramFailed',
   };
 }
 

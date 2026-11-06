@@ -1623,7 +1623,8 @@ export function heartbeatDue(state: DailyCounters, today: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(state.day)) return false;
   const age = daysBetween(state.day, today);
   if (!(age >= 1 && age <= MAX_HEARTBEAT_AGE_DAYS)) return false;
-  if (state.activation === null) return false;
+  // An activation that threw before it recorded its outcome is still sent (B4).
+  if (state.activation === null && !((state.errors.activationFailed ?? 0) > 0)) return false;
   return (
     state.activations > 0 ||
     state.canvasOpens > 0 ||

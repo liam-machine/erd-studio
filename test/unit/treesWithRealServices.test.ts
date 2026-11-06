@@ -273,6 +273,19 @@ describe('Table Library tree with the real library', () => {
     expect(loading.mock.calls).toEqual([[false]]);
     provider.dispose();
   });
+
+  it('a Subject Areas listing that throws is counted and keeps "Loading diagrams…", never the empty start (B18)', () => {
+    const { subjectAreaService, layerService } = services();
+    const loading = vi.fn();
+    const listFailed = vi.fn();
+    const provider = new SubjectAreaTreeProvider(subjectAreaService, layerService, root, '.erd-studio', loading, undefined, undefined, listFailed);
+    vi.spyOn(layerService, 'getAllLayers').mockImplementation(() => { throw new Error('layers.json unreadable'); });
+    expect(() => provider.getChildren()).toThrow('layers.json unreadable');
+    expect(listFailed).toHaveBeenCalledTimes(1);
+    expect(loading).not.toHaveBeenCalled();
+    expect(provider.isLoading()).toBe(true);
+    provider.dispose();
+  });
 });
 
 describe('both trees log how long a render took (debug, in the ERD Studio log)', () => {
