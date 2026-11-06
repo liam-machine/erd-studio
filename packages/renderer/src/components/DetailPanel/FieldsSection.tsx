@@ -274,8 +274,8 @@ function CollapsibleFields({
           onClick={toggle}
         >
           <span className="fields-section__chevron" aria-hidden="true">{open ? '\u25be' : '\u25b8'}</span>
-          <span className="fields-section__toggle-label">Fields</span>
-          <span className="fields-section__count">{count}</span>
+          <span className="fields-section__toggle-label">Fields</span>{' '}
+          <span className="fields-section__count">({count})</span>
         </button>
       </h4>
       <dl className="fields-section__list" id={listId} hidden={!open}>

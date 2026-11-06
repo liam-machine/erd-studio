@@ -18,7 +18,7 @@ All four JavaScript entry points share their modules, so a store or context crea
 
 ## Viewer: `ErdCanvas`
 
-`ErdCanvas` renders a `DisplaySubjectArea` read-only, the way the extension shows a read-only domain: model nodes with their columns and key badges, FK edges, annotations, the minimap, the legend, and the detail panel a click on a model opens. It presents no editing affordances and posts nothing anywhere.
+`ErdCanvas` renders a `DisplaySubjectArea` read-only, the way the extension shows a read-only domain: model nodes with their columns and key badges, FK edges, annotations, the minimap, the legend with the table and relationship counts beside it, and the detail panel a click on a model opens. Closing the panel keeps the table selected (its relationships stay lit, unlike the extension); a click on the empty canvas, or Escape, clears the selection. Escape is heard on `window` and acts only when it is pressed inside the canvas, or with nothing focused for the canvas last clicked, pointed at or focused, so with several canvases on a page it clears only that one's selection. It presents no editing affordances and posts nothing anywhere.
 
 ```tsx
 import { useRef, useState } from 'react';

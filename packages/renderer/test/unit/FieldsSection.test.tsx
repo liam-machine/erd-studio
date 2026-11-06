@@ -513,7 +513,7 @@ describe('FieldsSection — read-only (viewer and physical stage)', () => {
     const toggle = screen.getByRole('button', { name: /Fields/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(toggle.closest('h4')).not.toBeNull();
-    expect(container.querySelector('.fields-section__count')!.textContent).toBe('7');
+    expect(container.querySelector('.fields-section__count')!.textContent).toBe('(7)');
     const list = container.querySelector<HTMLElement>('.fields-section__list')!;
     expect(list.hidden).toBe(true);
     expect(toggle.getAttribute('aria-controls')).toBe(list.id);

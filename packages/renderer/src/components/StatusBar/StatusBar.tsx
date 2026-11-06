@@ -3,7 +3,9 @@
  * to its layers: "5 tables | 4 relationships | [GLD] Gold 4  [SLV] Silver 1".
  *
  * Relationships are counted as the canvas draws them: a composite foreign key
- * is one line, so one relationship, however many column pairs it has.
+ * is one line, so one relationship, however many column pairs it has, and a
+ * relationship whose other end is not on the diagram is not drawn, so not
+ * counted.
  *
  * The key appears once the tables' own layers are known (DBML storage), so a
  * diagram that borrows tables from other layers says which, with the badge
@@ -13,7 +15,8 @@
  * the store's domain, posts nothing and offers nothing to click. Render it as
  * a child of `<ReactFlow>` (it is a React Flow `Panel`, beside the legend's
  * `?` button). In the viewer it stays in sight while the legend is open, to
- * the legend's right, and wraps rather than running under the minimap.
+ * the legend's right (the counts on one row, the layer key under them), and
+ * is hidden while the legend is open on a canvas too narrow for both.
  */
 
 import { useMemo } from 'react';
@@ -58,7 +61,11 @@ export function statusBarStats(
 ): StatusBarStats {
   const models = domain.models ?? [];
   const tables = models.length;
-  const relationships = foldComposites(domain.relationships ?? []).length;
+  // Only the lines the canvas draws: both ends on the diagram (the graph
+  // transformer's filter, by exact name).
+  const names = new Set(models.map((m) => m.name));
+  const relationships = foldComposites(domain.relationships ?? [])
+    .filter((rel) => names.has(rel.fromModel) && names.has(rel.toModel)).length;
 
   const counts = new Map<string, number>();
   for (const model of models) {
@@ -107,12 +114,14 @@ export function StatusBar() {
       position="bottom-left"
       className={viewer ? `status-bar status-bar--viewer${legendOpen ? ' status-bar--beside-legend' : ''}` : 'status-bar'}
     >
-      <span className="status-bar__item">{counted(tables, 'table')}</span>
-      <span className="status-bar__divider">|</span>
-      <span className="status-bar__item">{counted(relationships, 'relationship')}</span>
+      <span className="status-bar__counts">
+        <span className="status-bar__item">{counted(tables, 'table')}</span>
+        <span className="status-bar__divider">|</span>
+        <span className="status-bar__item">{counted(relationships, 'relationship')}</span>
+      </span>
       {layers.length > 0 && (
         <>
-          <span className="status-bar__divider">|</span>
+          <span className="status-bar__divider status-bar__divider--layers">|</span>
           <span className="status-bar__layers" title="The layers this diagram's tables belong to. Each table's header strip and badge are drawn in its layer's colour.">
             {layers.map((l) => (
               <span key={l.id} className="status-bar__layer">

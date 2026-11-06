@@ -71,6 +71,13 @@ import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { Legend } from './components/Legend/Legend';
 import { StatusBar } from './components/StatusBar/StatusBar';
 
+/**
+ * The canvas the reader last clicked, pointed at or focused. An Escape with
+ * nothing focused clears only its selection, so with several canvases on a
+ * page one Escape never clears them all.
+ */
+let lastActiveCanvas: HTMLElement | null = null;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -287,23 +294,35 @@ function ErdCanvasInner({
 
   // Escape clears the selection, as a click on the empty canvas does (the
   // panel may already be closed, with the table still selected). Only when
-  // the key is pressed in the canvas, or with nothing focused (the closed
-  // panel's button took the focus with it), so it never takes Escape from
-  // the rest of the page.
+  // the key is pressed in the canvas, or with nothing focused (focus fell
+  // back to the page) and this is the canvas the reader last used, so it
+  // never takes Escape from the rest of the page or from another canvas.
   useEffect(() => {
+    const container = containerRef.current;
+    const markActive = () => {
+      lastActiveCanvas = container;
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       const target = e.target as Node | null;
-      const inCanvas = target !== null && containerRef.current?.contains(target) === true;
-      const nowhere = target === document.body || target === document.documentElement || target === document;
+      const inCanvas = target !== null && container?.contains(target) === true;
+      const nowhere =
+        (target === document.body || target === document.documentElement || target === document) &&
+        lastActiveCanvas === container;
       if (!inCanvas && !nowhere) return;
       const s = storeApi.getState();
       if (s.selectedNode === null && s.selectedEdge === null && s.selectedAnnotation === null) return;
       onPaneClick();
       flowApi.getState().resetSelectedElements();
     };
+    const activity = ['pointerdown', 'click', 'focusin'] as const;
+    for (const type of activity) container?.addEventListener(type, markActive, true);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      for (const type of activity) container?.removeEventListener(type, markActive, true);
+      window.removeEventListener('keydown', onKeyDown);
+      if (lastActiveCanvas === container) lastActiveCanvas = null;
+    };
   }, [storeApi, flowApi, onPaneClick]);
   // Hover preview and relationship flow (ephemeral, no posts).
   const { hoverHandlers, flowClassName } = useHoverFocus();
@@ -380,8 +399,9 @@ function ErdCanvasInner({
       ref={containerRef}
       className={`editor-canvas${logicalOnly ? ' editor-canvas--neutral' : ''}${className ? ` ${className}` : ''}`}
       // The extension's canvas layout (a column flex box around the flow area),
-      // positioned so the legend and panels anchor to the canvas.
-      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', ...style }}
+      // positioned so the legend and panels anchor to the canvas, and a size
+      // container so the counts can react to the canvas's width (StatusBar.css).
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', containerType: 'inline-size', ...style }}
     >
       <ReactFlow
         className={flowClassName}

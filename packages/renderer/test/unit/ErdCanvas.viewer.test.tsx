@@ -169,7 +169,7 @@ for (const readOnly of [false, true]) {
       // Folded to its heading and count until the reader opens it.
       const toggle = section.querySelector<HTMLButtonElement>('.fields-section__toggle')!;
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(section.querySelector('.fields-section__count')!.textContent).toBe('1');
+      expect(section.querySelector('.fields-section__count')!.textContent).toBe('(1)');
       expect(section.querySelector<HTMLElement>('.fields-section__list')!.hidden).toBe(true);
       fireEvent.click(toggle);
       expect(section.querySelector<HTMLElement>('.fields-section__list')!.hidden).toBe(false);
@@ -480,6 +480,64 @@ describe('ErdCanvas — closing the detail panel keeps the table selected', () =
     expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(false);
   });
 
+  it('gives the focus to the selected table when the close button hides the panel, where Escape still clears it', async () => {
+    const { container } = await renderThree();
+    const panel = await openPanel(container, 'orders');
+    const close = panel.querySelector<HTMLElement>('.detail-panel__close')!;
+    close.focus();
+    expect(document.activeElement).toBe(close);
+    fireEvent.click(close);
+    await flush();
+
+    expect(container.querySelector('.detail-panel')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('.react-flow__node[data-id="orders"]'));
+    expect(card(container, 'orders').classList.contains('model-node--selected')).toBe(true);
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await flush();
+    expect(container.querySelector('.model-node--selected')).toBeNull();
+    expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(false);
+  });
+
+  it('leaves an Escape the page has already handled alone', async () => {
+    const { container } = await renderThree();
+    await openPanel(container, 'orders');
+    const handled = (e: Event) => e.preventDefault();
+    document.body.addEventListener('keydown', handled);
+    try {
+      fireEvent.keyDown(document.body, { key: 'Escape', cancelable: true });
+      await flush();
+      expect(container.querySelector('.detail-panel')).not.toBeNull();
+      expect(card(container, 'orders').classList.contains('model-node--selected')).toBe(true);
+      expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(true);
+    } finally {
+      document.body.removeEventListener('keydown', handled);
+    }
+  });
+
+  it('with two canvases on a page, an Escape with nothing focused clears only the one last used', async () => {
+    const a = await renderThree();
+    const b = await renderThree();
+    const panelA = await openPanel(a.container, 'orders');
+    fireEvent.click(panelA.querySelector('.detail-panel__close')!);
+    await flush();
+    await openPanel(b.container, 'customers');
+
+    // B was used last: only B clears.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await flush();
+    expect(card(a.container, 'orders').classList.contains('model-node--selected')).toBe(true);
+    expect(b.container.querySelector('.detail-panel')).toBeNull();
+    expect(b.container.querySelector('.model-node--selected')).toBeNull();
+
+    // Back in A: now A clears.
+    fireEvent.click(tableNode(a.container, 'orders'));
+    await flush();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await flush();
+    expect(a.container.querySelector('.model-node--selected')).toBeNull();
+  });
+
   it('leaves Escape alone when it is pressed elsewhere on the page', async () => {
     const outside = document.createElement('input');
     document.body.appendChild(outside);
@@ -590,5 +648,29 @@ describe('ErdCanvas — the counts beside the legend', () => {
     expect(container.querySelector('.status-bar')!.classList.contains('status-bar--beside-legend')).toBe(true);
     expect(post).not.toHaveBeenCalled();
     post.mockRestore();
+  });
+
+  it('keeps the counts in one group and the layer key in another, with a divider the viewer hides between them', async () => {
+    const domain = threeTables();
+    domain.layer = 'gold';
+    domain.layerConfigs = [
+      { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 1, creatable: true },
+      { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 2, creatable: true },
+    ] as never;
+    domain.models = domain.models.map((m, i) => ({ ...m, layer: i === 0 ? 'silver' : 'gold' }));
+    const { container } = render(
+      <div style={{ width: 760, height: 600 }}>
+        <ErdCanvas domain={domain} />
+      </div>,
+    );
+    await flush();
+    const bar = container.querySelector('.status-bar')!;
+    const counts = bar.querySelector(':scope > .status-bar__counts')!;
+    expect([...counts.querySelectorAll('.status-bar__item')].map((i) => i.textContent)).toEqual(['3 tables', '1 relationship']);
+    expect(counts.querySelector('.status-bar__divider')).not.toBeNull();
+    expect(bar.querySelector(':scope > .status-bar__divider--layers')).not.toBeNull();
+    expect(bar.querySelector(':scope > .status-bar__layers')!.querySelectorAll('.status-bar__layer')).toHaveLength(2);
+    // The canvas root is the size container the bar's narrow-canvas rule queries.
+    expect((container.querySelector('.editor-canvas') as HTMLElement).style.containerType).toBe('inline-size');
   });
 });

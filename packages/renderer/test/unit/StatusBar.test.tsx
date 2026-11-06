@@ -54,6 +54,7 @@ describe('StatusBar relationship count', () => {
 
   it('keeps two composites between the same tables apart', () => {
     const { container } = renderBar({
+      models: [{ name: 'fct_order' }, { name: 'dim_customer' }],
       relationships: [
         rel('a1', 'a1', { compositeKey: 'a' }),
         rel('a2', 'a2', { compositeKey: 'a' }),
@@ -65,7 +66,10 @@ describe('StatusBar relationship count', () => {
   });
 
   it('says "1 relationship" and "1 table" for one', () => {
-    const { container } = renderBar({ models: [{ name: 'fct_order' }], relationships: [rel('customer_id', 'customer_id')] });
+    const { container } = renderBar({
+      models: [{ name: 'fct_order' }],
+      relationships: [{ fromModel: 'fct_order', fromColumn: 'parent_id', toModel: 'fct_order', toColumn: 'order_id', cardinality: 'many-to-one' }],
+    });
     expect(container.textContent).toContain('1 relationship');
     expect(container.textContent).not.toContain('1 relationships');
     expect(container.textContent).toContain('1 table');
@@ -78,11 +82,31 @@ describe('StatusBar relationship count', () => {
     expect(bar.classList.contains('react-flow__panel')).toBe(true);
     expect(bar.classList.contains('bottom')).toBe(true);
     expect(bar.classList.contains('left')).toBe(true);
-    expect([...bar.children].map((c) => `${c.className}:${c.textContent}`)).toEqual([
+    // The counts are one group (so they never wrap apart); inside it, the
+    // items and divider the editor always had.
+    expect([...bar.children].map((c) => c.className)).toEqual(['status-bar__counts']);
+    expect([...bar.querySelector('.status-bar__counts')!.children].map((c) => `${c.className}:${c.textContent}`)).toEqual([
       'status-bar__item:2 tables',
       'status-bar__divider:|',
       'status-bar__item:0 relationships',
     ]);
+  });
+
+  it('does not count a relationship whose other end is not on the diagram, as the canvas does not draw it', async () => {
+    const { transformSubjectArea } = await import('../../src/lib/graphTransformer');
+    const domain = domainOf({
+      stage: 'logical',
+      viewConfig: { positions: {} },
+      models: [{ name: 'a', columns: [] }, { name: 'b', columns: [] }],
+      relationships: [
+        { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'b_id', cardinality: 'many-to-one' },
+        { fromModel: 'a', fromColumn: 'gone_id', toModel: 'gone', toColumn: 'gone_id', cardinality: 'many-to-one' },
+      ],
+    });
+    const stats = statusBarStats(domain);
+    expect(stats.relationships).toBe(1);
+    const drawn = transformSubjectArea(domain).edges.filter((e) => e.type === 'fk').length;
+    expect(stats.relationships).toBe(drawn);
   });
 });
 

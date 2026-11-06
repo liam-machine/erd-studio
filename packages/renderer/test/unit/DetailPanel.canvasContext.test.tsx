@@ -206,7 +206,7 @@ describe('DetailPanel — Modelling detail (optional)', () => {
     expect(screen.queryByRole('button', { name: /Modelling detail/ })).toBeNull();
     const order = sectionOrder(container);
     const columns = order.findIndex((t) => /^Columns/.test(t));
-    const fields = order.findIndex((t) => /^.?Fields\s?2$/.test(t));
+    const fields = order.findIndex((t) => /^.?Fields\s?\(2\)$/.test(t));
     expect(fields).toBeGreaterThan(-1);
     expect(fields).toBeLessThan(columns);
     // Filled rows only, read-only: the fold's own toggle is the one control.
@@ -233,7 +233,7 @@ describe('DetailPanel — Modelling detail (optional)', () => {
     const list = () => container.querySelector<HTMLElement>('.fields-section__list')!;
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     expect(toggle().textContent).toContain('Fields');
-    expect(container.querySelector('.fields-section__count')!.textContent).toBe('2');
+    expect(container.querySelector('.fields-section__count')!.textContent).toBe('(2)');
     expect(list().hidden).toBe(true);
     expect(toggle().getAttribute('aria-controls')).toBe(list().id);
 

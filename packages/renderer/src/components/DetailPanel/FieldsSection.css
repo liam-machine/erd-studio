@@ -101,8 +101,14 @@
   padding-bottom: 0;
 }
 
+/* The labels read as the header's Schema / Warehouse name labels do (muted,
+   sentence case, weight 500), not as a second level of section headings. */
 .fields-section--read-only:not(.fields-section--compact) .fields-section__name {
   line-height: 1.6;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /* The viewer's fold: the section heading is the button, with the count. */
@@ -151,14 +157,8 @@
   text-align: center;
 }
 
+/* "(7)", as the Columns and Relationships headings give theirs. */
 .fields-section__count {
-  padding: 0 5px;
-  border-radius: 8px;
-  border: 1px solid var(--panel-border);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 14px;
-  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
