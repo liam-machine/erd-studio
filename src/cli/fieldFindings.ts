@@ -354,7 +354,7 @@ export function summariseFields(reading: FieldsReading, fieldsFile: string, tabl
     problems.push({
       code: 'fieldNotInList', severity: 'info', ...(notInList.file ? { file: notInList.file } : {}), table: notInList.tables[0], key: notInList.keys[0], count: n,
       message: `${plural(n, 'table')} ${n === 1 ? 'has' : 'have'} ${orList(notInList.keys, 6)}, which fields.yml does not list. `
-        + `They show ${notInList.keys.length === 1 ? 'it' : 'them'} under "Not in your list".`,
+        + `The canvas shows ${notInList.keys.length === 1 ? 'it' : 'them'} under "Not in your list".`,
     });
   }
   if (shadows.tables.length > 0) {
