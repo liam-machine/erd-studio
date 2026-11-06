@@ -183,7 +183,7 @@ describe('Import Semantic Model…', () => {
     expect(model.modelPicks).toHaveLength(1);
     expect(model.modelPicks[0].map((i) => i.label).sort()).toEqual(['AdventureSales', 'AdventureSales', 'Broken', 'BrokenTmdl']);
     expect(model.modelPicks[0].map((i) => i.description).sort()).toEqual(['TMDL', 'TMDL', 'model.bim', 'model.bim']);
-    expect(features()).toEqual(['importSemanticModelCancelled']);
+    expect(features()).toEqual(['importSemanticModelSeveral', 'importSemanticModelCancelled']);
     expect(fs.existsSync(erd())).toBe(false);
   });
 
@@ -197,7 +197,8 @@ describe('Import Semantic Model…', () => {
     await vi.waitFor(() => expect(model.opened).toHaveLength(1));
     expect(model.opened[0].filePath.startsWith(path.join(FIXTURES, 'broken', `${name}.SemanticModel`))).toBe(true);
     expect(fs.existsSync(erd())).toBe(false);
-    expect(features()).toEqual(['importSemanticModelInvalid']);
+    // Why, by the model's format.
+    expect(features()).toEqual(['importSemanticModelInvalid', name === 'BrokenTmdl' ? 'importSemanticModelParseTmdl' : 'importSemanticModelParseBim']);
   });
 
   it('a folder with no model says what to pick, offers another folder, and counts as invalid', async () => {
@@ -207,7 +208,7 @@ describe('Import Semantic Model…', () => {
     await importSemanticModel(deps(model, importUi()));
     expect(model.errors[0].message).toContain('no semantic model found in reports');
     expect(model.errors[0].items).toEqual([CHOOSE_ANOTHER_FOLDER_BUTTON]);
-    expect(features()).toEqual(['importSemanticModelInvalid']);
+    expect(features()).toEqual(['importSemanticModelInvalid', 'importSemanticModelNoModel']);
   });
 
   it('a big repo with one model in it still imports from its root: only model files count toward the bound', async () => {
@@ -231,6 +232,7 @@ describe('Import Semantic Model…', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(model.errors[0].message).toMatch(new RegExp(`big holds more than ${MAX_SEMANTIC_MODEL_FILES} model files\\. Pick the <Name>\\.SemanticModel folder itself`));
     expect(model.errors[0].items).toEqual([CHOOSE_ANOTHER_FOLDER_BUTTON]);
+    expect(features()[0]).toBe('importLimitTooManyFiles');
     // The button runs the import again, from the folder dialog.
     expect(again).toBe(2);
   });

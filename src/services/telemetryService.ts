@@ -397,6 +397,14 @@ export const telemetry = {
   featureOnce(feature: TelemetryFeature): void {
     active?.record(s => recordFeatureOnce(s, feature), feature, true);
   },
+  /**
+   * Count `feature` without adding it to the onboarding trail (`once`: at most
+   * once per day): for flags that describe what was shown or found rather
+   * than something the user did, so they never use up the first day's trail.
+   */
+  featureQuiet(feature: TelemetryFeature, once = false): void {
+    active?.update(s => (once ? recordFeatureOnce(s, feature) : recordFeature(s, feature)));
+  },
   error(code: TelemetryErrorCode): void {
     errorRecorded(code);
     active?.record(s => recordError(s, code), trailError(code));

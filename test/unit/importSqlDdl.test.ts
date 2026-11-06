@@ -228,7 +228,8 @@ describe('Import SQL DDL…', () => {
     expect(sql.errors[0].items).toEqual(['Open File', TRY_ANOTHER_DIALECT_BUTTON]);
     await vi.waitFor(() => expect(sql.opened).toEqual([{ filePath: broken, line: 6 }]));
     expect(erdFiles()).toEqual([]);
-    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid']);
+    // Why, as fixed keys: the problem kind, the clause the parser rejected, the dialect it was read as.
+    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse', 'importSqlRejectedCreateTable', 'importSqlFailPostgres']);
     expect(errors()).toEqual([]);
   });
 
@@ -242,6 +243,7 @@ describe('Import SQL DDL…', () => {
     await vi.waitFor(() => expect(sql.dialectPicks).toHaveLength(2));
     expect(reads).toBe(1);
     await vi.waitFor(() => expect(features()).toContain('importSqlDdlCancelled'));
+    expect(features()).toContain('importSqlTryAnotherDialect');
   });
 
   it('closing the file dialog or the dialect pick writes nothing and counts a cancel', async () => {
@@ -259,13 +261,14 @@ describe('Import SQL DDL…', () => {
     expect(features()).toEqual(['importSqlDialectMysql', 'importSqlDdlCancelled']);
   });
 
-  it('no SQL importer (a dev host before npm run build): ours, with Send Feedback, counted as importSqlDdlFailed', async () => {
+  it('no SQL importer (a dev host before npm run build): ours, with Send Feedback, counted as importSqlEngineLoadFailed', async () => {
     const sql = sqlUi({ files: [path.join(FIXTURES, 'mysql', 'shop.sql')] }, 'mysql');
     const run = importSqlDdl(deps(sql, importUi(), { loadSqlImport: () => { throw new Error('ERD Studio could not load its SQL importer (dist/sqlImport.js): missing'); } }));
     expect(await run).toBeUndefined();
     expect(sql.errors[0].message).toMatch(/^Import SQL DDL hit a problem in ERD Studio while loading its SQL importer/);
     expect(sql.errors[0].items).toEqual(['Send Feedback']);
-    expect(errors()).toEqual(['importSqlDdlFailed']);
+    // Its own code, not folded into importSqlDdlFailed: a VSIX missing dist/sqlImport.js shows up as exactly this.
+    expect(errors()).toEqual(['importSqlEngineLoadFailed']);
   });
 
   it('converted DBML that does not read back is ours: Send Feedback, importSqlDdlFailed, never "invalid"', async () => {
@@ -314,7 +317,7 @@ describe('gatherSqlFiles', () => {
     fs.mkdirSync(root);
     for (let i = 0; i <= MAX_SQL_FILES; i++) fs.writeFileSync(path.join(root, `${i}.sql`), '');
     const read = await gatherSqlFiles({ folder: root }, ui);
-    expect(read).toMatchObject({ error: true });
+    expect(read).toMatchObject({ error: true, limit: 'tooManyFiles' });
     expect('message' in read && read.message).toContain(`more than ${MAX_SQL_FILES} .sql files`);
   });
 
@@ -334,7 +337,7 @@ describe('gatherSqlFiles', () => {
     const file = path.join(tmp, 'huge.sql');
     fs.writeFileSync(file, 'CREATE TABLE a (id int);');
     const read = await gatherSqlFiles({ files: [file] }, { ...ui, fileSize: async () => 300 * 1024 * 1024, readFile: async () => { throw new Error('never read'); } });
-    expect(read).toMatchObject({ error: true, message: expect.stringContaining('huge.sql is larger than 200 MB') });
+    expect(read).toMatchObject({ error: true, limit: 'fileTooBig', message: expect.stringContaining('huge.sql is larger than 200 MB') });
     expect('message' in read && read.message).toContain('pg_dump --schema-only');
   });
 
@@ -352,7 +355,7 @@ describe('gatherSqlFiles', () => {
 
   it('a file it cannot read is named', async () => {
     const read = await gatherSqlFiles({ files: [path.join(tmp, 'gone.sql')] }, ui);
-    expect(read).toMatchObject({ error: true, message: expect.stringContaining("couldn't read gone.sql") });
+    expect(read).toMatchObject({ error: true, limit: 'unreadable', message: expect.stringContaining("couldn't read gone.sql") });
   });
 });
 
@@ -405,5 +408,29 @@ describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide
     await importSqlDdl(deps(sql, importUi()), undefined, { dialect: 'mysql' });
     expect(sql.dialectPicks).toHaveLength(1);
     expect(sql.dialectPicks[0][0].dialect).toBe('mysql');
+  });
+});
+
+describe('Import SQL DDL… — why it did not import (telemetry, fixed keys only)', () => {
+  it('a COMMENT ON run into the CREATE TABLE before it (no semicolon) records importSqlRejectedCommentOn', async () => {
+    const file = path.join(tmp, 'glued.sql');
+    fs.writeFileSync(file, "CREATE TABLE a (id int)\nCOMMENT ON TABLE a IS 'the a table';\n");
+    await importSqlDdl(deps(sqlUi({ files: [file] }, 'postgres'), importUi()));
+    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse', 'importSqlRejectedCommentOn', 'importSqlFailPostgres']);
+  });
+
+  it('a table defined twice records its kind (no clause: nothing was rejected by the grammar)', async () => {
+    const file = path.join(tmp, 'twice.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);\nCREATE TABLE a (id int);\n');
+    await importSqlDdl(deps(sqlUi({ files: [file] }, 'mysql'), importUi()));
+    expect(features()).toEqual(['importSqlDialectMysql', 'importSqlDdlInvalid', 'importSqlInvalidDuplicateTable', 'importSqlFailMysql']);
+  });
+
+  it('a file too big to read records importLimitFileTooBig beside the message', async () => {
+    const file = path.join(tmp, 'huge.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);');
+    const sql = { ...sqlUi({ files: [file] }, 'postgres'), fileSize: async () => 300 * 1024 * 1024 };
+    await importSqlDdl(deps(sql, importUi()));
+    expect(features()).toEqual(['importLimitFileTooBig']);
   });
 });

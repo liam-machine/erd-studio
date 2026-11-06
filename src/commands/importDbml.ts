@@ -78,6 +78,7 @@ import {
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
+import { IMPORT_STOP_FEATURES, dropQuietly, recordWriteFailure, type DraftDropReason, type ImportStop } from '../services/importTelemetry';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
@@ -263,6 +264,16 @@ export interface ImportDraftOptions {
   generation?(): number;
   /** No stage colours: a folder without dbt (default true). */
   logicalOnly?: boolean;
+  /**
+   * A quiet run ended before its draft showed: why, as a fixed reason (the
+   * host counts it beside `draftUnavailable`). Called only while quiet.
+   */
+  quietDrop?(reason: DraftDropReason): void;
+}
+
+/** An import stopped before writing, on the project's state (counted quiet or not: it is the project, not the user's answer). */
+function importStopped(stop: ImportStop): void {
+  telemetry.feature(IMPORT_STOP_FEATURES[stop]);
 }
 
 /**
@@ -440,7 +451,10 @@ async function runImportDbml(
   // 1. The file.
   const filePath = resume?.filePath
     ?? await ui.pickFile((await deps.findDefaultFile?.().catch(() => undefined)) ?? (workspaceRoot || undefined));
-  if (!filePath) return cancelled();
+  if (!filePath) {
+    dropQuietly(draftOptions, 'nothingFound');
+    return cancelled();
+  }
   const fileName = path.basename(filePath);
   progress.fileName = fileName;
   const quick = resume?.quick === true;
@@ -459,6 +473,8 @@ async function runImportDbml(
     text = stripBom(await ui.readFile(filePath));
   } catch (err) {
     log.error(`[ERD Studio] ${title}: could not read the file:`, err);
+    if (quiet) dropQuietly(draftOptions, 'unreadable');
+    else telemetry.feature('importInputUnreadable');
     showError(`${title} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
@@ -479,7 +495,15 @@ async function runImportDbml(
     return undefined;
   }
   if (!read.ok) {
-    if (counts.invalid && !quiet) telemetry.feature(counts.invalid);
+    dropQuietly(draftOptions, 'unreadable');
+    if (read.threw) {
+      // The parser itself stopped: ours, not the user's file (the message to them is the same).
+      telemetry.error('importDbmlParserThrew');
+    } else if (counts.invalid && !quiet) {
+      telemetry.feature(counts.invalid);
+      telemetry.feature(read.importsOtherFiles ? 'importDbmlInvalidUse' : 'importDbmlInvalidSyntax');
+      if (read.diagnostics.some((d) => SEVERAL_FIELDS_ON_ONE_LINE.test(d.message))) telemetry.feature('importDbmlSeveralFieldsOneLine');
+    }
     const first = read.diagnostics[0];
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
@@ -488,6 +512,8 @@ async function runImportDbml(
   }
   const model = read.model;
   if (model.tables.length === 0) {
+    if (quiet) dropQuietly(draftOptions, 'nothingDrawable');
+    else telemetry.feature('importDbmlNoTables');
     void ui.showInformationMessage(`${title}: ${fileName} has no tables, so there is nothing to import.`);
     return undefined;
   }
@@ -500,6 +526,8 @@ async function runImportDbml(
   // 2. The layer: the one the file's TableGroup or schema names, offered first.
   const creatable = layerService.getCreatableLayers();
   if (creatable.length === 0) {
+    importStopped('noLayers');
+    dropQuietly(draftOptions, 'noLayer');
     showError(NO_LAYERS_MESSAGE, { [ADD_LAYER_BUTTON]: () => ui.addLayer() });
     return undefined;
   }
@@ -527,7 +555,10 @@ async function runImportDbml(
       })),
       { title: title, placeHolder: WHICH_LAYER_FOR_DIAGRAM, ignoreFocusOut: true },
     );
-    if (!choice) return cancelled();
+    if (!choice) {
+      dropQuietly(draftOptions, 'needsChoice');
+      return cancelled();
+    }
     layer = choice.id;
   }
   const chosenLayer = layer;
@@ -550,7 +581,11 @@ async function runImportDbml(
     // As New Diagram takes it: "Sales" is saved as sales.
     validateInput: (value: string) => validateTypedDiagramName(value, (slug) => deps.validateDomainName(slug, chosenLayer)),
   });
-  if (!name) return cancelled();
+  if (!name) {
+    // Quiet, the box is never shown: the suggested name was not a valid, free one.
+    dropQuietly(draftOptions, 'badName');
+    return cancelled();
+  }
   const slug = slugFromName(name);
 
   // A project that writes DBML (§3.2) gets a `.dbml` diagram whose relationships all live in the library (D5).
@@ -569,6 +604,7 @@ async function runImportDbml(
   });
   // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
   if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
+    importStopped('nameTaken');
     nameTaken();
     return undefined;
   }
@@ -618,6 +654,7 @@ async function runImportDbml(
     if (dbml) {
       const refusal = dbmlImportRefusal(plan, (n) => tableLibraryService.tableStorage?.(n));
       if (refusal) {
+        importStopped('yamlInDbml');
         showError(`${title}: ${refusal} Nothing was changed.`);
         return undefined;
       }
@@ -644,6 +681,7 @@ async function runImportDbml(
     if (!dbml) for (const table of plan.changedLibraryTables) tableLibraryService.serializeTable(table);
   } catch (err) {
     if (isRefusedWrite(err)) {
+      importStopped('refusedWrite');
       showRefusal(err, 'Nothing was changed.');
       return undefined;
     }
@@ -662,6 +700,7 @@ async function runImportDbml(
     });
   };
   if (dirty.length > 0) {
+    importStopped('unsaved');
     showUnsaved(dirty[0]);
     return undefined;
   }
@@ -858,21 +897,26 @@ async function runImportDbml(
   function reportWriteFailure(failed: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {
     const { error: err, undone } = failed;
     if (failed.nameTaken) {
+      importStopped('nameTaken');
       nameTaken();
       return;
     }
     // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
     if (err instanceof UnsavedFilesRefused) {
+      importStopped('unsaved');
       showUnsaved(err.filePaths[0]);
       return;
     }
     const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
+      importStopped('refusedWrite');
       showRefusal(err, result);
       return;
     }
     telemetry.error(counts.failed);
+    // Its class: the user's permissions or disk, or ours.
+    recordWriteFailure(err, telemetry);
     const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
     if (!why) {
       const doing = 'while saving the diagram';
@@ -948,7 +992,10 @@ export async function quickImportDbml(deps: ImportDbmlDeps): Promise<ImportDbmlR
   const filePath = await deps.findDefaultFile?.().catch(() => undefined);
   if (!filePath) {
     // The automatic draft never asks: nothing to take is the end of it.
-    if (deps.draft?.quiet) return undefined;
+    if (deps.draft?.quiet) {
+      dropQuietly(deps.draft, 'nothingFound');
+      return undefined;
+    }
     telemetry.feature('quickImportFellBack');
     return importDbml(deps);
   }

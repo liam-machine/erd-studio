@@ -238,6 +238,16 @@ describe('Import SQL DDL… — the quick path', () => {
     expect(sql.dialectPicks).toHaveLength(1);
     expect(sql.errors[0]).toMatch(/^Import SQL DDL: nothing was imported\. broken\.sql line \d+/);
     expect(ui.chooses).toEqual([]);
+    expect(features()[0]).toBe('quickSqlNoDialect');
+  });
+
+  it('the first dialect tried does not read the script but a later one does: counted quickSqlDialectFallback', async () => {
+    // Nothing in the text decides it, so PostgreSQL is tried first; only MySQL reads UNSIGNED and TINYTEXT.
+    fs.writeFileSync(path.join(tmp, 'shop.sql'), 'CREATE TABLE t (id INT UNSIGNED, n TINYTEXT);\n');
+    const result = await quickImportSqlDdl(sqlDeps(sqlUi(), dbmlUi(), { plain: true }));
+    expect(result).toBeDefined();
+    expect(features()).toEqual(expect.arrayContaining(['importSqlDialectMysql', 'quickSqlDialectFallback']));
+    expect(features()).not.toContain('quickSqlNoDialect');
   });
 
   it('no CREATE TABLE script in the folder: the step-by-step flow (the file dialog), counted as a fall-back', async () => {
@@ -628,3 +638,57 @@ function modelUiForDraft(): ImportSemanticModelUi & { folders: number; picks: nu
   };
   return ui;
 }
+
+describe('the automatic draft says why it was dropped (quietDrop, telemetry 2.0 B9)', () => {
+  const quietDraft = (quiet = true) => {
+    const preview = fakeDraftPreview([]);
+    const drops: string[] = [];
+    return { preview, drops, options: { preview, trigger: 'sidebar' as const, quiet, quietDrop: (reason: string) => { drops.push(reason); } } };
+  };
+
+  it('SQL: no CREATE TABLE script, a script no dialect reads, a script that cannot be read', async () => {
+    const q = quietDraft();
+    await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi()), draft: q.options });
+    fs.writeFileSync(path.join(tmp, 'broken.sql'), 'CREATE TABLE t (id int,, x);\n');
+    await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi()), draft: q.options });
+    const unreadable = { ...sqlUi(), readFile: async () => { throw new Error('EACCES'); } };
+    fs.writeFileSync(path.join(tmp, 'broken.sql'), 'CREATE TABLE t (id int);\n');
+    await quickImportSqlDdl({ ...sqlDeps(unreadable, dbmlUi()), draft: q.options });
+    expect(q.drops).toEqual(['nothingFound', 'noDialect', 'unreadable']);
+    expect(q.preview.drafts).toEqual([]);
+    // Quiet: none of the import's own reason keys either (the host counts draftUnavailable and the drop).
+    expect(features().filter((f) => /^import|^quickSql/.test(f))).toEqual([]);
+  });
+
+  it('DBML: no file found, not valid DBML, no tables, no layer, a name it cannot take', async () => {
+    const q = quietDraft();
+    await quickImportDbml({ ...baseDeps(), ui: dbmlUi(), findDefaultFile: async () => undefined, draft: q.options });
+    const file = path.join(tmp, 'shop.dbml');
+    fs.writeFileSync(file, 'Table a {\n  id int [pk]\n');
+    await quickImportDbml({ ...baseDeps(), ui: dbmlUi(), findDefaultFile: async () => file, draft: q.options });
+    fs.writeFileSync(file, "Project p {\n  Note: 'nothing'\n}\n");
+    await quickImportDbml({ ...baseDeps(), ui: dbmlUi(), findDefaultFile: async () => file, draft: q.options });
+    fs.writeFileSync(file, 'Table a {\n  id int [pk]\n}\n');
+    const noLayers = baseDeps();
+    noLayers.layerService = Object.assign(Object.create(noLayers.layerService), { getCreatableLayers: () => [] });
+    await quickImportDbml({ ...noLayers, ui: dbmlUi(), findDefaultFile: async () => file, draft: q.options });
+    await quickImportDbml({ ...baseDeps(), validateDomainName: () => 'not valid', ui: dbmlUi(), findDefaultFile: async () => file, draft: q.options });
+    expect(q.drops).toEqual(['nothingFound', 'unreadable', 'nothingDrawable', 'noLayer', 'badName']);
+    // The project's own state is counted, quiet or not.
+    expect(features()).toEqual(['importStopNoLayers']);
+  });
+
+  it('a semantic model folder with none in it', async () => {
+    const q = quietDraft();
+    await quickImportSemanticModel({ ...baseDeps(), modelUi: modelUiForDraft(), ui: dbmlUi(), draft: q.options });
+    expect(q.drops).toEqual(['nothingFound']);
+  });
+
+  it('a run that is not quiet never reports a drop: its own keys say why', async () => {
+    const q = quietDraft(false);
+    fs.writeFileSync(path.join(tmp, 'shop.dbml'), 'Table a {\n  id int [pk]\n');
+    await quickImportDbml({ ...baseDeps(), ui: dbmlUi(), findDefaultFile: async () => path.join(tmp, 'shop.dbml'), draft: q.options });
+    expect(q.drops).toEqual([]);
+    expect(features()).toEqual(['importDbmlInvalid', 'importDbmlInvalidSyntax']);
+  });
+});

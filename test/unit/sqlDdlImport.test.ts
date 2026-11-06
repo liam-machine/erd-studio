@@ -390,7 +390,7 @@ describe('dialect details', () => {
 describe('problems', () => {
   it('a broken file names its file and the line of the statement that does not parse', () => {
     expect(problemsOf('postgres', fixtureFiles('broken'))).toEqual([
-      { file: 'stray_words.sql', line: 6, message: expect.stringMatching(/^CREATE TABLE fct_order could not be read: .*oops/) },
+      { file: 'stray_words.sql', line: 6, message: expect.stringMatching(/^CREATE TABLE fct_order could not be read: .*oops/), kind: 'parse', clause: 'CreateTable' },
     ]);
   });
 
@@ -405,7 +405,7 @@ describe('problems', () => {
       { name: 'a.sql', text: 'CREATE TABLE sales.customer (id int);' },
       { name: 'b.sql', text: '-- again\nCREATE TABLE SALES.Customer (id int, name text);' },
     ]);
-    expect(problems).toEqual([{ file: 'b.sql', line: 2, message: 'Table SALES.Customer is defined twice (also in a.sql, line 1).' }]);
+    expect(problems).toEqual([{ file: 'b.sql', line: 2, message: 'Table SALES.Customer is defined twice (also in a.sql, line 1).', kind: 'duplicateTable' }]);
   });
 
   it('public.t and t are the same Postgres table', () => {
@@ -414,9 +414,9 @@ describe('problems', () => {
 
   it('no CREATE TABLE at all is a problem', () => {
     expect(problemsOf('postgres', [{ name: 'v.sql', text: 'CREATE VIEW v AS SELECT 1;\nGRANT SELECT ON v TO bob;' }])).toEqual([
-      { file: 'v.sql', message: 'No CREATE TABLE statements with a column list were found in the file.' },
+      { file: 'v.sql', message: 'No CREATE TABLE statements with a column list were found in the file.', kind: 'noCreateTable' },
     ]);
-    expect(problemsOf('postgres', [])).toEqual([{ file: '', message: 'No SQL files to import.' }]);
+    expect(problemsOf('postgres', [])).toEqual([{ file: '', message: 'No SQL files to import.', kind: 'noFiles' }]);
   });
 
   it('a column defined twice is a problem', () => {
@@ -542,7 +542,7 @@ describe('dialects', () => {
     const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int);' }] }, () => {
       throw new TypeError("Cannot read properties of undefined (reading 'fields')");
     });
-    expect(result).toEqual({ ok: false, problems: [{ file: 'a.sql', line: 1, message: 'CREATE TABLE a could not be read: the SQL parser could not read this statement' }] });
+    expect(result).toEqual({ ok: false, problems: [{ file: 'a.sql', line: 1, message: 'CREATE TABLE a could not be read: the SQL parser could not read this statement', kind: 'parse', clause: 'CreateTable' }] });
   });
 });
 

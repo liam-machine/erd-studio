@@ -241,6 +241,11 @@ New `FEATURES` keys, mirrored in `telemetry/src/index.js`, `telemetry.json`'s co
 
 Error codes (`TelemetryErrorCode`): `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK failed). Detection's per-window activation and dbt-tooling flags are §13.2's.
 
+2.0 adds (keys in `telemetry/README.md`, "Keys added in 2.0.0", B6 and B9):
+
+- **Draft quality** (`src/services/draftTelemetry.ts`, pure): when a draft that is not a redraw shows, `trackedDraftPreview` records its presence flags (`draftOrphansMost`, `draftThin<Source>`, `draftRelsNone<Source>`, …), then `draftKeptThin<Source>` on a Keep that wrote a thin draft and `draftRejectedFast<Source>` on a Discard or close within 15 s with no details opened. They go through `telemetry.featureQuiet`, so they never use up the first day's onboarding trail. Examples get none. Each flag is a ratio or threshold worked out on the device: never a name, path or count.
+- **Why the automatic draft did not appear**: beside `draftUnavailable`, the host records which draft it was going to be (`draftUnavailable<Source>` or `draftUnavailableExample`), and every quiet early end reports its reason through the draft options' `quietDrop` (`draftDropNothingFound`, `draftDropUnreadable`, `draftDropNoLayer`, `draftDropBadName`, `draftDropNothingDrawable`, `draftDropNoDialect`, `draftDropNeedsChoice`). A quiet run still never counts the import's `*Cancelled`, `*Invalid` or reason keys; the project's own state (`importStop*`) is counted either way. `draftWaitedForPrompt` counts an automatic draft held back because another prompt had the window.
+
 ## 12. Security and limits
 
 - The page's CSP: `default-src 'none'; script-src 'nonce-…'; style-src ${cspSource} 'nonce-…'; img-src ${cspSource} data:; font-src ${cspSource}; worker-src blob:` — no `unsafe-inline` (the canvas's React Flow styles are set through the CSSOM, which the CSP allows; P2 verifies and fails loudly otherwise). `localResourceRoots`: `dist/` only.

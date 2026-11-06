@@ -64,10 +64,12 @@ import {
   rankSqlDialects,
   withoutSqlData,
   type SqlDdlFile,
+  type SqlDdlProblem,
   type SqlDialect,
 } from '../services/sqlDdlImport';
 import { loadSqlImport, type SqlImportModule } from '../services/sqlImportLoader';
-import type { TelemetryFeature } from '../services/telemetryPayload';
+import { IMPORT_LIMIT_FEATURES, dropQuietly, sqlInvalidFeatures, type ImportInputLimit } from '../services/importTelemetry';
+import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
   IMPORT_TITLES,
@@ -217,8 +219,8 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
-  const ours = (doing: string, err: unknown): undefined => {
-    telemetry.error('importSqlDdlFailed');
+  const ours = (doing: string, err: unknown, code: TelemetryErrorCode = 'importSqlDdlFailed'): undefined => {
+    telemetry.error(code);
     log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
     showError(oursMessage(TITLE, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)),
@@ -226,24 +228,29 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
     return undefined;
   };
   /** A gather that gave a message: say it (an error or a plain note). */
-  const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean }): undefined => {
+  const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }): undefined => {
     if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
+    if (gathered.limit && !quiet) telemetry.feature(IMPORT_LIMIT_FEATURES[gathered.limit]);
     if (gathered.error) showError(gathered.message);
     else void ui.showInformationMessage(gathered.message);
     return undefined;
   };
-  const invalid = (): void => {
-    if (!quiet) telemetry.feature('importSqlDdlInvalid');
+  /** SQL that did not convert: `importSqlDdlInvalid`, then why (each problem kind, the rejected clause, the dialect). */
+  const invalid = (problems: readonly SqlDdlProblem[], dialect: SqlDialect): void => {
+    if (quiet) return;
+    telemetry.feature('importSqlDdlInvalid');
+    for (const key of sqlInvalidFeatures(problems, dialect)) telemetry.feature(key);
   };
   return { cancelled, showError, ours, gatherMessage, invalid };
 }
 
 /** The SQL importer, loaded on first use; undefined after saying it failed. */
-function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown) => undefined): SqlImportModule | undefined {
+function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown, code?: TelemetryErrorCode) => undefined): SqlImportModule | undefined {
   try {
     return deps.loadSqlImport ? deps.loadSqlImport() : loadSqlImport(deps.extensionPath);
   } catch (err) {
-    return ours('while loading its SQL importer', err);
+    // Its own code: a VSIX missing dist/sqlImport.js shows up as exactly this.
+    return ours('while loading its SQL importer', err, 'importSqlEngineLoadFailed');
   }
 }
 
@@ -300,11 +307,14 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     return ours('while converting the SQL', err);
   }
   if (!result.ok) {
-    invalid();
+    invalid(result.problems, dialect);
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
-    actions[TRY_ANOTHER_DIALECT_BUTTON] = () => importSqlDdl(deps, read);
+    actions[TRY_ANOTHER_DIALECT_BUTTON] = () => {
+      telemetry.feature('importSqlTryAnotherDialect');
+      return importSqlDdl(deps, read);
+    };
     showError(describeImportProblems(TITLE, result.problems, `They were read as ${SQL_DIALECT_LABELS[dialect]}.`), actions);
     return undefined;
   }
@@ -401,6 +411,7 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     // The automatic draft never asks: nothing to take is the end of it.
     if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: no CREATE TABLE script to draft (automatic draft dropped).`);
+      dropQuietly(deps.draft, 'nothingFound');
       return undefined;
     }
     log.info(`[ERD Studio] ${TITLE}: ${found.truncated ? `more than ${MAX_SQL_FILES} .sql files in the folder` : 'no CREATE TABLE script found'}; asking which files.`);
@@ -408,7 +419,10 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     return importSqlDdl(deps);
   }
   const gathered = await gatherSqlFiles({ files: found.files, root: deps.workspaceRoot }, ui);
-  if ('message' in gathered) return gatherMessage(gathered);
+  if ('message' in gathered) {
+    if (quiet) dropQuietly(deps.draft, 'unreadable');
+    return gatherMessage(gathered);
+  }
 
   // The dialect: the detected one, else the most likely in turn; the first that reads every file.
   const text = gathered.files.map((f) => f.text).join('\n');
@@ -430,11 +444,15 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
   if (!converted) {
     if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: the scripts read as no one dialect (automatic draft dropped).`);
+      dropQuietly(deps.draft, 'noDialect');
       return undefined;
     }
+    telemetry.feature('quickSqlNoDialect');
     return importSqlDdl(deps, gathered);
   }
   telemetry.feature(SQL_DIALECT_FEATURES[converted.dialect]);
+  // The first dialect tried did not read every file; a later one did.
+  if (!quiet && converted.dialect !== order[0]) telemetry.feature('quickSqlDialectFallback');
   const chosenDialect = converted.dialect;
   return importConvertedSql(deps, gathered, chosenDialect, converted.result, { quick: true },
     ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name }));
@@ -479,7 +497,7 @@ export const TRY_ANOTHER_DIALECT_BUTTON = 'Try Another Dialect';
 export async function gatherSqlFiles(
   sources: SqlSources,
   ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'fileSize'>,
-): Promise<SqlResume | { message: string; error: boolean; invalid?: boolean }> {
+): Promise<SqlResume | { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }> {
   let entries: Array<{ name: string; fullPath: string }>;
   let fileName: string;
   let sourceLabel: string;
@@ -488,7 +506,7 @@ export async function gatherSqlFiles(
     const folderName = path.basename(folder);
     const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: (n) => /\.sql$/i.test(n), limit: MAX_SQL_FILES });
     if (walk.truncated) {
-      return { message: `${TITLE}: ${folderName} holds more than ${MAX_SQL_FILES} .sql files. Pick a folder with fewer, or the files themselves.`, error: true };
+      return { message: `${TITLE}: ${folderName} holds more than ${MAX_SQL_FILES} .sql files. Pick a folder with fewer, or the files themselves.`, error: true, limit: 'tooManyFiles' };
     }
     if (walk.files.length === 0) {
       return { message: `${TITLE}: ${folderName} has no .sql files, so there is nothing to import.`, error: false, invalid: true };
@@ -527,20 +545,20 @@ export async function gatherSqlFiles(
   for (const entry of entries) {
     const size = await ui.fileSize?.(entry.fullPath).catch(() => undefined);
     if (size !== undefined && size > MAX_SQL_FILE_BYTES) {
-      return { message: tooBigMessage(entry.name), error: true };
+      return { message: tooBigMessage(entry.name), error: true, limit: 'fileTooBig' };
     }
     let raw: string;
     try {
       raw = await ui.readFile(entry.fullPath);
     } catch (err) {
       log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
-      return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true };
+      return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true, limit: 'unreadable' };
     }
     // A dump's data (COPY blocks, INSERT statements) is not SQL to import: it neither counts nor is read.
     const { text, sqlChars } = withoutSqlData(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
     chars += sqlChars;
     if (chars > MAX_SQL_CHARS) {
-      return { message: `${TITLE}: the scripts hold more than ${Math.round(MAX_SQL_CHARS / 1024 / 1024)} MB of SQL, not counting data. Import the table definitions on their own.`, error: true };
+      return { message: `${TITLE}: the scripts hold more than ${Math.round(MAX_SQL_CHARS / 1024 / 1024)} MB of SQL, not counting data. Import the table definitions on their own.`, error: true, limit: 'tooMuchText' };
     }
     files.push({ name: entry.name, text });
     fullPaths.set(entry.name, entry.fullPath);

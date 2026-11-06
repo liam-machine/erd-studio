@@ -4576,7 +4576,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       telemetry.featureOnce('dbmlProject');
     } else {
       try {
-        if (detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
+        const detected = detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>);
+        if (detected === 'v4') format = 'v4';
+        // A JSON diagram in the v6 table naming (still counted as 'v5'): once a day, off the onboarding trail.
+        if (detected === 'v6') telemetry.featureQuiet('canvasJsonV6', true);
       } catch {
         // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
       }
