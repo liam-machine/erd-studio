@@ -163,6 +163,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
   - The read-only diagram viewer used outside VS Code no longer mentions dbt: the **Warehouse name** tooltip, the legend and table hover text use neutral wording.
 - `erdStudio.claudeSync.skipPermissions` is now read from your user settings only: a workspace's `.vscode/settings.json` can no longer make Execute with Claude skip Claude Code's permission prompts.
 - Usage telemetry counts how Run dbt parse and Run dbt compile go: whether dbt was found, was the dbt Cloud CLI or was already running, whether the project's own dbt was declined, and whether there was no dbt profile; whether dbt started, refreshed an existing manifest, finished, failed (and its fixed cause) or was stopped; which next step was picked (Show output, Run dbt deps and its result, the adapter guide, Open Physical view); Parse without your credentials with the adapter it used; and ERD Studio's own errors writing the placeholder profile or following up a run. Each is a fixed key listed in telemetry.json. dbt's output, paths and names are never sent.
+- The anonymous daily usage report can now also send an interim copy the same day during an install's first week or after an error (at most three a day). The final report the next day replaces it, and turning telemetry off stops any further sends.
 
 ### Removed
 - **The six short per-start videos** (in the 2.0 pre-releases) on the **ERD Studio Tour** tab: **Show Me Around** shows the same starts on your own data, and the extension is smaller for it.

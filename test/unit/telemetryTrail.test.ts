@@ -20,6 +20,7 @@ import {
   MAX_TRAIL_GAP_S,
   MAX_TRAIL_WINDOWS,
   TRAIL_DAYS,
+  TRAIL_GENERAL_MAX,
   TRAIL_MARKERS,
   buildHeartbeat,
   emptyCounters,
@@ -69,11 +70,26 @@ describe('recordTrail', () => {
     expect(s.trail).toHaveLength(2);
   });
 
-  it('keeps the first MAX_TRAIL entries and counts the rest', () => {
+  it('keeps the first TRAIL_GENERAL_MAX ordinary entries and counts the rest', () => {
     let s = day();
     for (let i = 0; i < MAX_TRAIL + 7; i++) s = recordTrail(s, i % 2 ? 'windowAway' : 'windowBack', T0 + i * 1000, 1);
+    expect(s.trail).toHaveLength(TRAIL_GENERAL_MAX);
+    expect(s.trailDropped).toBe(MAX_TRAIL + 7 - TRAIL_GENERAL_MAX);
+  });
+
+  it('keeps its last places for errors and the closing markers, up to MAX_TRAIL', () => {
+    let s = day();
+    for (let i = 0; i < 95; i++) s = recordTrail(s, i % 2 ? 'windowAway' : 'windowBack', T0 + i * 1000, 1);
+    expect(s.trail).toHaveLength(TRAIL_GENERAL_MAX);
+    s = recordTrail(s, '!saveFailed', T0 + 100_000, 1);
+    s = recordTrail(s, 'editColumn', T0 + 101_000, 1);
+    s = recordTrail(s, 'canvasClosed', T0 + 102_000, 1);
+    s = recordTrail(s, 'windowClosed', T0 + 103_000, 1);
+    expect(s.trail!.slice(TRAIL_GENERAL_MAX).map((e) => e[0])).toEqual(['!saveFailed', 'canvasClosed', 'windowClosed']);
+    expect(s.trailDropped).toBe(95 - TRAIL_GENERAL_MAX + 1);
+    for (let i = 0; i < 20; i++) s = recordTrail(s, i % 2 ? '!saveFailed' : '!other', T0 + 104_000 + i, 1);
     expect(s.trail).toHaveLength(MAX_TRAIL);
-    expect(s.trailDropped).toBe(7);
+    expect(s.trail!.every((e) => isTrailEvent(e[0]))).toBe(true);
   });
 
   it('writes an error code as !code, apart from a feature of the same name', () => {
@@ -164,8 +180,8 @@ describe('the heartbeat', () => {
     const longest = [...TRAIL_MARKERS, ...FEATURES, ...ERROR_CODES.map((c) => `!${c}`)].sort((a, b) => b.length - a.length).slice(0, 2) as TrailEvent[];
     let s: DailyCounters = day();
     s = { ...s, features: Object.fromEntries(FEATURES.map((f) => [f, 100])), errors: Object.fromEntries(ERROR_CODES.map((e) => [e, 100])) };
-    for (let i = 0; i < MAX_TRAIL + 5; i++) s = recordTrail(s, longest[i % 2]!, T0 + i * 3_600_000, 1 + (i % 2) * 19);
-    s = { ...s, trail: s.trail!.map((e) => [e[0], MAX_TRAIL_GAP_S, MAX_TRAIL_WINDOWS, MAX_COUNTER]) };
+    // Built directly: recordTrail keeps its last places for errors, and the worst case is a full trail of the longest ids.
+    s = { ...s, trail: Array.from({ length: MAX_TRAIL }, (_, i) => [longest[i % 2]!, MAX_TRAIL_GAP_S, MAX_TRAIL_WINDOWS, MAX_COUNTER]), trailDropped: MAX_TRAIL_DROPPED };
     const bytes = new TextEncoder().encode(JSON.stringify(buildHeartbeat(s, ENV))).byteLength;
     expect(bytes).toBeLessThan(limit);
   });
