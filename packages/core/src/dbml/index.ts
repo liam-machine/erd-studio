@@ -36,6 +36,7 @@ export type { DbmlFormatOptions, DbmlFormatResult, DbmlFormatSkipReason } from '
 export { applyTextEdits } from './splice.js';
 export type { TextEdit } from './splice.js';
 export { DbmlEditRefused } from './errors.js';
+export { clearCompileCaches as clearDbmlCompileCaches } from './parser.js';
 export type { DbmlParserModule } from './parserModule.js';
 // Parser-free, from the main entry: re-exported so a host reading a project needs one import.
 export { attachRelationships, dbmlTableLookup } from '../dbmlAttach.js';

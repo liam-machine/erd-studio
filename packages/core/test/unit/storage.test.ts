@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  dbmlTableFinder,
   classifySemanticFile,
   dbmlNotADiagramMessage,
   dirnamePosix,
@@ -277,5 +278,38 @@ describe('posix helpers', () => {
     expect(isInsidePosix('.', 'gold/x.dbml')).toBe(true);
     expect(isInsidePosix('.', '../x.dbml')).toBe(false);
     expect(isInsidePosix('.', '/x.dbml')).toBe(false);
+  });
+});
+
+describe('dbmlTableFinder (findDbmlTable from a listing, in the extension\'s order)', () => {
+  it('finds a name in any layer and schema folder, ignoring every path that is not a table file', () => {
+    const find = dbmlTableFinder([
+      'gold/diagrams/fct_order.dbml',
+      'gold/relationships/fct_order.dbml',
+      'logical-models/fct_order.yml',
+      'gold/tables/fct_order.dbml',
+      'silver/tables/sales/fct_order.dbml',
+    ]);
+    expect(find('fct_order')).toBe('silver/tables/sales/fct_order.dbml');
+    expect(find('nothing')).toBeNull();
+  });
+
+  it('layers, then schema folders, in collator order; the first folder holding the name wins', () => {
+    const find = dbmlTableFinder(['silver/tables/a/x.dbml', 'gold/tables/z/x.dbml', 'gold/tables/b/x.dbml']);
+    expect(find('x')).toBe('gold/tables/b/x.dbml');
+  });
+
+  it('in that folder, the exact spelling first, then any case; the name trimmed', () => {
+    expect(dbmlTableFinder(['gold/tables/s/X.dbml', 'gold/tables/s/x.dbml'])('x')).toBe('gold/tables/s/x.dbml');
+    expect(dbmlTableFinder(['gold/tables/s/X.dbml', 'gold/tables/s/x.dbml'])('X')).toBe('gold/tables/s/X.dbml');
+    expect(dbmlTableFinder(['gold/tables/s/Dim_A.dbml'])(' dim_a ')).toBe('gold/tables/s/Dim_A.dbml');
+    // An exact spelling in a later folder does not beat any case in an earlier one.
+    expect(dbmlTableFinder(['gold/tables/a/X.dbml', 'gold/tables/b/x.dbml'])('x')).toBe('gold/tables/a/X.dbml');
+  });
+
+  it('answers normalised paths, and nothing for a non-string', () => {
+    const find = dbmlTableFinder(['./gold/tables/s/x.dbml', 42 as never]);
+    expect(find('x')).toBe('gold/tables/s/x.dbml');
+    expect(find(undefined as never)).toBeNull();
   });
 });

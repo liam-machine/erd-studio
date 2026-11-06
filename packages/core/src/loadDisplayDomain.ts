@@ -26,8 +26,10 @@
  * the `dbml` option) names its tables by its `use` lines instead: each is
  * read from the path its line resolves to, then from `{dir}/{name}.dbml` in
  * each `{layer}/tables/{schema}` folder its lines name, then by the YAML
- * probe above; its relationships come from the relationships files it
- * imports (`use * from '…/relationships/{file}.dbml'`), and from no other.
+ * probe above, then (only for a member with a `use` line, and only when the
+ * host passes `findDbmlTable`) from the file the host finds by name; its
+ * relationships come from the relationships files it imports
+ * (`use * from '…/relationships/{file}.dbml'`), and from no other.
  *
  * With `readFieldsFile: true`, the project's field list is read too:
  *
@@ -67,7 +69,7 @@ import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
 import { FIELDS_FILE_NAME, parseFieldsText } from './fieldsFile.js';
 import type { FieldList } from './fields.js';
 import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
-import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, tableFileCandidates } from './storage.js';
+import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, normalisePosix, tableFileCandidates } from './storage.js';
 import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
@@ -205,6 +207,25 @@ export interface LoadDisplaySubjectAreaOptions {
    */
   maxRelationshipsChars?: number;
   /**
+   * Find a DBML diagram member's table file by name, for a member the probe
+   * misses: one with a `use` line whose path, the table folders the
+   * diagram's lines name and the YAML probe all hold no file (a table moved
+   * to another schema folder or layer, or its file renamed in case; GitHub
+   * paths are case-sensitive). Answer the file's path relative to the
+   * semantic dir (`{layer}/tables/{schema}/{name}.dbml`), or null or
+   * undefined for none; any other answer, a path already probed, and a file
+   * of another name are ignored, and the member is drawn as missing. A
+   * rejection is passed through, like `readFile`'s. The table is read from
+   * that file (its layer and schema folder too), with a warning naming both
+   * paths, as the extension draws it until the next edit fixes the line.
+   * A member with no `use` line (`erd_unlinked_tables`) and a JSON diagram's
+   * models are never looked up. `dbmlTableFinder(paths)` builds one from a
+   * listing of the tree, in the extension's lookup order. Called at most
+   * once per member, within `maxParallelReads`. Default none: such a member
+   * draws as missing.
+   */
+  findDbmlTable?: (name: string) => string | null | undefined | Promise<string | null | undefined>;
+  /**
    * Read `{semanticDir}/fields.yml` (the project's field list) and set it as
    * the result's `fields`; see the module header. Default false: the file is
    * not read and the result has no `fields` (the starting set).
@@ -308,6 +329,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     maxYamlChars = Infinity,
     maxRelationshipsChars = Infinity,
     dbml,
+    findDbmlTable,
     readFieldsFile = false,
   } = options;
   const warn = options.warn ?? ((message: string) => console.warn(message));
@@ -319,6 +341,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   checkLimit('loadDisplaySubjectArea', 'maxDomainChars', maxDomainChars);
   checkLimit('loadDisplaySubjectArea', 'maxYamlChars', maxYamlChars);
   checkLimit('loadDisplaySubjectArea', 'maxRelationshipsChars', maxRelationshipsChars);
+  if (findDbmlTable !== undefined && typeof findDbmlTable !== 'function') {
+    throw new TypeError('loadDisplaySubjectArea: findDbmlTable must be a function');
+  }
   const ignoreStrayPositions =
     options.ignoreStrayPositions ??
     [maxModels, maxYamlNodes, maxDomainChars, maxYamlChars, maxRelationshipsChars].some((limit) => limit !== Infinity);
@@ -450,15 +475,29 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       while ((text === null || text === undefined) && ++index < candidates.length) {
         text = await readFile(candidates[index]);
       }
+      let foundRel: string | undefined;
+      if ((text === null || text === undefined) && findDbmlTable && memberPaths.has(name)) {
+        // A member whose use line is stale: the file the host finds by name, if any.
+        const rel = await findDbmlTable(name);
+        const tree = typeof rel === 'string' ? dbmlTreePathOf(rel) : undefined;
+        const normalised = tree?.kind === 'table' ? normalisePosix(rel as string) : undefined;
+        if (normalised !== undefined && tree!.name.trim().toLowerCase() === name.trim().toLowerCase() && !dbmlPaths.includes(normalised)) {
+          text = await readFile(`${prefix}${normalised}`);
+          if (text !== null && text !== undefined) {
+            foundRel = normalised;
+            warn(`Table "${name}" is not at its use line's path (${memberPaths.get(name)}); it was read from ${normalised}. The next ERD Studio edit fixes the line`);
+          }
+        }
+      }
       if (text === null || text === undefined) {
         parsed.set(name, NO_TABLE);
         return;
       }
-      const path = candidates[index];
-      if (dbml && index < dbmlPaths.length) {
+      const path = foundRel !== undefined ? `${prefix}${foundRel}` : candidates[index];
+      if (dbml && (foundRel !== undefined || index < dbmlPaths.length)) {
         dbmlFound.add(name);
         // Its schema folder, the schema of an unqualified Table (§1.2), and its layer.
-        const tree = dbmlTreePathOf(dbmlPaths[index]);
+        const tree = dbmlTreePathOf(foundRel ?? dbmlPaths[index]);
         const schemaFolder = tree?.schema;
         if (tree) tableLayers?.set(name.toLowerCase(), tree.layer);
         parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder));
