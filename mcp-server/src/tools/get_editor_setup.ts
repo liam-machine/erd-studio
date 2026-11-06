@@ -52,7 +52,7 @@ export const get_editor_setup = {
       '|---|---|',
       '| Claude Code | `.claude/skills/erd-studio/SKILL.md` with `DBML.md`, `LEGACY.md` and `SYNC.md` (+ PreToolUse hook) |',
       '| Claude Code (setup walkthrough) | `.claude/skills/erd-studio-setup/` — run `/erd-studio-setup` in the project folder |',
-      '| Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor | `.agents/skills/erd-studio/SKILL.md` + `.agents/skills/erd-studio-setup/` — `/erd-studio-setup` (Copilot, Cursor), `$erd-studio-setup` (Codex), or ask Gemini CLI to "Set up ERD Studio for this project" |',
+      '| Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor | `.agents/skills/erd-studio/SKILL.md` + `.agents/skills/erd-studio-setup/` — `/erd-studio-setup` (Copilot, Cursor), `$erd-studio-setup` (Codex), or ask Gemini CLI to "Set up ERD Studio for this project" (+ a pre-edit hook for each of GitHub Copilot, Codex and Gemini CLI it finds) |',
       '| GitHub Copilot | `.github/instructions/erd-studio.instructions.md` |',
       '| Google Gemini | `.gemini/styleguide.md` |',
       '| OpenAI Codex | `AGENTS.md` (appended) |',

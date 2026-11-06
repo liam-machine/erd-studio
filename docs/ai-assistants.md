@@ -54,6 +54,31 @@ Both routes use a small read-only `erd-studio` helper that ERD Studio installs i
 
 The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the shared `.agents/skills/` folder.
 
+## The safety check
+
+ERD Studio's format rules only help if your assistant reads them before it writes. So for the assistants that let a project add a hook, Set Up My AI Helper adds one that pauses the **first** edit to an `.erd-studio` file in each session and tells the assistant to load the rules first. The assistant loads them and retries; every later edit goes through as normal. The hook never approves anything on its own: your assistant still asks you before each change, as it always does.
+
+| Assistant | Where the hook is registered | Committed? |
+|---|---|---|
+| Claude Code | `.claude/settings.local.json` (script in `.claude/skills/erd-studio/`) | No: a local settings file |
+| GitHub Copilot (the Copilot CLI, and Copilot sessions in VS Code) | `.github/copilot/settings.local.json` (script in `.github/copilot/hooks/`) | No: ERD Studio adds both to `.gitignore` |
+| Codex | `.codex/hooks.json` (script in `.codex/hooks/`) | No when ERD Studio creates `.codex/hooks.json` (it adds both to `.gitignore`). If your project already has one, the entry is added to it and goes wherever that file goes |
+| Gemini CLI | `.gemini/settings.json` (script in `.gemini/hooks/`) | Gemini CLI has no local settings file, so the entry sits in your project's Gemini settings. If you commit that file, commit `.gemini/hooks/erd-studio-enforce-skill.sh` too, or remove the entry |
+| Cursor | Not yet supported | Cursor handles a hook's answer differently from the others, and ERD Studio hasn't checked a safe way to pause it yet. Cursor relies on the always-on skill |
+| Antigravity CLI | Not yet supported | Google's newer command-line assistant. ERD Studio doesn't add a hook for it yet, so it relies on the always-on skill |
+
+A few things to know:
+
+- **Which assistants get it:** Set Up My AI Helper adds the hook for the assistants it finds on your computer. When it finds none, it adds Claude Code's, GitHub Copilot's and Codex's (their files stay out of git), not Gemini CLI's. Updating ERD Studio's files later keeps the hooks you have current and adds no new ones.
+- **Codex asks first.** Codex runs a new project hook only after you trust it: when it starts, it says a hook needs review, and you approve it in `/hooks`.
+- **Gemini CLI** shows a one-time notice the first time it runs a new project hook, and ignores project settings in a folder you haven't trusted. Google moved free-tier and Google One users from Gemini CLI to Antigravity CLI in June 2026; the Gemini CLI hook is for anyone still using Gemini CLI.
+- **Copilot in VS Code** reads `.github/copilot/settings.local.json` in Copilot sessions. A chat that uses VS Code's own local agent instead may not run the hook.
+- **Versions:** GitHub Copilot hooks need a recent Copilot CLI (1.0.70 or later recommended) or a VS Code with agent hooks (still in preview); Codex 0.131 or later; Gemini CLI 0.26 or later. An older version just skips the hook, which is harmless.
+- **Windows:** Claude Code's check needs Git Bash. GitHub Copilot's and Codex's checks don't run on Windows at all. Gemini CLI may show a hook warning and carry on. Either way an edit is never blocked by mistake.
+- **Your own settings stay.** ERD Studio adds its one entry and keeps everything else in these files, with their indentation. A settings file with comments in it, or one it can't read, is left alone, and Set Up My AI Helper tells you that assistant's check wasn't added.
+
+## Choosing the files yourself
+
 To choose exactly which files are added, run **ERD Studio: Install AI Helper Files…** from the Command Palette. Pick the assistants you use: it adds instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini's style guide, or Codex's `AGENTS.md` (with the two format guides it points at, `DBML.md` and `LEGACY.md` in `.agents/skills/erd-studio/`).
 
 ## The `erd-studio` helper

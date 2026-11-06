@@ -204,12 +204,12 @@
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Install the skills into .agents/skills/ only (erd-studio and erd-studio-setup, Agent Skills frontmatter). No .claude/ folder. Run in Codex CLI.",
       "prompt": "$erd-studio-setup orders\n\n(When the skill offers to apply your team's modelling style after the first diagram, say yes.)",
-      "expected_output": "Codex picks up the skill from .agents/skills/, reads .agents/skills/erd-studio/SKILL.md for the format rules (no /erd-studio slash command), never mentions Shift+Tab, accept-edits mode or the Claude Code safety-check hook, and completes the walkthrough to a clean diff.",
+      "expected_output": "Codex picks up the skill from .agents/skills/, reads .agents/skills/erd-studio/SKILL.md for the format rules (no /erd-studio slash command), never mentions Shift+Tab or accept-edits mode, and completes the walkthrough to a clean diff.",
       "files": [],
       "expectations": [
         "Loads the format rules by reading .agents/skills/erd-studio/SKILL.md",
         "Does not tell the user to type /erd-studio or /erd-studio-setup; any re-run hint uses $erd-studio-setup",
-        "Does not mention Shift+Tab, 'accept edits on', plan mode or the one-time safety check",
+        "Does not mention Shift+Tab, 'accept edits on' or plan mode",
         "After the first diagram, offers the modelling-style step; on yes confirms the detected style and saves .erd-studio/modelling-approach.md",
         "The final `erd-studio diff` for the new domain exits 0 (clean)"
       ]
@@ -243,7 +243,7 @@
       "expectations": [
         "Quick start: the first domain is written, diffed and handed over to the canvas before any modelling-style question; the style step is then offered as the next step ('Want me to apply your team's modelling style — keys, grain, SCD?')",
         "Loads the format rules by reading .agents/skills/erd-studio/SKILL.md (or .claude/skills/erd-studio/SKILL.md if that is what exists)",
-        "Does not mention Shift+Tab, 'accept edits on' or the Claude Code safety-check hook",
+        "Does not mention Shift+Tab or 'accept edits on'",
         "Runs the helper at ~/.erd-studio-cli/bin/erd-studio (or the .cmd route on Windows) and narrates it",
         "Confirms the detected modelling style (medallion silver → gold, Kimball-style dim_/fct_ tables) in one question with evidence and a yes default, never an open 'how do you model data?' question",
         "The final `erd-studio diff` for the new domain exits 0 (clean)"

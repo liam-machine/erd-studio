@@ -26,16 +26,40 @@ export interface HarnessStatus {
   /**
    * The Agent Skills copies read by GitHub Copilot, Codex, Gemini CLI and
    * Cursor: `.agents/skills/erd-studio/SKILL.md` (folds in its SYNC.md) and
-   * `.agents/skills/erd-studio-setup/SKILL.md`. No hook — only Claude Code
-   * gets the enforce-skill guard.
+   * `.agents/skills/erd-studio-setup/SKILL.md`. Their pre-edit hooks are
+   * reported in `hooks`.
    */
   agents: {
     schemaSkill: FileState;
     setupSkill: FileState;
   };
+  /**
+   * The other assistants' "load the skill before the first edit" hook, as
+   * `claude.hookRegistered` is Claude Code's: the script exists and the
+   * tool's config registers it (`.github/copilot/settings.local.json`,
+   * `.codex/hooks.json`, `.gemini/settings.json`). Cursor has none.
+   */
+  hooks: {
+    copilot: boolean;
+    codex: boolean;
+    gemini: boolean;
+  };
   copilot: FileState;
   gemini: FileState;
   codex: FileState;
+}
+
+/**
+ * Why Set Up My AI Helper left one assistant's pre-edit hook out: its config
+ * has comments or trailing commas (`jsonc`), is not JSON (`not-json`) or has
+ * a `hooks` value of another shape (`shape`), or a script at the hook's path
+ * is the user's own (`own-script`) or from a newer ERD Studio (`newer-script`).
+ */
+export type AssistantHookSkipReason = 'jsonc' | 'not-json' | 'shape' | 'own-script' | 'newer-script';
+
+export interface SkippedAssistantHook {
+  id: 'copilot' | 'codex' | 'gemini';
+  reason: AssistantHookSkipReason;
 }
 
 export interface RecommendedInstallResult {
@@ -46,5 +70,11 @@ export interface RecommendedInstallResult {
   filesWritten: string[];
   /** The skill folders this call covered (`claude` = `.claude/skills/`, `agents` = `.agents/skills/`). */
   targets: Array<'claude' | 'agents'>;
+  /**
+   * Hooks this call was asked for but left out on purpose. They count as in
+   * place for `unchanged`, so a skipped hook never makes every later run
+   * report `updated`.
+   */
+  skippedHooks?: SkippedAssistantHook[];
   error?: string;
 }
