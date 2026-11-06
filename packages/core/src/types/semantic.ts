@@ -274,6 +274,33 @@ export type TableLoadErrorKind =
   | 'dbmlStructure';
 
 /**
+ * Why a loader warned (the optional second argument of `warn` in
+ * `loadDisplaySubjectArea`'s options and `buildUnifiedSubjectArea`'s
+ * context): a fixed code a host can count or log without the message, which
+ * may name tables and paths. Appended to, never reordered or renamed.
+ *
+ *  - `foreignDbml`: a DBML diagram declares its own Tables and imports none
+ *    (a single-file DBML from another tool, to import);
+ *  - `usePathMismatch`: a `use` line points somewhere other than the table's file;
+ *  - `inlineElement`: a diagram declares a Table, Enum, TableGroup, … or a
+ *    Metadata block, kept as written but not read;
+ *  - `relationshipsFileMissing`: a diagram imports a relationships file that
+ *    does not exist;
+ *  - `yamlTableInDbml`: a DBML diagram draws a YAML table;
+ *  - `layoutProblem` / `layoutMergeConflict`: the diagram's `erd_layout`
+ *    has a line it cannot read, a key twice or a bad value / conflict markers;
+ *  - `modelNotFound` / `modelUnreadable`: a table the diagram lists has no
+ *    file / a file that cannot be read (or is over a limit);
+ *  - `fieldsFile` / `layersFile`: `fields.yml` / `layers.json` was not used as written;
+ *  - `other`: anything else (repaired entries, dropped values, …).
+ */
+export const LOADER_WARNING_CODES = [
+  'foreignDbml', 'usePathMismatch', 'inlineElement', 'relationshipsFileMissing', 'yamlTableInDbml',
+  'layoutProblem', 'layoutMergeConflict', 'modelNotFound', 'modelUnreadable', 'fieldsFile', 'layersFile', 'other',
+] as const;
+export type LoaderWarningCode = (typeof LOADER_WARNING_CODES)[number];
+
+/**
  * A model file that exists but is broken, as the canvas shows it. Carries no
  * parser message (which may quote the file) — only the kind and the position.
  */

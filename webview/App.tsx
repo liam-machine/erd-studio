@@ -66,6 +66,7 @@ import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import { useLibraryDrop } from './hooks/useLibraryDrop';
 import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
 import { CanvasGuide } from './components/Guide/CanvasGuide';
+import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
 import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
@@ -754,18 +755,25 @@ function EditorCanvas() {
         <EmptyCanvas />
         {/* One-time drag-to-relate tip — 2+ tables, no relationships yet. */}
         <DragHint />
-        <Toolbar
-          nodes={nodes}
-          edges={edges}
-          allExpanded={allExpanded}
-          onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
-          onCollapseAll={collapseAll}
-        />
+        {/* Area boundaries tag a render crash's area for usage telemetry and rethrow it: no fallback UI. */}
+        <AreaErrorBoundary area="toolbar">
+          <Toolbar
+            nodes={nodes}
+            edges={edges}
+            allExpanded={allExpanded}
+            onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
+            onCollapseAll={collapseAll}
+          />
+        </AreaErrorBoundary>
         <StatusBar />
-        <DetailPanel />
-        <NewTableDialog />
-        <NewFkDialog />
-        <AddExistingTableDialog />
+        <AreaErrorBoundary area="detailPanel">
+          <DetailPanel />
+        </AreaErrorBoundary>
+        <AreaErrorBoundary area="dialogs">
+          <NewTableDialog />
+          <NewFkDialog />
+          <AddExistingTableDialog />
+        </AreaErrorBoundary>
       </ReactFlow>
 
       {activeToastMessage && (
@@ -782,22 +790,26 @@ function EditorCanvas() {
       <DragLine />
 
       {/* Edge context menu (F401) */}
-      {contextMenu && <ContextMenu />}
+      {contextMenu && <AreaErrorBoundary area="dialogs"><ContextMenu /></AreaErrorBoundary>}
 
-      {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
-      <DiscrepancyPanel />
+      <AreaErrorBoundary area="compare">
+        {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
+        <DiscrepancyPanel />
 
-      {/* Sync merge modal — full-screen takeover when sync mode is active */}
-      <SyncMergeModal />
+        {/* Sync merge modal — full-screen takeover when sync mode is active */}
+        <SyncMergeModal />
+      </AreaErrorBoundary>
 
       {/* Legend panel (bottom-left) */}
       <Legend />
 
       {/* Feedback dialog (bug reports and feature requests) */}
-      <FeedbackDialog />
+      <AreaErrorBoundary area="dialogs">
+        <FeedbackDialog />
+      </AreaErrorBoundary>
 
       {/* The onboarding guide's coach marks (Show Me Around), over the canvas. */}
-      {guide && <CanvasGuide start={guide} onEnd={endGuide} />}
+      {guide && <AreaErrorBoundary area="guide"><CanvasGuide start={guide} onEnd={endGuide} /></AreaErrorBoundary>}
     </div>
   );
 }
@@ -825,7 +837,9 @@ export function App() {
     <CanvasStoreProvider store={editorStoreApi}>
       <CanvasEnvironmentProvider host={vscodeCanvasHost}>
         <ReactFlowProvider>
-          <EditorCanvas />
+          <AreaErrorBoundary area="canvas">
+            <EditorCanvas />
+          </AreaErrorBoundary>
         </ReactFlowProvider>
       </CanvasEnvironmentProvider>
     </CanvasStoreProvider>

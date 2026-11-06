@@ -25,6 +25,7 @@ import {
   type DraftQuality,
 } from '../services/draftTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
+import { draftLayoutFeatures, webviewErrorCodes } from '../services/telemetryCanvas';
 import type { GuideActionPayload } from '../types/onboardingGuide';
 import type {
   Draft,
@@ -201,6 +202,8 @@ export function draftPreviewEvents(
   /** Told when the details open (`trackedDraftPreview`'s `onDetailsOpened`: a later discard is not a rejection at a glance). */
   onDetailsOpened?: () => void,
 ): DraftPreviewEvents {
+  // The built-in examples are left out of the layout keys (2.0 B17): their size is ERD Studio's, not the user's.
+  const isExample = (source: DraftSource): boolean => source === 'example' || source === 'exampleProject';
   return {
     detailsOpened: () => {
       feature('draftDetailsOpened');
@@ -208,6 +211,21 @@ export function draftPreviewEvents(
     },
     layoutFailed: () => error('draftLayoutFailed'),
     ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
+    pageReady: (_source, slow) => {
+      feature('draftPageReady');
+      if (slow) feature('readySlowOver10s');
+    },
+    noReady: () => error('webviewNoReadyDraft'),
+    pageError: (_source, kind) => {
+      for (const code of webviewErrorCodes(kind, 'draft')) error(code);
+    },
+    layoutFinished: (source, layout) => {
+      if (isExample(source)) return;
+      for (const key of draftLayoutFeatures(layout)) feature(key);
+    },
+    closedWhileLayingOut: (source) => {
+      if (!isExample(source)) feature('draftClosedWhileLayingOut');
+    },
   };
 }
 

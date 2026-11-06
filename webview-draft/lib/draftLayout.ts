@@ -8,13 +8,13 @@
 import { transformSubjectArea } from '@erd-studio/renderer';
 import { NODE_THRESHOLD, type FkFlowEdge, type TableFlowNode } from '@erd-studio/renderer/editor';
 
-import { runElkLayout } from '../../webview/lib/elkLayout';
+import { runElkLayout, type LayoutHooks } from '../../webview/lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, firstOpenLayoutOptions } from '../../webview/lib/firstOpenLayout';
 import type { DisplaySubjectArea } from '../../src/types/display';
 import type { NodePosition } from '../../src/types/semantic';
 
-/** Lay `display`'s tables out; positions keyed by table name. Rejects when ELK fails. */
-export async function layoutDraft(display: DisplaySubjectArea): Promise<Record<string, NodePosition>> {
+/** Lay `display`'s tables out; positions keyed by table name. Rejects when ELK fails. `hooks` hears a stack-safe fallback. */
+export async function layoutDraft(display: DisplaySubjectArea, hooks?: LayoutHooks): Promise<Record<string, NodePosition>> {
   // Sized as ErdCanvas draws them: every table's columns open below NODE_THRESHOLD.
   const expanded = display.models.length < NODE_THRESHOLD;
   // `isExpanded` here only sizes the edge handles; the nodes ELK sizes must
@@ -30,6 +30,7 @@ export async function layoutDraft(display: DisplaySubjectArea): Promise<Record<s
     fkEdges,
     firstOpenLayoutOptions(tableNodes.length, display.viewConfig.layoutOptions),
     FIRST_OPEN_LAYOUT.partitionStrategy,
+    hooks,
   );
 }
 

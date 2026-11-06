@@ -1057,11 +1057,11 @@ The clause is matched on the device against fixed keywords: the line the parser 
 **B17 — big diagrams: slow loads, layout failures and the draft layout.**
 
 - `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day).
-- `layoutStackFallback` — an auto layout fell back to the stacked placement.
+- `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
 - `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
 - `draftLayoutOver5s` — a draft page layout took more than 5 s.
 - `draftFitZoomUnder30` — a draft fitted to the screen at under 30% zoom.
-- `draftLayoutFallback` — a draft page layout fell back to the simple placement.
+- `draftLayoutFallback` — a draft page layout ran out of stack and was laid out again with the stack-safe placement.
 - `draftClosedWhileLayingOut` — a draft page closed before its layout finished.
 - `layoutFailedTimeout` (error) — an auto layout timed out.
 - `layoutFailedWorker` (error) — the layout worker crashed.

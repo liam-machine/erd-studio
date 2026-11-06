@@ -108,7 +108,10 @@ export function primeLayoutOnlyReading(oldText: string, newText: string, filePat
   const gone = new Set((reading.layoutProblems ?? []).filter((p) => p.code !== 'layoutDuplicateKey'));
   if (gone.size > 0) {
     const messages = new Set([...gone].map((p) => (p.line !== undefined ? `Line ${p.line}: ${p.message}` : p.message)));
-    reading.warnings = reading.warnings.filter((w) => !messages.has(w));
+    // `warningCodes` stays index for index with `warnings`.
+    const keptWarnings = reading.warnings.map((w, i) => ({ w, code: reading.warningCodes?.[i] })).filter(({ w }) => !messages.has(w));
+    reading.warnings = keptWarnings.map(({ w }) => w);
+    if (reading.warningCodes) reading.warningCodes = keptWarnings.map(({ code }) => code ?? 'other');
     const kept = (reading.layoutProblems ?? []).filter((p) => !gone.has(p));
     if (kept.length > 0) reading.layoutProblems = kept; else delete reading.layoutProblems;
   }

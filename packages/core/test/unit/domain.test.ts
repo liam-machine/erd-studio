@@ -362,7 +362,7 @@ describe('buildUnifiedSubjectArea', () => {
     const u = build({ schemaVersion: 5, logical: { models: ['dim_a', 'gone', 'dim_a'] } }, { getModel, warn });
     expect(u.logical.models).toEqual([dimA, { name: 'gone', columns: [] }, dimA]);
     expect(getModel.mock.calls.map((c) => c[0])).toEqual(['dim_a', 'gone', 'dim_a']);
-    expect(warn).toHaveBeenCalledWith('Model "gone" not found in the table library');
+    expect(warn).toHaveBeenCalledWith('Model "gone" not found in the table library', 'modelNotFound');
   });
 
   it('names a known load error in the warning and carries it on the placeholder (#110)', () => {
@@ -419,7 +419,7 @@ describe('buildUnifiedSubjectArea', () => {
       { warn },
     );
     expect(u.logical.models).toEqual([{ name: 'a', extra: 1 }]);
-    expect(warn).toHaveBeenCalledWith(`Skipping inline model without a string "name" in ${FILE}`);
+    expect(warn).toHaveBeenCalledWith(`Skipping inline model without a string "name" in ${FILE}`, 'other');
   });
 
   it('throws the layer error before resolving any model', () => {

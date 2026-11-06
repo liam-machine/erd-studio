@@ -34,7 +34,7 @@ import {
 } from '@erd-studio/core';
 import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
 import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
-import type { DbmlSubjectAreaReading, DbtKeyIndex, SubjectAreaFormat } from '@erd-studio/core';
+import type { DbmlSubjectAreaReading, DbtKeyIndex, LoaderWarningCode, SubjectAreaFormat } from '@erd-studio/core';
 import type { SubjectAreaSummary, SemanticSubjectArea, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { CompositeForeignKey, ManifestData } from '../types/manifest';
@@ -205,6 +205,8 @@ export class SubjectAreaService {
   private readonly importDrift = new Map<string, string[]>();
   /** The last read of each DBML diagram: each member's layer, from the file it was read from (path → lower-case name → layer). */
   private readonly memberLayers = new Map<string, ReadonlyMap<string, string>>();
+  /** The last successful read of each diagram: the fixed codes of the warnings it gave (path → codes; telemetry only). */
+  private readonly warningCodes = new Map<string, ReadonlySet<LoaderWarningCode>>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -335,7 +337,23 @@ export class SubjectAreaService {
     return library ? library.withIndexSnapshot(() => this.readSubjectArea(filePath, options)) : this.readSubjectArea(filePath, options);
   }
 
+  /**
+   * The fixed codes of the warnings the last successful read of the diagram
+   * `filePath` gave (2.0 B14: `modelNotFound`, `foreignDbml`, …), never their
+   * text; empty when there were none or it was never read.
+   */
+  loaderWarningCodes(filePath: string): ReadonlySet<LoaderWarningCode> {
+    return this.warningCodes.get(path.resolve(filePath)) ?? new Set();
+  }
+
   private readSubjectArea(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex }): UnifiedSubjectArea {
+    const codes = new Set<LoaderWarningCode>();
+    const unified = this.readSubjectAreaCoded(filePath, options, codes);
+    this.warningCodes.set(path.resolve(filePath), codes);
+    return unified;
+  }
+
+  private readSubjectAreaCoded(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex }, codes: Set<LoaderWarningCode>): UnifiedSubjectArea {
     if (!fs.existsSync(filePath)) {
       throw new SubjectAreaFileError('missing', filePath, `Diagram file not found: ${filePath}`);
     }
@@ -350,6 +368,7 @@ export class SubjectAreaService {
 
     if (subjectAreaStorageOf(filePath) === 'dbml') {
       const reading = this.readDbmlSubjectArea(filePath, raw);
+      reading.warnings.forEach((_w, i) => codes.add(reading.warningCodes?.[i] ?? 'other'));
       const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
       const view: DbmlDiagramView = {
         memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
@@ -361,7 +380,7 @@ export class SubjectAreaService {
         drift: new Set(),
         memberLayers: new Map(),
       };
-      const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view });
+      const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view, codes });
       this.memberLayers.set(path.resolve(filePath), view.memberLayers!);
       const drift = [...view.drift].sort();
       this.importDrift.set(path.resolve(filePath), drift);
@@ -374,7 +393,7 @@ export class SubjectAreaService {
     // Empty / invalid JSON (SubjectAreaFileError), then validation and repair
     // (SubjectAreaValidationError, warnings) — shared with every other host.
     const { obj, format } = validateSubjectAreaDocument(parseSubjectAreaJson(raw, filePath), filePath);
-    return this.buildUnified(obj, format, filePath, path.basename(filePath, '.json'), options);
+    return this.buildUnified(obj, format, filePath, path.basename(filePath, '.json'), { ...options, codes });
   }
 
   /**
@@ -421,7 +440,7 @@ export class SubjectAreaService {
     const segments = filePath.split(/[\\/]/).filter((s) => s !== '');
     if (classifySemanticFile(segments.slice(-3).join('/'), { tablesDirIsLayer: false }).kind !== 'diagram' || !filePath.endsWith('.dbml')) {
       const semanticRoot = this.tableLibraryService ? path.dirname(this.tableLibraryService.getTablesDir()) : undefined;
-      throw new SubjectAreaValidationError(notADiagramMessage(filePath, semanticRoot));
+      throw new SubjectAreaValidationError(notADiagramMessage(filePath, semanticRoot), 'notADiagram');
     }
     const raw = text ?? fs.readFileSync(filePath, 'utf-8');
     const reading = readDbmlDiagram(raw, filePath);
@@ -466,7 +485,7 @@ export class SubjectAreaService {
     format: SubjectAreaFormat,
     filePath: string,
     domainNameFallback: string,
-    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView; codes?: Set<LoaderWarningCode> },
   ): UnifiedSubjectArea {
     // The diagram's own tables are read with only the relationships they own
     // worked out (`readingTables`), not an attach over the whole library.
@@ -481,7 +500,7 @@ export class SubjectAreaService {
     format: SubjectAreaFormat,
     filePath: string,
     domainNameFallback: string,
-    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView },
+    options: { dbtKeyIndex?: DbtKeyIndex; dbml?: DbmlDiagramView; codes?: Set<LoaderWarningCode> },
   ): UnifiedSubjectArea {
     const view = options.dbml;
     const library = this.tableLibraryService;
@@ -514,7 +533,10 @@ export class SubjectAreaService {
             : null;
         }
         : undefined,
-      warn: (message) => log.warn(`[DomainService] ${message}`),
+      warn: (message, code) => {
+        options.codes?.add(code ?? 'other');
+        log.warn(`[DomainService] ${message}`);
+      },
       ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
   }
