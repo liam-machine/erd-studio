@@ -72,7 +72,7 @@ import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndRelo
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
-import { TelemetryService, telemetry } from './services/telemetryService';
+import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
@@ -1127,6 +1127,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // host crashes mid-recovery.
   const currentVersion = context.extension.packageJSON.version as string;
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
+  // Telemetry's update flag (no version text), written before the reload
+  // below can return, so the next activation still counts the update.
+  await notePendingUpdate(context, previousVersion, currentVersion);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   // Fresh install: remember that the Welcome panel is owed, even if this
   // activation has no dbt project and returns early below. Captured here,
