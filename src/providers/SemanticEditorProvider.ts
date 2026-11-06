@@ -102,10 +102,13 @@ import {
   linkKey,
   normaliseSubjectAreaDocument,
   sameLink,
+  builtInField,
   setMetaEntry,
   toDisplaySubjectArea,
 } from '@erd-studio/core';
-import type { DbtKeyIndex } from '@erd-studio/core';
+import type { DbtKeyIndex, FieldList, MetaValue } from '@erd-studio/core';
+import { FieldsService } from '../services/fieldsService';
+import { CUSTOMISE_FIELDS_COMMAND } from '../commands/customiseFields';
 import { dbtKeyIndexOf, withDbtKeyHints } from '../services/stageDisplay';
 import { rewriteJsonScalars } from '../services/minimalEdits';
 import { checkManifestStaleness } from '../services/stalenessService';
@@ -488,6 +491,8 @@ import {
   validateTableName,
   validateModelAliasPayload,
   validateMetaPayload,
+  validateOpenFieldsFilePayload,
+  validateRationalePayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateAddExistingModelsPayload,
@@ -1966,6 +1971,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'openFieldsFile': {
+            // The Detail panel's "Customise fields" link (editor only). Writes
+            // nothing: it opens fields.yml, or an unsaved one holding the starting set.
+            const payloadError = validateOpenFieldsFilePayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await vscode.commands.executeCommand(CUSTOMISE_FIELDS_COMMAND);
+            break;
+          }
           case 'openModelFile': {
             // Writes nothing, so it is on the physical allowlist.
             const payload = (message as OpenModelFileMessage).payload;
@@ -2199,10 +2215,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'updateModelRationale': {
             const payload = (message as { payload?: { modelName: string; rationale: Rationale } }).payload;
-            if (payload) {
-              await this.queueEdit(panelKey, () =>
-                this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage));
+            const rationaleError = validateRationalePayload(payload);
+            if (rationaleError || !payload) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update design rationale: ${rationaleError ?? 'Missing payload.'}` } });
+              break;
             }
+            await this.queueEdit(panelKey, () =>
+              this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage));
             break;
           }
           case 'updateModelDescription': {
@@ -3581,6 +3600,59 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return path.dirname(this.tableLibraryService.getTablesDir());
   }
 
+  /** The project's fields.yml reader, for the semantic dir in use (it changes only with a reload). */
+  private fieldsReader: FieldsService | undefined;
+  /** The problems last logged for fields.yml, so one broken file is logged once, not on every redraw. */
+  private loggedFieldsReading: unknown;
+
+  private fieldsService(): FieldsService {
+    const root = this.semanticRootDir();
+    if (!this.fieldsReader || this.fieldsReader.semanticRoot !== root) this.fieldsReader = new FieldsService(root);
+    return this.fieldsReader;
+  }
+
+  /**
+   * The field list a DisplaySubjectArea carries (both stages): the project's
+   * fields.yml, only when it has one, so a project without the file posts
+   * exactly what it did before. A broken file is logged (doctor reports it in
+   * full) and its readable part, or the starting set, is used. Reads only.
+   */
+  private displayFields(): FieldList | undefined {
+    try {
+      const service = this.fieldsService();
+      const reading = service.read();
+      if (reading.problems.length > 0 && this.loggedFieldsReading !== reading) {
+        this.loggedFieldsReading = reading;
+        for (const problem of reading.problems) {
+          log.warn(`[SemanticEditorProvider] ${projectRelative(this.workspaceRoot, reading.filePath)}${problem.line !== undefined ? ` (line ${problem.line})` : ''}: ${problem.message}`);
+        }
+      }
+      return service.displayFields();
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] Could not read fields.yml: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    }
+  }
+
+  /** The resolved field list (the starting set without a file), for an edit that depends on a field's type. */
+  private fieldList(): FieldList | undefined {
+    try {
+      return this.fieldsService().getList();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * fields.yml was created, changed or deleted outside ERD Studio: drop the
+   * cached list and redraw every open canvas, on whichever stage it shows.
+   * A refresh path: it never writes.
+   */
+  async onFieldsFileChanged(): Promise<void> {
+    this.fieldsReader?.invalidate();
+    await this.refreshAllOpenSubjectAreas();
+  }
+
   /**
    * The {@link SubjectAreaResolver} of a library plan: tables, the
    * relationships files a diagram imports and file existence as the plan
@@ -4117,6 +4189,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const readOnly = domain.stage === 'physical';
     const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
+    const fields = this.displayFields();
     const display = toDisplaySubjectArea(domain, {
       viewConfig,
       stubColumns,
@@ -4125,6 +4198,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       editorPayload,
       // A relationship drawn backwards is flagged on dbt's evidence too (#163).
       dbtKeyIndex,
+      // The project's fields.yml, only when it has one.
+      ...(fields ? { fields } : {}),
     });
     // dbt's key evidence orients new relationships on an editable canvas (#133 L1).
     return readOnly ? display : this.withWhereThingsLand(this.withOwnRelationships(this.withTableLayers(withDbtKeyHints(display, dbtKeyIndex), diagramPath), diagramPath), diagramPath);
@@ -4413,6 +4488,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         postedTables = physicalDomain.models.length;
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
+        const fields = this.displayFields();
+        if (fields) { physicalDomain.fields = fields; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
         this.cancelCanvasContext(webview);
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
@@ -7222,6 +7299,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         return;
       }
+      const scope = payload.columnName !== undefined ? 'column' : 'table';
       const ok = await this.applyTableEdit(document, webview, payload.modelName, (model) => {
         let target: { meta?: Meta } = model;
         if (payload.columnName !== undefined) {
@@ -7230,8 +7308,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           target = column;
         }
         const meta: Meta = { ...(target.meta ?? {}) };
+        const writesDbmlText = this.tableIsDbml(payload.modelName);
         for (const key of payload.remove ?? []) delete meta[key];
-        for (const [key, value] of Object.entries(payload.set ?? {})) setMetaEntry(meta, key, value);
+        for (const [key, value] of Object.entries(payload.set ?? {})) {
+          setMetaEntry(meta, key, this.metaValueToWrite(key, value, meta[key], scope, writesDbmlText));
+        }
         if (Object.keys(meta).length > 0) { target.meta = meta; } else { delete target.meta; }
       });
       if (!ok) {
@@ -7242,6 +7323,35 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       log.error(`[SemanticEditorProvider] Update meta failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update metadata: ${message}` } });
     }
+  }
+
+  /** Whether `modelName`'s file is a DBML table (it keeps its storage through an edit). */
+  private tableIsDbml(modelName: string): boolean {
+    try {
+      return this.tableLibraryService.findTableFile(modelName)?.toLowerCase().endsWith('.dbml') ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * What an `updateMeta` set writes for `key` (A12). The canvas posts text;
+   * a yes-no answer (`true` / `false`) is written as a BOOLEAN where the file
+   * keeps booleans: over a value that is already a boolean (YAML `pii: true`,
+   * a DBML `meta_json` entry), and in a YAML table when the project's field
+   * list makes the key a yes-no field. A DBML table's text value stays text
+   * (`pii: 'true'`), as its bare spelling holds only text. Anything else is
+   * the text as posted.
+   */
+  private metaValueToWrite(key: string, value: string, existing: MetaValue | undefined, scope: 'table' | 'column', dbml: boolean): MetaValue {
+    const answer = /^\s*(true|false)\s*$/i.exec(value)?.[1]?.toLowerCase();
+    if (answer === undefined) return value;
+    if (typeof existing === 'boolean') return answer === 'true';
+    if (dbml) return value;
+    const list = this.fieldList();
+    const defs = list ? (scope === 'column' ? list.columns : list.tables) : [];
+    const def = defs.find((d) => d.key === key && d.home.kind === 'meta') ?? builtInField(key, scope);
+    return def?.type === 'yes-no' && def.home.kind === 'meta' ? answer === 'true' : value;
   }
 
   private async handleUpdateModelRole(
@@ -7349,6 +7459,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
+        }
+        const fields = this.displayFields();
+        if (fields) {
+          physicalDomain.fields = fields;
         }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
         this.cancelCanvasContext(webview);

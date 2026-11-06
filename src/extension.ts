@@ -163,6 +163,7 @@ import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, dra
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
+import { CUSTOMISE_FIELDS_COMMAND, customiseFields } from './commands/customiseFields';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
@@ -720,6 +721,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.turnOnStartSuggestions',
   'erdStudio.showImportGuide',
   'erdStudio.showMeAround',
+  'erdStudio.customiseFields',
 ]);
 
 /**
@@ -2282,6 +2284,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     warnIfLayerConfigBroken();
   });
 
+  // fields.yml (the project's field list) changed outside ERD Studio → drop
+  // the cached list and redraw the open canvases with it. Never writes.
+  const fieldsConfigChangedSubscription = fileWatcherService.onFieldsConfigChanged(() => {
+    void editorProvider.onFieldsFileChanged().catch((err) => {
+      log.error('[ERD Studio] Redraw after a fields.yml change failed:', err);
+    });
+  });
+
   // Table files changed outside ERD Studio → refresh the diagrams that use
   // them and the views, once per watcher batch: Edit > Undo of Convert
   // reports 1,100 tables in one batch while it is still deleting files, and
@@ -2787,6 +2797,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     editorWroteSubscription,
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
+    fieldsConfigChangedSubscription,
     logicalModelChangedSubscription,
     bulkChangeStartedSubscription,
     bulkChangeSettledSubscription,
@@ -3432,6 +3443,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         editorProvider.switchStageForUri(fileUri, 'physical');
       }
     }),
+    // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
+    // holding the starting set. Writes nothing (the user saves it).
+    vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, () => customiseFields(fullSemanticDirPath)),
     // Export a domain's logical design as Mermaid or DBML. The argument is
     // the canvas's document Uri, the domain tree's node, or nothing (the
     // focused canvas, else the domain picker). Writes no ERD Studio file.

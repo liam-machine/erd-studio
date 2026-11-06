@@ -1,4 +1,4 @@
-Table branches.branches_site [meta_owner: 'data-engineering'] {
+Table branches.branches_site [owner: 'data-engineering'] {
   Note: 'The branch directory.'
 
   branch_code STRING    [pk, natural_key: 'true']

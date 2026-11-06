@@ -3,7 +3,7 @@
 Table reporting.customer_activity [
   role: 'transaction-fact',
   grain: 'One row per thing a customer did',
-  meta_owner: 'bi-platform'
+  owner: 'bi-platform'
 ] {
   Note: 'Every customer action, oldest first: opened an account, called the bank, responded to a campaign.'
 

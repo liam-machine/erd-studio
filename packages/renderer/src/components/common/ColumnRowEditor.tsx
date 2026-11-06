@@ -34,6 +34,18 @@ export interface ColumnRowEditorColumn {
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
 }
 
+/**
+ * Which of a column's typed fields the row shows, from the project's field
+ * list (`ColumnEditor` works it out with core's resolver). Each is shown when
+ * true. The natural key's badge always shows whatever `naturalKey` says: it
+ * is key information, not only a field.
+ */
+export interface ColumnFieldVisibility {
+  scdType?: boolean;
+  additiveType?: boolean;
+  naturalKey?: boolean;
+}
+
 export interface ColumnRowEditorProps {
   /** The column data to display/edit. */
   column: ColumnRowEditorColumn;
@@ -63,8 +75,13 @@ export interface ColumnRowEditorProps {
   onToggleNK?: () => void;
   /** Show warning if multiple PKs exist in model. */
   showMultiplePKWarning?: boolean;
-  /** Parent model's role — determines whether SCD/additive dropdowns are shown. */
+  /** Parent model's role — determines whether SCD/additive dropdowns are shown (without `fieldVisibility`). */
   modelRole?: TableRole;
+  /**
+   * Which typed fields to show, from the field list. When absent, the SCD
+   * dropdown shows for a dimension role and the additive one for a fact role.
+   */
+  fieldVisibility?: ColumnFieldVisibility;
   /** Whether the description area is expanded. */
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
@@ -132,6 +149,7 @@ export function ColumnRowEditor({
   onToggleNK,
   showMultiplePKWarning = false,
   modelRole,
+  fieldVisibility,
   expanded = false,
   onToggleExpand,
   dragHandleProps,
@@ -478,9 +496,12 @@ export function ColumnRowEditor({
   // Check if description exists
   const hasDescription = Boolean(localColumn.description?.trim());
 
-  // Determine which metadata dropdowns to show based on parent model role
+  // Which metadata dropdowns to show: the field list's answer when given,
+  // else the parent model's role.
   const isDimRole = modelRole?.includes('dim') || modelRole === 'reference';
   const isFactRole = modelRole?.includes('fact') || modelRole?.includes('snapshot');
+  const showScdType = fieldVisibility ? fieldVisibility.scdType === true : isDimRole;
+  const showAdditiveType = fieldVisibility ? fieldVisibility.additiveType === true : isFactRole;
 
   // Handle row click for selection (only when not in new-column mode)
   const handleRowClick = useCallback(
@@ -683,8 +704,8 @@ export function ColumnRowEditor({
             </div>
           )}
 
-          {/* SCD Type dropdown — shown for dimension-role models */}
-          {isDimRole && (
+          {/* SCD Type dropdown — on the field list (or set), else for dimension-role models */}
+          {showScdType && (
             <div className="column-row-editor__metadata-row">
               <label className="column-row-editor__metadata-label">SCD Type</label>
               <select
@@ -701,8 +722,8 @@ export function ColumnRowEditor({
             </div>
           )}
 
-          {/* Additive Type dropdown — shown for fact-role models */}
-          {isFactRole && (
+          {/* Additive Type dropdown — on the field list (or set), else for fact-role models */}
+          {showAdditiveType && (
             <div className="column-row-editor__metadata-row">
               <label className="column-row-editor__metadata-label">Additive</label>
               <select

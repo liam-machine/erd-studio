@@ -1,8 +1,8 @@
 Table gold.dim_customer [
   role: 'conformed-dim',
   grain: 'One row per customer per version',
-  rationale_scd_strategy: 'Type 2 on segment so revenue stays with the segment the customer was in at the time; type 1 on email.',
-  rationale_design: 'Built from silver customers.'
+  decisions: 'Built from silver customers: a pipeline step, not a foreign key, so there is no Ref to it.',
+  scd_strategy: 'Type 2 on segment so revenue stays with the segment the customer was in at the time; type 1 on email.'
 ] {
   Note: 'Customers, with history of their segment.'
 

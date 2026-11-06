@@ -1,7 +1,7 @@
 Table atlas.clients_daily [
   grain: 'One row per client per day',
-  rationale_design: 'A view of atlas_derived.clients_daily_v6. Queries use the view, so the next version of the table can replace this one behind it.',
-  meta_materialized: 'view'
+  decisions: 'A view of atlas_derived.clients_daily_v6. Queries use the view, so the next version of the table can replace this one behind it.',
+  materialized: 'view'
 ] {
   Note: 'Each client\'s activity on each day.'
 

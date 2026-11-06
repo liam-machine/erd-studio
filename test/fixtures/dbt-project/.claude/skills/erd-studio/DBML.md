@@ -11,9 +11,10 @@ This is how an ERD Studio project stores its model as DBML (ERD Studio 2.0 and l
 Table sales.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
-  rationale_purpose: 'Revenue reporting by day, customer and region',
-  meta_owner: 'sales-data',
-  meta_json: '{"pii":false,"tags":["finance"]}'
+  purpose: 'Revenue reporting by day, customer and region',
+  decisions: 'Returns are negative lines, not a table of their own, so totals net off',
+  owner: 'sales-data',
+  meta_json: '{"tags":["finance"]}'
 ] {
   Note: 'Order lines'
 
@@ -25,9 +26,12 @@ Table sales.fct_order [
     natural_key: 'true',
     note: 'The order number the customer sees on the receipt, emails and the shop'
   ]
+  email          VARCHAR         [pii: 'true', note: 'Where the receipt was sent']
   loaded_at      timestamp       [not null, default: `now()`]
 }
 ```
+
+Here `owner` and `pii` are fields of the team's own, from its `fields.yml` (below); `tags`, a list, is metadata in `meta_json`.
 
 - **Exactly one `Table` per file**, declared `Table <schema>.<name>`: the schema spelled exactly as the schema folder and the name exactly as the file (`gold/tables/sales/fct_order.dbml` holds `Table sales.fct_order`). Double-quote a part that is not a plain identifier (`Table "SAP FI".afih`). Any number of `Enum`s and comments may sit beside it. No `Project`, `TableGroup`, top-level `Note`, `TablePartial` or `Records`.
 - **The schema is the qualifier, never a setting.** Doctor warns about an unqualified `Table fct_order` (`unqualifiedTable`: other DBML tools read it as `public.fct_order`), a qualifier that differs from the folder (`schemaFolderMismatch`) and an old `[schema: '…']` setting (`schemaProperty`: remove it). To change a table's schema, move its file to the other schema folder and change the qualifier, every Ref end and every `use` line that names it, in one change.
@@ -36,7 +40,7 @@ Table sales.fct_order [
 - **A table needs at least one column.** A table with none yet holds the placeholder line `_erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']`; delete it when you add the first real column.
 - **Primary key**: `pk` on the column; for two or more columns, an `indexes { (a, b) [pk] }` block instead, with no `pk` on the columns.
 - The table's description is the `Note: '…'` line, first in the block and followed by a blank line. A text with a line break is triple-quoted (`'''…'''`); escape `'` as `\'` and `\` as `\\`.
-- A flag is written only when it is set (`natural_key: 'true'`); to unset it, delete the setting. Settings ERD Studio does not model (`not null`, `unique`, `default`, `increment`, `note` on an index, `headercolor`, other indexes, Enums, your own custom settings) are kept exactly as written.
+- A flag is written only when it is set (`natural_key: 'true'`); to unset it, delete the setting. DBML's own settings ERD Studio does not model (`not null`, `unique`, `default`, `increment`, `note` on an index, `headercolor`, other indexes, Enums) are kept exactly as written; every other setting is a field ("Setting names" below), kept too.
 - **Never write a `Metadata` block** (`Metadata Table x { … }`): put every property inline, on the Table or the column. A Metadata block silently overrides the inline value.
 
 ## Field names
@@ -49,9 +53,9 @@ Table sales.fct_order [
 | role (see "Table roles" in `SKILL.md`) | `role` | `role: 'conformed-dim'` |
 | grain | `grain` | `grain: 'One row per customer'` |
 | warehouse table name (dbt `alias`) | `alias` (never DBML's own `as`) | `alias: 'customer'` |
-| design rationale | `rationale_<field>` | `rationale_grain_choice: '…'` |
-| metadata, text values | `meta_<key>` (key matching `[a-z_][a-z0-9_]*`) | `meta_owner: 'crm-team'` |
-| metadata, anything else | one `meta_json` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a `meta_json` as it is) | `meta_json: '{"pii":true}'` |
+| a field (see "Fields" in `SKILL.md` and "fields.yml" below) | `<key>: '<value>'`, the key as fields.yml names it | `purpose: '…'`, `owner: 'crm-team'` |
+| metadata that is not text (a list, a map, a number, or `true` / `false` for a key that is not a yes-no field) | one `meta_json` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a `meta_json` as it is) | `meta_json: '{"tags":["finance"]}'` |
+| a field in an older file | `rationale_<key>` or `meta_<key>` ("Setting names" below) | `rationale_purpose: '…'` |
 | column type | the column's type | `email VARCHAR` |
 | column description | `note` (column setting) | `[note: 'Email address']` |
 | primary key | `pk`, or `indexes { (a, b) [pk] }` | `[pk]` |
@@ -59,9 +63,88 @@ Table sales.fct_order [
 | natural (business) key | `natural_key: 'true'` | `[natural_key: 'true']` |
 | SCD type | `scd_type: '0'`, `'1'` or `'2'` | `[scd_type: '2']` |
 | additive type | `additive_type` | `[additive_type: 'semi-additive']` |
-| column metadata | `meta_<key>` / `meta_json` on the column | `[meta_pii: 'yes']` |
+| a column field | `<key>: '<value>'` on the column (`meta_json` for metadata that is not text) | `[pii: 'true']` |
 
-Every custom value is a quoted string. `foreign_key` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. ERD Studio never compares `meta_*` with dbt (see "The team's metadata list" in `SKILL.md`); an imported table may carry a `meta_json` with a `dbml` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
+Every custom value is a quoted string. `foreign_key` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. ERD Studio never compares a field with dbt (see "Fields" in `SKILL.md`); an imported table may carry a `meta_json` with a `dbml` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
+
+## fields.yml: the fields a project records
+
+`.erd-studio/fields.yml` (optional, beside `layers.json`; the same file in a YAML project) lists the fields this project records on tables and on columns, in the order the Detail panel shows them. ERD Studio reads it and never writes it; change it only when the user asks (the `/erd-studio-setup` guide writes it after a yes). Without it, a project records the starting set (below). An ERD Studio 2.0 pre-release from before fields reads only the old spellings and keeps the bare ones as written.
+
+```yaml
+version: 1
+tables:
+  - grain                          # a bare name: the built-in, as shipped
+  - purpose
+  - key: decisions                 # a built-in in the team's own words
+    guidance: Choices finance signed off, and why.
+  - open_questions
+  - role
+  - scd_strategy
+  - measures
+  - key: owner                     # the team's own fields from here
+    label: Owner
+    type: value
+    guidance: The team that owns it, e.g. crm-team.
+    filled_by: dbt
+  - key: sensitivity
+    label: Sensitivity
+    type: choice
+    values: [public, internal, confidential]
+    filled_by: people
+columns:
+  - natural_key
+  - scd_type
+  - additive_type
+  - key: pii
+    label: Personal data
+    type: yes-no
+    filled_by: dbt
+left_out: [dimension, metrics]     # dbt meta keys that are another tool's settings
+```
+
+- **key**: the setting's name in a table file: lower case letters, digits and `_` (DBML lower-cases setting names), never a reserved name ("Setting names" below), listed once. A bare name is a built-in as shipped; an entry with `key` is a built-in in the team's words (only `label`, `guidance` and `filled_by` change; its type, values and show_for are fixed) or a field of the team's own.
+- **label**: what the canvas and the exports call it. **guidance**: one sentence saying what to write; it is the canvas placeholder and your instruction.
+- **type**: `text` (the default: a sentence or two), `value` (one short value), `choice` (one of its `values`, at least two, in dropdown order) or `yes-no` (`'true'` or `'false'`).
+- **filled_by**: `anyone` (the default: people or you), `people` (you write only a value the user gives you) or `dbt` (copied from the dbt model's `meta:`, never typed in). **show_for**: `dimensions`, `facts` or `all` (the default), read from the table's role; a table with no role shows both, and a field with a value always shows.
+- **left_out**: dbt `meta:` keys that are another tool's settings (Lightdash's `dimension`, `metrics`): never copied or offered.
+- A missing `tables:` or `columns:` means the starting set's; `tables: []` means none. No `version:` means 1. Unknown keys are ignored. doctor reports a problem in the file under `erd.fields` (an error is the `fix-fields-file` step).
+
+The built-in fields (starting = on without a fields.yml; optional = only when listed):
+
+| key | on | type | default | guidance |
+|---|---|---|---|---|
+| `grain` | tables | text | starting | One row per ___. The one sentence that says what a row is. |
+| `purpose` | tables | text | starting | Who uses this table and the question it answers. |
+| `decisions` | tables | text | starting | A choice a later editor might undo, and why. |
+| `open_questions` | tables | text | starting | What is still undecided. Assistants ask about these and never guess. |
+| `role` | tables | choice (the "Table roles" in `SKILL.md`) | starting | Which kind of table this is: conformed-dim, transaction-fact, … |
+| `scd_strategy` | dimensions | text | starting | How this dimension keeps history: which columns track changes and which overwrite. |
+| `measures` | facts | text | starting | How the measures add up: which sum across every dimension and which do not. |
+| `source_of_truth` | tables | value | optional | The system this data is mastered in. |
+| `freshness` | tables | text | optional | How fresh it must be, and how often it loads. |
+| `known_issues` | tables | text | optional | Data problems a consumer should know before trusting a number. |
+| `retention` | tables, people only | text | optional | How long rows are kept, and why. |
+| `natural_key` | columns | yes-no | starting | The business identifier, like an order number or a customer code. |
+| `scd_type` | dimension columns | choice `0` / `1` / `2` | starting | 0 never changes, 1 overwrites, 2 keeps history. |
+| `additive_type` | fact columns | choice | starting | Additive, semi-additive or non-additive. |
+| `business_rule` | columns | text | optional | How the value is worked out, in business terms. |
+
+**Retired** (still read and shown, never offered or written new): `design` (move it to `decisions`, or to `purpose`), `role_choice` and `grain_choice` (move them to `decisions`).
+
+### Setting names
+
+| On a Table or a column | Is |
+|---|---|
+| `<key>: '<value>'`, for a key that is not reserved (`purpose`, `owner`, `pii`) | that field, listed or not (an unlisted one shows under "Not in your list") |
+| `erd_<key>` | the same field, and it wins over `<key>`: for a file where another DBML tool writes its own `<key>` |
+| DBML's own: `note`, `headercolor`, `color`, `pk`, `primary key`, `primary_key`, `unique`, `ref`, `dep`, `not null`, `not_null`, `null`, `increment`, `default`, `name`, `type`, `check`, `update`, `delete`, `inactive`, `example` | reserved: never a field key; kept as written |
+| ERD Studio's own: `schema`, `alias`, `role`, `grain`, `foreign_key`, `natural_key`, `scd_type`, `additive_type`, `meta_json`, `erd_placeholder`, `linked_table`, and `json`, `dbml`, `constructor`, `__proto__` | reserved: never a key of the team's own (`role` to `additive_type` are the built-ins above) |
+| anything starting `erd_`, `rationale_` or `meta_` | never a field key: a spelling of one (below) |
+| `meta_json` | metadata that is not text: lists, maps, numbers, and `true` / `false` for a key that is not a yes-no field. A text value is its own setting |
+| old spellings: `rationale_<key>` (`rationale_purpose`), `meta_<key>` (`meta_owner`), an entry in `meta_json` | the same field. Change it where it is; never add a second copy. A table holding two spellings uses the bare one (doctor: `fieldSpelledTwice`) |
+
+**Renaming old spellings** is the user's choice: only on a yes, all in one change, and only what doctor counts as `fieldOldSpellings`. Never rename `rationale_design`, `rationale_role_choice` or `rationale_grain_choice` (retired: offer to move the text into `decisions`, showing the result first), an entry in `meta_json`, or a `meta_<key>` whose key is reserved or a built-in that is not metadata (`meta_purpose`, `meta_role`, `meta_retention`): that is metadata of its own, shown as "purpose (metadata)", and `meta_<key>` is the same field only for a key of the team's own.
 
 ## Relationships file: `<layer>/relationships/<file>.dbml`
 
@@ -154,7 +237,7 @@ ERD Studio writes every `.dbml` in one layout and tidies a file into it each tim
 - **Two-space indents.** At most one blank line in a row, and none straight after `{` or before `}`.
 - **A table's `Note` comes first** in its body, then one blank line, then the columns, then `indexes`.
 - **Columns line up**: on consecutive lines, the names are padded to the group's longest name (a name over 32 characters does not widen it); the types are padded to the longest type **of a column that has settings** (a type over 24 characters does not widen it), then one space and the settings. A column with no settings ends at its type, so a long settings-less type such as `"VARCHAR(4000)"` does not push the other columns' settings out. A blank line or an own-line comment between columns starts a new group with its own alignment, so use one to group related columns.
-- **Column settings in this order**: `pk`; DBML's own (`not null`, `unique`, `increment`, `default`); ERD Studio's (`natural_key`, `scd_type`, `additive_type`, `foreign_key`); `meta_*`; then `note` last. Written `[a, b: c]`: no space inside the brackets, `, ` between settings, `: ` after a name.
+- **Column settings in this order**: `pk`; DBML's own (`not null`, `unique`, `increment`, `default`); ERD Studio's (`natural_key`, `scd_type`, `additive_type`, `foreign_key`); the fields (`pii: 'true'`, any `meta_json`); then `note` last. Written `[a, b: c]`: no space inside the brackets, `, ` between settings, `: ` after a name.
 - **Long settings go one per line**: when a column's line would pass 100 characters, `[` ends the column line, each setting sits on its own line two spaces further in with a comma after all but the last, and `]` is alone on the column's indent (as `order_number` above). A Table with two or more settings lists them the same way.
 - **Relationships**: single spaces around the operator. When ERD Studio writes a relationships file it puts one blank line between the Refs of each foreign-key table; Format Document keeps blank lines that are there but does not add these, so keep a table's Refs together and leave a blank line before the next table's.
 - **`use` lines** next to each other line up their `from` (a `use { … }` part over 48 characters does not widen the run).
@@ -170,4 +253,4 @@ The project's own files are DBML; these commands bring other DBML in and send di
 - **dbdiagram.io** — `dbdiagram push <name>.dbml --name "<Name>"` (dbdiagram's own CLI: `npm install -g dbdiagram`, then `dbdiagram auth login`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores `erd_layout`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
 - **`meta.dbml`** — an imported table or column may carry a `dbml` entry in its metadata (`meta_json` in DBML, `meta.dbml` in YAML): what the DBML file said that ERD Studio has no field for (`not_null`, `unique`, `default`, `increment`, `checks`, `enum`, `indexes`, `header_color`, the original `name` when it had to change, another tool's own `properties`). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.
 
-<!-- erd-studio-harness: 45 -->
+<!-- erd-studio-harness: 46 -->

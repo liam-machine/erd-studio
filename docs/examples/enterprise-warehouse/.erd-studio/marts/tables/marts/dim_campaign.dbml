@@ -1,7 +1,7 @@
 Table marts.dim_campaign [
   role: 'domain-dim',
   grain: 'One row per campaign',
-  meta_owner: 'marketing-analytics'
+  owner: 'marketing-analytics'
 ] {
   Note: 'Marketing campaigns, for marketing.'
 

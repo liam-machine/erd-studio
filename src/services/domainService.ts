@@ -758,6 +758,8 @@ export class SubjectAreaService {
             description: model.description || '',
             columns: [],
             rationale: model.rationale,
+            // The design's own fields (team fields, business_rule), shown read-only beside rationale: display only, never persisted.
+            ...(model.meta ? { meta: model.meta } : {}),
             grain: model.grain,
             modelRole: model.modelRole,
             existsInProject: false,
@@ -852,6 +854,8 @@ export class SubjectAreaService {
             dc.isNaturalKey = logicalCol.isNaturalKey ?? false;
             if (logicalCol.scdType !== undefined) { dc.scdType = logicalCol.scdType; }
             if (logicalCol.additiveType !== undefined) { dc.additiveType = logicalCol.additiveType; }
+            // The column's fields kept in meta, for the read-only Detail panel (never persisted).
+            if (logicalCol.meta) { dc.meta = logicalCol.meta; }
           }
         }
 
@@ -887,6 +891,8 @@ export class SubjectAreaService {
             || catalogNode?.comment || model.description || '',
           columns,
           rationale: model.rationale,
+          // The design's own fields (team fields, business_rule), shown read-only beside rationale: display only, never persisted.
+          ...(model.meta ? { meta: model.meta } : {}),
           grain: model.grain,
           modelRole: model.modelRole,
           existsInProject: true,

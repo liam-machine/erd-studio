@@ -20,6 +20,7 @@ import {
 } from '../../src/exportDiagram';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
 import { RATIONALE_LABELS } from '../../src/exportShared';
+import { RATIONALE_FIELD_KEYS } from '../../src/fields';
 import type { DisplaySubjectArea } from '../../src/types/display';
 import { DBML_PARSERS, MERMAID_PARSERS, RICH_DBML_PARSERS, col, subjectArea, tableDef, rel } from '../exportParsers';
 
@@ -115,8 +116,32 @@ describe('diagram export API', () => {
     }
   });
 
-  it('keeps the rationale labels in step with the rationale keys', () => {
-    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([...RATIONALE_KEYS]);
+  it('keeps the rationale labels in step with the catalogue rationale keys, in their one order', () => {
+    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([...RATIONALE_FIELD_KEYS]);
+    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([
+      'purpose', 'decisions', 'openQuestions', 'design', 'grainChoice', 'roleChoice',
+      'scdStrategy', 'measures', 'sourceOfTruth', 'freshness', 'knownIssues', 'retention',
+    ]);
+  });
+
+  it('keeps the six first-release keys in their relative order, with the labels they always printed', () => {
+    const legacy = RATIONALE_LABELS.filter(([key]) => (RATIONALE_KEYS as readonly string[]).includes(key));
+    expect(legacy).toEqual([
+      ['purpose', 'Purpose'],
+      ['design', 'Design'],
+      ['grainChoice', 'Grain choice'],
+      ['roleChoice', 'Role choice'],
+      ['scdStrategy', 'SCD strategy'],
+      ['measures', 'Measures'],
+    ]);
+    expect(Object.fromEntries(RATIONALE_LABELS.filter(([key]) => !(RATIONALE_KEYS as readonly string[]).includes(key)))).toEqual({
+      decisions: 'Decisions',
+      openQuestions: 'Open questions',
+      sourceOfTruth: 'Source of truth',
+      freshness: 'Freshness',
+      knownIssues: 'Known issues',
+      retention: 'Retention',
+    });
   });
 
   it('depends at runtime on yaml and the pinned DBML parser alone (the parser only behind @erd-studio/core/dbml)', () => {

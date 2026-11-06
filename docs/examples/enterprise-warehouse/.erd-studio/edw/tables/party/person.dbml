@@ -1,6 +1,6 @@
 Table party.person [
   grain: 'One row per person',
-  meta_owner: 'customer-data'
+  owner: 'customer-data'
 ] {
   Note: 'What only a person has. A subtype of party: one-to-one, with the same id.'
 

@@ -195,6 +195,32 @@ describe('an ERD Studio rich export, row by row', () => {
     });
   });
 
+  it('reads the rich export\'s rationale_<field> for every built-in text field; a bare setting stays another tool\'s (A27)', () => {
+    const p = plan([
+      'Table t [',
+      "  rationale_purpose: 'Who uses it',",
+      "  rationale_decisions: 'Lines, not orders',",
+      "  erd_rationale_open_questions: 'Refunds?',",
+      "  rationale_source_of_truth: 'SAP',",
+      "  rationale_freshness: 'Hourly',",
+      "  rationale_known_issues: 'Duplicates',",
+      "  rationale_retention: 'Seven years',",
+      "  rationale_unknown: 'x',",
+      "  decisions: 'bare'",
+      '] {',
+      '  id int [pk]',
+      '}',
+      '',
+    ].join('\n'));
+    const t = tableOf(p, 't');
+    expect(t.rationale).toEqual({
+      purpose: 'Who uses it', decisions: 'Lines, not orders', openQuestions: 'Refunds?',
+      sourceOfTruth: 'SAP', freshness: 'Hourly', knownIssues: 'Duplicates', retention: 'Seven years',
+    });
+    // Unchanged in this release: a setting ERD Studio does not read on import is kept in meta.dbml.
+    expect(t.meta?.dbml).toMatchObject({ properties: { rationale_unknown: 'x', decisions: 'bare' } });
+  });
+
   it('meta_<key> and meta_json → meta, exactly (numbers as their text)', () => {
     const fact = tableOf(salesPlan(), 'fct_order');
     expect(fact.meta).toEqual({ owner: 'sales-team', tier: '1', pii: false, tags: ['finance', 'daily'], 'Odd Key': null });

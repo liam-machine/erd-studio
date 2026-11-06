@@ -1,4 +1,4 @@
-Table raw_vault.sat_customer_policy_effectivity [meta_vault_type: 'effectivity-satellite'] {
+Table raw_vault.sat_customer_policy_effectivity [vault_type: 'effectivity-satellite'] {
   Note: 'When each customer-policy link started and ended.'
 
   customer_policy_hk BINARY    [foreign_key: 'true']

@@ -37,7 +37,8 @@ import {
   isReservedLayerName,
   parseTableText,
 } from '@erd-studio/core';
-import type { DbmlFileOutline, ProjectStorage, Relationship, SemanticFileClass } from '@erd-studio/core';
+import { FIELDS_FILE_NAME } from '@erd-studio/core';
+import type { DbmlFileOutline, DbmlTableReading, ProjectStorage, Relationship, SemanticFileClass } from '@erd-studio/core';
 import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
@@ -50,6 +51,7 @@ import { tablesDirIsLayer } from '../services/logicalModelService';
 import { listSemanticFiles } from '../services/semanticFiles';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
+import { isFieldProblemCode } from './fieldFindings';
 
 /** One problem in a DBML file. */
 export interface DbmlProblemEntry {
@@ -171,8 +173,12 @@ function projectFiles(semanticRoot: string, listing: ReadonlyArray<{ rel: string
   return out;
 }
 
-/** The root files a DBML project may hold besides the model (`README.md` and `layers.json` classify as theirs). */
-const ALLOWED_ROOT_FILES: ReadonlySet<string> = new Set(['modelling-approach.md']);
+/**
+ * The root files a DBML project may hold besides the model (`README.md` and
+ * `layers.json` classify as theirs): the team's modelling approach and its
+ * field list (`fields.yml`, checked in `erd.fields`).
+ */
+export const ALLOWED_ROOT_FILES: ReadonlySet<string> = new Set(['modelling-approach.md', FIELDS_FILE_NAME]);
 
 /**
  * Where a `.dbml` the tree has no place for belongs (§1.1): the hint
@@ -236,11 +242,23 @@ function conflictOutsideLayout(f: ProjectFile): number | null {
   return findConflictMarkers(blanked);
 }
 
+/** What {@link collectDbmlProblems} hands on besides its problems. */
+export interface DbmlProblemsSink {
+  /**
+   * Filled with each table file's reading, by absolute path, so
+   * `erd.fields` reads the same readings (their `fieldSpellings`) without a
+   * second parse.
+   */
+  tableReadings?: Map<string, DbmlTableReading>;
+}
+
 /**
  * Every DBML problem of the project, in file order (project-wide checks
- * first). `storage` is the project's storage (`projectStorageOf`).
+ * first). `storage` is the project's storage (`projectStorageOf`). Field
+ * findings are never here: a table reader's field problem goes to
+ * `erd.fields` (through `sink.tableReadings`).
  */
-export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): DbmlProblemEntry[] {
+export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, sink: DbmlProblemsSink = {}): DbmlProblemEntry[] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   if (!fs.existsSync(semanticRoot)) return [];
   const projectRel = (rel: string): string => `${ctx.semanticDir.replace(/\\/g, '/').replace(/\/+$/, '')}/${rel}`;
@@ -361,9 +379,12 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage): D
     } catch {
       reading = null;
     }
+    if (reading) sink.tableReadings?.set(path.resolve(f.abs), reading);
     if (reading && reading.ok) {
       declaredAt.set(f.rel, { name: reading.table.name, reference: reading.declaredReference });
       for (const p of reading.problems) {
+        // A field problem is erd.fields' (fieldFindings.ts), never a DBML problem.
+        if (isFieldProblemCode(p.code)) continue;
         const code = p.code ?? 'tableWarning';
         push({ file: projectRel(f.rel), ...(p.line !== undefined ? { line: p.line } : {}), ...(p.column !== undefined ? { column: p.column } : {}), code, message: p.message });
       }
@@ -908,7 +929,7 @@ function treeShapeProblems(
       out.push({
         file: projectRel(rel), code: 'unexpectedFileInDbmlFolder',
         message: `ERD Studio does not read or write this file. A DBML project's ${ctx.semanticDir} holds its tables, relationships files and diagrams, `
-          + 'layers.json, templates/, README.md and modelling-approach.md; move the file out if it is not part of the model.',
+          + `layers.json, templates/, README.md, modelling-approach.md and ${FIELDS_FILE_NAME}; move the file out if it is not part of the model.`,
       });
     }
   }

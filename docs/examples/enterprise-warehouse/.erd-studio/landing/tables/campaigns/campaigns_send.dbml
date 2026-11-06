@@ -1,4 +1,4 @@
-Table campaigns.campaigns_send [meta_owner: 'data-engineering'] {
+Table campaigns.campaigns_send [owner: 'data-engineering'] {
   Note: 'Messages the marketing platform sent, and whether the customer responded.'
 
   send_id       STRING    [pk, natural_key: 'true']

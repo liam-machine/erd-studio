@@ -40,6 +40,7 @@ const SUBJECT_AREA_CASES: Record<string, string> = {
   'data-type-alias': '.erd-studio/silver/orders.json',
   'domain-one-to-many': '.erd-studio/gold/sales.json',
   'duplicate-key': '.erd-studio/silver/orders.json',
+  'rationale-and-meta': '.erd-studio/silver/ledger.json',
 };
 
 const ERROR_CASES: Record<string, string> = {

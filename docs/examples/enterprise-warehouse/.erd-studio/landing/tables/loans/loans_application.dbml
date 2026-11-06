@@ -1,4 +1,4 @@
-Table loans.loans_application [meta_owner: 'data-engineering'] {
+Table loans.loans_application [owner: 'data-engineering'] {
   Note: 'Loan applications from the loan origination system.'
 
   application_id   STRING    [pk, natural_key: 'true']

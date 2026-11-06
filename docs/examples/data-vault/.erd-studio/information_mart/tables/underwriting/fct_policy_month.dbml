@@ -1,7 +1,7 @@
 Table underwriting.fct_policy_month [
   role: 'periodic-snapshot',
   grain: 'One row per policy per month',
-  rationale_design: 'Built from bridge_customer_policy at each month end.'
+  decisions: 'Built from bridge_customer_policy at each month end: lineage, so there is no Ref to the vault.'
 ] {
   Note: 'Earned premium by policy and month.'
 

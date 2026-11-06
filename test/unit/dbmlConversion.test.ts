@@ -1083,6 +1083,47 @@ describe('planDbmlConversion: S7 review, round 1', () => {
     }
   });
 
+  it('converts every built-in text field in rationale: to its bare setting, and keeps meta.purpose as meta_purpose (context fields)', async () => {
+    const table = [
+      'name: t',
+      'rationale:',
+      '  purpose: Who uses it',
+      '  decisions: Lines, not orders',
+      '  openQuestions: Do refunds count?',
+      '  retention: Seven years',
+      'meta:',
+      '  purpose: a team key that shares the built-in name',
+      '  owner: crm-team',
+      'columns:',
+      '  - name: a',
+      '    dataType: INT',
+      '    meta:',
+      '      business_rule: Net of tax',
+      '',
+    ].join('\n');
+    const plan = await planDbmlConversion(inputOf({ 'logical-models/t.yml': table, 'gold/s.json': diagram('s', 'gold', ['t']) }));
+    expect(plan.refusals).toEqual([]);
+    const text = created(plan, 'gold/tables/public/t.dbml')!;
+    // Nothing is kept as a // line: every rationale key is now read.
+    expect(text).not.toContain('//');
+    expect(text).toContain("  purpose: 'Who uses it'");
+    expect(text).toContain("  decisions: 'Lines, not orders'");
+    expect(text).toContain("  open_questions: 'Do refunds count?'");
+    expect(text).toContain("  retention: 'Seven years'");
+    expect(text).toContain("  meta_purpose: 'a team key that shares the built-in name'");
+    expect(text).toContain("  owner: 'crm-team'");
+    expect(text).toContain("business_rule: 'Net of tax'");
+    const reading = parseTableDbml(text, 't');
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.table.rationale).toEqual({
+      purpose: 'Who uses it', decisions: 'Lines, not orders', openQuestions: 'Do refunds count?', retention: 'Seven years',
+    });
+    expect(reading.table.meta).toEqual({ purpose: 'a team key that shares the built-in name', owner: 'crm-team' });
+    expect(reading.table.columns?.[0].meta).toEqual({ business_rule: 'Net of tax' });
+    expectCompilesEverywhere(inputOf({ 'logical-models/t.yml': table, 'gold/s.json': diagram('s', 'gold', ['t']) }), plan);
+  });
+
   it('an existing DBML table the plan must change that is not writable (an inline ref:) is refused, by name', async () => {
     const plan = await planDbmlConversion(inputOf({
       'gold/tables/gold/dim.dbml': 'Table gold.dim {\n  dim_key INT [pk]\n  other_key INT [ref: > other.other_key]\n}\n',

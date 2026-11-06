@@ -51,6 +51,8 @@
  * Pure: no `vscode`, no Node built-ins. The host passes paths and file texts.
  */
 
+import { DBML_RICH_META_PREFIX } from '@erd-studio/core';
+
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
 
 // ---------------------------------------------------------------------------
@@ -852,7 +854,12 @@ export const SEMANTIC_MODEL_TYPE_MAP: Readonly<Record<string, string>> = {
   variant: 'variant',
 };
 
-/** The custom-property names the DBML carries (`meta_` + this becomes ERD Studio's `meta.<this>`). */
+/**
+ * The custom-property names the DBML carries (`DBML_RICH_META_PREFIX` + this
+ * becomes ERD Studio's `meta.<this>`). The generated file is Import DBML's
+ * input, so it uses the rich export's `meta_` spelling, which Import DBML
+ * reads (a bare setting there is another tool's, kept in `meta.dbml`).
+ */
 export const SEMANTIC_MODEL_META = {
   /** The original name, when snake_case changed it. */
   name: 'power_bi_name',
@@ -1106,9 +1113,9 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
   for (const t of converted) {
     out.push('');
     const tableSettings: string[] = [];
-    if (t.name !== t.source.name) tableSettings.push(`meta_${SEMANTIC_MODEL_META.name}: ${dbmlString(t.source.name)}`);
-    if (t.source.isHidden) tableSettings.push(`meta_${SEMANTIC_MODEL_META.hidden}: 'true'`);
-    if (t.source.kind === 'calculated') tableSettings.push(`meta_${SEMANTIC_MODEL_META.calculated}: 'true'`);
+    if (t.name !== t.source.name) tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.name}: ${dbmlString(t.source.name)}`);
+    if (t.source.isHidden) tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.hidden}: 'true'`);
+    if (t.source.kind === 'calculated') tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.calculated}: 'true'`);
     out.push(`Table ${ident(t.name)}${tableSettings.length ? ` [${tableSettings.join(', ')}]` : ''} {`);
     for (const c of t.columns) {
       const settings: string[] = [];
@@ -1120,9 +1127,9 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
         calculated ? 'Calculated column in Power BI; its DAX was not imported' : '',
       ]);
       if (note) settings.push(`note: ${dbmlString(note)}`);
-      if (c.name !== c.source.name) settings.push(`meta_${SEMANTIC_MODEL_META.name}: ${dbmlString(c.source.name)}`);
-      if (c.source.isHidden) settings.push(`meta_${SEMANTIC_MODEL_META.hidden}: 'true'`);
-      if (calculated) settings.push(`meta_${SEMANTIC_MODEL_META.calculated}: 'true'`);
+      if (c.name !== c.source.name) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.name}: ${dbmlString(c.source.name)}`);
+      if (c.source.isHidden) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.hidden}: 'true'`);
+      if (calculated) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.calculated}: 'true'`);
       const type = SEMANTIC_MODEL_TYPE_MAP[c.source.dataType.trim().toLowerCase()] ?? 'variant';
       out.push(`  ${ident(c.name)} ${type}${settings.length ? ` [${settings.join(', ')}]` : ''}`);
     }

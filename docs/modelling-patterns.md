@@ -64,10 +64,10 @@ Patterns combine. A medallion's gold layer, a dbt project's marts and a Data Vau
 | a department, domain or team | a schema folder when it has its own schema; always a diagram, and if you like a relationships file | |
 | a conformed (shared) dimension | one table, in a shared schema (`conformed`, `shared`, `common`), on every diagram that uses it | Mark it `role: 'conformed-dim'`. |
 | a business process, data product or dashboard | a **diagram** | A table can be on many diagrams, or none. |
-| a view over a table | its own table | Add `meta_materialized: 'view'` and say what it reads in its design rationale. |
+| a view over a table | its own table | Add a field of your own, `materialized: 'view'`, and say what it reads in its `decisions`. |
 | a versioned table (`clients_daily_v6`) | its own table, version in the name | The next version is a new file beside it. |
 | the same table name in two schemas or layers | two tables with unique names, the warehouse name in `alias` | See rule 3. |
-| a hub, link, satellite, PIT or bridge | a table with `meta_vault_type` | ERD Studio's roles are Kimball's; vault types go in metadata. |
+| a hub, link, satellite, PIT or bridge | a table with a `vault_type` field | ERD Studio's roles are Kimball's; vault types go in a field of your own. |
 
 ## Many teams, one model
 
@@ -85,7 +85,7 @@ The tree is built so that teams can work side by side without stepping on each o
 - **Two teams in one schema?** Folders can't say which team a table belongs to, so a brand-new table's first relationship goes to the shared file. Choose your team's file in **New Relationship** once; the table's later relationships follow it. The [enterprise warehouse example](examples/enterprise-warehouse/) walks through this, step by step.
 - **Use another team's table; don't copy it.** A diagram can show any table in the project, from any layer. The [data mesh example](examples/data-mesh/) draws the orders team's `customer_order` on the shipping and payments diagrams.
 - **Diagrams are cheap.** Make one per audience: a team's working view, a dashboard's tables, a source system. Each keeps its own layout, so rearranging one never moves another.
-- **Say who owns a table in the table itself**, with `meta_owner: 'orders-team'`, so people and AI assistants reading the files know who to ask.
+- **Say who owns a table in the table itself**, with an `owner: 'orders-team'` field, so people and AI assistants reading the files know who to ask. List it in `.erd-studio/fields.yml` so the canvas labels it and every assistant fills it in the same way, as the [data mesh example](examples/data-mesh/) does.
 
 ## Agree these on day one
 
@@ -97,15 +97,16 @@ A short list of decisions keeps a shared project consistent. Write them in your 
 4. **Where conformed dimensions live:** usually a shared schema in your reporting layer.
 5. **How relationships files split:** one per layer (the default), or one per team or process.
 6. **Which layers get diagrams.** Most teams draw their reporting layer in detail and their landing layer lightly, or not at all.
+7. **The fields every table records:** the built-in ones you use (grain, purpose, decisions, …) and your own (an owner, a sensitivity level), in `.erd-studio/fields.yml`, where the canvas and every assistant read them.
 
 ## What the tree doesn't model
 
 - **The database or project part of a name.** DBML names a table `schema.table`. When databases are stages, make them layers; when they are environments, leave them out.
 - **Environments.** One design serves dev, test and prod.
-- **Lineage between layers.** That gold's `dim_customer` is built from silver's `customers` is a pipeline step, not a foreign key. Write it in the table's design rationale. Using dbt? The **Physical** tab shows what dbt built.
+- **Lineage between layers.** That gold's `dim_customer` is built from silver's `customers` is a pipeline step, not a foreign key. Write it in the table's **Decisions**. Using dbt? The **Physical** tab shows what dbt built.
 - **One table in two layers.** No mainstream method has one: Kimball, Data Vault and medallion all build a new table at each stage. A table belongs to one layer and can appear on diagrams in any layer.
 - **Relationships between repositories.** Keep the whole model, even a whole data mesh, in one repository and one `.erd-studio` folder.
-- **Who owns a table, by folder alone,** when teams share a schema. Say it in the table (`meta_owner`) and list the team's files in `CODEOWNERS`, as the [enterprise warehouse example](examples/enterprise-warehouse/) does.
+- **Who owns a table, by folder alone,** when teams share a schema. Say it in the table (an `owner` field) and list the team's files in `CODEOWNERS`, as the [enterprise warehouse example](examples/enterprise-warehouse/) does.
 
 ## Try the examples
 

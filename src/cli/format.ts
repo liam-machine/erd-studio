@@ -196,6 +196,22 @@ export function formatDoctor(r: DoctorResult, p: Paint, options: { mentionDbt?: 
       lines.push(`${severity === 'error' ? p.red('✗') : p.yellow('!')} ${where}: ${text}`);
     }
   }
+  // The field list: which one, then its errors (✗) and warnings (!), then one line per piece of information.
+  const fields = r.erd.fields;
+  if (fields && r.erd.semanticDirExists) {
+    const findings = fields.problems ?? [];
+    const errors = findings.filter((f) => f.severity === 'error').length;
+    lines.push(`${ok(errors === 0)} Fields: ${fields.source === 'file' ? fields.file : `the starting set${fields.file ? ` (${fields.file} could not be read)` : ' (no fields.yml)'}`}`
+      + ` — ${plural(fields.tables.length, 'table field')}, ${plural(fields.columns.length, 'column field')}`);
+    for (const severity of ['error', 'warning', 'info'] as const) {
+      for (const f of findings.filter((q) => q.severity === severity)) {
+        // A fields.yml problem says where; a table's finding names its table itself.
+        const where = f.table === undefined && f.file !== undefined ? `${f.file}${f.line !== undefined ? ` line ${f.line}` : ''}: ` : '';
+        const mark = severity === 'error' ? p.red('✗') : severity === 'warning' ? p.yellow('!') : p.dim('·');
+        lines.push(`${mark} ${where}${f.message}${severity === 'info' ? '' : ` (${f.code})`}`);
+      }
+    }
+  }
   const dataTypeKey = logicalOnly ? 'data_type' : "dbt's data_type";
   for (const a of r.erd.dataTypeAliasFiles) {
     if (a.columns.length > 0) {

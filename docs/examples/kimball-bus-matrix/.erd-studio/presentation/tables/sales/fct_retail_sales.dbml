@@ -1,7 +1,7 @@
 Table sales.fct_retail_sales [
   role: 'transaction-fact',
   grain: 'One row per product on a checkout transaction',
-  rationale_grain_choice: 'The finest grain the tills record, so every question about baskets, products and promotions can be answered.'
+  decisions: 'The finest grain the tills record, so every question about baskets, products and promotions can be answered.'
 ] {
   Note: 'Point-of-sale sales.'
 

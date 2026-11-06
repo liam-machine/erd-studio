@@ -1,7 +1,7 @@
 Table atlas.clients_last_seen [
   grain: 'One row per client per day',
-  rationale_design: 'A view of atlas_derived.clients_last_seen_v2. Queries use the view, so the next version of the table can replace this one behind it.',
-  meta_materialized: 'view'
+  decisions: 'A view of atlas_derived.clients_last_seen_v2. Queries use the view, so the next version of the table can replace this one behind it.',
+  materialized: 'view'
 ] {
   Note: 'Which of the last 28 days each client was active.'
 

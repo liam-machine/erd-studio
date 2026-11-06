@@ -6,7 +6,7 @@ description: >-
   logical model that mirrors dbt, checks it with the ERD Studio diff and opens the canvas within
   minutes - then offers to detect and apply the team's modelling style (medallion or
   staging/marts layers; Kimball, Data Vault and more). Enriches diagrams that already exist (such
-  as an Import from dbt draft) with keys, grain, roles, rationale and metadata instead of rebuilding
+  as an Import from dbt draft) with keys, grain, roles and the team's fields instead of rebuilding
   them; full setup on request. Without dbt, designs a first diagram from a description of the
   business, or enriches a DBML import.
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
@@ -15,7 +15,7 @@ description: >-
   or do not know where to start.<!-- /dbt-only -->
 <!-- no-dbt -->  Friendly, step-by-step ERD Studio setup for people new to data modelling: designs a first
   diagram with you from a description of the business, starts from a DBML import, or enriches
-  diagrams that already exist with keys, grain, roles, rationale and metadata instead of
+  diagrams that already exist with keys, grain, roles and the team's fields instead of
   rebuilding them, then checks the files and opens the canvas.
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
   "set up ERD Studio", "design a data model" or "draw a diagram of our tables" - even if they do
@@ -89,7 +89,7 @@ These rules matter most: a beginner who gets lost or scared stops, and nothing g
   ```
 
   A full setup has no "Next" line (step 3 adds "and modelling style"); enriching lists Check dbt ·
-  Add keys, grain, roles and metadata · Check it against dbt · Open it · Next. Mark a skipped step
+  Add keys, grain, roles and fields · Check it against dbt · Open it · Next. Mark a skipped step
   "–" with a few words why, never "✓" — a tick claims work that did not happen.
 - **Never block on something optional.** dbt, a warehouse connection, the catalog and a web
   lookup all make the result more exact, but ERD Studio works without them. If something is
@@ -210,7 +210,7 @@ Show the checklist and ask "Ready?". After doctor (Stage 1), pick the route your
 one line — never ask the user to choose:
 
 - **Enrich** — doctor's `erd.domains` is above 0: a diagram exists, often an **Import from dbt**
-  draft (dbt's columns, no grain, role, rationale or natural keys). Do not rebuild it: follow
+  draft (dbt's columns, no grain, role, purpose or natural keys). Do not rebuild it: follow
   "Enriching an existing diagram" below — unless they asked for a new area (quick start for it).
 - **Full setup** — the user asks for it ("the full setup", "do it properly") or already described
   how their team models data: every stage in order, 1 to 6.
@@ -385,8 +385,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    to `.erd-studio/modelling-approach.md` — future AI edits will follow it."
 4. Say "Reading the full details of the models you picked," and run `inventory --models <the
    comma-separated names>`. Its `relationships` are exactly the lines the diff will expect for
-   this set of models — which is why you ask for exactly the chosen models. Then **metadata**, on
-   every route, with or without a style: read `references/metadata.md`, follow sections 2–4.
+   this set of models — which is why you ask for exactly the chosen models. Then **the field list**,
+   on every route, with or without a style: read `references/metadata.md`, follow sections 2–4.
 5. **Check for a thin project.** If most chosen models have `columnCount` 0, or their
    `provenance.columns` is only `file`, say "dbt doesn't list these columns anywhere yet, so ERD
    Studio can only see that the tables exist", then offer, in this order: (1) the catalog
@@ -399,8 +399,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    - one model file per model **not** already in the library (which folder: see that file) — columns,
      types and descriptions copied from the inventory (text in double quotes), never invented —
      **plus the approach's design fields** (`modelRole`, `grain`, `scdType`, `additiveType`,
-     `isNaturalKey`, `rationale`), following `references/modelling-approaches.md` section 2 (with no agreed
-     style, only what section 4 allows), **plus the metadata list's values from dbt**
+     `isNaturalKey`, the text fields), following `references/modelling-approaches.md` section 2 (with no
+     agreed style, only what section 4 allows), **plus the fields `filled_by: dbt`, from dbt**
      (`references/metadata.md` section 5). The approach never renames, adds or removes a column
      or a relationship: those come from dbt, and the diff checks them;
    - the diagram, `.erd-studio/<layer>/diagrams/<domain>.dbml` (`.json` in a `yaml` project), listing the
@@ -409,7 +409,7 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    they may be someone's careful design and other domains may share them.
 7. Keep a list, **created this session**, of every model file you wrote (Stage 5 needs it). Then
    run `doctor` and fix each `fix-model-yaml` / `fix-dbml-file` file:line it lists first (usually a value to quote) —
-   except a merge conflict, which is the user's to settle (Stage 1).
+   except a merge conflict, which is the user's to settle (Stage 1); `fix-fields-file`: `references/verify-and-fix.md`.
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
    diagram, marking 2 facts and 6 dimensions the Kimball way"), not file by file.
 
@@ -472,11 +472,11 @@ changes in the logical model; never rename a model; never edit dbt files.
 - Suggest next steps:
   - **quick start or enrich, first:** "Want me to apply your team's modelling style — keys,
     grain, SCD? That's the next step." (default yes). On a yes: Stage 3b, then the approach's
-    design fields (Stage 4 steps 1–3 and step 6's design fields; metadata is settled) — for
+    design fields (Stage 4 steps 1–3 and step 6's design fields; the field list is settled) — for
     models not written this session, after one "Add these?" — then Stage 5 with its review and
     this summary again. No style found and none described: stop, the mirror is complete;
   - if the catalog was skipped: generating it (Stage 2) fills in exact column types;
-  - any metadata next step `references/metadata.md` asks for (sections 3, 5 and 6);
+  - any fields next step `references/metadata.md` asks for (sections 3, 5, 6 and 7);
   - fill in any descriptions marked "(draft)" and the blanks on the "to confirm" list;
   - another business area: run `/erd-studio-setup` again (safe — existing models are kept, the
     saved approach reused), or draft it with **Import from dbt…** and run this again to enrich it;
@@ -504,8 +504,8 @@ not record. Add it — never rebuild, rename, or change a column, type or relati
    `isForeignKey` from the inventory (`references/building-the-model.md` table); `grain` where a
    unique test backs it; `isNaturalKey` on an obvious source business key; `modelRole` only where
    the name or description already says it (values: `references/modelling-approaches.md` §2);
-   `rationale.purpose` from dbt's description; dbt's metadata (`references/metadata.md`, offered
-   with these drafts). Anything unclear goes on the "to confirm" list.
+   `purpose` (`rationale.purpose` in YAML) from dbt's description; the field list and dbt's metadata
+   (`references/metadata.md`, offered with these drafts). Anything unclear goes on the "to confirm" list.
 4. Show the drafts as one short list per model, ask "Add these?" once, and write them on a yes.
 5. Re-run the diff, then Stage 6 — whose first next step is the modelling-style offer.<!-- /dbt-only -->
 <!-- no-dbt -->If no route to the helper works, carry on without it as the walkthrough says, and tell the user
@@ -528,7 +528,7 @@ Read these when the stage calls for them — not all up front:
 | `references/dbt-explained.md` | You are about to use a term the user may not know |
 | `references/dbt-setup.md` | Installing dbt, writing `profiles.yml`, a dbt command failed |
 | `references/modelling-approaches.md` | Stage 3b (the modelling style), Stage 4 (applying it), the Stage 5 review |
-| `references/metadata.md` | Stage 4 and enriching, before writing model files: dbt's `meta:` and the team's metadata list |
+| `references/metadata.md` | Stage 4 and enriching, before writing model files: the field list (`fields.yml`) and dbt's `meta:` |
 | `references/building-the-model.md` | Stage 4, before writing any file |
 | `references/verify-and-fix.md` | Stage 5, and for adding dbt relationship tests |<!-- /dbt-only -->
 <!-- no-dbt -->| `references/walkthrough.md` | Always: the whole guided setup, from its start |

@@ -53,12 +53,12 @@ Dan Linstedt's method, common in banking, insurance and government, where the wa
 
 ## What to notice
 
-- **Vault object types are metadata.** ERD Studio's table roles are Kimball's (`conformed-dim`, `transaction-fact`, …), so the vault tables leave `role` empty and say what they are in `meta_vault_type: 'hub'`. The marts use the Kimball roles as usual.
+- **Vault object types are metadata.** ERD Studio's table roles are Kimball's (`conformed-dim`, `transaction-fact`, …), so the vault tables leave `role` empty and say what they are in a field of the team's own, `vault_type: 'hub'`. The marts use the Kimball roles as usual.
 - **Satellites have two-column keys** (`customer_hk`, `load_datetime`), written as an `indexes { (customer_hk, load_datetime) [pk] }` block.
 - **The PIT table points at satellites with composite relationships**: `pit_customer.(customer_hk, sat_customer_crm_ldts)` points at `sat_customer_crm.(customer_hk, load_datetime)`, one Ref with both columns. Each has a role (`crm`, `policy admin`, `risk score`).
 - **Relationships cross layers.** The business vault's computed satellite, PIT and bridge point at the raw vault's hubs and satellites. A Ref lives with its foreign-key table, so those Refs are in `business_vault/relationships/business_vault.dbml`, with `use` lines reaching into `../../raw_vault/tables/`.
 - **A diagram can draw tables from another layer.** The business vault's **query-helpers** diagram shows its own tables beside the raw vault tables they point at, so it imports both layers' relationships files.
-- **Marts are built from the vault, not joined to it.** `dim_customer` reuses the hub's hash key as its surrogate key, but the information mart has no foreign keys into the vault: that is lineage, written in the design rationale.
+- **Marts are built from the vault, not joined to it.** `dim_customer` reuses the hub's hash key as its surrogate key, but the information mart has no foreign keys into the vault: that is lineage, written in its **Decisions**.
 
 ## When to choose it
 

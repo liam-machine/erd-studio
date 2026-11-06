@@ -1,4 +1,4 @@
-Table raw_vault.hub_policy [meta_vault_type: 'hub'] {
+Table raw_vault.hub_policy [vault_type: 'hub'] {
   Note: 'One row per policy number.'
 
   policy_hk     BINARY    [pk, note: 'Hash of policy_bk']

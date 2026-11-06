@@ -1,4 +1,4 @@
-Table cards.cards_transaction [meta_owner: 'data-engineering'] {
+Table cards.cards_transaction [owner: 'data-engineering'] {
   Note: 'Card authorisations from the card platform.'
 
   card_txn_id     STRING    [pk, natural_key: 'true']

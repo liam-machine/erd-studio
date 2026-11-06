@@ -17,7 +17,7 @@ import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode
 import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
-  DIAGRAMS_DIR, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
+  DIAGRAMS_DIR, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_FIELD_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
   dbmlName, dbmlTablePath, dbmlTreePathOf, diagramPathOf, isDbmlLayerName, isLibraryFolderName, linkKey, subjectAreaStorageOf, tableLoadWarningOf, parseTableText,
   writesDbml, writesTableNaming,
 } from '@erd-studio/core';
@@ -3012,6 +3012,15 @@ export class TableLibraryService {
         continue;
       }
       if (!(key in desired)) {
+        const current = map.get(key, true);
+        if (key === 'rationale' && isMap(current)) {
+          // The map is not ERD Studio's alone: a key it does not manage
+          // (`notes:`, a newer field) stays, and only the managed keys go.
+          // The map itself goes only when nothing at all is left in it.
+          this.syncMap(doc, current, {}, RATIONALE_FIELD_KEYS);
+          if (current.items.length === 0) map.delete(key);
+          continue;
+        }
         if (map.has(key)) map.delete(key);
         continue;
       }
@@ -3029,7 +3038,7 @@ export class TableLibraryService {
         continue;
       }
       if (key === 'rationale' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
-        this.syncMap(doc, existing, value as Record<string, unknown>, RATIONALE_KEYS);
+        this.syncMap(doc, existing, value as Record<string, unknown>, RATIONALE_FIELD_KEYS);
         continue;
       }
       if (key === 'columns' && isSeq(existing) && Array.isArray(value)) {
@@ -3459,13 +3468,12 @@ export class TableLibraryService {
     if (model.modelRole) obj.modelRole = model.modelRole;
 
     if (model.rationale) {
+      // Every built-in text field the catalogue keeps in `rationale:`, camelCase, in catalogue order.
       const rat: Record<string, string> = {};
-      if (model.rationale.purpose) rat.purpose = model.rationale.purpose;
-      if (model.rationale.design) rat.design = model.rationale.design;
-      if (model.rationale.grainChoice) rat.grainChoice = model.rationale.grainChoice;
-      if (model.rationale.roleChoice) rat.roleChoice = model.rationale.roleChoice;
-      if (model.rationale.scdStrategy) rat.scdStrategy = model.rationale.scdStrategy;
-      if (model.rationale.measures) rat.measures = model.rationale.measures;
+      for (const key of RATIONALE_FIELD_KEYS) {
+        const text = model.rationale[key];
+        if (typeof text === 'string' && text) rat[key] = text;
+      }
       if (Object.keys(rat).length > 0) obj.rationale = rat;
     }
 

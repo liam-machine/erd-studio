@@ -22,6 +22,7 @@ import * as oniguruma from 'vscode-oniguruma';
 import * as vsctm from 'vscode-textmate';
 import { compileOne } from '../../packages/core/src/dbml/parser';
 import { classifySemanticFile } from '../../packages/core/src/storage';
+import { BUILT_IN_FIELDS, DBML_SETTING_NAMES } from '../../packages/core/src/fields';
 import { DBML_KIND_LANGUAGE_IDS, DBML_LANGUAGE_IDS, dbmlFileIconPath, type DbmlFileKind } from '../../src/providers/dbmlFileKinds';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -97,6 +98,9 @@ const TABLE_FILE = [
   "  role: 'transaction-fact',",
   "  grain: 'One row per order line',",
   "  rationale_purpose: 'Revenue reporting',",
+  "  decisions: 'Line grain, so refunds net out per line',",
+  "  open_questions: 'Do we keep cancelled lines?',",
+  "  owner: 'sales-data',",
   `  meta_json: '{"pii":false}'`,
   '] {',
   "  Note: '''",
@@ -111,6 +115,7 @@ const TABLE_FILE = [
   '  price         decimal(18, 2) [not null, default: 0.5]',
   '  loaded_at     timestamp [null, default: `now()`, unique]',
   "  scd           INT [scd_type: '2', natural_key: 'true']",
+  "  rule          INT [business_rule: 'Net of refunds', pii: 'true']",
   '  indexes {',
   '    (order_line_id, loaded_at) [pk]',
   "    loaded_at [type: btree, name: 'ix_loaded']",
@@ -184,6 +189,15 @@ describe('dbml.tmLanguage.json: a table file', () => {
     expect(scopesOf(t, 'additive_type:', 'additive_type')).toContain('variable.other.property.erd-studio.dbml');
     expect(scopesOf(t, 'scd           INT', 'scd_type')).toContain('variable.other.property.erd-studio.dbml');
     expect(scopesOf(t, 'scd           INT', 'natural_key')).toContain('variable.other.property.erd-studio.dbml');
+    // Context fields: a built-in field's bare key is ERD Studio's; a team field's key is a plain custom property.
+    for (const key of ['decisions', 'open_questions']) {
+      expect(scopesOf(t, `  ${key}:`, key), key).toContain('variable.other.property.erd-studio.dbml');
+    }
+    expect(scopesOf(t, 'rule          INT', 'business_rule')).toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, "  owner: 'sales-data'", 'owner')).toContain('variable.other.property.dbml');
+    expect(scopesOf(t, "  owner: 'sales-data'", 'owner')).not.toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'rule          INT', 'pii')).toContain('variable.other.property.dbml');
+    expect(scopesOf(t, 'rule          INT', 'pii')).not.toContain('variable.other.property.erd-studio.dbml');
 
     expect(scopesOf(t, 'order_line_id BIGINT', 'pk')).toContain('keyword.other.setting.dbml');
     expect(scopesOf(t, 'order_line_id BIGINT', 'note')).toContain('keyword.other.setting.dbml');
@@ -192,6 +206,20 @@ describe('dbml.tmLanguage.json: a table file', () => {
     expect(scopesOf(t, 'loaded_at     timestamp', 'null')).toContain('keyword.other.setting.dbml');
     expect(scopesOf(t, 'loaded_at     timestamp', 'unique')).toContain('keyword.other.setting.dbml');
     expect(scopesOf(t, "note: 'Line total'", 'note')).toContain('keyword.other.setting.dbml');
+  });
+
+  it('scopes every built-in field key of the catalogue as ERD Studio\'s, bare and with its old prefixes, and no DBML setting', () => {
+    for (const def of BUILT_IN_FIELDS) {
+      for (const key of [def.key, `erd_${def.key}`, `rationale_${def.key}`]) {
+        const line = def.scope === 'table' ? `Table t [${key}: 'x'] {` : `  c INT [${key}: 'x']`;
+        const t = tokenize(['Table t {', line, '}'].join('\n'));
+        expect(scopesOf(t, line, key), key).toContain('variable.other.property.erd-studio.dbml');
+      }
+    }
+    for (const name of DBML_SETTING_NAMES.filter((n) => !n.includes(' '))) {
+      const t = tokenize(['Table t {', `  c INT [${name}: 'x']`, '}'].join('\n'));
+      expect(scopesOf(t, `  c INT [${name}`, name), name).not.toContain('variable.other.property.erd-studio.dbml');
+    }
   });
 
   it('scopes column names, types and type arguments, aligned or not', () => {

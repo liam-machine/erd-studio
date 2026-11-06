@@ -96,6 +96,7 @@ const CORE_CASES: Record<string, string> = {
   'data-type-alias': '.erd-studio/silver/orders.json',
   'domain-one-to-many': '.erd-studio/gold/sales.json',
   'duplicate-key': '.erd-studio/silver/orders.json',
+  'rationale-and-meta': '.erd-studio/silver/ledger.json',
 };
 
 /** The v6 and mixed-naming copies of core fixtures (read through the v6 naming, #181). */

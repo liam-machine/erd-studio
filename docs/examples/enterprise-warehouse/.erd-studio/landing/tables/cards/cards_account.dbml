@@ -1,4 +1,4 @@
-Table cards.cards_account [meta_owner: 'data-engineering'] {
+Table cards.cards_account [owner: 'data-engineering'] {
   Note: 'Credit card accounts from the card platform.'
 
   card_account_id STRING    [pk, natural_key: 'true']

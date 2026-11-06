@@ -1,6 +1,6 @@
 Table accounts.account [
   grain: 'One row per customer account',
-  meta_owner: 'accounts-team'
+  owner: 'accounts-team'
 ] {
   Note: 'Customer accounts, published by the accounts domain.'
 

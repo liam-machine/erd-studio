@@ -35,7 +35,7 @@ export { Legend } from './components/Legend/Legend';
 export { KeyBadge } from './components/common/KeyBadge';
 export { KeyBadgeGroup } from './components/common/KeyBadgeGroup';
 export { DataTypeSelect } from './components/common/DataTypeSelect';
-export { ColumnRowEditor } from './components/common/ColumnRowEditor';
+export { ColumnRowEditor, type ColumnFieldVisibility } from './components/common/ColumnRowEditor';
 
 // Hooks
 export * from './hooks/useColumnExpansion';

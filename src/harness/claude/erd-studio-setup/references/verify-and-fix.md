@@ -138,6 +138,10 @@ versions of the file. Show the file and line, ask which
 side to keep, and never pick one or run a git command yourself (troubleshooting.md → "Merge
 conflicts").
 
+**`fix-fields-file`** is a doctor step, not a diff fix: `.erd-studio/fields.yml` has an error.
+Fix the line doctor's `erd.fields` names before writing tables (troubleshooting.md →
+"`fix-fields-file`"); the diff never compares fields.
+
 **Advisory fixes** are never applied. List them once at the end: "dbt doesn't know these column
 types yet. Generating the catalog (Stage 2) will fill them in."
 

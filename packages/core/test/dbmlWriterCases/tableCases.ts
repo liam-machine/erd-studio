@@ -108,15 +108,16 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('a changed setting splices its value only', 'fct_order', FCT_ORDER, (t) => { t.grain = 'One row per order'; }, (out) => {
     expect(out).toBe(FCT_ORDER.replace("grain: 'One row per order line'", "grain: 'One row per order'"));
   }),
+  // A field new to the file is written bare (context fields), among the field settings in catalogue order.
   tableCase('a setting added to a multi-line list gets its own line at its place in the canonical order', 'fct_order', FCT_ORDER, (t) => {
     t.rationale = { ...t.rationale, design: 'Star' };
   }, (out) => {
-    expect(out).toBe(FCT_ORDER.replace("  rationale_measures:", "  rationale_design: 'Star',\n  rationale_measures:"));
+    expect(out).toBe(FCT_ORDER.replace("  rationale_measures:", "  design: 'Star',\n  rationale_measures:"));
   }),
   tableCase('a setting added last to a multi-line list gets its own line, with a comma after the one before', 'fct_order', FCT_ORDER, (t) => {
     t.meta = { ...t.meta, team: 'orders' };
   }, (out) => {
-    expect(out).toContain(`  meta_json: '{"pii":false,"tags":["finance"]}',\n  meta_team: 'orders'\n] {`);
+    expect(out).toContain(`  meta_json: '{"pii":false,"tags":["finance"]}',\n  team: 'orders'\n] {`);
   }),
   tableCase('a setting removed from a multi-line list loses its line, and the comma before a new last one goes', 'fct_order', FCT_ORDER, (t) => {
     delete t.meta;
@@ -158,8 +159,8 @@ export const TABLE_CASES: WriterCase[] = [
   tableCase('meta_json is rewritten only when what it holds changes', 'fct_order', FCT_ORDER, (t) => { t.meta = { ...t.meta, pii: true }; }, (out) => {
     expect(out).toBe(FCT_ORDER.replace(`meta_json: '{"pii":false,"tags":["finance"]}'`, `meta_json: '{"pii":true,"tags":["finance"]}'`));
   }),
-  tableCase('a new string meta entry is its own meta_<key>', 'fct_order', BARE, (t) => { t.meta = { team: 'sales' }; }, (out) => {
-    expect(out).toBe(BARE.replace('Table fct_order {', "Table fct_order [meta_team: 'sales'] {"));
+  tableCase('a new string meta entry is its own bare setting', 'fct_order', BARE, (t) => { t.meta = { team: 'sales' }; }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {', "Table fct_order [team: 'sales'] {"));
   }),
   tableCase('a meta_<key> that overrides the same key in meta_json is left alone by an edit of another key', 'fct_order',
     `Table fct_order [meta_owner: 'wins', meta_json: '{"owner":"loses","n":"1"}'] {\n  id int\n}\n`, (t) => { t.meta = { ...t.meta, n: '2' }; }, (out) => {
@@ -418,7 +419,7 @@ export const TABLE_CASES: WriterCase[] = [
     t.description = 'x';
   }, (out) => {
     expect(out.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(out).toContain("  rationale_design: 'd',\r\n  rationale_measures:");
+    expect(out).toContain("  design: 'd',\r\n  rationale_measures:");
     expect(out).toContain('  extra int\r\n');
   }),
   tableCase('a no-op keeps `indexes { id [pk] }`, `primary key` flags and erd_ names', 'fct_order',
@@ -494,6 +495,125 @@ export const TABLE_CASES: WriterCase[] = [
   }),
 ];
 
+/**
+ * Context fields (spec §4, A3–A10): a field is edited in the spelling it was
+ * read from, cleared in every spelling of its home (and no other), and a new
+ * one is written as a new file writes it.
+ */
+export const FIELD_CASES: WriterCase[] = [
+  // --- Rationale-home fields -------------------------------------------------
+  tableCase('a rationale value is spliced in its old spelling (rationale_<key>)', 'fct_order', FCT_ORDER, (t) => {
+    t.rationale = { ...t.rationale, purpose: 'Revenue' };
+  }, (out) => {
+    expect(out).toBe(FCT_ORDER.replace("rationale_purpose: 'Revenue reporting by day, customer and region'", "rationale_purpose: 'Revenue'"));
+  }),
+  tableCase('…in the bare spelling, leaving a shadowed old one alone', 'fct_order',
+    "Table fct_order [purpose: 'a', rationale_purpose: 'old'] {\n  id int\n}\n", (t) => { t.rationale = { purpose: 'b' }; }, (out) => {
+      expect(out).toBe("Table fct_order [purpose: 'b', rationale_purpose: 'old'] {\n  id int\n}\n");
+    }),
+  tableCase('…in an erd_ spelling', 'fct_order', "Table fct_order [erd_rationale_purpose: 'a'] {\n  id int\n}\n", (t) => { t.rationale = { purpose: 'b' }; }, (out) => {
+    expect(out).toBe("Table fct_order [erd_rationale_purpose: 'b'] {\n  id int\n}\n");
+  }),
+  tableCase('…in the Metadata block that sets it (D25)', 'fct_order',
+    "Table fct_order [purpose: 'inline'] {\n  id int\n}\nMetadata Table fct_order {\n  purpose: 'block'\n}\n", (t) => { t.rationale = { purpose: 'edited' }; }, (out) => {
+      expect(out).toBe("Table fct_order [purpose: 'inline'] {\n  id int\n}\nMetadata Table fct_order {\n  purpose: 'edited'\n}\n");
+    }),
+  tableCase('…past an empty spelling that comes first (it is skipped on read, so it stays)', 'fct_order',
+    "Table fct_order [purpose: '', rationale_purpose: 'r'] {\n  id int\n}\n", (t) => { t.rationale = { purpose: 'r2' }; }, (out) => {
+      expect(out).toBe("Table fct_order [purpose: '', rationale_purpose: 'r2'] {\n  id int\n}\n");
+    }),
+  tableCase('a value for a field held only by empty spellings fills the first of them, never a duplicate', 'fct_order',
+    "Table fct_order [rationale_purpose: '', purpose: ''] {\n  id int\n}\n", (t) => { t.rationale = { purpose: 'x' }; }, (out) => {
+      expect(out).toBe("Table fct_order [rationale_purpose: '', purpose: 'x'] {\n  id int\n}\n");
+    }),
+  tableCase('a cleared rationale field loses every spelling, inline and in blocks, but never meta_<key> (another home)', 'fct_order',
+    "Table fct_order [purpose: 'b', rationale_purpose: 'r', meta_purpose: 'kept', owner: 'o'] {\n  id int\n}\nMetadata Table fct_order {\n  erd_purpose: 'e'\n  rationale_purpose: 'rb'\n}\n",
+    (t) => { delete t.rationale; }, (out) => {
+      expect(out).toBe("Table fct_order [meta_purpose: 'kept', owner: 'o'] {\n  id int\n}\nMetadata Table fct_order {\n}\n");
+      expect(readTable(out, 'fct_order').table).toMatchObject({ meta: { purpose: 'kept', owner: 'o' } });
+      expect(readTable(out, 'fct_order').table.rationale).toBeUndefined();
+    }),
+  tableCase('a new built-in field is written bare, in catalogue order among the fields', 'fct_order', FCT_ORDER, (t) => {
+    t.rationale = { ...t.rationale, decisions: 'Lines, not orders', openQuestions: 'Refunds?', retention: 'Seven years' };
+  }, (out) => {
+    expect(out).toBe(FCT_ORDER.replace(
+      "  rationale_measures: 'amount is additive',\n",
+      "  decisions: 'Lines, not orders',\n  open_questions: 'Refunds?',\n  rationale_measures: 'amount is additive',\n  retention: 'Seven years',\n",
+    ));
+  }),
+
+  // --- Meta-home fields --------------------------------------------------------
+  tableCase('a meta value is spliced in the spelling it is read from: bare, rationale_<key>, erd_meta_<key>', 'fct_order',
+    "Table fct_order [owner: 'o', meta_owner: 'old', rationale_sla: 's', erd_meta_tier: 't'] {\n  id int [business_rule: 'b']\n}\n", (t) => {
+      t.meta = { owner: 'o2', sla: 's2', tier: 't2' };
+      t.columns![0].meta = { business_rule: 'b2' };
+    }, (out) => {
+      expect(out).toBe("Table fct_order [owner: 'o2', meta_owner: 'old', rationale_sla: 's2', erd_meta_tier: 't2'] {\n  id int [business_rule: 'b2']\n}\n");
+    }),
+  tableCase('text a meta_json entry holds is edited inside meta_json', 'fct_order',
+    `Table fct_order [meta_json: '{"owner":"j","pii":true}'] {\n  id int\n}\n`, (t) => { t.meta = { owner: 'k', pii: true }; }, (out) => {
+      expect(out).toBe(`Table fct_order [meta_json: '{"owner":"k","pii":true}'] {\n  id int\n}\n`);
+    }),
+  tableCase('a cleared meta key loses every spelling and its meta_json entry, and nothing resurfaces', 'fct_order',
+    `Table fct_order [owner: 'b', meta_owner: 'm', rationale_owner: 'r', meta_json: '{"owner":"j","pii":true}', purpose: 'p'] {\n  id int\n}\nMetadata Table fct_order {\n  erd_owner: 'e'\n}\n`,
+    (t) => { t.meta = { pii: true }; }, (out) => {
+      expect(out).toBe(`Table fct_order [meta_json: '{"pii":true}', purpose: 'p'] {\n  id int\n}\nMetadata Table fct_order {\n}\n`);
+      expect(readTable(out, 'fct_order').table).toMatchObject({ meta: { pii: true }, rationale: { purpose: 'p' } });
+    }),
+  tableCase('a new text entry under a reserved name or a built-in kept elsewhere is meta_<key>, never bare', 'fct_order', BARE, (t) => {
+    t.meta = { note: 'n', role: 'r', purpose: 'p', grain: 'g', dbml: 'd', alias: 'a' };
+  }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {',
+      "Table fct_order [\n  meta_note: 'n',\n  meta_role: 'r',\n  meta_purpose: 'p',\n  meta_grain: 'g',\n  meta_dbml: 'd',\n  meta_alias: 'a'\n] {"));
+    const read = readTable(out, 'fct_order').table;
+    expect(read.meta).toEqual({ note: 'n', role: 'r', purpose: 'p', grain: 'g', dbml: 'd', alias: 'a' });
+    expect([read.description, read.modelRole, read.grain, read.alias, read.rationale]).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  }),
+  tableCase('the parser-unsafe names constructor and __proto__ are meta_ spellings', 'fct_order', BARE, (t) => {
+    const meta = {} as NonNullable<SemanticTable['meta']>;
+    Object.defineProperty(meta, '__proto__', { value: 'p', enumerable: true, writable: true, configurable: true });
+    meta.constructor = 'c' as never;
+    t.meta = meta;
+    t.columns![0].meta = { constructor: 'cc' } as never;
+  }, (out) => {
+    expect(out).toBe("Table fct_order [\n  meta___proto__: 'p',\n  meta_constructor: 'c'\n] {\n  id int [pk, meta_constructor: 'cc']\n  amount int\n}\n");
+    const read = readTable(out, 'fct_order').table;
+    expect(Object.getOwnPropertyDescriptor(read.meta!, '__proto__')?.value).toBe('p');
+    expect(read.columns![0].meta!.constructor).toBe('cc');
+  }),
+  tableCase('a key that is not an identifier, or json, goes into meta_json', 'fct_order', BARE, (t) => {
+    t.meta = { 'Odd Key': 'x', json: 'j', '1st': 'f' };
+  }, (out) => {
+    expect(out).toBe(BARE.replace('Table fct_order {', `Table fct_order [meta_json: '{"Odd Key":"x","json":"j","1st":"f"}'] {`));
+  }),
+  tableCase('a column\'s fields are bare after its ERD Studio flags and before its note (business_rule, a column purpose)', 'fct_order', BARE, (t) => {
+    t.columns![1] = { ...t.columns![1], description: 'Total', additiveType: 'additive', meta: { business_rule: 'Sum of lines', purpose: 'p' } };
+  }, (out) => {
+    expect(out).toBe(BARE.replace('  amount int\n', "  amount int [additive_type: 'additive', business_rule: 'Sum of lines', purpose: 'p', note: 'Total']\n"));
+  }),
+  // A9: a key added between two the file holds, and a value turning into a list.
+  tableCase('an entry added between two bare ones rewrites the owner\'s meta in key order', 'fct_order',
+    "Table fct_order [owner: 'a', team: 'b'] {\n  id int\n}\n", (t) => { t.meta = { owner: 'a', n: 1 as never, team: 'b' }; }, (out) => {
+      expect(out).toBe("Table fct_order [owner: 'a', n: '1', team: 'b'] {\n  id int\n}\n");
+      expect(Object.keys(readTable(out, 'fct_order').table.meta!)).toEqual(['owner', 'n', 'team']);
+    }),
+  tableCase('a bare text value that becomes a list moves into meta_json, in its place', 'fct_order',
+    "Table fct_order [owner: 'a', team: 'b'] {\n  id int\n}\n", (t) => { t.meta = { owner: 'a', team: ['x'] }; }, (out) => {
+      expect(out).toBe(`Table fct_order [owner: 'a', meta_json: '{"team":["x"]}'] {\n  id int\n}\n`);
+    }),
+  tableCase('a meta_json value that becomes text is written as a new file writes it, in its place', 'fct_order',
+    `Table fct_order [meta_json: '{"pii":true}', owner: 'o'] {\n  id int\n}\n`, (t) => { t.meta = { pii: 'yes', owner: 'o' }; }, (out) => {
+      expect(out).toBe("Table fct_order [pii: 'yes', owner: 'o'] {\n  id int\n}\n");
+    }),
+  tableCase('the key-order rewrite takes every meta spelling of the owner, block entries too, and no other setting', 'fct_order',
+    "Table fct_order [owner: 'a', purpose: 'p', color: 'c'] {\n  id int\n}\nMetadata Table fct_order {\n  team: 'b'\n}\n", (t) => {
+      t.meta = { flag: true, owner: 'a', team: 'b' };
+    }, (out) => {
+      expect(out).toBe(`Table fct_order [purpose: 'p', color: 'c', meta_json: '{"flag":true}', owner: 'a', team: 'b'] {\n  id int\n}\nMetadata Table fct_order {\n}\n`);
+      expect(Object.keys(readTable(out, 'fct_order').table.meta!)).toEqual(['flag', 'owner', 'team']);
+    }),
+];
+
 /** A table file with `Metadata` blocks before and after the Table (D25). */
 export function METADATA_TABLE(): string {
   return `Metadata Table fct_order {
@@ -526,6 +646,19 @@ const READ_BACK_TABLE: SemanticTable = {
   ],
 };
 
+/** A table with every rationale-home field (given out of order) and meta that shadows built-ins. */
+const FIELDS_TABLE: SemanticTable = {
+  name: 'dim_store',
+  schema: 'gold',
+  modelRole: 'conformed-dim',
+  rationale: {
+    retention: 'r', measures: 'm', purpose: 'p', knownIssues: 'k', design: 'old design', decisions: 'd', freshness: 'daily',
+    grainChoice: 'gc', openQuestions: 'q', roleChoice: 'rc', scdStrategy: 's', sourceOfTruth: 'POS',
+  },
+  meta: { owner: 'ops', purpose: 'shadow', note: 'n', pii: true, business_rule: 'a team field on a table' },
+  columns: [{ name: 'code', dataType: 'VARCHAR', description: '', isNaturalKey: true, meta: { business_rule: 'Till prefix', purpose: 'col', role: 'r' } }],
+};
+
 /** New-file cases: `renderNewTableDbml` and its read-back. */
 export const NEW_TABLE_CASES: WriterCase[] = [
   {
@@ -556,17 +689,51 @@ export const NEW_TABLE_CASES: WriterCase[] = [
       expect(o.output).toBe(`Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
-  rationale_purpose: 'Revenue',
-  rationale_measures: 'amount is additive',
-  meta_owner: 'sales-data',
+  purpose: 'Revenue',
+  measures: 'amount is additive',
+  owner: 'sales-data',
   meta_json: '{"pii":false}'
 ] {
   Note: 'Order lines'
 
   id BIGINT [pk, natural_key: 'true', scd_type: '0', note: 'Line id']
-  amount "DECIMAL(18,2)" [additive_type: 'additive', foreign_key: 'true', meta_unit: 'AUD']
+  amount "DECIMAL(18,2)" [additive_type: 'additive', foreign_key: 'true', unit: 'AUD']
 }
 `);
+    },
+  },
+  {
+    // Context fields (A10): every rationale-home field bare in RATIONALE_FIELD_KEYS order; meta bare,
+    // meta_<key> for a reserved name or a built-in kept elsewhere, meta_json for the rest.
+    name: 'a new table writes every field bare, in catalogue order, and keeps meta that shadows a built-in as meta_<key>',
+    run: () => ({ path: 'gold/tables/gold/dim_store.dbml', input: null, output: renderNewTableDbml(FIELDS_TABLE) }),
+    check: (o) => {
+      expect(o.output).toBe(`Table gold.dim_store [
+  role: 'conformed-dim',
+  purpose: 'p',
+  decisions: 'd',
+  open_questions: 'q',
+  design: 'old design',
+  grain_choice: 'gc',
+  role_choice: 'rc',
+  scd_strategy: 's',
+  measures: 'm',
+  source_of_truth: 'POS',
+  freshness: 'daily',
+  known_issues: 'k',
+  retention: 'r',
+  owner: 'ops',
+  meta_purpose: 'shadow',
+  meta_note: 'n',
+  meta_json: '{"pii":true}',
+  business_rule: 'a team field on a table'
+] {
+  code VARCHAR [natural_key: 'true', business_rule: 'Till prefix', purpose: 'col', meta_role: 'r']
+}
+`);
+      const read = readTable(o.output, 'dim_store');
+      expect(read.table).toEqual(FIELDS_TABLE);
+      expect(read.fieldSpellings!.filter((f) => f.old)).toEqual([]);
     },
   },
   {
@@ -598,8 +765,8 @@ export const NEW_TABLE_CASES: WriterCase[] = [
     }),
     check: (o) => {
       expect(o.output).toBe(
-        "Table gold.dim_employee [\n  meta_owner: 'people',\n  meta_json: '{\"contains_pii\":true}',\n  meta_exposure: 'crm'\n] {\n" +
-          "  id int [meta_a: 'x', meta_json: '{\"b\":true,\"c\":\"y\",\"d\":[\"p\",\"q\"]}', meta_e: 'z']\n}\n",
+        "Table gold.dim_employee [\n  owner: 'people',\n  meta_json: '{\"contains_pii\":true}',\n  exposure: 'crm'\n] {\n" +
+          "  id int [a: 'x', meta_json: '{\"b\":true,\"c\":\"y\",\"d\":[\"p\",\"q\"]}', e: 'z']\n}\n",
       );
       const read = readTable(o.output, 'dim_employee').table;
       expect(Object.keys(read.meta ?? {})).toEqual(['owner', 'contains_pii', 'exposure']);

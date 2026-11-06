@@ -46,8 +46,51 @@ export type DbmlTableReading =
       /** False while a `use` line, a `Ref` or a column `[ref: …]` is in the file: writes are refused until it is moved (§2.2). */
       writable: boolean;
       problems: DbmlProblem[];
+      /**
+       * Every setting that holds a context field (a rationale-home built-in
+       * or a `meta` key), inline or in a same-file Metadata block, and every
+       * `meta_json` entry, in the order they stand: how `doctor` counts old
+       * spellings and fields spelled twice. Absent when there is none. Never
+       * a problem: nothing here stops a read or a write.
+       */
+      fieldSpellings?: DbmlFieldSpelling[];
     }
   | { ok: false; error: TableLoadError & { column?: number; message: string } };
+
+/**
+ * One spelling of a context field found in a table file (`fieldSpellings`).
+ * The same name set inline and in a same-file Metadata block is one spelling.
+ */
+export interface DbmlFieldSpelling {
+  /** `''` for the table, else the column's name as declared. */
+  owner: string;
+  /** Where the field's value lives: `rationale` (a table built-in) or `meta`. */
+  home: 'rationale' | 'meta';
+  /** The field's key: snake case for a rationale-home field (`open_questions`), the `meta` key otherwise. */
+  key: string;
+  /**
+   * How it is spelled: `bare` (`purpose`, `owner`), `erd` (any `erd_`
+   * prefixed name), `rationale` (`rationale_<key>`), `meta` (`meta_<key>`),
+   * or `json` (an entry of `meta_json`).
+   */
+  spelling: 'bare' | 'erd' | 'rationale' | 'meta' | 'json';
+  /**
+   * The setting's name as the file writes it (`erd_rationale_purpose`,
+   * `meta_owner`; for a `json` entry, the `meta_json` or `erd_meta_json`
+   * setting that holds it). Optional: a reading from an older core has none.
+   */
+  name?: string;
+  /** This is the spelling the value is read from (an empty or shadowed one is not). */
+  used: boolean;
+  /**
+   * A new file would spell this field another way: `rationale_<key>` of a
+   * built-in, or a `meta` key held as `meta_<key>`, `rationale_<key>` or a
+   * text `meta_json` entry where a new file writes it bare. `erd_` and bare
+   * spellings, `meta_<key>` of a reserved key or a built-in kept elsewhere,
+   * and non-text `meta_json` entries are never old.
+   */
+  old: boolean;
+}
 
 /** How a one-to-one (`-`) Ref was oriented: by its `?` mark, by keys, or by position (the second end is the foreign key). */
 export type DbmlOneToOneDirection = 'mark' | 'keys' | 'position';

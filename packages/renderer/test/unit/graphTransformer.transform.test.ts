@@ -180,6 +180,20 @@ describe('transformSubjectArea nodes', () => {
     expect(fkEdges(result)[0].data?.readOnly).toBe(true);
   });
 
+  it('hasRationale counts every rationale field with text (new and retired keys), never blank text', () => {
+    const result = transformSubjectArea(subjectArea({
+      models: [
+        table('a', { rationale: { decisions: 'Surrogate keys' } }),
+        table('b', { rationale: { openQuestions: 'Which currency?' } }),
+        table('c', { rationale: { retention: 'Seven years' } }),
+        table('d', { rationale: { grainChoice: 'Order line' } }),
+        table('e', { rationale: { purpose: '   ', decisions: '' } }),
+      ],
+    }));
+    for (const name of ['a', 'b', 'c', 'd']) expect(nodeById(result, name).data.hasRationale).toBe(true);
+    expect(nodeById(result, 'e').data).not.toHaveProperty('hasRationale');
+  });
+
   it('carries physical provenance onto node data, and only when the host set it', () => {
     const result = transformSubjectArea(subjectArea({
       stage: 'physical',

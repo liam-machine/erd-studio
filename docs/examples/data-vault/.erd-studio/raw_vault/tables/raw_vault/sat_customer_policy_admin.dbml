@@ -1,4 +1,4 @@
-Table raw_vault.sat_customer_policy_admin [meta_vault_type: 'satellite'] {
+Table raw_vault.sat_customer_policy_admin [vault_type: 'satellite'] {
   Note: 'Customer details from the policy administration system.'
 
   customer_hk   BINARY    [foreign_key: 'true']

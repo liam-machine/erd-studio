@@ -1,7 +1,7 @@
 Table marts.dim_date [
   role: 'conformed-dim',
   grain: 'One row per calendar day',
-  meta_owner: 'bi-platform'
+  owner: 'bi-platform'
 ] {
   Note: 'The calendar, with the bank\'s July-to-June financial year.'
 

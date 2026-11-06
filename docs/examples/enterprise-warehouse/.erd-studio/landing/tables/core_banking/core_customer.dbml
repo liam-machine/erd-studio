@@ -1,6 +1,6 @@
 // Landing has one schema per source system, so names carry the source too: every table name
 // is unique across the whole project (core_customer, cards_account, …).
-Table core_banking.core_customer [meta_owner: 'data-engineering'] {
+Table core_banking.core_customer [owner: 'data-engineering'] {
   Note: 'Customers as the core banking system sends them.'
 
   customer_no   STRING    [pk, natural_key: 'true', note: 'The CIF number in core banking']

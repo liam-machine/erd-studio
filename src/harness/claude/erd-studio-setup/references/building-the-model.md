@@ -120,10 +120,10 @@ or `2` breaks it in other DBML tools.
 | `note: '…'` (column setting) | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else leave it out |
 | `pk` (or `indexes { (a, b) [pk] }`) | as `isPrimaryKey` in the Legacy table below |
 | `foreign_key: 'true'` | Every column listed in `foreignKeys` |
-| `meta_<key>` / `meta_json` | Only with a team metadata list: its `dbt` keys — `references/metadata.md` section 5 |
+| a field's `<key>: '<value>'` (`meta_json` for a value that is not text) | Only the fields `.erd-studio/fields.yml` marks `filled_by: dbt` — `references/metadata.md` section 5 |
 
-The design fields (`role`, `grain`, `rationale_<field>`, `scd_type`, `additive_type`,
-`natural_key`) come from the modelling approach, as the paragraph after "Quote every text value"
+The design fields (`role`, `grain`, text fields such as `purpose` and `decisions`, `scd_type`,
+`additive_type`, `natural_key`) come from the modelling approach, as the paragraph after "Quote every text value"
 below says. A text with a line break is triple-quoted (`'''…'''`); escape `'` as `\'`. A
 table file holds no `use`, `Ref` or `[ref: …]` — relationships go in the relationships file.
 
@@ -195,7 +195,7 @@ For the inventory in "Legacy worked example" below, with the Kimball approach, y
 Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order',
-  rationale_design: 'Kimball transaction fact, per .erd-studio/modelling-approach.md'
+  decisions: 'Kimball transaction fact, per .erd-studio/modelling-approach.md'
 ] {
   Note: 'One row per order (draft)'
 
@@ -241,7 +241,7 @@ For each `InventoryModel` in the `inventory --models` output:
 | `columns[].description` | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else `""` |
 | `columns[].isPrimaryKey: true` | The column in `keyCandidates.unique` when there is exactly one. With several, prefer the one named like `<entity>_id` for the model (`order_id` for `fct_order`). With none, every column of the first `keyCandidates.compositeUnique` group |
 | `columns[].isForeignKey: true` | Every column listed in `foreignKeys` |
-| `meta`, `columns[].meta` | Only with a team metadata list: its `dbt` keys from `meta` / `columns[].meta` — `references/metadata.md` section 5 |<!-- /dbt-only -->
+| `meta`, `columns[].meta` | Only the fields `.erd-studio/fields.yml` marks `filled_by: dbt`, from `meta` / `columns[].meta` — `references/metadata.md` section 5 |<!-- /dbt-only -->
 <!-- no-dbt -->## Legacy: model yml<!-- /no-dbt -->
 
 ### Quote every text value
@@ -390,7 +390,7 @@ description: "One row per order (draft)"
 grain: "One row per order"
 modelRole: transaction-fact
 rationale:
-  design: "Kimball transaction fact, per .erd-studio/modelling-approach.md"
+  decisions: "Kimball transaction fact, per .erd-studio/modelling-approach.md"
 columns:
   - name: order_id
     dataType: "INT"

@@ -1,5 +1,5 @@
 // One satellite per source: the CRM's view of a customer, with every change kept.
-Table raw_vault.sat_customer_crm [meta_vault_type: 'satellite'] {
+Table raw_vault.sat_customer_crm [vault_type: 'satellite'] {
   Note: 'Customer details from the CRM.'
 
   customer_hk   BINARY    [foreign_key: 'true']

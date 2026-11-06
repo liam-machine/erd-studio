@@ -1,6 +1,6 @@
 Table arrangement.account [
   grain: 'One row per account, from any system',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'Every account the bank holds, whichever system opened it.'
 

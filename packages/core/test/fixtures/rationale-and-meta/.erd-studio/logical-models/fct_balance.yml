@@ -1,0 +1,30 @@
+name: fct_balance
+schema: silver
+description: Month-end balance per account
+grain: One row per account per month end
+modelRole: periodic-snapshot
+rationale:
+  purpose: Month-end balances for the finance close
+  measures: balance is semi-additive (never sum across months); txn_count is additive
+  design: ''
+meta:
+  owner: finance-data
+  refresh: daily
+columns:
+  - name: account_key
+    dataType: INT
+    description: Account at month end
+  - name: month_end
+    dataType: DATE
+    description: Last day of the month
+  - name: balance
+    dataType: DECIMAL(18,2)
+    description: Closing balance
+    additiveType: semi-additive
+    meta:
+      business_rule: Ledger balance after the last posting of the month
+      unit: AUD
+  - name: txn_count
+    dataType: INT
+    description: Transactions in the month
+    additiveType: additive

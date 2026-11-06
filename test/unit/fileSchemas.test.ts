@@ -18,6 +18,20 @@ import { describe, expect, it } from 'vitest';
 import { LIBRARY_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION, TABLE_NAMING_SCHEMA_VERSION, detectSubjectAreaFormat } from '../../packages/core/src/types/semantic';
 import { LAYERS_SCHEMA_VERSION } from '../../packages/core/src/types/layer';
 import { RATIONALE_KEYS } from '../../packages/core/src/logicalModel';
+import {
+  BUILT_IN_FIELDS,
+  DBML_SETTING_NAMES,
+  ERD_SETTING_NAMES,
+  FIELD_FILLED_BY,
+  FIELD_KEY_PATTERN,
+  FIELD_SHOW_FOR,
+  FIELD_TYPES,
+  RATIONALE_FIELD_KEYS,
+  RESERVED_FIELD_KEY_PREFIXES,
+  STARTING_FIELD_LIST,
+  UNSAFE_FIELD_KEYS,
+} from '../../packages/core/src/fields';
+import { parseFieldsText, renderFieldsText } from '../../packages/core/src/fieldsFile';
 import { VALID_CARDINALITIES } from '../../packages/core/src/domain';
 import { ANNOTATION_COLORS } from '../../packages/renderer/src/lib/annotationColors';
 import { CARDINALITIES, TABLE_ROLES } from '../../src/providers/payloadValidation';
@@ -34,6 +48,7 @@ const subjectAreaSchema = loadSchema('domain.schema.json');
 const tableSchema = loadSchema('logical-model.schema.json');
 const layersSchema = loadSchema('layers.schema.json');
 const templateSchema = loadSchema('template.schema.json');
+const fieldsSchema = loadSchema('fields.schema.json');
 
 const ajv = new Ajv({ allErrors: true });
 // VS Code's own keyword for per-value hover text in completion lists.
@@ -43,6 +58,7 @@ const validators: Record<string, ValidateFunction> = {
   'logical-model.schema.json': ajv.compile(tableSchema),
   'layers.schema.json': ajv.compile(layersSchema),
   'template.schema.json': ajv.compile(templateSchema),
+  'fields.schema.json': ajv.compile(fieldsSchema),
 };
 
 const validate = (schemaFile: string, data: unknown): string[] => {
@@ -115,7 +131,7 @@ describe('schemas match the TypeScript types', () => {
         for (const [k, v] of Object.entries(node)) walk(v, `${at}/${k}`);
       }
     };
-    for (const [file, schema] of Object.entries({ domainSchema: subjectAreaSchema, modelSchema: tableSchema, layersSchema, templateSchema })) walk(schema, file);
+    for (const [file, schema] of Object.entries({ domainSchema: subjectAreaSchema, modelSchema: tableSchema, layersSchema, templateSchema, fieldsSchema })) walk(schema, file);
     expect(offenders).toEqual([]);
   });
 
@@ -126,6 +142,7 @@ describe('schemas match the TypeScript types', () => {
       subjectAreaSchema, subjectAreaSchema.properties.logical, subjectAreaSchema.definitions.relationship,
       subjectAreaSchema.definitions.viewConfig, subjectAreaSchema.definitions.position, subjectAreaSchema.definitions.annotation,
       layersSchema, layersSchema.definitions.layer,
+      fieldsSchema, fieldsSchema.definitions.tableEntry, fieldsSchema.definitions.columnEntry,
     ];
     for (const node of closed) expect(node.additionalProperties).toBe(false);
   });
@@ -149,8 +166,20 @@ describe('schema enums match the runtime', () => {
     expect(cardinality.enumDescriptions[cardinality.enum.indexOf('one-to-many')]).toMatch(/^Deprecated in model files/);
   });
 
-  it('rationale keys are the ones the model reader keeps', () => {
-    expect(schemaKeys(tableSchema.definitions.rationale)).toEqual([...RATIONALE_KEYS].sort());
+  it('rationale keys are the ones the model reader keeps: every catalogue rationale key, in its one order', () => {
+    expect(schemaKeys(tableSchema.definitions.rationale)).toEqual([...RATIONALE_FIELD_KEYS].sort());
+    expect(Object.keys(tableSchema.definitions.rationale.properties)).toEqual([...RATIONALE_FIELD_KEYS]);
+    // The six keys of the first release are still declared (old files keep validating).
+    for (const key of RATIONALE_KEYS) expect(tableSchema.definitions.rationale.properties).toHaveProperty(key);
+  });
+
+  it('a model file with the context-field rationale keys validates, and a snake_case key does not', () => {
+    const model = {
+      name: 'dim_account',
+      rationale: { purpose: 'p', decisions: 'd', openQuestions: 'q', sourceOfTruth: 's', freshness: 'f', knownIssues: 'k', retention: 'r' },
+    };
+    expect(validate('logical-model.schema.json', model)).toEqual([]);
+    expect(validate('logical-model.schema.json', { name: 'dim_account', rationale: { open_questions: 'q' } })).not.toEqual([]);
   });
 
   it('annotation colours are the canvas palette', () => {
@@ -215,6 +244,9 @@ describe('package.json schema contributions', () => {
     ['project/.erd-studio/logical-models/gold/fct_order.yml', 'logical-model.schema.json'],
     ['project/.erd-studio/.sync-plan.json', undefined],
     ['project/.erd-studio/logical-models/a/b/too_deep.yml', undefined],
+    ['project/.erd-studio/fields.yml', 'fields.schema.json'],
+    ['project/.erd-studio/gold/fields.yml', undefined],
+    ['project/.erd-studio/logical-models/fields.yml', 'logical-model.schema.json'],
     ['project/models/schema.yml', undefined],
     ['project/.vscode/settings.json', undefined],
     // Native DBML storage (§7.5): .dbml and .dbdiagram files have no JSON Schema.
@@ -356,5 +388,136 @@ describe('what a hand-editor is told', () => {
       schemaVersion: 4, domain: 'd', layer: 'silver',
       logical: { models: [{ name: 'dim_a', columns: [] }], relationships: [] }, viewConfig: {},
     })).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fields.yml (context fields)
+// ---------------------------------------------------------------------------
+
+describe('fields.schema.json: the field list', () => {
+  /** The design's example file (docs/semantic-domain-json-reference.md → Field list). */
+  const EXAMPLE = [
+    'version: 1',
+    'tables:',
+    '  - grain',
+    '  - purpose',
+    '  - key: decisions',
+    '    guidance: Choices finance signed off, and why.',
+    '  - open_questions',
+    '  - role',
+    '  - scd_strategy',
+    '  - measures',
+    '  - key: owner',
+    '    label: Owner',
+    '    type: value',
+    '    guidance: The team that owns it, e.g. crm-team.',
+    '    filled_by: dbt',
+    '  - key: sensitivity',
+    '    label: Sensitivity',
+    '    type: choice',
+    '    values: [public, internal, confidential]',
+    '    filled_by: people',
+    '    show_for: all',
+    'columns:',
+    '  - natural_key',
+    '  - scd_type',
+    '  - additive_type',
+    '  - key: pii',
+    '    label: Personal data',
+    '    type: yes-no',
+    '    filled_by: dbt',
+    'left_out: [dimension, metrics]',
+    '',
+  ].join('\n');
+
+  const builtInKeys = (scope: 'table' | 'column') => BUILT_IN_FIELDS.filter((d) => d.scope === scope).map((d) => d.key);
+
+  it('validates the documented example, which core reads with no problem', () => {
+    expect(parseFieldsText(EXAMPLE).problems).toEqual([]);
+    expect(validate('fields.schema.json', parseYaml(EXAMPLE))).toEqual([]);
+  });
+
+  it('every fields.yml example in the docs reads with no problem and validates', () => {
+    const docs = ['docs/semantic-domain-json-reference.md', 'docs/dev/fields.md'];
+    let found = 0;
+    for (const doc of docs) {
+      const text = fs.readFileSync(path.join(ROOT, doc), 'utf-8');
+      for (const m of text.matchAll(/```yaml\n(version: 1\n[\s\S]*?)```/g)) {
+        found++;
+        expect(parseFieldsText(m[1]).problems, doc).toEqual([]);
+        expect(validate('fields.schema.json', parseYaml(m[1])), doc).toEqual([]);
+      }
+    }
+    expect(found).toBeGreaterThanOrEqual(2);
+  });
+
+  it('validates the starting set as Customise Fields… writes it', () => {
+    const text = renderFieldsText(STARTING_FIELD_LIST);
+    expect(parseFieldsText(text).problems).toEqual([]);
+    expect(validate('fields.schema.json', parseYaml(text))).toEqual([]);
+    expect(validate('fields.schema.json', {})).toEqual([]);
+  });
+
+  it('offers exactly the catalogue as bare names, per scope, each with a description', () => {
+    const tables = fieldsSchema.definitions.tableBuiltInName;
+    const columns = fieldsSchema.definitions.columnBuiltInName;
+    expect(tables.enum).toEqual(builtInKeys('table'));
+    expect(columns.enum).toEqual(builtInKeys('column'));
+    expect(tables.enumDescriptions).toHaveLength(tables.enum.length);
+    expect(columns.enumDescriptions).toHaveLength(columns.enum.length);
+    for (const def of BUILT_IN_FIELDS) {
+      const node = def.scope === 'table' ? tables : columns;
+      const text: string = node.enumDescriptions[node.enum.indexOf(def.key)];
+      expect(text.startsWith(def.label), def.key).toBe(true);
+      expect(text, def.key).toContain(def.guidance);
+    }
+  });
+
+  it('types, filled_by and show_for are the values core reads', () => {
+    for (const entry of [fieldsSchema.definitions.tableEntry, fieldsSchema.definitions.columnEntry]) {
+      expect([...entry.properties.type.enum].sort()).toEqual([...FIELD_TYPES].sort());
+      expect([...entry.properties.filled_by.enum].sort()).toEqual([...FIELD_FILLED_BY].sort());
+      expect([...entry.properties.show_for.enum].sort()).toEqual([...FIELD_SHOW_FOR].sort());
+    }
+  });
+
+  it('a key follows core: its pattern, the reserved names and prefixes, a built-in allowed only in its own scope', () => {
+    for (const scope of ['table', 'column'] as const) {
+      const key = fieldsSchema.definitions[`${scope}Key`];
+      expect(key.pattern).toBe(FIELD_KEY_PATTERN.source);
+      const reserved = key.anyOf[1].not.anyOf;
+      expect([...reserved[0].enum].sort()).toEqual([...DBML_SETTING_NAMES, ...ERD_SETTING_NAMES, ...UNSAFE_FIELD_KEYS].sort());
+      expect(reserved[1].pattern).toBe(`^(${RESERVED_FIELD_KEY_PREFIXES.join('|')})`);
+    }
+    const tableField = (key: string) => validate('fields.schema.json', { tables: [{ key, label: 'X' }] });
+    const columnField = (key: string) => validate('fields.schema.json', { columns: [{ key, label: 'X' }] });
+    for (const key of ['owner', 'tier', '_private', 'decisions', 'role', 'grain']) expect(tableField(key), key).toEqual([]);
+    for (const key of ['pii', 'business_rule', 'natural_key', 'scd_type']) expect(columnField(key), key).toEqual([]);
+    for (const key of ['note', 'pk', 'default', 'schema', 'alias', 'meta_json', 'json', 'dbml', 'constructor', '__proto__',
+      'erd_owner', 'rationale_owner', 'meta_owner', 'Owner', '2nd', 'open questions', 'natural_key']) {
+      expect(tableField(key), key).not.toEqual([]);
+    }
+    // A table built-in is not a column one: role on a column is reserved.
+    expect(columnField('role')).not.toEqual([]);
+    // Every reserved key core refuses, the schema flags too (built-ins of the scope aside).
+    for (const scope of ['table', 'column'] as const) {
+      for (const key of [...DBML_SETTING_NAMES, ...ERD_SETTING_NAMES, ...UNSAFE_FIELD_KEYS]) {
+        if (builtInKeys(scope).includes(key)) continue;
+        const data = scope === 'table' ? { tables: [{ key }] } : { columns: [{ key }] };
+        expect(validate('fields.schema.json', data), `${scope} ${key}`).not.toEqual([]);
+        expect(parseFieldsText(`${scope === 'table' ? 'tables' : 'columns'}:\n  - key: "${key}"\n`).problems.length, `${scope} ${key}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('flags what core warns about or refuses: a misspelt name, an unknown type or property, a newer version', () => {
+    expect(validate('fields.schema.json', { tables: ['purpse'] })).not.toEqual([]);
+    expect(validate('fields.schema.json', { columns: ['purpose'] })).not.toEqual([]);
+    expect(validate('fields.schema.json', { tables: [{ key: 'tier', type: 'number' }] })).not.toEqual([]);
+    expect(validate('fields.schema.json', { tables: [{ key: 'tier', filledBy: 'dbt' }] })).not.toEqual([]);
+    expect(validate('fields.schema.json', { tables: [{ label: 'Tier' }] })).not.toEqual([]);
+    expect(validate('fields.schema.json', { version: 2 })).not.toEqual([]);
+    expect(validate('fields.schema.json', { table: ['grain'] })).not.toEqual([]);
   });
 });

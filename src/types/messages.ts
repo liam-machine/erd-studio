@@ -63,6 +63,7 @@ import type {
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
   OpenModelFileMessage,
+  OpenFieldsFileMessage,
   AddExistingModelMessage,
   AddExistingModelsMessage,
   CanvasContext,
@@ -93,6 +94,7 @@ export type {
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
   OpenModelFileMessage,
+  OpenFieldsFileMessage,
   AddExistingModelMessage,
   AddExistingModelsMessage,
   CanvasEditMessage,
@@ -1088,6 +1090,7 @@ export type WebviewMessage =
   | RemoveAnnotationMessage
   | RemoveAnnotationsMessage
   | OpenModelFileMessage
+  | OpenFieldsFileMessage
   | GoToTableMessage
   | ShowTableOnOtherDiagramsMessage
   | MoveTableMessage

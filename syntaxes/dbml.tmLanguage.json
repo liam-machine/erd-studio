@@ -326,7 +326,7 @@
         },
         {
           "name": "variable.other.property.erd-studio.dbml",
-          "match": "(?i)(?<![\\w.\"])(?:role|grain|schema|alias|rationale_\\w*|natural_key|scd_type|additive_type|foreign_key|linked_table|meta_\\w+|erd_\\w+)\\b(?=\\s*:)"
+          "match": "(?i)(?<![\\w.\"])(?:role|grain|schema|alias|rationale_\\w*|natural_key|scd_type|additive_type|foreign_key|linked_table|meta_\\w+|erd_\\w+|purpose|decisions|open_questions|scd_strategy|measures|source_of_truth|freshness|known_issues|retention|design|role_choice|grain_choice|business_rule)\\b(?=\\s*:)"
         },
         {
           "name": "variable.other.property.dbml",

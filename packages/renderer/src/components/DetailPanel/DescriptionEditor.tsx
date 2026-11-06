@@ -6,7 +6,7 @@
  * 2. Read — shows description text with pencil edit button on hover
  * 3. Edit — textarea with Save/Cancel buttons
  *
- * Follows the same pattern as GrainEditor.tsx.
+ * Follows the same add / read / edit pattern as the text fields in FieldsSection.tsx.
  */
 
 import { useCallback, useEffect, useState } from 'react';

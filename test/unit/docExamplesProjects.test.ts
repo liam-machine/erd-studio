@@ -10,6 +10,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { formatDbml } from '@erd-studio/core/dbml';
+import { FIELDS_FILE_NAME, parseFieldsText } from '@erd-studio/core';
+import Ajv from 'ajv';
+import { parse as parseYaml } from 'yaml';
 
 import { runDoctor } from '../../src/cli/doctor';
 import { buildCliContext } from '../../src/cli/context';
@@ -32,11 +35,13 @@ function filesUnder(dir: string, rel = ''): string[] {
   });
 }
 
-/** The README's tree: README.md and layers.json first, layers in layers.json order, then tables, relationships, diagrams. */
+/** The README's tree: README.md, layers.json and fields.yml first, layers in layers.json order, then tables, relationships, diagrams. */
 function expectedTree(semantic: string): string {
   const layers = (JSON.parse(fs.readFileSync(path.join(semantic, 'layers.json'), 'utf-8')) as { layers: Array<{ id: string }> }).layers.map((l) => l.id);
   const order = (dir: string, names: string[]): string[] => {
-    if (dir === semantic) return ['README.md', 'layers.json', ...layers.filter((id) => names.includes(id))];
+    if (dir === semantic) {
+      return [...['README.md', 'layers.json', FIELDS_FILE_NAME, 'modelling-approach.md'].filter((n) => names.includes(n)), ...layers.filter((id) => names.includes(id))];
+    }
     if (layers.some((id) => path.join(semantic, id) === dir)) return ['tables', 'relationships', 'diagrams'].filter((n) => names.includes(n));
     return [...names].sort();
   };
@@ -75,6 +80,28 @@ afterAll(() => {
 });
 
 describe('the example projects in docs/examples', () => {
+  it('include one project with a fields.yml, so the field list is part of the corpus', () => {
+    expect(examples.filter((name) => fs.existsSync(path.join(EXAMPLES, name, SEMANTIC_DIR, FIELDS_FILE_NAME)))).toEqual(['data-mesh']);
+  });
+
+  it('spell every field the way ERD Studio writes a new one: no rationale_ or meta_ prefix (meta_ only for a key a built-in shadows)', () => {
+    const old: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.dbml')) {
+          for (const m of fs.readFileSync(full, 'utf-8').matchAll(/\b((?:erd_)?(?:rationale|meta)_[a-z0-9_]+)\s*:/g)) {
+            // meta_retention: a metadata key named like the built-in Retention keeps its prefix, so it never reads as that field.
+            if (m[1] !== 'meta_retention') old.push(`${path.relative(EXAMPLES, full)}: ${m[1]}`);
+          }
+        }
+      }
+    };
+    walk(EXAMPLES);
+    expect(old).toEqual([]);
+  });
+
   it('are all listed in the examples index and the modelling patterns guide', () => {
     expect(examples.length).toBeGreaterThanOrEqual(7);
     const index = fs.readFileSync(path.join(EXAMPLES, 'README.md'), 'utf-8');
@@ -138,6 +165,18 @@ describe('the example projects in docs/examples', () => {
         for (const m of members) if (!placed.has(m)) unplaced.push(`${d}: ${m}`);
       }
       expect(unplaced).toEqual([]);
+    });
+
+    it('has a fields.yml, if any, that reads with no problem and validates against its schema', () => {
+      const file = path.join(semantic, FIELDS_FILE_NAME);
+      if (!fs.existsSync(file)) return;
+      const text = fs.readFileSync(file, 'utf-8');
+      expect(parseFieldsText(text).problems).toEqual([]);
+      const schema = JSON.parse(fs.readFileSync(path.join(REPO, 'schemas', 'fields.schema.json'), 'utf-8'));
+      const ajv = new Ajv({ allErrors: true });
+      ajv.addKeyword('enumDescriptions');
+      const validate = ajv.compile(schema);
+      expect(validate(parseYaml(text)), JSON.stringify(validate.errors)).toBe(true);
     });
 
     it('shows the files on disk in its README tree', () => {

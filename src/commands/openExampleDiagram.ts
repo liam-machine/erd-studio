@@ -47,7 +47,12 @@ export const EXAMPLE_LAYER = 'gold';
 /**
  * The coffee-shop star schema, in DBML with ERD Studio's custom properties
  * (`role`, `grain`, `rationale_*`, `natural_key`, `scd_type`,
- * `additive_type`; see `src/services/dbmlImport.ts`). Plain DBML apart from
+ * `additive_type`; see `src/services/dbmlImport.ts`). It is Import DBML's
+ * input, so its fields keep the rich export's `rationale_<field>` spelling
+ * (Import DBML reads that, and keeps another tool's bare settings in
+ * `meta.dbml`); the table files the import writes spell them bare
+ * (`decisions: '…'`). No retired field (`design`, `grain_choice`): the
+ * choices are Decisions. Plain DBML apart from
  * those, so it also opens in dbdiagram.io. Kept free of settings ERD Studio
  * has no field for (`not null`, defaults, indexes), so the import keeps
  * nothing in `meta.dbml`. Tested to parse and import whole in
@@ -69,7 +74,7 @@ Table dim_customers [role: 'conformed-dim', grain: 'One row per customer', ratio
   lifetime_spend decimal(38,2) [note: 'Total spent across all orders, including tax, in dollars.']
 }
 
-Table dim_products [role: 'conformed-dim', grain: 'One row per product on the menu', rationale_design: 'Supply details are folded in so the star stays one hop deep.'] {
+Table dim_products [role: 'conformed-dim', grain: 'One row per product on the menu', rationale_decisions: 'Supply details are folded in so the star stays one hop deep.'] {
   Note: 'Product dimension: what is on the menu.'
   product_id varchar [pk, natural_key: 'true', note: 'The product SKU, for example JAF-001.']
   product_name varchar [note: 'Menu name of the product.']
@@ -123,7 +128,7 @@ Table fct_orders [role: 'transaction-fact', grain: 'One row per order', rational
   customer_order_number bigint [additive_type: 'non-additive', note: '1 for the first order of a customer, 2 for the second, and so on.']
 }
 
-Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an order', rationale_grain_choice: 'The finest grain in the star, so product-level questions need no join back to the order.'] {
+Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an order', rationale_decisions: 'Kept at the finest grain in the star, so product-level questions need no join back to the order.'] {
   Note: 'Order item fact. order_id links each line back to its order.'
   order_item_id varchar [pk, natural_key: 'true', note: 'Natural key for the order line from the source system.']
   order_id varchar [ref: > fct_orders.order_id, note: 'The order this line belongs to.']

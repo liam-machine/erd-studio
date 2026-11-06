@@ -317,6 +317,16 @@ export interface OffDiagramRelationship {
 }
 
 /**
+ * Request to open the project's field list (`<semanticDir>/fields.yml`) in a
+ * text editor: the Detail panel's "Customise fields" link, editor only (never
+ * a viewer, never the read-only physical stage). Writes nothing — with no
+ * file the host opens an unsaved document holding the starting set.
+ */
+export interface OpenFieldsFileMessage {
+  type: 'openFieldsFile';
+}
+
+/**
  * What an editing host knows about the project beyond the diagram itself,
  * sent beside (never inside) the `DisplaySubjectArea`, logical stage only.
  * Keyed by the diagram's table names. A viewer never gets one: the canvas
@@ -352,5 +362,6 @@ export type CanvasEditMessage =
   | UpdateAnnotationMessage
   | RemoveAnnotationMessage
   | OpenModelFileMessage
+  | OpenFieldsFileMessage
   | AddExistingModelMessage
   | AddExistingModelsMessage;

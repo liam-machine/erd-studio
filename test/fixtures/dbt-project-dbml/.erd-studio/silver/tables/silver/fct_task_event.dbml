@@ -1,9 +1,9 @@
 Table silver.fct_task_event [
   role: 'transaction-fact',
   grain: 'One row per task event',
-  rationale_purpose: 'Central fact table tracking all task activity for reporting and analysis',
-  rationale_design: 'Transaction grain with surrogate foreign keys to all relevant dimensions',
-  rationale_measures: 'duration_hours (additive), amount (additive)'
+  purpose: 'Central fact table tracking all task activity for reporting and analysis',
+  design: 'Transaction grain with surrogate foreign keys to all relevant dimensions',
+  measures: 'duration_hours (additive), amount (additive)'
 ] {
   Note: 'Records every task event across all projects and tasks'
 

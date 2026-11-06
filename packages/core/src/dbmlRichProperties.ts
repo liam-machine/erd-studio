@@ -10,6 +10,8 @@
  */
 
 import type { AnnotationColor, Rationale } from './types/semantic.js';
+// fields.ts imports nothing from here, so this is no cycle.
+import { isRationaleFieldKey } from './fields.js';
 
 /** Table properties. */
 export const DBML_RICH_TABLE_PROPERTIES = Object.freeze({
@@ -153,15 +155,19 @@ export function rationaleProperty(key: keyof Rationale): string {
   return DBML_RICH_RATIONALE_PREFIX + key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-/** The rationale key a property names (`rationale_scd_strategy` → `scdStrategy`), or undefined. */
+/**
+ * The rationale key a property names (`rationale_scd_strategy` →
+ * `scdStrategy`, `erd_rationale_open_questions` → `openQuestions`): any
+ * rationale-home field of the catalogue (`RATIONALE_FIELD_KEYS`), else
+ * undefined (`rationale_unknown`). The rich export's spelling; storage reads
+ * more spellings (`dbml/settings.ts`).
+ */
 export function rationaleKeyOf(property: string): keyof Rationale | undefined {
   const bare = property.startsWith(DBML_RICH_PROPERTY_PREFIX) ? property.slice(DBML_RICH_PROPERTY_PREFIX.length) : property;
   if (!bare.startsWith(DBML_RICH_RATIONALE_PREFIX)) return undefined;
   const key = bare.slice(DBML_RICH_RATIONALE_PREFIX.length).replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-  return (RATIONALE_KEYS as readonly string[]).includes(key) ? (key as keyof Rationale) : undefined;
+  return isRationaleFieldKey(key) ? key : undefined;
 }
-
-const RATIONALE_KEYS: ReadonlyArray<keyof Rationale> = ['purpose', 'design', 'grainChoice', 'roleChoice', 'scdStrategy', 'measures'];
 
 /** A property name without the optional `erd_` prefix: what import matches on. */
 export function bareDbmlProperty(property: string): string {

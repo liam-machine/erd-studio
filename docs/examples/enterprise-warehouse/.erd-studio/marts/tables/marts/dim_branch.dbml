@@ -1,7 +1,7 @@
 Table marts.dim_branch [
   role: 'conformed-dim',
   grain: 'One row per branch',
-  meta_owner: 'bi-platform'
+  owner: 'bi-platform'
 ] {
   Note: 'Branches for every star.'
 

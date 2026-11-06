@@ -453,3 +453,47 @@ describe('validateNoRelationshipsFile — an edit keeps its relationship where i
     expect(validateNoRelationshipsFile(undefined)).toBeNull();
   });
 });
+
+describe('context fields: updateModelRationale and openFieldsFile payloads', async () => {
+  const { RATIONALE_FIELD_KEYS, TABLE_ROLE_VALUES } = await import('@erd-studio/core');
+  const { TABLE_ROLES, validateOpenFieldsFilePayload, validateRationalePayload } = await import('../../src/providers/payloadValidation');
+
+  it('accepts every catalogue rationale key, text or null (clear), and an empty patch', () => {
+    for (const key of RATIONALE_FIELD_KEYS) {
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: 'text' } }), key).toBeNull();
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: '' } }), key).toBeNull();
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: null } }), key).toBeNull();
+    }
+    expect(validateRationalePayload({ modelName: 'dim', rationale: {} })).toBeNull();
+  });
+
+  it.each([
+    [undefined, 'Missing payload.'],
+    [null, 'Missing payload.'],
+    [[], 'Missing payload.'],
+    [{ rationale: { purpose: 'x' } }, 'Table name is required.'],
+    [{ modelName: '../x', rationale: { purpose: 'x' } }, 'Table name cannot contain path separators.'],
+    [{ modelName: 'dim', rationale: 'after' }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim', rationale: ['purpose'] }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim' }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim', rationale: { notes: 'x' } }, '"notes" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: { open_questions: 'x' } }, '"open_questions" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: JSON.parse('{"__proto__": "x"}') }, '"__proto__" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: { openQuestions: 7 } }, 'Value of "open_questions" must be text.'],
+    [{ modelName: 'dim', rationale: { purpose: { a: 1 } } }, 'Value of "purpose" must be text.'],
+  ])('refuses %j', (payload, message) => {
+    expect(validateRationalePayload(payload)).toBe(message);
+  });
+
+  it('openFieldsFile takes no payload', () => {
+    expect(validateOpenFieldsFilePayload(undefined)).toBeNull();
+    expect(validateOpenFieldsFilePayload({})).toBeNull();
+    for (const bad of [null, [], 'x', { path: '/etc' }]) {
+      expect(validateOpenFieldsFilePayload(bad)).toBe('Customise fields takes no payload.');
+    }
+  });
+
+  it('the table roles are core\'s one list (the Table role field\'s choices)', () => {
+    expect(TABLE_ROLES).toEqual(TABLE_ROLE_VALUES);
+  });
+});

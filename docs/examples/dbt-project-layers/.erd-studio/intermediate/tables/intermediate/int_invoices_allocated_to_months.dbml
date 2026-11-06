@@ -1,7 +1,7 @@
 // int_<entity>s_<verb>s: what the model does to its input.
 Table intermediate.int_invoices_allocated_to_months [
   grain: 'One row per invoice per month it covers',
-  rationale_design: 'Spreads each invoice over the months of its period, so monthly revenue can be summed.'
+  decisions: 'Spreads each invoice over the months of its period, so monthly revenue can be summed.'
 ] {
   Note: 'Invoices spread over the months they pay for.'
 

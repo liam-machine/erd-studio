@@ -3,8 +3,8 @@ Table gold.gold_orders [
   role: 'gold-fact',
   grain: 'One row per order',
   alias: 'orders',
-  rationale_purpose: 'The orders dashboard, in a tool that cannot join tables.',
-  rationale_design: 'Pre-joined from fct_order_line and its dimensions: no foreign keys, so nothing to draw between it and the star.'
+  purpose: 'The orders dashboard, in a tool that cannot join tables.',
+  decisions: 'Pre-joined from fct_order_line and its dimensions: no foreign keys, so nothing to draw between it and the star.'
 ] {
   Note: 'Orders with their customer and totals, ready for a dashboard.'
 

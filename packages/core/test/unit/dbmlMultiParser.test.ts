@@ -12,13 +12,13 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
+import { FIELD_CASES, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
 import { RELATIONSHIPS_CASES } from '../dbmlWriterCases/relationshipsCases';
 import { DIAGRAM_CASES, NEW_DIAGRAM_CASES } from '../dbmlWriterCases/diagramCases';
 import { lawFiveParsers, projectDiagnostics, projectOf, type WriterCase } from '../dbmlWriterSupport';
 
 const GROUPS: ReadonlyArray<readonly [string, readonly WriterCase[]]> = [
-  ['table writer', [...TABLE_CASES, ...NEW_TABLE_CASES]],
+  ['table writer', [...TABLE_CASES, ...FIELD_CASES, ...NEW_TABLE_CASES]],
   ['relationships writer', RELATIONSHIPS_CASES],
   ['diagram writer', [...DIAGRAM_CASES, ...NEW_DIAGRAM_CASES]],
 ];

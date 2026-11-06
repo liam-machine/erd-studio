@@ -69,6 +69,7 @@ Parser facts verified for this spec, all under `@dbml/parse` 9.1.1, 10.3.1 and 1
 | D31 | **Placement**: a new Ref goes to the file (any layer) already holding the most Refs of its FK table, else `<FK layer>/relationships/<FK schema>.dbml` when that file already exists (added 2026-11-02), else `<FK layer>/relationships/<FK layer>.dbml`; Convert uses the last two rules only. An existing Ref is never moved; a link any file already holds is refused. | Hand-made splits survive; the index is built once per plan so placement never depends on edit order. |
 | D32 | **Exact imports**: a diagram imports exactly the relationships files holding a live Ref between two of its `use` members, or a pending line between two tables it draws (2026-10-30), kept up to date for every diagram in the same edit (the settle, §5.3). Core, the canvas, Convert and `doctor` draw and check through the same rule. | A missing import silently drops a Ref in other tools; an import of a missing file breaks the diagram; the same link in two imported files breaks every diagram importing both. |
 | D33 | **No read path for the 1.9 pre-release tree** (Liam, 2026-10-29): it is recognised (path only) and never read; `doctor`, the editor and Convert say to restore the YAML/JSON from git and convert again. The one exception to "never drop a read path" (`docs/dev/compatibility.md`). | It shipped only as pre-releases, and core 0.4.0, the only core that read it, was never published. |
+| D34 | **Context fields** (2026-11-06; developer guide `docs/dev/fields.md`). Every field, built-in or the team's own, on a table or a column, is **one quoted setting named after it**, `<key>: '<value>'`, no prefix: `purpose`, `decisions`, `open_questions`, `owner`, `pii`. An optional `.erd-studio/fields.yml` lists the fields a project records, in display order (a bare name is a built-in from core's catalogue; `{key, label, type, values, guidance, filled_by, show_for}` a team field); without it, the starting set. Values stay in their homes (`rationale` with six new optional keys, `meta` for team fields and `business_rule`, the typed properties); `DisplaySubjectArea` gains only an optional `fields` (the resolved list, only when the file exists). Old spellings are the same field and **still read**: `erd_K` > `K` > `erd_rationale_K` > `rationale_K` for a built-in text field (first non-empty), `erd_k` > `k` > `erd_meta_k` > `meta_k` > `rationale_k` > the `meta_json` entry for a team field (first present). New values are written bare; an edit changes the spelling it read; a clear removes every spelling of that home; nothing is renamed. Reserved names (DBML's settings, ERD Studio's own, `constructor` / `__proto__`, anything `erd_` / `rationale_` / `meta_`) are never a field; a `meta` key that is reserved or a same-scope built-in's keeps `meta_<k>` / `meta_json`. Design, Role choice and Grain choice are retired (read and shown, never offered). The rich export and Import DBML keep `rationale_` / `meta_` (storage is not export). | One rule instead of three prefixes for every assistant; the list says what a key is, so the name need not; a team's metadata list becomes something ERD Studio can read, label and check. |
 
 ---
 
@@ -186,9 +187,9 @@ Table gold.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
   alias: 'orders',
-  rationale_purpose: 'Revenue reporting by day, customer and region',
-  rationale_measures: 'amount is additive',
-  meta_owner: 'sales-data',
+  purpose: 'Revenue reporting by day, customer and region',
+  measures: 'amount is additive',
+  owner: 'sales-data',
   meta_json: '{"pii":false,"tags":["finance"]}'
 ] {
   Note: 'Order lines'
@@ -231,7 +232,7 @@ Table gold.bridge_empty {
 }
 ```
 
-**Field mapping.** `packages/core/src/dbmlRichProperties.ts` is the **one** property-name table. Storage adds no new table or column property names.
+**Field mapping.** `packages/core/src/dbmlRichProperties.ts` is the **one** property-name table, and `packages/core/src/fields.ts` (D34) the one table of field keys, reserved names and spellings; the reader, the writer, `doctor` and the renderer import them.
 
 | `SemanticTable` / `ColumnDef` | DBML (written) | Read also accepts |
 |---|---|---|
@@ -241,8 +242,8 @@ Table gold.bridge_empty {
 | `modelRole` | `role` | `erd_role` |
 | `grain` | `grain` | `erd_grain` |
 | `alias` | `alias` (custom property; DBML's own `as` alias is never written) | `erd_alias` |
-| `rationale.<key>` | `rationale_<snake_case>` (`rationaleProperty`) | `erd_rationale_…` |
-| `meta` | `meta_<key>: '<text>'` for a string value under `/^[a-z_][a-z0-9_]*$/` (not `json`); every other entry goes into **one** `meta_json: '<JSON of exactly those entries>'`, written where its first entry is; a text entry between two that need it goes into it too, so the map reads back in its key order | `erd_meta_…` |
+| `rationale.<key>` | `<snake_case>` (`purpose`, `open_questions`; D34), in `RATIONALE_FIELD_KEYS` order in a new file | `erd_<snake>`, `erd_rationale_<snake>`, `rationale_<snake>` (`rationaleProperty`; the 2.0 pre-releases' spelling); the first with text wins |
+| `meta` | `<key>: '<text>'` for a string value under a key `isBareMetaKey` accepts (`/^[a-z_][a-z0-9_]*$/`, not reserved, not a same-scope built-in with another home; D34); `meta_<key>: '<text>'` for a string value under a reserved or shadowed identifier key; every other entry goes into **one** `meta_json: '<JSON of exactly those entries>'`, written where its first entry is; a text entry between two that need it goes into it too, so the map reads back in its key order | `erd_<key>`, `erd_meta_<key>`, `meta_<key>`, `erd_rationale_<key>` / `rationale_<key>` (not a built-in rationale key), the `meta_json` entry; the first present wins |
 | column `name` | `<ident(name)>` | quoted names |
 | column `dataType` | `columnType(dataType)`: bare when a plain identifier, else `"…"`; empty → `""` | any DBML type. The read value is `rawDb` `type.type_name` (args included, quotes stripped). |
 | `isPrimaryKey` | single PK → column `pk`; two or more → `indexes { (a, b) [pk] }` | `primary key` flag |
@@ -251,7 +252,7 @@ Table gold.bridge_empty {
 | `isNaturalKey` | `natural_key: 'true'` | unquoted `true` (DBML 11, with the `unquotedValue` warning; the same for every flag) |
 | `scdType` | `scd_type: '0'\|'1'\|'2'` | unquoted `0`, `1`, `2` (DBML 11, with the warning) |
 | `additiveType` | `additive_type: '<value>'` | |
-| column `meta` | as table meta | |
+| column `meta` (`business_rule`, team fields) | as table meta | as table meta |
 | no columns | the placeholder column `_erd_no_columns unknown [erd_placeholder: 'true', note: …]` | dropped on read only when it carries `erd_placeholder` |
 
 **Writing rules** (shared with the export through the new `packages/core/src/dbmlText.ts`; §4.2):
@@ -262,13 +263,13 @@ Table gold.bridge_empty {
 - A flag is written as `'true'` only when it is set. Unsetting it removes the property.
 - Names are bare when they are a plain identifier and not a DBML keyword, else double-quoted with `\"` and `\\` escapes. These are the `ident()` and `KEYWORDS` of `exportDbmlRich.ts`, moved to `dbmlText.ts`.
 - Notes and descriptions go through `noteText()`: leading whitespace is dropped (§2.8).
-- A new file: one Table with a qualified name (`Table S.n`), its settings inline when there is one, else as a multi-line list; the body `Note` **first**, followed by one blank line; one column per line; an `indexes` block only for a composite PK; two-space indents and `\n` line endings; then the formatter (§2.9). A column's settings go in the canonical order: `pk`, DBML's own (`not null`, `unique`, `increment`, `default`; the writer emits none of these today), ERD Studio's properties (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), meta (`meta_<key>` / `meta_json`, in the map's key order), then `note` **last**. (Until 1.9.x the Note was last and the column `note` came second; such files read and edit as before.)
-- A setting an edit **adds** to an existing list goes straight after the last setting there that sorts at or before it in that order (before every setting when none does), so a list in canonical order stays in it and a `note` that was last stays last; every meta setting already there (`meta_json` included) sorts as one, so the meta map keeps its key order. A description an edit adds to a table with no `Note` goes first in the body, with a blank line after it; a composite-PK `indexes` block it adds goes last in the body (before a `Note` that comes after every column, the 1.9.x layout).
+- A new file: one Table with a qualified name (`Table S.n`), its settings inline when there is one, else as a multi-line list; the body `Note` **first**, followed by one blank line; one column per line; an `indexes` block only for a composite PK; two-space indents and `\n` line endings; then the formatter (§2.9). A column's settings go in the canonical order: `pk`, DBML's own (`not null`, `unique`, `increment`, `default`; the writer emits none of these today), ERD Studio's properties (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), the fields (bare keys, `meta_<key>` / `meta_json`, in the map's key order; D34), then `note` **last**. (Until 1.9.x the Note was last and the column `note` came second; such files read and edit as before.)
+- A setting an edit **adds** to an existing list goes straight after the last setting there that sorts at or before it in that order (before every setting when none does), so a list in canonical order stays in it and a `note` that was last stays last; in the field band after ERD Studio's typed settings come the rationale-home fields in `RATIONALE_FIELD_KEYS` order, then any setting ERD Studio does not read, then every `meta` spelling as one group (bare, `meta_<key>`, `rationale_<key>` and an existing `meta_json`), then a new `meta_json`, and `note` last, so the meta map keeps its key order. A description an edit adds to a table with no `Note` goes first in the body, with a blank line after it; a composite-PK `indexes` block it adds goes last in the body (before a `Note` that comes after every column, the 1.9.x layout).
 - When editing an existing file, take the indent from the first column line and the EOL from the file (`\r\n` if it holds any).
 
 **Schema rule (D30).** The schema is the qualifier and the folder. `renderNewTableDbml` requires a schema; `editTableDbml` keeps the schema unless it is asked to **re-qualify** (a move to another schema folder, `requalify: true`), which rewrites the qualifier of the Table and of its `Metadata` blocks, while the planner re-spells every Ref end and `use` specifier naming the table in the same edit. A schema change any other way is refused: "The schema of a DBML table is its folder: move the table to change it." Ref ends and `use { table … }` specifiers spell the table as declared (its **declared reference**, `gold.x`), so an unqualified hand-written table's ends stay unqualified.
 
-**Settings ERD Studio does not model** (`not null`, `unique`, `increment`, `default`, `headercolor`, `check`, `indexes` other than the PK, enums, comments, custom properties it does not know) are never read into memory and are preserved byte for byte by splicing. An `Enum` used as a column type reads as the type name.
+**Settings ERD Studio does not model** (`not null`, `unique`, `increment`, `default`, `headercolor`, `check` and DBML's other settings, `indexes` other than the PK, enums, comments, a multi-word custom property) are never read into memory and are preserved byte for byte by splicing. Since D34 any other custom property with an identifier name that is not reserved is a **field**: read into `meta` (a team field, shown under "Not in your list" when the list does not name it) and kept byte for byte until it is edited. An `Enum` used as a column type reads as the type name.
 
 ### 2.3 Relationships file
 
@@ -694,7 +695,7 @@ Every reader strips a leading BOM first (§2.1) and takes an optional last `pars
 6. Structure checks (§2.2) → `dbmlStructure` with a message naming the rule. The stem and the declared name compare case-insensitively.
 7. Map `rawDb.tables[0]` per §2.2. Drop the placeholder. Read custom values with `propertyText`, accepting the `erd_` prefix (`bareDbmlProperty`) and 11.0's typed values (each one an `unquotedValue` warning, §2.2). Mirror `yamlToTable`'s normalisation exactly:
    - `scdType` is an integer 0–2 or absent; `additiveType` is in the union; `modelRole` is any string, as YAML keeps it.
-   - `meta` is read through core's `readMeta` rules. `meta_json` is parsed as JSON, and invalid JSON is a warning, with the entry kept as the string under the key `json`. `meta_<key>` entries win over the same key inside `meta_json`. Entries read in the order the properties come, `meta_json`'s where it stands, so `meta` keeps its key order (stress round 1).
+   - `meta` is read through core's `readMeta` rules. `meta_json` is parsed as JSON, and invalid JSON is a warning, with the entry kept as the string under the key `json`. `meta_<key>` entries win over the same key inside `meta_json`. Entries read in the order the properties come, `meta_json`'s where it stands, so `meta` keeps its key order (stress round 1). Since D34 a bare identifier setting that `isBareMetaKey` accepts is read into `meta` first, and the built-in text fields read `K` before `rationale_K` (precedence in D34, one setter resolution shared with the writer; `fieldSpellings` lists every spelling found, for `doctor`).
 
 **`readRelationshipsDbml`** works from the AST, never `rawDb`:
 
@@ -768,11 +769,12 @@ All writers live in `packages/core/src/dbml/`. They are pure, deterministic and 
 **`editTableDbml(oldText, desired: SemanticTable, { rename?: boolean })`:**
 
 - **Table name** (rename): replace the name token's span with `ident(desired.name)`. A schema-qualified name keeps its qualifier; a DBML alias (`as X`) is kept.
-- **Table settings and properties** (`role`, `grain`, `alias`, `schema`, `rationale_*`, `meta_*`, `meta_json`):
+- **Table settings and properties** (`role`, `grain`, `alias`, `schema`, every field spelling — bare keys since D34, `rationale_*`, `meta_*`, `meta_json`):
   - **changed**: replace that attribute's value span. If the file spells the name `erd_<x>`, the name is kept.
   - **added**: placed by the canonical settings order (§2.2): after the last setting of the list that sorts at or before it, or before every setting when none does (`, <k>: <v>` / `<k>: <v>, ` in an inline list; a new line `<indent><k>: <v>` in a multi-line list, with a comma added after the previous attribute when it goes last), or, when there is no list, insert ` [<k>: <v>]` **immediately before the body's `{`**, which puts it after the name and after any DBML alias (`Table x as X [k: 'v'] {` parses in all three, verified, and checked again by the S3 multi-parser test).
   - **removed**: delete the attribute and its separating comma (plus its own line in a multi-line list). Remove the brackets when the list becomes empty.
   - **Meta:** only the properties whose value changed are touched. `meta_json` is recomputed from the desired non-`meta_<key>` entries and rewritten only when its parsed JSON differs.
+  - **Fields (D34):** a changed field is edited in the spelling the reader read (bare, `erd_`, `rationale_`, `meta_`, a same-file `Metadata` block or its `meta_json` entry); a cleared field loses every spelling of its home; an added one is written in the new-file spelling (bare, or `meta_<key>` / `meta_json` for a reserved, shadowed or non-text entry). No respelling or rename.
 - **Description**: replace the body `Note` value span (or the header `note` value). Add `<indent>Note: <v>` as the first body line, followed by a blank line (W1), or remove the Note's line.
 - **Columns** are matched desired ↔ current by name, case-insensitively (exact case first). Unmatched columns pair by position only when exactly one was removed and one added at the same index: that is a rename, the `syncColumns` rule.
   - **matched**: splice the name, type and settings as for table settings. `note` is the column description.

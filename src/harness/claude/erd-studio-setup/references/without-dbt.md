@@ -83,7 +83,7 @@ written. Then:
   them, and do not ask about another project folder.<!-- /no-dbt --> Read:
   - `erd.storage` — which format to write (the schema skill's "What to write": `dbml`, `yaml` or `mixed`);
   - `erd.domains` and `erd.logicalModels` — whether diagrams and tables exist already;
-  - `nextSteps` — handle `fix-model-yaml`, `fix-dbml-file`, `resolve-merge-conflicts`,
+  - `nextSteps` — handle `fix-model-yaml`, `fix-dbml-file`, `fix-fields-file`, `resolve-merge-conflicts`,
     `resolve-format-conflicts`, `finish-dbml-conversion`, `import-dbml-file` and
     `turn-round-relationships` as SKILL.md and `references/troubleshooting.md` say;
     `fix-subject-area-naming` by using one set of key names in each file it lists, as its `why`
@@ -157,17 +157,24 @@ one round at a time. This is the one place you invent columns rather than copyin
 - **Design fields** — `grain` on every table; the role (`role` in DBML; `tableRole`, or `modelRole`
   in v5 YAML) only from the values in `references/modelling-approaches.md` section 2; the SCD and
   additive types (`scd_type` / `additive_type`, `scdType` / `additiveType` in YAML) where the style
-  makes them clear; a one-line purpose (`rationale_purpose`, `rationale.purpose` in YAML), and
-  the design rationale (`rationale_design`) citing the approach. <!-- dbt-only -->Without dbt these record the intended design, so the
+  makes them clear; a one-line purpose (`purpose`, `rationale.purpose` in YAML), `decisions`
+  (`rationale.decisions`) citing the approach, and any other field `.erd-studio/fields.yml`
+  lists, as its guidance says. <!-- dbt-only -->Without dbt these record the intended design, so the
   dbt route's "describe what dbt does today" rule and its Target-design backlog do not apply.<!-- /dbt-only --><!-- no-dbt -->They record the intended design.<!-- /no-dbt -->
 - **Descriptions**: one plain line per table and column. Leave out audit columns
   (`created_at`, `loaded_at`) unless the style asks for them.
-<!-- dbt-only -->- **Metadata** (`meta`): only keys the team's metadata list names (Source `the team`) or the user
-  gives, with values they gave — `references/metadata.md`; never invent one.<!-- /dbt-only --><!-- no-dbt -->- **Metadata** (`meta`): only keys the team's metadata list names or the user gives, with values
-  they gave; never invent one. The list is the `## Metadata` section of
-  `.erd-studio/modelling-approach.md`, a table of **Key**, **On** (models, columns or both),
-  **Values** and **Source** (`the team`). When the user wants a key recorded on every table, offer
-  once to add it there.<!-- /no-dbt -->
+- **The team's own fields** (owner, source system…): only fields `.erd-studio/fields.yml` lists
+  or the user asks for, with values they gave; never invent one, and fill a `filled_by: people`
+  field only with a value the user gives. When the user wants a field recorded on every table,
+  offer once to add it to fields.yml, showing the entry first (`key`, `label`, a `type` — `text`,
+  `value`, `choice` with its `values`, or `yes-no` — one sentence of `guidance`, and
+  `filled_by: people` when only people fill it in; the format is the schema skill's `DBML.md` →
+  "fields.yml"). With no file yet, list the starting set's names first (`grain`, `purpose`,
+  `decisions`, `open_questions`, `role`, `scd_strategy`, `measures`; columns `natural_key`,
+  `scd_type`, `additive_type`), so nothing else changes. An old `## Metadata` table in
+  `.erd-studio/modelling-approach.md` names the team's fields until it moves: offer once to move
+  it into fields.yml (show the result; remove the old section on a yes).<!-- dbt-only --> More:
+  `references/metadata.md` sections 4 and 7.<!-- /dbt-only -->
 - Anything you are unsure of (a type, a role, a cardinality) goes on a "to confirm" list for
   step 6.
 
@@ -182,7 +189,7 @@ never rebuild them.
 2. Read the diagram and each of its table files.
 3. Draft, per table, only what is missing: a primary key, the foreign-key flag on columns that point at
    another table's key, the relationships those columns imply (between tables in this diagram),
-   the grain, the role (section 2's values), natural keys, descriptions and the rationale's purpose.
+   the grain, the role (section 2's values), natural keys, descriptions and the purpose.
    With an agreed approach, follow it. Never rename a table or column, change a type, or remove
    anything without asking.
 4. Show the drafts as one short list per table, ask "Add these?" once, and write them on a yes —
@@ -216,7 +223,7 @@ never rebuild them.
 ## 5. Check the files
 
 Say "Checking the files ERD Studio will read," then run doctor (as in step 1). Fix each
-`fix-model-yaml` and `fix-dbml-file` it lists (the file and line, usually a value to quote) — except a merge conflict — and
+`fix-model-yaml`, `fix-dbml-file` and `fix-fields-file` it lists (the file and line, usually a value to quote) — except a merge conflict — and
 each `fix-subject-area-naming`, and offer `turn-round-relationships` fixes. Then check the
 diagram loads end to end: say "Checking the whole diagram loads," and run
 `~/.erd-studio-cli/bin/erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml --semantic-dir .erd-studio`

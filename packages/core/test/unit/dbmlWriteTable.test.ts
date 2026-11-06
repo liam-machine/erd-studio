@@ -10,13 +10,17 @@ import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { applyTextEdits, refuseOverlaps } from '../../src/dbml/splice';
 import * as DbmlParse from '@dbml/parse';
-import { METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
+import { FIELD_CASES, METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
 import { clone, projectDiagnostics, readTable } from '../dbmlWriterSupport';
 import { parseTableDbml } from '../../src/dbml/readTable';
 import { STORAGE_PARSERS } from '../dbmlParsers';
 
 describe('editTableDbml', () => {
   for (const c of TABLE_CASES) it(c.name, () => c.check(c.run()));
+});
+
+describe('editTableDbml: context fields in every spelling', () => {
+  for (const c of FIELD_CASES) it(c.name, () => c.check(c.run()));
 });
 
 const BARE_TABLE = 'Table fct_order {\n  id int [pk]\n}\n';
@@ -95,6 +99,42 @@ describe('editTableDbml refusals', () => {
     expect(() => editTableDbml(METADATA_TABLE(), { ...table, grain: 'ok' }, {
       foreignMetadata: [{ file: 'gold/sales.dbml', line: 12, property: 'role' }],
     })).not.toThrow();
+  });
+});
+
+describe('editTableDbml: a field another file\'s Metadata block sets is refused in every spelling (D25, A9)', () => {
+  const TEXT = "Table fct_order [rationale_purpose: 'p', owner: 'o'] {\n  id int [meta_unit: 'u']\n}\n";
+  const table = (): ReturnType<typeof readTable>['table'] => clone(readTable(TEXT, 'fct_order').table);
+  const refused = (fn: () => unknown): string => {
+    try {
+      fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(DbmlEditRefused);
+      return (err as Error).message;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it.each(['purpose', 'erd_purpose', 'rationale_purpose', 'erd_rationale_purpose'])('a rationale field set as %s elsewhere', (property) => {
+    const desired = { ...table(), rationale: { purpose: 'changed' } };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property }] })))
+      .toBe('purpose is set by a Metadata block in gold/x.dbml:3; edit it there.');
+  });
+
+  it.each(['owner', 'meta_owner', 'erd_owner', 'rationale_owner'])('a meta key set as %s elsewhere', (property) => {
+    const desired = { ...table(), meta: { owner: 'changed' } };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property }] })))
+      .toBe('meta owner is set by a Metadata block in gold/x.dbml:3; edit it there.');
+  });
+
+  it('a column\'s meta key, and only that column\'s', () => {
+    const desired = table();
+    desired.columns![0].meta = { unit: 'AUD' };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, column: 'id', property: 'unit' }] })))
+      .toBe('meta unit is set by a Metadata block in gold/x.dbml:3; edit it there.');
+    // The table's own meta, or a block of another home (meta_purpose is not Purpose), edits as usual.
+    expect(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property: 'unit' }] })).not.toThrow();
+    expect(() => editTableDbml(TEXT, { ...table(), rationale: { purpose: 'x' } }, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property: 'meta_purpose' }] })).not.toThrow();
   });
 });
 

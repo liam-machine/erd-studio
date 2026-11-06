@@ -1,8 +1,8 @@
 Table marts.fct_account_balance_daily [
   role: 'periodic-snapshot',
   grain: 'One row per account per day',
-  rationale_measures: 'closing_balance adds up across accounts but not across days: a month\'s balance is its last day\'s.',
-  meta_owner: 'finance-analytics'
+  measures: 'closing_balance adds up across accounts but not across days: a month\'s balance is its last day\'s.',
+  owner: 'finance-analytics'
 ] {
   Note: 'Each account\'s balance at the end of every day, for finance.'
 

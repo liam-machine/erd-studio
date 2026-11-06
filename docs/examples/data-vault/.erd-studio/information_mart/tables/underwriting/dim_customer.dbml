@@ -1,7 +1,7 @@
 Table underwriting.dim_customer [
   role: 'conformed-dim',
   grain: 'One row per customer',
-  rationale_design: 'A view over pit_customer and its satellites at the latest snapshot. Built from the vault, so it can be rebuilt at any time.'
+  decisions: 'A view over pit_customer and its satellites at the latest snapshot. Built from the vault, not joined to it, so it can be rebuilt at any time.'
 ] {
   Note: 'Customers, as underwriting sees them.'
 

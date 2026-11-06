@@ -35,7 +35,7 @@ import type { Node as YamlNode, Pair } from 'yaml';
 
 import {
   DBML_DEFAULT_SCHEMA,
-  RATIONALE_KEYS,
+  RATIONALE_FIELD_KEYS,
   SEMANTIC_README_NAME,
   SubjectAreaFileError,
   TABLES_DIR,
@@ -353,7 +353,7 @@ function firstDifference(a: unknown, b: unknown, at = ''): string | null {
 const TABLE_KEYS = new Set(['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'tableRole', 'rationale', 'meta', 'columns', 'relationships']);
 const COLUMN_KEYS = new Set(['name', 'dataType', 'data_type', 'description', 'isPrimaryKey', 'isForeignKey', 'isNaturalKey', 'scdType', 'additiveType', 'meta']);
 const RELATIONSHIP_KEYS = new Set(['fromModel', 'fromTable', 'fromColumn', 'toModel', 'toTable', 'toColumn', 'cardinality', 'role', 'compositeKey']);
-const RATIONALE_KEY_SET = new Set<string>(RATIONALE_KEYS);
+const RATIONALE_KEY_SET = new Set<string>(RATIONALE_FIELD_KEYS);
 
 interface KeptLines {
   /** The comment block (each line already `// `-prefixed, the header first), or [] when nothing is kept. */

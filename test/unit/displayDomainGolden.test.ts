@@ -87,6 +87,8 @@ const SUBJECT_AREA_CASES: Record<string, string> = {
   'domain-one-to-many': 'gold/sales.json',
   // #164: a key written twice, read with the last copy winning and a loadWarning.
   'duplicate-key': 'silver/orders.json',
+  // Context fields: the six rationale keys, an unknown one, table and column meta (text, boolean, list), meta.purpose beside rationale.purpose.
+  'rationale-and-meta': 'silver/ledger.json',
 };
 
 /** Domain files under packages/core/test/fixtures/errors that must fail to load. */

@@ -246,6 +246,32 @@ describe('table edits (applyTableEdit): the table file is spliced, the diagram k
     check(table('dim_region'));
   });
 
+  it('updateModelRationale with a new built-in field writes it bare, editing the old spelling in place (context fields)', async () => {
+    const r = await run({ type: 'updateModelRationale', payload: { modelName: 'fct_order', rationale: { decisions: 'Lines, not orders', purpose: 'Revenue by day' } } });
+    expectWrote(r, ['gold/diagrams/sales.dbml', 'gold/tables/gold/fct_order.dbml']);
+    const text = r.after['gold/tables/gold/fct_order.dbml'];
+    expect(text).toContain("decisions: 'Lines, not orders'");
+    // The value already there keeps the spelling it was read from.
+    expect(text).toContain("rationale_purpose: 'Revenue by day'");
+    expect(text).not.toMatch(/^\s+purpose:/m);
+    expect(table('fct_order').rationale).toMatchObject({ purpose: 'Revenue by day', decisions: 'Lines, not orders', measures: 'amount is additive' });
+  });
+
+  it('updateMeta yes-no (A12): a meta_json boolean stays a boolean; a DBML text answer stays text', async () => {
+    const r = await run({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { pii: 'true' } } });
+    expectWrote(r, ['gold/diagrams/sales.dbml', 'gold/tables/gold/fct_order.dbml']);
+    expect(r.after['gold/tables/gold/fct_order.dbml']).toContain('"pii":true');
+    expect(table('fct_order').meta).toMatchObject({ pii: true, owner: 'sales-data' });
+
+    // A yes-no field of fields.yml on a DBML table is written as text (its bare spelling holds text only).
+    const fields = 'version: 1\ntables:\n  - key: reviewed\n    type: yes-no\n';
+    const r2 = await run({ type: 'updateMeta', payload: { modelName: 'dim_region', set: { reviewed: 'true' } } }, 'gold/diagrams/sales.dbml',
+      () => fs.writeFileSync(at('fields.yml'), fields));
+    expect(r2.errors).toEqual([]);
+    expect(r2.after['gold/tables/gold/dim_region.dbml']).toContain("reviewed: 'true'");
+    expect(table('dim_region').meta).toEqual({ reviewed: 'true' });
+  });
+
   it('a no-op edit leaves every byte unchanged', async () => {
     const r = await run({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'Order lines' } });
     expect(r.errors).toEqual([]);

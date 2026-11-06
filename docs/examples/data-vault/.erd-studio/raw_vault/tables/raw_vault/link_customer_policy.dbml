@@ -1,4 +1,4 @@
-Table raw_vault.link_customer_policy [meta_vault_type: 'link'] {
+Table raw_vault.link_customer_policy [vault_type: 'link'] {
   Note: 'Which customers hold which policies.'
 
   customer_policy_hk BINARY    [pk, note: 'Hash of customer_bk and policy_bk']

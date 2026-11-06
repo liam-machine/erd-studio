@@ -12,6 +12,7 @@ import {
   parseTableTextWithUsage,
 } from '../../src/logicalModel';
 import * as core from '../../src/index';
+import { RATIONALE_FIELD_KEYS } from '../../src/fields';
 
 /** A classic exponential alias expansion: 10 levels of 10x, about 10^10 nodes. */
 function billionLaughs(): string {
@@ -456,5 +457,68 @@ describe("dbt's data_type spelling of a column type (#144)", () => {
     expect(typeOf('    description: no type\n')).toBe('unknown');
     expect(typeOf('    data_type: ~\n')).toBe('unknown');
     expect(typeOf('    data_type:\n')).toBe('unknown');
+  });
+});
+
+describe('context fields: the rationale map', () => {
+  it('reads every catalogue rationale key, camelCase, in RATIONALE_FIELD_KEYS order', () => {
+    const model = parseTableText(
+      [
+        'name: dim_account',
+        'rationale:',
+        '  retention: Seven years, for audit',
+        '  knownIssues: Some codes are reused after closure',
+        '  freshness: Daily by 06:00',
+        '  sourceOfTruth: CRM',
+        '  measures: none',
+        '  scdStrategy: credit_limit is type 2',
+        '  roleChoice: Conformed',
+        '  grainChoice: Versioned',
+        '  design: Conformed dimension',
+        '  openQuestions: Do closed accounts stay?',
+        '  decisions: Kept the CRM code as the natural key',
+        '  purpose: Shared account reference',
+        '',
+      ].join('\n'),
+      'x',
+    );
+    expect(model?.rationale).toEqual({
+      purpose: 'Shared account reference',
+      decisions: 'Kept the CRM code as the natural key',
+      openQuestions: 'Do closed accounts stay?',
+      design: 'Conformed dimension',
+      grainChoice: 'Versioned',
+      roleChoice: 'Conformed',
+      scdStrategy: 'credit_limit is type 2',
+      measures: 'none',
+      sourceOfTruth: 'CRM',
+      freshness: 'Daily by 06:00',
+      knownIssues: 'Some codes are reused after closure',
+      retention: 'Seven years, for audit',
+    });
+    expect(Object.keys(model!.rationale!)).toEqual([...RATIONALE_FIELD_KEYS]);
+  });
+
+  it('reads camelCase only: a snake_case key inside rationale: is not the field (A11)', () => {
+    const model = parseTableText('name: t\nrationale:\n  open_questions: snake\n  source_of_truth: snake\n  purpose: p\n', 'x');
+    expect(model?.rationale).toEqual({ purpose: 'p' });
+  });
+
+  it('treats a new key as it treats the old ones: text kept as written, numbers as their text, empty and null as none', () => {
+    const model = parseTableText(
+      "name: t\nrationale:\n  decisions: ''\n  openQuestions: ~\n  freshness: 24\n  retention: true\n  knownIssues: '  spaced  '\n",
+      'x',
+    );
+    expect(model?.rationale).toEqual({ freshness: '24', retention: 'true', knownIssues: '  spaced  ' });
+  });
+
+  it('keeps an empty rationale map when no catalogue key has text, as before', () => {
+    expect(parseTableText('name: t\nrationale:\n  notes: unread\n', 'x')?.rationale).toEqual({});
+  });
+
+  it('still exports the six legacy keys as RATIONALE_KEYS, and the catalogue keys from the package entry', () => {
+    expect(core.RATIONALE_KEYS).toBe(RATIONALE_KEYS);
+    expect(core.RATIONALE_FIELD_KEYS).toBe(RATIONALE_FIELD_KEYS);
+    expect(RATIONALE_FIELD_KEYS.filter((k) => (RATIONALE_KEYS as readonly string[]).includes(k))).toEqual([...RATIONALE_KEYS]);
   });
 });

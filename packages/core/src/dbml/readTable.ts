@@ -6,23 +6,40 @@
  * (offsets kept) and reported: the table still loads, but writes are refused
  * until the line moves to a relationships file. The table's schema is its
  * qualifier (`Table gold.x`), else its schema folder.
+ *
+ * Context fields: a built-in text field reads into `rationale` and every
+ * other field into `meta`, from any of its spellings (bare `purpose: '…'`,
+ * the older `rationale_purpose`, `meta_owner`, a `meta_json` entry, an
+ * `erd_` form), by the precedence `settings.ts` decides for the writer too.
+ * A reserved setting (DBML's own, ERD Studio's typed ones, `json`, …) or a
+ * multi-word one is never a field; its bytes stay. `fieldSpellings` lists
+ * every spelling found, for `doctor`.
  */
 
-import type { ColumnDef, Rationale, SemanticTable } from '../types/semantic.js';
-import type { DbmlProblem, DbmlTableReading } from '../types/dbmlStorage.js';
+import type { ColumnDef, SemanticTable } from '../types/semantic.js';
+import type { DbmlFieldSpelling, DbmlProblem, DbmlTableReading } from '../types/dbmlStorage.js';
 import {
   DBML_DEFAULT_SCHEMA,
   DBML_RICH_COLUMN_PROPERTIES,
-  DBML_RICH_META_JSON_PROPERTY,
-  DBML_RICH_META_PREFIX,
   DBML_RICH_PLACEHOLDER_COLUMN,
   DBML_RICH_PLACEHOLDER_PROPERTY,
   DBML_RICH_TABLE_PROPERTIES,
   bareDbmlProperty,
-  rationaleKeyOf,
 } from '../dbmlRichProperties.js';
 import { dbmlName, dbmlString } from '../dbmlText.js';
-import { readMeta } from '../meta.js';
+import type { FieldScope } from '../fields.js';
+import {
+  columnNodesOf,
+  isOldSpelling,
+  metaPlacement,
+  metadataBlocksOf,
+  resolveFieldSettings,
+  settersOf,
+  settingNames,
+  type FieldSettings,
+  type MetadataBlock,
+  type MetaSpelling,
+} from './settings.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_QUOTE_HINT, DBML_TABLE_QUOTE_HINT_CODES, classifyDbmlTableError, type DbmlTableStructureRule } from '../domain.js';
 import type { DbmlMetadataTarget, TableLoadError } from '../types/semantic.js';
@@ -91,16 +108,24 @@ const isTrue = (value: string | undefined): boolean => value !== undefined && va
 
 const ADDITIVE_TYPES: ReadonlySet<string> = new Set(['additive', 'semi-additive', 'non-additive']);
 
-/** A property map read as text, `erd_<x>` winning over `<x>`, each 11.0 typed value reported once. */
+/** A setting map as text: every name as written (`raw`), and `erd_<x>` folded over `<x>` (`typed`); each 11.0 typed value reported once. */
+interface Properties {
+  /** Every readable setting by its name as written (lower-case), in DBML's order. */
+  raw: Map<string, string>;
+  /** ERD Studio's typed settings: the name without `erd_`, an `erd_` spelling winning. */
+  typed: Map<string, string>;
+}
+
 function readProperties(
   metadata: unknown,
   text: string,
   where: string,
   problems: DbmlProblem[],
-): Map<string, string> {
-  const out = new Map<string, string>();
+): Properties {
+  const raw = new Map<string, string>();
+  const typed = new Map<string, string>();
   const prefixed = new Set<string>();
-  if (!metadata || typeof metadata !== 'object') return out;
+  if (!metadata || typeof metadata !== 'object') return { raw, typed };
   for (const [key, value] of Object.entries(metadata as Record<string, unknown>)) {
     const read = propertyText(value, text);
     if (!read) continue;
@@ -114,54 +139,41 @@ function readProperties(
         message: `${where}: \`${key}: ${read.text}\` reads only in DBML 11+; quote it, as in \`${key}: '${read.text}'\`, so DBML 9 and 10 tools can read the file`,
       });
     }
+    raw.set(key, read.text);
     const bare = bareDbmlProperty(key);
     const isPrefixed = bare !== key;
     if (!isPrefixed && prefixed.has(bare)) continue;
     if (isPrefixed) prefixed.add(bare);
-    out.set(bare, read.text);
+    typed.set(bare, read.text);
   }
-  return out;
+  return { raw, typed };
 }
 
 /**
- * `meta` from `meta_json` and `meta_<key>` properties, in the order the
- * properties come (`meta_json`'s entries where it is). A `meta_<key>` wins
- * over the same key in the JSON, and stands where it is.
+ * The context fields of the table or a column (`rationale` and `meta`),
+ * read from its settings by the spelling rules (`settings.ts`). The names
+ * come from the file's own setters (`names`, inline then block entries) and
+ * the values from what DBML read (a block's entry over the inline one).
  */
-function readMetaProperties(props: ReadonlyMap<string, string>, where: string, problems: DbmlProblem[]): ReturnType<typeof readMeta> {
-  const raw: Record<string, unknown> = {};
-  const set = (key: string, value: unknown): void => {
-    Object.defineProperty(raw, key, { value, enumerable: true, writable: true, configurable: true });
-  };
-  const own = new Set<string>();
-  for (const key of props.keys()) {
-    if (key !== DBML_RICH_META_JSON_PROPERTY && key.startsWith(DBML_RICH_META_PREFIX) && key.length > DBML_RICH_META_PREFIX.length) {
-      own.add(key.slice(DBML_RICH_META_PREFIX.length));
-    }
+function readFields(
+  props: Properties,
+  names: readonly string[],
+  scope: FieldScope,
+  owner: string,
+  where: string,
+  problems: DbmlProblem[],
+  spellings: DbmlFieldSpelling[],
+): FieldSettings {
+  const ordered = [...names.filter((n) => props.raw.has(n)), ...[...props.raw.keys()].filter((n) => !names.includes(n))];
+  const fields = resolveFieldSettings(ordered.map((name) => ({ name, text: props.raw.get(name)! })), scope);
+  if (fields.json && !fields.json.valid) {
+    problems.push({ code: 'metaJson', severity: 'warning', message: `${where}: meta_json is not a JSON object; it is kept as the text of meta "json"` });
   }
-  for (const [key, value] of props) {
-    if (key === DBML_RICH_META_JSON_PROPERTY) {
-      let parsed: unknown;
-      let ok = false;
-      try {
-        parsed = JSON.parse(value);
-        ok = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
-      } catch {
-        ok = false;
-      }
-      if (ok) {
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) if (!own.has(k)) set(k, v);
-      } else {
-        problems.push({ code: 'metaJson', severity: 'warning', message: `${where}: meta_json is not a JSON object; it is kept as the text of meta "json"` });
-        set('json', value);
-      }
-      continue;
-    }
-    if (!key.startsWith(DBML_RICH_META_PREFIX)) continue;
-    const metaKey = key.slice(DBML_RICH_META_PREFIX.length);
-    if (metaKey !== '') set(metaKey, value);
+  const placement = new Map<string, MetaSpelling>(metaPlacement(fields.meta, scope).map((p) => [p.key, p.spelling]));
+  for (const { value, ...entry } of fields.spellings) {
+    spellings.push({ owner, ...entry, old: isOldSpelling({ ...entry, value }, placement, scope) });
   }
-  return readMeta(raw);
+  return fields;
 }
 
 function noteText(value: unknown): string {
@@ -198,24 +210,46 @@ export function parseTableDbml(
   options: ParseTableDbmlOptions = {},
   parser: DbmlParserModule = PINNED_PARSER,
 ): DbmlTableReading {
+  return readTableFile(rawText, fileStem, options, parser).reading;
+}
+
+/**
+ * The context-field settings of a table file as the reader read them: the
+ * table's, and each column's in the order of `reading.table.columns`. For
+ * the table writer only (internal), so an edit changes the very setting a
+ * value was read from.
+ */
+export interface TableFieldSettings {
+  table: FieldSettings;
+  columns: FieldSettings[];
+}
+
+/** {@link parseTableDbml}, with the settings each field was read from (internal: the table writer's). */
+export function readTableFile(
+  rawText: string,
+  fileStem: string,
+  options: ParseTableDbmlOptions = {},
+  parser: DbmlParserModule = PINNED_PARSER,
+): { reading: DbmlTableReading; fields?: TableFieldSettings } {
+  const reading = (r: DbmlTableReading): { reading: DbmlTableReading } => ({ reading: r });
   const text = stripBom(rawText);
   if (text.trim() === '') {
-    return { ok: false, error: { kind: 'read', message: `${fileStem}.dbml is empty` } };
+    return reading({ ok: false, error: { kind: 'read', message: `${fileStem}.dbml is empty` } });
   }
   let first;
   try {
     first = compileOne(text, parser);
   } catch (err) {
-    return failure(`The DBML parser stopped: ${err instanceof Error ? err.message : String(err)}`, { dbmlCode: 1000, line: 1, column: 1 });
+    return reading(failure(`The DBML parser stopped: ${err instanceof Error ? err.message : String(err)}`, { dbmlCode: 1000, line: 1, column: 1 }));
   }
   const syntax = first.errors.filter((d) => d.errorClass === 'syntax');
   if (first.errors.length > 0) {
     const conflict = findConflictMarkers(text);
     if (conflict !== null) {
-      return failure(`${fileStem}.dbml has unresolved git merge conflicts (first at line ${conflict})`, { mergeConflict: true, line: conflict });
+      return reading(failure(`${fileStem}.dbml has unresolved git merge conflicts (first at line ${conflict})`, { mergeConflict: true, line: conflict }));
     }
   }
-  if (syntax.length > 0) return diagnosticFailure(syntax[0]);
+  if (syntax.length > 0) return reading(diagnosticFailure(syntax[0]));
 
   // Structure (§2.2): exactly one Table, named as the file, and nothing a table file may not hold.
   const problems: DbmlProblem[] = [];
@@ -245,31 +279,31 @@ export function parseTableDbml(
     if (type === 'table') tables.push(node);
     if (type === undefined || !ALLOWED_ELEMENTS.has(type)) {
       const line = lineAt(text, node.start);
-      return failure(
+      return reading(failure(
         `Line ${line}: a table file holds one Table and no ${elementType(node) ?? 'other'} block; move it out of ${fileStem}.dbml`,
         { rule: 'unsupportedElement', line, column: node.start - lineStartOf(text, node.start) + 1 },
-      );
+      ));
     }
   }
   if (tables.length !== 1) {
     const at = tables[1] ?? undefined;
     const line = at ? lineAt(text, at.start) : undefined;
-    return failure(
+    return reading(failure(
       tables.length === 0 ? `${fileStem}.dbml declares no Table` : `${fileStem}.dbml declares ${tables.length} Tables; a table file holds exactly one`,
       { rule: 'notOneTable', ...(line !== undefined ? { line } : {}) },
-    );
+    ));
   }
   const tableNode = tables[0];
   const nameParts = plainNames(tableNode.name);
   if (!nameParts || nameParts.length === 0 || nameParts.length > 2) {
-    return failure(`${fileStem}.dbml: the Table's name is not a table name`, { rule: 'nameMismatch', line: lineAt(text, tableNode.start) });
+    return reading(failure(`${fileStem}.dbml: the Table's name is not a table name`, { rule: 'nameMismatch', line: lineAt(text, tableNode.start) }));
   }
   const declaredName = nameParts[nameParts.length - 1];
   if (declaredName.toLowerCase() !== fileStem.toLowerCase()) {
-    return failure(
+    return reading(failure(
       `${fileStem}.dbml declares Table ${declaredName}; name the Table as its file (or rename the file)`,
       { rule: 'nameMismatch', line: lineAt(text, tableNode.start) },
-    );
+    ));
   }
   const qualifier = nameParts.length === 2 ? nameParts[0] : undefined;
   const declaredReference = nameParts.map(dbmlName).join('.');
@@ -324,7 +358,7 @@ export function parseTableDbml(
     try {
       compiled = compileOne(blankSpans(text, blanks), parser);
     } catch (err) {
-      return failure(`The DBML parser stopped: ${err instanceof Error ? err.message : String(err)}`, { dbmlCode: 1000, line: 1, column: 1 });
+      return reading(failure(`The DBML parser stopped: ${err instanceof Error ? err.message : String(err)}`, { dbmlCode: 1000, line: 1, column: 1 }));
     }
   }
   if (compiled.errors.length > 0) {
@@ -340,30 +374,41 @@ export function parseTableDbml(
         const element: 'table' | 'column' = kind === 'column' || (kind === '' && parts.length > 1) ? 'column' : 'table';
         const name = parts.length > 0 ? parts[parts.length - 1] : '';
         const line = lineAt(text, block.start);
-        return failure(
+        return reading(failure(
           `A Metadata block on line ${line} targets ${element} '${name}', which this table does not have; rename or remove the block`,
           { rule: 'metadataTarget', line, column: block.start - lineStartOf(text, block.start) + 1, target: { element, name } },
-        );
+        ));
       }
     }
-    return diagnosticFailure(firstError);
+    return reading(diagnosticFailure(firstError));
   }
 
   const db = compiled.rawDb();
   const rawTable = Array.isArray(db?.tables) ? (db!.tables[0] as AstNode | undefined) : undefined;
   if (!rawTable) {
-    return failure(`${fileStem}.dbml declares no Table`, { rule: 'notOneTable' });
+    return reading(failure(`${fileStem}.dbml declares no Table`, { rule: 'notOneTable' }));
   }
-  const table = mapTable(rawTable, declaredName, qualifier ?? schemaFolder, text, problems, schemaPropertyLine(tableNode, text));
+  // The setters come from the file as compiled (its blanked lines gone), named as DBML names them.
+  const compiledTable = topLevel(compiled.ast).find((n) => elementType(n)?.toLowerCase() === 'table') ?? tableNode;
+  const spellings: DbmlFieldSpelling[] = [];
+  const { table, fields } = mapTable(rawTable, declaredName, qualifier ?? schemaFolder, text, problems, schemaPropertyLine(tableNode, text), {
+    tableNode: compiledTable,
+    blocks: metadataBlocksOf(compiled.ast, declaredName),
+    spellings,
+  });
   return {
-    ok: true,
-    table,
-    declaredName,
-    declaredReference,
-    ...(dbmlAlias !== undefined ? { alias: dbmlAlias } : {}),
-    schemaQualified: qualifier !== undefined,
-    writable,
-    problems,
+    reading: {
+      ok: true,
+      table,
+      declaredName,
+      declaredReference,
+      ...(dbmlAlias !== undefined ? { alias: dbmlAlias } : {}),
+      schemaQualified: qualifier !== undefined,
+      writable,
+      problems,
+      ...(spellings.length > 0 ? { fieldSpellings: spellings } : {}),
+    },
+    fields,
   };
 }
 
@@ -375,40 +420,54 @@ function schemaPropertyLine(tableNode: AstNode, text: string): number {
   return lineAt(text, (setting ?? tableNode).start);
 }
 
+/** Where the table's settings are set in the file: what the context fields are read by. */
+interface SettingSources {
+  tableNode: AstNode;
+  blocks: readonly MetadataBlock[];
+  /** Filled with every field spelling found. */
+  spellings: DbmlFieldSpelling[];
+}
+
 /**
  * The raw Table as a {@link SemanticTable}, the way `yamlToTable` normalises
  * a model file (§2.2 field mapping). `schema` is the effective schema (the
  * qualifier, else the schema folder); an old `[schema: …]` property is read
- * only to warn when it says something else.
+ * only to warn when it says something else. Context fields (`rationale`,
+ * `meta`) are read by the spelling rules of `settings.ts`.
  */
-function mapTable(raw: AstNode, name: string, schema: string | undefined, text: string, problems: DbmlProblem[], schemaLine: number): SemanticTable {
+function mapTable(
+  raw: AstNode,
+  name: string,
+  schema: string | undefined,
+  text: string,
+  problems: DbmlProblem[],
+  schemaLine: number,
+  sources: SettingSources,
+): { table: SemanticTable; fields: TableFieldSettings } {
   const props = readProperties(raw.metadata, text, `Table ${name}`, problems);
   const table: SemanticTable = { name };
-  const schemaProperty = props.get(DBML_RICH_TABLE_PROPERTIES.schema);
+  const schemaProperty = props.typed.get(DBML_RICH_TABLE_PROPERTIES.schema);
   if (schemaProperty !== undefined && schemaProperty !== schema) {
     problems.push({
       code: 'schemaProperty', severity: 'warning', line: schemaLine,
       message: `the schema is the Table's qualifier; remove \`[schema: ${dbmlString(schemaProperty)}]\`.`,
     });
   }
-  const alias = props.get(DBML_RICH_TABLE_PROPERTIES.alias)?.trim();
+  const alias = props.typed.get(DBML_RICH_TABLE_PROPERTIES.alias)?.trim();
   const description = noteText(raw.note);
-  const grain = props.get('grain');
-  const role = props.get(DBML_RICH_TABLE_PROPERTIES.role);
+  const grain = props.typed.get(DBML_RICH_TABLE_PROPERTIES.grain);
+  const role = props.typed.get(DBML_RICH_TABLE_PROPERTIES.role);
   if (schema) table.schema = schema;
   if (alias) table.alias = alias;
   if (description) table.description = description;
   if (grain) table.grain = grain;
   if (role) table.modelRole = role as SemanticTable['modelRole'];
 
-  const rationale: Rationale = {};
-  for (const [key, value] of props) {
-    const rationaleKey = rationaleKeyOf(key);
-    if (rationaleKey && value) rationale[rationaleKey] = value;
-  }
-  if (Object.keys(rationale).length > 0) table.rationale = rationale;
-  const meta = readMetaProperties(props, `Table ${name}`, problems);
-  if (meta) table.meta = meta;
+  const tableFields = readFields(
+    props, settingNames(settersOf(sources.tableNode.attributeList, sources.blocks)), 'table', '', `Table ${name}`, problems, sources.spellings,
+  );
+  if (Object.keys(tableFields.rationale).length > 0) table.rationale = { ...tableFields.rationale };
+  if (tableFields.meta) table.meta = tableFields.meta;
 
   // A composite primary key is an `indexes { (a, b) [pk] }` line.
   const indexPk = new Set<string>();
@@ -419,31 +478,40 @@ function mapTable(raw: AstNode, name: string, schema: string | undefined, text: 
     }
   }
 
+  const columnNodes = columnNodesOf(sources.tableNode);
   const columns: ColumnDef[] = [];
-  for (const field of Array.isArray(raw.fields) ? raw.fields : []) {
+  const columnFields: FieldSettings[] = [];
+  const rawFields: AstNode[] = Array.isArray(raw.fields) ? raw.fields : [];
+  rawFields.forEach((field, i) => {
     const fieldName = typeof field?.name === 'string' ? field.name : '';
     const where = `${name}.${fieldName}`;
     const fieldProps = readProperties(field?.metadata, text, where, problems);
-    if (fieldName === DBML_RICH_PLACEHOLDER_COLUMN && fieldProps.has(DBML_RICH_PLACEHOLDER_PROPERTY)) continue;
+    if (fieldName === DBML_RICH_PLACEHOLDER_COLUMN && fieldProps.typed.has(DBML_RICH_PLACEHOLDER_PROPERTY)) return;
     const column: ColumnDef = {
       name: fieldName,
       dataType: typeof field?.type?.type_name === 'string' ? field.type.type_name : '',
       description: noteText(field?.note),
     };
     if (field?.pk === true || indexPk.has(fieldName.toLowerCase())) column.isPrimaryKey = true;
-    if (isTrue(fieldProps.get(DBML_RICH_COLUMN_PROPERTIES.foreignKey))) column.isForeignKey = true;
-    if (isTrue(fieldProps.get(DBML_RICH_COLUMN_PROPERTIES.naturalKey))) column.isNaturalKey = true;
-    const scd = fieldProps.get(DBML_RICH_COLUMN_PROPERTIES.scdType);
+    if (isTrue(fieldProps.typed.get(DBML_RICH_COLUMN_PROPERTIES.foreignKey))) column.isForeignKey = true;
+    if (isTrue(fieldProps.typed.get(DBML_RICH_COLUMN_PROPERTIES.naturalKey))) column.isNaturalKey = true;
+    const scd = fieldProps.typed.get(DBML_RICH_COLUMN_PROPERTIES.scdType);
     if (scd !== undefined && scd.trim() !== '') {
       const scdType = Number(scd);
       if (scdType === 0 || scdType === 1 || scdType === 2) column.scdType = scdType;
     }
-    const additive = fieldProps.get(DBML_RICH_COLUMN_PROPERTIES.additiveType);
+    const additive = fieldProps.typed.get(DBML_RICH_COLUMN_PROPERTIES.additiveType);
     if (additive !== undefined && ADDITIVE_TYPES.has(additive)) column.additiveType = additive as ColumnDef['additiveType'];
-    const columnMeta = readMetaProperties(fieldProps, where, problems);
-    if (columnMeta) column.meta = columnMeta;
+    // The column's line in the file: the same place, else the same name.
+    const node = columnNodes[i]?.name.toLowerCase() === fieldName.toLowerCase()
+      ? columnNodes[i]
+      : columnNodes.find((c) => c.name.toLowerCase() === fieldName.toLowerCase());
+    const names = node ? settingNames(settersOf(node.settings, sources.blocks, node.name)) : [];
+    const fields = readFields(fieldProps, names, 'column', fieldName, where, problems, sources.spellings);
+    if (fields.meta) column.meta = fields.meta;
     columns.push(column);
-  }
+    columnFields.push(fields);
+  });
   table.columns = columns;
-  return table;
+  return { table, fields: { table: tableFields, columns: columnFields } };
 }

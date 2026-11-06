@@ -1,7 +1,7 @@
 Table gold.fct_order_line [
   role: 'transaction-fact',
   grain: 'One row per order line',
-  rationale_design: 'Built from silver order_lines joined to silver_orders.'
+  decisions: 'Built from silver order_lines joined to silver_orders: lineage, so there is no Ref to them.'
 ] {
   Note: 'Sales, at the finest grain.'
 

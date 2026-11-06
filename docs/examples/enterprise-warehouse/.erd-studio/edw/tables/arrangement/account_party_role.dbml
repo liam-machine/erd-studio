@@ -1,6 +1,6 @@
 Table arrangement.account_party_role [
   grain: 'One row per party per account per role',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'Who holds, shares or guarantees each account: an account can have joint owners, and a person can hold many accounts (many-to-many).'
 

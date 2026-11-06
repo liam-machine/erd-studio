@@ -72,7 +72,7 @@ Onboarding has three starting points — no folder open, a folder without dbt (l
   | `dbmlOutsideKnownFolders` (a `.dbml` where the tree has no place for it, or a diagram's `use *` of such a file) | warning, with a hint for its shape | not read. The hints never start with a folder name: an upper-case layer folder gets "layer folders are lower-case ids; rename Silver/ to silver/ and set its label in layers.json", `<L>/x.dbml` gets "a diagram belongs at <L>/diagrams/x.dbml", a case variant of `diagrams` / `tables` / `relationships` gets "rename the folder to <name> (lower-case)", a reserved top folder gets "The folder <x>/ cannot be a layer: …". Silent in a YAML project |
   | `dbmlLayerNotConfigured` (a layer folder holding table or relationships files that `layers.json` does not list, when `layers.json` exists; or holding DBML diagrams in a layer that does not open: not in `layers.json`, or with no `layers.json` not a default layer) | warning | its tables are still part of the library, but its diagrams do not open; a backup copy (`gold-old/`) also shows as `duplicateTableName` |
   | `duplicateTableName` (one name in two DBML table files: two layers or two schema folders) | error, one per extra file | `fix-dbml-file`: give the tables unique names, the warehouse name in `alias` |
-  | `unexpectedFileInDbmlFolder` (a file of no kind ERD Studio knows, in a DBML or mixed project, e.g. a stray `.dbdiagram` or a `.yaml`) | warning | root `modelling-approach.md` and `README.md` are expected |
+  | `unexpectedFileInDbmlFolder` (a file of no kind ERD Studio knows, in a DBML or mixed project, e.g. a stray `.dbdiagram` or a `.yaml`) | warning | root `modelling-approach.md`, `fields.yml` and `README.md` are expected |
   | `missingLayersConfig` (a DBML library with no `layers.json`) | warning | |
   | `dbmlDiagramInYamlProject`, `yamlTableInDbmlDiagram` | warning | |
   | `declaredInDiagram` (a Table / Ref / TableGroup in a diagram; a Metadata block there is `foreignMetadata`) | warning | kept byte for byte, not drawn |
@@ -81,6 +81,19 @@ Onboarding has three starting points — no folder open, a folder without dbt (l
   | `foreignMetadata` (D25: a `Metadata Table t` / `Metadata Column t.c` block in a diagram or relationships file) | warning, at the block's line, naming the target table and its file | ERD Studio reads and edits a table's properties only in its table file, so the canvas never shows the block's values while other DBML tools apply them; move them inline into the table file. Reported instead of the diagram reader's `declaredInDiagram` for the same block |
   | `metaJson`, `unreadableRef`, `diagramWarning` (the readers' other warnings: a `meta_json` that is not a JSON object, a Ref line it cannot read, any other diagram warning) | warning | |
   | unsorted `use` lines or Refs | not reported | cosmetic |
+
+- **The CLI and context fields** (`docs/dev/fields.md`). `doctor` adds **`erd.fields`** (additive): `{ file, source, tables, columns, leftOut, problems }` — `file` is the project-relative `fields.yml` or `null`, `source` is `'file'` or `'starting-set'`, `tables` / `columns` the listed keys in order, and `problems` the findings below, each `{ code, severity: 'error' | 'warning' | 'info', message, file?, line?, table?, column?, key?, count? }`. It is read with `readFieldsFile` (`src/services/fieldsService.ts`, no `vscode`), works in YAML projects too (the two spelling checks are DBML-only), and is kept **out of `erd.dbmlProblems`**, so a project that was clean stays clean. Errors raise the new next step **`fix-fields-file`**, placed right after `fix-dbml-file` (the skill routes it in its check-your-work sentence, `verify-and-fix.md` and `without-dbt.md`); warnings and info raise none. Human output prints errors with ✗, warnings with !, and each info finding as one summary line.
+
+  | Check (`code`) | Severity | Example message |
+  |---|---|---|
+  | `fieldsYamlInvalid`, `fieldsSectionInvalid`, `fieldsEntryInvalid`, `fieldsKeyInvalid`, `fieldsKeyReserved`, `fieldsKeyDuplicate`, `fieldsTypeInvalid`, `fieldsChoiceWithoutValues`, `fieldsFilledByInvalid`, `fieldsShowForInvalid` (core's `parseFieldsText`, with the file and line) | error | "fields.yml: note is a DBML setting and cannot be a field. Pick another key." |
+  | `fieldsUnknownName`, `fieldsBuiltInOverride`, `fieldsRetiredListed`, `fieldsVersionNewer`, `fieldsVersionInvalid`, `fieldsPropertyInvalid` | warning | "fields.yml: purpse is not a built-in field. Did you mean purpose?" |
+  | `fieldValueOutsideChoices` (per table or column: a team choice value outside its `values`, a yes-no that is not true or false; the role is not checked here) | warning | "dim_customer: sensitivity is secret; fields.yml allows public, internal, confidential." |
+  | `fieldSpelledTwice` (per table: one field under two spellings, from `fieldSpellings`) | warning | "fct_order has rationale_purpose and purpose; purpose is used. Remove the other." |
+  | `fieldOldSpellings` (one finding, `count` and an example: settings a new table would spell bare) | info | "9 tables still say rationale_purpose or meta_owner. Ask your assistant to rename them." |
+  | `fieldRetired` (one finding: tables with `design`, `role_choice` or `grain_choice`) | info | "12 tables still have Design. Ask your assistant to move it into Decisions." |
+  | `fieldMetaShadowsBuiltIn` (one finding: `meta` keys named like a built-in of their scope, kept as `meta_<key>`) | info | |
+  | `fieldNotInList` (one finding, only with a `fields.yml`: keys with values the list does not name; `left_out` keys ignored) | info | "3 tables have tier, which fields.yml does not list. They show it under “Not in your list”." |
 
 | Exit code | Meaning |
 |---|---|

@@ -1,0 +1,12 @@
+Table gold.dim_store [
+  role: 'conformed-dim',
+  grain: 'One row per store version',
+  rationale_purpose: 'Stores, for every sales report',
+  rationale_scd_strategy: 'Type 2 on region; the name overwrites',
+  meta_owner: 'retail-ops'
+] {
+  store_key  INT     [pk]
+  store_code VARCHAR [natural_key: 'true', meta_business_rule: 'The till prefix of the store']
+  region     VARCHAR [scd_type: '2']
+  name       VARCHAR [scd_type: '1']
+}

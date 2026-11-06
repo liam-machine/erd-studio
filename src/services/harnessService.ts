@@ -38,7 +38,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '45';
+export const HARNESS_VERSION = '46';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -224,7 +224,8 @@ ERD Studio keeps a project's logical data model in \`.erd-studio/\` as plain tex
 ├── README.md                       ← explains the folders; ERD Studio writes it once, leave it
 ├── layers.json                     ← the layers (JSON); write it first in a new project
 ├── modelling-approach.md           ← optional: the team's modelling rules (see below)
-└── gold/                           ← a layer folder (bronze, silver, gold, …), named by its id
+├── fields.yml                      ← optional: the fields the team records (see "Fields")
+└── gold/                         ← a layer folder (bronze, silver, gold, …), named by its id
     ├── tables/                     ← the layer's tables: one Table per file
     │   └── sales/                  ← a schema folder
     │       ├── dim_customer.dbml   ← Table sales.dim_customer
@@ -264,25 +265,27 @@ A new project also needs \`.erd-studio/layers.json\`, which lists the layer fold
 - **Remove a table from a diagram** = delete its \`use\` line there and its line in the diagram's \`erd_layout\`. The table file and its Refs stay: the diagram just stops showing them.
 - **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and \`Table\` line, the \`use\` lines in relationships files and diagrams, every Ref end, the \`erd_layout\` lines and sticky notes' \`linked_table\`.
 - **Never hand-merge a conflicted file.** When a file holds git conflict markers (\`<<<<<<<\` … \`>>>>>>>\`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands. A conflict inside a diagram's \`erd_layout\` only differs in positions: keep either side whole, never a mix of lines.
-- **Check your work** with \`erd-studio doctor\` (its \`erd.dbmlProblems\` names every problem with its file, line and the exact line to write) and \`erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml\` (the diagram's path from the project folder, \`.erd-studio/\` included). Fix every \`fix-dbml-file\` error before anything else. Then fix every \`missingUse\`, \`missingRelationshipsUse\`, \`unquotedValue\` and \`usePathMismatch\` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a \`foreignMetadata\` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a \`.dbml\` one) and remove the block. Other warnings are information.
+- **Check your work** with \`erd-studio doctor\` (its \`erd.dbmlProblems\` names every problem with its file, line and the exact line to write) and \`erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml\` (the diagram's path from the project folder, \`.erd-studio/\` included). Fix every \`fix-dbml-file\` and \`fix-fields-file\` error before anything else (\`erd.fields\` gives each fields.yml problem with its line). Then fix every \`missingUse\`, \`missingRelationshipsUse\`, \`unquotedValue\` and \`usePathMismatch\` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a \`foreignMetadata\` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a \`.dbml\` one) and remove the block. Other warnings are information.
 - **Summarise a pull request's model changes** with \`erd-studio changes --base <git-ref> --format markdown\` (for example \`--base origin/main\`): the tables, columns, keys, relationships and diagrams changed since that ref, ready to paste as a review comment (\`--json\` for the same as data). It reads the ref from git and changes nothing.
 
 ## Team Modelling Approach
 
-If \`.erd-studio/modelling-approach.md\` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and rationale, whatever the file format). The \`/erd-studio-setup\` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. <!-- dbt-only -->If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. <!-- /dbt-only -->If it has a **Metadata** section, that is the team's metadata list — follow it as "The team's metadata list" below says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
+If \`.erd-studio/modelling-approach.md\` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and the other fields, whatever the file format). The \`/erd-studio-setup\` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. <!-- dbt-only -->If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. <!-- /dbt-only -->Which fields a table records is \`.erd-studio/fields.yml\`'s job; an old **Metadata** section is followed as "Fields" says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
 
-### The team's metadata list
+## Fields
 
-If \`.erd-studio/modelling-approach.md\` has a \`## Metadata\` section, it lists the \`meta\` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (<!-- dbt-only -->\`dbt\` or <!-- /dbt-only -->\`the team\`). Read it before creating or editing a model, and follow it:
+Read \`.erd-studio/fields.yml\` before creating or editing a table. It lists every field this project records on tables and on columns, in order (its format: "fields.yml" in {DBML}). Without the file, use the starting set: grain, purpose, decisions, open_questions, role, scd_strategy, measures; on columns natural_key, scd_type, additive_type. Fill only listed fields; another key only when the user asks, then offer once to add it to the list.
 
-- **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (\`owner\`, \`pii\`), never a new spelling, and put it where **On** says. When **Values** names a fixed set, use one of those values; an example in **Values** is never a default. Keep the kind of value (text, \`true\` / \`false\`, a list).
-<!-- dbt-only -->- **Source \`dbt\`: copy it; never make it up.** The value comes from the dbt model's own \`meta:\` — best from \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`, already merged as dbt merges them, including project-wide \`+meta\` from \`dbt_project.yml\`) when that helper is installed, else from the model's schema \`.yml\` (\`meta:\` and \`config: meta:\`, the \`config\` one winning per key; a column's are under that column) and the \`+meta\` entries in \`dbt_project.yml\`. Copy it whenever you create a logical model or add a column from dbt, including from a sync plan. Keep the kind of value: in a DBML table a text value is one \`meta_<key>: '<text>'\` setting and anything else (\`true\` / \`false\`, a number, a list) goes into the one \`meta_json\` setting as JSON (a text value ERD Studio put inside \`meta_json\` to keep the key order stays there; {DBML}); in YAML, \`true\` / \`false\` stay unquoted and a list stays a list, and numbers may be written quoted or not (ERD Studio reads \`24\` and \`"24"\` the same), but keep the quotes when leaving them off would change the digits (\`"1.10"\`, \`"007"\`). When dbt has no value (or \`null\`), leave the key out: never guess and never write a placeholder.
-  - When you are already reading that dbt model and the model file's value for a listed \`dbt\` key differs from dbt's, say so in one line and ask before changing it — the difference may be deliberate.
-  - When the user gives a value for a \`dbt\` key ("its owner is finance-team"), write it, say that dbt does not record it, and offer to add it to the dbt model's \`meta:\` too so the two agree — never edit dbt files unasked. When they ask for a \`dbt\` key that dbt has no value for and give none, say so and ask for the value.<!-- /dbt-only -->
-- **Source \`the team\`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating models, say in one line which of them still lack these keys (one line for a whole batch<!-- dbt-only --> or sync plan<!-- /dbt-only -->).
-- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list (Source \`the team\`<!-- dbt-only -->, or \`dbt\` when dbt records it<!-- /dbt-only -->).<!-- dbt-only --> Keys the list names under **Left out** (another tool's settings) are never copied from dbt.<!-- /dbt-only -->
-
-Without that section, add or change only the keys the user asks for<!-- dbt-only -->, and never copy dbt's \`meta:\` unasked<!-- /dbt-only -->. Ask for a value you were not given; never make one up.
+- Each field is one setting, \`<key>: '<value>'\`: on the Table line for a table field, on the column for a column field. Quote every value. (A YAML table keeps them in its \`rationale:\` and \`meta:\` maps: {LEGACY}.)
+- type text: what the guidance asks for, in a sentence or two. type value: one short value. type choice: exactly one of its values. type yes-no: 'true' or 'false'.
+- filled_by people: write only a value the user gives you; after a batch, say in one line which tables still lack one.<!-- dbt-only --> filled_by dbt: copy it exactly from the dbt model's meta: \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`, merged as dbt merges them: \`config: meta:\` wins, project \`+meta\` included), else the schema \`.yml\` (\`meta:\`, \`config: meta:\`) and \`+meta\` in \`dbt_project.yml\`. Never type one in; no value, no setting. When the file's value differs from dbt's, say so and ask; when the user gives a value, write it and offer to add it to dbt's \`meta:\` too (never edit dbt unasked). Never copy a key listed under left_out. A list or map in dbt's meta is never a listed field: copy it only when asked.<!-- /dbt-only -->
+- show_for dimensions / facts: only on tables with that role.
+- Leave a field out when you have nothing true to say. Never write a placeholder.
+- open_questions: when you meet a choice you cannot make, write the question there and ask the user. When they answer, move the answer into decisions and remove the question.
+- Keep every setting the list does not name exactly as it is.
+- Old spellings (\`rationale_<key>\`, \`meta_<key>\`, an entry in \`meta_json\`) are the same field: change it where it is, never add a second copy. Rename only what doctor's \`erd.fields\` lists as old spellings (\`fieldOldSpellings\`), and only when the user agrees; never a \`meta_json\` entry, nor a \`meta_<key>\` whose key is reserved or a built-in (metadata of its own). Retired fields (design, role_choice, grain_choice): keep them; offer once to move the text into decisions, showing the result first.
+- An old \`## Metadata\` table in \`modelling-approach.md\` names the team fields while fields.yml has none: Key is the key, On the list (tables, columns), Values a choice or yes-no, Source <!-- dbt-only -->\`dbt\` is filled_by dbt, <!-- /dbt-only -->\`the team\` is people<!-- dbt-only -->, Left out is left_out<!-- /dbt-only -->. Offer once to move it into fields.yml: show the result, and remove the old section on a yes.
+- doctor's \`erd.fields\` also reports \`fieldValueOutsideChoices\` (use a listed value, or ask) and \`fieldSpelledTwice\` (the used spelling stays; offer to remove the other).
 
 ## Table roles
 
@@ -299,20 +302,6 @@ A table's role is \`role\` in a DBML table file and \`modelRole\` (\`tableRole\`
 | \`reference\` | Low-cardinality lookup |
 | \`gold-fact\` | Pre-joined Gold view |
 | \`gold-dim\` | Flattened Gold dimension view |
-
-
-## Design rationale
-
-Optional, and every field is optional text: in DBML each is a table setting \`rationale_<field in snake_case>\` (\`rationale_purpose\`, \`rationale_grain_choice\`, …); in YAML they are keys of one \`rationale:\` map. Write only the fields there is something to say about.
-
-| Field | Purpose |
-|-------|---------|
-| \`purpose\` | What requirements this model fulfils |
-| \`design\` | Why it was designed this way |
-| \`grainChoice\` | Why this grain was chosen over alternatives |
-| \`roleChoice\` | Why this model role was selected |
-| \`scdStrategy\` | Overall SCD strategy across dimension attributes |
-| \`measures\` | Why measures are structured this way |
 
 ---
 
@@ -346,7 +335,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project \`.erd-studio/{layer}/tables/{schema}/{name}.dbml\` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the \`.yml\` path {LEGACY} gives. <!-- dbt-only -->When the source is a dbt model and the team's metadata list has \`dbt\` keys, copy those too (see "The team's metadata list").<!-- /dbt-only -->
+Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project \`.erd-studio/{layer}/tables/{schema}/{name}.dbml\` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the \`.yml\` path {LEGACY} gives. <!-- dbt-only -->When the source is a dbt model, copy the fields \`filled_by: dbt\` too (see "Fields").<!-- /dbt-only -->
 
 ### Step 4 — Reconcile via set-difference
 Re-read the table file you just wrote. Compute the set-difference between source columns and the file's columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -397,7 +386,7 @@ The physical stage has **no files on disk**. It is derived at runtime from the d
 7. **Relationships**: derived from **dbt relationship tests** — the union of those declared in \`.yml\` files and those in the manifest, deduped; never copied from logical. \`catalog.json\` holds no constraint or foreign-key information, so it contributes no edges.
 8. **Cardinality**: derived from **uniqueness tests** merged from yml and manifest — no \`unique\` test = "many" side.
 9. **Scoping**: only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
-10. **Carried forward from logical**: PK/FK/NK flags, grain, the table role, SCD type and additive type — dbt yml does not carry them. \`meta\` is logical-only and is never read from, or compared with, dbt.
+10. **Carried forward from logical**: PK/FK/NK flags, grain, the table role, SCD type and additive type — dbt yml does not carry them. Every other field (and \`meta\`) is logical-only: ERD Studio never reads it from, or compares it with, dbt.
 
 A model known **only** by the file that defines it renders as a real node with **zero columns**: nothing has stated its shape, and seeding it from the logical design would invent one. Sync comparison skips such a model entirely rather than reporting every logical column as missing. That suppression is automatic and distinct from \`stubColumns\`, which is the user's own switch for models they know are deliberately partial.
 
@@ -449,9 +438,10 @@ This is how an ERD Studio project stores its model as DBML (ERD Studio 2.0 and l
 Table sales.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order line',
-  rationale_purpose: 'Revenue reporting by day, customer and region',
-  meta_owner: 'sales-data',
-  meta_json: '{"pii":false,"tags":["finance"]}'
+  purpose: 'Revenue reporting by day, customer and region',
+  decisions: 'Returns are negative lines, not a table of their own, so totals net off',
+  owner: 'sales-data',
+  meta_json: '{"tags":["finance"]}'
 ] {
   Note: 'Order lines'
 
@@ -463,9 +453,12 @@ Table sales.fct_order [
     natural_key: 'true',
     note: 'The order number the customer sees on the receipt, emails and the shop'
   ]
+  email          VARCHAR         [pii: 'true', note: 'Where the receipt was sent']
   loaded_at      timestamp       [not null, default: \`now()\`]
 }
 \`\`\`
+
+Here \`owner\` and \`pii\` are fields of the team's own, from its \`fields.yml\` (below); \`tags\`, a list, is metadata in \`meta_json\`.
 
 - **Exactly one \`Table\` per file**, declared \`Table <schema>.<name>\`: the schema spelled exactly as the schema folder and the name exactly as the file (\`gold/tables/sales/fct_order.dbml\` holds \`Table sales.fct_order\`). Double-quote a part that is not a plain identifier (\`Table "SAP FI".afih\`). Any number of \`Enum\`s and comments may sit beside it. No \`Project\`, \`TableGroup\`, top-level \`Note\`, \`TablePartial\` or \`Records\`.
 - **The schema is the qualifier, never a setting.** Doctor warns about an unqualified \`Table fct_order\` (\`unqualifiedTable\`: other DBML tools read it as \`public.fct_order\`), a qualifier that differs from the folder (\`schemaFolderMismatch\`) and an old \`[schema: '…']\` setting (\`schemaProperty\`: remove it). To change a table's schema, move its file to the other schema folder and change the qualifier, every Ref end and every \`use\` line that names it, in one change.
@@ -474,7 +467,7 @@ Table sales.fct_order [
 - **A table needs at least one column.** A table with none yet holds the placeholder line \`_erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']\`; delete it when you add the first real column.
 - **Primary key**: \`pk\` on the column; for two or more columns, an \`indexes { (a, b) [pk] }\` block instead, with no \`pk\` on the columns.
 - The table's description is the \`Note: '…'\` line, first in the block and followed by a blank line. A text with a line break is triple-quoted (\`'''…'''\`); escape \`'\` as \`\\'\` and \`\\\` as \`\\\\\`.
-- A flag is written only when it is set (\`natural_key: 'true'\`); to unset it, delete the setting. Settings ERD Studio does not model (\`not null\`, \`unique\`, \`default\`, \`increment\`, \`note\` on an index, \`headercolor\`, other indexes, Enums, your own custom settings) are kept exactly as written.
+- A flag is written only when it is set (\`natural_key: 'true'\`); to unset it, delete the setting. DBML's own settings ERD Studio does not model (\`not null\`, \`unique\`, \`default\`, \`increment\`, \`note\` on an index, \`headercolor\`, other indexes, Enums) are kept exactly as written; every other setting is a field ("Setting names" below), kept too.
 - **Never write a \`Metadata\` block** (\`Metadata Table x { … }\`): put every property inline, on the Table or the column. A Metadata block silently overrides the inline value.
 
 ## Field names
@@ -487,9 +480,9 @@ Table sales.fct_order [
 | role (see "Table roles" in {SKILL}) | \`role\` | \`role: 'conformed-dim'\` |
 | grain | \`grain\` | \`grain: 'One row per customer'\` |
 | warehouse table name<!-- dbt-only --> (dbt \`alias\`)<!-- /dbt-only --> | \`alias\` (never DBML's own \`as\`) | \`alias: 'customer'\` |
-| design rationale | \`rationale_<field>\` | \`rationale_grain_choice: '…'\` |
-| metadata, text values | \`meta_<key>\` (key matching \`[a-z_][a-z0-9_]*\`) | \`meta_owner: 'crm-team'\` |
-| metadata, anything else | one \`meta_json\` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a \`meta_json\` as it is) | \`meta_json: '{"pii":true}'\` |
+| a field (see "Fields" in {SKILL} and "fields.yml" below) | \`<key>: '<value>'\`, the key as fields.yml names it | \`purpose: '…'\`, \`owner: 'crm-team'\` |
+| metadata that is not text (a list, a map, a number, or \`true\` / \`false\` for a key that is not a yes-no field) | one \`meta_json\` with those entries as JSON, where its first entry is (ERD Studio also keeps a text value inside it when it sits between two of its entries, so the metadata reads back in key order: leave such a \`meta_json\` as it is) | \`meta_json: '{"tags":["finance"]}'\` |
+| a field in an older file | \`rationale_<key>\` or \`meta_<key>\` ("Setting names" below) | \`rationale_purpose: '…'\` |
 | column type | the column's type | \`email VARCHAR\` |
 | column description | \`note\` (column setting) | \`[note: 'Email address']\` |
 | primary key | \`pk\`, or \`indexes { (a, b) [pk] }\` | \`[pk]\` |
@@ -497,9 +490,92 @@ Table sales.fct_order [
 | natural (business) key | \`natural_key: 'true'\` | \`[natural_key: 'true']\` |
 | SCD type | \`scd_type: '0'\`, \`'1'\` or \`'2'\` | \`[scd_type: '2']\` |
 | additive type | \`additive_type\` | \`[additive_type: 'semi-additive']\` |
-| column metadata | \`meta_<key>\` / \`meta_json\` on the column | \`[meta_pii: 'yes']\` |
+| a column field | \`<key>: '<value>'\` on the column (\`meta_json\` for metadata that is not text) | \`[pii: 'true']\` |
 
-Every custom value is a quoted string. \`foreign_key\` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. <!-- dbt-only -->ERD Studio never compares \`meta_*\` with dbt (see "The team's metadata list" in {SKILL}); an<!-- /dbt-only --><!-- no-dbt -->An<!-- /no-dbt --> imported table may carry a \`meta_json\` with a \`dbml\` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
+Every custom value is a quoted string. \`foreign_key\` records the intent only: a Ref never sets it, so set it on a foreign-key column yourself. <!-- dbt-only -->ERD Studio never compares a field with dbt (see "Fields" in {SKILL}); an<!-- /dbt-only --><!-- no-dbt -->An<!-- /no-dbt --> imported table may carry a \`meta_json\` with a \`dbml\` entry (what an imported DBML file said that ERD Studio has no field for): keep it as it is.
+
+## fields.yml: the fields a project records
+
+\`.erd-studio/fields.yml\` (optional, beside \`layers.json\`; the same file in a YAML project) lists the fields this project records on tables and on columns, in the order the Detail panel shows them. ERD Studio reads it and never writes it; change it only when the user asks (the \`/erd-studio-setup\` guide writes it after a yes). Without it, a project records the starting set (below). An ERD Studio 2.0 pre-release from before fields reads only the old spellings and keeps the bare ones as written.
+
+\`\`\`yaml
+version: 1
+tables:
+  - grain                          # a bare name: the built-in, as shipped
+  - purpose
+  - key: decisions                 # a built-in in the team's own words
+    guidance: Choices finance signed off, and why.
+  - open_questions
+  - role
+  - scd_strategy
+  - measures
+  - key: owner                     # the team's own fields from here
+    label: Owner
+    type: value
+    guidance: The team that owns it, e.g. crm-team.
+<!-- dbt-only -->
+    filled_by: dbt
+<!-- /dbt-only -->
+  - key: sensitivity
+    label: Sensitivity
+    type: choice
+    values: [public, internal, confidential]
+    filled_by: people
+columns:
+  - natural_key
+  - scd_type
+  - additive_type
+  - key: pii
+    label: Personal data
+    type: yes-no
+<!-- dbt-only -->
+    filled_by: dbt
+left_out: [dimension, metrics]     # dbt meta keys that are another tool's settings
+<!-- /dbt-only -->
+\`\`\`
+
+- **key**: the setting's name in a table file: lower case letters, digits and \`_\` (DBML lower-cases setting names), never a reserved name ("Setting names" below), listed once. A bare name is a built-in as shipped; an entry with \`key\` is a built-in in the team's words (only \`label\`, \`guidance\` and \`filled_by\` change; its type, values and show_for are fixed) or a field of the team's own.
+- **label**: what the canvas and the exports call it. **guidance**: one sentence saying what to write; it is the canvas placeholder and your instruction.
+- **type**: \`text\` (the default: a sentence or two), \`value\` (one short value), \`choice\` (one of its \`values\`, at least two, in dropdown order) or \`yes-no\` (\`'true'\` or \`'false'\`).
+- **filled_by**: \`anyone\` (the default: people or you)<!-- no-dbt --> or<!-- /no-dbt --><!-- dbt-only -->,<!-- /dbt-only --> \`people\` (you write only a value the user gives you)<!-- dbt-only --> or \`dbt\` (copied from the dbt model's \`meta:\`, never typed in)<!-- /dbt-only -->. **show_for**: \`dimensions\`, \`facts\` or \`all\` (the default), read from the table's role; a table with no role shows both, and a field with a value always shows.
+<!-- dbt-only -->- **left_out**: dbt \`meta:\` keys that are another tool's settings (Lightdash's \`dimension\`, \`metrics\`): never copied or offered.
+<!-- /dbt-only -->- A missing \`tables:\` or \`columns:\` means the starting set's; \`tables: []\` means none. No \`version:\` means 1. Unknown keys are ignored. doctor reports a problem in the file under \`erd.fields\` (an error is the \`fix-fields-file\` step).
+
+The built-in fields (starting = on without a fields.yml; optional = only when listed):
+
+| key | on | type | default | guidance |
+|---|---|---|---|---|
+| \`grain\` | tables | text | starting | One row per ___. The one sentence that says what a row is. |
+| \`purpose\` | tables | text | starting | Who uses this table and the question it answers. |
+| \`decisions\` | tables | text | starting | A choice a later editor might undo, and why. |
+| \`open_questions\` | tables | text | starting | What is still undecided. Assistants ask about these and never guess. |
+| \`role\` | tables | choice (the "Table roles" in {SKILL}) | starting | Which kind of table this is: conformed-dim, transaction-fact, … |
+| \`scd_strategy\` | dimensions | text | starting | How this dimension keeps history: which columns track changes and which overwrite. |
+| \`measures\` | facts | text | starting | How the measures add up: which sum across every dimension and which do not. |
+| \`source_of_truth\` | tables | value | optional | The system this data is mastered in. |
+| \`freshness\` | tables | text | optional | How fresh it must be, and how often it loads. |
+| \`known_issues\` | tables | text | optional | Data problems a consumer should know before trusting a number. |
+| \`retention\` | tables, people only | text | optional | How long rows are kept, and why. |
+| \`natural_key\` | columns | yes-no | starting | The business identifier, like an order number or a customer code. |
+| \`scd_type\` | dimension columns | choice \`0\` / \`1\` / \`2\` | starting | 0 never changes, 1 overwrites, 2 keeps history. |
+| \`additive_type\` | fact columns | choice | starting | Additive, semi-additive or non-additive. |
+| \`business_rule\` | columns | text | optional | How the value is worked out, in business terms. |
+
+**Retired** (still read and shown, never offered or written new): \`design\` (move it to \`decisions\`, or to \`purpose\`), \`role_choice\` and \`grain_choice\` (move them to \`decisions\`).
+
+### Setting names
+
+| On a Table or a column | Is |
+|---|---|
+| \`<key>: '<value>'\`, for a key that is not reserved (\`purpose\`, \`owner\`, \`pii\`) | that field, listed or not (an unlisted one shows under "Not in your list") |
+| \`erd_<key>\` | the same field, and it wins over \`<key>\`: for a file where another DBML tool writes its own \`<key>\` |
+| DBML's own: \`note\`, \`headercolor\`, \`color\`, \`pk\`, \`primary key\`, \`primary_key\`, \`unique\`, \`ref\`, \`dep\`, \`not null\`, \`not_null\`, \`null\`, \`increment\`, \`default\`, \`name\`, \`type\`, \`check\`, \`update\`, \`delete\`, \`inactive\`, \`example\` | reserved: never a field key; kept as written |
+| ERD Studio's own: \`schema\`, \`alias\`, \`role\`, \`grain\`, \`foreign_key\`, \`natural_key\`, \`scd_type\`, \`additive_type\`, \`meta_json\`, \`erd_placeholder\`, \`linked_table\`, and \`json\`, \`dbml\`, \`constructor\`, \`__proto__\` | reserved: never a key of the team's own (\`role\` to \`additive_type\` are the built-ins above) |
+| anything starting \`erd_\`, \`rationale_\` or \`meta_\` | never a field key: a spelling of one (below) |
+| \`meta_json\` | metadata that is not text: lists, maps, numbers, and \`true\` / \`false\` for a key that is not a yes-no field. A text value is its own setting |
+| old spellings: \`rationale_<key>\` (\`rationale_purpose\`), \`meta_<key>\` (\`meta_owner\`), an entry in \`meta_json\` | the same field. Change it where it is; never add a second copy. A table holding two spellings uses the bare one (doctor: \`fieldSpelledTwice\`) |
+
+**Renaming old spellings** is the user's choice: only on a yes, all in one change, and only what doctor counts as \`fieldOldSpellings\`. Never rename \`rationale_design\`, \`rationale_role_choice\` or \`rationale_grain_choice\` (retired: offer to move the text into \`decisions\`, showing the result first), an entry in \`meta_json\`, or a \`meta_<key>\` whose key is reserved or a built-in that is not metadata (\`meta_purpose\`, \`meta_role\`, \`meta_retention\`): that is metadata of its own, shown as "purpose (metadata)", and \`meta_<key>\` is the same field only for a key of the team's own.
 
 ## Relationships file: \`<layer>/relationships/<file>.dbml\`
 
@@ -592,7 +668,7 @@ ERD Studio writes every \`.dbml\` in one layout and tidies a file into it each t
 - **Two-space indents.** At most one blank line in a row, and none straight after \`{\` or before \`}\`.
 - **A table's \`Note\` comes first** in its body, then one blank line, then the columns, then \`indexes\`.
 - **Columns line up**: on consecutive lines, the names are padded to the group's longest name (a name over 32 characters does not widen it); the types are padded to the longest type **of a column that has settings** (a type over 24 characters does not widen it), then one space and the settings. A column with no settings ends at its type, so a long settings-less type such as \`"VARCHAR(4000)"\` does not push the other columns' settings out. A blank line or an own-line comment between columns starts a new group with its own alignment, so use one to group related columns.
-- **Column settings in this order**: \`pk\`; DBML's own (\`not null\`, \`unique\`, \`increment\`, \`default\`); ERD Studio's (\`natural_key\`, \`scd_type\`, \`additive_type\`, \`foreign_key\`); \`meta_*\`; then \`note\` last. Written \`[a, b: c]\`: no space inside the brackets, \`, \` between settings, \`: \` after a name.
+- **Column settings in this order**: \`pk\`; DBML's own (\`not null\`, \`unique\`, \`increment\`, \`default\`); ERD Studio's (\`natural_key\`, \`scd_type\`, \`additive_type\`, \`foreign_key\`); the fields (\`pii: 'true'\`, any \`meta_json\`); then \`note\` last. Written \`[a, b: c]\`: no space inside the brackets, \`, \` between settings, \`: \` after a name.
 - **Long settings go one per line**: when a column's line would pass 100 characters, \`[\` ends the column line, each setting sits on its own line two spaces further in with a comma after all but the last, and \`]\` is alone on the column's indent (as \`order_number\` above). A Table with two or more settings lists them the same way.
 - **Relationships**: single spaces around the operator. When ERD Studio writes a relationships file it puts one blank line between the Refs of each foreign-key table; Format Document keeps blank lines that are there but does not add these, so keep a table's Refs together and leave a blank line before the next table's.
 - **\`use\` lines** next to each other line up their \`from\` (a \`use { … }\` part over 48 characters does not widen the run).
@@ -612,7 +688,7 @@ const LEGACY_PART = `# ERD Studio — YAML and JSON files (projects before 2.0)
 
 **Read this file only when \`erd-studio doctor --json\` reports \`erd.storage: yaml\`** (or, in a \`mixed\` project, to edit an existing \`.yml\` table or \`.json\` diagram in place). A new project, and every new file in a \`dbml\` or \`mixed\` project, is DBML: follow {DBML}. **Never convert by hand: run ERD Studio: Convert Project to DBML** (the user runs it in VS Code: one undoable step that doctor's \`erd.dbmlConversion\` previews).
 
-In a YAML project, model (table) definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`). The rules every format shares — the team's modelling approach and metadata list, table roles, rationale fields, building from a source, naming<!-- dbt-only -->, the physical stage and sync plans<!-- /dbt-only --> — are in {SKILL}.
+In a YAML project, model (table) definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`). The rules every format shares — the team's modelling approach, the fields it records (\`fields.yml\`), table roles, building from a source, naming<!-- dbt-only -->, the physical stage and sync plans<!-- /dbt-only --> — are in {SKILL}.
 
 ## File naming: v5 or v6 — use the one \`erd-studio doctor\` reports
 
@@ -641,6 +717,7 @@ Everything else — \`layer\`, <!-- dbt-only -->\`modelFolder\` (the dbt \`model
 \`\`\`
 .erd-studio/
 ├── modelling-approach.md     ← Optional: the team's modelling rules (see {SKILL})
+├── fields.yml                ← Optional: the fields the team records (see "Fields" in {SKILL})
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_project.yml       ← top level (flat libraries keep working)
 │   ├── silver/               ← optional per-layer folders
@@ -730,7 +807,7 @@ Annotations are temporary build notes — visible on the canvas while constructi
 |-----------------|---------------|
 | Add/remove/rename a column | the model's \`.yml\` (\`logical-models/{name}.yml\` or \`logical-models/{folder}/{name}.yml\`) |
 | Change column type, PK/FK/NK flags, SCD type | the model's \`.yml\` |
-| Change grain, modelRole, description, rationale, meta | the model's \`.yml\` |
+| Change grain, modelRole, description, a field (\`rationale\`, \`meta\`) | the model's \`.yml\` |
 | Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create it — \`logical-models/{layer}/{name}.yml\` (the domain's layer) when the project uses layer folders, else \`logical-models/{name}.yml\` |
 | Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` (relationships in model YAML stay — the domain just stops drawing them) |
 | Add/remove/edit a relationship | The many-side (FK) model's \`.yml\` → \`relationships:\` when the project keeps relationships in the model library, else domain \`.json\` → \`logical.relationships[]\` — see "Where relationships live" |
@@ -754,7 +831,7 @@ grain: "One row per customer"
 modelRole: conformed-dim
 rationale:
   purpose: "Customer master data for cross-domain joins"
-  roleChoice: "Conformed dimension shared across domains"
+  decisions: "Email is the natural key: the CRM reuses customer ids after two accounts merge"
 meta:
   owner: crm-team
   source_system: salesforce
@@ -788,7 +865,7 @@ columns:
 | \`grain\` | No | Grain statement — "One row per ___" |
 | \`modelRole\` | No | Architecture role (see "Table roles" in {SKILL}) |
 | \`columns\` | No | Array of column definitions |
-| \`rationale\` | No | Design rationale object (omit if empty) |
+| \`rationale\` | No | The text fields: a map of camelCase keys (see "Fields in a YAML table" below; omit if empty) |
 | \`meta\` | No | Free-form metadata map (see "Metadata" below) |
 | \`relationships\` | No | Relationships leaving this model (it holds the foreign key), shared by every domain (see "Where relationships live") |
 
@@ -811,9 +888,25 @@ columns:
       classification: confidential
 \`\`\`
 
-<!-- dbt-only -->- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`. (Assistants may copy it from dbt by hand, only as the team's metadata list in {SKILL} says.)<!-- /dbt-only -->
-- The canvas shows it in the Detail panel and when the user hovers a model's name or a column; top-level text values can be edited in the panel, nested maps, lists, booleans and \`null\` are shown read-only.
-- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list, <!-- dbt-only -->values the user typed in, and values dbt no longer records<!-- /dbt-only --><!-- no-dbt -->and values the user typed in<!-- /no-dbt --> — and never move keys between the model and its columns. Never invent metadata.
+<!-- dbt-only -->- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`. (Assistants copy a field \`filled_by: dbt\` from dbt by hand, only as "Fields" in {SKILL} says.)<!-- /dbt-only -->
+- The canvas shows each entry in the Detail panel's fields (a field on \`fields.yml\`'s list under its label, any other under "Not in your list") and when the user hovers a model's name or a column; top-level text values can be edited in the panel, \`true\` / \`false\` of a yes-no field too, and other nested maps, lists, booleans and \`null\` are shown read-only.
+- **Keep the kind of value**: \`true\` / \`false\` stay unquoted and a list stays a list. Numbers may be written quoted or not (ERD Studio reads \`24\` and \`"24"\` the same), but keep the quotes when leaving them off would change the digits (\`"1.10"\`, \`"007"\`).
+- **Keep every existing entry** when you edit a model file — including keys that are not on \`fields.yml\`'s list, <!-- dbt-only -->values the user typed in, and values dbt no longer records<!-- /dbt-only --><!-- no-dbt -->and values the user typed in<!-- /no-dbt --> — and never move keys between the model and its columns. Never invent metadata.
+
+### Fields in a YAML table
+
+The fields \`fields.yml\` lists ("Fields" in {SKILL}; the file's format is "fields.yml" in {DBML}) keep their YAML homes:
+
+| Field | In a YAML model file |
+|---|---|
+| \`grain\`, \`role\` | \`grain\`, \`modelRole\` (\`tableRole\` in the v6 naming) |
+| \`natural_key\`, \`scd_type\`, \`additive_type\` | the column's \`isNaturalKey: true\`, \`scdType\`, \`additiveType\` |
+| the text built-ins | a key of the model's \`rationale:\` map, in camelCase: \`purpose\`, \`decisions\`, \`openQuestions\`, \`scdStrategy\`, \`measures\`, \`sourceOfTruth\`, \`freshness\`, \`knownIssues\`, \`retention\`; the retired \`design\`, \`grainChoice\`, \`roleChoice\` are still read |
+| \`business_rule\` and the team's own fields | a key of the \`meta:\` map (on the model, or on the column for a column field), named as \`fields.yml\` names it: \`owner: crm-team\`, a yes-no as \`pii: true\` |
+
+Write a camelCase key in \`rationale:\` (\`openQuestions\`, never \`open_questions\`): any other key there is kept but not read as a field. A retired key stays where it is until the user agrees to move its text into \`decisions\`.
+
+**Older ERD Studio versions.** A teammate on a version before 2.0 sees only the six keys of the first release (\`purpose\`, \`design\`, \`grainChoice\`, \`roleChoice\`, \`scdStrategy\`, \`measures\`). When their editor clears the last of those six on a table, it removes the whole \`rationale:\` map, the newer keys (\`decisions\`, \`openQuestions\`, …) with it. The first time you write a newer key in a YAML project, tell the user in one line that teammates should update ERD Studio before editing those tables' fields.
 
 ## Columns
 
@@ -1041,9 +1134,9 @@ Write each change in the format of the file it touches (the schema skill's "What
 
 | Action | What to do (DBML) |
 |--------|-----------|
-| \`add-to-logical\` | Add a \`use { table <schema>.<name> } from '…'\` line for the table to the diagram (and a \`use * from '…'\` line for every relationships file holding a Ref between it and another table of the diagram, when the diagram lacks it), and create the table file at \`logicalModelPath\` from manifest data unless a file for that name already exists in any folder. Copy the dbt \`meta\` keys the team's metadata list names, reading them from the schema yml or \`erd-studio inventory\`, not from the manifest (the schema skill's "The team's metadata list") |
+| \`add-to-logical\` | Add a \`use { table <schema>.<name> } from '…'\` line for the table to the diagram (and a \`use * from '…'\` line for every relationships file holding a Ref between it and another table of the diagram, when the diagram lacks it), and create the table file at \`logicalModelPath\` from manifest data unless a file for that name already exists in any folder. Copy the fields \`fields.yml\` marks \`filled_by: dbt\` (never a \`left_out\` key), reading them from the schema yml or \`erd-studio inventory\`, not from the manifest (the schema skill's "Fields") |
 | \`remove-from-logical\` | Delete the table's \`use\` line from the diagram and its line in the diagram's \`erd_layout\`, and any \`use *\` line only it needed. The table file and its Refs stay |
-| \`add-column-to-logical\` | Add a column line to the Table block in \`logicalModelPath\` (\`name TYPE [note: '…']\`), with the dbt column \`meta\` keys the team's metadata list names. When there is no file at \`logicalModelPath\` yet (a table the diagram lists with no table file: its \`use\` line points there), create it first as \`Table <schema>.<name> {\` … \`}\`, the schema its folder (\`<layer>/tables/<schema>/\`), and add every column the plan has for it |
+| \`add-column-to-logical\` | Add a column line to the Table block in \`logicalModelPath\` (\`name TYPE [note: '…']\`), with the column fields \`fields.yml\` marks \`filled_by: dbt\` (never a \`left_out\` key) from the dbt column's \`meta\`. When there is no file at \`logicalModelPath\` yet (a table the diagram lists with no table file: its \`use\` line points there), create it first as \`Table <schema>.<name> {\` … \`}\`, the schema its folder (\`<layer>/tables/<schema>/\`), and add every column the plan has for it |
 | \`remove-column-from-logical\` | Delete the column's line from \`logicalModelPath\`, and every Ref in a relationships file that names it (a later \`remove-relationship-from-logical\` entry for one of those Refs then has nothing left to do) |
 | \`update-type-in-logical\` | Change the column's type in \`logicalModelPath\` to \`resolvedDataType\` (double-quoted when it is not a plain identifier: \`"DECIMAL(18,2)"\`) |
 | \`add-relationship-to-logical\` | When the entry has \`storedIn\`, the Ref is already there: leave it, and add a \`use * from '…'\` line for \`storedIn\` to the diagram (that missing import is why it is not drawn). Otherwise add one Ref line, for the cardinality to write, to \`relationshipsPath\` of the many-side (FK) table (none: see Key fields) — \`Ref: s.fk_table.fk_col >? s.pk_table.pk_col\` for many-to-one, \`Ref: s.pk_table.pk_col ?- s.fk_table.fk_col\` for one-to-one, \`<>?\` for many-to-many, each end spelled as its table declares itself — plus a \`use { table s.x }\` line there for each table it names that the file does not import, and a \`use * from '…'\` line for that file in every diagram that shows both tables and lacks it. A \`one-to-many\` is written from the other end as \`>?\` |
@@ -1054,9 +1147,9 @@ Write each change in the format of the file it touches (the schema skill's "What
 
 | Action | What to do (YAML / JSON) |
 |--------|-----------|
-| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create the model file from manifest data at \`logicalModelPath\` — \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) when the project uses layer folders, else \`logical-models/{name}.yml\` — unless a file for that name already exists in any folder. Copy the dbt \`meta\` keys the team's metadata list names, as above |
+| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create the model file from manifest data at \`logicalModelPath\` — \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) when the project uses layer folders, else \`logical-models/{name}.yml\` — unless a file for that name already exists in any folder. Copy the fields \`fields.yml\` marks \`filled_by: dbt\` (never a \`left_out\` key), as above |
 | \`remove-from-logical\` | Remove model name from domain JSON \`logical.models[]\` + remove related relationships from \`logical.relationships[]\` |
-| \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the dbt column \`meta\` keys the team's metadata list names; when there is no file there yet, create it (\`name: <model>\` and \`columns:\`) first |
+| \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the column fields \`fields.yml\` marks \`filled_by: dbt\` (never a \`left_out\` key) from the dbt column's \`meta\`; when there is no file there yet, create it (\`name: <model>\` and \`columns:\`) first |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
 | \`update-type-in-logical\` | Update column \`dataType\` in the model's yml (\`logicalModelPath\`) to the value in \`resolvedDataType\` |
 | \`add-relationship-to-logical\` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action, with the cardinality to write) where the project keeps relationships — the many-side (FK) model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` (see "Where relationships live"). A \`one-to-many\` is written with its ends swapped as \`many-to-one\`, in the other model's file |
@@ -1247,7 +1340,7 @@ function generateGeminiStyleguide(dbt: boolean): string {
 
 ### ERD Studio DBML files (\`.erd-studio/**/*.dbml\`)
 
-1. **Custom values are quoted strings**, even \`'true'\` and numbers (\`natural_key: 'true'\`, \`scd_type: '2'\`, \`erd_schema_version: '7'\`): an unquoted value breaks DBML 9 and 10 tools
+1. **Custom values are quoted strings**, even \`'true'\` and numbers (\`natural_key: 'true'\`, \`scd_type: '2'\`, \`erd_schema_version: '7'\`): an unquoted value breaks DBML 9 and 10 tools. A field is one bare \`<key>: '<value>'\` setting named as \`fields.yml\` names it, never a second copy beside an old \`rationale_<key>\` or \`meta_<key>\` spelling
 2. **One Table per table file**, at \`<layer>/tables/<schema>/<name>.dbml\` and declared \`Table <schema>.<name>\` as the folder and file spell it (no \`[schema: '…']\` setting), with no \`use\`, \`Ref\` or inline \`[ref: …]\`
 3. **Relationships** are \`Ref\` lines in \`<layer>/relationships/*.dbml\` files, ends qualified as the tables declare themselves: \`>?\` many-to-one with the FK end first, \`?-\` one-to-one with the key end first, \`<>?\` many-to-many; never \`<\`; one Ref per pair of column sets across all files; an existing Ref is never moved to another file
 4. **\`use\` lines**: a relationships file imports every table its Refs name; a diagram imports its tables (\`use { table s.x } from '…'\`, paths relative to the diagram) and exactly the relationships files holding a Ref between two of its tables (\`use * from '…'\`)

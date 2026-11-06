@@ -1,4 +1,4 @@
-Table core_banking.core_account [meta_owner: 'data-engineering'] {
+Table core_banking.core_account [owner: 'data-engineering'] {
   Note: 'Accounts as the core banking system sends them.'
 
   account_no   STRING    [pk, natural_key: 'true']

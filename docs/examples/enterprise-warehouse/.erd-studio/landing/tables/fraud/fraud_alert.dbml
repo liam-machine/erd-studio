@@ -1,4 +1,4 @@
-Table fraud.fraud_alert [meta_owner: 'data-engineering'] {
+Table fraud.fraud_alert [owner: 'data-engineering'] {
   Note: 'Alerts the fraud system raised on card transactions.'
 
   alert_id    STRING    [pk, natural_key: 'true']

@@ -20,7 +20,7 @@
  * shows it (with no warning: a staging table often is not drawn). With
  * `erdStudio.sidebar.rowDetails` set to `full` (`rowDetails.ts`) it also says
  * which diagrams use it ("on 2 diagrams") and its owner (its `owner` meta
- * entry, `meta_owner` in DBML), and layer and schema rows their counts;
+ * entry: `owner:` in YAML and DBML, or an older `meta_owner`), and layer and schema rows their counts;
  * compact, those are in the hover only. When the repository has a
  * CODEOWNERS file, the tooltip names who reviews a change to the table's
  * file. A file whose name is already taken by a file earlier in the lookup
@@ -169,8 +169,8 @@ function shownPath(semanticRoot: string, filePath: string): string {
 }
 
 /**
- * A table's owner, as its meta says it (`owner:` in YAML, `meta_owner` in
- * DBML): a short text, else nothing. Shown in the sidebar only, never sent anywhere.
+ * A table's owner, as its meta says it (`owner:` in YAML and DBML, or an
+ * older `meta_owner` / `meta_json` entry): a short text, else nothing. Shown in the sidebar only, never sent anywhere.
  */
 export function tableOwnerOf(table: { readonly meta?: Readonly<Record<string, unknown>> } | null | undefined): string | undefined {
   const owner = table?.meta?.owner;

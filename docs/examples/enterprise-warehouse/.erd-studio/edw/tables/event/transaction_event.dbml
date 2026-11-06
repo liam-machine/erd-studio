@@ -1,6 +1,6 @@
 Table event.transaction_event [
   grain: 'One row per posted transaction or card authorisation',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'Money moving on an account, from core banking and the card platform.'
 

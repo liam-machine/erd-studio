@@ -1,5 +1,5 @@
 // A computed satellite: a business rule's output, hung off the raw vault's hub (another layer).
-Table business_vault.sat_customer_risk_score [meta_vault_type: 'computed-satellite'] {
+Table business_vault.sat_customer_risk_score [vault_type: 'computed-satellite'] {
   Note: 'The underwriting risk score of each customer, with history.'
 
   customer_hk   BINARY    [foreign_key: 'true']
