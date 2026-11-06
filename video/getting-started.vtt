@@ -1,61 +1,133 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:03.723
-Your dbt project, as a diagram, in about a minute.
+00:00:00.350 --> 00:00:04.930
+Your data model as a diagram, saved as DBML files in your repo.
 
 2
-00:00:03.773 --> 00:00:06.260
-No AI, and nothing to configure.
+00:00:04.980 --> 00:00:07.546
+Edit it by hand, or with your AI assistant,
 
 3
-00:00:06.710 --> 00:00:10.630
-Install ERD Studio, and open your dbt project.
+00:00:07.596 --> 00:00:10.562
+through a built-in skill it uses by itself.
 
 4
-00:00:10.680 --> 00:00:12.994
-The Get started guide opens by itself.
+00:00:11.012 --> 00:00:17.176
+Most teams already have one, in Snowflake, Databricks, dbt, Power BI, Fabric or SQL.
 
 5
-00:00:13.444 --> 00:00:17.184
-Click Draw from dbt, and pick a folder, like your marts.
+00:00:17.226 --> 00:00:19.592
+Open your project, and click Import.
 
 6
-00:00:19.244 --> 00:00:24.162
-It reads your models and their relationship tests, and lays out the diagram for you.
+00:00:20.212 --> 00:00:25.277
+Import reads DBML, SQL scripts, or a Power BI or Fabric model.
 
 7
-00:00:25.244 --> 00:00:26.957
-That's your Logical design.
+00:00:25.327 --> 00:00:30.816
+From Snowflake or Databricks, import the exported DDL. It works out the dialect.
 
 8
-00:00:27.007 --> 00:00:29.435
-Click a table to see its columns and keys.
+00:00:31.266 --> 00:00:34.076
+You get a draft of every table and relationship.
 
 9
-00:00:29.485 --> 00:00:33.211
-It's saved as plain files in your repo, next to your SQL.
+00:00:34.626 --> 00:00:36.578
+Keep it, and it's your diagram.
 
 10
-00:00:33.661 --> 00:00:36.968
-Switch to Physical to see what dbt actually built.
+00:00:37.266 --> 00:00:42.804
+Each table is now a DBML file, an open format, next to the code that builds it.
 
 11
-00:00:37.018 --> 00:00:40.424
-Diff compares the two, and flags anywhere they disagree.
+00:00:42.854 --> 00:00:45.807
+Change it, and Git shows exactly what changed.
 
 12
-00:00:40.874 --> 00:00:43.726
-Want grain, keys and the why behind each table?
+00:00:46.542 --> 00:00:48.256
+Edit it by hand, on the canvas.
 
 13
-00:00:43.776 --> 00:00:49.193
-Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
+00:00:48.306 --> 00:00:51.985
+Add a table, with starter columns if you like, and lay it out.
 
 14
-00:00:50.174 --> 00:00:53.673
-No dbt project? Try the sample project.
+00:00:52.035 --> 00:00:54.103
+Every edit is saved to its file.
 
 15
-00:00:55.074 --> 00:01:00.120
-ERD Studio is free. Install it, and draw your dbt project today.
+00:00:54.553 --> 00:00:58.184
+Or ask your AI assistant. Click Set Up My AI Helper.
+
+16
+00:00:58.234 --> 00:01:03.749
+It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
+
+17
+00:01:04.199 --> 00:01:07.191
+Ask Claude Code for a change, in plain words.
+
+18
+00:01:07.341 --> 00:01:09.777
+It loads the ERD Studio skill by itself,
+
+19
+00:01:09.827 --> 00:01:13.395
+and a pre-tool hook makes sure it has, before any edit,
+
+20
+00:01:13.445 --> 00:01:16.743
+so what it writes is a diagram you can see, right away.
+
+21
+00:01:19.699 --> 00:01:24.421
+Here's the change: a new table file, and the line that links it to the orders table.
+
+22
+00:01:24.471 --> 00:01:27.432
+On the canvas, the new table and its relationship.
+
+23
+00:01:29.299 --> 00:01:33.463
+The design change goes in the same pull request as the code that builds it,
+
+24
+00:01:33.513 --> 00:01:35.661
+so your team reviews both together.
+
+25
+00:01:37.899 --> 00:01:42.820
+Using dbt? Import from dbt turns your models into a diagram.
+
+26
+00:01:42.870 --> 00:01:46.269
+To check your design against them, click Run dbt parse.
+
+27
+00:01:46.319 --> 00:01:51.231
+It writes manifest.json, a description of every model your project builds.
+
+28
+00:01:51.281 --> 00:01:54.810
+The Physical tab shows what it describes, as a diagram.
+
+29
+00:01:55.660 --> 00:01:58.989
+Compare with dbt marks every difference from your design.
+
+30
+00:01:59.439 --> 00:02:05.090
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+31
+00:02:05.140 --> 00:02:08.344
+ERD Studio for Confluence reads them from GitHub,
+
+32
+00:02:08.394 --> 00:02:11.400
+and shows the diagram to business users.
+
+33
+00:02:12.739 --> 00:02:15.898
+ERD Studio is free to use in VS Code.

@@ -166,6 +166,13 @@ def from_supplied(src: pathlib.Path, total: float) -> None:
 def main() -> None:
     tl = json.loads((BUILD / 'timeline.json').read_text())
     total = tl['total']
+    if tl.get('music', True) is False:
+        # A voice-only cut (`music: false` in its script, e.g. the README cut): no bed at all.
+        # A stale track from an earlier render is removed so encode.sh cannot pick it up.
+        for stale in ('music.wav', 'music_raw.wav', 'music.raw.wav', 'mix.wav'):
+            (BUILD / stale).unlink(missing_ok=True)
+        print(f'music: none ({VARIANT} is voice only)')
+        return
     supplied = next((p for p in SUPPLIED if p.exists()), None)
     generator = HERE / 'music' / 'synth_music.py'
     if not supplied and generator.exists():

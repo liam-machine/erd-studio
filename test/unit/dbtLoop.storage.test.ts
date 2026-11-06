@@ -13,7 +13,7 @@
  * - Sync: `.sync-plan.json`, with every path naming a real file (or, for a
  *   new table, the diagram's layer) in the storage's own layout;
  * - Add Tables from dbt on the logical stage;
- * - Draw from dbt with the real draft, and the diagram it writes opens and draws;
+ * - Import from dbt with the real draft, and the diagram it writes opens and draws;
  * - `selectors.yml`: the same `domain_*` selectors, user selectors kept.
  */
 
@@ -343,7 +343,7 @@ describe.each([
     run().added = buildLogicalDisplaySubjectArea(SubjectAreaService.toLogicalStage(unified), unified.viewConfig, unified.stubColumns);
   });
 
-  it('Draw from dbt writes a diagram and its tables in this storage, and the diagram opens and draws', async () => {
+  it('Import from dbt writes a diagram and its tables in this storage, and the diagram opens and draws', async () => {
     const s = services(root);
     const before = new Set(Object.keys(snapshot(root)));
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('drawn' as never);
@@ -396,7 +396,7 @@ describe.each([
     run().drawnFiles = created;
   });
 
-  it('Draw from dbt puts a table new to the library in the chosen layer', async () => {
+  it('Import from dbt puts a table new to the library in the chosen layer', async () => {
     const s = services(root);
     const before = new Set(Object.keys(snapshot(root)));
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('drawn_new' as never);
@@ -498,7 +498,7 @@ describe.each([
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  it('Draw from dbt seeds the catalog-only column, the Physical tab shows the same columns, and diff is clean', async () => {
+  it('Import from dbt seeds the catalog-only column, the Physical tab shows the same columns, and diff is clean', async () => {
     const s = services(root);
     expect(s.tableLibraryService.tableExists('stg_raw_payments')).toBe(false);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('payments' as never);
@@ -554,7 +554,7 @@ describe.each([
     expect(diff.domains[0].clean).toBe(true);
   });
 
-  it('Add Existing Model seeds the same columns as Draw from dbt, and Compare matches every one', async () => {
+  it('Add Existing Model seeds the same columns as Import from dbt, and Compare matches every one', async () => {
     // A fresh copy, so the table is new to the library and Add Existing seeds it from dbt.
     const fresh = copyFixture(fixture);
     try {
@@ -619,7 +619,7 @@ describe('the two storages agree at every step of the dbt loop', () => {
     expect(same(withoutStorageFields(dbml.added), ['stg_raw_payments'])).toEqual(same(withoutStorageFields(yaml.added), ['stg_raw_payments']));
   });
 
-  it('Draw from dbt draws the same diagram', () => {
+  it('Import from dbt draws the same diagram', () => {
     const [yaml, dbml] = both();
     expect(same(withoutStorageFields(dbml.drawn), ['stg_raw_payments'])).toEqual(same(withoutStorageFields(yaml.drawn), ['stg_raw_payments']));
   });

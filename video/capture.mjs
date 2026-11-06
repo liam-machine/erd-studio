@@ -9,6 +9,7 @@
 //   node capture.mjs --scale 0.6667      render at 1280x720 (layout identical, deviceScaleFactor)
 //   node capture.mjs --stills 3.2,41     just write PNG stills of those times to build/stills/
 //   VARIANT=logical node capture.mjs     the cut for a folder without dbt: build-logical/ in and out
+//   (a recorded cut, timeline.recording, writes build/chrome.mkv instead; npm run composite adds the footage)
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -96,10 +97,13 @@ if (STILLS) {
   await Promise.all(ranges.map(([a, b], j) => renderRange(a, b, files[j])));
   const list = join(parts, 'list.txt');
   writeFileSync(list, files.map((f) => `file '${f}'`).join('\n'));
-  await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', join(BUILD, 'master.mkv')], { stdio: 'inherit' })
+  // A recorded cut renders only its frame here (headline, chapter bar, the window's bezel, the end
+  // card) to chrome.mkv; record/composite.mjs lays the footage into it and writes master.mkv.
+  const OUT = timeline.recording ? 'chrome.mkv' : 'master.mkv';
+  await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', join(BUILD, OUT)], { stdio: 'inherit' })
     .on('close', (c) => (c === 0 ? res() : rej(new Error('concat failed')))));
   const secs = (performance.now() - t0) / 1000;
-  console.log(JSON.stringify({ frames: N, fps: FPS, jobs: ranges.length, draft: DRAFT, scale: SCALE, secs: +secs.toFixed(1), capFps: +(N / secs).toFixed(1) }));
+  console.log(JSON.stringify({ out: OUT, frames: N, fps: FPS, jobs: ranges.length, draft: DRAFT, scale: SCALE, secs: +secs.toFixed(1), capFps: +(N / secs).toFixed(1) }));
 }
 await browser.close();
 server.close();

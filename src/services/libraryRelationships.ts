@@ -745,7 +745,7 @@ export function diagramsStillDrawing(keys: readonly RelationshipEnds[], domains:
 }
 
 /**
- * Send relationships a canvas or Draw from dbt would add to a domain file to
+ * Send relationships a canvas or Import from dbt would add to a domain file to
  * their from-models instead. `newModels` are models about to be created (they
  * take their relationships directly); any other from-model is looked up with
  * `libraryModel`, which must return a copy the caller may change. A
@@ -793,7 +793,7 @@ export function routeToLibrary(
 /**
  * The sentence for relationships a DBML diagram cannot store (D5): `routeToLibrary`
  * kept them because their many-side table's file could not be read. Undefined
- * when there are none. Shared by the canvas and Draw from dbt.
+ * when there are none. Shared by the canvas and Import from dbt.
  */
 export function describeUnstoredRelationships(kept: readonly Relationship[]): string | undefined {
   if (kept.length === 0) return undefined;

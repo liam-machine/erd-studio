@@ -4,7 +4,7 @@ Your data model probably exists already: as tables in Databricks or Snowflake, a
 
 The same steps are inside ERD Studio: run **ERD Studio: Bring In Your Data Model…**, or choose it under **More ways to start…** on the walkthrough or the empty **Diagrams** view. Each card there has a **Copy** button for its command and a button that runs the right import, with the source already chosen.
 
-Every import works the same way once you have the files: you pick the files (or a folder), a layer and a name, and ERD Studio shows what it will create before anything is written. **Review All…** lists every table, relationship and anything it left out. Nothing leaves your machine.
+Every import works the same way once you have the files: you pick the files (or a folder), a layer and a name, and ERD Studio shows what it will create before anything is written. **Review All…** lists every table, relationship and anything it left out: from SQL scripts, anything that is not a table (views, indexes, grants and the like) is listed as not imported. Nothing leaves your machine.
 
 - [Databricks (Unity Catalog)](#databricks-unity-catalog)
 - [Snowflake](#snowflake)
@@ -114,7 +114,7 @@ erwin Data Modeler, ER/Studio, DbSchema, DBeaver, DataGrip, Visual Paradigm and 
 
 ## dbt
 
-dbt is optional. If your folder is a dbt project, **Draw from dbt** copies your dbt models and their relationship tests into a diagram, with no export step: see [Using ERD Studio with dbt](dbt.md).
+dbt is optional. If your folder is a dbt project, **Import from dbt** copies your dbt models and their relationship tests into a diagram, with no export step: see [Using ERD Studio with dbt](dbt.md).
 
 ## Not yet
 

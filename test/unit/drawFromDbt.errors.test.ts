@@ -1,5 +1,5 @@
 /**
- * What Draw from dbt says when it cannot draw (#189): plain words, whose
+ * What Import from dbt says when it cannot draw (#189): plain words, whose
  * problem it is, and a button for the next step — never a raw exception or
  * an absolute path. A failure that is ERD Studio's offers Send Feedback with
  * the exception, redacted; Try Again and Choose Another Name keep the
@@ -47,9 +47,9 @@ import { telemetry } from '../../src/services/telemetryService';
 
 const FCT_ORDER = ['name: fct_order', 'columns:', '  - name: customer_key', '    dataType: string', ''].join('\n');
 const OURS_READING =
-  "Draw from dbt hit a problem in ERD Studio while reading your Table Library, so nothing was changed. This isn't something you did. Please send us a report.";
+  "Import from dbt hit a problem in ERD Studio while reading your Table Library, so nothing was changed. This isn't something you did. Please send us a report.";
 const OURS_SAVING =
-  "Draw from dbt hit a problem in ERD Studio while saving the diagram, so nothing was changed. This isn't something you did. Please send us a report.";
+  "Import from dbt hit a problem in ERD Studio while saving the diagram, so nothing was changed. This isn't something you did. Please send us a report.";
 
 let tmp: string;
 let lms: TableLibraryService;
@@ -112,7 +112,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('Draw from dbt — a failure that is ERD Studio\'s', () => {
+describe('Import from dbt — a failure that is ERD Studio\'s', () => {
   it('reading the library: says so without the raw error, offers Send Feedback (redacted) and Try Again', async () => {
     shown.mockResolvedValueOnce('Send Feedback' as never);
     const d = deps();
@@ -157,7 +157,7 @@ describe('Draw from dbt — a failure that is ERD Studio\'s', () => {
 
     await vi.waitFor(() => expect(toasts()).toHaveLength(2));
     expect(toasts()[1]).toEqual({
-      message: "Draw from dbt hit a problem in ERD Studio while running Try Again, so nothing was changed. This isn't something you did. Please send us a report.",
+      message: "Import from dbt hit a problem in ERD Studio while running Try Again, so nothing was changed. This isn't something you did. Please send us a report.",
       buttons: ['Send Feedback'],
     });
   });
@@ -203,7 +203,7 @@ describe('Draw from dbt — a failure that is ERD Studio\'s', () => {
   });
 });
 
-describe('Draw from dbt — a write the environment refused', () => {
+describe('Import from dbt — a write the environment refused', () => {
   it('EACCES: names the folder project-relative, offers Try Again, and counts drawWriteFailed', async () => {
     const error = vi.spyOn(telemetry, 'error');
     vi.spyOn(lms, 'saveTable').mockImplementation(() => {
@@ -213,7 +213,7 @@ describe('Draw from dbt — a write the environment refused', () => {
     await drawFromDbt(deps());
 
     expect(toasts()).toEqual([{
-      message: "Draw from dbt couldn't save the diagram: ERD Studio isn't allowed to write to .erd-studio/logical-models/. " +
+      message: "Import from dbt couldn't save the diagram: ERD Studio isn't allowed to write to .erd-studio/logical-models/. " +
         "Check the folder's permissions, then try again. Nothing was changed.",
       buttons: [TRY_AGAIN_BUTTON],
     }]);
@@ -227,7 +227,7 @@ describe('Draw from dbt — a write the environment refused', () => {
     await drawFromDbt(deps());
 
     expect(toasts()).toEqual([{
-      message: "Draw from dbt couldn't save the diagram: the disk is full. Free up some space, then try again. Nothing was changed.",
+      message: "Import from dbt couldn't save the diagram: the disk is full. Free up some space, then try again. Nothing was changed.",
       buttons: [TRY_AGAIN_BUTTON],
     }]);
   });
@@ -251,7 +251,7 @@ describe('Draw from dbt — a write the environment refused', () => {
   });
 });
 
-describe('Draw from dbt — a refusal over the user\'s file', () => {
+describe('Import from dbt — a refusal over the user\'s file', () => {
   it('keeps the refusal\'s words and opens the file at its line', async () => {
     shown.mockResolvedValueOnce(OPEN_FILE_BUTTON as never);
     const show = vi.spyOn(vscode.window, 'showTextDocument');
@@ -262,7 +262,7 @@ describe('Draw from dbt — a refusal over the user\'s file', () => {
     await drawFromDbt(deps());
 
     expect(toasts()).toEqual([{
-      message: 'Draw from dbt: fct_order.yml, line 2: "columns" is written twice in one block. Nothing was changed.',
+      message: 'Import from dbt: fct_order.yml, line 2: "columns" is written twice in one block. Nothing was changed.',
       buttons: [OPEN_FILE_BUTTON],
     }]);
     await vi.waitFor(() => expect(show).toHaveBeenCalled());
@@ -277,13 +277,13 @@ describe('Draw from dbt — a refusal over the user\'s file', () => {
     await drawFromDbt(deps());
 
     expect(toasts()).toEqual([{
-      message: 'Draw from dbt: logical-models/fct_order.yml holds both "modelRole" and "tableRole". Nothing was changed.',
+      message: 'Import from dbt: logical-models/fct_order.yml holds both "modelRole" and "tableRole". Nothing was changed.',
       buttons: [OPEN_FILE_BUTTON],
     }]);
   });
 });
 
-describe('Draw from dbt — the next step as a button', () => {
+describe('Import from dbt — the next step as a button', () => {
   it('no layers: Add Layer runs erdStudio.addLayer', async () => {
     shown.mockResolvedValueOnce(ADD_LAYER_BUTTON as never);
     const d = deps();
@@ -305,7 +305,7 @@ describe('Draw from dbt — the next step as a button', () => {
     await drawFromDbt(deps());
 
     expect(toasts()).toEqual([{
-      message: 'Draw from dbt: logical-models/fct_order.yml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
+      message: 'Import from dbt: logical-models/fct_order.yml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
       buttons: [SHOW_FILE_BUTTON],
     }]);
     await vi.waitFor(() => expect(show).toHaveBeenCalled());

@@ -1,5 +1,5 @@
 /**
- * **Draw from dbt…** (`erdStudio.drawFromDbt`) — the no-AI route to a first
+ * **Import from dbt…** (`erdStudio.drawFromDbt`) — the no-AI route to a first
  * diagram. It reads the dbt project's schema yml and manifest, asks which
  * models to draw (a folder, a connected cluster or a hand-picked list), and
  * writes a LOGICAL draft: one `logical-models/*.yml` per model the library
@@ -84,7 +84,7 @@ import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerW
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
-const TITLE = 'Draw from dbt';
+const TITLE = 'Import from dbt';
 
 /**
  * Shown when no model has columns to draw. `listDraftModels` takes a model's
@@ -95,7 +95,7 @@ const TITLE = 'Draw from dbt';
  * model with no declared columns drawable.
  */
 export const NO_DBT_MODELS_MESSAGE =
-  'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +
+  'No dbt models with columns found. Import from dbt reads the columns listed in your schema .yml files — ' +
   'add columns: to your models there, then try again.';
 
 
@@ -124,7 +124,7 @@ export interface DrawFromDbtDeps {
   draft?: DbtDraftOptions;
 }
 
-/** How Draw from dbt shows its draft (`docs/dev/draft-first.md` §5.2). */
+/** How Import from dbt shows its draft (`docs/dev/draft-first.md` §5.2). */
 export interface DbtDraftOptions {
   preview: DraftPreview;
   /** What opened it. `changeOptions`: the picker, layer pick and name box run as before, then the draft. */

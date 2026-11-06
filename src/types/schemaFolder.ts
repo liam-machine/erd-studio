@@ -8,7 +8,7 @@ import { isLibraryFolderName } from '@erd-studio/core';
 
 /**
  * Whether a schema can be a NEW schema folder, the one check every writer
- * shares (Import, Draw from dbt and Add from dbt through the library write
+ * shares (Import, Import from dbt and Add from dbt through the library write
  * planner, Convert, and New Table): a library folder name with no dbt Jinja
  * (`{{ target.schema }}`, `{% … %}`, `{# … #}`, which a schema yml read
  * without a manifest leaves unrendered), no character Windows refuses in a

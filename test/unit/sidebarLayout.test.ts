@@ -60,7 +60,7 @@ describe('sidebar views', () => {
     ]);
     expect(titles.filter((m) => m.when?.startsWith('view == erdStudio.domainTree') && m.group?.startsWith('navigation')))
       .toEqual([{ submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0' }]);
-    // With no folder open, the + menu is gone and the one icon is ▶ (Watch the One-Minute Tour): the
+    // With no folder open, the + menu is gone and the one icon is ▶ (Watch the Tour): the
     // Welcome tab one click away (onboarding story 09). In a project, Help & Feedback has that row.
     expect(contributes.menus['view/title'].filter(emptyWindowOnly)).toEqual([
       { command: 'erdStudio.showGettingStarted', when: 'view == erdStudio.domainTree && !erdStudio.hasProject', group: 'navigation@0' },
@@ -159,7 +159,7 @@ describe('HelpTreeProvider', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Watch the One-Minute Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
     for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);

@@ -6612,7 +6612,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         // Seed the logical model from yml (primary) or the manifest (fallback)
-        // when it is not in the library yet — the same seeding Draw from dbt
+        // when it is not in the library yet — the same seeding Import from dbt
         // uses (`seedTableFromDbt`). The file is NOT written here — it rides
         // in the same WorkspaceEdit as the domain change below, so a rejected
         // edit leaves no orphan yml behind and one undo removes both.
@@ -6778,7 +6778,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * "Add models from dbt" — the empty canvas's primary action, a batch version
-   * of Add Existing Model. Asks which dbt models with the Draw from dbt picker
+   * of Add Existing Model. Asks which dbt models with the Import from dbt picker
    * (models already in the domain left out), seeds the ones the library lacks
    * from dbt's yml / manifest and adds names, relationships and new library
    * files in ONE `applySubjectAreaEdit` — one save, one refresh, one undo step.

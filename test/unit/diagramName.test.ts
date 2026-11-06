@@ -25,7 +25,7 @@ describe('a diagram name as people type it', () => {
       .toBe('There is already a diagram named "taken"');
   });
 
-  it('is the one rule every start uses: New Diagram, Import DBML (and the SQL and Power BI imports through it), Draw from dbt', () => {
+  it('is the one rule every start uses: New Diagram, Import DBML (and the SQL and Power BI imports through it), Import from dbt', () => {
     // Onboarding story 04 found New Diagram accepting "Orders" and the imports refusing "Sales".
     const src = (rel: string) => fs.readFileSync(path.join(__dirname, '../../src', rel), 'utf8');
     for (const file of ['extension.ts', 'commands/importDbml.ts', 'commands/drawFromDbt.ts']) {

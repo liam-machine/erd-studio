@@ -125,7 +125,7 @@ describe('trackedDraftPreview: the gate and the funnel', () => {
     expect(w.features).toEqual(['draftShown', 'draftShownAuto', 'draftSourceDbt', 'draftScopeChanged', 'draftDiscarded']);
   });
 
-  it('Keep: counted only when it wrote, once; the folder is marked started for an import or Draw from dbt, never for an example project', async () => {
+  it('Keep: counted only when it wrote, once; the folder is marked started for an import or Import from dbt, never for an example project', async () => {
     const w = wired(['keep']);
     const d = draft('sqlDdl', 'prompt', IMPORT_KEEP);
     const answer = await w.preview.ask(d);

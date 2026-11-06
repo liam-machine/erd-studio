@@ -1,7 +1,7 @@
 /**
- * The QuickPick flow that chooses what Draw from dbt draws: a scope (a dbt
+ * The QuickPick flow that chooses what Import from dbt draws: a scope (a dbt
  * folder or a connected cluster) or a hand-picked list, capped at
- * `DRAFT_MODEL_LIMIT`. Shared by the Draw from dbt command and the canvas's
+ * `DRAFT_MODEL_LIMIT`. Shared by the Import from dbt command and the canvas's
  * "add models from dbt" batch add. Only the UI lives here; the scopes and the
  * draft itself come from `src/services/dbtDraft.ts`.
  */
@@ -25,7 +25,7 @@ export interface PickDraftScopeOptions {
   excludeNames?: Iterable<string>;
   /** Defaults to `DRAFT_MODEL_LIMIT`. */
   limit?: number;
-  /** QuickPick title (e.g. "Draw from dbt"). */
+  /** QuickPick title (e.g. "Import from dbt"). */
   title?: string;
 }
 

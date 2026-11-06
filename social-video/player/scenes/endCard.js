@@ -4,7 +4,9 @@
 // cta:  the brand block eases up, a VS Code-style Extensions search types "ERD Studio" and the
 //       result row appears, then "Link in the comments" with a down chevron. All landed by cta+1.5.
 //       A cut can replace that line (`props.link: { text, chevron }`; the README cut says where
-//       else it is published and drops the chevron).
+//       else it is published and drops the chevron), the tagline (`props.tagline`) and the two
+//       pills (`props.pills`), and land each pill on a word of the name line (`props.pillWords`,
+//       timed by its share of the caption, as readme/story.js wordAt does).
 import { appear, appIcon, caret, easeInOut, ICON, lerp, seg, typed } from '../lib.js';
 
 const QUERY = 'ERD Studio';
@@ -16,7 +18,20 @@ export default {
     // Tagline: [plain, highlighted]. A cut can override it (script `props.tagline`).
     const [tagA, tagB] = scene?.props?.tagline ?? ['The logical model, ', 'in your repo.'];
     const link = { text: 'Link in the comments', chevron: true, ...scene?.props?.link };
+    // The two pills under the tagline. A cut can override them (script `props.pills`).
+    const [pillA, pillB] = scene?.props?.pills ?? ['Free VS Code extension', 'Source on GitHub'];
     const name = beats.name.t, cta = beats.cta.t;
+    // When each pill lands: on the cut's own words, or the pro cut's fixed offsets.
+    const nameLine = scene?.lines?.find((l) => l.beat === 'name');
+    const onWord = (word, fallback) => {
+      const i = nameLine?.caption?.indexOf(word) ?? -1;
+      if (!nameLine || i < 0) return fallback;
+      const w = (x) => x.length + (x.match(/[.?!]/g) ?? []).length * 6 + (x.match(/[,:;]/g) ?? []).length * 3;
+      return nameLine.t + ((nameLine.end - nameLine.t) * w(nameLine.caption.slice(0, i))) / w(nameLine.caption);
+    };
+    const [wordA, wordB] = scene?.props?.pillWords ?? [];
+    const pillAAt = wordA ? onWord(wordA, name + 2.2) : name + 2.2;
+    const pillBAt = wordB ? onWord(wordB, name + 3.1) : name + 3.1;
     // The brand block starts centred in the frame and eases up to make room for the CTA.
     const lift = easeInOut(seg(t, cta - 0.05, cta + 0.45));
     const dy = lerp(190, 0, lift);
@@ -36,8 +51,8 @@ export default {
     // "source" ≈ name+3.1). "Free" is attached to the VS Code extension on purpose: it is what is
     // free, and the pill says so without implying anything about the Confluence app.
     html += `<div class="abs" style="left:0;right:0;top:${g(560)}px;display:flex;justify-content:center;gap:16px">
-      ${pill('Free VS Code extension', name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('Source on GitHub', name + 3.1, { green: true, icon: ICON.check({ size: 24 }) })}</div>`;
+      ${pill(pillA, pillAAt, { green: true, icon: ICON.check({ size: 24 }) })}
+      ${pill(pillB, pillBAt, { green: true, icon: ICON.check({ size: 24 }) })}</div>`;
 
     // ---- CTA: Extensions search ----
     const cardAt = cta + 0.3;             // once the brand block has mostly lifted

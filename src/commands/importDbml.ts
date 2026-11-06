@@ -15,7 +15,7 @@
  * fake, a host without one) the dry run is the old modal, Import / Cancel.
  *
  * The mapping is the pure planner's (`planDbmlImport` in
- * `src/services/dbmlImport.ts`); the files are written the way Draw from dbt
+ * `src/services/dbmlImport.ts`); the files are written the way Import from dbt
  * writes a draft, through the shared `writeNewSubjectArea`: tables the Table
  * Library already has are used as they are and never overwritten, new table
  * files go in the folder the library groups by, the subject area file is
@@ -499,7 +499,7 @@ async function runImportDbml(
     return undefined;
   }
 
-  // 4. The plan. Decided before the first file lands, as Draw from dbt
+  // 4. The plan. Decided before the first file lands, as Import from dbt
   // decides it: the library folder new tables go in (a flat library stays
   // flat), and whether relationships go to the tables' files (#126). A file
   // it would change that is open with unsaved edits stops it here.

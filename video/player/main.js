@@ -3,28 +3,39 @@
 //
 // Persistent chrome (kicker, chapter bar) lives here; each scene module only returns the HTML
 // for its own content: `render(localT, ctx) -> string`, ctx = { beats, dur, t }.
-import { clamp, seg, easeOut, lerp, mix, ACCENT } from './lib.js';
+import { clamp, seg, easeOut, lerp, mix, ACCENT as DARK_ACCENT, ACCENT_LIGHT } from './lib.js';
 
 const params = new URLSearchParams(location.search);
-// ?variant=logical renders build-logical/ (script.logical.yaml); the default is the dbt cut in build/.
+// ?variant=logical renders build-logical/ (script.logical.yaml); the default cut (script.yaml, the
+// same tour with a short dbt beat before Confluence) is build/.
 const VARIANT = params.get('variant') ?? '';
 const BUILD = `/video/${VARIANT ? `build-${VARIANT}` : 'build'}`;
 const timeline = await (await fetch(`${BUILD}/timeline.json`, { cache: 'no-store' })).json();
 window.TIMELINE = timeline;
 
-// Scene modules come from the timeline itself (a cut's own scenes live in a sub-folder, e.g. logical/hook).
+// Scene modules come from the timeline itself (rec/window: the frame both cuts' recorded footage plays in;
+// tour/: their HTML scenes, Confluence and the end card).
 const MODULES = [...new Set(timeline.scenes.map((s) => s.module))];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
 );
 
 const $ = (id) => document.getElementById(id);
+// A recorded cut (script.yaml `recording`): a smaller headline and a lower chapter bar leave room
+// for the real VS Code window between them (style.css body.rec).
+if (timeline.recording) document.body.classList.add('rec');
+/** The headline's highlight colours: the light frame's for a recorded cut, else the dark frame's. */
+const ACCENT = timeline.recording ? ACCENT_LIGHT : DARK_ACCENT;
+/** Recorded scenes' footage runs on across scene changes: only the headline fades between them. */
+const isRec = (sc) => !!sc && sc.module.startsWith('rec/');
+/** The window stays put across these too: an HTML scene that draws a still of the footage's last frame where it was (props.still, the AI change; composite.mjs holdsWindow). */
+const holdsWindow = (sc) => isRec(sc) || !!sc?.props?.still;
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), chapters: $('chapters'), hud: $('hud') };
 
 // Chapter spans: first scene start -> last scene end, per chapter number.
 const spans = {};
-// Scenes after the last chaptered one (the sample-project scene, the end card) show every
-// chapter done; scenes before the first one (intro, two-ways) show none.
+// Scenes after the last chaptered one (the default cut's dbt beat, the end card) show every
+// chapter done; scenes before the first one (the hook) show none.
 const lastChaptered = timeline.scenes.findLastIndex((s) => s.chapter);
 for (const sc of timeline.scenes) {
   if (!sc.chapter) continue;
@@ -51,6 +62,11 @@ window.render = function render(t) {
   const pout = i === scs.length - 1 ? 0 : seg(lt, sc.dur - fade, sc.dur);
   const op = pin * (1 - pout);
   const rise = lerp(14, 0, pin);
+  // A recorded scene's window stays put next to another recorded scene, or a still of it
+  // (composite.mjs fades each run of footage only where it starts and ends, with these same fades,
+  // and cuts to a still with no fade).
+  const stageOp = !holdsWindow(sc) ? op : (holdsWindow(scs[i - 1]) ? 1 : pin) * (holdsWindow(scs[i + 1]) ? 1 : 1 - pout);
+  const stageRise = holdsWindow(sc) ? 0 : rise;
 
   // Accent (with an optional change on a beat, cross-faded over 0.4 s).
   let accent = ACCENT[sc.accent];
@@ -72,8 +88,8 @@ window.render = function render(t) {
 
   const html = scenesByName[sc.module].render(lt, { beats: sc.beats, dur: sc.dur, t, scene: sc });
   put('stage', els.stage, html);
-  els.stage.style.opacity = op.toFixed(3);
-  els.stage.style.transform = `translateY(${rise.toFixed(1)}px)`;
+  els.stage.style.opacity = stageOp.toFixed(3);
+  els.stage.style.transform = `translateY(${stageRise.toFixed(1)}px)`;
 
   // Chapter bar: done chapters full, the current one fills across its scenes, intro scenes show
   // none, outro scenes (after the last chapter) show all done.

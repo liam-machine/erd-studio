@@ -115,7 +115,7 @@ Using the fields in `telemetry.json`, compare this window against the baselines 
 - canvas opens;
 - first canvas (`firstCanvas`);
 - physical stage, compare and sync plan;
-- Draw from dbt, add from dbt, empty canvas;
+- Import from dbt, add from dbt, empty canvas;
 - AI-helper setup and harness installs;
 - getting-started video progress;
 - retention (`activeDays28`, `canvasDays28`);

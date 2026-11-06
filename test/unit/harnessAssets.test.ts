@@ -226,14 +226,14 @@ describe('harnessAssets', () => {
         expect(body()).toContain('**`run-catalog`** — full setup only');
       });
 
-      it('names the no-AI Draw from dbt command as it is contributed', () => {
-        expect(body()).toContain('**ERD Studio: Draw from dbt…**');
+      it('names the no-AI Import from dbt command as it is contributed', () => {
+        expect(body()).toContain('**ERD Studio: Import from dbt…**');
         const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
           contributes: { commands: { command: string; title: string; category?: string }[] };
         };
         const command = pkg.contributes.commands.find((c) => c.command === 'erdStudio.drawFromDbt');
         expect(command, 'erdStudio.drawFromDbt is contributed').toBeDefined();
-        expect(command!.title.startsWith('Draw from dbt')).toBe(true);
+        expect(command!.title.startsWith('Import from dbt')).toBe(true);
       });
 
       it('enriches an existing diagram with design fields only, never rebuilding it', () => {

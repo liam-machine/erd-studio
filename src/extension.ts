@@ -1163,7 +1163,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // "Watch the One-Minute Tour" works without a project too: the panel
+  // "Watch the Tour" works without a project too: the panel
   // asks for a folder. The project path fills in
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;
@@ -1472,7 +1472,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(workspaceRoot, semanticDir);
   // What the start screen suggests here (src/types/startActions.ts): Convert
-  // for a project from before 2.0, Draw from dbt in a dbt project, else what a
+  // for a project from before 2.0, Import from dbt in a dbt project, else what a
   // bounded look at the folder finds (a Power BI semantic model, CREATE TABLE scripts,
   // a DBML file) or a blank diagram. Looked up only when a start surface asks
   // (the empty Diagrams view, the Welcome panel, the walkthrough), never here.
@@ -2462,7 +2462,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => dbmlConversionGoesNowhere(context.workspaceState, workspaceRoot, semanticDir),
   );
 
-  // After Draw from dbt or Import DBML writes a new diagram and its tables.
+  // After Import from dbt or Import DBML writes a new diagram and its tables.
   // Every file was recorded as an own write, so the watchers stay quiet;
   // issue their refreshes here, as createDomain does.
   const refreshAfterNewSubjectArea = ({ domainPath, modelNames, changedModelNames }: {
@@ -2540,7 +2540,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // A folder with no ERD data yet (a plain folder, or a dbt project
     // never set up): New Diagram is the explicit action that makes the
-    // ERD folder, with the default layers.json first, as Draw from dbt and
+    // ERD folder, with the default layers.json first, as Import from dbt and
     // Import DBML do. Removed again if the diagram cannot be written, as is
     // a layer folder made for it.
     // (Its README.md too, in a DBML project: removed with the folder.)
@@ -3474,7 +3474,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         projectRoot: workspaceRoot,
         semanticRoot: fullSemanticDirPath,
       })),
-    // Draw from dbt (§5.2): the top-ranked models folder as a draft, with the
+    // Import from dbt (§5.2): the top-ranked models folder as a draft, with the
     // Folder switcher and Change options… (the picker). A start passes { draft }.
     vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async (arg?: unknown) => {
       if (!hasDbt) {

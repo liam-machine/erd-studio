@@ -1,49 +1,113 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:04.524
-Your data model, as a diagram, saved as plain files in your repo.
+00:00:00.350 --> 00:00:04.930
+Your data model as a diagram, saved as DBML files in your repo.
 
 2
-00:00:04.574 --> 00:00:07.061
-No AI, and nothing to configure.
+00:00:04.980 --> 00:00:07.546
+Edit it by hand, or with your AI assistant,
 
 3
-00:00:07.511 --> 00:00:12.035
-Install ERD Studio, and open the folder your data model lives in.
+00:00:07.596 --> 00:00:10.562
+through a built-in skill it uses by itself.
 
 4
-00:00:12.085 --> 00:00:14.399
-The Get started guide opens by itself.
+00:00:11.012 --> 00:00:16.627
+Most teams already have one, in Snowflake, Databricks, Power BI, Fabric or SQL.
 
 5
-00:00:14.849 --> 00:00:17.417
-Click New Diagram, and give it a name.
+00:00:17.226 --> 00:00:19.592
+Open your project, and click Import.
 
 6
-00:00:20.049 --> 00:00:22.684
-Add a table, with starter columns if you like.
+00:00:20.212 --> 00:00:25.277
+Import reads DBML, SQL scripts, or a Power BI or Fabric model.
 
 7
-00:00:22.734 --> 00:00:25.655
-Add another, then link the two with a relationship.
+00:00:25.327 --> 00:00:30.816
+From Snowflake or Databricks, import the exported DDL. It works out the dialect.
 
 8
-00:00:29.049 --> 00:00:34.667
-Each table is a plain DBML file in your repo, to commit and review like code.
+00:00:31.266 --> 00:00:34.076
+You get a draft of every table and relationship.
 
 9
-00:00:35.449 --> 00:00:39.543
-Already have DBML? Import it, and export back any time.
+00:00:34.626 --> 00:00:36.578
+Keep it, and it's your diagram.
 
 10
-00:00:40.649 --> 00:00:43.501
-Want grain, keys and the why behind each table?
+00:00:37.266 --> 00:00:42.804
+Each table is now a DBML file, an open format, next to the code that builds it.
 
 11
-00:00:43.551 --> 00:00:48.968
-Click Set Up My AI Helper, then type /erd-studio-setup in your assistant.
+00:00:42.854 --> 00:00:45.807
+Change it, and Git shows exactly what changed.
 
 12
-00:00:49.949 --> 00:00:54.523
-ERD Studio is free. Install it, and draw your data model today.
+00:00:46.542 --> 00:00:48.256
+Edit it by hand, on the canvas.
+
+13
+00:00:48.306 --> 00:00:51.985
+Add a table, with starter columns if you like, and lay it out.
+
+14
+00:00:52.035 --> 00:00:54.103
+Every edit is saved to its file.
+
+15
+00:00:54.553 --> 00:00:58.184
+Or ask your AI assistant. Click Set Up My AI Helper.
+
+16
+00:00:58.234 --> 00:01:03.749
+It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
+
+17
+00:01:04.199 --> 00:01:07.191
+Ask Claude Code for a change, in plain words.
+
+18
+00:01:07.341 --> 00:01:09.777
+It loads the ERD Studio skill by itself,
+
+19
+00:01:09.827 --> 00:01:13.395
+and a pre-tool hook makes sure it has, before any edit,
+
+20
+00:01:13.445 --> 00:01:16.743
+so what it writes is a diagram you can see, right away.
+
+21
+00:01:19.699 --> 00:01:24.421
+Here's the change: a new table file, and the line that links it to the orders table.
+
+22
+00:01:24.471 --> 00:01:27.432
+On the canvas, the new table and its relationship.
+
+23
+00:01:29.299 --> 00:01:33.463
+The design change goes in the same pull request as the code that builds it,
+
+24
+00:01:33.513 --> 00:01:35.661
+so your team reviews both together.
+
+25
+00:01:37.899 --> 00:01:43.550
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+26
+00:01:43.600 --> 00:01:46.804
+ERD Studio for Confluence reads them from GitHub,
+
+27
+00:01:46.854 --> 00:01:49.860
+and shows the diagram to business users.
+
+28
+00:01:51.199 --> 00:01:54.358
+ERD Studio is free to use in VS Code.

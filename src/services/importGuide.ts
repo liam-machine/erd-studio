@@ -7,7 +7,7 @@
  * One card per source: what to export, the exact step or command (a **Copy**
  * button on each command), and the button that runs the right import with
  * the source preselected — Import SQL DDL… with its dialect, Import Semantic
- * Model…, Import DBML…, Import…, Draw from dbt (its card only in a dbt
+ * Model…, Import DBML…, Import…, Import from dbt (its card only in a dbt
  * project) — and a **Not yet** card (Oracle, BigQuery, live connections)
  * whose Send Feedback lets people ask for theirs. The folder's suggested
  * start (`startIntentFor`) leads: a "Found in this folder" card for a direct
@@ -129,7 +129,7 @@ export interface ImportGuideCard {
 
 /** Each button's label: says which import runs, and for SQL which dialect it reads. */
 export const IMPORT_GUIDE_ACTION_LABELS: Readonly<Record<Exclude<ImportGuideAction, 'found'>, string>> = {
-  dbt: 'Draw from dbt',
+  dbt: 'Import from dbt',
   databricks: 'Import Databricks DDL…',
   snowflake: 'Import Snowflake DDL…',
   powerBi: 'Import Semantic Model…',
@@ -240,7 +240,7 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   dbt: {
     id: 'dbt',
     title: 'dbt',
-    what: 'This folder is a dbt project: Draw from dbt copies your dbt models and their relationship tests into a diagram, and the Physical tab compares your design with what dbt built.',
+    what: 'This folder is a dbt project: Import from dbt copies your dbt models and their relationship tests into a diagram, and the Physical tab compares your design with what dbt built.',
     sections: [{ steps: [{ text: 'Nothing to export: ERD Studio reads the project as it is.' }], action: 'dbt' }],
   },
   databricks: {

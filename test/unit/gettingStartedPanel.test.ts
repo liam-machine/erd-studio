@@ -192,7 +192,7 @@ describe('buildGettingStartedHtml', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
     // Its own name: never a second tab called Welcome beside VS Code's.
     expect(html).toContain('<title>ERD Studio Tour</title>');
-    expect(html).toContain('<h1 class="gs-hero__title">The one-minute tour</h1>');
+    expect(html).toContain('<h1 class="gs-hero__title">The tour</h1>');
     expect(html).not.toMatch(/Welcome to ERD Studio|getting-started video/i);
     expect(html).toContain('Turn the dbt project you already have into a data model you can see.');
     const order = ['assistant', 'helper', 'start'].map((step) => html.indexOf(`data-step="${step}"`));
@@ -205,7 +205,7 @@ describe('buildGettingStartedHtml', () => {
     }
     expect(html).toContain('Enrich with your AI assistant (optional)');
     expect(html).toContain('keys, grain, rationale and your team\'s modelling style');
-    expect(html).toContain('ERD Studio: Watch the One-Minute Tour');
+    expect(html).toContain('ERD Studio: Watch the Tour');
     expect(html).toContain('Open the folder your data model lives in');
     expect(html).toContain('Any folder works');
     expect(html).toContain('data-action="openFolder"');
@@ -611,7 +611,7 @@ describe('panel script', () => {
         expect(p.player.hasAttribute('autoplay'), String(mode)).toBe(false);
         expect(p.tour.hidden, String(mode)).toBe(false);
         // One name for the tour, on every page.
-        expect(p.tourLabel(), String(mode)).toBe('Watch the One-Minute Tour');
+        expect(p.tourLabel(), String(mode)).toBe('Watch the Tour');
         // A status (the dbt page, a folder without dbt) never starts it either.
         for (const payload of [STATUS, { ...STATUS, logicalOnly: true }]) {
           p.dom.window.dispatchEvent(new p.dom.window.MessageEvent('message', { data: { type: 'status', payload } }));
@@ -680,7 +680,7 @@ describe('panel script', () => {
     const variants = (base: GettingStartedStatus): GettingStartedStatus[] => [
       base,
       { ...base, domainCount: 2 },
-      // A YAML project from before 2.0 (the Convert card), and a status listing every start: Draw from dbt
+      // A YAML project from before 2.0 (the Convert card), and a status listing every start: Import from dbt
       // is gated to the dbt page by its data-modes, so even a wrong list cannot show it elsewhere.
       { ...base, storage: 'yaml' },
       { ...base, starts: [...START_ACTIONS] },
@@ -1581,7 +1581,7 @@ describe('GettingStartedPanel', () => {
     expect(feature).not.toHaveBeenCalled();
   });
 
-  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Draw from dbt with dbt, only the example with no folder', async () => {
+  it('every status carries the suggestion and the starts the start rule gives: Convert alone for a YAML or mixed project, Import from dbt with dbt, only the example with no folder', async () => {
     const deps = makeDeps();
     GettingStartedPanel.createOrShow(makeContext(), deps);
     const panel = vscode.window._webviewPanels[0];
@@ -1805,7 +1805,9 @@ describe('GettingStartedPanel', () => {
       expect(html).not.toContain('media/onboarding/getting-started.mp4');
       expect(html).not.toContain('media/onboarding/getting-started-poster.jpg');
       expect(html).toContain(escaped(LOGICAL_GETTING_STARTED_CUES[0].text));
-      expect(html).not.toContain(escaped(GETTING_STARTED_CUES[0].text));
+      // The two cuts share every scene but the default cut's dbt beat: its captions stay off these pages.
+      const dbtCue = GETTING_STARTED_CUES.find((c) => /\bdbt\b/.test(c.text))!;
+      expect(html).not.toContain(JSON.stringify(dbtCue.text).slice(1, -1));
       vscode.window._webviewPanels[0].dispose();
     }
   });

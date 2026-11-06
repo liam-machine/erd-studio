@@ -38,7 +38,7 @@ export const HELP_ACTIONS: readonly HelpActionNode[] = [
   {
     type: 'action', id: 'gettingStarted', label: TOUR_LABEL, icon: 'play-circle', command: 'erdStudio.showGettingStarted',
     // Neutral in every folder: the panel plays the cut that matches it.
-    tooltip: 'A one-minute video and your first steps.',
+    tooltip: 'A short video and your first steps.',
   },
   {
     type: 'action', id: 'showMeAround', label: SHOW_ME_AROUND_LABEL, icon: 'compass', command: SHOW_ME_AROUND_COMMAND,

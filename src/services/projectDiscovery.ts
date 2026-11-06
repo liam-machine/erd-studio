@@ -39,9 +39,9 @@ import {
 import { findLegacySemanticDir } from './migrationService';
 import { pathKey } from './pathKey';
 
-/** Draw from dbt in a folder with no dbt_project.yml (logical-only mode). */
+/** Import from dbt in a folder with no dbt_project.yml (logical-only mode). */
 export const DRAW_FROM_DBT_NEEDS_DBT_MESSAGE =
-  'Draw from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.';
+  'Import from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.';
 
 /** The canvas's Add Tables from dbt in a folder with no dbt_project.yml (logical-only mode). */
 export const ADD_FROM_DBT_NEEDS_DBT_MESSAGE =

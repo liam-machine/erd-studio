@@ -4,7 +4,7 @@ ERD Studio's data model is plain files in DBML, an open format, so any AI coding
 
 ## Set Up My AI Helper
 
-Click **Set Up My AI Helper** on the ERD Studio Tour tab, or run **ERD Studio: Set Up My AI Helper**. It installs instructions for the AI assistants it finds on your computer (Claude Code, GitHub Copilot, Codex, Gemini CLI, Cursor) that teach them ERD Studio's files.
+In the ERD Studio sidebar, open **Help & Feedback** and click **Set Up My AI Helper**. It is also on the ERD Studio Tour tab, and in the Command Palette as **ERD Studio: Set Up My AI Helper**. It installs instructions for the AI assistants it finds on your computer (Claude Code, GitHub Copilot, Codex, Gemini CLI, Cursor) that teach them ERD Studio's files.
 
 Then ask for what you want, for example:
 

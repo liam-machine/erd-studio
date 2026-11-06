@@ -365,7 +365,7 @@ Read it as a funnel: `dbtParse` → the pre-run keys → `dbtParseLaunched`
 Why installs stop using ERD Studio, step by step. The start screen
 (`src/types/startActions.ts`) offers the same one-click starts on the Welcome
 panel, the Get Started walkthrough and the empty Diagrams view, led by the one
-the folder **suggests**: Convert to DBML (projects from before 2.0), Draw from
+the folder **suggests**: Convert to DBML (projects from before 2.0), Import from
 dbt (dbt projects), one of three direct imports when a quick local look at
 the folder finds that kind of file (a Power BI / Fabric semantic model,
 CREATE TABLE scripts, a DBML file), else New Diagram; Import… and Open an

@@ -1,5 +1,5 @@
 /**
- * Getting-started telemetry for Draw from dbt: the funnel start, each place a
+ * Getting-started telemetry for Import from dbt: the funnel start, each place a
  * user can stop (a feature), and a throw (an error, rethrown unchanged).
  */
 
@@ -58,7 +58,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('Draw from dbt telemetry', () => {
+describe('Import from dbt telemetry', () => {
   it('counts the start and "no models with columns"', async () => {
     draft.models = [];
     const feature = vi.spyOn(telemetry, 'feature');

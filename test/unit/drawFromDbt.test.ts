@@ -1,5 +1,5 @@
 /**
- * The one-line note Draw from dbt shows after drawing. The flow itself runs
+ * The one-line note Import from dbt shows after drawing. The flow itself runs
  * end to end against a fixture copy in extension.activate.test.ts.
  */
 import { describe, expect, it } from 'vitest';

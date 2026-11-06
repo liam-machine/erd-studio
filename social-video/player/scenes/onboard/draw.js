@@ -1,9 +1,9 @@
-// onboard/draw · "Click Draw from dbt. / Pick a folder, like your marts."
+// onboard/draw · "Click Import from dbt. / Pick a folder, like your marts."
 // Continues from onboard/install's last frame (same window, same walkthrough) and zooms onto the
-// open step "Draw your dbt project — no AI needed". The pointer clicks its blue Draw from dbt
-// button on "Draw from dbt"; the step ticks itself done (its completionEvent is
+// open step "Draw your dbt project — no AI needed". The pointer clicks its blue Import from dbt
+// button on "Import from dbt"; the step ticks itself done (its completionEvent is
 // onCommand:erdStudio.drawFromDbt) and the command's "Reading your dbt project…" progress
-// notification flashes. On `pick` the real QuickPick drops from the top (title "Draw from dbt",
+// notification flashes. On `pick` the real QuickPick drops from the top (title "Import from dbt",
 // placeholder "Which dbt models should the diagram start from?", one row per folder with the
 // first model names as detail, then "Choose models…"); the pointer lands on `marts` on "…your
 // marts" and the row holds pressed. marts maps to the Gold layer by itself, so the only follow-up
@@ -31,7 +31,7 @@ const checklist = (size) => `<svg class="icon" width="${size}" height="${size}" 
 
 function quickPickShell(inner, h, style) {
   return `<div class="abs" style="left:${QP.x}px;top:${QP.y}px;width:${QP.w}px;height:${h}px;border-radius:10px;background:#252526;border:1px solid #454545;box-shadow:0 18px 50px #000c;overflow:hidden;${style}">
-    <div class="abs" style="left:0;right:0;top:0;height:${QP_TITLE}px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:var(--text-2);background:#1f1f20;border-bottom:1px solid #3a3a3c">Draw from dbt</div>
+    <div class="abs" style="left:0;right:0;top:0;height:${QP_TITLE}px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:var(--text-2);background:#1f1f20;border-bottom:1px solid #3a3a3c">Import from dbt</div>
     ${inner}</div>`;
 }
 
@@ -41,8 +41,8 @@ export default {
     // zoom onto the step before the line starts
     const z = easeInOut(seg(t, 0.0, 0.6));
     const s = lerp(1, ZOOM, z), tx = lerp(0, TX, z), ty = lerp(0, TY, z);
-    // o_click: "Click Draw from dbt." (+0.0–1.34)
-    const click = C + 0.6;                 // lands on "Draw from dbt"
+    // o_click: "Click Import from dbt." (+0.0–1.34)
+    const click = C + 0.6;                 // lands on "Import from dbt"
     const doneAt = click + 0.25;           // step ticks itself done
     const readAt = click + 0.2, readEnd = P - 0.1;   // "Reading your dbt project…"
     // o_pick: "Pick a folder,"(+0.0–0.74) "like your marts."(+0.84–1.57)
@@ -105,7 +105,7 @@ export default {
       }
     }
 
-    // ---- pointer: clicks Draw from dbt, then lands on marts and presses ----
+    // ---- pointer: clicks Import from dbt, then lands on marts and presses ----
     const endAt = swapAt;
     if (t >= 0.25 && t < endAt) {
       const pt = path(t, [
