@@ -25,6 +25,7 @@ import * as vscode from 'vscode';
 import type { DiagramExportFormat } from '@erd-studio/core';
 
 import {
+  OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
   classifyWriteFailure,
   describeDiagramFileProblem,
@@ -40,6 +41,7 @@ import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaSummary } from '../types/semantic';
 import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE, exportInsideSemanticDirMessage, isInsideFolder } from './exportDiagram';
 import { log } from '../services/logger';
+import { openTableFileAt } from './openModelFile';
 
 export const EXPORT_ALL_DIAGRAMS_COMMAND = 'erdStudio.exportAllDiagrams';
 
@@ -71,6 +73,8 @@ export interface ExportAllDiagramsUi {
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Open a file as text, the cursor at the 1-based line and column when given (#236). */
+  openFileAt(filePath: string, line?: number, column?: number): Promise<void>;
 }
 
 export interface ExportAllDiagramsDeps {
@@ -180,25 +184,43 @@ interface SkippedInWords {
   text: string;
   /** Not the file's fault: ERD Studio's, offered as a report. */
   ours?: unknown;
+  /** The user's file to fix, and opening it helps: Open File goes there (#236). */
+  open?: { line?: number; column?: number };
 }
 
 function describeSkipped(deps: ExportAllDiagramsDeps, exported: SubjectAreaFilesExport): SkippedInWords[] {
   return exported.skipped.map(({ domainPath, error }) => {
     const shown = deps.projectRoot ? projectRelative(deps.projectRoot, domainPath) : path.basename(domainPath);
     const problem = describeDiagramFileProblem(error, domainPath, shown);
-    return problem
-      ? { domainPath, text: `${shown} (${problem.reason})` }
-      : { domainPath, text: `${shown} (ERD Studio hit a problem reading it)`, ours: error };
+    if (!problem) return { domainPath, text: `${shown} (ERD Studio hit a problem reading it)`, ours: error };
+    return {
+      domainPath,
+      text: `${shown} (${problem.reason})`,
+      ...(problem.openable
+        ? { open: { ...(problem.line !== undefined ? { line: problem.line } : {}), ...(problem.column !== undefined ? { column: problem.column } : {}) } }
+        : {}),
+    };
   });
+}
+
+/**
+ * The buttons for skipped diagrams (#236): Open File at the first one the
+ * user can fix, and Send Feedback when a skip was ours.
+ */
+function skippedActions(ui: ExportAllDiagramsUi, skipped: readonly SkippedInWords[], doing: string): ErrorActions {
+  const openable = skipped.find((s) => s.open !== undefined);
+  const ours = skipped.find((s) => s.ours !== undefined);
+  return {
+    ...(openable ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(openable.domainPath, openable.open?.line, openable.open?.column) } : {}),
+    ...(ours ? { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)) } : {}),
+  };
 }
 
 /** Every domain was skipped: say why each, with a report when any failure was ours. */
 function nothingReadable(ui: ExportAllDiagramsUi, total: number, skipped: readonly SkippedInWords[]): ShownFailure {
-  const ours = skipped.find((s) => s.ours !== undefined);
-  const doing = 'while reading the diagrams';
   return {
     message: `None of the ${count(total, 'diagram')} could be exported, so nothing was written: ${listNames(skipped.map((s) => s.text))}.`,
-    actions: ours ? { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)) } : {},
+    actions: skippedActions(ui, skipped, 'while reading the diagrams'),
   };
 }
 
@@ -330,14 +352,13 @@ function reportDone(
   // A skip that was ours is a failure of ours, though the rest was exported.
   if (ours) { telemetry.error('exportFailed'); }
   const message = `${done} Skipped ${count(skipped.length, 'diagram')} that couldn't be read: ${listNames(skipped.map((s) => s.text))}.`;
-  if (!ours) {
-    void ui.showWarningMessage(message);
-    return;
-  }
-  const doing = 'while reading a diagram';
-  void Promise.resolve(ui.showWarningMessage(message, SEND_FEEDBACK_BUTTON)).then((choice) => {
-    if (choice === SEND_FEEDBACK_BUTTON) { void ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)); }
-  });
+  const actions = skippedActions(ui, skipped, 'while reading a diagram');
+  showErrorWithActions(
+    (m, ...items) => ui.showWarningMessage(m, ...items),
+    message,
+    actions,
+    (choice, err) => log.error(`[ERD Studio] ${EXPORT_ALL_TITLE}: "${choice}" failed:`, err),
+  );
 }
 
 function cancelled(): undefined {
@@ -357,5 +378,6 @@ export function vscodeExportAllUi(): ExportAllDiagramsUi {
     showWarningMessage: async (message, ...items) => vscode.window.showWarningMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    openFileAt: (filePath, line, column) => openTableFileAt(filePath, line, column),
   };
 }

@@ -669,7 +669,7 @@ describe('allowlists agree with the Worker', () => {
       'dbtCompileStopped', 'dbtCompileNoStart',
     ]);
     expect(FEATURES.at(-1)).toBe('dbtCompileNoStart');
-    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed']);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']);
   });
 
   it('every dbt parse failure category and placeholder adapter has its feature key', () => {
@@ -683,7 +683,7 @@ describe('allowlists agree with the Worker', () => {
     const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
     expect(readme).toMatch(/^\| Run dbt parse \|/m);
     for (const key of FEATURES.slice(FEATURES.indexOf('dbtParseLaunched'))) expect(readme, key).toContain(`\`${key}\``);
-    for (const code of ['dbtProfileWriteFailed', 'dbtRunFailed']) expect(readme, code).toContain(`\`${code}\``);
+    for (const code of ['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']) expect(readme, code).toContain(`\`${code}\``);
   });
 
   it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {

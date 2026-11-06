@@ -614,7 +614,10 @@ describe('in a native DBML project', () => {
       (args.includes('Move Files') ? 'Move Files' : undefined)) as never);
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
     await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
-    expect(errors).toHaveBeenCalledWith('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+    expect(errors).toHaveBeenCalledWith(
+      'Organise Table Library: VS Code refused the file moves, usually because a file with that name already exists or a file is open with unsaved changes. Nothing was changed. Save open files and try again.',
+      'Save All',
+    );
     // Replaced documents are put back in memory and saved: disk matches the start.
     for (const doc of vscode.workspace.textDocuments) if (doc.isDirty) await doc.save();
     expect(bytes()).toEqual(before);

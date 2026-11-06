@@ -27,7 +27,7 @@ import { projectStorageOf } from './services/projectStorage';
 import type { ProjectStorage } from '@erd-studio/core';
 import { ownWrites } from './services/ownWriteTracker';
 import { ownFileOperations } from './services/ownFileOperations';
-import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
+import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
   hasErdStudioData,
@@ -83,9 +83,25 @@ import {
   ADD_LAYER_BUTTON,
   CHOOSE_ANOTHER_NAME_BUTTON,
   NO_LAYERS_MESSAGE,
+  OPEN_FILE_BUTTON,
   OPEN_IT_BUTTON,
+  RELOAD_WINDOW_BUTTON,
+  SAVE_ALL_BUTTON,
+  SEND_FEEDBACK_BUTTON,
+  TRY_AGAIN_BUTTON,
   diagramNameTakenMessage,
+  feedbackPrefill,
+  showErrorWithActions,
 } from './services/commandErrors';
+import {
+  MANIFEST_RETRY_FAILED_MESSAGE,
+  MANIFEST_STILL_WRITING_MESSAGE,
+  MIGRATE_AGAIN_BUTTON,
+  MIGRATE_V5_TITLE,
+  describeMigrationResult,
+  migrationFailedMessage,
+  moveRefusedMessage,
+} from './services/migrationMessages';
 import {
   NEW_DIAGRAM_TITLE,
   RENAME_DIAGRAM_TITLE,
@@ -1607,15 +1623,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'Migrate Now',
       'Later',
     ).then((choice) => {
-      if (choice === 'Migrate Now') {
-        const result = migrationService.migrate();
-        const details: string[] = [];
-        if (result.domainsConverted > 0) details.push(`${result.domainsConverted} diagram(s) converted`);
-        if (result.modelsCreated > 0) details.push(`${result.modelsCreated} table file(s) created in the Table Library`);
-        if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved (richest version kept)`);
-        vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
-        selectorsService.scheduleRegenerate();
-      }
+      // The command's own path (#243): the same refreshes, counts and messages. The prompt was the confirm.
+      if (choice === 'Migrate Now') return runMigrateToV5Command({ confirmed: true });
+      return undefined;
     });
   });
   // Each DBML table's layer and schema, which every view groups and labels by.
@@ -2032,12 +2042,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
               }
             } else {
-              void vscode.window.showWarningMessage(
-                'dbt manifest still updating — graph may show stale data. Run dbt compile to refresh.',
-              );
+              void vscode.window.showWarningMessage(MANIFEST_STILL_WRITING_MESSAGE, RUN_DBT_PARSE_ACTION)
+                .then((pick) => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
             }
           } catch (err) {
             log.error('[ERD Studio] Manifest retry failed:', err);
+            telemetry.error('manifestRetryFailed');
+            void vscode.window.showWarningMessage(MANIFEST_RETRY_FAILED_MESSAGE, RELOAD_WINDOW_BUTTON)
+              .then((pick) => { if (pick === RELOAD_WINDOW_BUTTON) { void vscode.commands.executeCommand('workbench.action.reloadWindow'); } });
           }
         }, 2000);
       } else if (!fromDbtRun) {
@@ -2377,37 +2389,81 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
-  /** "Migrate Subject Areas to the Central Table Library": v4 → v5, prompted. True when it ran. */
-  const migrateToV5 = async (): Promise<boolean> => {
-    const v4Count = migrationService.findV4SubjectAreas().length;
-    const confirm = await vscode.window.showWarningMessage(
-      `${v4Count} diagram file(s) still keep their tables inside the diagram, the format from before the Table Library. ` +
-      'Migrating moves each table into its own file in the Table Library, and the diagrams then list their tables by name. ' +
-      'This cannot be undone automatically.',
-      'Migrate Now',
-      'Cancel',
-    );
-
-    if (confirm !== 'Migrate Now') return false;
+  /**
+   * "Migrate Subject Areas to the Central Table Library": v4 → v5, prompted
+   * (unless `confirmed`: the activation prompt or Migrate Again already
+   * asked). True when every diagram was converted; a partial run names each
+   * file it left and why, and is false so a chained step (the file naming,
+   * Convert to DBML) stops (#243). A throw is counted and rethrown, for the
+   * caller's own message.
+   */
+  const migrateToV5 = async (options: { confirmed?: boolean } = {}): Promise<boolean> => {
+    if (!options.confirmed) {
+      const v4Count = migrationService.findV4SubjectAreas().length;
+      const confirm = await vscode.window.showWarningMessage(
+        `${v4Count} diagram file(s) still keep their tables inside the diagram, the format from before the Table Library. ` +
+        'Migrating moves each table into its own file in the Table Library, and the diagrams then list their tables by name. ' +
+        'This cannot be undone automatically.',
+        'Migrate Now',
+        'Cancel',
+      );
+      if (confirm !== 'Migrate Now') return false;
+    }
 
     let result: ReturnType<typeof migrationService.migrate>;
     try {
       result = migrationService.migrate();
     } catch (err) {
       telemetry.error('migrationFailed');
+      // Table files it wrote before the throw are on disk: show them.
+      tableLibraryProvider.refresh();
       throw err;
     }
     telemetry.feature('migrateV5');
-    const details: string[] = [];
-    if (result.domainsConverted > 0) details.push(`${result.domainsConverted} diagram(s) converted`);
-    if (result.modelsCreated > 0) details.push(`${result.modelsCreated} table file(s) created in the Table Library`);
-    if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved`);
-    void vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+    const report = describeMigrationResult(result, workspaceRoot);
+    const actions: Record<string, () => unknown> = {};
+    if (report.openFile) {
+      const file = report.openFile;
+      actions[OPEN_FILE_BUTTON] = () => vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
+    }
+    if (report.migrateAgain) actions[MIGRATE_AGAIN_BUTTON] = () => runMigrateToV5Command({ confirmed: true });
+    const show = (m: string, ...items: string[]) => (report.level === 'warning'
+      ? vscode.window.showWarningMessage(m, ...items)
+      : vscode.window.showInformationMessage(m, ...items));
+    showErrorWithActions(show, report.message, actions, (choice, err) => {
+      log.error(`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, err);
+    });
 
     treeProvider.refresh();
+    tableLibraryProvider.refresh();
     await editorProvider.refreshAllOpenSubjectAreas();
     selectorsService.scheduleRegenerate();
-    return true;
+    return result.skipped.length === 0;
+  };
+
+  /**
+   * The command and the activation prompt (#243): `migrateToV5`, and a throw
+   * said as ours with Send Feedback and Try Again, never VS Code's generic
+   * "command failed". True when every diagram was converted.
+   */
+  const runMigrateToV5Command = async (options: { confirmed?: boolean } = {}): Promise<boolean> => {
+    try {
+      return await migrateToV5(options);
+    } catch (err) {
+      log.error(`[ERD Studio] ${MIGRATE_V5_TITLE} failed:`, err);
+      const cause = err instanceof MigrationFailed ? err.cause : err;
+      const modelsCreated = err instanceof MigrationFailed ? err.modelsCreated : 0;
+      showErrorWithActions(
+        (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+        migrationFailedMessage(modelsCreated),
+        {
+          [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(MIGRATE_V5_TITLE, 'while migrating', cause)),
+          [TRY_AGAIN_BUTTON]: () => runMigrateToV5Command({ confirmed: true }),
+        },
+        (choice, actionErr) => log.error(`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, actionErr),
+      );
+      return false;
+    }
   };
 
   /** "Migrate to the New File Naming" (#182): v5 → v6, prompted. */
@@ -2417,7 +2473,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     subjectAreaService,
     tableLibraryService,
     version: currentVersion,
-    migrateToV5,
+    migrateToV5: () => migrateToV5(),
     // The canvases, and the sidebar views and context keys (one refresh after, not one per moved file).
     holdRefreshes: () => {
       const canvases = editorProvider.holdRefreshes();
@@ -2445,7 +2501,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     semanticDir,
     tableLibraryService,
-    migrateToV5,
+    migrateToV5: () => migrateToV5(),
     holdRefreshes: () => editorProvider.holdRefreshes(),
     holdViewRefreshes: () => viewRefreshes.hold(),
     workspaceState: context.workspaceState,
@@ -3113,7 +3169,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const result = await applyHeldLifecycleWrites(writes, path.dirname(modelsDir), yamlRenames);
         if (!result.ok) {
-          if (result.unrestored.length === 0) void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+          if (result.unrestored.length === 0) void vscode.window.showErrorMessage(moveRefusedMessage('the file moves', 'Organise Table Library: '), SAVE_ALL_BUTTON).then((pick) => { if (pick === SAVE_ALL_BUTTON) { void vscode.workspace.saveAll(false); } });
           return;
         }
         for (const move of plan.moves) {
@@ -3154,7 +3210,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         for (const folder of newFolders) {
           try { fs.rmdirSync(folder); } catch { /* not empty, or already gone */ }
         }
-        void vscode.window.showErrorMessage('Organise Table Library: VS Code rejected the file moves; nothing was changed.');
+        void vscode.window.showErrorMessage(moveRefusedMessage('the file moves', 'Organise Table Library: '), SAVE_ALL_BUTTON).then((pick) => { if (pick === SAVE_ALL_BUTTON) { void vscode.workspace.saveAll(false); } });
         return;
       }
       // Our own moves: the watcher must not bounce them back as external
@@ -3372,7 +3428,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const result = await applyLifecycleWrites(writes, path.dirname(tableLibraryService.getTablesDir()), [], (reason) => saveFailures.add(reason));
       if (!result.ok) {
         // A file the reconcile could not put back is already named in its modal.
-        if (result.unrestored.length === 0) void vscode.window.showErrorMessage('VS Code rejected the rename; nothing was changed.');
+        if (result.unrestored.length === 0) void vscode.window.showErrorMessage(moveRefusedMessage('the rename'), SAVE_ALL_BUTTON).then((pick) => { if (pick === SAVE_ALL_BUTTON) { void vscode.workspace.saveAll(false); } });
         return;
       }
       // Domain edits land in memory; a canvas never sits dirty, so they were
@@ -3943,7 +3999,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       // v4 → v5, then on to the new file naming (#182), so nobody goes through two prompts.
-      if (await migrateToV5()) await migrateNaming();
+      if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
     vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),

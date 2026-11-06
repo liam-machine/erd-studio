@@ -652,6 +652,8 @@ const ERROR_CODES = [
   // storage; ERD Studio's own Run dbt parse / compile code threw (never dbt's failure).
   'dbtProfileWriteFailed',
   'dbtRunFailed',
+  // Re-reading manifest.json after it changed threw (#243): the diagrams may be stale until a reload.
+  'manifestRetryFailed',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

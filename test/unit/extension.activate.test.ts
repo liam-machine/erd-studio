@@ -1490,7 +1490,7 @@ describe('erdStudio.organizeModelLibrary (issue #76)', () => {
 
     await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
 
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('rejected the file moves'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('VS Code refused the file moves, usually because'), 'Save All');
     expect(fs.readdirSync(lib()).filter((f) => f.endsWith('.yml')).sort())
       .toEqual(before.filter((f) => f.endsWith('.yml')));
     // No empty layer folders are left behind for the move that did not happen.
@@ -1620,7 +1620,10 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
 
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
 
-    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(error).toHaveBeenCalledWith(
+      'VS Code refused the rename, usually because a file with that name already exists or a file is open with unsaved changes. Nothing was changed. Save open files and try again.',
+      'Save All',
+    );
     expect(fs.existsSync(ignored())).toBe(true);
     expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
   });
@@ -1636,7 +1639,10 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
 
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
 
-    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(error).toHaveBeenCalledWith(
+      'VS Code refused the rename, usually because a file with that name already exists or a file is open with unsaved changes. Nothing was changed. Save open files and try again.',
+      'Save All',
+    );
     expect(fs.existsSync(path.join(lib(), 'silver', 'silver_date.yml'))).toBe(false);
     expect(fs.readFileSync(ignored(), 'utf-8')).toBe(ignoredBefore);
     expect(fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8')).toBe(silverBefore);
@@ -4115,5 +4121,78 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
       expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
       expect(recentLogLines().some((l) => l.includes("the onboarding guide's canvas part is owed") && l.includes('diagramsNudge'))).toBe(true);
     });
+  });
+});
+
+describe('Migrate to the Central Table Library: one path, and every failure said (#243)', () => {
+  const v4File = () => path.join(root, '.erd-studio', 'silver', 'legacy.json');
+  const OURS = "Migrate to the Central Table Library hit a problem in ERD Studio while migrating, so no diagram files were changed. This isn't something you did. Please send us a report.";
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.writeFileSync(v4File(), JSON.stringify({
+      schemaVersion: 4, domain: 'legacy', layer: 'silver',
+      logical: { models: [{ name: 'dim_legacy_thing', columns: [{ name: 'id', isPrimaryKey: true }] }], relationships: [] },
+      viewConfig: {},
+    }, null, 2));
+    openWorkspace(root);
+  });
+
+  /** The confirm (and only it) answered Migrate Now; the naming offer after it declined. */
+  const confirmMigrate = () => vi.spyOn(vscode.window, 'showWarningMessage')
+    .mockImplementation((async (message: string) => (/still keep their tables inside the diagram/.test(message) ? 'Migrate Now' : undefined)) as never);
+
+  it('the command: a throw is said as ours with Send Feedback and Try Again, counted, and never reaches VS Code', async () => {
+    const { MigrationService } = await import('../../src/services/migrationService');
+    await activate(context);
+    confirmMigrate();
+    vi.spyOn(MigrationService.prototype, 'migrate').mockImplementation(() => { throw new Error('boom'); });
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const errors = vi.spyOn(telemetry, 'error');
+
+    await expect(vscode.commands.executeCommand('erdStudio.migrateToV5')).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalledWith(OURS, 'Send Feedback', 'Try Again');
+    expect(errors.mock.calls.map((c) => c[0])).toContain('migrationFailed');
+  });
+
+  it('the command: a full run says complete and counts migrateV5', async () => {
+    await activate(context);
+    confirmMigrate();
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+
+    await vscode.commands.executeCommand('erdStudio.migrateToV5');
+
+    expect(info.mock.calls.map((c) => c[0])).toContain('Migration complete: 1 diagram converted, 1 table file created in the Table Library.');
+    expect(feature.mock.calls.map((c) => c[0])).toContain('migrateV5');
+    expect(JSON.parse(fs.readFileSync(v4File(), 'utf-8')).schemaVersion).toBe(5);
+  });
+
+  it('the activation prompt runs the same path: Migrate Now converts, counts migrateV5 and says so', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (/older format\. Move their tables into the Table Library/.test(message) ? 'Migrate Now' : undefined)) as never);
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(info.mock.calls.map((c) => c[0])).toContain('Migration complete: 1 diagram converted, 1 table file created in the Table Library.'));
+    expect(feature.mock.calls.map((c) => c[0])).toContain('migrateV5');
+    // The prompt was the confirm: no second question.
+    expect(JSON.parse(fs.readFileSync(v4File(), 'utf-8')).schemaVersion).toBe(5);
+  });
+
+  it('the activation prompt: a throw is said as ours and counted, not an unhandled rejection', async () => {
+    const { MigrationService } = await import('../../src/services/migrationService');
+    vi.spyOn(MigrationService.prototype, 'migrate').mockImplementation(() => { throw new Error('boom'); });
+    vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (/older format\. Move their tables into the Table Library/.test(message) ? 'Migrate Now' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const errors = vi.spyOn(telemetry, 'error');
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith(OURS, 'Send Feedback', 'Try Again'));
+    expect(errors.mock.calls.map((c) => c[0])).toContain('migrationFailed');
   });
 });

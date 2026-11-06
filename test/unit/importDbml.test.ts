@@ -1012,13 +1012,102 @@ describe('Import DBML — a write that fails', () => {
     expect(erdFiles()).toEqual(['layers.json']);
   });
 
-  it('a throw it did not expect is counted and rethrown', async () => {
+  it('a throw it did not expect is counted once and shown as ours, with Send Feedback and Try Again (#236)', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver', errorChoices: ['Send Feedback'] });
+    ui.showInputBox = async () => { throw new Error(`boom at ${tmp}/secret`); };
+
+    await expect(importDbml(deps(ui))).resolves.toBeUndefined();
+
+    expect(ui.errors).toEqual([{
+      message: "Import DBML hit a problem in ERD Studio while importing shop.dbml, so nothing was changed. This isn't something you did. Please send us a report.",
+      buttons: ['Send Feedback', TRY_AGAIN_BUTTON],
+    }]);
+    expect(errorNames()).toEqual(['importDbmlFailed']);
+    expect(erdFiles()).toEqual(['layers.json']);
+    await vi.waitFor(() => expect(ui.feedback).toHaveLength(1));
+    expect(ui.feedback[0].title).toBe('Import DBML failed');
+    expect(ui.feedback[0].description).not.toContain(tmp);
+  });
+
+  it('Try Again after an unexpected throw re-runs with the same file', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver', errorChoices: [TRY_AGAIN_BUTTON] });
+    let calls = 0;
+    const box = ui.showInputBox;
+    ui.showInputBox = async (options) => {
+      if (calls++ === 0) throw new Error('boom');
+      return box(options);
+    };
+
+    await importDbml(deps(ui));
+
+    await vi.waitFor(() => expect(ui.openedDiagrams).toEqual([erd('silver', 'shop.json')]));
+    // The Open dialog was not asked again: the same file was read twice.
+    expect(ui.dialogs).toHaveLength(1);
+    expect(ui.reads).toEqual([file, file]);
+  });
+
+  it('a throw after the files are written says the diagram was created, with Open Diagram (#236)', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver', errorChoices: ['Open Diagram'] });
+    let opens = 0;
+    ui.openDiagram = async (domainPath) => {
+      if (opens++ === 0) throw new Error('the editor did not open');
+      ui.openedDiagrams.push(domainPath);
+    };
+
+    await expect(importDbml(deps(ui))).resolves.toBeUndefined();
+
+    expect(fs.existsSync(erd('silver', 'shop.json'))).toBe(true);
+    expect(ui.errors).toEqual([{
+      message: "Import DBML created silver/shop, but hit a problem in ERD Studio opening it. This isn't something you did. Please send us a report.",
+      buttons: ['Open Diagram', 'Send Feedback'],
+    }]);
+    expect(errorNames()).toEqual(['importDbmlFailed']);
+    await vi.waitFor(() => expect(ui.openedDiagrams).toEqual([erd('silver', 'shop.json')]));
+  });
+
+  it('a refresh that throws after the write is said the same way', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver' });
+
+    await importDbml(deps(ui, { onWritten: () => { throw new Error('tree refresh'); } }));
+
+    expect(ui.errors.map((e) => e.message)).toEqual([
+      "Import DBML created silver/shop, but hit a problem in ERD Studio opening it. This isn't something you did. Please send us a report.",
+    ]);
+  });
+
+  it('Open Example Diagram says it under its own title (#236)', async () => {
     makeProject('v5');
     const file = dbmlFile('shop.dbml', SHOP_DBML);
     const ui = fakeUi({ file, layer: 'silver' });
     ui.showInputBox = async () => { throw new Error('boom'); };
 
-    await expect(importDbml(deps(ui))).rejects.toThrow('boom');
+    await importDbml(deps(ui, { source: 'example' }));
+
+    expect(ui.errors.map((e) => e.message)).toEqual([
+      "Open Example Diagram hit a problem in ERD Studio while opening the example diagram, so nothing was changed. This isn't something you did. Please send us a report.",
+    ]);
+    expect(errorNames()).toEqual(['importDbmlFailed']);
+  });
+
+  it('the automatic draft still rethrows before its Keep, so the host counts it and shows nothing', async () => {
+    makeProject('v5');
+    const file = dbmlFile('shop.dbml', SHOP_DBML);
+    const ui = fakeUi({ file, layer: 'silver' });
+    vi.spyOn(layerService, 'getCreatableLayers').mockImplementation(() => { throw new Error('boom'); });
+
+    await expect(importDbml(
+      deps(ui, { draft: { preview: {} as never, trigger: 'sidebar', quiet: true } }),
+      { filePath: file, quick: true },
+    )).rejects.toThrow('boom');
+    expect(ui.errors).toEqual([]);
     expect(errorNames()).toEqual(['importDbmlFailed']);
   });
 });

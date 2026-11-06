@@ -48,6 +48,7 @@ interface FakeUi extends ExportAllDiagramsUi {
   errors: string[];
   errorButtons: string[][];
   feedback: FeedbackPrefill[];
+  openedAt: Array<{ filePath: string; line?: number; column?: number }>;
 }
 
 /**
@@ -66,7 +67,7 @@ function fakeUi(answers: {
   const folders = [...(answers.folders ?? [])];
   const errorChoices = [...(answers.errorChoices ?? [])];
   const ui: FakeUi = {
-    picks: [], openDialogs: [], written: [], modals: [], infos: [], warnings: [], errors: [], errorButtons: [], feedback: [],
+    picks: [], openDialogs: [], written: [], modals: [], infos: [], warnings: [], errors: [], errorButtons: [], feedback: [], openedAt: [],
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions) => {
       ui.picks.push({ items: [...items] as Pickable[], options });
       return (items as readonly Pickable[]).find((i) => i.format !== undefined && i.format === answers.format) as T | undefined;
@@ -90,6 +91,7 @@ function fakeUi(answers: {
       return errorChoices.shift();
     },
     sendFeedback: async (prefill) => { ui.feedback.push(prefill); },
+    openFileAt: async (filePath, line, column) => { ui.openedAt.push({ filePath, line, column }); },
   };
   return ui;
 }
@@ -239,10 +241,10 @@ describe('Export All Diagrams', () => {
     expect(features()).toEqual(['exportCancelled']);
   });
 
-  it('a subject area that cannot be read is skipped and named at the end, not fatal', async () => {
+  it('a subject area that cannot be read is skipped and named at the end, not fatal, with Open File at the mistake (#236)', async () => {
     const broken = '/project/.erd-studio/silver/broken.json';
     const mistake = new SubjectAreaFileError('invalid-json', broken, `Invalid JSON in ${broken}`, { line: 2, column: 3, syntaxProblem: 'missing-comma' });
-    const ui = fakeUi({ format: 'dbml', folders: ['/project/exports'] });
+    const ui = fakeUi({ format: 'dbml', folders: ['/project/exports'], warningChoice: 'Open File' });
     const exportAll = vi.fn(async () => ({ ...fakeExport('dbml'), skipped: [{ domainPath: broken, error: mistake }] }));
     const result = await exportAllDiagramsCommand(deps(ui, { exportAll }).deps);
     expect(ui.written).toHaveLength(2);
@@ -250,8 +252,9 @@ describe('Export All Diagrams', () => {
     expect(ui.warnings).toEqual([{
       message: 'Exported 2 diagrams as DBML to exports. Skipped 1 diagram that couldn\'t be read: ' +
         '.erd-studio/silver/broken.json (there is a mistake at line 2, column 3: a comma is missing after this value).',
-      items: [],
+      items: ['Open File'],
     }]);
+    await vi.waitFor(() => expect(ui.openedAt).toEqual([{ filePath: broken, line: 2, column: 3 }]));
     expect(result?.skipped).toEqual([broken]);
     expect(features()).toEqual(['exportAll']);
     // The user's file, not a failure of ours.
@@ -282,10 +285,46 @@ describe('Export All Diagrams', () => {
     expect(ui.errors).toEqual([
       'None of the 1 diagram could be exported, so nothing was written: .erd-studio/silver/broken.json (it was deleted or renamed).',
     ]);
+    // A deleted file has nothing to open.
     expect(ui.errorButtons).toEqual([[]]);
     expect(features()).toEqual([]);
     // Counted as Export Diagram counts a diagram it cannot read.
     expect(errors()).toEqual(['exportFailed']);
+  });
+
+  it('when nothing can be read and a file has a mistake, Open File goes to the first one the user can fix (#236)', async () => {
+    const gone = '/project/.erd-studio/silver/gone.json';
+    const conflicted = '/project/.erd-studio/gold/sales.json';
+    const ui = fakeUi({ format: 'dbml', errorChoices: ['Open File'] });
+    const exportAll = vi.fn(async () => ({
+      files: [],
+      skipped: [
+        { domainPath: gone, error: new SubjectAreaFileError('missing', gone, `Subject area file not found: ${gone}`) },
+        { domainPath: conflicted, error: new SubjectAreaFileError('invalid-json', conflicted, `Invalid JSON in ${conflicted}`, { line: 4, mergeConflict: true }) },
+      ],
+    }));
+    await exportAllDiagramsCommand(deps(ui, { exportAll }).deps);
+    expect(ui.errors).toEqual([
+      'None of the 2 diagrams could be exported, so nothing was written: .erd-studio/silver/gone.json (it was deleted or renamed), ' +
+        '.erd-studio/gold/sales.json (it has unresolved git merge conflicts, first at line 4. Keep one side of each conflict, then try again).',
+    ]);
+    expect(ui.errorButtons).toEqual([['Open File']]);
+    await vi.waitFor(() => expect(ui.openedAt).toEqual([{ filePath: conflicted, line: 4, column: undefined }]));
+  });
+
+  it('a skip of ours beside one the user can fix offers both Open File and Send Feedback (#236)', async () => {
+    const broken = '/project/.erd-studio/silver/broken.json';
+    const odd = '/project/.erd-studio/silver/odd.json';
+    const ui = fakeUi({ format: 'dbml', folders: ['/out'] });
+    const exportAll = vi.fn(async () => ({
+      ...fakeExport('dbml'),
+      skipped: [
+        { domainPath: odd, error: new Error('boom') },
+        { domainPath: broken, error: new SubjectAreaFileError('empty', broken, `Empty file: ${broken}`) },
+      ],
+    }));
+    await exportAllDiagramsCommand(deps(ui, { exportAll }).deps);
+    expect(ui.warnings[0].items).toEqual(['Open File', 'Send Feedback']);
   });
 
   it('a folder it may not write stops, says what was saved, and offers another folder', async () => {

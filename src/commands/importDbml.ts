@@ -52,6 +52,7 @@ import {
   ADD_LAYER_BUTTON,
   CHOOSE_ANOTHER_NAME_BUTTON,
   NO_LAYERS_MESSAGE,
+  OPEN_DIAGRAM_BUTTON,
   OPEN_FILE_BUTTON,
   OPEN_IT_BUTTON,
   SEND_FEEDBACK_BUTTON,
@@ -302,19 +303,88 @@ export interface ImportDbmlResult {
 }
 
 /**
+ * How far a run got, for the message when something throws that the flow did
+ * not expect (#236): the file, Try Again's re-run, the diagram once it is on
+ * disk, and the Keep still waiting.
+ */
+interface ImportRunProgress {
+  fileName?: string;
+  /** Re-enters with what the user already chose (the file, then the layer and name). */
+  retry?: () => unknown;
+  /** Set once every file is written: what failed after that was the refresh or the open. */
+  written?: { domainPath: string; shown: string };
+  /** The user is waiting on this run: false only for the automatic draft before its Keep. */
+  loud: boolean;
+  /** The draft's Keep, not settled yet. */
+  settle?: (outcome: DraftKeepOutcome) => void;
+}
+
+/** The title an unexpected failure is said under (Open Example Diagram is its own command, #236). */
+function failureTitle(source: ImportDbmlSource): string {
+  return source === 'example' ? 'Open Example Diagram' : IMPORT_TITLES[source];
+}
+
+/**
  * Run the flow. Resolves undefined when the user cancels, when the file
  * cannot be imported, or when a write fails (each case has already said so).
- * Anything that throws is counted and rethrown.
+ * Anything that throws is counted once and said as ERD Studio's problem, with
+ * Send Feedback (#236): it never reaches VS Code's generic "command failed".
+ * The automatic draft before its Keep still rethrows, so the host counts it
+ * (`draftBuildFailed`) and shows nothing.
  */
 export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume): Promise<ImportDbmlResult | undefined> {
   const base = deps.ui ?? vscodeImportDbmlUi();
-  const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[deps.source ?? 'file']) : base;
+  const source = deps.source ?? 'file';
+  const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[source]) : base;
+  const progress: ImportRunProgress = { loud: !deps.draft?.quiet };
   try {
-    return await runImportDbml(deps, ui, base, resume);
+    return await runImportDbml(deps, ui, base, resume, progress);
   } catch (err) {
-    telemetry.error(IMPORT_SOURCE_TELEMETRY[deps.source ?? 'file'].failed);
-    throw err;
+    telemetry.error(IMPORT_SOURCE_TELEMETRY[source].failed);
+    // A Keep left waiting gets its answer: kept when the diagram is on disk.
+    progress.settle?.(progress.written ? { kept: true } : { kept: false });
+    if (!progress.loud) throw err;
+    log.error(`[ERD Studio] ${failureTitle(source)} failed:`, err);
+    reportUnexpectedImportFailure(base, source, progress, err);
+    return undefined;
   }
+}
+
+/**
+ * The words for a throw the flow did not expect: always ERD Studio's. Before
+ * the write nothing was changed (Send Feedback, Try Again); after it, the
+ * diagram exists and only opening it failed (Open Diagram, Send Feedback).
+ */
+function reportUnexpectedImportFailure(ui: ImportDbmlUi, source: ImportDbmlSource, progress: ImportRunProgress, err: unknown): void {
+  const title = failureTitle(source);
+  const show = (message: string, actions: ErrorActions): void => showErrorWithActions(
+    (m, ...items) => ui.showErrorMessage(m, ...items),
+    message,
+    actions,
+    (choice, actionErr) => log.error(`[ERD Studio] ${title}: "${choice}" failed:`, actionErr),
+  );
+  const written = progress.written;
+  if (written) {
+    const doing = 'while opening the new diagram';
+    show(
+      `${title} created ${written.shown}, but hit a problem in ERD Studio opening it. This isn't something you did. Please send us a report.`,
+      {
+        [OPEN_DIAGRAM_BUTTON]: () => ui.openDiagram(written.domainPath),
+        [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(title, doing, err)),
+      },
+    );
+    return;
+  }
+  const doing = source === 'example'
+    ? 'while opening the example diagram'
+    : source !== 'file'
+      ? 'while importing the converted model'
+      : progress.fileName ? `while importing ${progress.fileName}` : 'while importing';
+  const retry = progress.retry;
+  show(oursMessage(title, doing, 'nothing was changed'), {
+    [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(title, doing, err)),
+    ...(retry ? { [TRY_AGAIN_BUTTON]: retry } : {}),
+  });
 }
 
 /**
@@ -339,7 +409,8 @@ async function runImportDbml(
   deps: ImportDbmlDeps,
   ui: ImportDbmlUi,
   loudUi: ImportDbmlUi,
-  resume?: ImportDbmlResume,
+  resume: ImportDbmlResume | undefined,
+  progress: ImportRunProgress,
 ): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
   const source = deps.source ?? 'file';
@@ -371,6 +442,7 @@ async function runImportDbml(
     ?? await ui.pickFile((await deps.findDefaultFile?.().catch(() => undefined)) ?? (workspaceRoot || undefined));
   if (!filePath) return cancelled();
   const fileName = path.basename(filePath);
+  progress.fileName = fileName;
   const quick = resume?.quick === true;
   /**
    * The deps a re-run takes: the automatic draft's own until its Keep, then
@@ -380,6 +452,7 @@ async function runImportDbml(
   let rerunDeps = deps;
   const again = (more: Omit<ImportDbmlResume, 'filePath'> = {}): (() => unknown) =>
     () => importDbml(rerunDeps, { filePath, ...(quick ? { quick } : {}), ...more });
+  progress.retry = again(resume?.layer !== undefined ? { layer: resume.layer } : {});
 
   let text: string;
   try {
@@ -487,6 +560,7 @@ async function runImportDbml(
   const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
   const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
   const tryAgain = again({ layer: chosenLayer, name: slug });
+  progress.retry = tryAgain;
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
   const nameTaken = (): void => showError(diagramNameTakenMessage(slug, layerLabel), {
@@ -616,6 +690,17 @@ async function runImportDbml(
   const chosen = { layer: chosenLayer, name: slug };
   /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
+  /** A Keep is waiting: settled once, here or (after a throw) by `importDbml`. */
+  const keepWaiting = (settle: (outcome: DraftKeepOutcome) => void): void => {
+    let done = false;
+    settleKeep = (outcome) => {
+      if (done) return;
+      done = true;
+      progress.settle = undefined;
+      settle(outcome);
+    };
+    progress.settle = settleKeep;
+  };
   /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
   let shown: Draft | undefined;
   /** A redraw of the same plan: its Keep is already answered, so the first pass writes at once. */
@@ -625,7 +710,8 @@ async function runImportDbml(
     const redraw = resume?.redraw;
     if (redraw && redraw.fingerprint === fingerprint) {
       // Files changed since the draft, but not this plan: write what was shown.
-      settleKeep = redraw.settle;
+      keepWaiting(redraw.settle);
+      progress.loud = true;
       shown = redraw.draft;
       answered = true;
     } else {
@@ -675,6 +761,7 @@ async function runImportDbml(
         case 'keep': {
           // The user waits on this Keep: what follows is said, even on the automatic draft.
           ui = loudUi;
+          progress.loud = true;
           if (draftOptions.quiet) rerunDeps = { ...deps, draft: { ...draftOptions, quiet: false } };
           if (planGeneration !== undefined && draftOptions.generation?.() !== planGeneration) {
             // The project's files changed since this plan (another window, git, an assistant): plan again.
@@ -697,7 +784,7 @@ async function runImportDbml(
               settle({ kept: false });
             }
           }
-          settleKeep = answer.settle;
+          keepWaiting(answer.settle);
           break;
         }
         case 'changeOptions':
@@ -755,6 +842,7 @@ async function runImportDbml(
       return undefined;
     }
 
+    progress.written = { domainPath, shown: `${chosenLayer}/${slug}` };
     deps.onWritten({ domainPath, modelNames: outcome.written, changedModelNames: outcome.changed });
     telemetry.feature(counts.done);
     if (quick) telemetry.feature('quickImport');

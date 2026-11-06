@@ -66,6 +66,34 @@ export interface MigrationResult {
   modelsCreated: number;
   /** Model names where multiple definitions were found — richest was kept. */
   mergeConflicts: string[];
+  /**
+   * Domain files left in the old format (#243): unreadable (no longer valid
+   * JSON when migration read it) or a write that failed. Each is named to the
+   * user; the next window still offers the migration for them.
+   */
+  skipped: MigrationSkip[];
+  /** How many domain files needed migrating when it started. */
+  domainsFound: number;
+}
+
+/** A domain file the migration left as it was, and why. */
+export interface MigrationSkip {
+  filePath: string;
+  reason: 'unreadable' | 'writeFailed';
+  /** The fs error of a write that failed (for its plain-words reason). */
+  error?: unknown;
+}
+
+/**
+ * `migrate()` threw part way (#243): what it had already written, so the
+ * message can say exactly what changed. Phase 3 catches per file, so a throw
+ * always comes before any domain file was rewritten.
+ */
+export class MigrationFailed extends Error {
+  constructor(readonly modelsCreated: number, readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'MigrationFailed';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -293,14 +321,28 @@ export class MigrationService {
       domainsConverted: 0,
       modelsCreated: 0,
       mergeConflicts: [],
+      skipped: [],
+      domainsFound: v4Paths.length,
     };
 
     if (v4Paths.length === 0) {
       return result;
     }
 
+    try {
+      this.extractAndConvert(v4Paths, result);
+    } catch (err) {
+      throw new MigrationFailed(result.modelsCreated, err);
+    }
+    return result;
+  }
+
+  /** `migrate()`'s three phases, filling in `result` as they go. */
+  private extractAndConvert(v4Paths: string[], result: MigrationResult): void {
     // Ensure logical-models directory exists
     this.tableLibraryService.ensureDir();
+    /** Files phase 1 could not read: phase 3 leaves them alone. */
+    const unreadable = new Set<string>();
 
     // Phase 1: Extract all models across all domains, resolve conflicts
     const allModels = new Map<string, { model: SemanticTable; sources: string[] }>();
@@ -331,7 +373,9 @@ export class MigrationService {
           }
         }
       } catch {
-        // Skip unparseable files
+        // Changed since it was found (no longer JSON, or gone): named, and left as it is.
+        unreadable.add(filePath);
+        result.skipped.push({ filePath, reason: 'unreadable' });
       }
     }
 
@@ -364,9 +408,17 @@ export class MigrationService {
 
     // Phase 3: Convert domain files to v5 format
     for (const filePath of v4Paths) {
+      if (unreadable.has(filePath)) continue;
+      let content: string;
+      let parsed: Record<string, unknown>;
       try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as Record<string, unknown>;
+        content = fs.readFileSync(filePath, 'utf-8');
+        parsed = JSON.parse(content) as Record<string, unknown>;
+      } catch {
+        result.skipped.push({ filePath, reason: 'unreadable' });
+        continue;
+      }
+      try {
 
         // Convert models (inline objects and/or existing name strings) to a
         // de-duplicated list of name references. Handles legacy top-level
@@ -399,10 +451,9 @@ export class MigrationService {
         result.domainsConverted++;
       } catch (err) {
         log.error(`[MigrationService] Failed to migrate ${filePath}:`, err);
+        result.skipped.push({ filePath, reason: 'writeFailed', error: err });
       }
     }
-
-    return result;
   }
 
   // -------------------------------------------------------------------------

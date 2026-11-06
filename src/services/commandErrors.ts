@@ -32,6 +32,8 @@ export const RELOAD_WINDOW_BUTTON = 'Reload Window';
 /** The buttons and words every way of making a diagram shares (#204, #229). */
 export const ADD_LAYER_BUTTON = 'Add Layer';
 export const OPEN_IT_BUTTON = 'Open It';
+/** A diagram was written, but opening it failed (#236): open it again. */
+export const OPEN_DIAGRAM_BUTTON = 'Open Diagram';
 export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
 export const NO_LAYERS_MESSAGE = 'No layers are configured for new diagrams. Add a layer first.';
 
