@@ -631,6 +631,8 @@ export const FEATURES = [
   'trySampleZip',
   'trySampleGithub',
   'noFolderWarned',
+  // 2.0 review — a stage switch or comparison met a diagram file the user broke (theirs, not ours)
+  'handlerFileProblem',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1734,11 +1736,14 @@ export const PROVISIONAL_ONBOARDING_FEATURES: readonly TelemetryFeature[] = [
  * What an update from `before` to `after` (the same day) asks of the interim
  * sender: `error` when an error code appears for the first time today (any
  * tenure), `onboarding` when an end-point was counted or the day's first
- * diagram with tables opened, or nothing.
+ * diagram with tables opened, or nothing. The B19 catch-all (`loggedError*`)
+ * never asks on its own: it also counts problems with the user's own files,
+ * and a failure of ours records its own code beside it.
  */
 export function provisionalTrigger(before: DailyCounters, after: DailyCounters): 'error' | 'onboarding' | undefined {
   if (before.day !== after.day) return undefined;
   for (const code of Object.keys(after.errors ?? {})) {
+    if (code.startsWith('loggedError')) continue;
     if (!(code in (before.errors ?? {}))) return 'error';
   }
   for (const f of PROVISIONAL_ONBOARDING_FEATURES) {

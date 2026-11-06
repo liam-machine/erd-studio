@@ -8,9 +8,11 @@
  * canvas's own ELK options before it is drawn (`Laying out N tables…`), the
  * schema on show only; ELK failing draws the host's fallback placement and
  * posts `layoutFailed` once per draft. A layout that finished posts
- * `layoutFinished` (usage telemetry, 2.0 B17) once the canvas has fitted it:
- * how long it took, whether the fitted zoom is readable, and whether it
- * needed the stack-safe placement.
+ * `laidOut` at once, then `layoutFinished` (usage telemetry, 2.0 B17) once
+ * the canvas has fitted it: how long it took, whether the fitted zoom is
+ * readable, and whether it needed the stack-safe placement. A page in a
+ * background tab may not fit it until it is shown again, so `laidOut` is
+ * what tells the host the layout is no longer running.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,6 +60,8 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   /** Laid-out positions per `<view id>\u0000<schema>`; `null`: ELK failed. */
   const [layouts, setLayouts] = useState<ReadonlyMap<string, Record<string, NodePosition> | null>>(new Map());
   const layoutFailedFor = useRef<string | undefined>();
+  /** The draft whose finished layout was reported (`laidOut`, once per draft: a schema filter's own layout says nothing). */
+  const laidOutFor = useRef<string | undefined>();
   /** A finished layout waiting for the canvas to fit it, to report (`layoutFinished`). */
   const layoutDone = useRef<{ key: string; ms: number; fallback: boolean } | undefined>();
   const canvasRef = useRef<HTMLElement>(null);
@@ -117,6 +121,10 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
         if (cancelled) return;
         layoutDone.current = { key: layoutKey, ms: Math.round(performance.now() - startedAt), fallback };
         setLayouts((prev) => new Map(prev).set(layoutKey, positions));
+        if (laidOutFor.current !== viewId) {
+          laidOutFor.current = viewId;
+          hostRef.current.post({ type: 'laidOut', id: viewId });
+        }
       },
       (err: unknown) => {
         if (cancelled) return;

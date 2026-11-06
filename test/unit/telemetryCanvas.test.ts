@@ -13,6 +13,7 @@ import {
   canvasLayoutTelemetry,
   dbmlDiagramFeatures,
   draftLayoutFeatures,
+  isUserFileProblem,
   loaderWarningFeatures,
   slowCanvasLoad,
   subjectAreaLoadDetailCode,
@@ -110,6 +111,26 @@ function thrown(fn: () => unknown): unknown {
   }
   throw new Error('expected a throw');
 }
+
+describe('isUserFileProblem (review of B12)', () => {
+  it('a broken, missing or locked diagram file is the user\'s', () => {
+    expect(isUserFileProblem(new SubjectAreaFileError('invalid-dbml', DIAGRAM, 'x', { dbmlErrorClass: 'syntax' }))).toBe(true);
+    expect(isUserFileProblem(new SubjectAreaFileError('invalid-json', '/p/a.json', 'x'))).toBe(true);
+    expect(isUserFileProblem(new SubjectAreaFileError('missing', '/p/a.json', 'x'))).toBe(true);
+    expect(isUserFileProblem(new SubjectAreaValidationError('x', 'notADiagram'))).toBe(true);
+    expect(isUserFileProblem(new SubjectAreaValidationError('x'))).toBe(true);
+    expect(isUserFileProblem(thrown(() => parseSubjectAreaDbml('Table x {\n  id int [pk\n}\n', DIAGRAM)))).toBe(true);
+  });
+
+  it('a parser that threw, core\'s own TypeError and anything else are ours', () => {
+    expect(isUserFileProblem(new SubjectAreaFileError('invalid-dbml', DIAGRAM, 'x', { parserThrew: true }))).toBe(false);
+    const wrapped = new SubjectAreaValidationError('x');
+    Object.defineProperty(wrapped, 'cause', { value: new TypeError('y') });
+    expect(isUserFileProblem(wrapped)).toBe(false);
+    expect(isUserFileProblem(new TypeError('x'))).toBe(false);
+    expect(isUserFileProblem('x')).toBe(false);
+  });
+});
 
 describe('subjectAreaLoadDetailCode (B14)', () => {
   it('maps a DBML diagnostic class from core, never the message', () => {

@@ -29,6 +29,7 @@ import { createLogger, log, logSourceOf, setErrorHook, writeLog } from '../../sr
 import { recordCommandFailure } from '../../src/commands/commandFailure';
 import { deleteFailure, layersFailure, layersFileMistake, renameReadFailure, renameRefused, unsavedSaveFailure, writeFailure, NEW_DIAGRAM_TITLE, SELECTORS_TITLE } from '../../src/services/diagramCommandErrors';
 import { LayersFileUnreadableError } from '../../src/services/layerService';
+import { SubjectAreaFileError } from '@erd-studio/core';
 import { telemetry } from '../../src/services/telemetryService';
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -106,7 +107,7 @@ describe('B10: showCommandFailure records the failure', () => {
     const recorded = keys();
     const err = errno('EACCES');
     recordCommandFailure(writeFailure(NEW_DIAGRAM_TITLE, err, ctx), err);
-    expect(recorded()).toEqual(['!newDiagramWriteFailed', 'writeFailedPermission']);
+    expect(recorded()).toEqual(['writeFailedPermission']);
   });
 
   it('a feature code is recorded as a feature, and a failure with no code or class records nothing', () => {
@@ -116,26 +117,35 @@ describe('B10: showCommandFailure records the failure', () => {
     expect(recorded()).toEqual(['newDiagramNoLayers']);
   });
 
-  it('each builder sets its code', () => {
+  it('each builder sets its code on a failure of ours', () => {
     const layersCtx = { workspaceRoot: '/w', layersPath: '/w/.erd-studio/layers.json', doing: 'while saving layers.json', outcome: 'Nothing was changed.' };
-    expect(writeFailure(NEW_DIAGRAM_TITLE, errno('ENOSPC'), ctx).code).toBe('newDiagramWriteFailed');
-    expect(writeFailure(NEW_DIAGRAM_TITLE, errno('EACCES'), ctx).code).toBe('newDiagramWriteFailed');
+    expect(writeFailure(NEW_DIAGRAM_TITLE, new TypeError('bug'), ctx).code).toBe('newDiagramWriteFailed');
     // Only the commands the plan names carry one.
-    expect(writeFailure(SELECTORS_TITLE, errno('EACCES'), ctx).code).toBeUndefined();
-    expect(layersFailure('Add Layer', errno('EACCES'), layersCtx).code).toBe('layersFileFailed');
-    expect(layersFailure('Add Layer', new LayersFileUnreadableError('Failed to read layers config: EACCES'), layersCtx).code).toBe('layersFileFailed');
+    expect(writeFailure(SELECTORS_TITLE, new TypeError('bug'), ctx).code).toBeUndefined();
+    expect(layersFailure('Add Layer', new TypeError('bug'), layersCtx).code).toBe('layersFileFailed');
+    expect(deleteFailure('orders', '/w/x.json', new TypeError('bug')).code).toBe('deleteDiagramFailed');
+    expect(renameReadFailure('/w/x.json', new TypeError('bug'), '/w').code).toBe('renameDiagramFailed');
+    expect(renameRefused('a', 'b').code).toBe('renameDiagramFailed');
+    for (const f of [writeFailure(NEW_DIAGRAM_TITLE, new TypeError('bug'), ctx), deleteFailure('o', '/w/x.json', new TypeError('bug'))]) {
+      expect(isTelemetryErrorCode(f.code!)).toBe(true);
+      expect(f.doing).toBeDefined();
+    }
+  });
+
+  it('the user\'s environment or file carries no error code: the operation code always means ours', () => {
+    const layersCtx = { workspaceRoot: '/w', layersPath: '/w/.erd-studio/layers.json', doing: 'while saving layers.json', outcome: 'Nothing was changed.' };
+    expect(writeFailure(NEW_DIAGRAM_TITLE, errno('ENOSPC'), ctx).code).toBeUndefined();
+    expect(writeFailure(NEW_DIAGRAM_TITLE, errno('EACCES'), ctx).code).toBeUndefined();
+    expect(layersFailure('Add Layer', errno('EACCES'), layersCtx).code).toBeUndefined();
+    expect(layersFailure('Add Layer', new LayersFileUnreadableError('Failed to read layers config: EACCES'), layersCtx).code).toBeUndefined();
     // The user's own mistake in layers.json is said in words, not counted as a failure.
     expect(layersFailure('Add Layer', new LayersFileUnreadableError('Invalid layers config: not JSON'), layersCtx).code).toBeUndefined();
     expect(layersFileMistake('Add Layer', layersCtx).code).toBeUndefined();
-    expect(deleteFailure('orders', '/w/x.json', new TypeError('bug')).code).toBe('deleteDiagramFailed');
-    expect(deleteFailure('orders', '/w/x.json', errno('EBUSY')).code).toBe('deleteDiagramFailed');
-    expect(unsavedSaveFailure('orders', 'deleting').code).toBe('deleteDiagramFailed');
-    expect(unsavedSaveFailure('orders', 'renaming').code).toBe('renameDiagramFailed');
-    expect(renameReadFailure('/w/x.json', new TypeError('bug'), '/w').code).toBe('renameDiagramFailed');
-    expect(renameRefused('a', 'b').code).toBe('renameDiagramFailed');
-    for (const f of [writeFailure(NEW_DIAGRAM_TITLE, errno('EACCES'), ctx), deleteFailure('o', '/w/x.json', errno('EBUSY'))]) {
-      expect(isTelemetryErrorCode(f.code!)).toBe(true);
-    }
+    expect(deleteFailure('orders', '/w/x.json', errno('EBUSY')).code).toBeUndefined();
+    expect(unsavedSaveFailure('orders', 'deleting').code).toBeUndefined();
+    expect(unsavedSaveFailure('orders', 'renaming').code).toBeUndefined();
+    expect(renameReadFailure('/w/x.json', new SubjectAreaFileError('missing', '/w/x.json', 'x'), '/w').code).toBeUndefined();
+    expect(renameReadFailure('/w/x.dbml', new SubjectAreaFileError('invalid-dbml', '/w/x.dbml', 'x', { line: 3 }), '/w').code).toBeUndefined();
   });
 });
 
@@ -159,6 +169,12 @@ describe('B12: canvas handler failures', () => {
     expect(handlerFailureKeys('relationship', { explained: true, overlap: false })).toEqual({ errors: [], features: [] });
     expect(handlerFailureKeys('model', { explained: true, overlap: true })).toEqual({ errors: ['dbmlWriteOverlap', 'handlerFailed', 'handlerFailedModel'], features: [] });
     expect(handlerFailureKeys('relationship', { explained: true, overlap: true })).toEqual({ errors: ['dbmlWriteOverlap', 'relHandlerFailed'], features: [] });
+  });
+
+  it('a diagram file the user broke is handlerFileProblem, never a failure of ours', () => {
+    expect(handlerFailureKeys('stage', { explained: false, overlap: false, userFile: true })).toEqual({ errors: [], features: ['handlerFileProblem'] });
+    expect(handlerFailureKeys('compare', { explained: false, overlap: false, userFile: true })).toEqual({ errors: [], features: ['handlerFileProblem'] });
+    expect(handlerFailureKeys('stage', { explained: false, overlap: false, userFile: false })).toEqual({ errors: ['handlerFailed', 'handlerFailedStage'], features: [] });
   });
 
   it('an error is counted once, however many times it is seen; a thrown string cannot be marked', () => {

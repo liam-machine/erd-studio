@@ -103,8 +103,10 @@ change to what is collected, documented in promise 1 above.
   own body below 16 KB, so a Worker still at the older cap never refuses a
   whole day.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
-  written. `day` must be a real calendar date, not in the future and at most 7
-  days before today (UTC). Unknown top-level keys and unknown `features` /
+  written. `day` must be a real calendar date, at most 7 days before today
+  (UTC) and not in the future, except that tomorrow is accepted within an
+  hour of midnight UTC (a client clock running a little fast, whose interim
+  copy names its own new day). Unknown top-level keys and unknown `features` /
   `errors` keys are dropped; zero counts are dropped.
 - Upsert on `(install_id, day)`, last write wins.
 - A D1 failure → `503`. The extension drops failed heartbeats silently and never
@@ -740,11 +742,19 @@ The day after shipping (and again a week later):
      "SELECT ext_family,outcome,reason,SUM(n),SUM(dropped_features),SUM(dropped_errors),SUM(dropped_trail) FROM worker_daily WHERE day>=date('now','-2 days') GROUP BY 1,2,3"
    ```
 
-   Any `denied` row for a `2.x` family means the Worker refuses that
-   version's heartbeats: a Worker hotfix. Any `dropped_*` above 0 on a `2.x`
-   family means the Worker's lists are older than that version's keys:
-   redeploy the Worker from the release's `telemetry/`. A version with no
-   ledger rows at all is one nobody is running (yet).
+   The 2.0 contract starts with the `1.9.x` pre-releases: read family `1.9`
+   exactly as `2.*` here and below. Any `denied` `shape_<field>` row for a
+   2.0-contract family means the Worker refuses that version's heartbeats: a
+   Worker hotfix. (A few `shape_day` rows are a client clock more than an
+   hour fast: an interim copy names the client's own today, and the Worker
+   accepts tomorrow only within an hour of its midnight.) `body_size` and
+   `json` denials are refused before the body is read, so their family is
+   always `other`: any `body_size` row at all means a client's 16 KB size
+   guard failed, since no well-behaved version sends more than 32 KB. Any
+   `dropped_*` above 0 on a 2.0-contract family means the Worker's lists are
+   older than that version's keys: redeploy the Worker from the release's
+   `telemetry/`. A version with no ledger rows at all is one nobody is
+   running (yet).
 1. Run query 0 and check the new version is reporting at all. No rows after
    two days with the old version still reporting means the heartbeat broke.
 2. Run query 1 for the new version, then query 3.
@@ -774,20 +784,26 @@ The day after shipping (and again a week later):
   update. Tenure is days since the install's first heartbeat, so an upgrader
   reads as `1-7` or older, never `0`, unless it had telemetry off before.
 
-Error rates per version family and tenure: installs with any error per
-install-day, finished single-version days only. Run it per code too (join
+Error rates per version family and tenure: installs with an error both
+families can send, per install-day, finished single-version days only. The
+2.0 family is the `1.9.x` pre-releases and `2.x`; the baseline is the last
+1.x stable (below `1.9`) over the 28 days before the first `1.9.x`
+heartbeat, and `<shared codes>` is the list of error codes that baseline
+recorded (never `loggedError*`). Do not compare `errors <> '{}'` across
+families: 2.0 sends codes 1.x never had (`loggedError*` for every logged
+error, `handlerFailed*`, `refreshFailed*`, `webviewNoReady*`), so the same day
+reads as an error day on 2.0 and clean on 1.x. Run it per code too (join
 `json_each(h.errors)`, count `DISTINCT install_id` per key) and read installs
-affected per 100 install-days against the last 1.x stable's rate over the 28
-days before 2.0.0. Treat a code at 1.5× its 1.x rate or more as a regression
-only when at least 2 installs are affected; tenure `0` (the first day) matters
-most.
+affected per 100 install-days against the baseline. Treat a shared code at
+1.5× its 1.x rate or more as a regression only when at least 2 installs are
+affected; tenure `0` (the first day) matters most.
 
 ```bash
 npx wrangler d1 execute erd-studio-telemetry --remote --command "
-SELECT CASE WHEN ext_version LIKE '2.%' THEN '2.x' ELSE '1.x' END AS fam,
+SELECT CASE WHEN ext_version LIKE '2.%' OR ext_version LIKE '1.9.%' THEN '2.0' ELSE '1.x' END AS fam,
        CASE WHEN tenure = '0' THEN '0' WHEN tenure = '1-7' THEN '1-7' ELSE '8+' END AS t,
        COUNT(*) AS install_days, COUNT(DISTINCT install_id) AS installs,
-       SUM(CASE WHEN errors <> '{}' THEN 1 ELSE 0 END) AS days_with_error
+       SUM(CASE WHEN EXISTS (SELECT 1 FROM json_each(errors) e WHERE e.key IN (<shared codes>)) THEN 1 ELSE 0 END) AS days_with_shared_error
 FROM heartbeats
 WHERE COALESCE(dev, 0) = 0 AND day >= date('now','-14 days') AND day < date('now','-1 day')
   AND json_extract(features, '$.heartbeatProvisional') IS NULL
@@ -803,7 +819,7 @@ query under *Bounces*.
 ```bash
 npx wrangler d1 execute erd-studio-telemetry --remote --command "
 SELECT f.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) f
-WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-14 days') AND h.ext_version LIKE '2.%'
+WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-14 days') AND (h.ext_version LIKE '2.%' OR h.ext_version LIKE '1.9.%')
   AND (f.key = 'firstRun' OR f.key LIKE 'ttf%' OR f.key LIKE 'draftUnavailable%' OR f.key LIKE 'draftDrop%')
 GROUP BY 1 ORDER BY 1"
 ```
@@ -1000,10 +1016,16 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `newDiagramNameTaken` — New Diagram: the name was taken.
 - `newDiagramNoLayers` — New Diagram: the project has no layers.
 - `commandFailedOurs` (error) — a command showed an error that names what it was doing (ours).
-- `newDiagramWriteFailed` (error) — New Diagram could not write the diagram.
-- `layersFileFailed` (error) — layers.json could not be written.
-- `renameDiagramFailed` (error) — Rename Diagram failed.
-- `deleteDiagramFailed` (error) — Delete Diagram failed.
+- `newDiagramWriteFailed` (error) — New Diagram could not write the diagram (ours).
+- `layersFileFailed` (error) — a layer command could not read or write layers.json (ours).
+- `renameDiagramFailed` (error) — Rename Diagram failed (ours).
+- `deleteDiagramFailed` (error) — Delete Diagram failed (ours).
+
+These four name the operation and are recorded only beside `commandFailedOurs`.
+A failure that is the user's environment or file (a file another program has
+open, a folder ERD Studio may not write, a full disk, a diagram file with a
+mistake in it, a save VS Code refused) records no error code: only the
+`writeFailedPermission` / `writeFailedDiskFull` feature, when it is one.
 - `exampleSaveFailed` (error) — Open an Example Project could not save the example.
 
 **B11 — Convert to DBML: refusal kinds, stops and storage state.**
@@ -1028,6 +1050,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 **B12 — canvas handler failures, protocol rejects, watcher refresh failures.**
 
 - `editRefused` — a canvas edit was refused with an explanation to the user.
+- `handlerFileProblem` — a canvas stage switch or comparison met a diagram file the user or an assistant broke, removed or locked (core's file and validation errors, except a DBML parser that threw or core's own `TypeError`); the user is told what is wrong with the file. Not a failure of ours, so no `handlerFailed*` beside it.
 - `canvasReconnectReload` — a canvas asked the host to reload it.
 - `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it).
 - `handlerFailedModel` (error) — a model handler threw.
@@ -1178,7 +1201,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `loggedErrorDbt` (error) — a logged error from the dbt integration.
 - `loggedErrorOther` (error) — a logged error from anywhere else.
 
-The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself.
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
 
 **B15 — trail marker.**
 

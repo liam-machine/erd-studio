@@ -45,6 +45,11 @@ export interface CommandFailure {
   /**
    * Internal, never shown: the usage-telemetry key `showCommandFailure`
    * records for this failure (B10), an error code or a feature. Fixed keys only.
+   * An error code is set only on a failure that is ours (`doing` set): the
+   * user's environment or file (a locked file, permissions, a full disk, a
+   * diagram with a mistake in it) carries none, so the operation's code
+   * always means an ERD Studio failure (`recordCommandFailure` counts the
+   * write class beside it instead).
    */
   code?: TelemetryErrorCode | TelemetryFeature;
 }
@@ -61,9 +66,9 @@ const WRITE_FAILURE_CODES: Readonly<Record<string, TelemetryErrorCode>> = {
   [NEW_DIAGRAM_TITLE]: 'newDiagramWriteFailed',
 };
 
-/** `failure` with its usage-telemetry code (unless it already has one). */
-function withCode(failure: CommandFailure, code: TelemetryErrorCode | TelemetryFeature | undefined): CommandFailure {
-  return code === undefined || failure.code !== undefined ? failure : { ...failure, code };
+/** `failure` with its usage-telemetry error code, when the failure is ours (`doing` set) and has none yet. */
+function withCode(failure: CommandFailure, code: TelemetryErrorCode | undefined): CommandFailure {
+  return code === undefined || failure.code !== undefined || !failure.doing ? failure : { ...failure, code };
 }
 
 /**
@@ -114,7 +119,6 @@ export function layersFailure(
       message: `${title}: ERD Studio can't read ${shown}, so ${clause(ctx.outcome)}. Check the file's permissions, then try again.`,
       buttons: [SHOW_FILE_BUTTON],
       target: ctx.layersPath,
-      code: 'layersFileFailed',
     };
   }
   return withCode(
@@ -152,7 +156,6 @@ export function deleteFailure(name: string, filePath: string, err: unknown): Com
       message: `"${name}" couldn't be deleted: another program may have it open, or ERD Studio isn't allowed to change that folder. Nothing was deleted.`,
       buttons: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
       target: filePath,
-      code: 'deleteDiagramFailed',
     };
   }
   const doing = 'while deleting the file';
@@ -171,7 +174,6 @@ export function unsavedSaveFailure(name: string, operation: 'deleting' | 'renami
     title: operation === 'deleting' ? DELETE_DIAGRAM_TITLE : RENAME_DIAGRAM_TITLE,
     message: `"${name}" couldn't be saved, so it wasn't ${operation === 'deleting' ? 'deleted' : 'renamed'}. Your changes are still in its tab.`,
     buttons: [SHOW_FILE_BUTTON],
-    code: operation === 'deleting' ? 'deleteDiagramFailed' : 'renameDiagramFailed',
   };
 }
 
@@ -191,7 +193,6 @@ export function renameReadFailure(filePath: string, err: unknown, workspaceRoot:
     message: `${shown} can't be renamed because the diagram file has a problem: ${problem.reason}.`,
     buttons: problem.openable ? [OPEN_FILE_BUTTON] : [],
     target: filePath,
-    code: 'renameDiagramFailed',
     ...(problem.line !== undefined ? { line: problem.line } : {}),
     ...(problem.column !== undefined ? { column: problem.column } : {}),
   };

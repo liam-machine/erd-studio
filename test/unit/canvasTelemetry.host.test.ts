@@ -185,14 +185,37 @@ describe('why a DBML diagram did not load (B14)', () => {
     expect(featureKeys()).not.toContain('domainLoadBlocking');
   });
 
+  it('a stage switch that meets a diagram the user broke is theirs, not a handler failure of ours', async () => {
+    const file = diagramPath(root, 'dbml', 'silver', 'showcase');
+    const good = fs.readFileSync(file, 'utf-8');
+    const { panel } = await open(file);
+    error.mockClear();
+    feature.mockClear();
+    fs.writeFileSync(file, `${good}\nTable broken {\n  id int [pk\n}\n`);
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical' } });
+    expect(types(panel)).toContain('error');
+    expect(errorCodes()).not.toContain('handlerFailed');
+    expect(errorCodes()).not.toContain('handlerFailedStage');
+    expect(featureKeys()).toContain('handlerFileProblem');
+  });
+
   it('flags a diagram whose erd_layout has a line it cannot read, and a table not found', async () => {
     const file = diagramPath(root, 'dbml', 'silver', 'showcase');
     const text = fs.readFileSync(file, 'utf-8')
       .replace('    dim_customer 40 60\n', '    dim_customer 40 60\n    this is not a layout line\n')
       .replace("use { table silver.dim_task }", "use { table silver.dim_nowhere } from '../tables/silver/dim_nowhere.dbml'\nuse { table silver.dim_task }");
     fs.writeFileSync(file, text);
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(true);
     await open(file);
     expect(featureOnce.mock.calls.map(([k]) => k)).toEqual(expect.arrayContaining(['dbmlLayoutBadLine', 'diagramWarnModelNotFound']));
     expect(featureOnce.mock.calls.map(([k]) => k)).not.toContain('dbmlDiagramReadOnly');
+  });
+
+  it('does no telemetry-only reading when usage telemetry is off', async () => {
+    const file = diagramPath(root, 'dbml', 'silver', 'showcase');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace('    dim_customer 40 60\n', '    dim_customer 40 60\n    this is not a layout line\n'));
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(false);
+    await open(file);
+    expect(featureOnce.mock.calls.map(([k]) => k)).not.toContain('dbmlLayoutBadLine');
   });
 });

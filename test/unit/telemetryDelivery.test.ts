@@ -116,6 +116,14 @@ describe('provisionalTrigger', () => {
     expect(provisionalTrigger(once, recordError(once, 'saveFailed'))).toBeUndefined();
   });
 
+  it('never fires for the loggedError* catch-all on its own', () => {
+    const s = used();
+    const logged = recordError(recordError(s, 'loggedError'), 'loggedErrorCanvas');
+    expect(provisionalTrigger(s, logged)).toBeUndefined();
+    // A failure of ours records its own code beside the catch-all.
+    expect(provisionalTrigger(s, recordError(logged, 'handlerFailedStage'))).toBe('error');
+  });
+
   it('fires for an onboarding end-point and the day\'s first diagram with tables', () => {
     const s = used();
     for (const f of ['draftDiscarded', 'draftClosed', 'draftKept', 'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideLeftDraft', 'draftRejectedFastDbt'] as const) {

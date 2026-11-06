@@ -113,6 +113,28 @@ describe('the draft page crash and layout events', () => {
     expect(ev.closedWhileLayingOut).toHaveBeenCalledWith('sqlDdl');
   });
 
+  it('does not count a close once the layout returned, though the canvas never fitted it (a background tab)', async () => {
+    const ev = events();
+    const draft = draftOf('large');
+    void DraftPreviewPanel.show(extensionUri, draft, ev);
+    const panel = lastPanel();
+    await panel._simulateMessage({ type: 'ready' });
+    await panel._simulateMessage({ type: 'laidOut', id: draft.id });
+    panel.dispose();
+    expect(ev.closedWhileLayingOut).not.toHaveBeenCalled();
+    expect(ev.layoutFinished).not.toHaveBeenCalled();
+  });
+
+  it('ignores a laidOut for another draft', async () => {
+    const ev = events();
+    void DraftPreviewPanel.show(extensionUri, draftOf('large'), ev);
+    const panel = lastPanel();
+    await panel._simulateMessage({ type: 'ready' });
+    await panel._simulateMessage({ type: 'laidOut', id: 'some-earlier-draft' });
+    panel.dispose();
+    expect(ev.closedWhileLayingOut).toHaveBeenCalledTimes(1);
+  });
+
   it('does not count a close when the layout failed, or there was none to run', async () => {
     const failed = events();
     void DraftPreviewPanel.show(extensionUri, draftOf('large'), failed);

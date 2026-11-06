@@ -459,21 +459,20 @@ export class SubjectAreaTreeProvider
       // rows, so the "No diagrams yet" welcome never flashes over a project
       // that has diagrams while the window opens.
       let rows = 0;
-      let failed = false;
       try {
         const children = this.rootChildren();
         rows = children.length;
         return children;
       } catch (err) {
-        // A listing that threw found nothing: the empty view's start buttons
-        // ("No diagrams yet") must not show over a project that may have diagrams.
-        failed = true;
+        // Logged and counted (usage telemetry). What the view shows is as
+        // before: a listing that threw found no rows, so the empty view's
+        // start buttons show rather than "Loading diagrams…" for good.
         treeLog.error('Listing the diagrams failed:', err);
         try { this.onListFailed?.(); } catch { /* counting never breaks the view */ }
         throw err;
       } finally {
         const loading = rows > 0;
-        if (!failed && this.loading !== loading) {
+        if (this.loading !== loading) {
           this.loading = loading;
           this.onLoadingChange?.(loading);
         }

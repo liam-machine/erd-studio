@@ -131,6 +131,21 @@ export function subjectAreaLoadDetailCode(err: unknown): TelemetryErrorCode | un
   return undefined;
 }
 
+/**
+ * Whether a canvas handler's failure is the diagram file itself (a file the
+ * user or an assistant broke, removed or locked), not ERD Studio: core's
+ * `SubjectAreaFileError` unless its DBML parser threw, and a
+ * `SubjectAreaValidationError` unless core wrapped its own `TypeError` in it.
+ * The load path already files these under the user's environment (B14:
+ * `domainLoadBlocking` / `domainLoadOverLive`); a stage switch or a
+ * comparison that meets the same file must not count it as ours.
+ */
+export function isUserFileProblem(err: unknown): boolean {
+  if (err instanceof SubjectAreaFileError) return err.parserThrew !== true;
+  if (err instanceof SubjectAreaValidationError) return !((err as { cause?: unknown }).cause instanceof TypeError);
+  return false;
+}
+
 const STRUCTURE_RULE_CODES: Record<string, TelemetryErrorCode> = {
   'structure:notOneTable': 'modelFileDbmlNotOneTable',
   'structure:nameMismatch': 'modelFileDbmlNameMismatch',

@@ -121,6 +121,14 @@ const MAX_BODY_BYTES = 32768;
 /** A heartbeat may describe a day at most this many days before it is received. */
 const MAX_DAY_AGE_DAYS = 7;
 
+/**
+ * How far ahead of ours a client's clock may run. Since 2.0 an interim copy
+ * describes the client's own today, posted seconds after its midnight: a
+ * clock a few minutes fast would name our tomorrow. Tomorrow is accepted
+ * only this close to our midnight.
+ */
+const MAX_CLOCK_AHEAD_MS = 3_600_000;
+
 /** Raw rows older than this (by `received_day`) are deleted by the cron. */
 const RETENTION_DAYS = 90;
 
@@ -746,6 +754,8 @@ const FEATURES = [
   'trySampleZip',
   'trySampleGithub',
   'noFolderWarned',
+  // 2.0 review — a stage switch or comparison met a diagram file the user broke (theirs, not ours)
+  'handlerFileProblem',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1416,7 +1426,9 @@ function optionalOneOf(value, allowed) {
 /**
  * A real `YYYY-MM-DD` calendar date between {@link MAX_DAY_AGE_DAYS} days ago
  * and today, UTC. Today is allowed (not only yesterday) so a client whose
- * clock is a few minutes ahead of ours is not refused at midnight.
+ * clock is a few minutes ahead of ours is not refused at midnight, and
+ * tomorrow within {@link MAX_CLOCK_AHEAD_MS} of our midnight, for the 2.0
+ * interim copy of a fast clock's new day.
  *
  * @param {unknown} value
  * @param {number} now
@@ -1427,10 +1439,10 @@ function isAcceptableDay(value, now) {
   const ms = Date.parse(`${value}T00:00:00Z`);
   // Date.parse accepts 2026-02-31 and rolls it over, so round-trip to reject it.
   if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== value) return false;
-  const today = utcDay(now);
+  const latest = utcDay(now + MAX_CLOCK_AHEAD_MS);
   const oldest = utcDay(now - MAX_DAY_AGE_DAYS * 86_400_000);
   // ISO dates compare correctly as strings.
-  return value <= today && value >= oldest;
+  return value <= latest && value >= oldest;
 }
 
 /**

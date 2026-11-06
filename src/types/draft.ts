@@ -281,6 +281,13 @@ export type DraftToHost =
    * (telemetry only).
    */
   | { type: 'layoutFinished'; ms: number; fitZoom: FitZoomBucket; fallback?: true }
+  /**
+   * Passive (2.0 B17): ELK finished laying out the draft `id`, posted as soon
+   * as the positions arrive. `layoutFinished` waits for the canvas to fit
+   * them, which a page in a background tab may never do (no animation
+   * frames), so this is what tells the host the layout is no longer running.
+   */
+  | { type: 'laidOut'; id: string }
   /** Passive (2.0 B13): the page crashed or hit an uncaught error; its kind only, never the text (telemetry only). */
   | { type: 'pageError'; kind: WebviewErrorKind; area: 'draft' }
   /** Passive: the onboarding guide showed a step or was skipped (`DRAFT_GUIDE_ACTIONS` only). */
@@ -288,12 +295,12 @@ export type DraftToHost =
 
 export const DRAFT_TO_HOST_TYPES = [
   'ready', 'keep', 'changeOptions', 'discard', 'otherStart', 'scope', 'detailsOpened', 'layoutFailed', 'guide',
-  'layoutFinished', 'pageError',
+  'layoutFinished', 'pageError', 'laidOut',
 ] as const satisfies readonly DraftToHost['type'][];
 
 /** Messages that are not a choice: they never close the page or answer the flow. */
 export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set([
-  'ready', 'detailsOpened', 'layoutFailed', 'guide', 'layoutFinished', 'pageError',
+  'ready', 'detailsOpened', 'layoutFailed', 'guide', 'layoutFinished', 'pageError', 'laidOut',
 ]);
 
 /** What the draft on show allows: a message for anything else is dropped. */
@@ -360,6 +367,8 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
       if (fallback !== undefined && fallback !== true) return undefined;
       return { type: 'layoutFinished', ms, fitZoom: fitZoom as FitZoomBucket, ...(fallback ? { fallback: true as const } : {}) };
     }
+    case 'laidOut':
+      return typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 200 ? { type: 'laidOut', id: raw.id } : undefined;
     case 'pageError':
       return isWebviewErrorKind(raw.kind) && raw.area === 'draft' ? { type: 'pageError', kind: raw.kind, area: 'draft' } : undefined;
     default:

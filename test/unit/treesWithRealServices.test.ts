@@ -274,7 +274,7 @@ describe('Table Library tree with the real library', () => {
     provider.dispose();
   });
 
-  it('a Subject Areas listing that throws is counted and keeps "Loading diagrams…", never the empty start (B18)', () => {
+  it('a Subject Areas listing that throws is counted, and the view leaves "Loading diagrams…" as before (B18)', () => {
     const { subjectAreaService, layerService } = services();
     const loading = vi.fn();
     const listFailed = vi.fn();
@@ -282,8 +282,9 @@ describe('Table Library tree with the real library', () => {
     vi.spyOn(layerService, 'getAllLayers').mockImplementation(() => { throw new Error('layers.json unreadable'); });
     expect(() => provider.getChildren()).toThrow('layers.json unreadable');
     expect(listFailed).toHaveBeenCalledTimes(1);
-    expect(loading).not.toHaveBeenCalled();
-    expect(provider.isLoading()).toBe(true);
+    // Telemetry changes nothing the user sees: no "Loading diagrams…" for good.
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(provider.isLoading()).toBe(false);
     provider.dispose();
   });
 });

@@ -169,6 +169,7 @@ import { markRecorded, wasRecorded } from '../services/telemetryOnce';
 import {
   canvasLayoutTelemetry,
   dbmlDiagramFeatures,
+  isUserFileProblem,
   loaderWarningFeatures,
   slowCanvasLoad,
   subjectAreaLoadDetailCode,
@@ -510,9 +511,26 @@ function isDbmlWriteOverlap(err: unknown): boolean {
 function recordHandlerFailure(group: HandlerGroup, err: unknown): void {
   if (wasRecorded(err)) return;
   markRecorded(err);
-  const keys = handlerFailureKeys(group, { explained: isExplainedRefusal(err), overlap: isDbmlWriteOverlap(err) });
+  const keys = handlerFailureKeys(group, {
+    explained: isExplainedRefusal(err),
+    overlap: isDbmlWriteOverlap(err),
+    userFile: isUserFileProblem(err),
+  });
   for (const code of keys.errors) telemetry.error(code);
   for (const feature of keys.features) telemetry.feature(feature);
+}
+
+/**
+ * Log a canvas handler failure at the level its telemetry counts it: a
+ * refusal the user was told about in plain words, or a diagram file the
+ * user or an assistant broke, is a warning, so the B19 catch-all
+ * (`loggedError*`) does not count it as ours either. Everything else,
+ * including a DBML writer overlap, stays an error.
+ */
+function logHandlerFailure(line: string, err: unknown): void {
+  const theirs = !isDbmlWriteOverlap(err) && (isExplainedRefusal(err) || isUserFileProblem(err));
+  if (theirs) log.warn(line);
+  else log.error(line);
 }
 
 import {
@@ -1071,7 +1089,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const detail = err instanceof Error ? err.message : String(err);
         const type = isTypedMessage(message) ? message.type : 'unknown';
         recordHandlerFailure(handlerGroupOf(type), err);
-        log.error(`[SemanticEditorProvider] Message "${type}" failed: ${detail}`);
+        logHandlerFailure(`[SemanticEditorProvider] Message "${type}" failed: ${detail}`, err);
         this.post(webview, { type: 'error', payload: { message: `Failed to handle "${type}": ${detail}` } });
       }
     };
@@ -4676,8 +4694,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * renders degraded — the loader's warning codes (a table not found, DBML
    * from another tool) and, for a DBML diagram, what its reading found (the
    * remembered one: no compile). Presence flags, once a day each. Never throws.
+   * Skipped when usage telemetry is off: its only use is telemetry.
    */
   private recordDiagramFlags(document: vscode.TextDocument): void {
+    if (!telemetry.enabled()) return;
     try {
       const fsPath = document.uri.fsPath;
       const features = loaderWarningFeatures(this.subjectAreaService.loaderWarningCodes(fsPath));
@@ -5109,7 +5129,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Dropping tables failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Dropping tables failed: ${message}`, err);
       recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${message}` } });
     }
@@ -5434,7 +5454,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add model failed: ${message}`, err);
       recordHandlerFailure('model', err);
       webview.postMessage({
         type: 'error',
@@ -5516,7 +5536,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add column failed: ${message}`, err);
       recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add column: ${message}` } });
     }
@@ -5647,7 +5667,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update column failed: ${message}`, err);
       recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update column: ${message}` } });
     }
@@ -5715,7 +5735,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Remove column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove column failed: ${message}`, err);
       recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove column: ${message}` } });
     }
@@ -5787,7 +5807,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Toggle key failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Toggle key failed: ${message}`, err);
       recordHandlerFailure('key', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to toggle key type: ${message}` } });
     }
@@ -5862,7 +5882,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Reorder columns failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Reorder columns failed: ${message}`, err);
       recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to reorder columns: ${message}` } });
     }
@@ -5902,7 +5922,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (written?.home === 'library') this.sayWhereRelationshipLanded(drawn);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
     }
@@ -6192,7 +6212,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Rename model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Rename model failed: ${message}`, err);
       recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to rename table: ${message}` } });
     }
@@ -6354,7 +6374,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`, err);
       recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}: ${message}` } });
     }
@@ -6506,7 +6526,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (written?.home === 'library') this.noteDiagramsStillDrawing(document, keys);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Remove ${label} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${label} failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${label}: ${message}` } });
     }
@@ -6554,7 +6574,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update relationship: ${message}` } });
     }
@@ -6592,7 +6612,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Edit relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Edit relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to edit relationship: ${message}` } });
     }
@@ -6654,7 +6674,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         : `Positions of ${what} in ${document.uri.fsPath} unchanged or not saved (${elapsedMs(start)} ms)`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Position update failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Position update failed: ${message}`, err);
       recordHandlerFailure('layout', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to save positions: ${message}` } });
     }
@@ -6693,7 +6713,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add annotation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add annotation failed: ${msg}`, err);
       recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add annotation: ${msg}` } });
     }
@@ -6737,7 +6757,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update annotation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update annotation failed: ${msg}`, err);
       recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update annotation: ${msg}` } });
     }
@@ -6770,7 +6790,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Remove ${label} failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${label} failed: ${msg}`, err);
       recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${label}: ${msg}` } });
     }
@@ -6965,7 +6985,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add existing model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add existing model failed: ${message}`, err);
       recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${message}` } });
     }
@@ -7039,7 +7059,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.applyDbtModels(document, webview, pick.modelNames, ymlData, manifest));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add models from dbt failed: ${message}`, err);
       // A refusal the toast explains (a conflicted diagram, a model file
       // with unsaved edits) is not a breakage.
       if (!isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
@@ -7078,7 +7098,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await this.applyDbtModels(document, webview, modelNames, ymlData, manifest, 'picked', options.dropAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add existing models failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add existing models failed: ${message}`, err);
       recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add tables: ${message}` } });
     }
@@ -7208,7 +7228,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Add models${from} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add models${from} failed: ${message}`, err);
       // A refusal the toast explains (a conflicted diagram, a model file
       // with unsaved edits) is not a breakage.
       if (fromDbt && !isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
@@ -7273,7 +7293,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update design rationale failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update design rationale failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update design rationale: ${message}` } });
     }
@@ -7319,7 +7339,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update description failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update description failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update description: ${message}` } });
     }
@@ -7365,7 +7385,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update grain failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update grain failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update grain: ${message}` } });
     }
@@ -7400,7 +7420,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update alias failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update warehouse name: ${message}` } });
     }
@@ -7447,7 +7467,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update meta failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update meta failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update metadata: ${message}` } });
     }
@@ -7520,7 +7540,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Update model role failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update model role failed: ${message}`, err);
       recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update table role: ${message}` } });
     }
@@ -7606,7 +7626,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Stage switch failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Stage switch failed: ${message}`, err);
       recordHandlerFailure('stage', err);
       // A file the user broke (#186) is named the way the load screen names it.
       const fileProblem = err instanceof SubjectAreaFileError ? this.subjectAreaFileProblemPayload(err, document.uri.fsPath) : undefined;
@@ -7678,7 +7698,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`, err);
       recordHandlerFailure('compare', err);
       webview.postMessage({ type: 'discrepancyReport', payload: null });
     }
@@ -7769,7 +7789,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.window.showTextDocument(uri, { preview: true, viewColumn: vscode.ViewColumn.Beside });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`, err);
       recordHandlerFailure('compare', err);
       webview.postMessage({
         type: 'error',

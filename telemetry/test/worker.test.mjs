@@ -362,7 +362,7 @@ describe('validation — rejections', () => {
     ['day', '2026-02-31'],
     ['day', '26-01-01'],
     ['day', '2026-1-1'],
-    ['day', utcDay(1)], // future
+    ['day', utcDay(2)], // future
     ['day', utcDay(-8)], // older than 7 days
     ['day', `${utcDay(-1)}T00:00:00Z`],
     ['day', 20260101],
@@ -426,6 +426,21 @@ describe('validation — rejections', () => {
 });
 
 describe('validation — acceptance and normalisation', () => {
+  it('accepts tomorrow only within an hour of our midnight (a fast clock\'s interim copy)', async () => {
+    const realNow = Date.now;
+    try {
+      const midnight = Date.parse(`${utcDay(1)}T00:00:00Z`);
+      Date.now = () => midnight - 10 * 60_000; // 23:50 UTC
+      assert.equal((await post(heartbeat({ day: utcDay(1) }))).status, 204);
+      Date.now = () => midnight - 3 * 3_600_000; // 21:00 UTC
+      const { status, env } = await post(heartbeat({ day: utcDay(1) }));
+      assert.equal(status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it('drops unknown top-level keys', async () => {
     const params = await storedParams(heartbeat({ hostname: 'secret-laptop', ip: '10.0.0.1', extra: { a: 1 } }));
     const flat = JSON.stringify(params);

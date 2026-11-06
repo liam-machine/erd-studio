@@ -319,6 +319,10 @@ export class DraftPreviewPanel {
         this.layingOut = undefined;
         this.events.layoutFailed?.(this.view.source);
         return;
+      case 'laidOut':
+        // Only the draft being laid out: a late one for a draft since replaced says nothing.
+        if (this.layingOut === message.id) this.layingOut = undefined;
+        return;
       case 'layoutFinished': {
         this.layingOut = undefined;
         const { type: _type, ...layout } = message;

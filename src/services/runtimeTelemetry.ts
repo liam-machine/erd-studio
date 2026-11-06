@@ -172,14 +172,18 @@ export function handlerGroupOf(type: string): HandlerGroup {
  *   whatever the user was told: `dbmlWriteOverlap`, then counted as a failure;
  * - another refusal the user was told about in plain words: `editRefused`
  *   (nothing for a relationship handler, which counts only its failures);
+ * - the diagram file itself is broken, missing or locked (`userFile`, a file
+ *   the user or an assistant wrote, met on a stage switch or a comparison):
+ *   `handlerFileProblem`, never a failure of ours;
  * - anything else: `handlerFailed` and the group's code, or for a
  *   relationship handler only the existing `relHandlerFailed`.
  */
 export function handlerFailureKeys(
   group: HandlerGroup,
-  failure: { explained: boolean; overlap: boolean },
+  failure: { explained: boolean; overlap: boolean; userFile?: boolean },
 ): { errors: TelemetryErrorCode[]; features: TelemetryFeature[] } {
   const errors: TelemetryErrorCode[] = failure.overlap ? ['dbmlWriteOverlap'] : [];
+  if (failure.userFile === true && !failure.overlap) return { errors, features: ['handlerFileProblem'] };
   if (failure.explained && !failure.overlap) {
     return { errors, features: group === 'relationship' ? [] : ['editRefused'] };
   }
