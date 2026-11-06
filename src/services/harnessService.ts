@@ -16,11 +16,20 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
+import type { FileState, HarnessStatus, RecommendedInstallResult, SkippedAssistantHook } from '../types/harness';
 import { recommendedSkillTargets, type AiAssistantId, type SkillHarnessTarget } from '../types/aiAssistants';
 import { DBT_SCOPE_SETUP_PATHS, SETUP_SKILL_DIRS, applyDbtScope, setupSkillAssets, skillForTarget } from './harnessAssets';
 import { isShippedSetupReference } from './harnessShippedReferences';
 import { hasDbtProjectFile } from './projectDiscovery';
+import {
+  ASSISTANT_HOOKS,
+  HOOKED_ASSISTANTS,
+  generateAssistantHookScript,
+  isAssistantHookRegistered,
+  isHookedAssistant,
+  mergeAssistantHookConfig,
+  type HookedAssistantId,
+} from './assistantHooks';
 
 export type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
 
@@ -29,7 +38,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '44';
+export const HARNESS_VERSION = '45';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -1337,6 +1346,28 @@ export function applySemanticDir(content: string, semanticDir: string): string {
 }
 
 const CLAUDE_HOOK_SCRIPT = '.claude/skills/erd-studio/enforce-skill.sh';
+
+/**
+ * Which other assistants' pre-edit hooks a skill folder's install may add:
+ * the tools that read that folder. GitHub Copilot reads `.claude/skills/`
+ * too; Codex and Gemini CLI read only `.agents/skills/`.
+ */
+const HOOK_READERS: Readonly<Record<SkillHarnessTarget, readonly HookedAssistantId[]>> = {
+  claude: ['copilot'],
+  agents: ['copilot', 'codex', 'gemini'],
+};
+
+/**
+ * The hooks Set Up My AI Helper registers for the detected assistants. With
+ * none detected (the guide should already be waiting for whichever one the
+ * user installs): GitHub Copilot and Codex, whose configs ERD Studio keeps
+ * out of Git, but not Gemini CLI, whose `.gemini/settings.json` is the
+ * project's shared Gemini settings file.
+ */
+export function recommendedHookAssistants(assistants: readonly AiAssistantId[]): HookedAssistantId[] {
+  if (assistants.length === 0) { return ['copilot', 'codex']; }
+  return HOOKED_ASSISTANTS.filter((id) => assistants.includes(id));
+}
 const CLAUDE_SETTINGS = '.claude/settings.local.json';
 /**
  * The registered hook command. `$CLAUDE_PROJECT_DIR` makes the path work on
@@ -1483,7 +1514,10 @@ export class HarnessService {
    *
    * The two skill targets (`claude`, `agents`) also write companions: SYNC.md
    * and the `/erd-studio-setup` skill; `claude` additionally writes the
-   * PreToolUse hook and its `.claude/settings.local.json` entry.
+   * PreToolUse hook and its `.claude/settings.local.json` entry. Either one
+   * also writes the other assistants' pre-edit hooks named in
+   * `hookAssistants` that read its folder, and refreshes any already
+   * registered (`installAssistantHooks`).
    *
    * `overwrite` is about the primary file only — the file the caller's
    * prompt named. The `/erd-studio-setup` companion has its own switch: a
@@ -1512,7 +1546,18 @@ export class HarnessService {
     workspaceRoot: string,
     target: HarnessTarget,
     overwrite: boolean = false,
-    options: { replaceUnmanagedSetupSkill?: boolean; keepUnmanagedPrimary?: boolean; replaceUnmanagedCompanions?: boolean } = {},
+    options: {
+      replaceUnmanagedSetupSkill?: boolean;
+      keepUnmanagedPrimary?: boolean;
+      replaceUnmanagedCompanions?: boolean;
+      /**
+       * The assistants to register the pre-edit hook for (Set Up My AI
+       * Helper passes the detected ones), limited to the tools that read
+       * this skill folder (`HOOK_READERS`). Omitted: only hooks already
+       * registered are refreshed, so Update All never adds a tool's config.
+       */
+      hookAssistants?: readonly AiAssistantId[];
+    } = {},
   ): HarnessInstallResult {
     const filePath = path.join(workspaceRoot, target.relativePath);
     const dir = path.dirname(filePath);
@@ -1595,7 +1640,7 @@ export class HarnessService {
         if (skillTarget === 'claude') {
           // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
           // per session so Claude loads the /erd-studio skill before making changes.
-          // Claude Code only: the other tools' hook formats differ.
+          // Claude Code's own; the other assistants' hooks are below (assistantHooks.ts).
           const hookPath = path.join(dir, 'enforce-skill.sh');
           fs.writeFileSync(hookPath, applySemanticDir(generateEnforceSkillHook(), this.semanticDir), { mode: 0o755 });
           filesWritten.push(rel(hookPath));
@@ -1607,6 +1652,12 @@ export class HarnessService {
             // Best-effort — don't fail install if settings merge fails
           }
         }
+
+        // The other assistants' pre-edit hooks (assistantHooks.ts): the
+        // tools asked for that read this folder, plus any already registered.
+        const wanted = (options.hookAssistants ?? []).filter(isHookedAssistant)
+          .filter((id) => HOOK_READERS[skillTarget].includes(id));
+        filesWritten.push(...this.installAssistantHooks(workspaceRoot, wanted));
 
         // /erd-studio-setup — the onboarding skill, a companion of this target.
         // Checked before writing so the ignore step below knows whether
@@ -2002,6 +2053,11 @@ export class HarnessService {
           && this.isHookRegistered(workspaceRoot),
       },
       agents: this.skillFolderStatus(workspaceRoot, 'agents', dbt),
+      hooks: {
+        copilot: this.isAssistantHookInstalled(workspaceRoot, 'copilot'),
+        codex: this.isAssistantHookInstalled(workspaceRoot, 'codex'),
+        gemini: this.isAssistantHookInstalled(workspaceRoot, 'gemini'),
+      },
       copilot: fileState(targetPath('copilot'), dbt),
       gemini: fileState(targetPath('gemini'), dbt),
       codex,
@@ -2058,8 +2114,20 @@ export class HarnessService {
       && skillTargetPaths(t, dbt).companions.some((c) => unmanaged.includes(c));
     const upToDate = (t: SkillHarnessTarget) => fine(status[t].schemaSkill) && fine(status[t].setupSkill)
       && (t !== 'claude' || status.claude.hookRegistered) && !replacing(t);
-    if (targets.every(upToDate)) {
-      return { status: 'unchanged', unmanaged: [], filesWritten: [], targets };
+    // The other assistants' pre-edit hooks, for the tools that read a folder being installed.
+    const hookAssistants = recommendedHookAssistants(options.assistants ?? [])
+      .filter((id) => targets.some((t) => HOOK_READERS[t].includes(id)));
+    // A hook left out on purpose (a commented or unreadable config, a script
+    // of the user's own) counts as in place: it is reported, not retried as
+    // an "update" on every run.
+    const skippedHooks: SkippedAssistantHook[] = hookAssistants
+      .filter((id) => !status.hooks[id])
+      .map((id) => ({ id, reason: this.assistantHookSkipReason(workspaceRoot, id) }))
+      .filter((s): s is SkippedAssistantHook => s.reason !== null);
+    const hooksInPlace = hookAssistants.every((id) => status.hooks[id] || skippedHooks.some((s) => s.id === id));
+    const skipped = skippedHooks.length > 0 ? { skippedHooks } : {};
+    if (targets.every(upToDate) && hooksInPlace) {
+      return { status: 'unchanged', unmanaged: [], filesWritten: [], targets, ...skipped };
     }
 
     const filesWritten: string[] = [];
@@ -2070,20 +2138,116 @@ export class HarnessService {
         replaceUnmanagedSetupSkill: options.replaceUnmanaged,
         replaceUnmanagedCompanions: options.replaceUnmanaged,
         keepUnmanagedPrimary: keep,
+        hookAssistants: hookAssistants.filter((id) => HOOK_READERS[t].includes(id)),
       });
       for (const f of result.filesWritten ?? []) {
         if (!filesWritten.includes(f)) { filesWritten.push(f); }
       }
       if (!result.success) {
-        return { status: 'failed', unmanaged: [], filesWritten, targets, error: result.error };
+        return { status: 'failed', unmanaged: [], filesWritten, targets, ...skipped, error: result.error };
       }
+    }
+    // Every folder was current but a hook was missing (removed, or a new assistant appeared).
+    for (const f of this.installAssistantHooks(workspaceRoot, hookAssistants)) {
+      if (!filesWritten.includes(f)) { filesWritten.push(f); }
     }
     return {
       status: targets.every((t) => status[t].schemaSkill === 'missing') ? 'installed' : 'updated',
       unmanaged: [],
       filesWritten,
       targets,
+      ...skipped,
     };
+  }
+
+  /** Whether one assistant's hook script exists and its config registers it (`HarnessStatus.hooks`). */
+  private isAssistantHookInstalled(workspaceRoot: string, id: HookedAssistantId): boolean {
+    const spec = ASSISTANT_HOOKS[id];
+    if (!fs.existsSync(path.join(workspaceRoot, ...spec.script.split('/')))) { return false; }
+    try {
+      return isAssistantHookRegistered(id, fs.readFileSync(path.join(workspaceRoot, ...spec.config.split('/')), 'utf-8'));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Why one assistant's hook is left out on purpose, or `null` when it can
+   * be written: a script at its path with no ERD Studio marker (the user's
+   * own) or a newer one, or a config that is not plain JSON of the shape
+   * the tool documents. Reads only; `installAssistantHooks` and
+   * `installRecommended` share it, so a skip is never retried as an update.
+   */
+  private assistantHookSkipReason(workspaceRoot: string, id: HookedAssistantId): SkippedAssistantHook['reason'] | null {
+    const spec = ASSISTANT_HOOKS[id];
+    const abs = (rel: string) => path.join(workspaceRoot, ...rel.split('/'));
+    const scriptState = fileState(abs(spec.script));
+    if (scriptState === 'unmanaged') { return 'own-script'; }
+    if (scriptState === 'newer') { return 'newer-script'; }
+    let configText: string | null = null;
+    try { configText = fs.readFileSync(abs(spec.config), 'utf-8'); } catch { configText = null; }
+    const merge = mergeAssistantHookConfig(id, configText);
+    return merge.status === 'unusable' ? merge.problem : null;
+  }
+
+  /**
+   * Write and register the pre-edit hook (`assistantHooks.ts`) for `wanted`
+   * plus every assistant whose hook is already registered (so an update
+   * keeps it current, and never adds a tool's config on its own). For each:
+   * the script is written unless one is there without ERD Studio's marker
+   * (the user's own — then that tool is skipped entirely) or with a newer
+   * one; the entry is merged into the tool's config, keeping every other
+   * key and hook, and a config that is not plain JSON of the documented
+   * shape is left alone (`assistantHookSkipReason`). A config
+   * ERD Studio creates for Copilot or Codex is added to `.gitignore` with its
+   * script; Gemini CLI's shared settings file never is. Best effort: a
+   * failure here never fails the install. Returns the paths written.
+   */
+  private installAssistantHooks(workspaceRoot: string, wanted: readonly HookedAssistantId[]): string[] {
+    const written: string[] = [];
+    const abs = (rel: string) => path.join(workspaceRoot, ...rel.split('/'));
+    for (const id of HOOKED_ASSISTANTS) {
+      const spec = ASSISTANT_HOOKS[id];
+      let configText: string | null = null;
+      try {
+        configText = fs.readFileSync(abs(spec.config), 'utf-8');
+      } catch {
+        configText = null;
+      }
+      const registered = configText !== null && isAssistantHookRegistered(id, configText);
+      if (!wanted.includes(id) && !registered) { continue; }
+      try {
+        if (this.assistantHookSkipReason(workspaceRoot, id) !== null) { continue; }
+        const script = applySemanticDir(generateAssistantHookScript(id, HARNESS_VERSION), this.semanticDir);
+        let current: string | null = null;
+        try { current = fs.readFileSync(abs(spec.script), 'utf-8'); } catch { current = null; }
+        const merge = mergeAssistantHookConfig(id, configText);
+        if (merge.status === 'unusable') { continue; }
+        if (current !== script) {
+          fs.mkdirSync(path.dirname(abs(spec.script)), { recursive: true });
+          fs.writeFileSync(abs(spec.script), script, { encoding: 'utf-8', mode: 0o755 });
+          fs.chmodSync(abs(spec.script), 0o755);
+          written.push(spec.script);
+        }
+        if (merge.status === 'written') {
+          fs.mkdirSync(path.dirname(abs(spec.config)), { recursive: true });
+          fs.writeFileSync(abs(spec.config), merge.text, 'utf-8');
+          written.push(spec.config);
+        }
+        // Kept out of Git only when ERD Studio created the config; the script follows the config.
+        if (spec.ignoreConfig && configText === null && this.addToGitignore(workspaceRoot, spec.config)
+          && !written.includes('.gitignore')) {
+          written.push('.gitignore');
+        }
+        if (spec.ignoreConfig && gitignoreLists(workspaceRoot, spec.config)
+          && this.addToGitignore(workspaceRoot, spec.script) && !written.includes('.gitignore')) {
+          written.push('.gitignore');
+        }
+      } catch {
+        // Best effort — a hook is a guard, never a reason to fail the install.
+      }
+    }
+    return written;
   }
 
   /** Whether `.claude/settings.local.json` registers the `enforce-skill.sh` PreToolUse hook. */

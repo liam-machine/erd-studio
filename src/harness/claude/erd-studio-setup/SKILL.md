@@ -131,6 +131,8 @@ user to type a command that belongs to a different one.
 - **Approvals.** Every assistant asks before it changes a file or runs a command unless the user
   has allowed it. Tell the user once, <!-- dbt-only -->in Stage 4<!-- /dbt-only --><!-- no-dbt -->before your first write<!-- /no-dbt -->, in words that fit their assistant, and say that
   approving is expected. Describe only buttons you are sure your assistant has.
+- **Safety check.** In Claude Code, GitHub Copilot, Codex and Gemini CLI, a hook denies the first
+  ERD Studio file edit per session until the format rules are read: read them, retry once.
 - **Shell.** bash, zsh, Git Bash or PowerShell; on Windows, see the helper's Windows route below.
 - **A file your reading tool refuses as ignored** (Gemini CLI skips files `.gitignore` matches):
   read it with a shell command instead — `cat <file>`, or `Get-Content <file>` in PowerShell.
@@ -147,9 +149,7 @@ user to type a command that belongs to a different one.
 - Then: "ERD Studio has a safety check that pauses the very first ERD Studio file change in each
   session until its format rules are loaded. If you see it, that's expected — I'll carry on." If
   that first Write or Edit is denied by the hook, make sure `/erd-studio` is loaded and retry the
-  same write **once**. It is not an error; do not apologise at length. Only Claude Code installs
-  this check (Copilot can run it if Claude hooks are enabled in its settings, and it then lets
-  every change through).
+  same write **once**. It is not an error; do not apologise at length.
 
 ## The helper tool
 

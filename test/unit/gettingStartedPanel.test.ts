@@ -1161,6 +1161,16 @@ describe('runSetupAiHelper', () => {
     });
   });
 
+  it('says in one sentence when a safety check was left out on purpose', async () => {
+    const { deps } = setupDeps({
+      assistants: ['gemini'],
+      results: [{ status: 'unchanged', unmanaged: [], filesWritten: [], targets: ['agents'], skippedHooks: [{ id: 'gemini', reason: 'jsonc' }] }],
+    });
+    const outcome = await runSetupAiHelper(deps);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.message.endsWith(" .gemini/settings.json has comments in it, so ERD Studio left it alone and didn't add Gemini CLI's safety check.")).toBe(true);
+  });
+
   it('logical-only: the success message is the logical-only wording', async () => {
     const { deps } = setupDeps();
     const outcome = await runSetupAiHelper({ ...deps, logicalOnly: true });

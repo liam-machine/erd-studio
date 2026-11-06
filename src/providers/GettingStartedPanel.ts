@@ -64,6 +64,7 @@ import { recordStart } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
 import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
+import { describeSkippedAssistantHook } from '../services/assistantHooks';
 import {
   AI_ASSISTANTS,
   detectAssistants,
@@ -686,12 +687,16 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
       };
     }
     telemetry.feature('setupAiHelper');
+    // A safety check left out on purpose (a commented settings file, a script of the user's own) is said once, in plain words.
+    const skipped = (result.skippedHooks ?? []).map(describeSkippedAssistantHook).join(' ');
+    const ready = setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly });
+    const message = result.status === 'unchanged' && filesWritten.length === 0
+      ? `Everything was already up to date. ${ready}`
+      : ready;
     return {
       ok: true,
       filesWritten,
-      message: result.status === 'unchanged' && filesWritten.length === 0
-        ? `Everything was already up to date. ${setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly })}`
-        : setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly }),
+      message: skipped ? `${message} ${skipped}` : message,
     };
   } catch (err) {
     telemetry.error('setupFailed');

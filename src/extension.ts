@@ -17,7 +17,7 @@ import { DiagramMembers } from './services/diagramMembers';
 import { CodeOwnersReader } from './services/codeOwners';
 import { tableHomesOf, type TableHome } from './services/tableHomes';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { TABLES_DIR, TableLibraryService } from './services/logicalModelService';
@@ -4331,9 +4331,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         if (!selected || selected.length === 0) { return; }
 
-        // Always overwrite — harness files are managed by the extension
+        // Always overwrite — harness files are managed by the extension.
+        // A skill folder also gets the pre-edit hook of each detected
+        // assistant that reads it (Copilot and Codex when none is detected).
+        const hookAssistants = recommendedHookAssistants(detectAiAssistants());
         const results = selected.map(s =>
-          harnessService.install(workspaceRoot, s.target, true),
+          harnessService.install(workspaceRoot, s.target, true, { hookAssistants }),
         );
         recordHarnessInstalls(results);
 

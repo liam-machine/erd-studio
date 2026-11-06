@@ -898,8 +898,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 43 (SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('44');
+    it('is 45 (the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('45');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
@@ -1434,6 +1434,7 @@ describe('HarnessService', () => {
       expect(service.harnessStatus(tmpDir)).toEqual({
         claude: { schemaSkill: 'missing', setupSkill: 'missing', hookRegistered: false },
         agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+        hooks: { copilot: false, codex: false, gemini: false },
         copilot: 'missing',
         gemini: 'missing',
         codex: 'missing',
@@ -1441,10 +1442,11 @@ describe('HarnessService', () => {
     });
 
     it('reports a fresh install of every target as current', () => {
-      for (const target of HARNESS_TARGETS) { service.install(tmpDir, target); }
+      for (const target of HARNESS_TARGETS) { service.install(tmpDir, target, false, { hookAssistants: ['copilot', 'codex', 'gemini'] }); }
       expect(service.harnessStatus(tmpDir)).toEqual({
         claude: { schemaSkill: 'current', setupSkill: 'current', hookRegistered: true },
         agents: { schemaSkill: 'current', setupSkill: 'current' },
+        hooks: { copilot: true, codex: true, gemini: true },
         copilot: 'current',
         gemini: 'current',
         codex: 'current',
@@ -1460,6 +1462,7 @@ describe('HarnessService', () => {
       expect(service.harnessStatus(tmpDir)).toEqual({
         claude: { schemaSkill: 'outdated', setupSkill: 'unmanaged', hookRegistered: false },
         agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+        hooks: { copilot: false, codex: false, gemini: false },
         copilot: 'outdated',
         gemini: 'unmanaged',
         codex: 'missing',
@@ -1624,9 +1627,14 @@ describe('HarnessService', () => {
           const status = service.harnessStatus(dir);
           expect(status.claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
           expect(status.agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
-          // .gitignore lists each Claude path once; `.agents/` is never ignored.
+          // .gitignore lists each Claude path once, and the Copilot and Codex
+          // hook files ERD Studio created; `.agents/` and Gemini CLI's shared
+          // settings are never ignored.
           const lines = read(dir, '.gitignore').split('\n').filter((l) => l.startsWith('.'));
-          expect(lines).toEqual(['.claude/skills/erd-studio/', '.claude/skills/erd-studio-setup/']);
+          expect(lines.filter((l) => l.startsWith('.claude'))).toEqual(['.claude/skills/erd-studio/', '.claude/skills/erd-studio-setup/']);
+          expect(lines.some((l) => l.startsWith('.agents') || l.startsWith('.gemini'))).toBe(false);
+          expect(lines.filter((l) => l.startsWith('.codex'))).toEqual(
+            assistants.length === 0 || assistants.includes('codex' as never) ? ['.codex/hooks.json', '.codex/hooks/erd-studio-enforce-skill.sh'] : []);
         } finally {
           fs.rmSync(dir, { recursive: true, force: true });
         }
@@ -1920,6 +1928,15 @@ describe('logical first: a root without dbt_project.yml', () => {
       expect(service.install(root, target, true).success, target.id).toBe(true);
     }
   };
+  /** Set Up My AI Helper (none detected) over files install() wrote: only the Copilot and Codex hooks are added. */
+  const expectOnlyHooksAdded = (): void => {
+    const result = service.installRecommended(root, { replaceUnmanaged: false });
+    expect(result.status).toBe('updated');
+    expect([...result.filesWritten].sort()).toEqual([
+      '.codex/hooks.json', '.codex/hooks/erd-studio-enforce-skill.sh', '.github/copilot/hooks/erd-studio-enforce-skill.sh',
+      '.github/copilot/settings.local.json', '.gitignore',
+    ]);
+  };
   /** Every harness file written under root (not the project's own files). */
   const harnessFiles = (): Record<string, string> => {
     const all = snapshot(root);
@@ -2003,6 +2020,8 @@ describe('logical first: a root without dbt_project.yml', () => {
     expect(status.agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
     expect([status.copilot, status.gemini, status.codex]).toEqual(['current', 'current', 'current']);
     expect(service.detectStale(root)).toEqual([]);
+    // Set Up My AI Helper adds only the other assistants' hooks (install() alone never does), then nothing.
+    expectOnlyHooksAdded();
     expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('unchanged');
     expect(claudeManagedFiles(false)).toEqual([SCHEMA_SKILL, DBML_GUIDE, LEGACY_GUIDE, SETUP_SKILL]);
     expect(agentsManagedFiles(false)).not.toContain(AGENTS_SYNC_GUIDE);
@@ -2090,6 +2109,7 @@ describe('logical first: a root without dbt_project.yml', () => {
     expect(files['.claude/skills/erd-studio-setup/references/walkthrough.md']).toBeDefined();
     expect(files['.agents/skills/erd-studio-setup/references/glossary.md']).toBeDefined();
     expect(service.detectStale(root)).toEqual([]);
+    expectOnlyHooksAdded();
     expect(service.installRecommended(root, { replaceUnmanaged: false }).status).toBe('unchanged');
   });
 

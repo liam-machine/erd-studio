@@ -37,23 +37,29 @@ Opening the project refreshes it automatically. Installing Node.js 18 or newer a
 permanently, because the helper prefers `node` when it finds one — mention that only if the
 problem comes back.
 
-## The safety check paused a write (Claude Code only)
+## The safety check paused a write
 
-**Seen as:** a denied Edit/Write with the reason "ERD Studio: load the /erd-studio skill
-(file-format rules) before editing .erd-studio files, then retry."
+**Seen as:** a denied edit with a reason starting "ERD Studio: load the /erd-studio skill" (Claude
+Code, GitHub Copilot), "load the $erd-studio skill" (Codex) or "activate the erd-studio skill"
+(Gemini CLI), ending "before editing .erd-studio files, then retry."
 
 This is expected, once per session. ERD Studio's hook pauses the very first change to an ERD
-Studio file in each Claude Code session, so the format rules are always loaded before anything is
-written. Make sure `/erd-studio` has been invoked, then retry the same write. You told the user
-about this <!-- dbt-only -->in Stage 4<!-- /dbt-only --><!-- no-dbt -->before your first write<!-- /no-dbt -->, so one short line is enough: "That was the one-time safety check —
-carrying on."
+Studio file in each session, so the format rules are always loaded before anything is written.
+Make sure the schema skill has been loaded (`/erd-studio` in Claude Code; read its `SKILL.md` in
+full elsewhere), then retry the same write. You told the user about this <!-- dbt-only -->in Stage 4<!-- /dbt-only --><!-- no-dbt -->before your first write<!-- /no-dbt -->, so
+one short line is enough: "That was the one-time safety check — carrying on."
 
 If it denies **again** on the retry, the hook could not record that it had already paused this
-session (it writes a small marker file in `/tmp`). Tell the user and suggest restarting Claude
-Code; if it persists, they can remove the ERD Studio entry from `hooks.PreToolUse` in
-`.claude/settings.local.json`. Do not edit that file yourself without asking.
+session (it writes a small marker file in the temp folder). Tell the user and suggest restarting
+the assistant; if it persists, they can remove ERD Studio's entry from the hook config — Claude
+Code: `hooks.PreToolUse` in `.claude/settings.local.json`; GitHub Copilot: `hooks.preToolUse` in
+`.github/copilot/settings.local.json`; Codex: `hooks.PreToolUse` in `.codex/hooks.json`; Gemini
+CLI: `hooks.BeforeTool` in `.gemini/settings.json`. Do not edit those files yourself without
+asking.
 
-Other assistants have no such check; <!-- dbt-only -->the walkthrough's own Stage 4 step 1<!-- /dbt-only --><!-- no-dbt -->loading the format rules before the first write<!-- /no-dbt --> does the same job.
+Codex runs a new or changed project hook only after the user trusts it: at startup it says a hook
+needs review, and they approve it in `/hooks`. Until then there is no pause, which is harmless.
+Cursor has no such check; <!-- dbt-only -->the walkthrough's own Stage 4 step 1<!-- /dbt-only --><!-- no-dbt -->loading the format rules before the first write<!-- /no-dbt --> does the same job.
 
 ## Format rules missing
 
@@ -105,8 +111,9 @@ read `.agents/skills/` (Copilot and Cursor also read `.claude/skills/`). Usual c
 - Without Git Bash (or in PowerShell), use `~/.erd-studio-cli/bin/erd-studio.cmd`, which in
   PowerShell is `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" doctor --json`. Tell the user
   you are using the Windows route.
-- Claude Code's safety-check hook is a bash script. Without Git Bash it cannot run and simply
-  does nothing — harmless, you just will not see the <!-- dbt-only -->Stage 4<!-- /dbt-only --><!-- no-dbt -->one-time<!-- /no-dbt --> pause.
+- ERD Studio's safety-check hooks are bash scripts. Without Git Bash Claude Code's simply does
+  nothing; GitHub Copilot's and Codex's are a no-op in PowerShell, and Gemini CLI may report its
+  hook as failed and carry on — all harmless, you just will not see the <!-- dbt-only -->Stage 4<!-- /dbt-only --><!-- no-dbt -->one-time<!-- /no-dbt --> pause.
 <!-- dbt-only -->- A virtual environment's dbt is at `.venv\Scripts\dbt.exe`. When *you* run it through the
   shell, write it with forward slashes — `.venv/Scripts/dbt.exe parse` — because Git Bash treats
   a backslash as an escape and would look for `.venvScriptsdbt.exe` (PowerShell accepts forward

@@ -105,7 +105,8 @@ style offer after the canvas; eval 7 states its style up front and takes the ful
      (evals 14–16) — check this before the run, so a failed setup is not graded as a skill failure;
    - every `modelRole` in the written `logical-models/*.yml` is one of the nine values in
      `ModelRole` (`src/types/semantic.ts`) (evals 7–16);
-   - no `Shift+Tab`, `accept edits` or `safety check` in a non-Claude transcript (evals 11–13);
+   - no `Shift+Tab` or `accept edits` in a non-Claude transcript (evals 11–13; the safety check
+     now covers GitHub Copilot, Codex and Gemini CLI too, so mentioning it is fine);
    - no `modelling-approach.md` and no `docs generate` / `compile --write-catalog` before the
      first canvas hand-over in a quick start (evals 20, 8–19 up to the style offer);
    - after eval 21, every column and relationship in the drafted files matches the pre-run

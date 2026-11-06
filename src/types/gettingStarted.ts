@@ -443,6 +443,17 @@ function samePath(a: string, b: string, platform: string): boolean {
 }
 
 /**
+ * The other assistants' pre-edit hook configs and their names (mirrors
+ * `ASSISTANT_HOOKS` in `src/services/assistantHooks.ts`, which `src/types/`
+ * may not import; a test keeps the two in step).
+ */
+export const ASSISTANT_HOOK_CONFIGS: ReadonlyArray<readonly [config: string, name: string]> = [
+  ['.github/copilot/settings.local.json', 'GitHub Copilot'],
+  ['.codex/hooks.json', 'Codex'],
+  ['.gemini/settings.json', 'Gemini CLI'],
+];
+
+/**
  * Group the files a setup wrote under a plain explanation each, so the
  * result reads as "what just happened" rather than a list of dot-paths.
  * Order is fixed; empty groups are dropped; unknown paths go last.
@@ -475,6 +486,14 @@ export function describeWrittenFiles(paths: readonly string[], opts: { logicalOn
       match: (p) => p.endsWith('/enforce-skill.sh') || p === '.claude/settings.local.json',
     },
     {
+      // Titled below by the assistants whose hook files are in the list.
+      title: 'A safety check for your other assistants',
+      why: 'Makes them load those rules before their first edit to your diagrams. GitHub Copilot\'s and Codex\'s files stay out of git; '
+        + 'Gemini CLI\'s goes in .gemini/settings.json, its settings file for this project.',
+      paths: [],
+      match: (p) => p.endsWith('/erd-studio-enforce-skill.sh') || ASSISTANT_HOOK_CONFIGS.some(([config]) => p === config),
+    },
+    {
       title: 'A small checking tool',
       why: opts.logicalOnly
         ? 'Your assistant runs it to check your diagram files. It sits in your home folder, outside the project.'
@@ -493,6 +512,22 @@ export function describeWrittenFiles(paths: readonly string[], opts: { logicalOn
   for (const p of paths) {
     const group = groups.find((g) => g.match(p));
     (group ?? other).paths.push(p);
+  }
+  const hooks = groups.find((g) => g.title === 'A safety check for your other assistants')!;
+  const hooked = ASSISTANT_HOOK_CONFIGS
+    .filter(([config]) => hooks.paths.some((p) => p.startsWith(config.slice(0, config.lastIndexOf('/') + 1))))
+    .map(([, name]) => name);
+  if (hooked.length > 0) {
+    const list = (names: string[]) => names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    hooks.title = `A safety check for ${list(hooked)}`;
+    // Only the sentences for the files actually written.
+    const ignored = hooked.filter((n) => n !== 'Gemini CLI');
+    hooks.why = [
+      'Makes them load those rules before their first edit to your diagrams.',
+      ...(ignored.length > 0 ? [`${list(ignored.map((n) => `${n}'s`))} files stay out of git.`] : []),
+      ...(hooked.includes('Gemini CLI') ? ["Gemini CLI's check is added to .gemini/settings.json, its settings file for this project."] : []),
+    ].join(' ');
+    if (hooked.length === 1) { hooks.why = hooks.why.replace('Makes them load', 'Makes it load'); }
   }
   return [...groups, other]
     .filter((g) => g.paths.length > 0)
