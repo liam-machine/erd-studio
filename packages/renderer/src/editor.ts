@@ -31,7 +31,8 @@ export { EdgeFlow, EdgeFlowGlyphs, type EdgeFlowProps } from './components/Graph
 export { AnnotationNode } from './components/Graph/AnnotationNode';
 export { AnnotationEdge } from './components/Graph/AnnotationEdge';
 export { DetailPanel } from './components/DetailPanel/DetailPanel';
-export { Legend } from './components/Legend/Legend';
+export { Legend, legendEntries, type LegendEntries } from './components/Legend/Legend';
+export { StatusBar, statusBarStats, type StatusBarStats, type StatusBarLayer } from './components/StatusBar/StatusBar';
 export { KeyBadge } from './components/common/KeyBadge';
 export { KeyBadgeGroup } from './components/common/KeyBadgeGroup';
 export { DataTypeSelect } from './components/common/DataTypeSelect';

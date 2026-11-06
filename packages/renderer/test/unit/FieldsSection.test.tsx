@@ -14,7 +14,7 @@
  * values read-only, a remove for every meta key, and nothing posted in the
  * viewer.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { STARTING_FIELD_LIST, builtInField } from '@erd-studio/core';
 import type { CanvasEditMessage, DisplayColumn, FieldDefinition, FieldList, Meta } from '@erd-studio/core';
@@ -499,12 +499,58 @@ describe('FieldsSection — read-only (viewer and physical stage)', () => {
       expect(container.textContent).not.toContain('people only');
       expect(container.textContent).not.toContain('Move to Decisions');
       expect(container.textContent).not.toContain('+ Add field');
-      expect(container.querySelectorAll('button, input, select, textarea')).toHaveLength(0);
+      // The viewer's fold toggle is the one control.
+      expect(container.querySelectorAll('button:not(.fields-section__toggle), input, select, textarea')).toHaveLength(0);
+      expect(container.querySelectorAll('.fields-section__toggle')).toHaveLength(options.viewer ? 1 : 0);
       fireEvent.doubleClick(rowOf(container, 'rationale:purpose')!);
       expect(container.querySelector('textarea')).toBeNull();
       expect(posted).toEqual([]);
     });
   }
+
+  it('viewer: a table\'s section is a fold, closed by default, with a heading button and the count', () => {
+    const { container, posted } = setup({ viewer: true, table: FILLED, fields: TEAM_LIST });
+    const toggle = screen.getByRole('button', { name: /Fields/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.closest('h4')).not.toBeNull();
+    expect(container.querySelector('.fields-section__count')!.textContent).toBe('(7)');
+    const list = container.querySelector<HTMLElement>('.fields-section__list')!;
+    expect(list.hidden).toBe(true);
+    expect(toggle.getAttribute('aria-controls')).toBe(list.id);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(list.hidden).toBe(false);
+    expect(container.querySelector('.fields-section--open')).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(list.hidden).toBe(true);
+    expect(posted).toEqual([]);
+  });
+
+  it('viewer: the fold follows a host\'s open / onOpenChange', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <CanvasEnvironmentProvider host={{ postMessage: () => {} }} viewer>
+        <FieldsSection modelName="fct_order" table={FILLED} fields={TEAM_LIST} open onOpenChange={onOpenChange} />
+      </CanvasEnvironmentProvider>,
+    );
+    const toggle = screen.getByRole('button', { name: /Fields/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(toggle);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    // Controlled: it stays as the host says until the host changes it.
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('a column\'s section and the physical stage have no fold', () => {
+    const column: DisplayColumn = { name: 'email', dataType: 'varchar', description: '', isPrimaryKey: false, isForeignKey: false, isNaturalKey: false, meta: { pii: 'true' } };
+    setup({ viewer: true, fields: TEAM_LIST, column });
+    expect(document.querySelector('.fields-section__toggle')).toBeNull();
+    cleanup();
+    setup({ readOnly: true, table: FILLED, fields: TEAM_LIST });
+    expect(document.querySelector('.fields-section__toggle')).toBeNull();
+    expect(document.querySelector<HTMLElement>('.fields-section__list')!.hidden).toBe(false);
+  });
 
   it('a yes-no reads Yes in the viewer', () => {
     const column: DisplayColumn = { name: 'email', dataType: 'varchar', description: '', isPrimaryKey: false, isForeignKey: false, isNaturalKey: false, meta: { pii: 'true' } };

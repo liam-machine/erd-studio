@@ -71,6 +71,97 @@
   margin: 0;
 }
 
+.fields-section__list[hidden] {
+  display: none;
+}
+
+/*
+ * A table's read-only section (viewer, physical stage): two columns, the
+ * muted label beside its value, which wraps; a hairline between rows.
+ */
+.fields-section--read-only:not(.fields-section--compact) .fields-section__list {
+  gap: 0;
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row {
+  display: grid;
+  grid-template-columns: minmax(64px, 34%) minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-top: 1px solid var(--panel-border);
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row:last-child {
+  padding-bottom: 0;
+}
+
+/* The labels read as the header's Schema / Warehouse name labels do (muted,
+   sentence case, weight 500), not as a second level of section headings. */
+.fields-section--read-only:not(.fields-section--compact) .fields-section__name {
+  line-height: 1.6;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* The viewer's fold: the section heading is the button, with the count. */
+.fields-section--collapsible {
+  gap: 0;
+}
+
+.fields-section--collapsible .fields-section__title {
+  margin: 0;
+}
+
+.fields-section--collapsible.fields-section--open {
+  gap: 8px;
+}
+
+.fields-section__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fields-section__toggle:hover {
+  color: var(--editor-fg);
+}
+
+.fields-section__toggle:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.fields-section__chevron {
+  width: 10px;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* "(7)", as the Columns and Relationships headings give theirs. */
+.fields-section__count {
+  font-variant-numeric: tabular-nums;
+}
+
 .fields-section__value {
   margin: 0;
   min-width: 0;

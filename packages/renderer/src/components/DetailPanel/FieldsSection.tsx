@@ -18,7 +18,9 @@
  *
  * Three presentations, gated `viewer ? … : (readOnly ? … : <editor>)`:
  * the viewer and a read-only stage (physical) show the rows that have a
- * value, labels and values only, and post nothing; the editor shows the list
+ * value, labels and values only (two columns: muted label, wrapped value),
+ * and post nothing; in the viewer a table's section is a fold, its heading a
+ * button with the count, closed unless `open` says otherwise. The editor shows the list
  * in order (empty fields with their guidance), retired fields with a badge,
  * values the list does not name under "Not in your list", and "+ Add field".
  */
@@ -162,9 +164,16 @@ export interface FieldsSectionProps {
   readOnly?: boolean;
   /** No dbt project: no "from dbt" badge. */
   logicalOnly?: boolean;
+  /**
+   * Viewer only, a table's section: whether its fold is open. Without it the
+   * section keeps its own state, starting closed.
+   */
+  open?: boolean;
+  /** Viewer only: called when the reader opens or closes the fold. */
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function FieldsSection({ modelName, table, column, fields, readOnly = false, logicalOnly = false }: FieldsSectionProps) {
+export function FieldsSection({ modelName, table, column, fields, readOnly = false, logicalOnly = false, open, onOpenChange }: FieldsSectionProps) {
   const viewer = useIsViewer();
   const list = fields ?? STARTING_FIELD_LIST;
   const rows = useMemo(() => fieldRows(table, column, list), [table, column, list]);
@@ -172,7 +181,11 @@ export function FieldsSection({ modelName, table, column, fields, readOnly = fal
   const compact = column !== undefined;
 
   return viewer ? (
-    <ReadOnlyFields rows={rows} dbml={dbml} compact={compact} />
+    compact ? (
+      <ReadOnlyFields rows={rows} dbml={dbml} compact />
+    ) : (
+      <CollapsibleFields rows={rows} dbml={dbml} open={open} onOpenChange={onOpenChange} />
+    )
   ) : readOnly ? (
     <ReadOnlyFields rows={rows} dbml={dbml} compact={compact} />
   ) : (
@@ -202,15 +215,71 @@ function ReadOnlyFields({ rows, dbml, compact }: { rows: FieldRow[]; dbml: MetaV
         <h4 className="detail-panel__section-title fields-section__title">Fields</h4>
       )}
       <dl className="fields-section__list">
-        {shown.map((row) => (
-          <div className="fields-section__row" key={row.id} data-field={row.id}>
-            <dt className="fields-section__name">{row.definition.label}</dt>
-            <dd className={`fields-section__value${typeof row.value === 'string' || row.choice !== undefined ? '' : ' fields-section__value--structured'}`}>
-              {valueText(row)}
-            </dd>
-          </div>
-        ))}
-        {dbml !== undefined && <DbmlImportRow value={dbml} editor={false} />}
+        <ReadOnlyRows shown={shown} dbml={dbml} />
+      </dl>
+    </div>
+  );
+}
+
+/** The read-only rows: each field's label and value, then Import DBML's bookkeeping. */
+function ReadOnlyRows({ shown, dbml }: { shown: FieldRow[]; dbml: MetaValue | undefined }) {
+  return (
+    <>
+      {shown.map((row) => (
+        <div className="fields-section__row" key={row.id} data-field={row.id}>
+          <dt className="fields-section__name">{row.definition.label}</dt>
+          <dd className={`fields-section__value${typeof row.value === 'string' || row.choice !== undefined ? '' : ' fields-section__value--structured'}`}>
+            {valueText(row)}
+          </dd>
+        </div>
+      ))}
+      {dbml !== undefined && <DbmlImportRow value={dbml} editor={false} />}
+    </>
+  );
+}
+
+/** The viewer's table section: a heading button with the count, folding the rows away. */
+function CollapsibleFields({
+  rows,
+  dbml,
+  open: openProp,
+  onOpenChange,
+}: {
+  rows: FieldRow[];
+  dbml: MetaValue | undefined;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const listId = useId();
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const shown = rows.filter(rowHasValue);
+  const count = shown.length + (dbml === undefined ? 0 : 1);
+  if (count === 0) return null;
+
+  const toggle = () => {
+    const next = !open;
+    if (openProp === undefined) setOwnOpen(next);
+    onOpenChange?.(next);
+  };
+
+  return (
+    <div className={`fields-section fields-section--read-only fields-section--collapsible${open ? ' fields-section--open' : ''}`}>
+      <h4 className="detail-panel__section-title fields-section__title">
+        <button
+          type="button"
+          className="fields-section__toggle"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={toggle}
+        >
+          <span className="fields-section__chevron" aria-hidden="true">{open ? '\u25be' : '\u25b8'}</span>
+          <span className="fields-section__toggle-label">Fields</span>{' '}
+          <span className="fields-section__count">({count})</span>
+        </button>
+      </h4>
+      <dl className="fields-section__list" id={listId} hidden={!open}>
+        <ReadOnlyRows shown={shown} dbml={dbml} />
       </dl>
     </div>
   );

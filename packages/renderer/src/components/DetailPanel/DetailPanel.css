@@ -17,6 +17,25 @@
   font-size: 12px;
 }
 
+/*
+ * The viewer's panel is never taller than the canvas it floats over (an
+ * embedded canvas can be 600 px tall inside a much taller page), and stops
+ * above the bottom-right minimap: its top is 15px down, the minimap takes
+ * 152px plus a 15px bottom margin, and 10px are left between them. It
+ * scrolls instead, never sideways.
+ */
+.detail-panel--viewer {
+  max-height: min(calc(100vh - 100px), calc(100% - 192px));
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/* A long value (a 40-character warehouse name) wraps inside the viewer's panel. */
+.detail-panel--viewer .detail-panel__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ---------------------------------------------------------------------------
    Header
    --------------------------------------------------------------------------- */
@@ -485,6 +504,56 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * The viewer's rows wrap instead of cutting a long table or column name off
+ * with an ellipsis: the target drops to a second line, a long name breaks
+ * after a `_`, `.` or `, ` (the `<wbr>`s DetailPanel puts there) and only
+ * mid-word as a last resort, and the arrow travels with the name it points
+ * at. The row is a grid so the text has the full width and the cardinality
+ * sits under it.
+ */
+.detail-panel__relationship--wrap {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 2px;
+  align-items: start;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-cardinality {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-columns {
+  flex-wrap: wrap;
+  row-gap: 1px;
+  overflow: visible;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-local,
+.detail-panel__relationship--wrap .detail-panel__rel-target {
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-direction,
+.detail-panel__relationship--wrap .detail-panel__rel-cardinality {
+  margin-top: 1px;
+}
+
+/* The relationship's role (`ship date`), as the line's label reads. */
+.detail-panel__rel-role {
+  flex-basis: 100%;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--dim-fg);
+  overflow-wrap: anywhere;
 }
 
 .detail-panel__rel-cardinality {
