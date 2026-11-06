@@ -145,14 +145,14 @@
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
       "prompt": "/erd-studio-setup\n\n(When the skill offers to apply your team's modelling style after the first diagram, say yes.)\n\n(When the skill states the modelling style it detected and asks 'Sound right?', answer instead: \"Data Vault 2.0 — hubs, links and satellites in the raw vault, with Kimball-style information marts on top.\")",
-      "expected_output": "Detects a medallion layout (silver, gold) with Kimball-style marts from the project and confirms it in one sentence with the evidence and a yes default. The user overrides it in their own words; the skill identifies Data Vault 2.0 plus Kimball marts, looks the standard up or uses the bundled summary, and plays back the rules. Explains once that ERD Studio's model roles are dimensional, so vault tables would get the closest role with the vault type recorded in rationale.roleChoice. Because this project's models are fct_/dim_ marts, it applies the Kimball mart mapping and the conformance review notes the vault layer is not in this domain.",
+      "expected_output": "Detects a medallion layout (silver, gold) with Kimball-style marts from the project and confirms it in one sentence with the evidence and a yes default. The user overrides it in their own words; the skill identifies Data Vault 2.0 plus Kimball marts, looks the standard up or uses the bundled summary, and plays back the rules. Explains once that ERD Studio's model roles are dimensional, so vault tables would get the closest role with the vault type recorded in decisions (only in decisions when the field list leaves Table role out). Because this project's models are fct_/dim_ marts, it applies the Kimball mart mapping and the conformance review notes the vault layer is not in this domain.",
       "files": [],
       "expectations": [
         "Quick start: the first domain is written, diffed and handed over to the canvas before any modelling-style question; the style step is then offered as the next step ('Want me to apply your team's modelling style — keys, grain, SCD?')",
         "Confirms the detected style (medallion silver → gold, Kimball-style dim_/fct_ tables) in one sentence with evidence and a yes default, alone in its message — never an open 'how do you model data?' question",
         "Accepts the user's override in their own words and follows it instead of the detected style",
         "Identifies both Data Vault 2.0 and Kimball information marts in the answer",
-        "Explains that hubs/links/satellites have no exact ERD Studio role and says how they would be recorded (closest modelRole plus rationale.roleChoice)",
+        "Explains that hubs/links/satellites have no exact ERD Studio role and says how they would be recorded (closest modelRole plus rationale.decisions / decisions)",
         "Never writes a modelRole value outside the nine valid values (no 'hub', 'link' or 'satellite')",
         "Saves .erd-studio/modelling-approach.md naming Data Vault 2.0 and the mart style",
         "The final `erd-studio diff` for the new domain exits 0 (clean)"
@@ -279,7 +279,7 @@
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Add packages.yml with '- package: Datavault-UK/automate_dv' (version 0.11.0) and models/raw_vault/hub_customer.sql, models/raw_vault/sat_customer_details.sql, models/raw_vault/lnk_customer_order.sql (each 'select 1'). Create an empty dbt_packages/automate_dv/ folder so doctor does not ask for dbt deps. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
       "prompt": "/erd-studio-setup\n\n(When the skill offers to apply your team's modelling style after the first diagram, say yes.)",
-      "expected_output": "inventory.conventions reports shape data-vault, strong (the automate_dv package plus hub_/sat_/lnk_ models), with kimball as an alternative and medallion layering. The skill says the project looks like Data Vault (AutomateDV package, hub/satellite/link tables) with Kimball-style marts on top, and asks for a yes. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in rationale.roleChoice, and never writes an invalid modelRole.",
+      "expected_output": "inventory.conventions reports shape data-vault, strong (the automate_dv package plus hub_/sat_/lnk_ models), with kimball as an alternative and medallion layering. The skill says the project looks like Data Vault (AutomateDV package, hub/satellite/link tables) with Kimball-style marts on top, and asks for a yes. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in decisions (only in decisions when the field list leaves Table role out), and never writes an invalid modelRole.",
       "files": [],
       "expectations": [
         "Quick start: the first domain is written, diffed and handed over to the canvas before any modelling-style question; the style step is then offered as the next step ('Want me to apply your team's modelling style — keys, grain, SCD?')",
@@ -287,7 +287,7 @@
         "Names Data Vault as the detected style and cites the automate_dv package and/or the hub_/sat_/lnk_ tables as evidence",
         "Mentions the Kimball-style dim_/fct_ marts as part of the picture (information marts on the vault), not as a competing question",
         "The confirmation has a yes default and is the only question in its message",
-        "Explains that hubs/links/satellites have no exact ERD Studio role and how they are recorded (closest modelRole plus rationale.roleChoice)",
+        "Explains that hubs/links/satellites have no exact ERD Studio role and how they are recorded (closest modelRole plus rationale.decisions / decisions)",
         "Never writes a modelRole value outside the nine valid values (no 'hub', 'link' or 'satellite')",
         "Saves .erd-studio/modelling-approach.md naming Data Vault 2.0, the mart style and the automate_dv evidence",
         "The final `erd-studio diff` for the new domain exits 0 (clean)"
@@ -343,7 +343,7 @@
       "fixture": "test/fixtures/dbt-project-modern-tests",
       "setup": "Copy the fixture to a temp dir and delete models/marts/. Create models/raw_vault/ with one `select 1 as x` .sql per model and a schema.yml declaring (every column with a data_type): customer_hub (customer_hk binary(16) unique, customer_id varchar, load_date timestamp, record_source varchar); order_hub (order_hk binary(16) unique, order_id, load_date, record_source); customer_order_link (customer_order_hk binary(16) unique, customer_hk and order_hk binary(16) with relationships tests to customer_hub / order_hub, load_date, record_source); customer_sat (customer_hk binary(16) with a relationships test to customer_hub, hashdiff binary(16), customer_name, email, credit_limit numeric(12,2), load_date, record_source). Descriptions are plain ('Customers.', 'Orders.', 'Which customer placed which order.', 'Customer details over time.') - no hub_/lnk_/sat_ names and no vault wording. Run `node dist/cli.js inventory --summary --json --project <copy>` once to confirm conventions.shape is { style: 'data-vault', confidence: 'weak', sources: ['structure'], alternatives: [] } with hub, link and satellite evidence. No dbt on PATH. Helper installed.",
       "prompt": "/erd-studio-setup\n\n(When the skill offers to apply your team's modelling style after the first diagram, say yes.)",
-      "expected_output": "Reads inventory.conventions: Data Vault, weak, from table structure only. The confirmation presents it as a guess from how the tables are built, not from names or descriptions - e.g. 'Your tables are shaped like a Data Vault - customer_hub and order_hub hold hash keys with load dates, and customer_sat tracks changes with a hashdiff. I'll model it that way - sound right? Or describe how your team does it.' It never calls customer_sat a fact or customer_hub a dimension, never claims a hub_/sat_ naming convention and never says it couldn't see a modelling style. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in rationale.roleChoice, never writes an invalid modelRole, and finishes with a clean diff.",
+      "expected_output": "Reads inventory.conventions: Data Vault, weak, from table structure only. The confirmation presents it as a guess from how the tables are built, not from names or descriptions - e.g. 'Your tables are shaped like a Data Vault - customer_hub and order_hub hold hash keys with load dates, and customer_sat tracks changes with a hashdiff. I'll model it that way - sound right? Or describe how your team does it.' It never calls customer_sat a fact or customer_hub a dimension, never claims a hub_/sat_ naming convention and never says it couldn't see a modelling style. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in decisions (only in decisions when the field list leaves Table role out), never writes an invalid modelRole, and finishes with a clean diff.",
       "files": [],
       "expectations": [
         "Quick start: the first domain is written, diffed and handed over to the canvas before any modelling-style question; the style step is then offered as the next step ('Want me to apply your team's modelling style — keys, grain, SCD?')",
@@ -352,7 +352,7 @@
         "Does not describe customer_sat as a fact or customer_hub / order_hub as dimensions, and does not offer Kimball as the detected style",
         "Never says 'I couldn't see a particular modelling style' and never asks an open question such as 'How does your team like to model data?'",
         "Does not paste raw conventions evidence strings or JSON",
-        "Every modelRole written is a valid value; vault table types are recorded in rationale.roleChoice",
+        "Every modelRole written is a valid value; vault table types are recorded in decisions (rationale.decisions in YAML)",
         "The final `erd-studio diff` for the new domain exits 0 (clean)",
         "Asks at most one question per message"
       ]
@@ -405,7 +405,7 @@
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Then open the copy in an Extension Development Host and run 'ERD Studio: Import from dbt…' on the gold marts, so .erd-studio/ holds one drafted domain whose model files copy dbt's columns, types and tested relationships with no grain, modelRole, rationale or isNaturalKey. Snapshot .erd-studio/ before the run.",
       "prompt": "/erd-studio-setup",
-      "expected_output": "Recognises the existing draft and enriches it instead of rebuilding it: proposes grain, keys, roles and rationale backed by dbt, asks once, writes only those fields, keeps the diff clean, then offers the modelling-style step.",
+      "expected_output": "Recognises the existing draft and enriches it instead of rebuilding it: proposes grain, keys, roles and purpose backed by dbt, asks once, writes only those fields, keeps the diff clean, then offers the modelling-style step.",
       "files": [],
       "expectations": [
         "Recognises the existing domain and says it will add what dbt doesn't record (keys, grain, roles, why) without changing columns or connections",
@@ -441,38 +441,40 @@
     },
     {
       "id": 23,
-      "name": "metadata-offer-quick-start",
+      "name": "fields-offer-quick-start",
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Add dbt metadata to the schema yml: `meta: {owner: crm-team}` on dim_customer, `config: {meta: {owner: sales-analytics}}` on fct_order and fct_sale, `meta: {pii: true}` on dim_customer's email column, and on fct_sale a Lightdash-style `meta: {dimension: {type: number, label: Amount}}` on one column. Run `dbt parse` (or keep target/manifest.json and rely on the yml).",
       "prompt": "/erd-studio-setup orders",
-      "expected_output": "The quick start offers dbt's metadata once, just before writing model files, with real counts and a yes default; on 'yes' it saves a metadata list (no Technique line) and copies the exact values, leaving the Lightdash settings out.",
+      "expected_output": "The quick start offers the field list once, just before writing model files: the starting set plus dbt's metadata, with real counts and a yes default; on 'yes' it saves .erd-studio/fields.yml and copies the exact values, leaving the Lightdash settings out.",
       "files": [],
       "expectations": [
-        "Says nothing about metadata before the business area is agreed",
-        "After `inventory --models` and before writing any model file, offers the metadata in one message, alone, with a plain definition, naming `owner` and `pii` with their counts across the chosen models and a yes default",
+        "Says nothing about fields or metadata before the business area is agreed",
+        "After `inventory --models` and before writing any model file, offers the field list in one message, alone, with a plain definition, naming `owner` and `pii` with their counts across the chosen models and a yes default (\"Change any?\")",
         "Names the Lightdash `dimension` key as left out, in a few words",
-        "On 'yes', writes .erd-studio/modelling-approach.md holding only a title and a `## Metadata` table (owner on models, pii on columns, Source `dbt`) with a 'Left out: `dimension`' line",
-        "Every model file it writes carries exactly dbt's values (owner: crm-team on dim_customer, sales-analytics on the facts, pii: true on email, unquoted) and no owner key on models dbt has none for",
-        "No model file contains the `dimension` key",
+        "On 'yes', writes .erd-studio/fields.yml: the starting set's names (grain, purpose, decisions, open_questions, role, scd_strategy, measures; natural_key, scd_type, additive_type), `owner` under tables and `pii` (type yes-no) under columns, both `filled_by: dbt`, and `left_out: [dimension]`; `erd-studio doctor` reports no `fix-fields-file`",
+        "Writes no `## Metadata` section and no modelling-approach.md",
+        "Every table file it writes carries exactly dbt's values as bare settings (`owner: 'crm-team'` on dim_customer, `owner: 'sales-analytics'` on the facts, `pii: 'true'` on email) and no owner setting on models dbt has none for; nothing is written as `meta_owner` or `rationale_*`",
+        "No table file contains the `dimension` key",
         "The final `erd-studio diff` for the new domain exits 0 (clean)",
-        "On 'yes' to the style offer after the canvas, still detects and confirms the style (the metadata-only file is not treated as an agreed approach) and keeps the `## Metadata` section when it writes the approach"
+        "On 'yes' to the style offer after the canvas, still detects and confirms the style and keeps fields.yml as it is (Kimball keeps the dimensional fields)"
       ],
       "harness": "claude-code"
     },
     {
       "id": 24,
-      "name": "metadata-saved-list-enrich",
+      "name": "fields-old-metadata-list-enrich",
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Add dbt metadata to the schema yml: `meta: {owner: crm-team}` on dim_customer, `config: {meta: {owner: sales-analytics}}` on fct_order and fct_sale, `meta: {pii: true}` on dim_customer's email column, and on fct_sale a Lightdash-style `meta: {dimension: {type: number, label: Amount}}` on one column. Run `dbt parse` (or keep target/manifest.json and rely on the yml). Then create .erd-studio/ with one domain drafted by 'ERD Studio: Import from dbt…' on the silver models, and write .erd-studio/modelling-approach.md with only '# Modelling approach' and a `## Metadata` table listing `owner` (models, Source dbt) and `steward` (models, Source the team). Hand-add `meta: {tier: gold}` to one drafted model file. Snapshot .erd-studio/.",
       "prompt": "/erd-studio-setup",
-      "expected_output": "The enrich route follows the saved list without asking again: owner is copied from dbt as part of the single 'Add these?', steward is never filled in, the hand-written tier key is kept, and pii (dbt has it, the list does not) is offered once as an addition to the list.",
+      "expected_output": "The enrich route follows the old ## Metadata list without asking again: owner is copied from dbt as part of the single 'Add these?', which also offers to move the list into fields.yml; steward is never filled in, the hand-written tier key is kept, and pii (dbt has it, the list does not) is offered once as an addition.",
       "files": [],
       "expectations": [
-        "Does not ask whether to copy the metadata; says in one line it will follow the saved list",
-        "Includes the owner values in the single 'Add these?' list of drafts, and writes them only on a yes",
+        "Does not ask separately whether to copy the metadata; follows the saved list",
+        "Includes the owner values, and moving the `## Metadata` list into .erd-studio/fields.yml (owner `filled_by: dbt`, steward `filled_by: people`, shown before writing), in the single 'Add these?' list of drafts, and writes them only on a yes",
+        "On that yes, removes the `## Metadata` section from modelling-approach.md (deleting the file when only its title is left, as the preview said)",
         "Never writes a `steward` value; after writing, says in one line which models still lack it",
         "The hand-added `tier: gold` entry is still in its model file after the run",
-        "Offers, as one Stage 6 next step, to add `pii` (recorded by dbt, not on the list) to the metadata list",
+        "Offers, as one Stage 6 next step, to add `pii` (recorded by dbt, not on the list) to the fields",
         "No column name, dataType, description or relationship in the drafted files changes (compare with the snapshot)",
         "The final `erd-studio diff` for the domain exits 0 (clean)"
       ],
@@ -480,16 +482,47 @@
     },
     {
       "id": 25,
-      "name": "metadata-none-in-dbt",
+      "name": "fields-none-in-dbt",
       "fixture": "test/fixtures/dbt-project",
       "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
       "prompt": "/erd-studio-setup orders",
-      "expected_output": "With no dbt metadata the quick start never mentions metadata before the canvas, and offers starting a metadata list only as one optional next step.",
+      "expected_output": "With no dbt metadata and no style the quick start never mentions fields before the canvas, writes no fields.yml (the starting set applies), and offers adding fields such as an owner only as one optional next step.",
       "files": [],
       "expectations": [
-        "Does not mention metadata before the hand-over to the canvas",
-        "Writes no `meta` key into any model file and no `## Metadata` section",
-        "Stage 6's next steps include one optional line offering to record keys such as owner or source system as the team's metadata list"
+        "Does not mention metadata or fields before the hand-over to the canvas",
+        "Writes no .erd-studio/fields.yml, no team field into any table file and no `## Metadata` section",
+        "Stage 6's next steps include one optional line offering to record things such as an owner or source system as fields, filled in by people"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 26,
+      "name": "fields-data-vault-style",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Add the automate_dv package to packages.yml and rename the silver models hub_customer, sat_customer and lnk_customer_order (sql and yml). Run `dbt parse`.",
+      "prompt": "/erd-studio-setup full setup for customers",
+      "expected_output": "After the Data Vault style is agreed, the field list leaves out the dimensional fields with a one-line reason, and no table file gets a role, scd_strategy, measures or a retired field.",
+      "files": [],
+      "expectations": [
+        "The field-list offer names Grain, Purpose, Decisions and Open questions and says table role and SCD type are left out because they are Kimball's vocabulary",
+        "On 'yes', .erd-studio/fields.yml lists grain, purpose, decisions, open_questions on tables and natural_key on columns, and no role, scd_strategy, measures, scd_type or additive_type",
+        "Vault table types are recorded in `decisions`, never in `role` or a retired `role_choice` / `rationale_role_choice`",
+        "No table file contains `rationale_design`, `rationale_role_choice` or `rationale_grain_choice`"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 27,
+      "name": "fields-open-questions",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir. Helper installed. Write .erd-studio/fields.yml with the starting set as bare names.",
+      "prompt": "Add a fct_refund table to the orders diagram. I haven't decided yet whether a refund is one row per refund or per refunded order line.",
+      "expected_output": "The assistant writes the undecided grain as an open question, asks the user, and moves the answer into decisions once given.",
+      "files": [],
+      "expectations": [
+        "Writes no grain it was not given; the table file has an `open_questions: '…'` setting asking which grain applies",
+        "Asks the user the same question in its reply",
+        "After the user answers ('per refund'), writes `grain: 'One row per refund'`, records why in `decisions`, and removes the `open_questions` setting"
       ],
       "harness": "claude-code"
     }

@@ -898,8 +898,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 45 (the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('45');
+    it('is 46 (context fields: one "Fields" section in place of the metadata list and the design rationale, fields.yml and bare `<key>: \'<value>\'` settings, the setting-name table, YAML rationale keys; 45 the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('46');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {
@@ -1026,19 +1026,25 @@ describe('HarnessService', () => {
       expect(main.columns.every((c) => typeof c.dataType === 'string')).toBe(true);
     });
 
-    it('tells every assistant to follow the team\'s metadata list, copying dbt keys and never guessing', () => {
+    it('tells every assistant to follow the field list, copying `filled_by: dbt` fields and never guessing (v46: in place of the metadata list)', () => {
       service.install(tmpDir, CLAUDE, true);
       const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
-      expect(skill).toContain('### The team\'s metadata list');
-      expect(skill).toContain('If it has a **Metadata** section, that is the team\'s metadata list');
-      expect(skill).toContain('**Use its key names exactly.**');
-      expect(skill).toContain('**Source `dbt`: copy it; never make it up.**');
-      expect(skill).toContain('leave the key out: never guess and never write a placeholder');
-      expect(skill).toContain('say that dbt does not record it, and offer to add it');
-      expect(skill).toContain('**Source `the team`: leave it to people.**');
-      expect(skill).toContain('never copy dbt\'s `meta:` unasked');
+      expect(skill).toContain('## Fields');
+      expect(skill).not.toContain('### The team\'s metadata list');
+      expect(skill).not.toContain('## Design rationale');
+      expect(skill).toContain('Read `.erd-studio/fields.yml` before creating or editing a table.');
+      expect(skill).toContain('filled_by dbt: copy it exactly from the dbt model\'s meta');
+      expect(skill).toContain('Never type one in; no value, no setting.');
+      expect(skill).toContain('offer to add it to dbt\'s `meta:` too (never edit dbt unasked)');
+      expect(skill).toContain('filled_by people: write only a value the user gives you');
+      expect(skill).toContain('Never copy a key listed under left_out.');
+      expect(skill).toContain('Never write a placeholder.');
+      // An old ## Metadata list is still followed, and moved only on a yes.
+      expect(skill).toContain('An old `## Metadata` table in `modelling-approach.md` names the team fields while fields.yml has none');
+      expect(skill).toContain('Offer once to move it into fields.yml: show the result, and remove the old section on a yes.');
       const sync = read(tmpDir, '.claude/skills/erd-studio/SYNC.md');
-      expect(sync).toContain('Copy the dbt `meta` keys the team\'s metadata list names');
+      expect(sync).toContain('Copy the fields `fields.yml` marks `filled_by: dbt` (never a `left_out` key)');
+      expect(sync).not.toContain('metadata list');
     });
 
     it('documents `meta` on models and columns, never compared with dbt', () => {

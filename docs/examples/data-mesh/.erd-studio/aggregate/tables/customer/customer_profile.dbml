@@ -1,7 +1,7 @@
 Table customer.customer_profile [
   grain: 'One row per customer account',
-  rationale_design: 'Built from accounts.account, orders.customer_order and payments.payment. The customer domain owns it; the other domains only publish.',
-  meta_owner: 'customer-team'
+  decisions: 'Built here from accounts.account, orders.customer_order and payments.payment: the customer domain owns it, and the other domains only publish.',
+  owner: 'customer-team'
 ] {
   Note: 'One view of each customer, across domains.'
 

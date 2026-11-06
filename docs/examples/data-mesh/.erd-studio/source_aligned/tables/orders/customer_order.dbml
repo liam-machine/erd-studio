@@ -1,6 +1,6 @@
 Table orders.customer_order [
   grain: 'One row per order',
-  meta_owner: 'orders-team'
+  owner: 'orders-team'
 ] {
   Note: 'Orders, published by the orders domain.'
 

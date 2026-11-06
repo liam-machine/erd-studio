@@ -50,8 +50,8 @@ describe('FileWatcherService', () => {
   });
 
   describe('initialization', () => {
-    it('creates six file system watchers (the table files have two: YAML and the DBML tree)', () => {
-      expect(_mockFileWatchers).toHaveLength(6);
+    it('creates seven file system watchers (the table files have two: YAML and the DBML tree; fields.yml its own)', () => {
+      expect(_mockFileWatchers).toHaveLength(7);
     });
 
     it('without dbt (logical-only) creates only the semantic-dir watchers', () => {
@@ -62,6 +62,7 @@ describe('FileWatcherService', () => {
         '.erd-studio/**/*.{json,dbml}',
         '.erd-studio/{logical-models,tables}/**/*.yml',
         '.erd-studio/*/tables/*/*.dbml',
+        '.erd-studio/fields.yml',
       ]);
       expect(patterns.some(p => p.includes('manifest') || p.includes('dbt_project') || p.startsWith('{models'))).toBe(false);
       logicalOnly.dispose();
@@ -781,8 +782,80 @@ describe('FileWatcherService', () => {
     });
   });
 
+  describe('fields.yml watcher (context fields)', () => {
+    const fieldsWatcher = (): MockFileSystemWatcher => _mockFileWatchers.find((w) => (w._pattern as vscode.RelativePattern).pattern.endsWith('/fields.yml'))!;
+    const FIELDS = '/test/workspace/.erd-studio/fields.yml';
+
+    it('watches exactly the root fields.yml of the semantic dir', () => {
+      expect((fieldsWatcher()._pattern as vscode.RelativePattern).pattern).toBe('.erd-studio/fields.yml');
+      _clearMockFileWatchers();
+      const custom = new FileWatcherService('/test/workspace', 'model');
+      expect((fieldsWatcher()._pattern as vscode.RelativePattern).pattern).toBe('model/fields.yml');
+      custom.dispose();
+    });
+
+    it('fires one onFieldsConfigChanged per burst of creates, changes and deletes, and nothing else', () => {
+      const fields = vi.fn();
+      const layers = vi.fn();
+      const semantic = vi.fn();
+      service.onFieldsConfigChanged(fields);
+      service.onLayerConfigChanged(layers);
+      service.onSemanticFileChanged(semantic);
+
+      fieldsWatcher()._simulateCreate(vscode.Uri.file(FIELDS));
+      fieldsWatcher()._simulateChange(vscode.Uri.file(FIELDS));
+      vi.advanceTimersByTime(300);
+      expect(fields).toHaveBeenCalledTimes(1);
+
+      fieldsWatcher()._simulateDelete(vscode.Uri.file(FIELDS));
+      vi.advanceTimersByTime(300);
+      expect(fields).toHaveBeenCalledTimes(2);
+      expect(layers).not.toHaveBeenCalled();
+      expect(semantic).not.toHaveBeenCalled();
+    });
+
+    it('ignores a fields.yml anywhere but the root', () => {
+      const fields = vi.fn();
+      service.onFieldsConfigChanged(fields);
+      fieldsWatcher()._simulateChange(vscode.Uri.file('/test/workspace/.erd-studio/silver/fields.yml'));
+      vi.advanceTimersByTime(300);
+      expect(fields).not.toHaveBeenCalled();
+    });
+
+    it('swallows a write recorded as our own', () => {
+      _clearMockFileWatchers();
+      const tracker = new OwnWriteTracker();
+      const watched = new FileWatcherService('/test/workspace', '.erd-studio', undefined, tracker);
+      const fields = vi.fn();
+      watched.onFieldsConfigChanged(fields);
+      tracker.recordWrite(FIELDS);
+      fieldsWatcher()._simulateChange(vscode.Uri.file(FIELDS));
+      vi.advanceTimersByTime(300);
+      expect(fields).not.toHaveBeenCalled();
+      watched.dispose();
+    });
+
+    it('is created without dbt too (logical-only)', () => {
+      _clearMockFileWatchers();
+      const logicalOnly = new FileWatcherService('/test/workspace', '.erd-studio', undefined, undefined, { dbt: false });
+      const fields = vi.fn();
+      logicalOnly.onFieldsConfigChanged(fields);
+      fieldsWatcher()._simulateChange(vscode.Uri.file(FIELDS));
+      vi.advanceTimersByTime(300);
+      expect(fields).toHaveBeenCalledTimes(1);
+      logicalOnly.dispose();
+    });
+  });
+
   describe('classifySemanticPath', () => {
     const root = '/ws/.erd-studio';
+
+    it('identifies the root fields.yml as the field list, and only the root one', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/fields.yml')).toBe('fields-config');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/silver/fields.yml')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/logical-models/fields.yml')).not.toBe('fields-config');
+      expect(classifySemanticPath(root, '/ws/fields.yml')).toBe('other');
+    });
 
     it('identifies {layer}/{domain}.json as a domain file', () => {
       expect(classifySemanticPath(root, '/ws/.erd-studio/silver/orders.json')).toBe('domain');

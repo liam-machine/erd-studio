@@ -4,15 +4,17 @@
  * happens: in a DBML diagram (or any diagram whose relationships are in the
  * Table Library) the table and its relationships stay; only a diagram file
  * that holds relationships itself loses them with the table. The role picker
- * is "Table type", with plain names for the gold roles (keys unchanged).
+ * is the "Table role" field, with plain names for the gold roles (keys
+ * unchanged).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
+import { TABLE_ROLE_VALUES } from '@erd-studio/core';
 import type { DisplaySubjectArea } from '@erd-studio/core';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
 import { DetailPanel, removeConfirmText } from '../../src/components/DetailPanel/DetailPanel';
-import { ROLE_OPTIONS } from '../../src/components/DetailPanel/RoleEditor';
+import { ROLE_OPTIONS } from '../../src/lib/roleOptions';
 
 const col = (name: string, isPrimaryKey = false) => ({ name, dataType: 'bigint', description: '', isPrimaryKey, isForeignKey: false, isNaturalKey: false });
 const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' as const };
@@ -83,17 +85,21 @@ describe('DetailPanel — Remove from Diagram', () => {
   });
 });
 
-describe('Table type picker', () => {
-  it('is labelled "Table type" and names the gold roles plainly, keeping their keys', () => {
+describe('Table role picker', () => {
+  it('is labelled "Table role" and names the gold roles plainly, keeping their keys', () => {
     const store = createCanvasStore({ domain: domainWith({}), selectedNode: 'fct_order', detailPanelOpen: true });
     render(<CanvasStoreProvider store={store}><ReactFlowProvider><DetailPanel /></ReactFlowProvider></CanvasStoreProvider>);
     // No type set yet: it sits under the folded "Modelling detail (optional)".
     fireEvent.click(screen.getByRole('button', { name: /Modelling detail/ }));
-    const select = screen.getByRole('combobox', { name: 'Table type' }) as HTMLSelectElement;
+    const select = screen.getByRole('combobox', { name: 'Table role' }) as HTMLSelectElement;
     const options = [...select.options].map((o) => [o.value, o.textContent]);
     expect(options).toContainEqual(['gold-fact', 'Pre-joined fact']);
     expect(options).toContainEqual(['gold-dim', 'Flattened dimension']);
     expect(options).toContainEqual(['domain-dim', 'Local dimension']);
     expect(ROLE_OPTIONS.map((o) => o.label).join(' ')).not.toMatch(/\bGold\b|\bDomain\b/);
+  });
+
+  it('offers the roles in core\'s order (the role field\'s choices)', () => {
+    expect(ROLE_OPTIONS.map((o) => o.value)).toEqual([...TABLE_ROLE_VALUES]);
   });
 });

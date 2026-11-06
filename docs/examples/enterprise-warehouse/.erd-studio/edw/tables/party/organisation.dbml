@@ -1,6 +1,6 @@
 Table party.organisation [
   grain: 'One row per organisation',
-  meta_owner: 'customer-data'
+  owner: 'customer-data'
 ] {
   Note: 'What only an organisation has. A subtype of party: one-to-one, with the same id.'
 

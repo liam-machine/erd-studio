@@ -1,7 +1,7 @@
 Table gold.fct_payment [
   role: 'transaction-fact',
   grain: 'One row per successful payment',
-  rationale_design: 'Built from silver payments, successful charges only.'
+  decisions: 'Successful charges only; failed charges stay in silver payments.'
 ] {
   Note: 'Cash received.'
 

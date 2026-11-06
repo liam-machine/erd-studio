@@ -133,20 +133,41 @@ export type TableRole =
 // Design rationale
 // ---------------------------------------------------------------------------
 
-/** Design rationale metadata for a model — explains architectural decisions. */
+/**
+ * A table's built-in text fields (context fields): what it is for and why it
+ * was built this way. Each key is the home of one catalogue field
+ * (`BUILT_IN_FIELDS` in `fields.ts`), whose field key is the snake_case of the
+ * property (`openQuestions` is the field `open_questions`). Every key is
+ * optional, and a reader that predates one ignores it.
+ *
+ * `design`, `grainChoice` and `roleChoice` are retired fields: still read and
+ * shown, never offered for a new table (their text belongs in `decisions`).
+ */
 export interface Rationale {
-  /** What requirements or purpose this model fulfils. */
+  /** Who uses this table and the question it answers. */
   purpose?: string;
-  /** Why this model was designed the way it was. */
+  /** Retired: why this model was designed the way it was (now `decisions` or `purpose`). */
   design?: string;
-  /** Why this grain was chosen over alternatives. */
+  /** Retired: why this grain was chosen over alternatives (now `decisions`). */
   grainChoice?: string;
-  /** Why this model role / fact type was selected. */
+  /** Retired: why this model role / fact type was selected (now `decisions`). */
   roleChoice?: string;
-  /** Overall SCD strategy explanation across dimension attributes. */
+  /** How this dimension keeps history: which columns track changes and which overwrite. */
   scdStrategy?: string;
-  /** Why measures are structured this way — additive type choices, component storage. */
+  /** How the measures add up: which sum across every dimension and which do not. */
   measures?: string;
+  /** A choice a later editor might undo, and why. Absent from files before context fields. */
+  decisions?: string;
+  /** What is still undecided. Absent from files before context fields. */
+  openQuestions?: string;
+  /** The system this data is mastered in. Absent from files before context fields. */
+  sourceOfTruth?: string;
+  /** How fresh it must be, and how often it loads. Absent from files before context fields. */
+  freshness?: string;
+  /** Data problems a consumer should know before trusting a number. Absent from files before context fields. */
+  knownIssues?: string;
+  /** How long rows are kept, and why. Absent from files before context fields. */
+  retention?: string;
 }
 
 // ---------------------------------------------------------------------------

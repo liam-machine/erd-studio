@@ -63,7 +63,7 @@ The layout [Databricks describes](https://docs.databricks.com/aws/en/lakehouse/m
 - **Conformed dimensions are one file each, on several diagrams**: `dim_date` and `dim_customer` appear on both the **sales** and **finance** diagrams.
 - **Relationships can be split by owner.** Gold's Refs are in `gold.dbml`, except the finance star's, which the finance team keeps in `finance.dbml`. New relationships of `fct_payment` land there too.
 - **A wide reporting table needs no relationships.** `gold_orders` is pre-joined for a dashboard tool and sits on its own diagram.
-- **Lineage is written down, not drawn.** Gold's `dim_customer` is built from silver's `customers`. That is a pipeline step, not a foreign key, so it goes in the table's design rationale rather than a Ref.
+- **Lineage is written down, not drawn.** Gold's `dim_customer` is built from silver's `customers`. That is a pipeline step, not a foreign key, so it goes in the table's **Decisions** rather than a Ref.
 
 ## Variations
 

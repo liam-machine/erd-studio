@@ -3,14 +3,17 @@
  * The detail panel with the editing host's canvas context: the table's File
  * line (with Open), "Reviewed by", and "Not on this diagram (n)" with "+ Add"
  * and "Add all related". None of it in the viewer, on the physical stage, or
- * without a context. The modelling fields fold under "Modelling detail
- * (optional)", open by themselves once one is set; the viewer keeps its old
- * layout, every section in the old order.
+ * without a context. The table's Fields fold under "Modelling detail
+ * (optional)", open by themselves once one has a value; the viewer keeps its
+ * old layout, every section in the old order, the Fields where the role,
+ * grain, meta and rationale were. A read-only stage (physical) shows the fold
+ * only when a field has a value, and offers no edit.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
-import type { CanvasContext, CanvasEditMessage, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
+import { builtInField } from '@erd-studio/core';
+import type { CanvasContext, CanvasEditMessage, DisplaySubjectArea, DisplayTable, FieldList } from '@erd-studio/core';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
 import { CanvasEnvironmentProvider } from '../../src/host/canvasEnvironment';
 import { DetailPanel, hasModellingDetail } from '../../src/components/DetailPanel/DetailPanel';
@@ -64,7 +67,7 @@ function renderPanel(options: { domain?: DisplaySubjectArea; context?: CanvasCon
 
 /** The section titles and toggles, top to bottom. */
 function sectionOrder(container: HTMLElement): string[] {
-  return [...container.querySelectorAll('.detail-panel__section-title, .column-editor__title, .detail-panel__rationale-toggle, .detail-panel__modelling-toggle, .detail-panel__button--danger')]
+  return [...container.querySelectorAll('.detail-panel__section-title, .column-editor__title, .detail-panel__modelling-toggle, .detail-panel__button--danger')]
     .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim());
 }
 
@@ -145,19 +148,42 @@ describe('DetailPanel — Modelling detail (optional)', () => {
   it('puts Description and Columns first and folds the modelling fields when none is set', () => {
     const { container } = renderPanel({ context: null });
     expect(screen.getByRole('button', { name: 'Modelling detail (optional)' }).getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('combobox', { name: 'Table type' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Table role' })).toBeNull();
     const order = sectionOrder(container);
     expect(order.findIndex((t) => t.endsWith('Modelling detail (optional)'))).toBeGreaterThan(order.findIndex((t) => /^Columns/.test(t)));
     expect(order.at(-1)).toBe('Remove from Diagram');
   });
 
-  it('opens by itself when any of the fields is set', () => {
-    for (const sale of [{ modelRole: 'transaction-fact' as const }, { grain: 'One row per sale line' }, { meta: { owner: 'sales' } }, { rationale: { purpose: 'Sales' } }]) {
+  it('opens by itself when any of the fields has a value', () => {
+    for (const sale of [
+      { modelRole: 'transaction-fact' as const },
+      { grain: 'One row per sale line' },
+      { meta: { owner: 'sales' } },
+      { rationale: { purpose: 'Sales' } },
+      { rationale: { decisions: 'Surrogate keys' } },
+      { rationale: { design: 'Retired, still shown' } },
+    ]) {
       renderPanel({ domain: domain({ sale }), context: null });
       expect(screen.getByRole('button', { name: /Modelling detail/ }).getAttribute('aria-expanded')).toBe('true');
-      expect(screen.getByRole('combobox', { name: 'Table type' })).toBeTruthy();
+      expect(screen.getByRole('combobox', { name: 'Table role' })).toBeTruthy();
       cleanup();
     }
+  });
+
+  it('stays folded for Import DBML\'s kept settings alone (not a field)', () => {
+    renderPanel({ domain: domain({ sale: { meta: { dbml: { tier: 'gold' } } } }), context: null });
+    expect(screen.getByRole('button', { name: /Modelling detail/ }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('draws the project\'s field list when the subject area has one', () => {
+    const list: FieldList = {
+      tables: [builtInField('purpose', 'table')!, { key: 'owner', scope: 'table', label: 'Owner', type: 'value', filledBy: 'dbt', showFor: 'all', status: 'team', home: { kind: 'meta' } }],
+      columns: [],
+      leftOut: [],
+    };
+    const { container } = renderPanel({ domain: { ...domain({ sale: { meta: { owner: 'sales' } } }), fields: list }, context: null });
+    const names = [...container.querySelectorAll('.detail-panel__modelling-body .fields-section__name')].map((el) => el.textContent);
+    expect(names).toEqual(['Purpose', 'Owner']);
   });
 
   it('stays open while it is being filled in, and folds again for a table with nothing set', () => {
@@ -180,14 +206,46 @@ describe('DetailPanel — Modelling detail (optional)', () => {
     expect(screen.queryByRole('button', { name: /Modelling detail/ })).toBeNull();
     const order = sectionOrder(container);
     const columns = order.findIndex((t) => /^Columns/.test(t));
-    const designRationale = order.findIndex((t) => /Design Rationale/i.test(t));
-    expect(designRationale).toBeGreaterThan(-1);
-    expect(designRationale).toBeLessThan(columns);
+    const fields = order.indexOf('Fields');
+    expect(fields).toBeGreaterThan(-1);
+    expect(fields).toBeLessThan(columns);
+    // Filled rows only, read-only.
+    expect([...container.querySelectorAll('.fields-section__name')].map((el) => el.textContent)).toEqual(['Purpose', 'owner']);
+    expect(container.querySelector('.fields-section select, .fields-section textarea, .fields-section button')).toBeNull();
+  });
+
+  it('the viewer shows no Fields section for a table with no field value', () => {
+    const { container } = renderPanel({ viewer: true, domain: domain({ viewerReadOnly: true }) });
+    expect(container.querySelector('.fields-section')).toBeNull();
   });
 
   it('hasModellingDetail: a blank grain or an empty meta is nothing', () => {
     expect(hasModellingDetail({})).toBe(false);
     expect(hasModellingDetail({ grain: '   ', meta: {} })).toBe(false);
     expect(hasModellingDetail({ grain: 'x' })).toBe(true);
+    expect(hasModellingDetail({ rationale: { openQuestions: 'Which currency?' } })).toBe(true);
+    expect(hasModellingDetail({ meta: { dbml: { tier: 'gold' } } })).toBe(false);
+  });
+});
+
+describe('DetailPanel — Fields on the physical stage (read-only)', () => {
+  it('shows the fold only when a field has a value, with values only, no affordances and no posts', () => {
+    const empty = renderPanel({ domain: domain({ stage: 'physical' }) });
+    expect(screen.queryByRole('button', { name: /Modelling detail/ })).toBeNull();
+    expect(empty.container.querySelector('.fields-section')).toBeNull();
+    cleanup();
+
+    const { container, posted } = renderPanel({
+      domain: domain({ stage: 'physical', sale: { grain: 'One row per sale line', modelRole: 'transaction-fact', rationale: { design: 'Old' } } }),
+    });
+    expect(screen.getByRole('button', { name: /Modelling detail/ }).getAttribute('aria-expanded')).toBe('true');
+    const section = container.querySelector<HTMLElement>('.fields-section')!;
+    expect([...section.querySelectorAll('.fields-section__name')].map((el) => el.textContent)).toEqual(['Grain', 'Table role', 'Design']);
+    expect(section.querySelectorAll('button, input, select, textarea')).toHaveLength(0);
+    expect(section.textContent).not.toContain('Retired');
+    expect(section.textContent).not.toContain('Customise fields');
+    expect(section.textContent).not.toContain('+ Add field');
+    fireEvent.doubleClick(section.querySelector('.fields-section__row')!);
+    expect(posted).toEqual([]);
   });
 });

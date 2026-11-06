@@ -9,6 +9,8 @@
  * - {semanticDir}/{logical-models,tables}/**\/*.yml and
  *   {semanticDir}/*\/tables/*\/*.dbml (table files) → one batch per burst
  * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
+ * - {semanticDir}/fields.yml (the root file only) → field list reload
+ *   (onFieldsConfigChanged); ERD Studio never writes it
  * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
  *   physical stage refresh (onDbtYmlChanged)
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
@@ -54,7 +56,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { classifySemanticFile } from '@erd-studio/core';
+import { FIELDS_FILE_NAME, classifySemanticFile } from '@erd-studio/core';
 
 import { LOGICAL_MODELS_DIR, TABLES_DIR, tablesDirIsLayer } from '../services/logicalModelService';
 import { NON_SUBJECT_AREA_DIRS } from '../services/domainService';
@@ -97,7 +99,7 @@ const PROJECT_PATH_KEY_RE =
   /^(target-path|model-paths|source-paths|seed-paths|data-paths|snapshot-paths)\s*:/;
 
 /** What {@link classifySemanticPath} says a path under the semantic directory is. */
-export type SemanticPathKind = 'domain' | 'table' | 'relationships' | 'layer-config' | 'other';
+export type SemanticPathKind = 'domain' | 'table' | 'relationships' | 'layer-config' | 'fields-config' | 'other';
 
 /**
  * Classify a path under the semantic directory.
@@ -120,7 +122,9 @@ export function classifySemanticPath(
   }
   const segments = rel.split(path.sep);
   if (segments.length === 1) {
-    return segments[0] === LAYERS_CONFIG_FILE ? 'layer-config' : 'other';
+    if (segments[0] === LAYERS_CONFIG_FILE) return 'layer-config';
+    // Only the root fields.yml is the field list: a layer folder's is just a file.
+    return segments[0] === FIELDS_FILE_NAME ? 'fields-config' : 'other';
   }
   const file = segments[segments.length - 1];
   if (file.endsWith('.dbml') || (file.endsWith('.yml') && segments.length <= 3)) {
@@ -171,6 +175,7 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
+  private readonly _onFieldsConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onTableChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
   private readonly _onTablesChanged = new vscode.EventEmitter<{ tables: Array<{ uri: vscode.Uri; modelName: string }> }>();
   private readonly _onRelationshipsChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
@@ -199,6 +204,12 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
   /** Fires when {semanticDir}/layers.json is created, modified or deleted externally. */
   readonly onLayerConfigChanged = this._onLayerConfigChanged.event;
+  /**
+   * Fires when the root {semanticDir}/fields.yml is created, modified or
+   * deleted (a git pull, an assistant, a hand edit). ERD Studio never writes
+   * it; a write recorded in the OwnWriteTracker would still be swallowed.
+   */
+  readonly onFieldsConfigChanged = this._onFieldsConfigChanged.event;
   /** Fires when a YAML model file in {semanticDir}/logical-models/ (or one of its layer folders) changes. */
   readonly onTableChanged = this._onTableChanged.event;
   /**
@@ -276,7 +287,37 @@ export class FileWatcherService implements vscode.Disposable {
     this.setupSemanticWatcher();
     if (watchDbt) { this.setupProjectConfigWatcher(); }
     this.setupTableWatcher();
+    this.setupFieldsWatcher();
     if (watchDbt) { this.setupDbtSourceWatcher(); }
+  }
+
+  /**
+   * Watch exactly {semanticDir}/fields.yml (the root file: the semantic
+   * watcher matches only `.json` and `.dbml`). One debounced
+   * onFieldsConfigChanged per burst, own writes swallowed.
+   */
+  private setupFieldsWatcher(): void {
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(
+      this.workspaceRoot,
+      `${this.semanticDir}/${FIELDS_FILE_NAME}`,
+    ));
+    const handle = (uri: vscode.Uri) => {
+      this.noteProjectEvent();
+      // The pattern names one file; check it all the same (a case-insensitive file system, a symlink).
+      if (classifySemanticPath(this.semanticRoot, uri.fsPath) !== 'fields-config') return;
+      this.debounceOwnWrite('fields-config', () => [uri.fsPath], () => {
+        if (this.ownWriteTracker.consume(uri.fsPath)) {
+          log.trace(`[FileWatcherService] Own write to ${FIELDS_FILE_NAME}, ignored`);
+          return;
+        }
+        log.debug(`[FileWatcherService] External change: ${FIELDS_FILE_NAME}`);
+        this.report(() => this._onFieldsConfigChanged.fire());
+      });
+    };
+    this.subscriptions.push(watcher.onDidChange(handle));
+    this.subscriptions.push(watcher.onDidCreate(handle));
+    this.subscriptions.push(watcher.onDidDelete(handle));
+    this.watchers.push(watcher);
   }
 
   /**
@@ -737,6 +778,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onSemanticFileChanged.dispose();
     this._onSemanticFileDeleted.dispose();
     this._onLayerConfigChanged.dispose();
+    this._onFieldsConfigChanged.dispose();
     this._onTableChanged.dispose();
     this._onTablesChanged.dispose();
     this._onRelationshipsChanged.dispose();

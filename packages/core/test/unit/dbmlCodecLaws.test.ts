@@ -43,6 +43,8 @@ import { cutSpan } from '../../src/dbml/splice';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { DBML_RICH_PLACEHOLDER_COLUMN } from '../../src/dbmlRichProperties';
 import { parseTableText } from '../../src/logicalModel';
+import { RATIONALE_FIELD_KEYS } from '../../src/fields';
+import { setMetaEntry } from '../../src/meta';
 import type { Annotation, AnnotationColor, ColumnDef, SemanticTable, TableRelationship } from '../../src/types/semantic';
 import {
   DIAGNOSTIC_PARSERS,
@@ -261,6 +263,7 @@ const KEPT_CONSTRUCTS: readonly string[] = [
   'scd_type: 2',
   'meta_count: 3',
   'headercolor: #3498db',
+  "color: 'not a field'",
 ];
 
 function cleanIn(files: Record<string, string>, entry: string): string[] {
@@ -328,6 +331,32 @@ Enum order_status {
 
 Metadata Column gold.fct_order.status {
   note: 'Set by a Metadata block'
+}
+`,
+  // Context fields in every spelling at once (A3/A4): bare beside old, erd_ ones, a reserved name kept as
+  // meta_<key>, a built-in's name kept as metadata, meta_json, and fields set by a Metadata block.
+  'gold/tables/gold/dim_mixed.dbml': `Table gold.dim_mixed [
+  role: 'conformed-dim',
+  purpose: 'bare purpose',
+  rationale_purpose: 'old purpose',
+  rationale_decisions: 'old decisions',
+  erd_scd_strategy: 'erd history',
+  owner: 'bare owner',
+  meta_owner: 'old owner',
+  meta_json: '{"owner":"json owner","pii":true}',
+  meta_note: 'a reserved name',
+  meta_purpose: 'a built-in name kept as metadata',
+  rationale_sla: 'an old team spelling',
+  color: 'not a field'
+] {
+  id int [pk, business_rule: 'rule', meta_unit: 'AUD', rationale_tier: 't'] // mixed column
+  name varchar
+}
+
+Metadata Table gold.dim_mixed {
+  // fields set by a block
+  open_questions: 'from a block'
+  rationale_known_issues: ''
 }
 `,
   'gold/tables/gold/dim_customer.dbml': `Table gold.dim_customer as DC {
@@ -409,6 +438,20 @@ describe('the laws over every DBML fixture', () => {
           (t) => { t.columns = (t.columns ?? []).slice(0, -1); t.meta = { ...(t.meta ?? {}), law: 'x', nested: { a: ['b'] } }; },
           (t) => { const cols = t.columns ?? []; if (cols.length > 0) cols[0] = { ...cols[0], name: `${cols[0].name}_renamed`, isNaturalKey: !cols[0].isNaturalKey }; t.description = 'New\n  description'; },
           (t) => { for (const c of t.columns ?? []) c.isPrimaryKey = !c.isPrimaryKey; t.columns?.reverse(); },
+          // Context fields: one rationale field changed, one added, one cleared; a meta key changed, one added
+          // (appended: inserting one among the others rewrites the owner's meta, which the generator covers).
+          (t) => {
+            const rationale = { ...(t.rationale ?? {}) };
+            if (rationale.purpose) delete rationale.purpose; else rationale.purpose = 'Law purpose';
+            rationale.decisions = 'Law decision';
+            const firstKey = Object.keys(rationale).find((k) => k !== 'decisions' && k !== 'purpose') as keyof typeof rationale | undefined;
+            if (firstKey) rationale[firstKey] = 'Law changed';
+            t.rationale = rationale;
+            const meta: NonNullable<SemanticTable['meta']> = {};
+            for (const [k, v] of Object.entries(t.meta ?? {})) setMetaEntry(meta, k, k === 'owner' ? 'law owner' : v);
+            setMetaEntry(meta, 'law_last', 'last');
+            t.meta = meta;
+          },
         ];
         for (const mutate of mutations) {
           const desired = clone(reading.table);
@@ -561,14 +604,33 @@ function randomText(rng: Rng): string {
   return pick(rng, TEXTS) + (chance(rng, 0.3) ? ` ${Math.floor(rng() * 1000)}` : '');
 }
 
+/**
+ * Meta keys the generator draws: team keys (written bare), keys that are not
+ * identifiers or are `json` (meta_json), reserved names and built-in names
+ * kept as metadata (`meta_<key>`), the parser-unsafe `constructor` and
+ * `__proto__`, and names that look like another spelling (`rationale_x`).
+ */
+const META_KEYS = [
+  'owner', 'tags', 'pii', 'Odd Key', 'json', 'count', 'nested', 'team', 'sla', '_private', 'business_rule',
+  'note', 'alias', 'role', 'grain', 'dbml', 'purpose', 'design', 'decisions', 'pk', 'default',
+  'constructor', '__proto__', 'meta_x', 'rationale_x', 'erd_x',
+];
+
 function randomMeta(rng: Rng): SemanticTable['meta'] {
   if (!chance(rng, 0.4)) return undefined;
-  const meta: Record<string, unknown> = {};
-  for (let i = 0; i < 1 + Math.floor(rng() * 3); i++) {
-    const key = pick(rng, ['owner', 'tags', 'pii', 'Odd Key', 'json', 'count', 'nested']);
-    meta[key] = pick(rng, [randomText(rng), true, null, ['a', 'b'], { k: 'v' }, '42']);
+  const meta: NonNullable<SemanticTable['meta']> = {};
+  for (let i = 0; i < 1 + Math.floor(rng() * 4); i++) {
+    const key = pick(rng, META_KEYS);
+    setMetaEntry(meta, key, pick(rng, [randomText(rng), randomText(rng), true, null, ['a', 'b'], { k: 'v' }, '42', '']) as never);
   }
-  return meta as SemanticTable['meta'];
+  return meta;
+}
+
+/** Some of the rationale-home fields, the new ones and the retired ones included. */
+function randomRationale(rng: Rng): SemanticTable['rationale'] {
+  const rationale: NonNullable<SemanticTable['rationale']> = {};
+  for (const key of RATIONALE_FIELD_KEYS) if (chance(rng, 0.25)) rationale[key] = randomText(rng);
+  return Object.keys(rationale).length > 0 ? rationale : { purpose: randomText(rng) };
 }
 
 function randomColumn(rng: Rng, name: string): ColumnDef {
@@ -593,7 +655,7 @@ function randomTable(rng: Rng, name: string): SemanticTable {
   if (chance(rng, 0.5)) t.grain = randomText(rng);
   if (chance(rng, 0.3)) t.alias = pick(rng, ['orders', 'cust']);
   if (chance(rng, 0.5)) t.description = randomText(rng);
-  if (chance(rng, 0.4)) t.rationale = { purpose: randomText(rng), ...(chance(rng, 0.5) ? { scdStrategy: randomText(rng) } : {}) };
+  if (chance(rng, 0.4)) t.rationale = randomRationale(rng);
   const meta = randomMeta(rng);
   if (meta) t.meta = meta;
   return t;
@@ -626,7 +688,7 @@ function decorate(rng: Rng, text: string, table: SemanticTable): string {
     const [line] = out.splice(noteAt, 1);
     out.splice(columnLines[0] + 1, 0, line);
   }
-  let result = out.join('\n');
+  let result = respell(rng, out.join('\n'));
   const columns = table.columns ?? [];
   // A Metadata block names the table as its Table line declares it: qualified by its schema.
   const reference = table.schema ? `${dbmlName(table.schema)}.${dbmlName(table.name)}` : dbmlName(table.name);
@@ -635,7 +697,40 @@ function decorate(rng: Rng, text: string, table: SemanticTable): string {
     result += `\nMetadata Column ${reference}.${dbmlName(column.name)} {\n  // set by a block\n  meta_from_block: 'column'\n}\n`;
   }
   if (chance(rng, 0.2)) result += `\nMetadata Table ${reference} {\n  // a block entry\n  meta_from_block: 'table'\n}\n`;
+  // Both spellings of a field (A4): a lower-precedence copy beside the one the table has, or a bare
+  // field set only by a block; read as the reader decides, kept, and cleared with the field.
+  if (chance(rng, 0.3)) {
+    const entries = [
+      "rationale_purpose: 'shadowed purpose'", "rationale_decisions: 'old decisions'", "meta_owner: 'shadowed owner'",
+      "rationale_team: 'old team'", "open_questions: 'from a block'", "erd_freshness: ''", "sla: 'block sla'",
+    ].filter(() => chance(rng, 0.4));
+    if (entries.length > 0) result += `\nMetadata Table ${reference} {\n${entries.map((e) => `  ${e}`).join('\n')}\n}\n`;
+  }
   return result;
+}
+
+/** The bare field names a new file writes that {@link respell} may turn into an older spelling. */
+const RESPELLABLE: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ...RATIONALE_FIELD_KEYS.map((k) => {
+    const snake = k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+    return [snake, [`rationale_${snake}`, `erd_rationale_${snake}`, `erd_${snake}`]] as const;
+  }),
+  ...['owner', 'team', 'sla', '_private', 'business_rule'].map((k) => [k, [`meta_${k}`, `erd_meta_${k}`, `rationale_${k}`, `erd_${k}`]] as const),
+];
+
+/**
+ * Old spellings, as the 2.0 pre-releases (or a person) wrote them: some bare
+ * field settings of a new file renamed `rationale_<key>`, `meta_<key>` or an
+ * `erd_` form. Only names at the start of a setting are touched.
+ */
+function respell(rng: Rng, text: string): string {
+  let out = text;
+  for (const [bare, spellings] of RESPELLABLE) {
+    if (!chance(rng, 0.5)) continue;
+    const to = pick(rng, spellings);
+    out = out.replace(new RegExp(`(^ {2}|\\[|, )${bare}(?=: ')`, 'gm'), `$1${to}`);
+  }
+  return out;
 }
 
 function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
@@ -643,7 +738,7 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
   const cols = d.columns ?? [];
   const ops = Math.max(1, Math.floor(rng() * 4));
   for (let i = 0; i < ops; i++) {
-    switch (Math.floor(rng() * 12)) {
+    switch (Math.floor(rng() * 13)) {
       case 0: d.grain = chance(rng, 0.3) ? undefined : randomText(rng); break;
       case 1: d.description = chance(rng, 0.3) ? undefined : randomText(rng); break;
       case 2: d.meta = randomMeta(rng); break;
@@ -655,7 +750,31 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
       case 8: if (cols.length) { const c = pick(rng, cols); const unused = COLUMN_NAMES.filter((n) => !cols.some((x) => x.name.toLowerCase() === n.toLowerCase())); if (unused.length) c.name = `${pick(rng, unused)}`; } break;
       case 9: d.modelRole = chance(rng, 0.3) ? undefined : pick(rng, ['transaction-fact', 'conformed-dim'] as const); d.alias = chance(rng, 0.5) ? undefined : 'renamed_alias'; break;
       case 10: d.name = pick(rng, TABLE_NAMES.filter((n) => n.toLowerCase() !== d.name.toLowerCase())); break; // a table rename
-      default: d.rationale = chance(rng, 0.3) ? undefined : { design: randomText(rng) }; break;
+      case 11: {
+        // A9: a key inserted among the meta the owner has (the key-order rewrite), on the table or a column.
+        const owner = cols.length > 0 && chance(rng, 0.5) ? pick(rng, cols) : d;
+        const entries = Object.entries(owner.meta ?? {});
+        const at = Math.floor(rng() * (entries.length + 1));
+        const meta: NonNullable<SemanticTable['meta']> = {};
+        const key = pick(rng, META_KEYS.filter((k) => !entries.some(([e]) => e === k)));
+        entries.forEach(([k, v], i) => { if (i === at) setMetaEntry(meta, key, randomText(rng)); setMetaEntry(meta, k, v); });
+        if (at === entries.length) setMetaEntry(meta, key, pick(rng, [randomText(rng), true]) as never);
+        owner.meta = meta;
+        break;
+      }
+      default: {
+        // Rationale: cleared, replaced, or one field changed or cleared.
+        const r = rng();
+        if (r < 0.2) d.rationale = undefined;
+        else if (r < 0.5) d.rationale = randomRationale(rng);
+        else {
+          const rationale = { ...(d.rationale ?? {}) };
+          const key = pick(rng, RATIONALE_FIELD_KEYS);
+          if (chance(rng, 0.3)) delete rationale[key]; else rationale[key] = randomText(rng);
+          d.rationale = rationale;
+        }
+        break;
+      }
     }
   }
   d.columns = cols;
@@ -769,6 +888,8 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
 
   it('tables: create, decorate, edit (Laws 1–5)', () => {
     const rng = mulberry32(SEED);
+    // How often the context-field rules were met, so the generator is seen to cover them.
+    const seen = { old: 0, twice: 0, bare: 0, reservedMeta: 0, unsafe: 0, rewrite: 0 };
     for (let i = 0; i < 120; i++) {
       try {
         const name = pick(rng, TABLE_NAMES);
@@ -781,11 +902,18 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         const file = `gold/tables/${table.schema}/${name}.dbml`;
         expect(projectDiagnostics({ [file]: t }, [file])).toEqual([]);
         const read = readOk(t, name);
+        const spellings = (parseTableDbml(t, name) as { fieldSpellings?: Array<{ owner: string; home: string; key: string; old: boolean; spelling: string }> }).fieldSpellings ?? [];
+        if (spellings.some((f) => f.old)) seen.old++;
+        if (new Set(spellings.map((f) => `${f.owner}|${f.home}|${f.key}`)).size < spellings.length) seen.twice++;
+        if (spellings.some((f) => f.spelling === 'bare')) seen.bare++;
+        if (/\bmeta_(note|role|alias|grain|dbml|purpose|design|decisions|pk|default):/.test(created)) seen.reservedMeta++;
+        if (/\bmeta_(constructor|__proto__):/.test(created)) seen.unsafe++;
         expect(editTableDbml(t, read)).toBe(t); // Law 1
         const desired = mutateTable(rng, read);
         note('desired', desired);
         const out = editTableDbml(t, desired, { rename: true });
         note('output', out);
+        if (/^ {2}meta_json: |\[meta_json: /m.test(out) !== /^ {2}meta_json: |\[meta_json: /m.test(t)) seen.rewrite++;
         expect(normTable(readOk(out, desired.name))).toEqual(normTable(desired)); // Law 3
         expect(editTableDbml(out, desired, { rename: true })).toBe(out); // Law 2
         expect(editTableDbml(out, readOk(out, desired.name))).toBe(out); // Law 1 on the output
@@ -795,6 +923,12 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
         fail('table', i, err);
       }
     }
+    expect(seen.old, JSON.stringify(seen)).toBeGreaterThanOrEqual(30);
+    expect(seen.twice, JSON.stringify(seen)).toBeGreaterThanOrEqual(3);
+    expect(seen.bare, JSON.stringify(seen)).toBeGreaterThanOrEqual(40);
+    expect(seen.reservedMeta, JSON.stringify(seen)).toBeGreaterThanOrEqual(15);
+    expect(seen.unsafe, JSON.stringify(seen)).toBeGreaterThanOrEqual(5);
+    expect(seen.rewrite, JSON.stringify(seen)).toBeGreaterThanOrEqual(3);
   });
 
   it('relationships: create, decorate, edit (Laws 1–5)', () => {

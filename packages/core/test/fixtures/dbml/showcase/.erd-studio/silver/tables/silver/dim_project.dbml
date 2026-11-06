@@ -1,9 +1,9 @@
 Table silver.dim_project [
   role: 'conformed-dim',
   grain: 'One row per project',
-  rationale_purpose: 'Central project reference shared across domains',
-  rationale_design: 'Conformed dimension for consistent project attributes',
-  rationale_scd_strategy: 'project_key is the surrogate facts join to; project_code is the business key'
+  purpose: 'Central project reference shared across domains',
+  design: 'Conformed dimension for consistent project attributes',
+  scd_strategy: 'project_key is the surrogate facts join to; project_code is the business key'
 ] {
   Note: 'Project dimension table'
 

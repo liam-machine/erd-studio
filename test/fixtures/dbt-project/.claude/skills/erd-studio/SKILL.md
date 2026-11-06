@@ -37,7 +37,8 @@ ERD Studio keeps a project's logical data model in `.erd-studio/` as plain text 
 ├── README.md                       ← explains the folders; ERD Studio writes it once, leave it
 ├── layers.json                     ← the layers (JSON); write it first in a new project
 ├── modelling-approach.md           ← optional: the team's modelling rules (see below)
-└── gold/                           ← a layer folder (bronze, silver, gold, …), named by its id
+├── fields.yml                      ← optional: the fields the team records (see "Fields")
+└── gold/                         ← a layer folder (bronze, silver, gold, …), named by its id
     ├── tables/                     ← the layer's tables: one Table per file
     │   └── sales/                  ← a schema folder
     │       ├── dim_customer.dbml   ← Table sales.dim_customer
@@ -77,25 +78,27 @@ A new project also needs `.erd-studio/layers.json`, which lists the layer folder
 - **Remove a table from a diagram** = delete its `use` line there and its line in the diagram's `erd_layout`. The table file and its Refs stay: the diagram just stops showing them.
 - **Rename, move or delete a table**: prefer the canvas or the Table Library (one undoable step). By hand, update every file that points at it in the same change: the table file's path and `Table` line, the `use` lines in relationships files and diagrams, every Ref end, the `erd_layout` lines and sticky notes' `linked_table`.
 - **Never hand-merge a conflicted file.** When a file holds git conflict markers (`<<<<<<<` … `>>>>>>>`), show the user the file and line and ask which side to keep; never pick a side yourself or run git commands. A conflict inside a diagram's `erd_layout` only differs in positions: keep either side whole, never a mix of lines.
-- **Check your work** with `erd-studio doctor` (its `erd.dbmlProblems` names every problem with its file, line and the exact line to write) and `erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml` (the diagram's path from the project folder, `.erd-studio/` included). Fix every `fix-dbml-file` error before anything else. Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a `foreignMetadata` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a `.dbml` one) and remove the block. Other warnings are information.
+- **Check your work** with `erd-studio doctor` (its `erd.dbmlProblems` names every problem with its file, line and the exact line to write) and `erd-studio export --domain .erd-studio/<layer>/diagrams/<name>.dbml --format dbml` (the diagram's path from the project folder, `.erd-studio/` included). Fix every `fix-dbml-file` and `fix-fields-file` error before anything else (`erd.fields` gives each fields.yml problem with its line). Then fix every `missingUse`, `missingRelationshipsUse`, `unquotedValue` and `usePathMismatch` warning in a file you wrote (the message gives the exact line): ERD Studio reads on without the fix, but other DBML tools reject the file and every diagram that imports it. Fix a `foreignMetadata` warning too: a Metadata block outside the table's own file, whose values the canvas never shows while other DBML tools apply them; do what its message says: move its properties into the table file (as inline settings in a `.dbml` one) and remove the block. Other warnings are information.
 - **Summarise a pull request's model changes** with `erd-studio changes --base <git-ref> --format markdown` (for example `--base origin/main`): the tables, columns, keys, relationships and diagrams changed since that ref, ready to paste as a review comment (`--json` for the same as data). It reads the ref from git and changes nothing.
 
 ## Team Modelling Approach
 
-If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and rationale, whatever the file format). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. If it has a **Metadata** section, that is the team's metadata list — follow it as "The team's metadata list" below says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
+If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (the table's role, grain, SCD and additive types, natural keys and the other fields, whatever the file format). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. Which fields a table records is `.erd-studio/fields.yml`'s job; an old **Metadata** section is followed as "Fields" says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
 
-### The team's metadata list
+## Fields
 
-If `.erd-studio/modelling-approach.md` has a `## Metadata` section, it lists the `meta` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (`dbt` or `the team`). Read it before creating or editing a model, and follow it:
+Read `.erd-studio/fields.yml` before creating or editing a table. It lists every field this project records on tables and on columns, in order (its format: "fields.yml" in `DBML.md`). Without the file, use the starting set: grain, purpose, decisions, open_questions, role, scd_strategy, measures; on columns natural_key, scd_type, additive_type. Fill only listed fields; another key only when the user asks, then offer once to add it to the list.
 
-- **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (`owner`, `pii`), never a new spelling, and put it where **On** says. When **Values** names a fixed set, use one of those values; an example in **Values** is never a default. Keep the kind of value (text, `true` / `false`, a list).
-- **Source `dbt`: copy it; never make it up.** The value comes from the dbt model's own `meta:` — best from `~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json` (`models[].meta`, `columns[].meta`, already merged as dbt merges them, including project-wide `+meta` from `dbt_project.yml`) when that helper is installed, else from the model's schema `.yml` (`meta:` and `config: meta:`, the `config` one winning per key; a column's are under that column) and the `+meta` entries in `dbt_project.yml`. Copy it whenever you create a logical model or add a column from dbt, including from a sync plan. Keep the kind of value: in a DBML table a text value is one `meta_<key>: '<text>'` setting and anything else (`true` / `false`, a number, a list) goes into the one `meta_json` setting as JSON (a text value ERD Studio put inside `meta_json` to keep the key order stays there; `DBML.md`); in YAML, `true` / `false` stay unquoted and a list stays a list, and numbers may be written quoted or not (ERD Studio reads `24` and `"24"` the same), but keep the quotes when leaving them off would change the digits (`"1.10"`, `"007"`). When dbt has no value (or `null`), leave the key out: never guess and never write a placeholder.
-  - When you are already reading that dbt model and the model file's value for a listed `dbt` key differs from dbt's, say so in one line and ask before changing it — the difference may be deliberate.
-  - When the user gives a value for a `dbt` key ("its owner is finance-team"), write it, say that dbt does not record it, and offer to add it to the dbt model's `meta:` too so the two agree — never edit dbt files unasked. When they ask for a `dbt` key that dbt has no value for and give none, say so and ask for the value.
-- **Source `the team`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating models, say in one line which of them still lack these keys (one line for a whole batch or sync plan).
-- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list (Source `the team`, or `dbt` when dbt records it). Keys the list names under **Left out** (another tool's settings) are never copied from dbt.
-
-Without that section, add or change only the keys the user asks for, and never copy dbt's `meta:` unasked. Ask for a value you were not given; never make one up.
+- Each field is one setting, `<key>: '<value>'`: on the Table line for a table field, on the column for a column field. Quote every value. (A YAML table keeps them in its `rationale:` and `meta:` maps: `LEGACY.md`.)
+- type text: what the guidance asks for, in a sentence or two. type value: one short value. type choice: exactly one of its values. type yes-no: 'true' or 'false'.
+- filled_by people: write only a value the user gives you; after a batch, say in one line which tables still lack one. filled_by dbt: copy it exactly from the dbt model's meta: `~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json` (`models[].meta`, `columns[].meta`, merged as dbt merges them: `config: meta:` wins, project `+meta` included), else the schema `.yml` (`meta:`, `config: meta:`) and `+meta` in `dbt_project.yml`. Never type one in; no value, no setting. When the file's value differs from dbt's, say so and ask; when the user gives a value, write it and offer to add it to dbt's `meta:` too (never edit dbt unasked). Never copy a key listed under left_out. A list or map in dbt's meta is never a listed field: copy it only when asked.
+- show_for dimensions / facts: only on tables with that role.
+- Leave a field out when you have nothing true to say. Never write a placeholder.
+- open_questions: when you meet a choice you cannot make, write the question there and ask the user. When they answer, move the answer into decisions and remove the question.
+- Keep every setting the list does not name exactly as it is.
+- Old spellings (`rationale_<key>`, `meta_<key>`, an entry in `meta_json`) are the same field: change it where it is, never add a second copy. Rename only what doctor's `erd.fields` lists as old spellings (`fieldOldSpellings`), and only when the user agrees: a text `meta_json` entry it lists moves out of the JSON into its own setting. Never rename a `meta_json` entry doctor does not list, nor a `meta_<key>` whose key is reserved or a built-in (metadata of its own). Retired fields (design, role_choice, grain_choice): keep them; offer once to move the text into decisions, showing the result first.
+- An old `## Metadata` table in `modelling-approach.md` names the team fields while fields.yml has none: Key is the key, On the list (tables, columns), Values a choice or yes-no, Source `dbt` is filled_by dbt, `the team` is people, Left out is left_out. Offer once to move it into fields.yml: show the result, and remove the old section on a yes.
+- doctor's `erd.fields` also reports `fieldValueOutsideChoices` (use a listed value, or ask) and `fieldSpelledTwice` (the used spelling stays; offer to remove the other).
 
 ## Table roles
 
@@ -112,20 +115,6 @@ A table's role is `role` in a DBML table file and `modelRole` (`tableRole` in th
 | `reference` | Low-cardinality lookup |
 | `gold-fact` | Pre-joined Gold view |
 | `gold-dim` | Flattened Gold dimension view |
-
-
-## Design rationale
-
-Optional, and every field is optional text: in DBML each is a table setting `rationale_<field in snake_case>` (`rationale_purpose`, `rationale_grain_choice`, …); in YAML they are keys of one `rationale:` map. Write only the fields there is something to say about.
-
-| Field | Purpose |
-|-------|---------|
-| `purpose` | What requirements this model fulfils |
-| `design` | Why it was designed this way |
-| `grainChoice` | Why this grain was chosen over alternatives |
-| `roleChoice` | Why this model role was selected |
-| `scdStrategy` | Overall SCD strategy across dimension attributes |
-| `measures` | Why measures are structured this way |
 
 ---
 
@@ -159,7 +148,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project `.erd-studio/{layer}/tables/{schema}/{name}.dbml` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the `.yml` path `LEGACY.md` gives. When the source is a dbt model and the team's metadata list has `dbt` keys, copy those too (see "The team's metadata list").
+Write the table's file — the existing file if the table already exists (in whichever folder it is in), otherwise a new file: in a DBML project `.erd-studio/{layer}/tables/{schema}/{name}.dbml` for the layer of the target diagram (see "Where a new table goes" above); in a YAML project the `.yml` path `LEGACY.md` gives. When the source is a dbt model, copy the fields `filled_by: dbt` too (see "Fields").
 
 ### Step 4 — Reconcile via set-difference
 Re-read the table file you just wrote. Compute the set-difference between source columns and the file's columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -210,7 +199,7 @@ The physical stage has **no files on disk**. It is derived at runtime from the d
 7. **Relationships**: derived from **dbt relationship tests** — the union of those declared in `.yml` files and those in the manifest, deduped; never copied from logical. `catalog.json` holds no constraint or foreign-key information, so it contributes no edges.
 8. **Cardinality**: derived from **uniqueness tests** merged from yml and manifest — no `unique` test = "many" side.
 9. **Scoping**: only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
-10. **Carried forward from logical**: PK/FK/NK flags, grain, the table role, SCD type and additive type — dbt yml does not carry them. `meta` is logical-only and is never read from, or compared with, dbt.
+10. **Carried forward from logical**: PK/FK/NK flags, grain, the table role, SCD type and additive type — dbt yml does not carry them. Every other field (and `meta`) is logical-only: ERD Studio never reads it from, or compares it with, dbt.
 
 A model known **only** by the file that defines it renders as a real node with **zero columns**: nothing has stated its shape, and seeding it from the logical design would invent one. Sync comparison skips such a model entirely rather than reporting every logical column as missing. That suppression is automatic and distinct from `stubColumns`, which is the user's own switch for models they know are deliberately partial.
 
@@ -247,4 +236,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in `relationshipsPath`, a change to an existing Ref in `storedIn`) and the YAML ones (legacy)
 
-<!-- erd-studio-harness: 45 -->
+<!-- erd-studio-harness: 46 -->

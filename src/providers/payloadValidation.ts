@@ -16,7 +16,7 @@ import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
-import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isValidTableAlias, normalisePosix } from '@erd-studio/core';
+import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, TABLE_ROLE_VALUES, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isRationaleFieldKey, isValidTableAlias, normalisePosix, rationaleKeyToFieldKey } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -151,6 +151,48 @@ export function validateMetaPayload(payload: unknown): string | null {
     if (removed.has(key)) {
       return `"${key}" cannot be set and removed at once.`;
     }
+  }
+  return null;
+}
+
+/**
+ * Validate an `updateModelRationale` payload: a patch of the table's built-in
+ * text fields kept in `rationale` (core's `RATIONALE_FIELD_KEYS`, camelCase).
+ * Each value is text, or `null` to clear it; `''` clears too (the handler
+ * trims). A key outside the catalogue is refused rather than dropped on the
+ * way to disk, and an empty patch is a harmless no-op.
+ */
+export function validateRationalePayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return 'Missing payload.';
+  }
+  const { modelName, rationale } = payload as { modelName?: unknown; rationale?: unknown };
+  const nameError = validateTableNameSafety(modelName);
+  if (nameError) {
+    return nameError;
+  }
+  if (!rationale || typeof rationale !== 'object' || Array.isArray(rationale)) {
+    return 'The fields to change must be an object.';
+  }
+  for (const [key, value] of Object.entries(rationale as Record<string, unknown>)) {
+    if (!isRationaleFieldKey(key)) {
+      return `"${key}" is not a built-in text field.`;
+    }
+    // `undefined` never survives the webview's JSON; an in-process sender's is a clear.
+    if (value !== null && value !== undefined && typeof value !== 'string') {
+      return `Value of "${rationaleKeyToFieldKey(key)}" must be text.`;
+    }
+  }
+  return null;
+}
+
+/** `openFieldsFile` (the Detail panel's "Customise fields" link) carries nothing. */
+export function validateOpenFieldsFilePayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Customise fields takes no payload.';
   }
   return null;
 }
@@ -368,17 +410,8 @@ export function validateNoRelationshipsFile(payload: unknown): string | null {
   return 'an existing relationship stays in the file that holds it; a relationships file can be chosen only for a new one.';
 }
 
-export const TABLE_ROLES: readonly TableRole[] = [
-  'conformed-dim',
-  'domain-dim',
-  'transaction-fact',
-  'periodic-snapshot',
-  'accumulating-snapshot',
-  'factless-fact',
-  'reference',
-  'gold-fact',
-  'gold-dim',
-];
+/** Every table role, in the canvas's order: core's one list (`TABLE_ROLE_VALUES`, also the Table role field's choices). */
+export const TABLE_ROLES: readonly TableRole[] = TABLE_ROLE_VALUES;
 
 export function isValidTableRole(value: unknown): value is TableRole {
   return typeof value === 'string' && (TABLE_ROLES as readonly string[]).includes(value);

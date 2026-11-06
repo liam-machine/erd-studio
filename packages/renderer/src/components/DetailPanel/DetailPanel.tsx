@@ -6,27 +6,25 @@
  * - Editable column list
  * - Incoming and outgoing FK relationships, then (editing host only) the
  *   relationships to tables not on this diagram, each with "+ Add"
- * - "Modelling detail (optional)": table type, grain, meta and design
- *   rationale, folded until one of them is set
+ * - "Modelling detail (optional)": the table's Fields (its context fields,
+ *   from the project's field list), folded until one of them has a value
  *
  * The viewer (`useIsViewer`) never has the host's context and keeps the
- * layout it always had: every section open, in the old order.
+ * layout it always had: every section open, in the old order, with the
+ * Fields where the role, grain, meta and rationale sections were.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
-import { TableRationale, hasRationaleContent } from './ModelRationale';
 import { DescriptionEditor } from './DescriptionEditor';
-import { GrainEditor } from './GrainEditor';
 import { AliasEditor } from './AliasEditor';
-import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
-import { MetaEditor } from './MetaEditor';
+import { FieldsSection, fieldRows, tableFieldsShown, type FieldsTable } from './FieldsSection';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
-import { backwardsRelationshipNote } from '@erd-studio/core';
-import type { ColumnPair, DisplayRelationship, DisplayTable, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
+import { STARTING_FIELD_LIST, backwardsRelationshipNote } from '@erd-studio/core';
+import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
@@ -121,12 +119,12 @@ export function removeConfirmText(
 /** Most tables one "Add all related" asks for (the host's `addExistingModels` limit). */
 const ADD_ALL_RELATED_LIMIT = 200;
 
-/** Whether any of the folded modelling fields holds something, so the section opens by itself. */
-export function hasModellingDetail(model: Pick<DisplayTable, 'modelRole' | 'grain' | 'meta' | 'rationale'>): boolean {
-  return !!model.modelRole
-    || !!model.grain?.trim()
-    || (!!model.meta && Object.keys(model.meta).length > 0)
-    || hasRationaleContent(model.rationale);
+/**
+ * Whether any of the table's fields has a value, so "Modelling detail" opens
+ * by itself. Import DBML's bookkeeping (`meta.dbml`) is not a field.
+ */
+export function hasModellingDetail(model: FieldsTable, list: FieldList = STARTING_FIELD_LIST): boolean {
+  return fieldRows(model, undefined, list).some((row) => row.value !== undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +327,8 @@ export function DetailPanel() {
   }, [domain, selectedNode]);
 
   const isReadOnly = domain?.readOnly ?? false;
+  // The project's field list; absent (no fields.yml, or an older core) is the starting set.
+  const fieldList = domain?.fields ?? STARTING_FIELD_LIST;
 
   // Relationships to tables not on this diagram (the host's context, logical stage).
   const offRows = useMemo(
@@ -339,7 +339,7 @@ export function DetailPanel() {
   // "Modelling detail (optional)": open when any field is set, else folded.
   // It opens by itself once one is set and only a new selection folds it
   // again, so it never shuts while someone is filling it in.
-  const hasModelling = model ? hasModellingDetail(model) : false;
+  const hasModelling = model ? hasModellingDetail(model, fieldList) : false;
   const [modellingOpen, setModellingOpen] = useState(hasModelling);
   useEffect(() => {
     setModellingOpen(hasModelling);
@@ -382,51 +382,19 @@ export function DetailPanel() {
   const showOffDiagram = viewer ? false : !isReadOnly && offRows.length > 0;
 
   // The sections, placed below in the viewer's order or the editor's.
-  const roleSection = (
-    <>
-      {/* Model role */}
-      {!isReadOnly && (
-        <div className="detail-panel__section">
-          <RoleEditor modelName={model.name} modelRole={model.modelRole} />
-        </div>
-      )}
-    </>
-  );
-  const grainSection = (
-    <>
-      {/* Grain statement */}
-      {!isReadOnly && (
-        <div className="detail-panel__section">
-          <GrainEditor modelName={model.name} grain={model.grain} />
-        </div>
-      )}
-    </>
-  );
-  const metaSection = (
-    <>
-      {/* Structured metadata (a read-only panel shows it only when there is some) */}
-      {((!isReadOnly && !viewer) || (model.meta && Object.keys(model.meta).length > 0)) && (
-        <div className="detail-panel__section">
-          <MetaEditor modelName={model.name} meta={model.meta} readOnly={isReadOnly} />
-        </div>
-      )}
-    </>
-  );
-  const rationaleSection = (
-    <>
-      {/* Design Rationale (the viewer shows the section only when there is some) */}
-      {(!viewer || hasRationaleContent(model.rationale)) && (
-        <div className="detail-panel__section">
-          <TableRationale
-            modelName={model.name}
-            rationale={model.rationale}
-            modelRole={model.modelRole}
-            grain={model.grain}
-          />
-        </div>
-      )}
-    </>
-  );
+  // A read-only panel (viewer, physical stage) shows the Fields only when one has a value.
+  const fieldsShown = viewer ? tableFieldsShown(model, fieldList) : (isReadOnly ? tableFieldsShown(model, fieldList) : true);
+  const fieldsSection = fieldsShown ? (
+    <div className="detail-panel__section">
+      <FieldsSection
+        modelName={model.name}
+        table={model}
+        fields={fieldList}
+        readOnly={isReadOnly}
+        logicalOnly={logicalOnly}
+      />
+    </div>
+  ) : null;
   const removeSection = (
     <>
       {/* Remove from Diagram button */}
@@ -477,6 +445,8 @@ export function DetailPanel() {
           columns={model.columns}
           readOnly={isReadOnly}
           modelRole={model.modelRole}
+          fields={fieldList}
+          logicalOnly={logicalOnly}
         />
       </div>
     </>
@@ -743,10 +713,7 @@ export function DetailPanel() {
 
       {viewer ? (
         <>
-          {roleSection}
-          {grainSection}
-          {metaSection}
-          {rationaleSection}
+          {fieldsSection}
           {removeSection}
           {columnsSection}
           {relationshipsSection}
@@ -802,25 +769,24 @@ export function DetailPanel() {
             </div>
           )}
 
-          {/* Table type, grain, meta and rationale: folded until one is set. */}
-          <div className="detail-panel__section detail-panel__modelling">
-            <button
-              type="button"
-              className="detail-panel__modelling-toggle"
-              aria-expanded={modellingOpen}
-              onClick={() => setModellingOpen((open) => !open)}
-            >
-              <span className="detail-panel__modelling-chevron" aria-hidden="true">{modellingOpen ? '\u25be' : '\u25b8'}</span>
-              <span className="detail-panel__modelling-title">Modelling detail</span>{' '}
-              <span className="detail-panel__modelling-optional">(optional)</span>
-            </button>
-          </div>
-          {modellingOpen && (
+          {/* The table's Fields: folded until one has a value (a read-only stage shows the fold only when one has). */}
+          {fieldsSection && (
+            <div className="detail-panel__section detail-panel__modelling">
+              <button
+                type="button"
+                className="detail-panel__modelling-toggle"
+                aria-expanded={modellingOpen}
+                onClick={() => setModellingOpen((open) => !open)}
+              >
+                <span className="detail-panel__modelling-chevron" aria-hidden="true">{modellingOpen ? '\u25be' : '\u25b8'}</span>
+                <span className="detail-panel__modelling-title">Modelling detail</span>{' '}
+                <span className="detail-panel__modelling-optional">(optional)</span>
+              </button>
+            </div>
+          )}
+          {fieldsSection && modellingOpen && (
             <div className="detail-panel__modelling-body">
-              {roleSection}
-              {grainSection}
-              {metaSection}
-              {rationaleSection}
+              {fieldsSection}
             </div>
           )}
 

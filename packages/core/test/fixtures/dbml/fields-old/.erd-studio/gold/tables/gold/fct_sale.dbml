@@ -1,0 +1,30 @@
+// Sale lines, as an ERD Studio 2.0 pre-release wrote them: the old
+// rationale_ / meta_ / meta_json spellings, erd_ variants and Metadata blocks.
+Table gold.fct_sale [
+  role: 'transaction-fact',
+  grain: 'One row per sale line',
+  rationale_purpose: 'Revenue by store and day',
+  rationale_design: 'A star around the sale line',
+  rationale_measures: 'amount is additive; unit_price is not',
+  erd_rationale_grain_choice: 'Line level, so returns can be matched',
+  meta_owner: 'sales-data',
+  erd_meta_steward: 'finance',
+  meta_json: '{"pii":false,"tags":["finance","daily"]}',
+  meta_tier: 'gold'
+] {
+  Note: 'Sale lines'
+
+  sale_line_id BIGINT          [pk, note: 'Line id']
+  store_key    INT             [foreign_key: 'true', meta_source: 'pos']
+  amount       "DECIMAL(18,2)" [additive_type: 'additive', meta_unit: 'AUD', meta_json: '{"sensitive":true}', note: 'Line total']
+  unit_price   "DECIMAL(18,2)" [additive_type: 'non-additive']
+}
+
+Metadata Table gold.fct_sale {
+  rationale_role_choice: 'A transaction fact: one row per event'
+  meta_reviewed: 'yes'
+}
+
+Metadata Column gold.fct_sale.store_key {
+  meta_source: 'pos-v2'
+}

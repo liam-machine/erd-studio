@@ -1,6 +1,6 @@
 Table silver.customers [
   grain: 'One row per customer, matched across Shopify and Stripe',
-  rationale_design: 'Deduplicated from bronze shopify_customers and stripe_customers: matched on the Shopify id in Stripe metadata, else on email.'
+  decisions: 'Deduplicated from bronze shopify_customers and stripe_customers: matched on the Shopify id in Stripe metadata, else on email.'
 ] {
   Note: 'Every customer once, whichever system they came through.'
 

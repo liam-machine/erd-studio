@@ -3,7 +3,9 @@
  * With a store but no CanvasEnvironmentProvider, the shared components render
  * exactly as the VS Code extension shows them: every editing affordance is
  * present — even on a read-only (physical-stage) domain, where upstream keeps
- * the relationship rows clickable and the key-badge menus open.
+ * the relationship rows clickable and the key-badge menus open. The table's
+ * Fields are the exception: a read-only domain shows only the fields that
+ * have a value, with nothing to edit (the host rejects a physical edit).
  */
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -79,13 +81,23 @@ describe('shared components outside a CanvasEnvironmentProvider', () => {
         }
       });
 
-      it('offers "+ Add Rationale" for a model without one, under "Modelling detail (optional)"', () => {
-        renderPanel(readOnly);
-        // Folded while none of its fields is set; one click opens it.
-        expect(screen.queryByText('+ Add Rationale')).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: /Modelling detail/ }));
-        expect(screen.getByText('+ Add Rationale')).toBeTruthy();
-      });
     });
   }
+
+  it('editable domain: offers the empty fields and "+ Add field" under "Modelling detail (optional)"', () => {
+    renderPanel(false);
+    // Folded while none of its fields has a value; one click opens it.
+    expect(screen.queryByLabelText('Add Purpose')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Modelling detail/ }));
+    expect(screen.getByLabelText('Add Purpose')).toBeTruthy();
+    expect(screen.getByText('+ Add field')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Customise fields' })).toBeTruthy();
+  });
+
+  it('read-only domain: no Fields to add, and no fold for a table with no field value', () => {
+    const { container } = renderPanel(true);
+    expect(screen.queryByRole('button', { name: /Modelling detail/ })).toBeNull();
+    expect(container.querySelector('.fields-section')).toBeNull();
+    expect(container.textContent).not.toContain('+ Add field');
+  });
 });

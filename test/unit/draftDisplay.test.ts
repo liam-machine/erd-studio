@@ -83,6 +83,20 @@ describe('displayFromFiles', () => {
   });
 });
 
+describe('a draft\'s fields (context fields)', () => {
+  it('a draft from tables carries no field list: the canvas uses the starting set', () => {
+    const { display } = displayFromTables({ name: 'sales', layer: 'gold', tables, relationships: [rel], layers: DEFAULT_LAYERS });
+    expect(display).not.toHaveProperty('fields');
+  });
+
+  it('a draft from files carries none either, even when the files hold a fields.yml', async () => {
+    const project = EXAMPLE_PROJECTS.find((p) => p.id === 'medallion')!;
+    const files = { ...exampleFiles(project.id), '.erd-studio/fields.yml': 'version: 1\ntables:\n  - purpose\n' };
+    const { display } = await displayFromFiles({ files, domainPath: project.startDiagram });
+    expect(display).not.toHaveProperty('fields');
+  });
+});
+
 describe('draftSchemas', () => {
   it('counts by schema, biggest first, then by name; no schema is the empty string', () => {
     expect(draftSchemas([{ schema: 'b' }, { schema: 'a' }, { schema: 'b' }, {}, { schema: 'a' }, { schema: 'c' }])).toEqual([

@@ -1,7 +1,7 @@
 Table marts.fct_campaign_response [
   role: 'transaction-fact',
   grain: 'One row per campaign message sent',
-  meta_owner: 'marketing-analytics'
+  owner: 'marketing-analytics'
 ] {
   Note: 'Every campaign message and whether the customer responded, for marketing.'
 

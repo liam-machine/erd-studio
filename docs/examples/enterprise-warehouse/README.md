@@ -16,7 +16,7 @@ It is also the example of the cases where the folders alone don't decide where a
 |---|---|
 | landing, enterprise warehouse, marts, reporting | a layer each: `landing/`, `edw/`, `marts/`, `reporting/` |
 | a source system (landing) or a subject area (warehouse) | a schema folder: `landing/tables/cards/`, `edw/tables/party/` |
-| who owns a table | `meta_owner` on the table, and a line in `.github/CODEOWNERS` |
+| who owns a table | an `owner` setting on the table, and a line in `.github/CODEOWNERS` |
 | a team's joins | a relationships file: `marts/relationships/finance.dbml` |
 
 ```text
@@ -115,7 +115,7 @@ Open this folder in VS Code: **File > Open Folder…**, choose `enterprise-wareh
    - `account_party_role` is **many-to-many**: an account can have joint owners, and a person can hold many accounts.
    - `product` points at **itself**: a product's family.
 
-4. **Who owns what.** In the **Table Library**, click the filter icon (or press Cmd+F / Ctrl+F) and type `owner:customer-data`: the four party tables. Click `party` on the canvas: its panel shows **Reviewed by @bellbird-bank/customer-data**, read from this folder's `.github/CODEOWNERS`, and `owner: customer-data` in the table's metadata.
+4. **Who owns what.** In the **Table Library**, click the filter icon (or press Cmd+F / Ctrl+F) and type `owner:customer-data`: the four party tables. Click `party` on the canvas: its panel shows **Reviewed by @bellbird-bank/customer-data**, read from this folder's `.github/CODEOWNERS`, and **owner** `customer-data` among its fields, under **Not in your list** (this project has no `fields.yml`).
 
 5. **A schema with its own file.** With **Relationships** grouped by file, the warehouse has two: `edw.dbml` (the data architecture team's) and `party.dbml` (the Customer Data team's). Because a file named after the `party` schema exists, a party table's next new relationship is saved there. `account_party_role` points at `party` too, but its relationships are in `edw.dbml`: a relationship lives with the table that holds the foreign key, and that table is in `arrangement`.
 

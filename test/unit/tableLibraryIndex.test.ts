@@ -659,6 +659,21 @@ describe('peekTableSummary', () => {
   });
 });
 
+describe('peekTableSummary: an owner field however it is spelt (context fields)', () => {
+  it('a bare owner: setting reaches meta.owner, as meta_owner and meta_json do, and the sidebar names it', async () => {
+    const { tableOwnerOf } = await import('../../src/providers/ModelLibraryTreeProvider');
+    write('gold/tables/gold/bare.dbml', "Table gold.bare [owner: 'crm-team'] {\n  id INT [pk]\n}\n");
+    write('gold/tables/gold/old.dbml', "Table gold.old [meta_owner: 'sales-data'] {\n  id INT [pk]\n}\n");
+    write('gold/tables/gold/json.dbml', "Table gold.json [meta_json: '{\"owner\":\"finance\"}'] {\n  id INT [pk]\n}\n");
+    const lib = service();
+    for (const name of ['bare', 'old', 'json']) lib.getTableFileError(name);
+    expect(lib.peekTableSummary('bare')).toEqual({ meta: { owner: 'crm-team' } });
+    expect(tableOwnerOf(lib.peekTableSummary('bare'))).toBe('crm-team');
+    expect(tableOwnerOf(lib.peekTableSummary('old'))).toBe('sales-data');
+    expect(tableOwnerOf(lib.peekTableSummary('json'))).toBe('finance');
+  });
+});
+
 describe('what one listing costs (readdir calls, counted)', () => {
   const cjsFs = createRequire(__filename)('fs') as typeof fs;
 

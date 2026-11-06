@@ -1,6 +1,6 @@
 Table location.branch [
   grain: 'One row per branch',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'The bank\'s branches.'
 

@@ -683,7 +683,7 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(listTree(ws)).toEqual(before);
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
     const patterns = vscode._mockFileWatchers.map((w) => (w._pattern as vscode.RelativePattern).pattern);
-    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.yml', '.erd-studio/*/tables/*/*.dbml']);
+    expect(patterns).toEqual(['.erd-studio/**/*.{json,dbml}', '.erd-studio/{logical-models,tables}/**/*.yml', '.erd-studio/*/tables/*/*.dbml', '.erd-studio/fields.yml']);
   });
 
   /** Activate in `ws` (holding the logical-only fixture) and open its diagram in the real editor provider. */

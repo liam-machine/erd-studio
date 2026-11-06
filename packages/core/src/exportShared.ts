@@ -18,16 +18,37 @@
 import type { DisplaySubjectArea } from './types/display.js';
 import type { Rationale } from './types/semantic.js';
 import { backwardsRelationshipNote, compositeGroupProblem, foreignKeyAtTo, linkKey } from './relationships.js';
+import { RATIONALE_FIELD_KEYS } from './fields.js';
 
-/** Rationale keys in display order, with the label an export prints. */
-export const RATIONALE_LABELS: ReadonlyArray<readonly [keyof Rationale, string]> = [
-  ['purpose', 'Purpose'],
-  ['design', 'Design'],
-  ['grainChoice', 'Grain choice'],
-  ['roleChoice', 'Role choice'],
-  ['scdStrategy', 'SCD strategy'],
-  ['measures', 'Measures'],
-];
+/**
+ * The label an export prints for each rationale key. The six keys of the
+ * first release keep the labels they always printed (so no export of an old
+ * file changes); the context-field keys print their catalogue label. Labels
+ * are the export's own, never a project's fields.yml wording.
+ */
+const RATIONALE_EXPORT_LABELS: Readonly<Record<keyof Rationale, string>> = {
+  purpose: 'Purpose',
+  decisions: 'Decisions',
+  openQuestions: 'Open questions',
+  design: 'Design',
+  grainChoice: 'Grain choice',
+  roleChoice: 'Role choice',
+  scdStrategy: 'SCD strategy',
+  measures: 'Measures',
+  sourceOfTruth: 'Source of truth',
+  freshness: 'Freshness',
+  knownIssues: 'Known issues',
+  retention: 'Retention',
+};
+
+/**
+ * Rationale keys in export order (`RATIONALE_FIELD_KEYS`, the order the
+ * storage writer uses too), with the label an export prints. The six keys of
+ * the first release keep their relative order.
+ */
+export const RATIONALE_LABELS: ReadonlyArray<readonly [keyof Rationale, string]> = RATIONALE_FIELD_KEYS.map(
+  (key) => [key, RATIONALE_EXPORT_LABELS[key]] as const,
+);
 
 /** Cardinalities an export can draw. Anything else is skipped with a reason. */
 export type ExportCardinality = 'many-to-one' | 'one-to-many' | 'one-to-one' | 'many-to-many';

@@ -10,6 +10,7 @@
 import type { Cardinality, Layer, Meta, TableLoadError, TableLoadWarning, TableRole, TableTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
 import type { DbtKeyHint } from '../keyEvidence.js';
+import type { FieldList } from '../fields.js';
 
 // ---------------------------------------------------------------------------
 // Existing model preview (for Add Existing Model dialog)
@@ -255,4 +256,12 @@ export interface DisplaySubjectArea {
    * schema and the table goes where it always did.
    */
   newTableSchemas?: { dir: string; layer: string; schemas: string[]; defaultSchema: string };
+  /**
+   * The project's field list (`.erd-studio/fields.yml`), fully resolved: every
+   * definition carries its label, type, values, guidance, `filledBy` and
+   * `showFor`, so a renderer draws the fields without the catalogue. Set only
+   * when the project has a fields.yml. Absent (no file, or an older core)
+   * means the starting set: read it as `fields ?? STARTING_FIELD_LIST`.
+   */
+  fields?: FieldList;
 }

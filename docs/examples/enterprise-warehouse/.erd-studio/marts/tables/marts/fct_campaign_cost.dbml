@@ -1,7 +1,7 @@
 Table marts.fct_campaign_cost [
   role: 'periodic-snapshot',
   grain: 'One row per campaign per day',
-  meta_owner: 'marketing-analytics'
+  owner: 'marketing-analytics'
 ] {
   Note: 'What each campaign cost each day, for marketing. Its relationships aren\'t drawn yet: the example\'s README walks you through adding them.'
 

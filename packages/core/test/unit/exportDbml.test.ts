@@ -110,6 +110,52 @@ describe('toDbml', () => {
     expect(text).not.toMatch(/Table [^\n]* as /);
   });
 
+  it('writes every context-field rationale key as a note line, in RATIONALE_LABELS order whatever the map order', () => {
+    const { db } = exportAndRead(
+      subjectArea([
+        tableDef('dim_account', [col('id')], {
+          rationale: {
+            retention: 'Seven years',
+            knownIssues: 'Codes reused',
+            freshness: 'Daily',
+            sourceOfTruth: 'CRM',
+            measures: 'm',
+            scdStrategy: 's',
+            roleChoice: 'rc',
+            grainChoice: 'gc',
+            design: 'd',
+            openQuestions: 'Do closed accounts stay?',
+            decisions: 'Kept the CRM code',
+            purpose: 'p',
+          },
+        }),
+      ]),
+    );
+    expect(table(db, 'dim_account').note).toBe(
+      [
+        'Purpose: p',
+        'Decisions: Kept the CRM code',
+        'Open questions: Do closed accounts stay?',
+        'Design: d',
+        'Grain choice: gc',
+        'Role choice: rc',
+        'SCD strategy: s',
+        'Measures: m',
+        'Source of truth: CRM',
+        'Freshness: Daily',
+        'Known issues: Codes reused',
+        'Retention: Seven years',
+      ].join('\n'),
+    );
+  });
+
+  it('skips an empty new rationale key and ignores keys that are not rationale keys', () => {
+    const { db } = exportAndRead(
+      subjectArea([tableDef('a', [col('id')], { rationale: { decisions: '  ', openQuestions: 'Why?', notes: 'never' } as never })]),
+    );
+    expect(table(db, 'a').note).toBe('Open questions: Why?');
+  });
+
   it('writes only the parts of the table note a model has', () => {
     const { db } = exportAndRead(
       subjectArea([tableDef('a', [col('id')], { description: 'Just a description' }), tableDef('b', [col('id')], { grain: 'g' }), tableDef('c', [col('id')])]),

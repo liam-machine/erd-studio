@@ -10,13 +10,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { BulkColumnActions } from './BulkColumnActions';
-import { MetaEditor } from './MetaEditor';
+import { FieldsSection, type FieldsTable } from './FieldsSection';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { useEditorStore } from '../../store/editorStore';
-import type { DisplayColumn } from '@erd-studio/core';
+import { STARTING_FIELD_LIST, resolveColumnFields } from '@erd-studio/core';
+import type { DisplayColumn, DisplayTable, FieldList } from '@erd-studio/core';
 import type { ColumnDef, TableRole } from '@erd-studio/core';
 import type { ColumnKeyType, UpdateColumnPayloadColumn } from '@erd-studio/core';
+import type { ColumnFieldVisibility } from '../common/ColumnRowEditor';
 import './ColumnEditor.css';
 
 // ---------------------------------------------------------------------------
@@ -30,15 +32,39 @@ export interface ColumnEditorProps {
   readOnly?: boolean;
   /** Parent model's role — passed to column rows for conditional SCD/additive dropdowns. */
   modelRole?: TableRole;
+  /** The project's field list (`DisplaySubjectArea.fields`); the starting set when absent. */
+  fields?: FieldList;
+  /** No dbt project: the column Fields show no "from dbt" badge. */
+  logicalOnly?: boolean;
+}
+
+/**
+ * Which of a column's typed fields its row shows: those the field list
+ * names (and that suit the table's role), and any with a value.
+ */
+export function columnFieldVisibility(column: DisplayColumn, table: FieldsTable, list: FieldList): ColumnFieldVisibility {
+  const ids = new Set(resolveColumnFields(column, table as DisplayTable, list).map((row) => row.id));
+  return { scdType: ids.has('scdType'), additiveType: ids.has('additiveType'), naturalKey: ids.has('naturalKey') };
+}
+
+/**
+ * A read-only row (the viewer, the physical stage) shows only the typed
+ * fields that have a value: an empty, disabled "Not set" dropdown says nothing.
+ */
+export function valueOnlyFieldVisibility(column: DisplayColumn): ColumnFieldVisibility {
+  return { scdType: column.scdType != null, additiveType: !!column.additiveType, naturalKey: true };
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ColumnEditor({ modelName, columns, readOnly, modelRole }: ColumnEditorProps) {
+export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, logicalOnly }: ColumnEditorProps) {
   const send = useSend();
   const viewer = useIsViewer();
+  const fieldList = fields ?? STARTING_FIELD_LIST;
+  // The columns' fields read only the table's role.
+  const fieldsTable = useMemo<FieldsTable>(() => (modelRole ? { modelRole } : {}), [modelRole]);
 
   // Column selection state from store
   const selectedColumns = useEditorStore((s) => s.selectedColumns);
@@ -295,6 +321,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             onToggleNK={viewer ? undefined : () => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}
+            fieldVisibility={viewer ? valueOnlyFieldVisibility(col) : (isEditable ? columnFieldVisibility(col, fieldsTable, fieldList) : valueOnlyFieldVisibility(col))}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={(opts) => handleToggleExpand(col.name, opts)}
             dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}
@@ -304,12 +331,13 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             onSelect={(e) => handleColumnSelect(col.name, e)}
             isEditingActive={editingColumn === col.name}
             metaSlot={
-              <MetaEditor
+              <FieldsSection
                 modelName={modelName}
-                columnName={col.name}
-                meta={col.meta}
+                table={fieldsTable}
+                column={col}
+                fields={fieldList}
                 readOnly={!isEditable}
-                compact
+                logicalOnly={logicalOnly}
               />
             }
           />
@@ -327,6 +355,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             showIndicators={true}
             showDelete={false}
             modelRole={modelRole}
+            fieldVisibility={columnFieldVisibility(newColumnTemplate, fieldsTable, fieldList)}
             expanded={true}
             onToggleExpand={() => {}}
           />

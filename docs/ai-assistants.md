@@ -8,7 +8,7 @@ In the ERD Studio sidebar, open **Help & Feedback** and click **Set Up My AI Hel
 
 Then ask for what you want, for example:
 
-> Propose a star schema for orders in ERD Studio. Include grain, keys, and design rationale. Let me review the diagram before generating any code.
+> Propose a star schema for orders in ERD Studio. Include grain, keys, purpose and decisions. Let me review the diagram before generating any code.
 
 > Add a dim_date table and link every date column in fct_order to it.
 
@@ -34,7 +34,7 @@ In a folder with no dbt project, the guide designs a first diagram with you and 
 
 - **From a description:** it asks what your business does, then proposes the tables, their keys, grain and relationships, with the reasons for each. It suggests a modelling style that fits (a Kimball star schema for reporting, say) or follows the one you describe, plays the rules back to you and saves them in `.erd-studio/modelling-approach.md` so later AI edits follow them too.
 - **From a DBML file:** it asks you to run **ERD Studio: Import DBML…** (no AI involved; you see what it will create before anything is written), then fills in the detail.
-- **From the tables you already have:** it adds keys, grain, roles and rationale to the diagrams in `.erd-studio/` instead of rebuilding them.
+- **From the tables you already have:** it adds keys, grain, roles and the other fields your project records to the diagrams in `.erd-studio/` instead of rebuilding them.
 
 It then writes the files, checks them with the `erd-studio` helper, and tells you how to open the diagram. Want to see a finished one first? Run **ERD Studio: Open an Example…** for a small coffee-shop model.
 
@@ -48,7 +48,23 @@ The guide:
 - builds the logical tables from your dbt project, applying those rules;
 - compares them with the Physical stage, and fixes the differences until the two match.
 
+On either route the guide also proposes your **field list**: the fields every table and column records (grain, purpose, decisions, open questions, and the ones your modelling style needs), plus your own, such as an owner or a sensitivity level. It shows you the list, saves it in `.erd-studio/fields.yml` on a yes, and from then on every assistant fills in the same fields. See [Your fields](#your-fields).
+
 Both routes use a small read-only `erd-studio` helper that ERD Studio installs in `~/.erd-studio-cli`. Your assistant still asks before it edits any file.
+
+## Your fields
+
+`.erd-studio/fields.yml` lists the fields your project records on tables and on columns, in order: built-in ones such as `grain`, `purpose`, `decisions` and `open_questions`, and your own, each with a label, a type (text, a short value, a choice from a list, or yes or no), one sentence of guidance and who fills it in. Without the file your project uses the starting set. Each field is one setting in the table's file, `<key>: '<value>'`, so a table reads like your list.
+
+Your assistant reads the list before it creates or edits a table, and:
+
+- writes what each field's guidance asks for, and leaves a field out rather than writing a placeholder;
+- writes a field marked `filled_by: people` only with a value you give it;
+- in a dbt project, copies a field marked `filled_by: dbt` exactly from the dbt model's `meta:`, never types one in, and never copies a key listed under `left_out`;
+- writes the question in **Open questions** when it meets a choice it can't make, asks you, and moves your answer into **Decisions**;
+- keeps every setting the list doesn't name exactly as it is, and changes an older spelling (`rationale_purpose`) where it is, renaming older spellings only when you agree.
+
+To change the list, edit the file, ask your assistant ("we don't use Open questions"), or run **ERD Studio: Customise Fields…**. The [file format reference](semantic-domain-json-reference.md#field-list-erd-studiofieldsyml) has every option.
 
 ## Where the instructions go
 

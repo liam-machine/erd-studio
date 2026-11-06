@@ -1,7 +1,7 @@
 Table procurement.fct_purchase_order_pipeline [
   role: 'accumulating-snapshot',
   grain: 'One row per purchase order line, updated as it moves',
-  rationale_design: 'An accumulating snapshot: one row per order line, with a date for each milestone filled in as the line is ordered, received and invoiced.'
+  decisions: 'A date column for each milestone, filled in as the line is ordered, received and invoiced, rather than a row per event.'
 ] {
   Note: 'Purchase orders from order to invoice.'
 

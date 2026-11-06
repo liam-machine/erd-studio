@@ -1,7 +1,7 @@
 Table inventory.fct_inventory_snapshot [
   role: 'periodic-snapshot',
   grain: 'One row per product per store per day',
-  rationale_measures: 'Quantity on hand is semi-additive: add it across products and stores, never across days (take the last day of the period instead).'
+  measures: 'Quantity on hand is semi-additive: add it across products and stores, never across days (take the last day of the period instead).'
 ] {
   Note: 'Stock on hand at the end of each day.'
 

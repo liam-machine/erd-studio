@@ -14,21 +14,28 @@
  *
  * A property set by a `Metadata Table` / `Metadata Column` block in the
  * same file (D25) is edited in that block, where it takes effect.
+ *
+ * Context fields (`settings.ts` holds the rules the reader shares): a new
+ * file writes each field as one bare setting (`purpose: '…'`, `owner: '…'`),
+ * `meta_<key>` for a `meta` key that is reserved or names a built-in kept
+ * elsewhere, and one `meta_json` for values that are not text. An edit
+ * changes a field in the spelling it was read from (`rationale_purpose`
+ * stays `rationale_purpose`), a clear removes every spelling of that field's
+ * home, and a field new to the file gets the new file's spelling.
  */
 
 import type { ColumnDef, Meta, Rationale, SemanticTable } from '../types/semantic.js';
 import {
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
-  DBML_RICH_META_PREFIX,
   DBML_RICH_PLACEHOLDER_COLUMN,
   DBML_RICH_PLACEHOLDER_PROPERTY,
   DBML_RICH_TABLE_PROPERTIES,
   DBML_STORAGE_PLACEHOLDER_NOTE,
   bareDbmlProperty,
-  rationaleProperty,
 } from '../dbmlRichProperties.js';
 import { dbmlColumnType, dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
+import { RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, type FieldScope } from '../fields.js';
 import { readMeta } from '../meta.js';
 import { isLibraryFolderName } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
@@ -45,7 +52,25 @@ import {
   topLevel,
   type AstNode,
 } from './parser.js';
-import { parseTableDbml } from './readTable.js';
+import { readTableFile, type TableFieldSettings } from './readTable.js';
+import {
+  columnNodesOf,
+  effectiveSetter,
+  effectiveTypedSetter,
+  fieldOfSetting,
+  leafName,
+  metaPlacement,
+  metaSettingNames,
+  metadataBlocksOf,
+  nameLeaves,
+  ownMetaSettingName,
+  ownMetaSpelling,
+  rationaleSettingNames,
+  settersOf,
+  type FieldSettings,
+  type MetadataBlock,
+  type Setter,
+} from './settings.js';
 import {
   applyTextEdits,
   attachedStart,
@@ -65,38 +90,31 @@ import {
 // Shared rules
 // ---------------------------------------------------------------------------
 
-/** The rationale keys, in the order a new file writes them (the export's `RATIONALE_LABELS` order). */
-const RATIONALE_KEYS: ReadonlyArray<keyof Rationale> = ['purpose', 'design', 'grainChoice', 'roleChoice', 'scdStrategy', 'measures'];
-
-/** A meta key DBML can carry as `meta_<key>`: DBML lower-cases property names, so only lower-case ones read back exactly. */
-const META_KEY = /^[a-z_][a-z0-9_]*$/;
-const META_JSON_KEY = DBML_RICH_META_JSON_PROPERTY.slice(DBML_RICH_META_PREFIX.length);
-
-/** Whether a meta entry is written as its own `meta_<key>` property (else it goes into `meta_json`). */
-function ownMetaProperty(key: string, value: unknown): value is string {
-  return typeof value === 'string' && META_KEY.test(key) && key !== META_JSON_KEY;
+/** A rationale-home field's setting as a new file writes it: bare (`open_questions: '…'`). */
+function rationaleSetting(key: keyof Rationale, value: string): string {
+  return `${rationaleKeyToFieldKey(key)}: ${dbmlString(value)}`;
 }
 
 /**
- * A meta map as properties, in its own key order: `meta_<key>` for each text
- * value under a lower-case key, the rest in one `meta_json` where its first
- * entry is. The reader takes the entries in the order the properties come,
- * so a text entry between two that need `meta_json` goes into it too: the map
- * reads back in its key order (the order the canvas and the exports show).
+ * A meta map as settings, in its own key order (`metaPlacement`): a bare
+ * `<key>: '…'` for text under a key a team field may have, `meta_<key>` for
+ * text under another identifier (a reserved name, a built-in kept elsewhere),
+ * and the rest in one `meta_json` where its first entry is. The reader takes
+ * the entries in the order the settings come, so a text entry between two
+ * that need `meta_json` goes into it too: the map reads back in its key order
+ * (the order the canvas and the exports show).
  */
-function metaSettings(meta: Meta | undefined): string[] {
+function metaSettings(meta: Meta | undefined, scope: FieldScope): string[] {
   const settings: string[] = [];
-  const entries = Object.entries(meta ?? {}).filter(([, value]) => value !== undefined);
-  const inJson = entries.map(([key, value]) => !ownMetaProperty(key, value));
-  const first = inJson.indexOf(true);
-  const last = inJson.lastIndexOf(true);
+  const placed = metaPlacement(meta, scope);
   const json: Record<string, unknown> = {};
-  entries.forEach(([key, value], i) => {
-    if (first !== -1 && i >= first && i <= last) {
+  const lastJson = placed.map((p) => p.spelling).lastIndexOf('json');
+  placed.forEach(({ key, value, spelling }, i) => {
+    if (spelling === 'json') {
       Object.defineProperty(json, key, { value, enumerable: true, writable: true, configurable: true });
-      if (i === last) settings.push(`${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(json))}`);
+      if (i === lastJson) settings.push(`${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(json))}`);
     } else {
-      settings.push(`${DBML_RICH_META_PREFIX}${key}: ${dbmlString(value as string)}`);
+      settings.push(`${ownMetaSettingName(key, spelling)}: ${dbmlString(value as string)}`);
     }
   });
   return settings;
@@ -126,25 +144,30 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** The table's settings, in the order a new file writes them (the schema is the Table's qualifier, never a setting). */
+/**
+ * The table's settings, in the order a new file writes them (the schema is
+ * the Table's qualifier, never a setting): `role`, `grain`, `alias`, the
+ * rationale-home fields bare in `RATIONALE_FIELD_KEYS` order, then meta.
+ */
 function tableSettings(table: SemanticTable): string[] {
   const settings: string[] = [];
   if (present(table.modelRole)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.role}: ${dbmlString(table.modelRole!)}`);
   if (present(table.grain)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.grain}: ${dbmlString(table.grain!)}`);
   if (present(table.alias)) settings.push(`${DBML_RICH_TABLE_PROPERTIES.alias}: ${dbmlString(table.alias!)}`);
-  for (const key of RATIONALE_KEYS) {
+  for (const key of RATIONALE_FIELD_KEYS) {
     const value = present(table.rationale?.[key]);
-    if (value !== undefined) settings.push(`${rationaleProperty(key)}: ${dbmlString(value)}`);
+    if (value !== undefined) settings.push(rationaleSetting(key, value));
   }
-  settings.push(...metaSettings(table.meta));
+  settings.push(...metaSettings(table.meta, 'table'));
   return settings;
 }
 
 /**
  * A column's settings, in the order a new file writes them (the canonical
  * order, {@link COLUMN_KEY_ORDER}): `pk`, then ERD Studio's properties
- * (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), then meta,
- * then the `note` last, so a long note never hides the short flags.
+ * (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), then the
+ * column's fields (meta), then the `note` last, so a long note never hides
+ * the short flags.
  */
 function columnSettings(column: ColumnDef, isPk: boolean): string[] {
   const settings: string[] = [];
@@ -153,7 +176,7 @@ function columnSettings(column: ColumnDef, isPk: boolean): string[] {
   if (column.scdType !== undefined && column.scdType !== null) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.scdType}: ${dbmlString(String(column.scdType))}`);
   if (column.additiveType) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.additiveType}: ${dbmlString(column.additiveType)}`);
   if (column.isForeignKey) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.foreignKey}: 'true'`);
-  settings.push(...metaSettings(column.meta));
+  settings.push(...metaSettings(column.meta, 'column'));
   const note = noteValue(column.description);
   if (note !== undefined) settings.push(`note: ${dbmlString(note)}`);
   return settings;
@@ -251,31 +274,16 @@ export interface EditTableDbmlOptions {
   parser?: DbmlParserModule;
 }
 
-/** Where a property is set. */
-interface Setter {
-  /** The property's bare, lower-case name (`erd_` removed). */
-  key: string;
-  prefixed: boolean;
-  where: 'inline' | 'block' | 'body';
-  /** The attribute, block entry or body `Note` element. */
-  node: AstNode;
-  /** The node whose span is the value text. */
-  value: AstNode | undefined;
-  /** For an inline attribute: its list and its index there. */
-  list?: AstNode;
-  index?: number;
-}
-
+/** ERD Studio's typed table settings, in the order a new file writes them. */
 const TABLE_KEY_ORDER: readonly string[] = [
-  'role', 'grain', 'alias',
-  ...RATIONALE_KEYS.map((k) => rationaleProperty(k)),
+  DBML_RICH_TABLE_PROPERTIES.role, DBML_RICH_TABLE_PROPERTIES.grain, DBML_RICH_TABLE_PROPERTIES.alias,
 ];
 /**
  * The canonical column settings order (W2): `pk`, DBML's own settings, ERD
- * Studio's properties, then meta ({@link keyOrder}: 1000), then `note` last
- * (2000). A setting the edit adds goes after the last setting of the list
- * that sorts at or before it, so a list in this order stays in it, and a
- * `note` that was last stays last.
+ * Studio's properties, then the column's fields ({@link META_ORDER}), then
+ * `note` last ({@link NOTE_ORDER}). A setting the edit adds goes after the
+ * last setting of the list that sorts at or before it, so a list in this
+ * order stays in it, and a `note` that was last stays last.
  */
 const COLUMN_KEY_ORDER: readonly string[] = [
   'pk', 'primary key', 'not null', 'null', 'unique', 'increment', 'default',
@@ -283,44 +291,47 @@ const COLUMN_KEY_ORDER: readonly string[] = [
   DBML_RICH_COLUMN_PROPERTIES.additiveType, DBML_RICH_COLUMN_PROPERTIES.foreignKey,
 ];
 
+/**
+ * The field band: after ERD Studio's typed settings and before `note`. A
+ * table's rationale-home fields sort in `RATIONALE_FIELD_KEYS` order from
+ * {@link RATIONALE_ORDER}; every `meta` spelling (bare, `meta_<key>`,
+ * `rationale_<key>`) sorts at {@link META_ORDER}, a new `meta_json` just
+ * after, so a new entry goes after the meta already there and the map reads
+ * back in the order it had.
+ */
+const RATIONALE_ORDER = 100;
+const META_ORDER = 1000;
+const META_JSON_ORDER = 1001;
+/** Where a setting no rule places sorts (DBML's own, a name ERD Studio does not read). */
+const OTHER_ORDER = 999;
 /** Where `note` sorts: after everything else. */
 const NOTE_ORDER = 2000;
 
+/** Where a typed setting (or `note`) the edit adds sorts. */
 function keyOrder(order: readonly string[], key: string): number {
   const at = order.indexOf(key);
   if (at >= 0) return at;
   if (key === 'note') return NOTE_ORDER;
-  if (key === DBML_RICH_META_JSON_PROPERTY) return 1001;
-  if (key.startsWith(DBML_RICH_META_PREFIX)) return 1000;
-  return 999;
+  return OTHER_ORDER;
+}
+
+/** Where a rationale-home field sorts. */
+function rationaleOrder(key: keyof Rationale): number {
+  return RATIONALE_ORDER + RATIONALE_FIELD_KEYS.indexOf(key);
 }
 
 /**
- * Where an existing setting sorts when a new one is placed among them: as
- * {@link keyOrder}, except that every meta setting (`meta_json` too) sorts as
- * one, so a new meta entry goes after the meta already there and the map
- * reads back in the order it had.
+ * Where an existing setting sorts when a new one is placed among them: a
+ * typed setting or `note` as {@link keyOrder}; a field's spelling in the
+ * field band, every `meta` spelling (`meta_json` too) as one.
  */
-function existingKeyOrder(order: readonly string[], rawKey: string): number {
-  const key = bareDbmlProperty(rawKey.toLowerCase());
-  return key.startsWith(DBML_RICH_META_PREFIX) ? 1000 : keyOrder(order, key);
-}
-
-/** The leaf names of a dotted name, as nodes (`gold.x.c` → the `gold`, `x` and `c` nodes). */
-function nameLeaves(expr: AstNode | undefined): AstNode[] {
-  if (!expr || typeof expr !== 'object') return [];
-  if (expr.kind === '<primary-expression>') return [expr];
-  if (expr.kind === '<infix-expression>' && expr.op?.value === '.') return [...nameLeaves(expr.leftExpression), ...nameLeaves(expr.rightExpression)];
-  return [];
-}
-
-/** The string a literal value node holds (`'x'`, `'''x'''`), or undefined. */
-function literalString(node: AstNode | undefined): string | undefined {
-  let n = node;
-  if (n?.kind === '<function-application>') n = n.callee;
-  if (n?.kind === '<primary-expression>') n = n.expression;
-  if (n?.kind === '<literal>' && typeof n.literal?.value === 'string') return n.literal.value as string;
-  return undefined;
+function existingKeyOrder(order: readonly string[], rawName: string, scope: FieldScope): number {
+  const name = rawName.toLowerCase();
+  const typed = keyOrder(order, bareDbmlProperty(name));
+  if (typed !== OTHER_ORDER) return typed;
+  const field = fieldOfSetting(name, scope);
+  if (field?.home === 'rationale') return rationaleOrder(field.key);
+  return field ? META_ORDER : OTHER_ORDER;
 }
 
 /** The value node of a body `Note: …` / `Note { … }` element. */
@@ -331,33 +342,6 @@ function noteElementValue(node: AstNode): AstNode | undefined {
     return (body.body as AstNode[]).find((n) => n?.kind === '<function-application>');
   }
   return undefined;
-}
-
-/** A column node of a Table body: a field line with a name. */
-interface ColumnNode {
-  node: AstNode;
-  name: string;
-  settings: AstNode | undefined;
-  type: AstNode | undefined;
-  placeholder: boolean;
-}
-
-function columnNodesOf(tableNode: AstNode): ColumnNode[] {
-  const body: AstNode[] = Array.isArray(tableNode.body?.body) ? tableNode.body.body : [];
-  const columns: ColumnNode[] = [];
-  for (const node of body) {
-    if (node?.kind !== '<function-application>') continue;
-    const name = plainNames(node.callee)?.[0];
-    if (name === undefined) continue;
-    const args: AstNode[] = Array.isArray(node.args) ? node.args : [];
-    const settings = args.length > 0 && args[args.length - 1]?.kind === '<list-expression>' ? args[args.length - 1] : undefined;
-    const type = args.length > 0 && args[0]?.kind !== '<list-expression>' ? args[0] : undefined;
-    const elements: AstNode[] = Array.isArray(settings?.elementList) ? settings.elementList : [];
-    const placeholder = name === DBML_RICH_PLACEHOLDER_COLUMN
-      && elements.some((a) => attributeName(a) === DBML_RICH_PLACEHOLDER_PROPERTY);
-    columns.push({ node, name, settings, type, placeholder });
-  }
-  return columns;
 }
 
 /** Whether an attribute is a primary-key flag. */
@@ -398,12 +382,6 @@ function indexLinesOf(tableNode: AstNode): { blocks: AstNode[]; lines: IndexLine
     }
   }
   return { blocks, lines };
-}
-
-/** The variable name a leaf node spells. */
-function leafName(leaf: AstNode): string {
-  const v = leaf?.expression?.variable?.value;
-  return typeof v === 'string' ? v : '';
 }
 
 function refuse(file: string, message: string, line?: number): never {
@@ -449,7 +427,7 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
   const out = editTableOnce(oldText, desired, options, new Set(), touched);
   if (touched.size === 0) return out;
   const stem = options.fileStem ?? desired.name;
-  const readBack = parseTableDbml(stripBom(out), stem, schemaOptions(options), options.parser ?? PINNED_PARSER);
+  const readBack = readTableFile(stripBom(out), stem, schemaOptions(options), options.parser ?? PINNED_PARSER).reading;
   if (!readBack.ok) return out;
   const keysOf = (meta: Meta | undefined): string => JSON.stringify(Object.keys(readMeta(meta) ?? {}));
   const reordered = new Set<string>();
@@ -488,7 +466,8 @@ function editTableOnce(
   const stem = options.fileStem ?? (declared && declared.length > 0 ? declared[declared.length - 1] : desired.name);
   const file = options.file ?? `${stem}.dbml`;
 
-  const reading = parseTableDbml(text, stem, schemaOptions(options), parser);
+  const read = readTableFile(text, stem, schemaOptions(options), parser);
+  const reading = read.reading;
   if (!reading.ok) {
     const line = reading.error.line;
     const where = line !== undefined && !/^line \d/i.test(reading.error.message) ? `line ${line}: ` : '';
@@ -500,6 +479,8 @@ function editTableOnce(
   }
   const tableNode = tableNodes[0];
   const current = reading.table;
+  // What each field was read from: the table's settings and each column's, aligned with `current.columns`.
+  const fields: TableFieldSettings = read.fields!;
   const eol = eolOf(text);
   const edits: TextEdit[] = [];
   const plans = new Map<AstNode | string, ListPlan>();
@@ -516,45 +497,13 @@ function editTableOnce(
   const indentUnit = allColumnNodes.length > 0 ? indentAt(text, allColumnNodes[0].node.start) || '  ' : '  ';
 
   // --- Metadata blocks in this file (D25) ---------------------------------
-  const tableName = current.name.toLowerCase();
-  const metadataBlocks = topLevel(compiled.ast).filter((n) => elementType(n)?.toLowerCase() === 'metadata');
-  interface Block { node: AstNode; kind: 'table' | 'column'; column?: string; leaves: AstNode[] }
-  const blocks: Block[] = [];
-  for (const node of metadataBlocks) {
-    const leaves = nameLeaves(node.name);
-    const kind = String(node.targetKind?.value ?? '').toLowerCase() === 'column' ? 'column' : 'table';
-    const names = leaves.map(leafName);
-    if (kind === 'table') {
-      if (names.length > 0 && names[names.length - 1].toLowerCase() === tableName) blocks.push({ node, kind, leaves });
-    } else if (names.length >= 2 && names[names.length - 2].toLowerCase() === tableName) {
-      blocks.push({ node, kind, column: names[names.length - 1], leaves });
-    }
-  }
-  const blockEntries = (block: Block): AstNode[] =>
-    (Array.isArray(block.node.body?.body) ? (block.node.body.body as AstNode[]) : []).filter((n) => n?.kind === '<element-declaration>');
+  const aliasParts = plainNames(tableNode.alias);
+  const blocks: MetadataBlock[] = metadataBlocksOf(compiled.ast, current.name, aliasParts && aliasParts.length === 1 ? aliasParts[0] : undefined);
 
-  const settersFrom = (list: AstNode | undefined, owner: { column?: string }): Setter[] => {
-    const out: Setter[] = [];
-    const elements: AstNode[] = Array.isArray(list?.elementList) ? list!.elementList : [];
-    elements.forEach((attribute, index) => {
-      if (attribute?.kind !== '<attribute>') return;
-      const raw = attributeName(attribute);
-      out.push({ key: bareDbmlProperty(raw), prefixed: bareDbmlProperty(raw) !== raw, where: 'inline', node: attribute, value: attribute.value, list, index });
-    });
-    for (const block of blocks) {
-      if (owner.column === undefined ? block.kind !== 'table' : block.kind !== 'column' || block.column!.toLowerCase() !== owner.column.toLowerCase()) continue;
-      for (const entry of blockEntries(block)) {
-        const raw = String(entry.type?.value ?? '').toLowerCase();
-        out.push({ key: bareDbmlProperty(raw), prefixed: bareDbmlProperty(raw) !== raw, where: 'block', node: entry, value: entry.body });
-      }
-    }
-    return out;
-  };
-
-  const tableSetters = settersFrom(tableNode.attributeList, {});
+  const tableSetters = settersOf(tableNode.attributeList, blocks);
   for (const node of Array.isArray(tableNode.body?.body) ? (tableNode.body.body as AstNode[]) : []) {
     if (elementType(node)?.toLowerCase() === 'note') {
-      tableSetters.push({ key: 'note', prefixed: false, where: 'body', node, value: noteElementValue(node) });
+      tableSetters.push({ name: 'note', key: 'note', prefixed: false, where: 'body', node, value: noteElementValue(node) });
     }
   }
 
@@ -571,29 +520,30 @@ function editTableOnce(
         added: [],
         multiLineWhenNew,
         // Each setting's place in the canonical order, so a new one goes among them (W2).
-        orders: elements.map((e) => (e?.kind === '<attribute>' ? existingKeyOrder(order, attributeName(e)) : 999)),
+        orders: elements.map((e) => (e?.kind === '<attribute>' ? existingKeyOrder(order, attributeName(e), order === TABLE_KEY_ORDER ? 'table' : 'column') : OTHER_ORDER)),
       };
       plans.set(key, plan);
     }
     return plan;
   };
 
-  /** Refuse to change a property a Metadata block in another file sets (D25): the edit would not stick there. */
-  const checkForeign = (property: string, column?: string): void => {
-    const blocked = (options.foreignMetadata ?? []).find((m) => bareDbmlProperty(m.property.toLowerCase()) === property
+  /** The foreign Metadata block that sets one of `names` (exact, lower-case setting names) of the table or `column`. */
+  const foreignSetter = (names: readonly string[], column?: string): ForeignDbmlMetadata | undefined =>
+    (options.foreignMetadata ?? []).find((m) => names.includes(m.property.toLowerCase())
       && (column === undefined ? m.column === undefined : m.column !== undefined && m.column.toLowerCase() === column.toLowerCase()));
-    if (blocked) {
-      refuse(file, `${property} is set by a Metadata block in ${blocked.file}:${blocked.line}; edit it there.`, blocked.line);
-    }
+
+  /** Refuse to change a property a Metadata block in another file sets (D25): the edit would not stick there. */
+  const refuseForeign = (blocked: ForeignDbmlMetadata | undefined, label: string): void => {
+    if (blocked) refuse(file, `${label} is set by a Metadata block in ${blocked.file}:${blocked.line}; edit it there.`, blocked.line);
   };
 
-  const effective = (setters: readonly Setter[]): Setter | undefined => {
-    if (setters.length === 0) return undefined;
-    const pool = setters.some((s) => s.prefixed) ? setters.filter((s) => s.prefixed) : [...setters];
-    const byWhere = (where: Setter['where']): Setter[] => pool.filter((s) => s.where === where);
-    const pick = byWhere('block').length > 0 ? byWhere('block') : byWhere('body').length > 0 ? byWhere('body') : pool;
-    return pick[pick.length - 1];
+  /** A typed setting (`role`, `grain`, `note`, …), in either of its spellings (`erd_` or not). */
+  const checkForeign = (property: string, column?: string): void => {
+    refuseForeign((options.foreignMetadata ?? []).find((m) => bareDbmlProperty(m.property.toLowerCase()) === property
+      && (column === undefined ? m.column === undefined : m.column !== undefined && m.column.toLowerCase() === column.toLowerCase())), property);
   };
+
+  const effective = effectiveTypedSetter;
 
   const setValue = (setter: Setter, valueText: string): void => {
     if (!setter.value) return;
@@ -641,6 +591,36 @@ function editTableOnce(
     planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({
       order: keyOrder(owner.order, key),
       text: addText ?? `${key}: ${valueText}`,
+    });
+  };
+
+  /**
+   * Set (or clear, with `undefined`) the table's rationale-home field `key`:
+   * the setting the reader read it from is spliced, whichever of its
+   * spellings that is (`purpose`, `rationale_purpose`, an `erd_` one, inline
+   * or in a block); a clear removes every spelling of the field, so nothing
+   * resurfaces, and never a `meta_<key>` (another home). A new value goes
+   * into a setting of the field that is there but empty (the first in
+   * precedence order), else bare into the inline list.
+   */
+  const setRationale = (key: keyof Rationale, want: string | undefined): void => {
+    const names = rationaleSettingNames(key);
+    refuseForeign(foreignSetter(names), rationaleKeyToFieldKey(key));
+    const mine = tableSetters.filter((s) => names.includes(s.name));
+    if (want === undefined) {
+      for (const setter of mine) removeSetter(setter);
+      return;
+    }
+    const winner = fields.table.rationaleWinners.get(key);
+    const held = winner ?? names.find((n) => mine.some((s) => s.name === n));
+    const target = held !== undefined ? effectiveSetter(mine.filter((s) => s.name === held)) : undefined;
+    if (target?.value) {
+      setValue(target, dbmlString(want));
+      return;
+    }
+    planFor(tableOwner.list, tableOwner.ownerKey, tableOwner.anchor, tableOwner.multiLine).added.push({
+      order: rationaleOrder(key),
+      text: rationaleSetting(key, want),
     });
   };
 
@@ -693,13 +673,18 @@ function editTableOnce(
     [DBML_RICH_TABLE_PROPERTIES.role, present(desired.modelRole), present(current.modelRole)],
     [DBML_RICH_TABLE_PROPERTIES.grain, present(desired.grain), present(current.grain)],
     [DBML_RICH_TABLE_PROPERTIES.alias, present(desired.alias?.trim()), present(current.alias)],
-    ...RATIONALE_KEYS.map((k): [string, string | undefined, string | undefined] => [rationaleProperty(k), present(desired.rationale?.[k]), present(current.rationale?.[k])]),
   ];
   for (const [key, want, have] of simple) {
     if (want === have) continue;
     setProperty(tableSetters, key, want === undefined ? undefined : dbmlString(want), tableOwner);
   }
-  planMeta(tableSetters, current.meta, desired.meta, tableOwner, undefined, '');
+  // The table's rationale-home fields, each edited in the spelling it was read from.
+  for (const key of RATIONALE_FIELD_KEYS) {
+    const want = present(desired.rationale?.[key]);
+    if (want === present(current.rationale?.[key])) continue;
+    setRationale(key, want);
+  }
+  planMeta(tableSetters, fields.table, current.meta, desired.meta, tableOwner, undefined, '', 'table');
 
   // Description: the effective `note` (a block's, else the body Note, else the header setting).
   const wantDescription = noteValue(desired.description);
@@ -770,7 +755,7 @@ function editTableOnce(
       }
     }
     columnEdits.set(ci, own);
-    const setters = settersFrom(node.settings, { column: have.name });
+    const setters = settersOf(node.settings, blocks, have.name);
     const anchor = node.type ? node.type.end : node.node.callee.end;
     const owner = { column: have.name, list: node.settings, ownerKey: node.node, anchor, multiLine: false, order: COLUMN_KEY_ORDER };
 
@@ -803,7 +788,7 @@ function editTableOnce(
     if (wantAdditive !== present(have.additiveType)) {
       setProperty(setters, DBML_RICH_COLUMN_PROPERTIES.additiveType, wantAdditive === undefined ? undefined : dbmlString(wantAdditive), owner);
     }
-    planMeta(setters, have.meta, want.meta, owner, have.name, metaOwnerId(want.name));
+    planMeta(setters, fields.columns[ci], have.meta, want.meta, owner, have.name, metaOwnerId(want.name), 'column');
   });
 
   // Metadata Column blocks of removed columns go with them.
@@ -816,7 +801,7 @@ function editTableOnce(
   // A table rename or a new qualifier retargets every Metadata block that stays (a cut one goes whole).
   if (renaming || requalifyTo !== undefined) {
     for (const block of blocks) {
-      if (removedNodes.has(block.node)) continue;
+      if (removedNodes.has(block.node) || block.viaAlias) continue; // an alias names the table whatever its name or schema
       respellName(block.leaves, block.kind === 'table' ? block.leaves.length - 1 : block.leaves.length - 2);
     }
   }
@@ -993,76 +978,86 @@ function editTableOnce(
   const out = applyTextEdits(text, [...edits, ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
-  /** Meta for the table or one column: only the entries whose value changed are touched (§4.5). */
+  /**
+   * Meta for the table or one column: only the entries whose value changed
+   * are touched (§4.5, A9). Each key's setters are every spelling of it
+   * (bare, `meta_<key>`, `rationale_<key>`, their `erd_` forms, inline or in
+   * a block) plus its `meta_json` entry; a change is spliced into the one the
+   * reader read, a removal takes every spelling, a text value new to the file
+   * gets a new file's spelling, and a non-text value goes into `meta_json`.
+   */
   function planMeta(
     setters: readonly Setter[],
+    read: FieldSettings,
     haveRaw: Meta | undefined,
     wantRaw: Meta | undefined,
     owner: { column?: string; list: AstNode | undefined; ownerKey: AstNode | string; anchor: number; multiLine: boolean; order: readonly string[] },
     column: string | undefined,
     id: string,
+    scope: FieldScope,
   ): void {
     const have = haveRaw ?? {};
     const want = readMeta(wantRaw) ?? {};
     if (deepEqual(have, want)) return;
     touchedMeta.add(id);
-    const allKeys = [...new Set([...Object.keys(have), ...Object.keys(want)])];
-    const foreign = (key: string): boolean => (options.foreignMetadata ?? []).some((m) => bareDbmlProperty(m.property.toLowerCase()) === `${DBML_RICH_META_PREFIX}${key}`
-      && (column === undefined ? m.column === undefined : m.column !== undefined && m.column.toLowerCase() === column.toLowerCase()));
-    if (rewriteMeta.has(id) && !allKeys.some(foreign)) {
+    const keys = [...new Set([...Object.keys(have), ...Object.keys(want)])];
+    const spellingsOf = (key: string): string[] => metaSettingNames(key, scope);
+    const foreign = (key: string): ForeignDbmlMetadata | undefined => foreignSetter(spellingsOf(key), column);
+    const add = (order: number, settingText: string): void => {
+      planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({ order, text: settingText });
+    };
+    if (rewriteMeta.has(id) && !keys.some((k) => foreign(k) !== undefined)) {
       // The splice would reorder the map: write this owner's meta whole, in want's key order.
-      for (const s of setters) if (s.key.startsWith(DBML_RICH_META_PREFIX)) removeSetter(s);
-      metaSettings(want).forEach((setting, i) => {
-        planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({ order: 1000 + i / 10000, text: setting });
-      });
+      // Every meta spelling goes (inline and in blocks); rationale-home and reserved settings stay.
+      for (const s of setters) {
+        if (s.where === 'body') continue;
+        const field = fieldOfSetting(s.name, scope);
+        if (field && field.home !== 'rationale') removeSetter(s);
+      }
+      metaSettings(want, scope).forEach((setting, i) => add(META_ORDER + i / 10000, setting));
       return;
     }
-    const attrs = new Map<string, Setter[]>();
-    for (const s of setters) {
-      if (!s.key.startsWith(DBML_RICH_META_PREFIX) || s.key === DBML_RICH_META_JSON_PROPERTY) continue;
-      const metaKey = s.key.slice(DBML_RICH_META_PREFIX.length);
-      if (metaKey === '') continue;
-      attrs.set(metaKey, [...(attrs.get(metaKey) ?? []), s]);
-    }
-    const jsonSetters = setters.filter((s) => s.key === DBML_RICH_META_JSON_PROPERTY);
+    const jsonSetters = setters.filter((s) => s.where !== 'body' && fieldOfSetting(s.name, scope)?.home === 'json');
     const jsonSetter = effective(jsonSetters);
-    let jsonObject: Record<string, unknown> | null = null;
-    if (jsonSetter) {
-      const raw = literalString(jsonSetter.value) ?? '';
-      try {
-        const parsed = JSON.parse(raw) as unknown;
-        jsonObject = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : { [META_JSON_KEY]: raw };
-      } catch {
-        jsonObject = { [META_JSON_KEY]: raw };
-      }
-    }
+    // The entries meta_json holds, as the reader read them (a setter it could not read holds none).
+    const jsonObject: Record<string, unknown> | null = read.json ? read.json.object : jsonSetter ? {} : null;
     const nextJson: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(jsonObject ?? {})) Object.defineProperty(nextJson, k, { value: v, enumerable: true, writable: true, configurable: true });
-    const keys = [...new Set([...Object.keys(have), ...Object.keys(want)])];
+    const put = (key: string, value: unknown): void => {
+      Object.defineProperty(nextJson, key, { value, enumerable: true, writable: true, configurable: true });
+    };
+    for (const [k, v] of Object.entries(jsonObject ?? {})) put(k, v);
     for (const key of keys) {
       const hasWant = Object.prototype.hasOwnProperty.call(want, key);
       const hasHave = Object.prototype.hasOwnProperty.call(have, key);
       const value = want[key];
       if (hasWant && hasHave && deepEqual(have[key], value)) continue;
-      const held = attrs.get(key) ?? [];
-      const property = `${DBML_RICH_META_PREFIX}${key}`;
-      checkForeign(property, column);
+      const names = spellingsOf(key);
+      const held = setters.filter((s) => s.where !== 'body' && names.includes(s.name));
+      refuseForeign(foreign(key), `meta ${key}`);
+      const winner = read.metaWinners.get(key);
+      const own = ownMetaSpelling(key, value, scope);
       if (!hasWant) {
         for (const s of held) removeSetter(s);
         delete nextJson[key];
-      } else if (held.length > 0 && ownMetaProperty(key, value)) {
-        setValue(effective(held)!, dbmlString(value));
-      } else if (held.length === 0 && jsonObject !== null && Object.prototype.hasOwnProperty.call(jsonObject, key)) {
-        // Edited where it is: an entry meta_json holds stays there.
-        Object.defineProperty(nextJson, key, { value, enumerable: true, writable: true, configurable: true });
-      } else if (ownMetaProperty(key, value)) {
-        planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({
-          order: keyOrder(owner.order, property), text: `${property}: ${dbmlString(value)}`,
-        });
+      } else if (typeof value !== 'string') {
+        // Not text: only meta_json can hold it.
+        for (const s of held) removeSetter(s);
+        put(key, value);
+      } else if (winner?.kind === 'setting' && held.some((s) => s.name === winner.name)) {
+        // Edited where it is read: that spelling, inline or in its block.
+        setValue(effectiveSetter(held.filter((s) => s.name === winner.name))!, dbmlString(value));
+      } else if (winner?.kind === 'json' && typeof have[key] === 'string') {
+        // Text that meta_json holds stays there.
+        put(key, value);
+      } else if (own !== undefined) {
+        // New to the file, or a non-text value turning to text: a new file's spelling.
+        const name = ownMetaSettingName(key, own);
+        const existing = held.filter((s) => s.name === name);
+        if (existing.length > 0 && effectiveSetter(existing)!.value) setValue(effectiveSetter(existing)!, dbmlString(value));
+        else add(META_ORDER, `${name}: ${dbmlString(value)}`);
         delete nextJson[key];
       } else {
-        for (const s of held) removeSetter(s);
-        Object.defineProperty(nextJson, key, { value, enumerable: true, writable: true, configurable: true });
+        put(key, value);
       }
     }
     if (deepEqual(nextJson, jsonObject ?? {})) return;
@@ -1071,10 +1066,7 @@ function editTableOnce(
     } else if (jsonSetter) {
       setValue(jsonSetter, dbmlString(JSON.stringify(nextJson)));
     } else {
-      planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({
-        order: keyOrder(owner.order, DBML_RICH_META_JSON_PROPERTY),
-        text: `${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(nextJson))}`,
-      });
+      add(META_JSON_ORDER, `${DBML_RICH_META_JSON_PROPERTY}: ${dbmlString(JSON.stringify(nextJson))}`);
     }
   }
 }

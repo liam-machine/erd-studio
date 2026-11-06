@@ -1,6 +1,6 @@
 Table payments.payment [
   grain: 'One row per captured payment',
-  meta_owner: 'payments-team'
+  owner: 'payments-team'
 ] {
   Note: 'Payments, published by the payments domain.'
 

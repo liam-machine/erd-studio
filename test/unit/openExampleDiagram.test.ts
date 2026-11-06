@@ -154,6 +154,12 @@ describe('the example DBML', () => {
     expect(orders.columns.find((c) => c.name === 'customer_order_number')?.additiveType).toBe('non-additive');
     expect(orders.columns.find((c) => c.name === 'order_id')?.isNaturalKey).toBe(true);
     expect(byName.dim_customers.rationale?.scdStrategy).toContain('Type 1');
+    // Context fields: the choices are Decisions, never a retired field.
+    expect(byName.dim_products.rationale).toEqual({ decisions: expect.stringContaining('one hop deep') });
+    expect(byName.fct_order_items.rationale).toEqual({ decisions: expect.stringContaining('finest grain') });
+    for (const name of SAMPLE_TABLES) {
+      for (const retired of ['design', 'grainChoice', 'roleChoice']) expect(byName[name].rationale ?? {}, name).not.toHaveProperty(retired);
+    }
     expect(byName.dim_customers.columns.find((c) => c.name === 'customer_name')?.scdType).toBe(1);
     // Every relationship from a fact's FK column to a dimension's (or the order's) key.
     for (const rel of plan.relationships) {
@@ -222,6 +228,11 @@ describe('Open Example Diagram', () => {
       'layers.json',
     ]);
     expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^Table gold\.fct_orders \[/m);
+    // The table files spell every field bare (context fields): no rationale_ prefix on disk.
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^ {2}measures: 'Amounts and counts are additive/m);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'dim_products.dbml'), 'utf-8')).toMatch(/^ {2}decisions: 'Supply details/m);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'dim_customers.dbml'), 'utf-8')).toMatch(/^ {2}scd_strategy: 'Type 1/m);
+    for (const t of SAMPLE_TABLES) expect(fs.readFileSync(erd('gold', 'tables', 'gold', `${t}.dbml`), 'utf-8'), t).not.toContain('rationale_');
     // Counted as the example only: the Import DBML counts stay the user's own files.
     expect(features()).toEqual(['exampleDiagram']);
   });

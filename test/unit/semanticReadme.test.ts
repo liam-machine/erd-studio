@@ -24,6 +24,18 @@ describe('semanticReadmeText', () => {
     }
     expect(text.endsWith('Check the files with `erd-studio doctor`.\n')).toBe(true);
   });
+
+  it('says what fields.yml is, in one item, and that it is optional (context fields)', () => {
+    const text = semanticReadmeText();
+    expect(text).toContain([
+      "- fields.yml (optional, beside layers.json) lists the fields each table and column records, in",
+      "  order; each is one setting, such as purpose: '…'. Without it, ERD Studio's starting set is used.",
+      '',
+      'Check the files with `erd-studio doctor`.',
+    ].join('\n'));
+    expect(text.match(/fields\.yml/g)).toHaveLength(1);
+    expect(semanticReadmeText([{ id: 'main', label: 'Main' }])).toContain('- fields.yml (optional, beside layers.json)');
+  });
 });
 
 describe('semanticReadmeText with the project\'s layers', () => {

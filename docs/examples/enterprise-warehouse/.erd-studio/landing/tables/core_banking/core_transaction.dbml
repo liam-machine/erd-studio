@@ -1,4 +1,4 @@
-Table core_banking.core_transaction [meta_owner: 'data-engineering'] {
+Table core_banking.core_transaction [owner: 'data-engineering'] {
   Note: 'Posted transactions as the core banking system sends them.'
 
   txn_id     STRING    [pk, natural_key: 'true']

@@ -64,11 +64,13 @@ import {
 } from './context';
 import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from './diff';
 import { collectDbmlProblems, FORMAT_CONFLICT_CODE, LEGACY_DBML_TREE_CODE, type DbmlProblemEntry } from './dbmlProblems';
+import { collectFieldsSummary, startingSetSummary, type FieldsSummary } from './fieldFindings';
+import type { DbmlTableReading } from '@erd-studio/core';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
   | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'resolve-naming-conflicts' | 'fix-subject-area-naming' | 'migrate-v5' | 'turn-round-relationships' | 'update-harness'
-  | 'finish-dbml-conversion' | 'fix-dbml-file' | 'resolve-format-conflicts' | 'import-dbml-file' | 'reconvert-dbml-project' | 'ready';
+  | 'finish-dbml-conversion' | 'fix-dbml-file' | 'fix-fields-file' | 'resolve-format-conflicts' | 'import-dbml-file' | 'reconvert-dbml-project' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -152,6 +154,16 @@ export interface DoctorResult extends Envelope {
      * Where a line is missing or wrong, the message gives the exact line.
      */
     dbmlProblems: DbmlProblemEntry[];
+    /**
+     * The project's field list (`.erd-studio/fields.yml`, or the starting set
+     * without one) and every finding about it and the tables' field values:
+     * fields.yml's own problems (errors raise `fix-fields-file`), values
+     * outside a choice's options and fields spelled twice (warnings), and
+     * old spellings, retired fields, fields the list does not name and
+     * metadata named like a built-in (information, one line each). Never part
+     * of `dbmlProblems`.
+     */
+    fields: FieldsSummary;
     /**
      * What "ERD Studio: Migrate to the New File Naming" would change (#182),
      * when the project is not already v6. The CLI only describes it: the
@@ -459,7 +471,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     return {
       semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
       conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-      naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], tablesFolderIsLayer: false, namingConflicts: [],
+      naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], fields: startingSetSummary(), tablesFolderIsLayer: false, namingConflicts: [],
     };
   }
   const domains = ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir);
@@ -502,6 +514,9 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   // The extension's own answer (#182), so doctor and the canvas never disagree.
   const naming = projectNamingOf(semanticRoot, ctx.tableLibraryService);
   const storage = projectStorageOf(ctx.tableLibraryService);
+  // The table readings the DBML checks make, so the field findings parse no table file twice.
+  const tableReadings = new Map<string, DbmlTableReading>();
+  const dbmlProblems = collectDbmlProblems(ctx, storage, { tableReadings });
   return {
     backwardsRelationships: backwardsRelationshipsOf(ctx, domains.map((d) => d.filePath).filter((f) => !issues.some((i) => i.file === relPath(ctx.root, f)))),
     semanticDirExists: true,
@@ -511,7 +526,8 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     naming,
     storage,
     diagrams: domains.map((d) => ({ file: relPath(ctx.root, d.filePath), format: d.storage ?? 'json' })),
-    dbmlProblems: collectDbmlProblems(ctx, storage),
+    dbmlProblems,
+    fields: collectFieldsSummary(ctx, tableReadings),
     // The YAML naming migration is offered only to a YAML project (§6.5).
     ...(naming === 'v6' || storage !== 'yaml' ? {} : { namingMigration: namingMigrationPreview(ctx) }),
     tablesFolderIsLayer: fs.existsSync(path.join(semanticRoot, TABLES_DIR)) && tablesDirIsLayer(semanticRoot),
@@ -614,6 +630,13 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       if (p.code === 'layoutMergeConflict') positionsOnly.add(p.file);
     }
   }
+  // A conflicted fields.yml is the user's to resolve too, never fix-fields-file's.
+  for (const p of r.erd.fields?.problems ?? []) {
+    const file = p.file ?? r.erd.fields.file ?? `${r.semanticDir}/fields.yml`;
+    if (p.mergeConflict && p.line !== undefined && !conflictedFiles.some((c) => c.file === file)) {
+      conflictedFiles.push({ file, line: p.line });
+    }
+  }
   if (conflictedFiles.length > 0) {
     const n = conflictedFiles.length;
     const onlyDiagrams = conflictedFiles.every((c) => r.erd.conflictedDomainFiles.includes(c));
@@ -690,6 +713,20 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
         + (dbmlErrors.some((p) => p.message.includes('Quote the value'))
           ? 'Fix these lines before anything else (a value to quote is the usual one), then re-run doctor.'
           : 'Fix these lines before anything else, then re-run doctor.'),
+      command: null,
+    });
+  }
+  // The field list does not read: like a DBML file, it is fixed before anything else. Only
+  // its errors raise this step; a warning or information about fields never does.
+  const fieldErrors = (r.erd.fields?.problems ?? []).filter((p) => p.severity === 'error' && !(p.mergeConflict && p.line !== undefined));
+  if (fieldErrors.length > 0) {
+    const file = r.erd.fields.file ?? `${r.semanticDir}/fields.yml`;
+    const n = fieldErrors.length;
+    steps.push({
+      id: 'fix-fields-file',
+      title: `Fix ${n === 1 ? 'a problem' : `${n} problems`} in the field list (${file})`,
+      why: `${fieldErrors.map((p) => `${p.file ?? file}${p.line !== undefined ? `:${p.line}` : ''} (${p.code}) — ${p.message.replace(/\.$/, '')}`).join('; ')}. `
+        + 'Until then the canvas and your AI assistant use what can be read of the list (the starting set when nothing can). Fix these lines, then re-run doctor.',
       command: null,
     });
   }
@@ -900,7 +937,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       erd: {
         semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
         conflictedDomainFiles: [], dataTypeAliasFiles: [], backwardsRelationships: [],
-        naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], tablesFolderIsLayer: false, namingConflicts: [],
+        naming: 'v6', storage: 'dbml', diagrams: [], dbmlProblems: [], fields: startingSetSummary(), tablesFolderIsLayer: false, namingConflicts: [],
       },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion, outdated: [], newer: [] },
     };

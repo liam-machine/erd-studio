@@ -1,6 +1,6 @@
 Table product.product [
   grain: 'One row per product or product family',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'Products and the families they belong to (a product points at its family in the same table).'
 

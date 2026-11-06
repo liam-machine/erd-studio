@@ -3,8 +3,8 @@
 Table reporting.obt_customer_360 [
   role: 'gold-dim',
   grain: 'One row per customer',
-  rationale_design: 'Rebuilt every night from the marts and the enterprise warehouse. Wide on purpose: the dashboard tool is fastest with no joins.',
-  meta_owner: 'bi-platform'
+  decisions: 'Rebuilt every night from the marts and the enterprise warehouse. Wide on purpose: the dashboard tool is fastest with no joins.',
+  owner: 'bi-platform'
 ] {
   Note: 'Everything about a customer in one wide row.'
 

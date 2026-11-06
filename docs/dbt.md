@@ -23,7 +23,7 @@ A table drawn from a dbt model with a custom schema (`+schema` or `config(schema
 
 1. Open your dbt project in VS Code. On a first install the **Get started with ERD Studio** walkthrough opens and takes you through the next steps.
 2. Run **Import from dbt**, from the walkthrough or the Command Palette (**ERD Studio: Import from dbt…**). ERD Studio copies your dbt models' columns and relationship tests into a logical draft and opens it, laid out automatically.
-3. Edit the draft by hand on the canvas, or ask your AI assistant to add keys, grain and design rationale (run **ERD Studio: Set Up My AI Helper** first: see [AI assistants](ai-assistants.md)). Switch between **Logical** and **Physical** to compare your design with what dbt has.
+3. Edit the draft by hand on the canvas, or ask your AI assistant to add keys, grain, purpose and decisions (run **ERD Studio: Set Up My AI Helper** first: see [AI assistants](ai-assistants.md)). Switch between **Logical** and **Physical** to compare your design with what dbt has.
 
 The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical stage is still read from dbt every time, never saved. An empty diagram offers an **Add Tables from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time. Rather start blank? **New Diagram…** (in the sidebar's Diagrams view, or **ERD Studio: New Diagram…** in the Command Palette) and **Import DBML…** work in a dbt project too.
 
@@ -68,6 +68,8 @@ A fresh clone has no `manifest.json`, so the Physical stage cannot show your dbt
 ## Compare and sync
 
 Click **Compare with dbt** on the toolbar. Missing columns, type differences and relationship mismatches appear on the canvas. From the comparison you can generate a sync plan for your AI assistant to apply only the changes you choose. The [AI assistants](ai-assistants.md) page has the guided setup that builds and checks the design against dbt for you.
+
+**Metadata from dbt.** Fields your dbt models already record in `meta:` (an owner, a `pii` flag) can be copied onto your design: list them in `.erd-studio/fields.yml` with `filled_by: dbt`, and your AI assistant copies each value exactly from the dbt model, never types one in, and writes nothing when dbt has no value. List another tool's settings (Lightdash's `dimension` or `metrics`, say) under `left_out` and they are never copied. The setup guide proposes this list from what your models already record. ERD Studio itself never compares metadata with dbt or syncs it back. See [Your fields](ai-assistants.md#your-fields).
 
 ## Run a whole diagram together
 

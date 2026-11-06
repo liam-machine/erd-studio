@@ -1,4 +1,4 @@
-Table crm.crm_contact [meta_owner: 'data-engineering'] {
+Table crm.crm_contact [owner: 'data-engineering'] {
   Note: 'Contact details and consent from the CRM.'
 
   contact_id        STRING    [pk, natural_key: 'true']

@@ -1,7 +1,7 @@
 Table marts.dim_product [
   role: 'conformed-dim',
   grain: 'One row per product',
-  meta_owner: 'bi-platform'
+  owner: 'bi-platform'
 ] {
   Note: 'Products with their family flattened in.'
 

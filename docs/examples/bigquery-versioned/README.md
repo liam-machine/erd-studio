@@ -49,8 +49,8 @@ Mozilla documents its BigQuery warehouse in [bigquery-etl](https://github.com/mo
 
 - **The layer can be part of the schema name.** The layer folder is the stage the suffix names; the schema folder keeps the dataset's full name, `atlas_derived`, exactly as BigQuery spells it. Add another product and it gets its own schema folders (`derived/tables/other_derived/`) in the same layers.
 - **Same table name in two datasets.** `main_v1` is in both `atlas_live` and `atlas_stable`. A table's name is unique across the whole project, so they are `atlas_live__main_v1` and `atlas_stable__main_v1` (the dataset, two underscores, then the table), each with `alias: 'main_v1'`.
-- **A version is part of the name.** `clients_daily_v6` is its own table; v7 would be a new file beside it. The view `clients_daily` says in its design rationale which version it shows.
-- **Views are tables in the design**, marked `meta_materialized: 'view'`. Each layer draws its own relationships: the derived tables point at `clients_first_seen_v1`, and the views at `clients_first_seen`.
+- **A version is part of the name.** `clients_daily_v6` is its own table; v7 would be a new file beside it. The view `clients_daily` says in its **Decisions** which version it shows.
+- **Views are tables in the design**, marked `materialized: 'view'`. Each layer draws its own relationships: the derived tables point at `clients_first_seen_v1`, and the views at `clients_first_seen`.
 - **Two diagrams can share a name in different layers**: `derived/diagrams/clients.dbml` and `views/diagrams/clients.dbml`.
 - **A diagram can show two layers.** **pings**, in `stable/`, shows the live and stable copies of the ping side by side.
 

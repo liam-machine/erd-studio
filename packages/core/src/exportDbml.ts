@@ -24,7 +24,7 @@
  * | model (+ schema)                   | `Table [schema.]name` — the model name, never the alias                 |
  * | modelRole, grain, alias            | table `Note` lines `Role: …`, `Grain: …`, `Warehouse table (alias): …` — never `Table x as y` (DBML aliases are unique; ours are not) |
  * | description                        | the table `Note`, after a blank line                                    |
- * | rationale                          | table `Note` lines `Purpose: …`, `Design: …`, …, after a blank line      |
+ * | rationale                          | table `Note` lines `Purpose: …`, `Decisions: …`, …, after a blank line, in `RATIONALE_LABELS` order (a fields.yml label never changes them) |
  * | model meta (plain text, yes/no)    | table `Note` lines `Meta – <key>: <value>`, after a blank line          |
  * | column                             | `name type` — type unquoted when a plain word, else `"…"`; empty → `unknown` |
  * | single primary key                 | column `[pk]`                                                            |

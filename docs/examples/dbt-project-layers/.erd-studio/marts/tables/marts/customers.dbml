@@ -1,7 +1,7 @@
 Table marts.customers [
   role: 'conformed-dim',
   grain: 'One row per paying customer',
-  rationale_design: 'Joins stg_stripe__customers to stg_app__accounts on the account id checkout stored.'
+  decisions: 'Joins stg_stripe__customers to stg_app__accounts on the account id checkout stored.'
 ] {
   Note: 'Every paying customer, with what they pay. Used by finance and marketing.'
 

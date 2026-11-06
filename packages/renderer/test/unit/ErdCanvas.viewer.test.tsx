@@ -154,29 +154,27 @@ for (const readOnly of [false, true]) {
       expect(document.querySelector('.key-badge-group__dropdown')).toBeNull();
     });
 
-    it('omits the rationale section for a model without rationale', async () => {
+    it('omits the Fields section for a model with no field value', async () => {
       const { container } = await renderCanvas(readOnly);
       const panel = await openPanel(container, 'orders');
-      expect(panel.textContent).not.toContain('+ Add Rationale');
-      expect(panel.querySelector('.detail-panel__rationale-section')).toBeNull();
+      expect(panel.textContent).not.toContain('+ Add field');
+      expect(panel.querySelector('.fields-section')).toBeNull();
     });
 
-    it('shows only the filled rationale fields, read-only', async () => {
+    it('shows only the filled fields, read-only', async () => {
       const { container } = await renderCanvas(readOnly);
       const panel = await openPanel(container, 'customers');
 
-      fireEvent.click(panel.querySelector('.detail-panel__rationale-toggle')!);
-      await flush();
-
-      const body = panel.querySelector('.detail-panel__rationale-body')!;
-      const labels = [...body.querySelectorAll('.detail-panel__section-title')].map((h) => h.textContent);
+      const section = panel.querySelector('.fields-section')!;
+      const labels = [...section.querySelectorAll('.fields-section__name')].map((h) => h.textContent);
       expect(labels).toEqual(['Purpose']);
-      expect(body.textContent).toContain('Who buys');
+      expect(section.textContent).toContain('Who buys');
       expect(panel.textContent).not.toMatch(/\+ Add/);
-      expect(panel.querySelector('.detail-panel__rationale-edit-btn')).toBeNull();
+      expect(panel.textContent).not.toContain('Customise fields');
+      expect(section.querySelectorAll('button, input, select, textarea')).toHaveLength(0);
 
-      fireEvent.doubleClick(panel.querySelector('.detail-panel__rationale-field')!);
-      expect(panel.querySelector('.detail-panel__rationale-textarea')).toBeNull();
+      fireEvent.doubleClick(section.querySelector('.fields-section__row')!);
+      expect(panel.querySelector('textarea')).toBeNull();
     });
 
     it('leaves a right-click on a model to the browser', async () => {

@@ -37,6 +37,13 @@ describe('root CLAUDE.md pointers', () => {
         expect(text).not.toMatch(/open standard/);
     });
 
+    it('points at the context fields developer doc and its core modules', () => {
+        expect(paths).toContain('docs/dev/fields.md');
+        expect(paths).toContain('packages/core/src/fields.ts');
+        expect(paths).toContain('src/services/fieldsService.ts');
+        expect(text).toMatch(/Context fields: the field catalogue and `fields\.yml`/);
+    });
+
     it.each(paths)('%s exists', (p) => {
         expect(fs.existsSync(path.join(ROOT, p))).toBe(true);
     });

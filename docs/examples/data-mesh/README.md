@@ -8,12 +8,13 @@ In a data mesh (Zhamak Dehghani's term), each business domain owns and publishes
 | a domain (and its schema) | a schema folder: `source_aligned/tables/orders/`, `…/shipping/` |
 | a domain team's relationships | its own relationships file: `source_aligned/relationships/orders.dbml` |
 | a data product | a diagram |
-| the owning team | `meta_owner` on each table, and a `CODEOWNERS` rule on its folders |
+| the owning team | an `owner` field on each table, listed in `fields.yml`, and a `CODEOWNERS` rule on its folders |
 
 ```text
 .erd-studio/
 ├── README.md
 ├── layers.json
+├── fields.yml
 ├── source_aligned/
 │   ├── tables/
 │   │   ├── accounts/
@@ -57,7 +58,7 @@ In a data mesh (Zhamak Dehghani's term), each business domain owns and publishes
 - **The layer says what kind of data product it is; the schema says which domain owns it.** That keeps a domain's tables together in one folder per layer, ready for an ownership rule.
 - **Each domain has its own relationships file**, so a domain team's pull requests touch only its own files. A Ref that crosses domains lives with its foreign-key table: `shipment.order_id` points into the orders domain, and that Ref is in `shipping.dbml`.
 - **A diagram can show another domain's table** (`customer_order` on the **shipping** and **payments** diagrams) without copying it. It is one file, owned by the orders team.
-- **Ownership is visible in two places**: `meta_owner` on every table, for people and AI assistants reading the files, and a `CODEOWNERS` file so GitHub asks the right team to review:
+- **Ownership is visible in two places**: an `owner` field on every table (`owner: 'payments-team'`), for people and AI assistants reading the files (`.erd-studio/fields.yml` lists it, so the canvas labels it **Owner** and assistants know only people fill it in), and a `CODEOWNERS` file so GitHub asks the right team to review:
 
   ```text
   # .github/CODEOWNERS

@@ -1,0 +1,53 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project ledger {
+  Note: '''Layer: silver
+Stage: logical
+
+Rationale and meta as model files held them before context fields'''
+}
+
+// dim_account: meta not exported (a list, a map or empty): tags
+Table silver.dim_account {
+  account_key INT [pk, note: 'Surrogate key, one per version']
+  account_code VARCHAR [note: 'The account number customers see (natural key; SCD type 0; meta pii: false; meta classification: internal)']
+  // account_name: meta not exported (a list, a map or empty): sources
+  account_name VARCHAR [note: 'Name on the account (SCD type 1; meta pii: true; meta business_rule: Trimmed, title case)']
+  credit_limit "DECIMAL(18,2)" [note: 'Credit limit at the time (SCD type 2)']
+  Note: '''Role: conformed-dim
+Grain: One row per account, per version
+
+One row per customer account
+
+Purpose: Shared account reference for finance reporting
+Design: Conformed dimension so every mart joins the same account
+Grain choice: Versioned rows, because credit limits change and finance reports on history
+Role choice: Conformed rather than domain-owned, since three marts use it
+SCD strategy: credit_limit is type 2; account_name overwrites
+Measures: None here; the balances live in fct_balance
+
+Meta – owner: finance-data
+Meta – certified: true
+Meta – purpose: Kept in meta, next to the rationale purpose'''
+}
+
+Table silver.fct_balance {
+  account_key INT [note: 'Account at month end']
+  month_end DATE [note: 'Last day of the month']
+  balance "DECIMAL(18,2)" [note: 'Closing balance (semi-additive; meta business_rule: Ledger balance after the last posting of the month; meta unit: AUD)']
+  txn_count INT [note: 'Transactions in the month (additive)']
+  Note: '''Role: periodic-snapshot
+Grain: One row per account per month end
+
+Month-end balance per account
+
+Purpose: Month-end balances for the finance close
+Measures: balance is semi-additive (never sum across months); txn_count is additive
+
+Meta – owner: finance-data
+Meta – refresh: daily'''
+}
+
+Ref: silver.fct_balance.account_key > silver.dim_account.account_key

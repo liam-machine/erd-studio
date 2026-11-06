@@ -1,10 +1,10 @@
 // Marts are one warehouse schema, marts, shared by three teams: the BI platform team owns the
 // shared dimensions, and finance and marketing own their stars. Folders can't say who owns
-// which table, so each table names its owner (meta_owner) and .github/CODEOWNERS lists the files.
+// which table, so each table names its owner in an owner setting and .github/CODEOWNERS lists the files.
 Table marts.dim_customer [
   role: 'conformed-dim',
   grain: 'One row per customer version',
-  meta_owner: 'bi-platform'
+  owner: 'bi-platform'
 ] {
   Note: 'Customers for every star, built from the party subject area.'
 

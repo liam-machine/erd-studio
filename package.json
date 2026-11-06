@@ -95,6 +95,10 @@
           "**/.erd-studio/tables/*/*.yml"
         ],
         "url": "./schemas/logical-model.schema.json"
+      },
+      {
+        "fileMatch": "**/.erd-studio/fields.yml",
+        "url": "./schemas/fields.schema.json"
       }
     ],
     "commands": [
@@ -310,6 +314,11 @@
         "title": "Go to Table…",
         "category": "ERD Studio",
         "icon": "$(search)"
+      },
+      {
+        "command": "erdStudio.customiseFields",
+        "title": "Customise Fields…",
+        "category": "ERD Studio"
       },
       {
         "command": "erdStudio.addToDiagram",
@@ -764,7 +773,7 @@
           {
             "id": "enrich",
             "title": "Enrich it with your AI assistant",
-            "description": "Add grain, keys, rationale and your team's modelling style. Set Up My AI Helper adds a guide for your AI coding assistant; then type /erd-studio-setup in it.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
+            "description": "Add grain, keys, purpose and decisions, and your team's modelling style. Set Up My AI Helper adds a guide for your AI coding assistant; then type /erd-studio-setup in it.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
             "media": {
               "svg": "media/walkthrough/enrich.svg",
               "altText": "A table with key badges, typed columns and a grain note."
@@ -1233,6 +1242,10 @@
         },
         {
           "command": "erdStudio.goToTable",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.customiseFields",
           "when": "erdStudio.hasProject"
         },
         {

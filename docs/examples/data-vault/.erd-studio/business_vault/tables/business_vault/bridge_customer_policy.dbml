@@ -1,6 +1,6 @@
 Table business_vault.bridge_customer_policy [
   grain: 'One row per customer, policy and snapshot date',
-  meta_vault_type: 'bridge'
+  vault_type: 'bridge'
 ] {
   Note: 'Bridge table: the customer-policy pairs in force on each day, so marts join without walking the link.'
 

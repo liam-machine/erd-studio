@@ -1,6 +1,6 @@
 Table business_vault.pit_customer [
   grain: 'One row per customer per snapshot date',
-  meta_vault_type: 'pit'
+  vault_type: 'pit'
 ] {
   Note: 'Point-in-time table: for each customer and day, which row of each satellite was current.'
 

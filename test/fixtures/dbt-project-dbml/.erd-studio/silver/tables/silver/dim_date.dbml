@@ -1,8 +1,8 @@
 Table silver.dim_date [
   role: 'conformed-dim',
   grain: 'One row per calendar date',
-  rationale_purpose: 'Shared date reference for consistent time-based analysis',
-  rationale_design: 'The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence'
+  purpose: 'Shared date reference for consistent time-based analysis',
+  design: 'The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence'
 ] {
   Note: 'Date dimension with fiscal calendar attributes'
 

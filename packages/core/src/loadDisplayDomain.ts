@@ -29,6 +29,19 @@
  * probe above; its relationships come from the relationships files it
  * imports (`use * from '…/relationships/{file}.dbml'`), and from no other.
  *
+ * With `readFieldsFile: true`, the project's field list is read too:
+ *
+ *   {semanticDir}/fields.yml                           <- optional, next to layers.json
+ *
+ * once, right after `layers.json` and before any model, and set as the
+ * result's `fields`. A missing file is no list (the renderer's starting set),
+ * as a missing `layers.json` is the default layers. A file longer than
+ * `maxDomainChars` is not parsed (a warning, no list); `maxYamlNodes` and
+ * `maxYamlChars` bound its YAML expansion. A file that is not YAML, or not a
+ * map, gives a warning and no list; every other problem is a warning and the
+ * list is used. A fields.yml never makes the load fail. Off by default, so a
+ * host that does not ask reads exactly the files it always read.
+ *
  * Everything the files say is validated and repaired by the same functions
  * the extension host uses. The limits in the options exist for hosts that
  * read files they do not control; all of them are off by default.
@@ -51,6 +64,8 @@ import {
   type LayerLookup,
 } from './domain.js';
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
+import { FIELDS_FILE_NAME, parseFieldsText } from './fieldsFile.js';
+import type { FieldList } from './fields.js';
 import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
 import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, tableFileCandidates } from './storage.js';
 import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
@@ -189,6 +204,12 @@ export interface LoadDisplaySubjectAreaOptions {
    * read: its relationships are not drawn, with a warning. Default unlimited.
    */
   maxRelationshipsChars?: number;
+  /**
+   * Read `{semanticDir}/fields.yml` (the project's field list) and set it as
+   * the result's `fields`; see the module header. Default false: the file is
+   * not read and the result has no `fields` (the starting set).
+   */
+  readFieldsFile?: boolean;
 }
 
 /** Split a domain path into its semantic-dir prefix (with trailing separator), parent dir and file name. */
@@ -287,6 +308,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     maxYamlChars = Infinity,
     maxRelationshipsChars = Infinity,
     dbml,
+    readFieldsFile = false,
   } = options;
   const warn = options.warn ?? ((message: string) => console.warn(message));
 
@@ -329,6 +351,20 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     }
     return text;
   };
+  const readFieldList = async (fieldsPath: string): Promise<FieldList | undefined> => {
+    const text = await readFile(fieldsPath);
+    if (text === null || text === undefined) return undefined;
+    if (text.length > maxDomainChars) {
+      warn(`${fieldsPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the starting set of fields`);
+      return undefined;
+    }
+    const { list, problems } = parseFieldsText(text, { maxNodes: maxYamlNodes, maxChars: maxYamlChars });
+    for (const problem of problems) {
+      warn(`${fieldsPath}${problem.line !== undefined ? ` (line ${problem.line})` : ''}: ${problem.message}`);
+    }
+    // A file that cannot be read as a field list is no list: the renderer's starting set.
+    return problems.some((p) => p.code === 'fieldsYamlInvalid') ? undefined : list;
+  };
 
   // 1-3. The domain file itself.
   const domainText = await readFile(domainPath);
@@ -356,6 +392,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     getValidLayerIds: () => layers.map((l) => l.id),
   };
   const domainLayer = resolveSubjectAreaLayer(obj.layer, domainPath, parentDirName, layerLookup);
+
+  // 5b. The field list, when asked for: right after layers.json, before any model.
+  const fields = readFieldsFile ? await readFieldList(`${prefix}${FIELDS_FILE_NAME}`) : undefined;
 
   // 6. The model cap, on the raw list, before anything is read.
   const logical = obj.logical;
@@ -508,6 +547,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       warn: callerWarn,
       ...(reading ? { schemaVersion: reading.schemaVersion, domainNameFallback: fileName.slice(0, -'.dbml'.length) } : {}),
       ...(tableLayers && tableLayers.size > 0 ? { tableLayers } : {}),
+      ...(fields ? { fields } : {}),
     });
   } catch (err) {
     if (err instanceof TypeError && !callerErrors.has(err)) {
@@ -540,6 +580,8 @@ function buildDisplaySubjectArea(
     domainNameFallback?: string;
     /** A DBML diagram's members: the layer of the file each was read from, by lower-case name. */
     tableLayers?: ReadonlyMap<string, string>;
+    /** The project's field list (`readFieldsFile`), when its fields.yml was read. */
+    fields?: FieldList;
   },
 ): DisplaySubjectArea {
   const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
@@ -592,6 +634,7 @@ function buildDisplaySubjectArea(
     stubColumns: unified.stubColumns,
     layerConfig: layers.find((l) => l.id === unified.layer),
     readOnly,
+    ...(ctx.fields ? { fields: ctx.fields } : {}),
   });
   const layerOf = (name: string): string | undefined => ctx.tableLayers?.get(name.toLowerCase());
   if (!display.models.some((m) => layerOf(m.name) !== undefined)) return display;

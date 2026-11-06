@@ -61,8 +61,8 @@ The read-only `erd-studio` helper (installed in `~/.erd-studio-cli` by **Set Up 
 | Layer, and its colour | a `TableGroup` holding every table |
 | Table, schema, description | `Table schema.name` and its note |
 | Table type, grain, warehouse name (alias) | `role`, `grain`, `alias` |
-| Design rationale | `rationale_purpose`, `rationale_grain_choice`, … |
-| Metadata (`meta`) | `meta_<key>` for a text value; everything else (numbers, lists, nested maps, …) in one `meta_json` |
+| Purpose, decisions and the other built-in fields | `rationale_purpose`, `rationale_decisions`, `rationale_open_questions`, … (the export keeps the `rationale_` prefix; in your own `.dbml` tables they are `purpose`, `decisions`, …) |
+| Your own fields and metadata (`meta`) | `meta_<key>` for a text value; everything else (numbers, lists, nested maps, …) in one `meta_json` |
 | Column type, description, primary key (also composite) | the column's type, note and `pk` |
 | Natural key, SCD type, additive type, foreign key | `natural_key`, `scd_type`, `additive_type`, `foreign_key` |
 | Relationships, with their names and composite keys | `Ref` lines, written from the foreign key |

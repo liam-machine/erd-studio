@@ -1,7 +1,7 @@
 Table marts.monthly_revenue [
   role: 'periodic-snapshot',
   grain: 'One row per customer per month',
-  rationale_measures: 'mrr is additive across customers, not across months: a quarter\'s MRR is its last month\'s, not the sum.'
+  measures: 'mrr is additive across customers, not across months: a quarter\'s MRR is its last month\'s, not the sum.'
 ] {
   Note: 'Monthly recurring revenue, for finance.'
 

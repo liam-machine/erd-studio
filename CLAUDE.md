@@ -26,7 +26,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
 | The onboarding stories in `test/stories/` (user stories as code driving a real VS Code, filmed as captioned videos; `npm run stories`, `stories.yml`), or any first-run surface they cover (start links, walkthrough, empty Diagrams view, Open an Example) | `docs/dev/onboarding-stories.md` |
-| The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`) | `docs/semantic-domain-json-reference.md` |
+| The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`; `fields.yml`) | `docs/semantic-domain-json-reference.md` |
+| Context fields: the field catalogue and `fields.yml` (`packages/core/src/fields.ts`, `fieldsFile.ts`, `src/services/fieldsService.ts`), how a field is spelled in a table file (bare `<key>`, old `rationale_` / `meta_` / `meta_json`, reserved names), the Detail panel's Fields section, `doctor`'s `erd.fields`, the skill's Fields section | `docs/dev/fields.md` |
 | The example projects in `docs/examples/` (one per modelling pattern, the shapes customers' repos take) and their tests — see **Example projects** under Rules | `docs/modelling-patterns.md` |
 | `proxy/`, `telemetry/`, `video/` | their own `README.md` |
 
@@ -40,6 +41,7 @@ ERD Studio uses a **central table library** shared by every diagram. **New proje
 .erd-studio/
 ├── README.md                      ← explains the folders; only ever created
 ├── layers.json                    ← JSON, unchanged
+├── fields.yml                     ← optional: the fields the project records (ERD Studio only reads it)
 ├── templates/*.json               ← JSON, unchanged
 └── gold/                          ← a layer folder (a lower-case layer id; its label is in layers.json)
     ├── tables/gold/fct_order.dbml ← one Table per file: Table gold.fct_order (schema folder = qualifier)
@@ -106,7 +108,7 @@ Six esbuild targets (`esbuild.js`, each in both build and watch branches):
 
 | Stage | Colour | Purpose | Storage |
 |---|---|---|---|
-| **Logical** | Blue `#60a5fa` | Full design — columns, types, PK/FK/NK, SCD, grain, rationale | DBML: `{layer}/tables/**.dbml` + `{layer}/relationships/*.dbml` + the diagram's `.dbml` (positions in `erd_layout`); legacy: `logical-models/**.yml` (or v6 `tables/**.yml`) + the domain file's `logical` section |
+| **Logical** | Blue `#60a5fa` | Full design — columns, types, PK/FK/NK, SCD, grain, fields (purpose, decisions, the team's own) | DBML: `{layer}/tables/**.dbml` + `{layer}/relationships/*.dbml` + the diagram's `.dbml` (positions in `erd_layout`); legacy: `logical-models/**.yml` (or v6 `tables/**.yml`) + the domain file's `logical` section |
 | **Physical** | Green `#22c55e` | What exists in the dbt project (source files, schema yml, `manifest.json`, `catalog.json`); relationships derived from dbt relationship tests | Derived at runtime, **never persisted** |
 
 ### Data flow
@@ -134,7 +136,8 @@ The canvas and the CLI reach comparisons through the same pure cores — `buildL
 - Refresh paths (watchers, external edits, stage switches) never write. Only the initial `ready` load persists auto-computed positions, and only for a partially positioned domain.
 - Compare model and column names with `sameName()` / `normaliseName()` (case-insensitive). Names match `TABLE_NAME_PATTERN` / `COLUMN_NAME_PATTERN` (`src/types/naming.ts`; the renderer keeps its own copies). Refuse a case-only model rename (the write-new + delete-old edit would delete the file on macOS/Windows). Add / Rename refuse a name already in the domain or the library in any case via `TableLibraryService.findTableNameIgnoringCase`, which lists files — never `existsSync`, which is case-sensitive on Linux.
 - `updateColumn` treats an omitted `scdType` / `additiveType` as "keep" and `null` as "clear".
-- `meta` is the user's free-form map: edit only through `updateMeta` patches; it is never compared, diffed or synced to dbt. `TableLibraryService.syncMeta` writes only the top-level key that changed, matching keys as the parser reads them (never via `YAMLMap.get/set`).
+- `meta` holds the team's own fields (and the column field `business_rule`) and is otherwise the user's free-form map: edit only through `updateMeta` patches; it is never compared, diffed or synced to dbt. `TableLibraryService.syncMeta` writes only the top-level key that changed, matching keys as the parser reads them (never via `YAMLMap.get/set`).
+- **Fields** (`docs/dev/fields.md`): the catalogue, `RATIONALE_FIELD_KEYS`, the reserved names and every field spelling are decided only in core's `fields.ts`, which every reader, writer, check and renderer imports — never hand-copy a rationale key list or a reserved name. A field's value stays in its home (`rationale`, `meta` or its typed property); never add a second value map. In DBML a new value is written bare (`<key>: '<value>'`), an edit changes the spelling it read, a clear removes every spelling of that home, and nothing is renamed. Built-in text fields in YAML are camelCase `rationale:` keys only; `syncMap` deletes only the keys it manages. ERD Studio never writes `.erd-studio/fields.yml` (it opens it; the setup guide writes it on a yes), and `DisplaySubjectArea.fields` is set only when the file exists and reads as a field list (no `fieldsYamlInvalid`), in the host and core alike.
 - `SelectorsService` owns only `domain_*` selectors whose description ends with `Managed by ERD Studio.`; everything else in `selectors.yml` is preserved.
 
 ### Message protocol and the physical stage
@@ -189,7 +192,7 @@ The Confluence app renders whatever is committed in a customer's repo — writte
 
 ### Harness
 
-- **A schema change must update the harness:** changing the on-disk schema (`packages/core/src/types/semantic.ts`, the DBML codec under `packages/core/src/dbml/` and `dbmlRichProperties.ts`, file layout, naming conventions) means updating `SCHEMA_CONTENT` (and the generators if needed) in `src/services/harnessService.ts`, **bumping `HARNESS_VERSION`**, and updating `docs/semantic-domain-json-reference.md`. Don't bump it for unrelated changes. Never silently overwrite a harness file that has no version marker. Never gitignore `.agents/`. Read `src/harness/CLAUDE.md` before editing `src/services/harnessService.ts` — it does not load on its own for files outside `src/harness/`.
+- **A schema change must update the harness:** changing the on-disk schema (`packages/core/src/types/semantic.ts`, the DBML codec under `packages/core/src/dbml/` and `dbmlRichProperties.ts`, the field catalogue in `packages/core/src/fields.ts` and the `fields.yml` format, file layout, naming conventions) means updating `SCHEMA_CONTENT` (and the generators if needed) in `src/services/harnessService.ts`, **bumping `HARNESS_VERSION`**, and updating `docs/semantic-domain-json-reference.md`. Don't bump it for unrelated changes. Never silently overwrite a harness file that has no version marker. Never gitignore `.agents/`. Read `src/harness/CLAUDE.md` before editing `src/services/harnessService.ts` — it does not load on its own for files outside `src/harness/`.
 
 ### Webview
 

@@ -520,9 +520,11 @@ describe('setup skill: the Without dbt route', () => {
     expect(cli('doctor.ts')).toContain('semanticDirExists');
     expect(flat(route())).toContain('**`erd.semanticDirExists: false`** → there is nothing to check yet');
     expect(cli('doctor.ts')).toContain("id: 'turn-round-relationships'");
-    for (const id of ['`fix-model-yaml`', '`fix-dbml-file`', '`resolve-merge-conflicts`', '`resolve-format-conflicts`', '`finish-dbml-conversion`', '`import-dbml-file`', '`turn-round-relationships`', '`erd.storage`']) {
+    for (const id of ['`fix-model-yaml`', '`fix-dbml-file`', '`fix-fields-file`', '`resolve-merge-conflicts`', '`resolve-format-conflicts`', '`finish-dbml-conversion`', '`import-dbml-file`', '`turn-round-relationships`', '`erd.storage`']) {
       expect(route(), id).toContain(id);
     }
+    // The walkthrough sends fix-fields-file to a reference it ships.
+    expect(ref('troubleshooting.md')).toContain('- **`fix-fields-file`** —');
   });
 
   it('offers a description, a DBML file or the existing tables, and designs with keys, grain and relationships', () => {
@@ -574,12 +576,12 @@ describe('setup skill: native DBML storage (§7.3)', () => {
     // Each id is in SKILL.md or a reference SKILL.md links.
     const linked = [...body().matchAll(/`references\/([\w-]+\.md)`/g)].map((m) => m[1]);
     const reachable = [body(), ...[...new Set(linked)].map(ref)].join('\n');
-    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project', 'dbml-invalid', 'not-a-diagram']) {
+    for (const id of ['fix-dbml-file', 'fix-fields-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project', 'dbml-invalid', 'not-a-diagram']) {
       expect(reachable, id).toContain(`\`${id}\``);
     }
     // The CLI really emits them.
     const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
-    for (const id of ['fix-dbml-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project']) {
+    for (const id of ['fix-dbml-file', 'fix-fields-file', 'resolve-format-conflicts', 'finish-dbml-conversion', 'import-dbml-file', 'reconvert-dbml-project']) {
       expect(cli('doctor.ts'), id).toContain(`'${id}'`);
     }
     expect(cli('diff.ts')).toContain("'dbml-invalid'");
@@ -764,12 +766,16 @@ describe('logical first: the setup skill in a folder without dbt_project.yml', (
     }
   });
 
-  it('the saved-approach template has no as-built rule, backlog or dbt-sourced metadata', () => {
+  it('the saved-approach template has no as-built rule, backlog or metadata list (v46: the fields are fields.yml\'s)', () => {
     const approaches = file('references/modelling-approaches.md');
     expect(approaches).toContain('**Chosen:** proposed for a new design');
     expect(approaches).not.toContain('Target-design backlog');
     expect(approaches).not.toContain('Detected from');
-    expect(approaches).toContain('| `owner` | models | team name, e.g. `crm-team` | the team |');
+    // The template no longer writes a ## Metadata table: the fields live in fields.yml.
+    const template = /```markdown\n([\s\S]*?)```/.exec(approaches.slice(approaches.indexOf('## 5. The saved file')))![1];
+    expect(template).not.toContain('## Metadata');
+    expect(template).not.toContain('| Key | On | Values | Source |');
+    expect(approaches.replace(/\s+/g, ' ')).toContain("The fields the team records are not in this file: they are `.erd-studio/fields.yml`'s list.");
   });
 
   it('the diagram example sets no dbt folder filter', () => {

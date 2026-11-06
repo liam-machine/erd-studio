@@ -1,6 +1,6 @@
 Table shipping.shipment [
   grain: 'One row per shipment',
-  meta_owner: 'shipping-team'
+  owner: 'shipping-team'
 ] {
   Note: 'Shipments, published by the shipping domain.'
 

@@ -1,7 +1,7 @@
 Table common_mart.mart_arr [
   role: 'gold-fact',
   grain: 'One row per subscription per month',
-  rationale_design: 'fct_mrr joined to its dimensions, so analysts and dashboards need no joins.'
+  decisions: 'fct_mrr joined to its dimensions, so analysts and dashboards need no joins.'
 ] {
   Note: 'ARR by account and month, pre-joined.'
 

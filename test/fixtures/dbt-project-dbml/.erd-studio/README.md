@@ -20,5 +20,7 @@ In each layer folder:
   unique names (silver_customer, gold_customer), with the warehouse name in their alias.
 - Each relationship is one Ref, stored once, in any relationships file.
 - Other DBML tools read a diagram as a normal DBML project: open <layer>/diagrams/<name>.dbml.
+- fields.yml (optional, beside layers.json) lists the fields each table and column records, in
+  order; each is one setting, such as purpose: '…'. Without it, ERD Studio's starting set is used.
 
 Check the files with `erd-studio doctor`.

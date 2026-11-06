@@ -471,6 +471,24 @@ describe('MigrationService (domain format → v5)', () => {
   });
 });
 
+describe('MigrationService richness: every built-in text field counts (context fields)', () => {
+  it('scores the catalogue\'s rationale keys: the legacy weights kept, a new field counts 2', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-migration-rich-'));
+    try {
+      const migration = new MigrationService(root, new LayerService(root), new TableLibraryService(root));
+      const richness = (m: object): number => (migration as unknown as { richness: (t: object) => number }).richness(m);
+      const base = richness({ name: 't' });
+      expect(richness({ name: 't', rationale: { purpose: 'p', design: 'd' } })).toBe(base + 6);
+      expect(richness({ name: 't', rationale: { grainChoice: 'g', roleChoice: 'r', scdStrategy: 's', measures: 'm' } })).toBe(base + 8);
+      expect(richness({ name: 't', rationale: { decisions: 'd', openQuestions: 'q', retention: 'r' } })).toBe(base + 6);
+      // An empty or non-text value counts nothing.
+      expect(richness({ name: 't', rationale: { decisions: '', purpose: 7 } })).toBe(base);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('MigrationService (domain format → v5) in a project that writes DBML', () => {
   let workspaceRoot: string;
   const semantic = (...parts: string[]): string => path.join(workspaceRoot, '.erd-studio', ...parts);

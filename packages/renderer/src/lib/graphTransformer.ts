@@ -14,6 +14,7 @@ import type {
   DisplayTable,
   LayerConfig,
   Meta,
+  Rationale,
 } from '@erd-studio/core';
 import type {
   DiscrepancyReport,
@@ -26,6 +27,7 @@ import type {
   AnnotationFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
+import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeTableLabels } from './modelLabels';
@@ -67,6 +69,13 @@ export interface TransformOptions {
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 const hasMeta = (meta: Meta | undefined): meta is Meta => !!meta && Object.keys(meta).length > 0;
+
+/** Whether any rationale-home field (every catalogue text field, retired ones included) has text. */
+const hasRationaleText = (rationale: Rationale | undefined): boolean =>
+  !!rationale && RATIONALE_FIELD_KEYS.some((key) => {
+    const text = (rationale as Record<string, unknown>)[key];
+    return typeof text === 'string' && text.trim() !== '';
+  });
 
 /**
  * Convert a DisplayTable's columns to ColumnDisplay[].
@@ -216,7 +225,7 @@ export function transformSubjectArea(
         ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== model.name.toLowerCase() ? { alias: model.alias.trim() } : {}),
         columns,
         isStub: domain.stubColumns?.includes(model.name) ?? false,
-        ...(model.rationale && (model.rationale.purpose || model.rationale.design || model.rationale.grainChoice || model.rationale.roleChoice || model.rationale.scdStrategy || model.rationale.measures) ? { hasRationale: true } : {}),
+        ...(hasRationaleText(model.rationale) ? { hasRationale: true } : {}),
         ...(model.grain ? { grain: model.grain } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         ...(hasMeta(model.meta) ? { meta: model.meta } : {}),

@@ -1,6 +1,6 @@
 Table event.interaction_event [
   grain: 'One row per contact with a party',
-  meta_owner: 'data-architecture'
+  owner: 'data-architecture'
 ] {
   Note: 'Every time a party contacted the bank: in a branch, on the phone or online.'
 

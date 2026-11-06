@@ -2,8 +2,8 @@
 // Each fact is stored once, so these tables are narrow and joined by keys; the marts denormalise them for reporting.
 Table party.party [
   grain: 'One row per party: a person or an organisation the bank deals with',
-  rationale_design: 'One party table for people and organisations, so a customer, a guarantor and a company director are all parties, with person and organisation holding what only one kind has.',
-  meta_owner: 'customer-data'
+  decisions: 'One party table for people and organisations, so a customer, a guarantor and a company director are all parties, with person and organisation holding what only one kind has.',
+  owner: 'customer-data'
 ] {
   Note: 'Anyone the bank deals with: customers, guarantors, companies and their directors.'
 

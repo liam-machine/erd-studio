@@ -1,7 +1,7 @@
 Table common.fct_mrr [
   role: 'periodic-snapshot',
   grain: 'One row per subscription per month',
-  rationale_measures: 'mrr is additive across subscriptions and accounts, not across months.'
+  measures: 'mrr is additive across subscriptions and accounts, not across months.'
 ] {
   Note: 'Monthly recurring revenue.'
 

@@ -2,7 +2,7 @@
 
 **Read this file only when `erd-studio doctor --json` reports `erd.storage: yaml`** (or, in a `mixed` project, to edit an existing `.yml` table or `.json` diagram in place). A new project, and every new file in a `dbml` or `mixed` project, is DBML: follow `DBML.md`. **Never convert by hand: run ERD Studio: Convert Project to DBML** (the user runs it in VS Code: one undoable step that doctor's `erd.dbmlConversion` previews).
 
-In a YAML project, model (table) definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see `Where relationships live`). The rules every format shares — the team's modelling approach and metadata list, table roles, rationale fields, building from a source, naming, the physical stage and sync plans — are in `SKILL.md`.
+In a YAML project, model (table) definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain (subject area) JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see `Where relationships live`). The rules every format shares — the team's modelling approach, the fields it records (`fields.yml`), table roles, building from a source, naming, the physical stage and sync plans — are in `SKILL.md`.
 
 ## File naming: v5 or v6 — use the one `erd-studio doctor` reports
 
@@ -31,6 +31,7 @@ Everything else — `layer`, `modelFolder` (the dbt `models/` path filter), `vie
 ```
 .erd-studio/
 ├── modelling-approach.md     ← Optional: the team's modelling rules (see `SKILL.md`)
+├── fields.yml                ← Optional: the fields the team records (see "Fields" in `SKILL.md`)
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_project.yml       ← top level (flat libraries keep working)
 │   ├── silver/               ← optional per-layer folders
@@ -120,7 +121,7 @@ Annotations are temporary build notes — visible on the canvas while constructi
 |-----------------|---------------|
 | Add/remove/rename a column | the model's `.yml` (`logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`) |
 | Change column type, PK/FK/NK flags, SCD type | the model's `.yml` |
-| Change grain, modelRole, description, rationale, meta | the model's `.yml` |
+| Change grain, modelRole, description, a field (`rationale`, `meta`) | the model's `.yml` |
 | Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
 | Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` (relationships in model YAML stay — the domain just stops drawing them) |
 | Add/remove/edit a relationship | The many-side (FK) model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
@@ -144,7 +145,7 @@ grain: "One row per customer"
 modelRole: conformed-dim
 rationale:
   purpose: "Customer master data for cross-domain joins"
-  roleChoice: "Conformed dimension shared across domains"
+  decisions: "Email is the natural key: the CRM reuses customer ids after two accounts merge"
 meta:
   owner: crm-team
   source_system: salesforce
@@ -178,7 +179,7 @@ columns:
 | `grain` | No | Grain statement — "One row per ___" |
 | `modelRole` | No | Architecture role (see "Table roles" in `SKILL.md`) |
 | `columns` | No | Array of column definitions |
-| `rationale` | No | Design rationale object (omit if empty) |
+| `rationale` | No | The text fields: a map of camelCase keys (see "Fields in a YAML table" below; omit if empty) |
 | `meta` | No | Free-form metadata map (see "Metadata" below) |
 | `relationships` | No | Relationships leaving this model (it holds the foreign key), shared by every domain (see "Where relationships live") |
 
@@ -201,9 +202,25 @@ columns:
       classification: confidential
 ```
 
-- ERD Studio **never compares, diffs or syncs `meta` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's `meta:`. (Assistants may copy it from dbt by hand, only as the team's metadata list in `SKILL.md` says.)
-- The canvas shows it in the Detail panel and when the user hovers a model's name or a column; top-level text values can be edited in the panel, nested maps, lists, booleans and `null` are shown read-only.
-- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list, values the user typed in, and values dbt no longer records — and never move keys between the model and its columns. Never invent metadata.
+- ERD Studio **never compares, diffs or syncs `meta` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's `meta:`. (Assistants copy a field `filled_by: dbt` from dbt by hand, only as "Fields" in `SKILL.md` says.)
+- The canvas shows each entry in the Detail panel's fields (a field on `fields.yml`'s list under its label, any other under "Not in your list") and when the user hovers a model's name or a column; top-level text values can be edited in the panel, `true` / `false` of a yes-no field too, and other nested maps, lists, booleans and `null` are shown read-only.
+- **Keep the kind of value**: `true` / `false` stay unquoted and a list stays a list. Numbers may be written quoted or not (ERD Studio reads `24` and `"24"` the same), but keep the quotes when leaving them off would change the digits (`"1.10"`, `"007"`).
+- **Keep every existing entry** when you edit a model file — including keys that are not on `fields.yml`'s list, values the user typed in, and values dbt no longer records — and never move keys between the model and its columns. Never invent metadata.
+
+### Fields in a YAML table
+
+The fields `fields.yml` lists ("Fields" in `SKILL.md`; the file's format is "fields.yml" in `DBML.md`) keep their YAML homes:
+
+| Field | In a YAML model file |
+|---|---|
+| `grain`, `role` | `grain`, `modelRole` (`tableRole` in the v6 naming) |
+| `natural_key`, `scd_type`, `additive_type` | the column's `isNaturalKey: true`, `scdType`, `additiveType` |
+| the text built-ins | a key of the model's `rationale:` map, in camelCase: `purpose`, `decisions`, `openQuestions`, `scdStrategy`, `measures`, `sourceOfTruth`, `freshness`, `knownIssues`, `retention`; the retired `design`, `grainChoice`, `roleChoice` are still read |
+| `business_rule` and the team's own fields | a key of the `meta:` map (on the model, or on the column for a column field), named as `fields.yml` names it: `owner: crm-team`, a yes-no as `pii: true` |
+
+Write a camelCase key in `rationale:` (`openQuestions`, never `open_questions`): any other key there is kept but not read as a field. A retired key stays where it is until the user agrees to move its text into `decisions`.
+
+**Older ERD Studio versions.** A teammate on a version before 2.0 sees only the six keys of the first release (`purpose`, `design`, `grainChoice`, `roleChoice`, `scdStrategy`, `measures`). When their editor clears the last of those six on a table, it removes the whole `rationale:` map, the newer keys (`decisions`, `openQuestions`, …) with it. The first time you write a newer key in a YAML project, tell the user in one line that teammates should update ERD Studio before editing those tables' fields.
 
 ## Columns
 
@@ -304,4 +321,4 @@ relationships:
 
 **Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Table Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
-<!-- erd-studio-harness: 45 -->
+<!-- erd-studio-harness: 46 -->

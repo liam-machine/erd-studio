@@ -1,4 +1,4 @@
-Table web.web_session [meta_owner: 'data-engineering'] {
+Table web.web_session [owner: 'data-engineering'] {
   Note: 'Online banking sessions from web analytics.'
 
   session_id  STRING    [pk, natural_key: 'true']

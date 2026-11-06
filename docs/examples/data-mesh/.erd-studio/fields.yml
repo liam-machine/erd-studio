@@ -1,0 +1,16 @@
+# The fields this project records, in the order the Detail panel shows them.
+# The starting set, plus the team that owns each data product. Columns keep the starting set.
+version: 1
+tables:
+  - grain
+  - purpose
+  - decisions
+  - open_questions
+  - role
+  - scd_strategy
+  - measures
+  - key: owner
+    label: Owner
+    type: value
+    guidance: The domain team that owns this data product, e.g. orders-team, as in .github/CODEOWNERS.
+    filled_by: people

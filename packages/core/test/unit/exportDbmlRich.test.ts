@@ -24,6 +24,7 @@ import {
   rationaleProperty,
 } from '../../src/dbmlRichProperties';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
+import { RATIONALE_FIELD_KEYS } from '../../src/fields';
 import type { DisplayRelationship, DisplaySubjectArea } from '../../src/types/display';
 import type { AnnotationColor, Meta } from '../../src/types/semantic';
 import { oneLine } from '../../src/exportShared';
@@ -139,6 +140,55 @@ describe('toDbmlRich: tables', () => {
     for (const property of Object.keys(t.properties).filter((p) => p.startsWith('rationale_'))) expect(rationaleKeyOf(property)).toBeDefined();
     // Never DBML's `as`: aliases are unique in DBML, ours are not.
     expect(toDbmlRich(area)).not.toMatch(/^Table .* as /m);
+  });
+
+  it('writes the context-field rationale keys as rationale_<snake_case> properties too, in RATIONALE_FIELD_KEYS order (the rich export is not storage)', () => {
+    const area = subjectArea([
+      tableDef('dim_account', [col('id', 'int', { isPrimaryKey: true })], {
+        rationale: {
+          retention: 'Seven years',
+          knownIssues: 'Codes reused',
+          freshness: 'Daily',
+          sourceOfTruth: 'CRM',
+          measures: 'm',
+          scdStrategy: 's',
+          roleChoice: 'rc',
+          grainChoice: 'gc',
+          design: 'd',
+          openQuestions: 'Do closed accounts stay?',
+          decisions: 'Kept the CRM code',
+          purpose: 'p',
+        },
+      }),
+    ]);
+    const text = toDbmlRich(area);
+    const settings = [...text.matchAll(/^  (rationale_[a-z_]+): /gm)].map((m) => m[1]);
+    expect(settings).toEqual([
+      'rationale_purpose',
+      'rationale_decisions',
+      'rationale_open_questions',
+      'rationale_design',
+      'rationale_grain_choice',
+      'rationale_role_choice',
+      'rationale_scd_strategy',
+      'rationale_measures',
+      'rationale_source_of_truth',
+      'rationale_freshness',
+      'rationale_known_issues',
+      'rationale_retention',
+    ]);
+    expect(settings).toEqual(RATIONALE_FIELD_KEYS.map((k) => rationaleProperty(k)));
+    const t = table(read(area), 'dim_account');
+    expect(t.properties).toMatchObject({
+      rationale_decisions: 'Kept the CRM code',
+      rationale_open_questions: 'Do closed accounts stay?',
+      rationale_source_of_truth: 'CRM',
+      rationale_freshness: 'Daily',
+      rationale_known_issues: 'Codes reused',
+      rationale_retention: 'Seven years',
+    });
+    // Never a bare field setting: storage spellings are not export spellings.
+    expect(text).not.toMatch(/^  (decisions|open_questions|purpose): /m);
   });
 
   it('writes the schema public also as a property, which DBML would otherwise read as no schema', () => {

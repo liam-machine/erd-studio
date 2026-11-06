@@ -19,7 +19,7 @@ import { TableLibraryService } from './logicalModelService';
 import { LayerService } from './layerService';
 import { keepLineEndings } from './lineEndings';
 import type { SemanticTable, Relationship, ViewConfig } from '../types/semantic';
-import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, mixesTableNaming } from '../types/semantic';
+import { RATIONALE_FIELD_KEYS, WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, mixesTableNaming } from '../types/semantic';
 import { log } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -435,13 +435,11 @@ export class MigrationService {
     if (model.modelRole) score += 5;
     if (model.description) score += 3;
     if (model.rationale) {
-      const r = model.rationale;
-      if (r.purpose) score += 3;
-      if (r.design) score += 3;
-      if (r.grainChoice) score += 2;
-      if (r.roleChoice) score += 2;
-      if (r.scdStrategy) score += 2;
-      if (r.measures) score += 2;
+      // Every built-in text field (the catalogue's rationale keys): purpose and design weigh most, as before.
+      const r = model.rationale as Record<string, unknown>;
+      for (const key of RATIONALE_FIELD_KEYS) {
+        if (typeof r[key] === 'string' && r[key]) score += key === 'purpose' || key === 'design' ? 3 : 2;
+      }
     }
 
     return score;

@@ -1,0 +1,46 @@
+# The shape every released extension before context fields wrote: all six
+# rationale keys, an unknown rationale key (never read), and table and column
+# meta holding text, a boolean and a list.
+name: dim_account
+schema: silver
+description: One row per customer account
+grain: One row per account, per version
+modelRole: conformed-dim
+rationale:
+  purpose: Shared account reference for finance reporting
+  design: Conformed dimension so every mart joins the same account
+  grainChoice: Versioned rows, because credit limits change and finance reports on history
+  roleChoice: Conformed rather than domain-owned, since three marts use it
+  scdStrategy: credit_limit is type 2; account_name overwrites
+  measures: None here; the balances live in fct_balance
+  notes: Not a rationale key, so it is never read
+meta:
+  owner: finance-data
+  certified: true
+  tags: [finance, conformed]
+  purpose: Kept in meta, next to the rationale purpose
+columns:
+  - name: account_key
+    dataType: INT
+    description: Surrogate key, one per version
+    isPrimaryKey: true
+  - name: account_code
+    dataType: VARCHAR
+    description: The account number customers see
+    isNaturalKey: true
+    scdType: 0
+    meta:
+      pii: false
+      classification: internal
+  - name: account_name
+    dataType: VARCHAR
+    description: Name on the account
+    scdType: 1
+    meta:
+      pii: true
+      business_rule: Trimmed, title case
+      sources: [crm, billing]
+  - name: credit_limit
+    dataType: DECIMAL(18,2)
+    description: Credit limit at the time
+    scdType: 2

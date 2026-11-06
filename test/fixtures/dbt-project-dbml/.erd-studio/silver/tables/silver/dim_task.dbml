@@ -1,9 +1,9 @@
 Table silver.dim_task [
   role: 'domain-dim',
   grain: 'One row per task version',
-  rationale_purpose: 'Tracks individual tasks and their lifecycle',
-  rationale_design: 'SCD Type 2 on status to track historical state changes',
-  rationale_scd_strategy: 'task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key'
+  purpose: 'Tracks individual tasks and their lifecycle',
+  design: 'SCD Type 2 on status to track historical state changes',
+  scd_strategy: 'task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key'
 ] {
   Note: 'Task dimension tracking individual project tasks'
 

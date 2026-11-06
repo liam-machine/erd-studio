@@ -1,7 +1,7 @@
 Table marts.fct_fee [
   role: 'transaction-fact',
   grain: 'One row per fee charged',
-  meta_owner: 'finance-analytics'
+  owner: 'finance-analytics'
 ] {
   Note: 'Fees charged to customers, for finance.'
 

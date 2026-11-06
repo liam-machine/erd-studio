@@ -1,0 +1,5 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table gold.dim_store } from '../tables/gold/dim_store.dbml'
+use { table gold.fct_sale }  from '../tables/gold/fct_sale.dbml'
+
+Ref: gold.fct_sale.store_key >? gold.dim_store.store_key

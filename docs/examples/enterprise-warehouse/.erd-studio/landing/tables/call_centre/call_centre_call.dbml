@@ -1,4 +1,4 @@
-Table call_centre.call_centre_call [meta_owner: 'data-engineering'] {
+Table call_centre.call_centre_call [owner: 'data-engineering'] {
   Note: 'Calls from the contact centre platform.'
 
   call_id         STRING    [pk, natural_key: 'true']

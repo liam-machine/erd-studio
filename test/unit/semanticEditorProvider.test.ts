@@ -1141,7 +1141,7 @@ describe('message boundary (H21)', () => {
     expect(rejections).toEqual([]);
 
     // The boundary must not poison the edit queue: a later mutation still runs.
-    panel._simulateMessage({ type: 'updateModelRationale', payload: { modelName: 'dim_task', rationale: 'after' } });
+    panel._simulateMessage({ type: 'updateModelRationale', payload: { modelName: 'dim_task', rationale: { purpose: 'after' } } });
     await waitForType(panel, 'domainLoaded', 2);
   });
 });
