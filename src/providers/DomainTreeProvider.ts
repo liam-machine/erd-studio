@@ -508,7 +508,7 @@ export class SubjectAreaTreeProvider
     // welcome view (which has its own Select dbt Project button) shows.
     // No diagram anywhere yet (a new project's empty layer folders): show
     // the welcome view's start buttons — New Diagram, Import, an example,
-    // Draw from dbt — rather than bare layer rows, until the first diagram.
+    // Import from dbt — rather than bare layer rows, until the first diagram.
     if (layerNodes.length === 0 || this.diagramTotal === 0) return this.projectRow ? [this.projectRow] : [];
     const convert = this.convertRowShows() ? [{ type: 'convert' } as const] : [];
     return [...(this.projectRow ? [this.projectRow] : []), ...convert, ...layerNodes, { type: 'newLayer' }];

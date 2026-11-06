@@ -26,25 +26,35 @@ body{
 .grid{position:absolute;inset:0;
   background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);
   background-size:64px 64px; mask-image:radial-gradient(760px 520px at 74% 30%,#000 20%,transparent 78%);}
-.left{position:relative;padding:0 0 0 76px;width:660px}
-.icon{width:88px;height:88px;border-radius:20px;display:block;margin-bottom:30px;
+.left{position:relative;padding:0 0 0 76px;width:640px}
+.icon{width:80px;height:80px;border-radius:18px;display:block;margin-bottom:26px;
   box-shadow:0 10px 34px #0009, 0 0 0 1px #ffffff14}
-h1{font-size:78px;line-height:1;letter-spacing:-2.6px;font-weight:700;margin-bottom:20px}
-.tag{font-size:31px;line-height:1.32;font-weight:600;color:#f2f4f7;margin-bottom:14px;letter-spacing:-.4px}
-.tag b{background:linear-gradient(96deg,#cd7f32,#c9ccd1 46%,#d4a800);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700}
-.sub{font-size:22px;line-height:1.5;color:#9aa1ab;max-width:560px}
-.chips{display:flex;gap:12px;margin-top:34px;align-items:center}
-.chip{font-size:16.5px;font-weight:600;padding:8px 17px;border-radius:999px;letter-spacing:.1px}
+h1{font-size:72px;line-height:1;letter-spacing:-2.4px;font-weight:700;margin-bottom:22px}
+.tag{font-size:33px;line-height:1.24;font-weight:650;color:#f2f4f7;margin-bottom:18px;letter-spacing:-.6px}
+.tag b{background:linear-gradient(96deg,#cd7f32,#c9ccd1 46%,#d4a800);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:750}
+.sub{font-size:21px;line-height:1.5;color:#9aa1ab;max-width:540px}
+.sub em{font-style:normal;color:#cfd4db;font-weight:600}
+.chips{display:flex;gap:12px;margin-top:30px;align-items:center}
+.chip{font-size:16px;font-weight:600;padding:8px 16px;border-radius:999px;letter-spacing:.1px}
 .c1{color:#93c5fd;background:#60a5fa1c;border:1px solid #60a5fa4d}
-.c2{color:#86efac;background:#22c55e1a;border:1px solid #22c55e4d}
+.c2{color:#e5c07b;background:#d4a8001a;border:1px solid #d4a8004d}
 .c3{color:#9aa1ab;background:#ffffff0a;border:1px solid #ffffff1f}
-/* --- ERD motif --- */
-.art{position:absolute;right:74px;top:50%;transform:translateY(-50%);width:404px;height:432px}
-.node{position:absolute;width:196px;border-radius:13px;background:#1c1f26;
-  border:1px solid #2f343d;box-shadow:0 16px 40px #0008;overflow:hidden}
-.node .hd{padding:10px 13px;font-size:14.5px;font-weight:700;letter-spacing:.2px;
+/* --- art: a DBML table file and the diagram it draws --- */
+.art{position:absolute;right:76px;top:50%;transform:translateY(-50%);width:470px;height:400px}
+.file{position:absolute;left:0;top:0;width:470px;border-radius:12px;background:#0f1218;
+  border:1px solid #2a2f38;box-shadow:0 18px 44px #000a;overflow:hidden}
+.file .bar{display:flex;align-items:center;gap:8px;padding:9px 13px;font-size:14px;color:#9aa1ab;
+  background:#171a21;border-bottom:1px solid #262a33}
+.file .bar svg{position:static;flex:none}
+.file .bar .path{color:#8b93a1}
+.file .bar .name{color:#e8eaed;font-weight:600}
+.file pre{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:14.5px;line-height:1.62;padding:11px 15px 13px;color:#c9d1d9}
+.kw{color:#ff7b72}.id{color:#e8eaed;font-weight:600}.ty{color:#79c0ff}.st{color:#a5d6ff}.br{color:#8b949e}.cm{color:#6f7786}
+.node{position:absolute;width:200px;border-radius:13px;background:#1c1f26;
+  border:1px solid #60a5fa66;box-shadow:0 16px 40px #0009;overflow:hidden}
+.node .hd{padding:10px 13px;font-size:14.5px;font-weight:700;letter-spacing:.2px;color:#bfdbfe;background:#60a5fa14;
   border-bottom:1px solid #2f343d;display:flex;align-items:center;gap:8px}
-.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:#60a5fa}
 .row{padding:7.5px 13px;font-size:12.5px;color:#8d95a0;display:flex;justify-content:space-between;gap:10px;
   border-bottom:1px solid #23272e}
 .row:last-child{border-bottom:0}
@@ -52,45 +62,54 @@ h1{font-size:78px;line-height:1;letter-spacing:-2.6px;font-weight:700;margin-bot
 .pk{font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:1.5px 5px;border-radius:4px}
 .pkk{color:#fbbf24;background:#fbbf2422}
 .fkk{color:#60a5fa;background:#60a5fa22}
-.n1{left:0;top:8px;border-color:#60a5fa66}
-.n1 .hd{color:#bfdbfe;background:#60a5fa14}
-.n2{right:0;bottom:6px;border-color:#22c55e66}
-.n2 .hd{color:#bbf7d0;background:#22c55e14}
-svg{position:absolute;inset:0;overflow:visible}
+.n1{left:0;top:196px}
+.n2{right:0;top:250px}
+.edge{position:absolute;inset:0;overflow:visible}
 </style></head><body>
 <div class="grid"></div>
 <div class="left">
   <img class="icon" src="../media/icon.png">
   <h1>ERD Studio</h1>
-  <div class="tag">Visual ERD designer for <b>dbt</b></div>
-  <div class="sub">Design your warehouse on a canvas &mdash; in your repo, as DBML, an open format your AI assistant can read.</div>
+  <div class="tag">Design your data model in <b>Git</b>.<br>Let your AI build from it.</div>
+  <div class="sub">Logical data modelling in VS Code, stored as <em>DBML</em>: an open format your AI assistant can read and write.</div>
   <div class="chips">
-    <span class="chip c1">Logical</span>
-    <span class="chip c2">Physical</span>
+    <span class="chip c1">Logical model</span>
+    <span class="chip c2">Stored as DBML</span>
     <span class="chip c3">Free to use</span>
   </div>
 </div>
 <div class="art">
-  <svg width="404" height="432">
-    <!-- orthogonal edge: right side of dim_customer -> top of fct_order -->
-    <path d="M196 74 H 286 A 14 14 0 0 1 300 88 V 276"
-          fill="none" stroke="#5b6472" stroke-width="2.2" stroke-linecap="round"/>
-    <circle cx="196" cy="74" r="4.6" fill="#60a5fa"/>
+  <div class="file">
+    <div class="bar">
+      <svg width="15" height="15" viewBox="0 0 16 16"><path fill="#3B82F6" fill-rule="evenodd" d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM3 6h3v3H3zm4 0h6v3H7zM3 10h3v3H3zm4 0h6v3H7z"/></svg>
+      <span><span class="path">.erd-studio/gold/tables/gold/</span><span class="name">fct_order.dbml</span></span>
+    </div>
+<pre><span class="kw">Table</span> <span class="id">gold.fct_order</span> <span class="br">{</span>
+  order_key    <span class="ty">INT</span> <span class="br">[</span>pk<span class="br">]</span>
+  customer_key <span class="ty">INT</span> <span class="br">[</span>foreign_key: <span class="st">'true'</span><span class="br">]</span>
+  order_total  <span class="ty">DECIMAL</span>
+<span class="br">}</span></pre>
+  </div>
+  <svg class="edge" width="470" height="400">
+    <!-- orthogonal edge: dim_customer.customer_key (one) -> fct_order.customer_key (many) -->
+    <path d="M200 250 H 221 A 14 14 0 0 1 235 264 V 321 A 14 14 0 0 0 249 335 H 270"
+          fill="none" stroke="#60a5fa" stroke-opacity=".85" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="200" cy="250" r="4.6" fill="#60a5fa"/>
     <!-- crow's foot (many side) -->
-    <path d="M288 278 L 300 292 L 312 278 M300 276 V 292"
-          fill="none" stroke="#5b6472" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M256 335 L 270 326 M256 335 L 270 344"
+          fill="none" stroke="#60a5fa" stroke-opacity=".85" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
   <div class="node n1">
-    <div class="hd"><span class="dot" style="background:#60a5fa"></span>dim_customer</div>
+    <div class="hd"><span class="dot"></span>dim_customer</div>
     <div class="row"><span class="k">customer_key</span><span class="pk pkk">PK</span></div>
-    <div class="row"><span>customer_name</span><span>varchar</span></div>
-    <div class="row"><span>valid_from</span><span>SCD2</span></div>
+    <div class="row"><span>customer_name</span><span>VARCHAR</span></div>
+    <div class="row"><span>email</span><span>VARCHAR</span></div>
   </div>
   <div class="node n2">
-    <div class="hd"><span class="dot" style="background:#22c55e"></span>fct_order</div>
+    <div class="hd"><span class="dot"></span>fct_order</div>
     <div class="row"><span class="k">order_key</span><span class="pk pkk">PK</span></div>
     <div class="row"><span class="k">customer_key</span><span class="pk fkk">FK</span></div>
-    <div class="row"><span>order_total</span><span>numeric</span></div>
+    <div class="row"><span>order_total</span><span>DECIMAL</span></div>
   </div>
 </div>
 </body></html>

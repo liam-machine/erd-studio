@@ -61,7 +61,7 @@ export interface TrackedDraftPreviewDeps {
   claim(): void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
   feature(key: TelemetryFeature): void;
-  /** A Keep wrote the draft (Import DBML's or Draw from dbt's writer: into this folder). */
+  /** A Keep wrote the draft (Import DBML's or Import from dbt's writer: into this folder). */
   onKept(draft: Draft): unknown;
   /** Every draft handed to the page (the automatic draft's "was anything shown?"). */
   onAsk?(draft: Draft): void;

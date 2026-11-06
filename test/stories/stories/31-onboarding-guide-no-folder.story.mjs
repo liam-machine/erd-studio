@@ -44,7 +44,7 @@ export default story({
     await givenVSCode(s, undefined, { say: 'Given VS Code as I use it, with no folder open.' });
     await installStep(s);
 
-    const AROUND = 'Watch the One-Minute Tour';
+    const AROUND = 'Watch the Tour';
     await s.step('Its walkthrough opens, with Show Me Around', async () => {
       await theOneInterruption(s, 'walkthrough', /Get started with ERD Studio/);
       const step = s.sel.walkthroughStep(AROUND);

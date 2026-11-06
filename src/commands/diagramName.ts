@@ -1,6 +1,6 @@
 /**
  * A diagram's name as people type it, everywhere one is asked for: New
- * Diagram, Import DBML…, Import SQL DDL…, Import Semantic Model… and Draw
+ * Diagram, Import DBML…, Import SQL DDL…, Import Semantic Model… and Import
  * from dbt. "Sales" or "Customer 360" is accepted and saved as its file name
  * (`sales`, `customer-360`), with a quiet "Saved as …" under the box; only
  * what no file name can be made from is refused. One rule, so the same name

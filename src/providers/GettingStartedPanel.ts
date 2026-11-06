@@ -14,7 +14,7 @@
  * example), a folder without dbt (`logicalOnly`: the AI cards with the guided
  * setup's no-dbt wording — no dbt text at all), and a dbt project (the
  * guided setup and the sample project).
- * The dbt page plays the dbt tour; the other two play the logical-first cut
+ * The dbt page plays the default cut (the DBML tour plus a short dbt beat); the other two play the logical-first cut
  * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
@@ -86,7 +86,7 @@ export const GETTING_STARTED_TITLE = GETTING_STARTED_TAB_TITLE;
 
 /**
  * Shipped media, relative to the extension root (spec addendum V4/V5): the
- * dbt tour (`video`, `poster`) for the dbt page, and the logical-first cut
+ * default cut, the DBML tour plus a short dbt beat (`video`, `poster`), for the dbt page, and the logical-first cut
  * (`logicalVideo`, `logicalPoster`) for the no-folder and logical pages.
  */
 export const GETTING_STARTED_MEDIA = {
@@ -97,7 +97,7 @@ export const GETTING_STARTED_MEDIA = {
   logicalPoster: 'getting-started-logical-poster.jpg',
 } as const;
 
-/** The cut, poster, captions and transcript a page plays: the dbt tour only on the dbt page. */
+/** The cut, poster, captions and transcript a page plays: the default cut (with its dbt beat) only on the dbt page. */
 export function gettingStartedCut(mode: GettingStartedPageMode): {
   video: string;
   poster: string;
@@ -211,7 +211,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
 // ---------------------------------------------------------------------------
 
 export interface ProjectSummaryInput {
-  /** `listDraftModels()` — the dbt models Draw from dbt can offer (yml ∪ manifest, minus disabled). */
+  /** `listDraftModels()` — the dbt models Import from dbt can offer (yml ∪ manifest, minus disabled). */
   models: readonly DraftModelEntry[];
   /** For each model's schema (a medallion schema token counts as a layer). */
   manifest?: ManifestData;
@@ -728,7 +728,7 @@ export interface GettingStartedDeps {
    * `known()` at once (the first status), `refresh()` after the bounded look
    * at the folder (a second status when it changed the suggestion).
    * Optional: without it, the suggestion comes from the status alone
-   * (Convert, Draw from dbt or a blank diagram; no look).
+   * (Convert, Import from dbt or a blank diagram; no look).
    */
   startIntent?: {
     known(): StartIntent | undefined;

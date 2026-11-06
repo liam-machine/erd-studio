@@ -6,7 +6,7 @@
  *  - an import plan (`planDbmlImport`: a DBML file, converted SQL, a
  *    converted semantic model, or the coffee-shop example in a folder),
  *    {@link draftFromImportPlan};
- *  - Draw from dbt's draft of one models folder, {@link draftFromDbt};
+ *  - Import from dbt's draft of one models folder, {@link draftFromDbt};
  *  - a bundled example project, {@link draftFromExampleProject};
  *  - the coffee-shop example with no folder open, {@link exampleDbmlDraft}.
  *
@@ -554,7 +554,7 @@ export interface DbtDraftInput {
   layers: readonly LayerConfig[];
   /** Library tables that gain a relationship (`routeToLibrary`'s `changed`): drawn as they will be. */
   changedTables?: readonly SemanticTable[];
-  /** Offer Change options… (Draw from dbt's picker). Default true. */
+  /** Offer Change options… (Import from dbt's picker). Default true. */
   changeOptions?: boolean;
   notice?: string;
 }
@@ -571,7 +571,7 @@ function skippedLine(s: DraftSkipped): string | undefined {
   }
 }
 
-/** The draft of one dbt models folder (Draw from dbt's `buildDbtDraft`). Keep runs Draw from dbt's write step. */
+/** The draft of one dbt models folder (Import from dbt's `buildDbtDraft`). Keep runs Import from dbt's write step. */
 export function draftFromDbt(input: DbtDraftInput): Draft {
   const { draft, scope, target } = input;
   // `routeToLibrary`'s `changed` can hold new models too (their relationships are on them already): only library tables count.

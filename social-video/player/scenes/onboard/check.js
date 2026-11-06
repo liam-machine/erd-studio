@@ -4,7 +4,7 @@
 //
 // On `physical` the pointer clicks the Physical tab: it turns green with the lock, the node
 // borders and edges blend blue -> green, read-only tabs appear over the nodes, and the column
-// types the draft left `unknown` fill in (the Physical stage reads catalog.json; Draw from dbt
+// types the draft left `unknown` fill in (the Physical stage reads catalog.json; Import from dbt
 // does not). A note says where Physical is read from. On `compare` we stay on Physical (the
 // headline is about what dbt built): the pointer hovers Diff, whose real tooltip reads
 // "Compare across stages" (so a muted viewer can map the narration's "Compare" to the button),

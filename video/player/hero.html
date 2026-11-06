@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!--
+  The README's hero GIF (media/demo.gif): ERD Studio in a plain folder, drawn from the video's own
+  pieces by hero.js and captured frame by frame by ../hero-gif.mjs (npm run gif).
+  One frame: http://127.0.0.1:4173/video/player/hero.html?t=8
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ERD Studio — README GIF</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    html, body { width: 1440px; height: 900px; }
+    body { background: #0f1114; }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage"></div>
+  <script type="module">
+    import './hero.js';
+    const t = new URLSearchParams(location.search).get('t');
+    if (t !== null) window.render(parseFloat(t));
+  </script>
+</body>
+</html>

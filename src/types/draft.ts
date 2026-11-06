@@ -6,7 +6,7 @@
  * TABLE scripts, a Power BI / Fabric semantic model, a DBML file, a dbt
  * project) or, when it found nothing, an example — read-only, in an editor
  * tab, with **nothing written** until the user presses Keep. Keep runs the
- * import's (or Draw from dbt's) existing write step: there is no second
+ * import's (or Import from dbt's) existing write step: there is no second
  * writer.
  *
  * Three packages code against this file and nothing else of each other's:
@@ -35,7 +35,7 @@ import { DRAFT_GUIDE_ACTIONS, parseGuideAction, type GuideActionPayload } from '
 
 /**
  * What a draft was built from. `sqlDdl`, `semanticModel` and `dbml` are the
- * user's files run through Import DBML's planner; `dbt` is Draw from dbt's
+ * user's files run through Import DBML's planner; `dbt` is Import from dbt's
  * draft of one models folder; `example` is the built-in coffee-shop DBML
  * (planned like an import); `exampleProject` is one of the bundled
  * `docs/examples/*` projects, read from memory.
@@ -220,7 +220,7 @@ export interface DraftView {
 export type DraftKeep =
   /** Import DBML's write step (`importDbml`): a DBML file, converted SQL or semantic model, or the coffee-shop example in a folder. */
   | { writer: 'importDbml'; importSource: 'file' | 'sql' | 'semanticModel' | 'example'; target: DraftTarget; fingerprint: string }
-  /** Draw from dbt's write step (`drawFromDbt`). */
+  /** Import from dbt's write step (`drawFromDbt`). */
   | { writer: 'drawFromDbt'; scopeId: string; target: DraftTarget; fingerprint: string }
   /** Open an Example…'s write step for a bundled project (`openExampleProject`: a folder of its own). */
   | { writer: 'exampleProject'; exampleId: string }

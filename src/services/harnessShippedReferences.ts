@@ -39,7 +39,8 @@ export const SHIPPED_SETUP_REFERENCE_HASHES: Readonly<Record<string, readonly st
   ],
   'references/without-dbt.md': [
     '072b0cb4409383d6', '08b24e1f84dac86d', '1da4b0384298b129', '784d60e87f158d95',
-    '97cdc2529ebd8275', 'bf86cce69c4ddc9c', 'c5981e31ad719b0d', 'ff29124b2e0588b9',
+    '97cdc2529ebd8275', 'bf86cce69c4ddc9c', 'c5981e31ad719b0d', 'dfcef69a6a3078fc',
+    'ff29124b2e0588b9',
   ],
 };
 

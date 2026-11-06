@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Logical data modeling in Git: draw ERDs in VS Code as plain files your AI assistant can read. New projects are DBML, an open format; YAML/JSON projects keep working. Import from dbdiagram.io, compare with dbt.",
+  "description": "Logical data modeling in Git, stored as DBML, an open format. Draw ERDs in VS Code as files your AI assistant reads and writes. Import DBML, SQL or Power BI; compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -100,7 +100,7 @@
     "commands": [
       {
         "command": "erdStudio.drawFromDbt",
-        "title": "Draw from dbt…",
+        "title": "Import from dbt…",
         "category": "ERD Studio",
         "icon": "$(wand)"
       },
@@ -393,7 +393,7 @@
       },
       {
         "command": "erdStudio.showGettingStarted",
-        "title": "Watch the One-Minute Tour",
+        "title": "Watch the Tour",
         "category": "ERD Studio",
         "icon": "$(play-circle)"
       },
@@ -563,7 +563,7 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
         "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed"
       },
       {
@@ -707,8 +707,8 @@
           },
           {
             "id": "draw",
-            "title": "Draw from dbt",
-            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit. No AI needed.\n[Draw from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "title": "Import from dbt",
+            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit, by hand or with your AI assistant.\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
             "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed",
             "media": {
               "svg": "media/walkthrough/draw.svg",
@@ -737,8 +737,8 @@
           },
           {
             "id": "watch",
-            "title": "Watch the One-Minute Tour",
-            "description": "Draw your dbt project, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, edit it by hand or with AI, then compare it with what dbt builds.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",
@@ -750,11 +750,11 @@
           },
           {
             "id": "watchLogical",
-            "title": "Watch the One-Minute Tour",
-            "description": "Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, and edit it by hand or with your AI assistant.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
-              "svg": "media/walkthrough/watch.svg",
+              "svg": "media/walkthrough/watch-logical.svg",
               "altText": "A video player showing a small diagram of three related tables."
             },
             "completionEvents": [

@@ -203,7 +203,7 @@ describe('buildSyncPlan', () => {
     expect(buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, manifest }).modelContext.dim_missing.dbtSqlPath).toBeNull();
   });
 
-  it('writes a column only the warehouse reports as Draw from dbt seeds it: ALL-CAPS lowercased', () => {
+  it('writes a column only the warehouse reports as Import from dbt seeds it: ALL-CAPS lowercased', () => {
     const r: DiscrepancyReport = { ...report(), models: [{ name: 'fct_order', status: 'matched', columns: [
       { name: 'LOADED_AT', status: 'missing', targetDataType: 'TIMESTAMP_NTZ' },
       { name: 'REGION', status: 'missing', targetDataType: 'TEXT' },

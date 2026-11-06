@@ -107,7 +107,7 @@ const DBT_WORD = /\bdbt(?:\b|_)/i;
 
 /** Controls that only make sense with dbt. Several name no dbt, so they are listed, not matched. */
 const DBT_CONTROLS = [
-  'Draw from dbt',
+  'Import from dbt',
   'Try the Sample Project',
   'Select dbt Project…',
   'Refresh Manifest',
@@ -124,7 +124,7 @@ type DbtControl = typeof DBT_CONTROLS[number];
 
 /** A contributed command (palette, menu, link, tree row) → the dbt control it is. */
 const COMMAND_CONTROLS: Record<string, DbtControl> = {
-  'erdStudio.drawFromDbt': 'Draw from dbt',
+  'erdStudio.drawFromDbt': 'Import from dbt',
   'erdStudio.trySampleProject': 'Try the Sample Project',
   'erdStudio.selectDbtProject': 'Select dbt Project…',
   'erdStudio.refreshManifest': 'Refresh Manifest',
@@ -139,7 +139,7 @@ const PANEL_CONTROLS: Record<string, DbtControl> = {
 
 /** Getting Started panel starts (`data-action="start" data-start="…"`) → the dbt control they are. */
 const PANEL_START_CONTROLS: Record<string, DbtControl> = {
-  drawFromDbt: 'Draw from dbt',
+  drawFromDbt: 'Import from dbt',
 };
 
 type Surface = 'package.json' | 'gettingStarted' | 'importGuide' | 'trees' | 'canvas' | 'toasts' | 'harness' | 'cli';
@@ -147,7 +147,7 @@ const SURFACES: Surface[] = ['package.json', 'gettingStarted', 'importGuide', 't
 
 /** Import guide buttons (`data-guide-action="…"`) → the dbt control they are. */
 const GUIDE_CONTROLS: Record<string, DbtControl> = {
-  dbt: 'Draw from dbt',
+  dbt: 'Import from dbt',
 };
 
 interface Shown { where: string; text: string }
@@ -802,7 +802,7 @@ beforeAll(() => {
 
 describe('the matcher', () => {
   it('matches dbt as a word, never DBML, dbdiagram or an id', () => {
-    for (const yes of ['Draw from dbt…', 'Run dbt parse', 'dbt_project.yml', 'New to dbt? How to install it', 'DBT']) {
+    for (const yes of ['Import from dbt…', 'Run dbt parse', 'dbt_project.yml', 'New to dbt? How to install it', 'DBT']) {
       expect(DBT_WORD.test(yes), yes).toBe(true);
     }
     for (const no of ['Import DBML…', 'Export to DBML', 'From dbdiagram.io or any DBML tool', 'erdStudio.drawFromDbt', 'erdStudio.hasDbtProject', 'dbtSemantic.projectPath']) {
@@ -910,16 +910,16 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
 
   it('package.json: the dbt walkthrough steps, welcome views and commands', () => {
     const shown = got.text['package.json'];
-    // The fixture is a project from before 2.0: its start step is Convert, with Draw from dbt under it.
+    // The fixture is a project from before 2.0: its start step is Convert, with Import from dbt under it.
     for (const step of ['watch', 'convertDbt']) {
       expect(shown.some((s) => s.where === `walkthrough step ${step} title`), step).toBe(true);
     }
-    // Draw from dbt is one of its "More ways to start…" (the quick pick: moreStartsFor).
+    // Import from dbt is one of its "More ways to start…" (the quick pick: moreStartsFor).
     expect(shown.some((s) => s.where === 'walkthrough step convertDbt description' && s.text.includes('[More ways to start…]'))).toBe(true);
     expect(moreStartsFor({ hasProject: true, hasDbt: true, storage: 'yaml' })).toContain('drawFromDbt');
     expect(shown.some((s) => s.where.startsWith('walkthrough step watchLogical'))).toBe(false);
-    expect(all('package.json')).toContain('Draw your dbt project, explore the diagram');
-    expect(all('package.json')).toContain('ERD Studio: Draw from dbt…');
+    expect(all('package.json')).toContain('then compare it with what dbt builds');
+    expect(all('package.json')).toContain('ERD Studio: Import from dbt…');
     expect(all('package.json')).toContain('ERD Studio: Regenerate dbt selectors.yml');
     expect(shown.some((s) => s.where.startsWith('viewsWelcome') && DBT_WORD.test(s.text))).toBe(true);
   });
@@ -935,13 +935,13 @@ describe('dbt-project: every dbt control and the key dbt texts are still there',
     }
     expect(got.text.gettingStarted.some((s) => s.where === 'panel video' && /getting-started\.mp4/.test(s.text))).toBe(true);
     expect(got.text.gettingStarted.some((s) => s.where === 'panel captions' && DBT_WORD.test(s.text))).toBe(true);
-    // Draft-first: the tab holds no start card; Draw from dbt is the dbt project's draft (the sidebar, the
+    // Draft-first: the tab holds no start card; Import from dbt is the dbt project's draft (the sidebar, the
     // popup's Show Me) and its own How-to clip, shown on the dbt page only (when the clips ship).
   });
 
-  it('the import guide: the dbt card leads, with Draw from dbt', () => {
-    expect(all('importGuide')).toContain('Draw from dbt copies your dbt models');
-    expect(got.controls.get('Draw from dbt') ?? []).toContain('import guide');
+  it('the import guide: the dbt card leads, with Import from dbt', () => {
+    expect(all('importGuide')).toContain('Import from dbt copies your dbt models');
+    expect(got.controls.get('Import from dbt') ?? []).toContain('import guide');
   });
 
   it('the canvas: the dbt wording on the alias row and the New Relationship hint', () => {

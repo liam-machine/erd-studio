@@ -3,11 +3,11 @@
 // What every new dbt user now sees first: the start suggestion, "ERD Studio
 // found a dbt project in this folder. Show its models as a diagram? Nothing
 // is saved until you keep it." (Show Me / Don't Ask Again for This Folder),
-// while the empty Diagrams view leads with "Draw from dbt" (its one button).
+// while the empty Diagrams view leads with "Import from dbt" (its one button).
 // Show Me is Draft-first: no picker, no name box, a read-only draft of the
 // top-ranked models folder (gold) with a Folder switcher over the others.
 // Switching to silver redraws it ("Draft: silver"), still nothing on disk.
-// Keep as Diagram runs Draw from dbt's writer: the drawn tables become DBML
+// Keep as Diagram runs Import from dbt's writer: the drawn tables become DBML
 // files in the layer of their folder, the dbt relationship tests become Refs,
 // the diagram file keeps a laid-out position for every table, and the canvas
 // shows the Logical / Physical switch dbt brings.
@@ -38,10 +38,10 @@ export default story({
       const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
       s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
       s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
-      // The same start in the sidebar: Draw from dbt is the empty Diagrams view's one button.
+      // The same start in the sidebar: Import from dbt is the empty Diagrams view's one button.
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Draw from dbt'), { what: 'the Draw from dbt button in the empty Diagrams view' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Draw from dbt'], 'Draw from dbt should be the one button in the empty Diagrams view');
+      await s.expectVisible(s.sel.welcomeLink('Import from dbt'), { what: 'the Import from dbt button in the empty Diagrams view' });
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import from dbt'], 'Import from dbt should be the one button in the empty Diagrams view');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);
       await s.wb.unhighlight();

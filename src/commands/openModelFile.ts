@@ -30,7 +30,7 @@ export async function openTableFileAt(filePath: string, line?: number, column?: 
  * A command's refused write (§4.7 of docs/plans/native-dbml-storage.md): a
  * modal with the refusal's own sentence and `outcome`, naming the file (and
  * line) it points at, with Open File there. `refusalLocation` is the one
- * answer for where a refusal points, shared with Draw from dbt and Import DBML.
+ * answer for where a refusal points, shared with Import from dbt and Import DBML.
  */
 export function showRefusedWrite(
   title: string,

@@ -4,7 +4,7 @@
 // frame), so it needs only a built timeline (tts + timeline), not a capture or an encode.
 //
 //   VARIANT=readme node thumb.mjs                      -> ../docs/assets/how-it-works-play.jpg
-//   VARIANT=readme node thumb.mjs --t 77.2 --out x.jpg  another frame / another file
+//   VARIANT=readme node thumb.mjs --t 40.5 --out x.jpg  another frame / another file
 //
 // The JPEG quality steps down from 88 until the file is under --max-kb (default 250), because
 // the README serves it through jsDelivr on every page view.
@@ -21,12 +21,16 @@ const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 ? dflt : argv[i + 1]; };
 
 const timeline = JSON.parse(readFileSync(join(BUILD, 'timeline.json'), 'utf8'));
-// Default frame: the Diff scene once all three differences are lit (its `lights` beat + 5 s).
-const diff = timeline.scenes.find((s) => s.id === 'diff');
-const T = Number(opt('t', diff ? diff.start + diff.beats.lights.t + 5 : timeline.total / 2));
+// Default frame: a scene can name its poster moment (`props.poster: { beat, offset }` in the
+// script); the README cut picks the canvas with its .dbml file open beneath it. Otherwise the
+// middle of the video.
+const posterScene = timeline.scenes.find((s) => s.props?.poster);
+const T = Number(opt('t', posterScene
+  ? posterScene.start + posterScene.beats[posterScene.props.poster.beat].t + (posterScene.props.poster.offset ?? 0)
+  : timeline.total / 2));
 const OUT = opt('out', join(HERE, '..', 'docs', 'assets', 'how-it-works-play.jpg'));
 const TITLE = opt('title', 'How ERD Studio works');
-const SUB = opt('sub', 'Logical design, dbt reality, and the diff between them');
+const SUB = opt('sub', 'Your logical data model in Git, stored as DBML');
 const MAX_KB = Number(opt('max-kb', 250));
 const secs = Math.round(timeline.total);
 const DURATION = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;

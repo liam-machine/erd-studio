@@ -5,9 +5,10 @@
 //   getting-started.vtt            captions (a source artefact: it is not shipped)
 //   ../src/types/gettingStartedTranscript.ts   the same cues as a TS constant for the Welcome panel
 //
-// VARIANT picks the cut (see CUTS below): unset is the dbt tour (script.yaml, build/, the files
-// above); VARIANT=logical is the cut for a folder without dbt (script.logical.yaml, build-logical/,
-// getting-started-logical.vtt and src/types/gettingStartedLogicalTranscript.ts).
+// VARIANT picks the cut (see CUTS below): unset is the default cut, the DBML tour with a short dbt
+// beat (script.yaml, build/, the files above); VARIANT=logical is the same tour without it, for a
+// folder without dbt (script.logical.yaml, build-logical/, getting-started-logical.vtt and
+// src/types/gettingStartedLogicalTranscript.ts).
 //
 // Timing is derived from the real audio, never guessed: change a line, re-run tts + timeline,
 // and every beat that hangs off it moves with it.
@@ -21,7 +22,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
 
 /**
- * Every cut the pipeline renders, keyed by VARIANT ('' is the default, dbt cut). `mp4` is the
+ * Every cut the pipeline renders, keyed by VARIANT ('' is the default cut). `mp4` is the
  * shipped video the cues belong to; the two constant names are what the generated module exports.
  */
 export const CUTS = {
@@ -84,7 +85,9 @@ export function buildTimeline(script, durations) {
     clock += dur;
     return scene;
   });
-  return { fps: 30, width: 1920, height: 1080, fade, total: round(clock), chapters: script.chapters, scenes };
+  // A recorded cut (script.yaml `recording`) carries the inset its footage plays in: record/ and
+  // capture/composite read it from here.
+  return { fps: 30, width: 1920, height: 1080, fade, total: round(clock), chapters: script.chapters, recording: script.recording ?? null, scenes };
 }
 
 /** Splits text into caption-sized pieces at sentence, then clause, boundaries. */

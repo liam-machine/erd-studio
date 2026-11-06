@@ -6,7 +6,7 @@ description: >-
   logical model that mirrors dbt, checks it with the ERD Studio diff and opens the canvas within
   minutes - then offers to detect and apply the team's modelling style (medallion or
   staging/marts layers; Kimball, Data Vault and more). Enriches diagrams that already exist (such
-  as a Draw from dbt draft) with keys, grain, roles, rationale and metadata instead of rebuilding
+  as an Import from dbt draft) with keys, grain, roles, rationale and metadata instead of rebuilding
   them; full setup on request. Without dbt, designs a first diagram from a description of the
   business, or enriches a DBML import.
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
@@ -203,13 +203,13 @@ and in each parent up to the nearest folder holding `.erd-studio/`. None → the
   keys, and how they connect.
 - First one diagram goes on screen — a copy of what dbt already has, checked against it. Then,
   if they like, you add their team's design rules. Nothing in dbt changes unless they say so.
-- The first diagram needs no AI at all: **ERD Studio: Draw from dbt…** in the Command Palette, or
+- The first diagram needs no AI at all: **ERD Studio: Import from dbt…** in the Command Palette, or
   on the Welcome tab, drafts one from the dbt files. This walkthrough does the same and checks it.
 
 Show the checklist and ask "Ready?". After doctor (Stage 1), pick the route yourself and say it in
 one line — never ask the user to choose:
 
-- **Enrich** — doctor's `erd.domains` is above 0: a diagram exists, often a **Draw from dbt**
+- **Enrich** — doctor's `erd.domains` is above 0: a diagram exists, often an **Import from dbt**
   draft (dbt's columns, no grain, role, rationale or natural keys). Do not rebuild it: follow
   "Enriching an existing diagram" below — unless they asked for a new area (quick start for it).
 - **Full setup** — the user asks for it ("the full setup", "do it properly") or already described
@@ -479,7 +479,7 @@ changes in the logical model; never rename a model; never edit dbt files.
   - any metadata next step `references/metadata.md` asks for (sections 3, 5 and 6);
   - fill in any descriptions marked "(draft)" and the blanks on the "to confirm" list;
   - another business area: run `/erd-studio-setup` again (safe — existing models are kept, the
-    saved approach reused), or draft it with **Draw from dbt…** and run this again to enrich it;
+    saved approach reused), or draft it with **Import from dbt…** and run this again to enrich it;
   - after changing dbt, run `dbt parse` and click **Compare with dbt** on the canvas;
   - future logical ↔ dbt changes can go through the canvas: **Compare with dbt** → **⊕ Sync** → **Apply
     Changes** writes a sync plan the schema skill's SYNC.md guide carries out (with a target

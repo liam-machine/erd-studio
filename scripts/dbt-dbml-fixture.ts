@@ -1,7 +1,7 @@
 /**
  * The DBML copy of the dbt fixture: `test/fixtures/dbt-project-dbml` is
  * `test/fixtures/dbt-project` after Convert Project to DBML, so the whole dbt
- * loop (Physical tab, Compare, Sync, Draw from dbt, `selectors.yml`) runs on
+ * loop (Physical tab, Compare, Sync, Import from dbt, `selectors.yml`) runs on
  * native DBML storage against the same dbt project. Shared by the generator
  * (`scripts/regen-dbt-dbml-fixture.ts`) and the test that keeps the committed
  * copy in step (`test/unit/dbtProjectDbmlFixture.test.ts`). No `vscode`.

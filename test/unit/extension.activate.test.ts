@@ -187,7 +187,7 @@ describe('activate() with no folder open (empty window)', () => {
     );
   });
 
-  it('Draw from dbt gets the no-project stub and no legacy alias', async () => {
+  it('Import from dbt gets the no-project stub and no legacy alias', async () => {
     expect(CONTRIBUTED).toContain('erdStudio.drawFromDbt');
     expect(NO_LEGACY_ALIAS.has('erdStudio.drawFromDbt')).toBe(true);
     await activate(context);
@@ -752,11 +752,11 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
   });
 
-  it('Draw from dbt explains that it needs a dbt project and writes nothing', async () => {
+  it('Import from dbt explains that it needs a dbt project and writes nothing', async () => {
     await activate(context);
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
     expect(info).toHaveBeenCalledWith(
-      'Draw from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.',
+      'Import from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.',
     );
     expect(pick).not.toHaveBeenCalled();
     expect(listTree(ws)).toEqual([]);
@@ -2198,13 +2198,16 @@ describe('Welcome panel: first run', () => {
     });
     // The tagline: short enough that VS Code's Welcome page never cuts it off.
     expect(walkthrough.description).toBe('Design your data model in Git. Let your AI build from it.');
-    // The dbt tour is unchanged in a dbt project; a folder without dbt gets the same video under neutral words.
-    expect(step('watch').description).toContain('Draw your dbt project, explore the diagram');
-    expect(step('watchLogical').title).toBe('Watch the One-Minute Tour');
+    // A dbt project's tour is the DBML tour with a short dbt beat last; a folder without dbt gets the cut without it, under neutral words.
+    expect(step('watch').description).toContain('see its DBML files next to your code, edit it by hand or with AI, then compare it with what dbt builds');
+    // ERD Studio works by hand or with your AI assistant: no step says otherwise (onboarding-and-cli.md → User-facing wording).
+    for (const s of walkthrough.steps) expect(s.description, s.id).not.toMatch(/no AI (needed|required)|without AI|nothing to configure/i);
+    expect(step('draw').description).toContain('a diagram you can edit, by hand or with your AI assistant.');
+    expect(step('watchLogical').title).toBe('Watch the Tour');
     // Show Me Around (the onboarding guide) is the tour steps' one quiet link: it replaced the short per-start videos.
-    expect(step('watchLogical').description).toBe('Start a diagram, add tables and relationships, and let your AI assistant fill in the detail.\n[Watch the One-Minute Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');
+    expect(step('watchLogical').description).toBe('Bring in your data model, see its DBML files next to your code, and edit it by hand or with your AI assistant.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)');
     expect(step('watch').description).toContain('\nOr: [Show Me Around](command:erdStudio.showMeAround)');
-    expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch.svg');
+    expect(step('watchLogical').media.svg).toBe('media/walkthrough/watch-logical.svg');
     expect(step('watchLogical').completionEvents).toEqual(['onCommand:erdStudio.showGettingStarted']);
     // Every start is one click through erdStudio.start, which counts where it came from: one button,
     // titled with its one label, and one quiet "More ways to start…" link to the rest (a quick pick).
@@ -2218,8 +2221,8 @@ describe('Welcome panel: first run', () => {
     for (const s of walkthrough.steps) expect(s.description, s.id).not.toContain('no lock-in');
     // The direct imports reuse the import picture: no new file in the VSIX.
     for (const id of ['importSemanticModel', 'importSqlDdl', 'importDbmlFile']) expect(step(id).media.svg).toBe('media/walkthrough/import-dbml.svg');
-    expect(step('draw').title).toBe('Draw from dbt');
-    expect(step('draw').description).toContain(`[Draw from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
+    expect(step('draw').title).toBe('Import from dbt');
+    expect(step('draw').description).toContain(`[Import from dbt](${startCommandLink('drawFromDbt', 'walkthrough')})`);
     expect(step('convert').title).toBe('Convert to DBML');
     expect(step('convert').description).toContain(`[Convert to DBML…](${startCommandLink('convert', 'walkthrough')})`);
     // An empty window: Open Folder…, and the example among the more ways to start (it lands in a folder of its own).
@@ -2273,12 +2276,12 @@ describe('Welcome panel: first run', () => {
 
     expect(panelsOfType()).toHaveLength(0);
     expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
-    const notices = info.mock.calls.filter((c) => String(c[0]).includes('one-minute tour'));
+    const notices = info.mock.calls.filter((c) => String(c[0]).includes('a short tour'));
     expect(notices).toHaveLength(1);
     // One line, no list of assistants.
-    expect(notices[0][0]).toBe('ERD Studio has a one-minute tour, and can set up your AI assistant to work on the same files.');
+    expect(notices[0][0]).toBe('ERD Studio has a short tour, and can set up your AI assistant to work on the same files.');
     expect(String(notices[0][0])).not.toMatch(/Claude|Copilot|Codex|Gemini|Cursor/);
-    expect(notices[0].slice(1)).toEqual(['Watch the One-Minute Tour', 'Not now']);
+    expect(notices[0].slice(1)).toEqual(['Watch the Tour', 'Not now']);
   });
 
   it('"Watch" on the upgrade notice opens the panel', async () => {
@@ -2286,7 +2289,7 @@ describe('Welcome panel: first run', () => {
     openWorkspace(root);
     context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]) });
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
-      (message.includes('one-minute tour') ? 'Watch the One-Minute Tour' : undefined)) as never);
+      (message.includes('a short tour') ? 'Watch the Tour' : undefined)) as never);
 
     await activate(context);
     await vi.waitFor(() => expect(panelsOfType()).toHaveLength(1));
@@ -2395,7 +2398,7 @@ describe('erdStudio.drawFromDbt', () => {
     expect(count('dbtSemantic.drawFromDbt')).toBe(0);
   });
 
-  /** Run Draw from dbt from the palette to its draft (the top-ranked folder, nothing asked). */
+  /** Run Import from dbt from the palette to its draft (the top-ranked folder, nothing asked). */
   async function drawToDraft() {
     const run = vscode.commands.executeCommand('erdStudio.drawFromDbt');
     const draft = await nextDraft();
@@ -2613,7 +2616,7 @@ describe('ERD Studio diagrams status bar item', () => {
     expect(quickPick).toHaveBeenCalledTimes(1);
   });
 
-  it('is hidden with no diagrams and appears once Draw from dbt creates one', async () => {
+  it('is hidden with no diagrams and appears once Import from dbt creates one', async () => {
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
     const items = spyStatusBar();
     await activate(context);
@@ -3169,7 +3172,7 @@ describe('one activation prompt per window', () => {
     openWorkspace(root);
   });
 
-  const UPGRADE = 'one-minute tour';
+  const UPGRADE = 'a short tour';
   const NUDGE = 'This project has';
   const OFFER = 'Let your AI assistant';
   const shown = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.map((c) => String(c[0]))

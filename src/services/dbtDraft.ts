@@ -1,5 +1,5 @@
 /**
- * Draw from dbt — seed a LOGICAL draft domain from what the dbt project
+ * Import from dbt — seed a LOGICAL draft domain from what the dbt project
  * already declares, so a first diagram needs no AI session and no blank canvas.
  *
  * What it builds is the same thing the canvas's "Add Existing Model" does one
@@ -477,7 +477,7 @@ export function customDraftScope(modelNames: readonly string[], models: readonly
  * manifest), and is empty when no source has one; a catalog-only column's
  * description is its warehouse comment, as on the Physical tab. A model with
  * no declared columns gets none from the catalog either (an empty table, as
- * Add Existing Model gives it; Draw from dbt does not list it at all).
+ * Add Existing Model gives it; Import from dbt does not list it at all).
  * `seededColumnCount` counts the same columns without building the table.
  */
 export function seedTableFromDbt(

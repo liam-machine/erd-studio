@@ -116,7 +116,7 @@ export type SyncPlanLibrary = Pick<TableLibraryService,
  * CLI (`diff`) take them from, so both name the same files. A table with no
  * file goes where a table created from that diagram goes
  * (`newTableHomeFor`: its layer), and on a DBML diagram in its dbt custom
- * schema's folder when the developer configured one, as Draw from dbt and Add
+ * schema's folder when the developer configured one, as Import from dbt and Add
  * Tables from dbt place it (§2.4). `layerIds`: the layers in `layers.json`.
  */
 export function syncPlanLibraryLookups(
@@ -262,7 +262,7 @@ export function buildSyncPlan(
 
       columns.push({
         modelName,
-        // A column only the warehouse reports is written as Draw from dbt
+        // A column only the warehouse reports is written as Import from dbt
         // seeds it (`LOADED_AT` → `loaded_at`); a declared one as declared.
         columnName: action === 'add-column-to-logical' && !declaredInDbt(modelName, columnName)
           ? catalogColumnName(columnName)

@@ -732,7 +732,7 @@ export class SubjectAreaService {
         // because that is a different question.
         const disabled = manifest?.disabledModels.has(key) ?? false;
         // unique_id first, then the short-name index (catalogNodeFor — the
-        // same lookup Draw from dbt seeds types through); the relation index
+        // same lookup Import from dbt seeds types through); the relation index
         // only when no manifest resolved the model.
         const catalogNode = catalogNodeFor(catalog, manifestModel, key)
           ?? (manifestModel ? undefined : catalogByRelation?.get(relationKey(model.schema, model.alias ?? model.name)));

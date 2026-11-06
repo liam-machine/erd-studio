@@ -113,7 +113,7 @@ describe('the cards', () => {
   it('has one primary button at most: the suggestion\'s, or Open Folder… in an empty window; none otherwise', () => {
     const primaries = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')].map((b) => b.textContent);
     expect(primaries(BLANK)).toEqual([]);
-    expect(primaries(DBT)).toEqual(['Draw from dbt']);
+    expect(primaries(DBT)).toEqual(['Import from dbt']);
     expect(primaries(NOFOLDER)).toEqual(['Open Folder…']);
   });
 
@@ -238,7 +238,7 @@ describe('the page', () => {
       expect(p.text, JSON.stringify(ctx)).not.toMatch(/\bdbt\b/i);
       expect(p.doc.querySelector('[data-guide-action="dbt"]')).toBeNull();
     }
-    expect(page(DBT).text).toMatch(/Draw from dbt/);
+    expect(page(DBT).text).toMatch(/Import from dbt/);
   });
 
   it('with no folder open says so, with Open a folder…', () => {
