@@ -170,3 +170,40 @@ describe('renderNewTableDbml', () => {
     expect(() => renderNewTableDbml({ name: 'x', schema: 'a/b', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
   });
 });
+
+describe('Metadata blocks that name the table by its alias (Law 3)', () => {
+  const TEXT = "Table gold.x as DC {\n  id int\n}\n\nMetadata Table DC {\n  purpose: 'b'\n}\n\nMetadata Column DC.id {\n  note: 'n'\n}\n";
+
+  it.each(STORAGE_PARSERS)('an edit lands in the alias block and reads back as the edit (%s)', (_label, parser) => {
+    const read = (text: string): ReturnType<typeof readTable>['table'] => {
+      const reading = parseTableDbml(text, 'x', { schemaFolder: 'gold' }, parser);
+      if (!reading.ok) throw new Error(reading.error.message);
+      return reading.table;
+    };
+    const desired = clone(read(TEXT));
+    expect(desired.rationale).toEqual({ purpose: 'b' });
+    expect(desired.columns![0].description).toBe('n');
+    desired.rationale = { purpose: 'new' };
+    desired.columns![0].description = 'edited';
+    const out = editTableDbml(TEXT, desired, { parser, fileStem: 'x' });
+    expect(out).toBe(TEXT.replace("purpose: 'b'", "purpose: 'new'").replace("note: 'n'", "note: 'edited'"));
+    expect(read(out).rationale).toEqual({ purpose: 'new' });
+    expect(read(out).columns![0].description).toBe('edited');
+    // Clearing removes the block entry: the value does not come back.
+    delete desired.rationale;
+    desired.columns![0].description = '';
+    const cleared = editTableDbml(out, desired, { parser, fileStem: 'x' });
+    expect(cleared).not.toContain('purpose');
+    expect(read(cleared).rationale).toBeUndefined();
+    expect(read(cleared).columns![0].description).toBe('');
+  });
+
+  it('a rename keeps an alias block as it is (the alias still names the table)', () => {
+    const desired = clone(parseTableDbml(TEXT, 'x', { schemaFolder: 'gold' }));
+    if (!desired.ok) throw new Error('read');
+    const out = editTableDbml(TEXT, { ...desired.table, name: 'y' }, { fileStem: 'x', rename: true });
+    expect(out).toContain('Table gold.y as DC {');
+    expect(out).toContain('Metadata Table DC {');
+    expect(out).toContain('Metadata Column DC.id {');
+  });
+});

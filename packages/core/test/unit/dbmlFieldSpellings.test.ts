@@ -65,7 +65,8 @@ describe('the bare spellings read as the same tables (the fields-new twin)', () 
     const old = read(OLD, 'fct_sale').fieldSpellings ?? [];
     const bare = read(NEW, 'fct_sale').fieldSpellings ?? [];
     expect(old.filter((s) => s.old).map((s) => `${s.owner}.${s.key}:${s.spelling}`)).toEqual([
-      '.purpose:rationale', '.design:rationale', '.measures:rationale', '.owner:meta', '.tier:meta', '.role_choice:rationale', '.reviewed:meta',
+      // rationale_design and rationale_role_choice are retired fields, not old spellings.
+      '.purpose:rationale', '.measures:rationale', '.owner:meta', '.tier:meta', '.reviewed:meta',
       'store_key.source:meta', 'amount.unit:meta',
     ]);
     // erd_ spellings are never old; meta_json entries that are not text are never old.
@@ -254,5 +255,24 @@ describe('what is and is not a field', () => {
     expect(Object.getOwnPropertyDescriptor(reading.table.meta!, '__proto__')?.value).toBe('p');
     expect(reading.table.meta!.constructor).toBe('c');
     expect(reading.table.columns![0].meta!.constructor).toBe('cc');
+  });
+});
+
+describe('spellings that are listed as they are (review fixes)', () => {
+  it('meta_json entries are listed under the setting they are read from: an erd_meta_json, whose entries are never old', () => {
+    const reading = inline(`meta_json: '{"a":"x"}', owner: 'o', erd_meta_json: '{"b":"y"}'`);
+    expect(reading.table.meta).toEqual({ b: 'y', owner: 'o' });
+    const json = reading.fieldSpellings!.filter((s) => s.spelling === 'json');
+    expect(json.map((s) => [s.key, s.name, s.used, s.old])).toEqual([['b', 'erd_meta_json', true, false]]);
+  });
+
+  it('a lone meta_json text entry under a bare key is still an old spelling', () => {
+    const json = inline(`meta_json: '{"steward":"crm"}'`).fieldSpellings!.filter((s) => s.spelling === 'json');
+    expect(json.map((s) => [s.key, s.name, s.old])).toEqual([['steward', 'meta_json', true]]);
+  });
+
+  it('rationale_<key> of a retired built-in is not an old spelling (it is reported as retired instead)', () => {
+    const spellings = inline("role: 'conformed-dim', rationale_design: 'd', rationale_role_choice: 'r', rationale_grain_choice: 'g', rationale_purpose: 'p'").fieldSpellings!;
+    expect(spellings.map((s) => [s.key, s.old])).toEqual([['design', false], ['role_choice', false], ['grain_choice', false], ['purpose', true]]);
   });
 });

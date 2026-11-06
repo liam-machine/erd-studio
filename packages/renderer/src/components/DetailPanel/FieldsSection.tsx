@@ -140,6 +140,8 @@ function addKeyError(key: string, scope: FieldScope, meta: Meta | undefined, row
   const id = builtIn ? fieldRowId(builtIn) : `meta:${key}`;
   const row = rows.find((r) => r.id === id);
   if (row) return `"${key}" is the ${row.definition.label} field: fill it in above.`;
+  // A retired built-in is never listed again: say where its text goes instead.
+  if (builtIn?.status === 'retired') return `"${key}" is a retired field. ${builtIn.guidance ?? 'Write it in Decisions instead.'}`;
   if (builtIn) return `"${key}" is the built-in field ${builtIn.label}: add ${builtIn.key} to fields.yml to use it.`;
   return null;
 }

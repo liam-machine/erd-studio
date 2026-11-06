@@ -37,6 +37,7 @@ import {
 import {
   FIELD_KEY_PATTERN,
   RATIONALE_FIELD_KEYS,
+  builtInField,
   fieldKeyToRationaleKey,
   isBareMetaKey,
   metaSpellingNames,
@@ -76,6 +77,8 @@ export interface MetadataBlock {
   column?: string;
   /** The name leaves of its target (`gold`, `fct_order`, `id`). */
   leaves: AstNode[];
+  /** It names the table by its `as` alias, which a rename or a move leaves as it is. */
+  viaAlias?: boolean;
 }
 
 /** The leaf names of a dotted name, as nodes (`gold.x.c` → the `gold`, `x` and `c` nodes). */
@@ -92,20 +95,26 @@ export function leafName(leaf: AstNode): string {
   return typeof v === 'string' ? v : '';
 }
 
-/** The file's `Metadata` blocks that target table `tableName` (any case) or one of its columns, in file order. */
-export function metadataBlocksOf(ast: AstNode | undefined, tableName: string): MetadataBlock[] {
-  const name = tableName.toLowerCase();
+/**
+ * The file's `Metadata` blocks that target table `tableName` (any case) or one
+ * of its columns, in file order. A block may also name the table by its `as`
+ * alias (`Metadata Table DC`, `Metadata Column DC.id`): the parsers merge
+ * those in, so the writer must reach them too, or an edit would be overridden.
+ */
+export function metadataBlocksOf(ast: AstNode | undefined, tableName: string, alias?: string): MetadataBlock[] {
+  const targets = new Set([tableName.toLowerCase()]);
+  if (alias) targets.add(alias.toLowerCase());
   const blocks: MetadataBlock[] = [];
   for (const node of topLevel(ast)) {
     if (elementType(node)?.toLowerCase() !== 'metadata') continue;
     const leaves = nameLeaves(node.name);
     const kind = String(node.targetKind?.value ?? '').toLowerCase() === 'column' ? 'column' : 'table';
     const names = leaves.map(leafName);
-    if (kind === 'table') {
-      if (names.length > 0 && names[names.length - 1].toLowerCase() === name) blocks.push({ node, kind, leaves });
-    } else if (names.length >= 2 && names[names.length - 2].toLowerCase() === name) {
-      blocks.push({ node, kind, column: names[names.length - 1], leaves });
-    }
+    const tableLeaf = kind === 'table' ? names[names.length - 1] : names.length >= 2 ? names[names.length - 2] : undefined;
+    if (tableLeaf === undefined || !targets.has(tableLeaf.toLowerCase())) continue;
+    const viaAlias = tableLeaf.toLowerCase() !== tableName.toLowerCase() ? { viaAlias: true } : {};
+    if (kind === 'table') blocks.push({ node, kind, leaves, ...viaAlias });
+    else blocks.push({ node, kind, column: names[names.length - 1], leaves, ...viaAlias });
   }
   return blocks;
 }
@@ -300,12 +309,13 @@ export function resolveFieldSettings(readings: readonly SettingReading[], scope:
   const jsons = classified.filter((c) => c.field?.home === 'json');
   let json: FieldSettings['json'];
   const jsonPosition = jsons.length > 0 ? jsons[0].position : -1;
-  if (jsons.length > 0) {
-    const chosen = jsons.find((c) => c.name !== DBML_RICH_META_JSON_PROPERTY) ?? jsons[0];
+  // The setting the entries are read from: its spellings are listed under its own name.
+  const chosenJson = jsons.find((c) => c.name !== DBML_RICH_META_JSON_PROPERTY) ?? jsons[0];
+  if (chosenJson) {
     let parsed: unknown;
     let valid = false;
     try {
-      parsed = JSON.parse(chosen.text);
+      parsed = JSON.parse(chosenJson.text);
       valid = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
     } catch {
       valid = false;
@@ -316,9 +326,9 @@ export function resolveFieldSettings(readings: readonly SettingReading[], scope:
         Object.defineProperty(object, k, { value: v, enumerable: true, writable: true, configurable: true });
       }
     } else {
-      Object.defineProperty(object, META_JSON_KEY, { value: chosen.text, enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(object, META_JSON_KEY, { value: chosenJson.text, enumerable: true, writable: true, configurable: true });
     }
-    json = { text: chosen.text, object, valid };
+    json = { text: chosenJson.text, object, valid };
   }
 
   // Rationale: the first spelling with text, the keys in the order their settings stand.
@@ -375,9 +385,9 @@ export function resolveFieldSettings(readings: readonly SettingReading[], scope:
     } else if (field.home === 'meta') {
       const winner = metaWinners.get(field.key);
       spellings.push({ home: 'meta', key: field.key, spelling: field.spelling, name: c.name, used: winner?.kind === 'setting' && winner.name === c.name, value: c.text });
-    } else if (json && c.position === jsonPosition) {
+    } else if (json && c.position === chosenJson?.position) {
       for (const k of Object.keys(json.object)) {
-        spellings.push({ home: 'meta', key: k, spelling: 'json', name: c.name, used: metaWinners.get(k)?.kind === 'json', value: json.object[k] });
+        spellings.push({ home: 'meta', key: k, spelling: 'json', name: chosenJson.name, used: metaWinners.get(k)?.kind === 'json', value: json.object[k] });
       }
     }
   }
@@ -430,19 +440,23 @@ export function metaPlacement(meta: Meta | undefined, scope: FieldScope): Array<
  * Whether a spelling found in a file is an old one: a new file would write
  * that field another way (spec A8). `rationale_<K>` of a built-in, and a
  * `meta` key held as `meta_<k>`, `rationale_<k>` or as a text `meta_json`
- * entry where a new file writes it bare. `erd_` spellings, bare ones,
- * `meta_<k>` of a reserved key and non-text `meta_json` entries are never old.
+ * entry where a new file writes it bare. `erd_` spellings (an entry of an
+ * `erd_meta_json` included), bare ones, `meta_<k>` of a reserved key and
+ * non-text `meta_json` entries are never old; nor is `rationale_<K>` of a
+ * retired built-in (design, role_choice, grain_choice), which is kept as it
+ * is and reported as retired instead.
  */
 export function isOldSpelling(
-  entry: { home: 'rationale' | 'meta'; key: string; spelling: DbmlFieldSpelling['spelling']; value: unknown },
+  entry: { home: 'rationale' | 'meta'; key: string; spelling: DbmlFieldSpelling['spelling']; value: unknown; name?: string },
   placement: ReadonlyMap<string, MetaSpelling>,
   scope: FieldScope,
 ): boolean {
   if (entry.spelling === 'erd' || entry.spelling === 'bare') return false;
-  if (entry.home === 'rationale') return entry.spelling === 'rationale';
+  if (entry.home === 'rationale') return entry.spelling === 'rationale' && builtInField(entry.key, scope)?.status !== 'retired';
   if (entry.spelling === 'rationale') return true;
   if (entry.spelling === 'meta') return isBareMetaKey(entry.key, scope);
   // A meta_json entry: old when it is text a new file writes bare (outside the meta_json span).
+  if (entry.name?.startsWith(DBML_RICH_PROPERTY_PREFIX)) return false;
   if (typeof entry.value !== 'string' || !isBareMetaKey(entry.key, scope)) return false;
   return placement.get(entry.key) !== 'json';
 }

@@ -104,7 +104,7 @@ left_out: [dimension, metrics]     # dbt meta keys that are another tool's setti
 ```
 
 - **key**: the setting's name in a table file: lower case letters, digits and `_` (DBML lower-cases setting names), never a reserved name ("Setting names" below), listed once. A bare name is a built-in as shipped; an entry with `key` is a built-in in the team's words (only `label`, `guidance` and `filled_by` change; its type, values and show_for are fixed) or a field of the team's own.
-- **label**: what the canvas and the exports call it. **guidance**: one sentence saying what to write; it is the canvas placeholder and your instruction.
+- **label**: what the canvas calls it (the exports keep their own labels). **guidance**: one sentence saying what to write; it is the canvas placeholder and your instruction.
 - **type**: `text` (the default: a sentence or two), `value` (one short value), `choice` (one of its `values`, at least two, in dropdown order) or `yes-no` (`'true'` or `'false'`).
 - **filled_by**: `anyone` (the default: people or you), `people` (you write only a value the user gives you) or `dbt` (copied from the dbt model's `meta:`, never typed in). **show_for**: `dimensions`, `facts` or `all` (the default), read from the table's role; a table with no role shows both, and a field with a value always shows.
 - **left_out**: dbt `meta:` keys that are another tool's settings (Lightdash's `dimension`, `metrics`): never copied or offered.
@@ -144,7 +144,7 @@ The built-in fields (starting = on without a fields.yml; optional = only when li
 | `meta_json` | metadata that is not text: lists, maps, numbers, and `true` / `false` for a key that is not a yes-no field. A text value is its own setting |
 | old spellings: `rationale_<key>` (`rationale_purpose`), `meta_<key>` (`meta_owner`), an entry in `meta_json` | the same field. Change it where it is; never add a second copy. A table holding two spellings uses the bare one (doctor: `fieldSpelledTwice`) |
 
-**Renaming old spellings** is the user's choice: only on a yes, all in one change, and only what doctor counts as `fieldOldSpellings`. Never rename `rationale_design`, `rationale_role_choice` or `rationale_grain_choice` (retired: offer to move the text into `decisions`, showing the result first), an entry in `meta_json`, or a `meta_<key>` whose key is reserved or a built-in that is not metadata (`meta_purpose`, `meta_role`, `meta_retention`): that is metadata of its own, shown as "purpose (metadata)", and `meta_<key>` is the same field only for a key of the team's own.
+**Renaming old spellings** is the user's choice: only on a yes, all in one change, and only what doctor counts as `fieldOldSpellings`. A text entry in `meta_json` that doctor counts moves out of the JSON into its own `<key>: '<value>'` setting. Never rename `rationale_design`, `rationale_role_choice` or `rationale_grain_choice` (retired, so doctor does not count them: offer to move the text into `decisions`, showing the result first), a `meta_json` entry doctor does not count, or a `meta_<key>` whose key is reserved or a built-in that is not metadata (`meta_purpose`, `meta_role`, `meta_retention`): that is metadata of its own, shown as "purpose (metadata)", and `meta_<key>` is the same field only for a key of the team's own.
 
 ## Relationships file: `<layer>/relationships/<file>.dbml`
 

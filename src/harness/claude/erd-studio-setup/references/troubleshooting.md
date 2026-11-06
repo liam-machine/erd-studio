@@ -140,6 +140,9 @@ the helper will be missing: ask them to start it from VS Code's integrated termi
   in `erd.dbmlProblems` has `mergeConflict: true` (a table file, a relationships file or a
   diagram; `layoutMergeConflict` when the markers are inside a diagram's `erd_layout`; never a
   `fix-dbml-file`).
+- doctor's `resolve-merge-conflicts` step naming `.erd-studio/fields.yml` — its entry in
+  `erd.fields.problems` is `fieldsYamlInvalid` with `mergeConflict: true` (never a
+  `fix-fields-file`); the canvas uses the starting set until it is resolved.
 
 The file still holds git's conflict markers (`<<<<<<<` … `=======` … `>>>>>>>`): two people
 changed the same lines, git kept both versions, and ERD Studio cannot read the file until one is
@@ -203,7 +206,8 @@ Other warnings are information.
 - **`fix-fields-file`** — `.erd-studio/fields.yml` has an error, and doctor's `erd.fields` names
   its line and what is wrong: a key that is reserved (`note` is a DBML setting), not lower case or
   listed twice, a `choice` without its `values`, an unknown `type`. Fix that line as the message
-  says, then re-run doctor. Its warnings (a misspelt built-in such as `purpse`) are worth a
+  says, then re-run doctor. A file with git conflict markers is `resolve-merge-conflicts`, never
+  this step: the user picks the side to keep, never you. Its warnings (a misspelt built-in such as `purpse`) are worth a
   one-line question. Never delete the file or a field the team listed without asking.
 - **`resolve-format-conflicts`** — the same table (or diagram) exists as both YAML/JSON and DBML
   (`x.yml` and `x.dbml`); only one is read. Show the user both files and ask which to keep;

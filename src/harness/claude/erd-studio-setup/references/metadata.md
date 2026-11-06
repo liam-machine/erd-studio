@@ -188,7 +188,10 @@ its `dbt` keys), each on the model or column where dbt has it.
   field (`owner: 'crm-team'`), and a yes-no field is `'true'` or `'false'` (`pii: 'true'`). Every
   other value (a number, a list, a map, or `true` / `false` for a key that is not a yes-no field)
   goes into the one `meta_json` setting as JSON (`meta_json: '{"tags":["finance"]}'`), merged
-  with what is already there. In a YAML table the key goes in `meta:`: `true` / `false` stay
+  with what is already there. In a YAML table, a field that is a text built-in (`freshness`,
+  `source_of_truth`, …) goes in the model's `rationale:` map under its camelCase key (`freshness`,
+  `sourceOfTruth`), never in `meta:`, where it would be metadata of its own beside an empty
+  built-in. A field of the team's own and `business_rule` go in `meta:`: `true` / `false` stay
   unquoted and a list stays a list; numbers arrive as text (`"24"`); write them quoted or not —
   ERD Studio reads `24` and `"24"` the same — but keep the quotes when leaving them off would
   change the digits (`"1.10"`, `"007"`). Nothing is reworded, merged or summarised.

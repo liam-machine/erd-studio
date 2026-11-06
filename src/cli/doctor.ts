@@ -630,6 +630,13 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
       if (p.code === 'layoutMergeConflict') positionsOnly.add(p.file);
     }
   }
+  // A conflicted fields.yml is the user's to resolve too, never fix-fields-file's.
+  for (const p of r.erd.fields?.problems ?? []) {
+    const file = p.file ?? r.erd.fields.file ?? `${r.semanticDir}/fields.yml`;
+    if (p.mergeConflict && p.line !== undefined && !conflictedFiles.some((c) => c.file === file)) {
+      conflictedFiles.push({ file, line: p.line });
+    }
+  }
   if (conflictedFiles.length > 0) {
     const n = conflictedFiles.length;
     const onlyDiagrams = conflictedFiles.every((c) => r.erd.conflictedDomainFiles.includes(c));
@@ -711,7 +718,7 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: NextStepDeps): N
   }
   // The field list does not read: like a DBML file, it is fixed before anything else. Only
   // its errors raise this step; a warning or information about fields never does.
-  const fieldErrors = (r.erd.fields?.problems ?? []).filter((p) => p.severity === 'error');
+  const fieldErrors = (r.erd.fields?.problems ?? []).filter((p) => p.severity === 'error' && !(p.mergeConflict && p.line !== undefined));
   if (fieldErrors.length > 0) {
     const file = r.erd.fields.file ?? `${r.semanticDir}/fields.yml`;
     const n = fieldErrors.length;

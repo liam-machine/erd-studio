@@ -412,6 +412,10 @@ describe('FieldsSection — + Add field', () => {
       ['constructor', '"constructor" cannot be a field key. Pick another key.'],
       ['purpose', '"purpose" is the Purpose field: fill it in above.'],
       ['freshness', '"freshness" is the built-in field Freshness: add freshness to fields.yml to use it.'],
+      // A retired built-in is never offered for fields.yml: its guidance says where the text goes.
+      ['design', '"design" is a retired field. Move to Decisions, or to Purpose.'],
+      ['role_choice', '"role_choice" is a retired field. Move to Decisions.'],
+      ['grain_choice', '"grain_choice" is a retired field. Move to Decisions.'],
     ];
     for (const [key, message] of cases) {
       const { container, posted } = add(key, 'x', {});

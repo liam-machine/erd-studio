@@ -128,6 +128,8 @@ export interface FieldsFileProblem {
   line?: number;
   key?: string;
   message: string;
+  /** True when the file holds unresolved git conflict markers (`line` is the first): the user's to resolve. */
+  mergeConflict?: true;
 }
 
 /** Budgets for {@link parseFieldsText}; both unlimited by default. */
@@ -504,15 +506,15 @@ export function parseFieldsText(text: string, opts: ParseFieldsOptions = {}): { 
   const source = typeof text === 'string' ? text : '';
   const lines = new LineCounter();
   const doc = parseDocument(source, { lineCounter: lines });
-  const invalid = (message: string, line?: number): { list: FieldList; problems: FieldsFileProblem[] } => ({
+  const invalid = (message: string, line?: number, mergeConflict = false): { list: FieldList; problems: FieldsFileProblem[] } => ({
     list: startingSet(),
-    problems: [{ code: 'fieldsYamlInvalid', severity: 'error', ...(line !== undefined ? { line } : {}), message }],
+    problems: [{ code: 'fieldsYamlInvalid', severity: 'error', ...(line !== undefined ? { line } : {}), message, ...(mergeConflict ? { mergeConflict: true as const } : {}) }],
   });
 
   if (doc.errors.length > 0) {
     const conflict = findConflictMarkers(source);
     if (conflict !== null) {
-      return invalid('The file has an unresolved Git merge conflict. The starting set is used until it is resolved.', conflict);
+      return invalid('The file has an unresolved Git merge conflict. The starting set is used until it is resolved.', conflict, true);
     }
     const first = doc.errors[0];
     const line = first.linePos?.[0]?.line;

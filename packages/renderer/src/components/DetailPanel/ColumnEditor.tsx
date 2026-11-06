@@ -47,6 +47,14 @@ export function columnFieldVisibility(column: DisplayColumn, table: FieldsTable,
   return { scdType: ids.has('scdType'), additiveType: ids.has('additiveType'), naturalKey: ids.has('naturalKey') };
 }
 
+/**
+ * A read-only row (the viewer, the physical stage) shows only the typed
+ * fields that have a value: an empty, disabled "Not set" dropdown says nothing.
+ */
+export function valueOnlyFieldVisibility(column: DisplayColumn): ColumnFieldVisibility {
+  return { scdType: column.scdType != null, additiveType: !!column.additiveType, naturalKey: true };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -313,7 +321,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
             onToggleNK={viewer ? undefined : () => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}
-            fieldVisibility={columnFieldVisibility(col, fieldsTable, fieldList)}
+            fieldVisibility={viewer ? valueOnlyFieldVisibility(col) : (isEditable ? columnFieldVisibility(col, fieldsTable, fieldList) : valueOnlyFieldVisibility(col))}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={(opts) => handleToggleExpand(col.name, opts)}
             dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}

@@ -393,7 +393,7 @@ export function readTableFile(
   const spellings: DbmlFieldSpelling[] = [];
   const { table, fields } = mapTable(rawTable, declaredName, qualifier ?? schemaFolder, text, problems, schemaPropertyLine(tableNode, text), {
     tableNode: compiledTable,
-    blocks: metadataBlocksOf(compiled.ast, declaredName),
+    blocks: metadataBlocksOf(compiled.ast, declaredName, dbmlAlias),
     spellings,
   });
   return {

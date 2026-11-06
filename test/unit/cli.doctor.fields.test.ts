@@ -157,6 +157,18 @@ describe('fields.yml problems', () => {
     expect(ids(r)).toEqual(['fix-fields-file']);
   });
 
+  it('a file with git conflict markers is the user\'s to resolve: resolve-merge-conflicts, never fix-fields-file', async () => {
+    const r = await doctor(nativeWith({ 'fields.yml': 'version: 1\ntables:\n<<<<<<< HEAD\n  - grain\n=======\n  - purpose\n>>>>>>> theirs\n' }));
+    const [p] = finding(r, 'fieldsYamlInvalid');
+    expect(p).toMatchObject({ severity: 'error', file: '.erd-studio/fields.yml', line: 3, mergeConflict: true });
+    expect(r.erd.fields.source).toBe('starting-set');
+    expect(ids(r)).toEqual(['resolve-merge-conflicts']);
+    const step = r.nextSteps.find((s) => s.id === 'resolve-merge-conflicts')!;
+    expect(step.why).toContain('.erd-studio/fields.yml:3');
+    expect(step.why).toContain("Don't pick a side");
+    expect(step.why).not.toContain('Fix these lines');
+  });
+
   it('a warning (a name that is not a built-in) raises no next step', async () => {
     const r = await doctor(nativeWith({ 'fields.yml': 'tables:\n  - grain\n  - purpse\n' }));
     const [p] = finding(r, 'fieldsUnknownName');
@@ -253,6 +265,15 @@ describe('field findings on DBML tables', () => {
     const [p] = finding(r, 'fieldRetired');
     expect(p).toMatchObject({ severity: 'info', count: 2 });
     expect(p.message).toMatch(/^2 tables still have (Design or Grain choice|Grain choice or Design)\. Ask your assistant to move them into Decisions\.$/);
+  });
+
+  it('rationale_<key> of a retired field is reported as retired, never as an old spelling to rename', async () => {
+    const r = await doctor(nativeWith({
+      [FCT_ORDER]: (t) => t.replace('rationale_purpose', 'purpose').replace('rationale_measures', 'measures').replace('meta_owner', 'owner'),
+      [DIM_CUSTOMER]: replace("[role: 'conformed-dim']", "[role: 'conformed-dim', rationale_design: 'One row per customer version']"),
+    }));
+    expect(finding(r, 'fieldRetired')[0]).toMatchObject({ count: 1, key: 'design' });
+    expect(finding(r, 'fieldOldSpellings')).toEqual([]);
   });
 
   it('fieldNotInList: only with a fields.yml, for values the list does not name, ignoring left_out', async () => {

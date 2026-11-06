@@ -86,6 +86,8 @@ export interface FieldFinding {
   key?: string;
   /** For an aggregated finding: how many (tables, or settings for `fieldOldSpellings`). */
   count?: number;
+  /** fields.yml holds unresolved git conflict markers (doctor's `resolve-merge-conflicts`, never `fix-fields-file`). */
+  mergeConflict?: true;
 }
 
 /** `erd.fields`: the field list doctor read, and every finding. */
@@ -221,6 +223,7 @@ export function summariseFields(reading: FieldsReading, fieldsFile: string, tabl
       file: fieldsFile,
       ...(p.line !== undefined ? { line: p.line } : {}),
       ...(p.key !== undefined ? { key: p.key } : {}),
+      ...(p.mergeConflict ? { mergeConflict: true as const } : {}),
     });
   }
 

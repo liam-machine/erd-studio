@@ -15,6 +15,7 @@ import { ColumnRowEditor, type ColumnRowEditorColumn, type ColumnFieldVisibility
 import { columnFieldVisibility } from '../../src/components/DetailPanel/ColumnEditor';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
 import { DetailPanel } from '../../src/components/DetailPanel/DetailPanel';
+import { CanvasEnvironmentProvider } from '../../src/host/canvasEnvironment';
 
 afterEach(cleanup);
 
@@ -79,9 +80,14 @@ describe('columnFieldVisibility (from the field list)', () => {
 });
 
 describe('ColumnEditor in the Detail panel', () => {
-  function expandedLabels(domain: DisplaySubjectArea): string[] {
+  function expandedLabels(domain: DisplaySubjectArea, viewer?: boolean): string[] {
     const store = createCanvasStore({ domain, selectedNode: 'fct_order', detailPanelOpen: true });
-    const { container } = render(<CanvasStoreProvider store={store}><ReactFlowProvider><DetailPanel /></ReactFlowProvider></CanvasStoreProvider>);
+    const panel = <ReactFlowProvider><DetailPanel /></ReactFlowProvider>;
+    const { container } = render(
+      <CanvasStoreProvider store={store}>
+        {viewer === undefined ? panel : <CanvasEnvironmentProvider host={{ postMessage: () => {} }} viewer={viewer}>{panel}</CanvasEnvironmentProvider>}
+      </CanvasStoreProvider>,
+    );
     fireEvent.click(container.querySelector('.column-row-editor__chevron')!);
     return [...container.querySelectorAll('.column-row-editor__metadata-label')].map((el) => el.textContent ?? '');
   }
@@ -100,5 +106,17 @@ describe('ColumnEditor in the Detail panel', () => {
     cleanup();
     const noScd: FieldList = { tables: [], columns: STARTING_FIELD_LIST.columns.filter((f) => f.key !== 'scd_type'), leftOut: [] };
     expect(expandedLabels(domainWith({ scdType: 1 }, { fields: noScd }, 'transaction-fact'))).toEqual(['SCD Type', 'Additive']);
+  });
+
+  it('a table with no role: the editor offers both, but the viewer and a read-only stage show only fields with a value', () => {
+    expect(expandedLabels(domainWith({}))).toEqual(['SCD Type', 'Additive']);
+    cleanup();
+    expect(expandedLabels(domainWith({}), true)).toEqual([]);
+    cleanup();
+    expect(expandedLabels(domainWith({}, { readOnly: true, stage: 'physical' }))).toEqual([]);
+    cleanup();
+    expect(expandedLabels(domainWith({ scdType: 2 }), true)).toEqual(['SCD Type']);
+    cleanup();
+    expect(expandedLabels(domainWith({ additiveType: 'additive' }, { readOnly: true, stage: 'physical' }))).toEqual(['Additive']);
   });
 });

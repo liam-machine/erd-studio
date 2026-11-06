@@ -497,7 +497,8 @@ function editTableOnce(
   const indentUnit = allColumnNodes.length > 0 ? indentAt(text, allColumnNodes[0].node.start) || '  ' : '  ';
 
   // --- Metadata blocks in this file (D25) ---------------------------------
-  const blocks: MetadataBlock[] = metadataBlocksOf(compiled.ast, current.name);
+  const aliasParts = plainNames(tableNode.alias);
+  const blocks: MetadataBlock[] = metadataBlocksOf(compiled.ast, current.name, aliasParts && aliasParts.length === 1 ? aliasParts[0] : undefined);
 
   const tableSetters = settersOf(tableNode.attributeList, blocks);
   for (const node of Array.isArray(tableNode.body?.body) ? (tableNode.body.body as AstNode[]) : []) {
@@ -800,7 +801,7 @@ function editTableOnce(
   // A table rename or a new qualifier retargets every Metadata block that stays (a cut one goes whole).
   if (renaming || requalifyTo !== undefined) {
     for (const block of blocks) {
-      if (removedNodes.has(block.node)) continue;
+      if (removedNodes.has(block.node) || block.viaAlias) continue; // an alias names the table whatever its name or schema
       respellName(block.leaves, block.kind === 'table' ? block.leaves.length - 1 : block.leaves.length - 2);
     }
   }

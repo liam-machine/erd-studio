@@ -28,7 +28,7 @@ export const SHIPPED_SETUP_REFERENCE_HASHES: Readonly<Record<string, readonly st
   ],
   'references/metadata.md': [
     '066bf80613dbbe3f', '10b03c963a0f9503', '3c48d758c966d1ee', 'b6545b0efb6f0b0a',
-    '5d8c66a96188375a',
+    'e38d8635afa35b56',
   ],
   'references/verify-and-fix.md': [
     '079fea5aac2f0725', '1b2b2e85eb66e4b6', '3405ecb7e3407a7f', '402bb7245e7ef93a',

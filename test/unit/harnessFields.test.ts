@@ -87,7 +87,8 @@ describe('the schema skill: one "Fields" section', () => {
 
   it('edits old spellings in place and renames only what doctor lists, on a yes', () => {
     expect(flat(fields)).toContain('Old spellings (`rationale_<key>`, `meta_<key>`, an entry in `meta_json`) are the same field: change it where it is, never add a second copy.');
-    expect(flat(fields)).toContain("Rename only what doctor's `erd.fields` lists as old spellings (`fieldOldSpellings`), and only when the user agrees; never a `meta_json` entry, nor a `meta_<key>` whose key is reserved or a built-in");
+    // doctor's count and the skill agree: a text meta_json entry doctor lists is renamed; one it does not list never is.
+    expect(flat(fields)).toContain("Rename only what doctor's `erd.fields` lists as old spellings (`fieldOldSpellings`), and only when the user agrees: a text `meta_json` entry it lists moves out of the JSON into its own setting. Never rename a `meta_json` entry doctor does not list, nor a `meta_<key>` whose key is reserved or a built-in");
   });
 
   it('maps an old ## Metadata table onto fields.yml, and offers once to move it', () => {
@@ -193,8 +194,12 @@ describe('DBML.md: the fields.yml format and the setting names', () => {
     expect(text).toContain('| `meta_json` | metadata that is not text: lists, maps, numbers, and `true` / `false` for a key that is not a yes-no field. A text value is its own setting |');
     expect(text).toContain('| `erd_<key>` | the same field, and it wins over `<key>`');
     expect(text).toContain('**Renaming old spellings** is the user\'s choice: only on a yes, all in one change, and only what doctor counts as `fieldOldSpellings`.');
-    expect(text).toContain('Never rename `rationale_design`, `rationale_role_choice` or `rationale_grain_choice`');
-    expect(text).toContain('an entry in `meta_json`, or a `meta_<key>` whose key is reserved or a built-in that is not metadata (`meta_purpose`, `meta_role`, `meta_retention`)');
+    expect(text).toContain('A text entry in `meta_json` that doctor counts moves out of the JSON into its own `<key>: \'<value>\'` setting.');
+    expect(text).toContain('Never rename `rationale_design`, `rationale_role_choice` or `rationale_grain_choice` (retired, so doctor does not count them');
+    expect(text).toContain('a `meta_json` entry doctor does not count, or a `meta_<key>` whose key is reserved or a built-in that is not metadata (`meta_purpose`, `meta_role`, `meta_retention`)');
+    // The exports keep their own labels: a fields.yml label is the canvas's only.
+    expect(format).toContain('- **label**: what the canvas calls it (the exports keep their own labels).');
+    expect(format).not.toContain('what the canvas and the exports call it');
     expect(text).toContain('`meta_<key>` is the same field only for a key of the team\'s own');
   });
 
@@ -275,6 +280,19 @@ describe('the setup skill writes fields.yml', () => {
     expect(list.leftOut).toEqual(['dimension', 'metrics']);
     // An old list is moved only on a yes, with a preview.
     expect(section(metadata, '## 7. An old `## Metadata` list')).toContain('On a yes, show the file you will write');
+  });
+
+  it('metadata.md puts a dbt value for a text built-in in a YAML table\'s rationale:, never in meta:', () => {
+    const text = flat(setup('references/metadata.md'));
+    expect(text).toContain('In a YAML table, a field that is a text built-in (`freshness`, `source_of_truth`, …) goes in the model\'s `rationale:` map under its camelCase key (`freshness`, `sourceOfTruth`), never in `meta:`');
+    expect(text).toContain('A field of the team\'s own and `business_rule` go in `meta:`');
+    expect(text).not.toContain('In a YAML table the key goes in `meta:`');
+  });
+
+  it('troubleshooting.md routes a conflicted fields.yml to resolve-merge-conflicts, never fix-fields-file', () => {
+    const text = flat(setup('references/troubleshooting.md'));
+    expect(text).toContain("doctor's `resolve-merge-conflicts` step naming `.erd-studio/fields.yml`");
+    expect(text).toContain('A file with git conflict markers is `resolve-merge-conflicts`, never this step');
   });
 
   it('SKILL.md offers the field list in Stage 4 and routes fix-fields-file, replacing lines only', () => {
