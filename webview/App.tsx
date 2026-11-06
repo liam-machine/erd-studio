@@ -36,6 +36,7 @@ import {
   CanvasEnvironmentProvider,
   DetailPanel,
   Legend,
+  StatusBar,
   type TableFlowNode,
   type FkFlowEdge,
   type AnnotationFlowNode,
@@ -46,7 +47,6 @@ import { useEditorStore, editorStoreApi } from './store/editorStore';
 import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
-import { StatusBar } from './components/Toolbar/StatusBar';
 import { NewTableDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingTableDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';

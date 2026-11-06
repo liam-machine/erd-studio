@@ -114,7 +114,9 @@ describe('ErdCanvas (the viewer) never names dbt', () => {
     expect(legend.textContent).toContain('Built from the project (read-only)');
     expect(legend.textContent).toContain('Not found in the project');
     expect(legend.textContent).toContain('Disabled in the project');
-    expect(legend.textContent).toContain('Shown while two stages are compared.');
+    // The viewer never compares stages, so the legend has no comparison entries.
+    expect(legend.querySelector('.legend__swatch')).toBeNull();
+    expect(legend.textContent).not.toContain('Comparing Stages');
   });
 
   it('explains ghosts and a missing schema without dbt commands', async () => {

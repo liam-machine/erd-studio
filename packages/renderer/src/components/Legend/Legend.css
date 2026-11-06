@@ -39,6 +39,13 @@
    Panel (expanded state)
    --------------------------------------------------------------------------- */
 
+/* The viewer on a physical diagram: the line, end-label and flow samples are
+   drawn in the stage colour the canvas draws them in. */
+.legend--stage-physical {
+  --stage-logical: var(--stage-physical);
+  --stage-logical-ring: var(--stage-physical-ring);
+}
+
 .legend {
   max-width: 260px;
   background: var(--panel-bg);

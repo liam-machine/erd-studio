@@ -10,8 +10,15 @@
  *   from the project's field list), folded until one of them has a value
  *
  * The viewer (`useIsViewer`) never has the host's context and keeps the
- * layout it always had: every section open, in the old order, with the
- * Fields where the role, grain, meta and rationale sections were.
+ * layout it always had, in the old order, with the Fields where the role,
+ * grain, meta and rationale sections were: a section folded to its heading
+ * and count until the reader opens it (it sits above Columns, so a few long
+ * rationale values would push the columns and relationships out of a short
+ * embedded canvas), and remembered from table to table. Its close button hides the
+ * panel but keeps the table selected (its relationships stay lit; a click on
+ * the table opens the panel again, and the empty canvas or Escape clears it),
+ * its relationship rows wrap instead of cutting names off, and it is never
+ * taller than the canvas it floats over.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -151,6 +158,8 @@ export function DetailPanel() {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameError, setNameError] = useState('');
+  // The viewer's Fields fold: closed until the reader opens it, then kept open for the next table.
+  const [viewerFieldsOpen, setViewerFieldsOpen] = useState(false);
 
   // Handle pending delete confirmation from keyboard shortcut
   useEffect(() => {
@@ -172,6 +181,11 @@ export function DetailPanel() {
     selectNode(null);
     setConfirmingDelete(false);
   }, [setDetailPanelOpen, selectNode]);
+
+  // The viewer's close: hide the panel, keep the selection (and its highlight).
+  const handleHide = useCallback(() => {
+    setDetailPanelOpen(false);
+  }, [setDetailPanelOpen]);
 
   const validateModelName = useCallback(
     (value: string): string => {
@@ -392,6 +406,7 @@ export function DetailPanel() {
         fields={fieldList}
         readOnly={isReadOnly}
         logicalOnly={logicalOnly}
+        {...(viewer ? { open: viewerFieldsOpen, onOpenChange: setViewerFieldsOpen } : {})}
       />
     </div>
   ) : null;
@@ -465,7 +480,7 @@ export function DetailPanel() {
             {outgoing.map((rel) => (
               <div
                 key={`out-${relationshipEdgeId(rel)}`}
-                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                className={viewer ? 'detail-panel__relationship detail-panel__relationship--wrap' : 'detail-panel__relationship detail-panel__relationship--clickable'}
                 onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
                 role={viewer ? undefined : 'button'}
                 tabIndex={viewer ? undefined : 0}
@@ -489,6 +504,7 @@ export function DetailPanel() {
                   <span className="detail-panel__rel-target" title={`${rel.toModel}.${columnsText(rel, 'to')}`}>
                     {rel.toModel}.{columnsText(rel, 'to')}
                   </span>
+                  {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
                 </span>
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
@@ -524,7 +540,7 @@ export function DetailPanel() {
             {incoming.map((rel) => (
               <div
                 key={`in-${relationshipEdgeId(rel)}`}
-                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                className={viewer ? 'detail-panel__relationship detail-panel__relationship--wrap' : 'detail-panel__relationship detail-panel__relationship--clickable'}
                 onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
                 role={viewer ? undefined : 'button'}
                 tabIndex={viewer ? undefined : 0}
@@ -548,6 +564,7 @@ export function DetailPanel() {
                   <span className="detail-panel__rel-local" title={columnsText(rel, 'to')}>
                     {columnsText(rel, 'to')}
                   </span>
+                  {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
                 </span>
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
@@ -588,7 +605,7 @@ export function DetailPanel() {
   // --- Render ------------------------------------------------------------
 
   return (
-    <Panel position="top-right" className="detail-panel">
+    <Panel position="top-right" className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}>
       {/* Header */}
       <div className="detail-panel__header">
         {editingName ? (
@@ -641,8 +658,8 @@ export function DetailPanel() {
         )}
         <button
           className="detail-panel__close"
-          onClick={handleClose}
-          title="Close detail panel"
+          onClick={viewer ? handleHide : handleClose}
+          title={viewer ? 'Close the panel (the table stays selected)' : 'Close detail panel'}
           aria-label="Close detail panel"
         >
           ×

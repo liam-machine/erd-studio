@@ -17,6 +17,16 @@
   font-size: 12px;
 }
 
+/*
+ * The viewer's panel is never taller than the canvas it floats over (an
+ * embedded canvas can be 600 px tall inside a much taller page), and
+ * scrolls instead.
+ */
+.detail-panel--viewer {
+  max-height: min(calc(100vh - 100px), calc(100% - 30px));
+  overscroll-behavior: contain;
+}
+
 /* ---------------------------------------------------------------------------
    Header
    --------------------------------------------------------------------------- */
@@ -485,6 +495,44 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * The viewer's rows wrap instead of cutting a long table or column name off
+ * with an ellipsis: the target drops to a second line, and a long name breaks
+ * where it has to. The direction arrow and the cardinality stay on the first.
+ */
+.detail-panel__relationship--wrap {
+  align-items: flex-start;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-columns {
+  flex-wrap: wrap;
+  row-gap: 1px;
+  overflow: visible;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-local,
+.detail-panel__relationship--wrap .detail-panel__rel-target {
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.detail-panel__relationship--wrap .detail-panel__rel-direction,
+.detail-panel__relationship--wrap .detail-panel__rel-cardinality {
+  margin-top: 1px;
+}
+
+/* The relationship's role (`ship date`), as the line's label reads. */
+.detail-panel__rel-role {
+  flex-basis: 100%;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--dim-fg);
+  overflow-wrap: anywhere;
 }
 
 .detail-panel__rel-cardinality {

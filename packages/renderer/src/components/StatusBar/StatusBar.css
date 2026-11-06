@@ -1,8 +1,8 @@
 /**
  * StatusBar styles.
  *
- * Positioned at bottom-left of the graph editor. Uses VS Code theme tokens
- * for consistent styling across light/dark themes.
+ * Positioned at bottom-left of the canvas, beside the legend's ? button (the
+ * extension's editor and the viewer). Theme tokens only (styles/theme.css).
  */
 
 .status-bar {
@@ -51,4 +51,27 @@
   line-height: 1.5;
   background: var(--button-bg);
   color: var(--button-fg);
+}
+
+/*
+ * The viewer: clear of the legend's ? button (15px panel margin + 28px
+ * button + a gap), never under the minimap (200px wide, 15px margin), and
+ * beside the open legend (260px at most) rather than behind it. The counts
+ * and the layer key wrap onto a second line when the canvas is narrow.
+ */
+.status-bar--viewer {
+  margin-left: 51px;
+  max-width: calc(100% - 51px - 231px);
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.status-bar--viewer.status-bar--beside-legend {
+  margin-left: 283px;
+  max-width: calc(100% - 283px - 231px);
+}
+
+.status-bar--viewer .status-bar__layers {
+  flex-wrap: wrap;
+  row-gap: 2px;
 }

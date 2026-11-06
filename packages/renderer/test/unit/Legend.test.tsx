@@ -27,7 +27,8 @@ vi.mock('../../src/store/editorStore', () => ({
   useEditorStore: (selector: (s: typeof mockStoreState) => unknown) => selector(mockStoreState),
 }));
 
-import { Legend } from '../../src/components/Legend/Legend';
+import { Legend, legendEntries } from '../../src/components/Legend/Legend';
+import { CanvasEnvironmentProvider, NOOP_CANVAS_HOST } from '../../src/host/canvasEnvironment';
 import {
   SOURCE_LABEL,
   SOURCE_LEGEND_DESC,
@@ -265,5 +266,72 @@ describe('Legend — a single-layer project', () => {
     } finally {
       mockStoreState.domain = undefined;
     }
+  });
+});
+
+describe('Legend — the viewer shows only what its stage can draw', () => {
+  function renderViewer(stage: 'logical' | 'physical' | undefined) {
+    mockStoreState.domain = stage === undefined ? undefined : { layer: 'silver', stage, models: [] };
+    try {
+      return render(
+        <CanvasEnvironmentProvider host={NOOP_CANVAS_HOST} viewer>
+          <Legend />
+        </CanvasEnvironmentProvider>,
+      );
+    } finally {
+      mockStoreState.domain = undefined;
+    }
+  }
+
+  for (const stage of ['logical', undefined] as const) {
+    it(`a logical diagram${stage ? '' : ' (no stage given)'}: Logical only, no physical, line-colour or comparison entries`, () => {
+      const { container } = renderViewer(stage);
+      expect(container.querySelector('.legend__model-card--logical')).not.toBeNull();
+      expect(container.querySelector('.legend__model-card--physical')).toBeNull();
+      expect(container.querySelector('.legend__model-card--ghost')).toBeNull();
+      expect(container.querySelector('.legend__items--sources')).toBeNull();
+      expect(container.querySelector('.legend__edge--physical')).toBeNull();
+      expect(container.querySelector('.legend__swatch')).toBeNull();
+      const text = container.querySelector('.legend__content')!.textContent!;
+      expect(text).not.toContain('Line colour follows the stage');
+      expect(text).not.toContain('Comparing Stages');
+      expect(container.querySelectorAll('.legend__items--cardinality .legend__item')).toHaveLength(4);
+    });
+  }
+
+  it('a physical diagram: Physical, both ghosts and the provenance chips, no Logical, line-colour or comparison entries', () => {
+    const { container } = renderViewer('physical');
+    expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+    expect(container.querySelector('.legend__model-card--ghost-disabled')).not.toBeNull();
+    expect(container.querySelectorAll('.legend__items--sources .legend__item')).toHaveLength(SOURCE_ORDER.length);
+    expect(container.querySelector('.legend__model-card--logical')).toBeNull();
+    expect(container.querySelector('.legend__swatch')).toBeNull();
+    expect(container.querySelector('.legend__content')!.textContent).not.toContain('Line colour follows the stage');
+  });
+
+  it('the editor keeps every entry on either stage', () => {
+    for (const stage of ['logical', 'physical'] as const) {
+      mockStoreState.domain = { layer: 'silver', stage, models: [] };
+      const { container, unmount } = render(<Legend />);
+      expect(container.querySelector('.legend__model-card--logical')).not.toBeNull();
+      expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+      expect(container.querySelector('.legend__swatch')).not.toBeNull();
+      unmount();
+      mockStoreState.domain = undefined;
+    }
+  });
+});
+
+describe('legendEntries', () => {
+  it('editor: everything, less the physical and comparison groups without dbt', () => {
+    expect(legendEntries({ viewer: false, logicalOnly: false, stage: 'physical' })).toEqual({ logicalStage: true, physical: true, lineColours: true, comparison: true });
+    expect(legendEntries({ viewer: false, logicalOnly: true, stage: 'logical' })).toEqual({ logicalStage: true, physical: false, lineColours: false, comparison: false });
+  });
+
+  it('viewer: the stage shown, never a comparison', () => {
+    expect(legendEntries({ viewer: true, logicalOnly: false, stage: 'logical' })).toEqual({ logicalStage: true, physical: false, lineColours: false, comparison: false });
+    expect(legendEntries({ viewer: true, logicalOnly: false, stage: 'physical' })).toEqual({ logicalStage: false, physical: true, lineColours: false, comparison: false });
+    // logicalOnly on a physical domain: still one stage card, never an empty section.
+    expect(legendEntries({ viewer: true, logicalOnly: true, stage: 'physical' }).logicalStage).toBe(true);
   });
 });

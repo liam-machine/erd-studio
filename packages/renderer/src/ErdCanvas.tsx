@@ -3,7 +3,11 @@
  *
  * Renders a `DisplaySubjectArea` the way the VS Code extension's canvas shows a
  * read-only domain: model nodes, FK edges, annotations, the minimap, the
- * detail panel a click on a model opens, and the legend. There are no editing
+ * detail panel a click on a model opens, the legend (only the entries the
+ * stage shown can draw) and, beside its button, the table and relationship
+ * counts. Closing the detail panel keeps the table selected, its
+ * relationships lit; a click on the empty canvas, or Escape, clears the
+ * selection. There are no editing
  * affordances (the canvas runs in viewer mode) and nothing is ever sent
  * anywhere.
  *
@@ -44,6 +48,7 @@ import {
   SelectionMode,
   applyNodeChanges,
   useNodesInitialized,
+  useStoreApi,
   type NodeChange,
 } from '@xyflow/react';
 import type { DisplayColumn, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
@@ -64,6 +69,7 @@ import { repickHandleSides } from './lib/dragHandleSides';
 import type { GraphNode, GraphEdge } from './lib/nodeOverlays';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { Legend } from './components/Legend/Legend';
+import { StatusBar } from './components/StatusBar/StatusBar';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -199,6 +205,8 @@ function ErdCanvasInner({
   handleRef,
 }: ErdCanvasInnerProps) {
   const storeApi = useEditorStoreApi();
+  const flowApi = useStoreApi();
+  const containerRef = useRef<HTMLDivElement>(null);
   const domain = useEditorStore((s) => s.domain);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
@@ -276,6 +284,27 @@ function ErdCanvasInner({
   );
 
   const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ onTransformed });
+
+  // Escape clears the selection, as a click on the empty canvas does (the
+  // panel may already be closed, with the table still selected). Only when
+  // the key is pressed in the canvas, or with nothing focused (the closed
+  // panel's button took the focus with it), so it never takes Escape from
+  // the rest of the page.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const target = e.target as Node | null;
+      const inCanvas = target !== null && containerRef.current?.contains(target) === true;
+      const nowhere = target === document.body || target === document.documentElement || target === document;
+      if (!inCanvas && !nowhere) return;
+      const s = storeApi.getState();
+      if (s.selectedNode === null && s.selectedEdge === null && s.selectedAnnotation === null) return;
+      onPaneClick();
+      flowApi.getState().resetSelectedElements();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [storeApi, flowApi, onPaneClick]);
   // Hover preview and relationship flow (ephemeral, no posts).
   const { hoverHandlers, flowClassName } = useHoverFocus();
 
@@ -348,6 +377,7 @@ function ErdCanvasInner({
 
   return (
     <div
+      ref={containerRef}
       className={`editor-canvas${logicalOnly ? ' editor-canvas--neutral' : ''}${className ? ` ${className}` : ''}`}
       // The extension's canvas layout (a column flex box around the flow area),
       // positioned so the legend and panels anchor to the canvas.
@@ -383,6 +413,7 @@ function ErdCanvasInner({
         proOptions={{ hideAttribution: true }}
       >
         <CanvasBackdrop />
+        <StatusBar />
         <DetailPanel />
       </ReactFlow>
       <Legend />

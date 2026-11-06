@@ -7,8 +7,12 @@
  * chips) and the column badges. Without a dbt project (`logicalOnly`) the
  * Physical, ghost, provenance and comparison entries are left out, and in a
  * single-layer project the layer badge, which the canvas does not draw. The
- * viewer (`useIsViewer`) keeps every entry but never names dbt: a page outside
- * VS Code cannot know whether the project uses it. The badge vocabulary is imported from lib/badgeLabels so the
+ * viewer (`useIsViewer`) shows only what can appear on the one read-only stage
+ * it draws (`legendEntries`): a logical diagram has no Physical, ghost,
+ * provenance or line-colour entries, a physical one no Logical entry, and
+ * neither has the comparison entries (the viewer never compares stages). It
+ * never names dbt: a page outside VS Code cannot know whether the project
+ * uses it. The badge vocabulary is imported from lib/badgeLabels so the
  * legend cannot fall out of step with what TableNode actually renders. Positioned in the bottom-left corner, collapsible
  * to a `?` icon button.
  */
@@ -44,6 +48,35 @@ const FLOW_SAMPLES: { mode: FlowMode; from: '1' | '*'; to: '1' | '*'; desc: stri
 ];
 const FLOW_SAMPLE_PATH = 'M2,6 H46';
 
+/** Which optional groups of entries the legend shows. */
+export interface LegendEntries {
+  /** The Logical stage card. */
+  logicalStage: boolean;
+  /** The Physical stage card, both ghosts and the provenance chips. */
+  physical: boolean;
+  /** "Line colour follows the stage": a logical and a physical line. */
+  lineColours: boolean;
+  /** "Comparing Stages": the discrepancy colours and lines. */
+  comparison: boolean;
+}
+
+/**
+ * The legend's optional entries. The editor shows every one (without a dbt
+ * project, `logicalOnly`, none of the physical or comparison ones). The viewer
+ * draws one stage, read-only, and never a comparison, so it shows only that
+ * stage's entries.
+ */
+export function legendEntries(options: { viewer: boolean; logicalOnly: boolean; stage: string | undefined }): LegendEntries {
+  const { viewer, logicalOnly } = options;
+  const physicalStage = options.stage === 'physical';
+  return {
+    logicalStage: viewer ? !physicalStage || logicalOnly : true,
+    physical: viewer ? physicalStage && !logicalOnly : !logicalOnly,
+    lineColours: viewer ? false : !logicalOnly,
+    comparison: viewer ? false : !logicalOnly,
+  };
+}
+
 function cardinalityLabel(label: '1' | '*') {
   return (
     <span className={`legend__cardinality-label${label === '*' ? ' legend__cardinality-label--many' : ''}`}>
@@ -65,6 +98,8 @@ export function Legend() {
   const singleLayer = useEditorStore((s) => (s.domain ? isSingleLayerProject(s.domain) : false));
   // The viewer cannot know whether the project uses dbt, so it never names it.
   const viewer = useIsViewer();
+  const stage = useEditorStore((s) => s.domain?.stage);
+  const entries = legendEntries({ viewer, logicalOnly, stage });
   const sourceLabel = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
   const sourceDesc = viewer ? SOURCE_LEGEND_DESC_NEUTRAL : SOURCE_LEGEND_DESC;
 
@@ -94,7 +129,7 @@ export function Legend() {
 
   // Expanded state: show full legend panel
   return (
-    <Panel position="bottom-left" className="legend">
+    <Panel position="bottom-left" className={viewer ? (entries.logicalStage ? 'legend' : 'legend legend--stage-physical') : 'legend'}>
       <div className="legend__header">
         <span className="legend__title">Legend</span>
         <button
@@ -112,16 +147,18 @@ export function Legend() {
         <section className="legend__section">
           <h3 className="legend__section-title">Design Stages</h3>
           <div className="legend__items">
-            <div className="legend__item">
-              <div className="legend__model-card legend__model-card--logical">
-                <div className="legend__model-header legend__model-header--logical" />
+            {entries.logicalStage && (
+              <div className="legend__item">
+                <div className="legend__model-card legend__model-card--logical">
+                  <div className="legend__model-header legend__model-header--logical" />
+                </div>
+                <div className="legend__item-text">
+                  <span className="legend__item-label">Logical</span>
+                  <span className="legend__item-desc">Your data model design</span>
+                </div>
               </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Logical</span>
-                <span className="legend__item-desc">Your data model design</span>
-              </div>
-            </div>
-            {!logicalOnly && (
+            )}
+            {entries.physical && (
               <>
                 <div className="legend__item">
                   <div className="legend__model-card legend__model-card--physical">
@@ -240,7 +277,7 @@ export function Legend() {
               </div>
             ))}
           </div>
-          {!logicalOnly && (
+          {entries.lineColours && (
             <>
               <h4 className="legend__subsection-title">Line colour follows the stage</h4>
               <div className="legend__items legend__items--disc-edges">
@@ -276,7 +313,7 @@ export function Legend() {
               <span className="legend__item-desc">The table&apos;s schema, when it is not the layer&apos;s name</span>
             </div>
           </div>
-          {!logicalOnly && (
+          {entries.physical && (
             <>
               <h4 className="legend__subsection-title">Where the shape came from (Physical)</h4>
               <div className="legend__items legend__items--sources">
@@ -330,14 +367,12 @@ export function Legend() {
           </div>
         </section>
 
-        {/* Comparing Stages Section — Diff needs the Physical stage */}
-        {!logicalOnly && (
+        {/* Comparing Stages Section — Diff needs the Physical stage; the viewer never compares */}
+        {entries.comparison && (
           <section className="legend__section">
             <h3 className="legend__section-title">Comparing Stages</h3>
             <p className="legend__note legend__note--lead">
-              {viewer
-                ? 'Shown while two stages are compared.'
-                : 'Shown while a comparison is open (Compare with dbt or Compare with design).'}
+              Shown while a comparison is open (Compare with dbt or Compare with design).
             </p>
             <div className="legend__items">
               <div className="legend__item">

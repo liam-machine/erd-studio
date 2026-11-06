@@ -198,7 +198,7 @@ describe('DetailPanel — Modelling detail (optional)', () => {
     expect(screen.getByRole('button', { name: /Modelling detail/ }).getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('the viewer keeps its old layout: no fold, sections in the old order', () => {
+  it('the viewer keeps its old layout: no Modelling detail fold, sections in the old order', () => {
     const { container } = renderPanel({
       viewer: true,
       domain: domain({ viewerReadOnly: true, sale: { meta: { owner: 'sales' }, rationale: { purpose: 'Sales' } } }),
@@ -206,12 +206,45 @@ describe('DetailPanel — Modelling detail (optional)', () => {
     expect(screen.queryByRole('button', { name: /Modelling detail/ })).toBeNull();
     const order = sectionOrder(container);
     const columns = order.findIndex((t) => /^Columns/.test(t));
-    const fields = order.indexOf('Fields');
+    const fields = order.findIndex((t) => /^.?Fields\s?2$/.test(t));
     expect(fields).toBeGreaterThan(-1);
     expect(fields).toBeLessThan(columns);
-    // Filled rows only, read-only.
+    // Filled rows only, read-only: the fold's own toggle is the one control.
     expect([...container.querySelectorAll('.fields-section__name')].map((el) => el.textContent)).toEqual(['Purpose', 'owner']);
-    expect(container.querySelector('.fields-section select, .fields-section textarea, .fields-section button')).toBeNull();
+    expect(container.querySelector('.fields-section select, .fields-section textarea, .fields-section button:not(.fields-section__toggle)')).toBeNull();
+  });
+
+  it('the viewer folds the Fields to a heading and a count, and keeps the reader\'s choice from table to table', () => {
+    const store = createCanvasStore({
+      domain: {
+        ...domain({ viewerReadOnly: true, extra: ['dim_customer'], sale: { meta: { owner: 'sales' }, rationale: { purpose: 'Sales' } } }),
+      },
+      selectedNode: 'fct_sale',
+      detailPanelOpen: true,
+    });
+    const { container } = render(
+      <CanvasStoreProvider store={store}>
+        <CanvasEnvironmentProvider host={{ postMessage: () => {} }} viewer>
+          <ReactFlowProvider><DetailPanel /></ReactFlowProvider>
+        </CanvasEnvironmentProvider>
+      </CanvasStoreProvider>,
+    );
+    const toggle = () => container.querySelector<HTMLButtonElement>('.fields-section__toggle')!;
+    const list = () => container.querySelector<HTMLElement>('.fields-section__list')!;
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().textContent).toContain('Fields');
+    expect(container.querySelector('.fields-section__count')!.textContent).toBe('2');
+    expect(list().hidden).toBe(true);
+    expect(toggle().getAttribute('aria-controls')).toBe(list().id);
+
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(list().hidden).toBe(false);
+
+    // Another table, then back: still open.
+    act(() => { store.getState().selectNode('dim_customer'); });
+    act(() => { store.getState().selectNode('fct_sale'); });
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
   });
 
   it('the viewer shows no Fields section for a table with no field value', () => {
