@@ -192,6 +192,7 @@ describe('convertProjectToDbml', () => {
     info.mockClear();
     expect(await convertProjectToDbml(deps())).toBe('nothing');
     expect(info).toHaveBeenCalledWith('This project is already stored as DBML.');
+    expect(feature).toHaveBeenCalledWith('convertNothingToDo');
     expect(vscode._appliedEdits).toHaveLength(1);
   });
 
@@ -213,6 +214,9 @@ describe('convertProjectToDbml', () => {
     expect(html).toContain('data-action="checkAgain"');
     expect(panel._disposed).toBe(true);
     expect(feature).toHaveBeenCalledWith('convertToDbmlRefused');
+    // Its kind, beside the refusal: a layer with a reserved name is the user's to fix, not ours.
+    expect(feature).toHaveBeenCalledWith('convertRefusedReservedLayer');
+    expect(telemetryError).not.toHaveBeenCalledWith('convertToDbmlSelfCheck');
     expect(vscode._appliedEdits).toHaveLength(0);
     expect(snapshot()).toEqual(before);
   });
@@ -290,6 +294,7 @@ describe('convertProjectToDbml', () => {
       'Convert Project to DBML: .erd-studio/logical-models/gold/employee.yml has unsaved edits. Save or revert it, then convert. Nothing was changed.',
     );
     expect(error.mock.calls[0].slice(1)).toEqual(['Show File', 'Save and Try Again']);
+    expect(feature).toHaveBeenCalledWith('convertStopUnsaved');
     expect(shown).toEqual([]);
     expect(snapshot()).toEqual(before);
   });
@@ -304,6 +309,7 @@ describe('convertProjectToDbml', () => {
     const before = snapshot();
     expect(await convertProjectToDbml(deps())).toBe('cancelled');
     expect(warn.mock.calls[0][0]).toBe('Convert Project to DBML: the project changed while the preview was open. Nothing was changed. Run it again.');
+    expect(feature).toHaveBeenCalledWith('convertStopChangedDuringPreview');
     expect(vscode._appliedEdits).toHaveLength(0);
     before.set('logical-models/gold/added.yml', 'name: added\ncolumns:\n  - name: id\n    dataType: INT\n');
     expect(snapshot()).toEqual(before);
@@ -427,7 +433,33 @@ describe('convertProjectToDbml', () => {
     expect(fs.existsSync(path.join(erd, 'tables'))).toBe(false);
     expect(error.mock.calls[0][0]).toMatch(/^Convert Project to DBML: VS Code didn't accept the conversion, so nothing was changed\./);
     expect(telemetryError).toHaveBeenCalledWith('convertToDbmlFailed');
+    // Everything was put back: not the unrestored error.
+    expect(telemetryError).not.toHaveBeenCalledWith('convertToDbmlUnrestored');
     expect(feature).not.toHaveBeenCalledWith('convertToDbml');
+  });
+
+  it('a partial edit that could not all be put back counts convertToDbmlUnrestored beside convertToDbmlFailed', async () => {
+    useFixture('composite-and-self');
+    answerConvert();
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    // Three creates land, then the edit fails, and the edit that puts them back applies nothing.
+    vscode._mockWorkspaceState.applyEditPrefixes.push(3, 0);
+    expect(await convertProjectToDbml(deps())).toBe('failed');
+    expect(telemetryError).toHaveBeenCalledWith('convertToDbmlFailed');
+    expect(telemetryError).toHaveBeenCalledWith('convertToDbmlUnrestored');
+  });
+
+  it('a conversion that took more than 60 s to apply counts convertOver60s; a quick one does not', async () => {
+    useFixture('composite-and-self');
+    answerConvert();
+    const realNow = Date.now.bind(Date);
+    let offset = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+    // The refresh at the end of the apply runs a minute and a second after it started.
+    expect(await convertProjectToDbml(deps({ onConverted: vi.fn(async () => { offset = 61_000; }) }))).toBe('converted');
+    expect(feature).toHaveBeenCalledWith('convertOver60s');
+    expect(feature).not.toHaveBeenCalledWith('convertLeftAsIs');
   });
 
   it('a failure of its own is counted and never shows the raw exception', async () => {
@@ -448,6 +480,7 @@ describe('convertProjectToDbml', () => {
     const onConverted = vi.fn(async () => { throw new Error('refresh failed at /secret/path'); });
     expect(await convertProjectToDbml(deps({ onConverted }))).toBe('converted');
     expect(feature).toHaveBeenCalledWith('convertToDbml');
+    expect(feature).not.toHaveBeenCalledWith('convertOver60s');
     expect(feature.mock.calls.filter((c) => c[0] === 'convertToDbml')).toHaveLength(1);
     expect(telemetryError).not.toHaveBeenCalledWith('convertToDbmlFailed');
     expect(snapshot()).toEqual(snapshot(TWIN));
@@ -599,6 +632,27 @@ describe('convertProjectToDbml', () => {
     for (const p of resumed) expected.set(p, earlier.get(p)!);
     expect(snapshot()).toEqual(expected);
     expect(sameConvertedTable(earlier.get(resumed[0])!, snapshot(TWIN).get(resumed[0])!, 'employee')).toBe(true);
+  });
+});
+
+describe('convertProjectToDbml: why it stopped (telemetry 2.0 B11)', () => {
+  it('a replaced file it could not save counts convertSaveFailed beside saveFailed', async () => {
+    fs.cpSync(path.resolve(__dirname, '../fixtures/dbml-convert/mixed/.erd-studio'), erd, { recursive: true });
+    answerConvert();
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vscode._failMockSave(path.join(erd, 'gold', 'relationships', 'gold.dbml'));
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('convertSaveFailed');
+  });
+
+  it('a conversion that leaves a file as it is counts convertLeftAsIs', async () => {
+    useFixture('composite-and-self');
+    const broken = path.join(erd, 'logical-models', 'gold', 'employee.yml');
+    fs.writeFileSync(broken, `${fs.readFileSync(broken, 'utf-8')}name: twice\n`);
+    answerConvert();
+    expect(await convertProjectToDbml(deps())).toBe('converted');
+    expect(feature).toHaveBeenCalledWith('convertLeftAsIs');
   });
 });
 

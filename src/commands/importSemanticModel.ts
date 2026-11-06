@@ -57,6 +57,8 @@ import {
   type SemanticModelFile,
 } from '../services/semanticModelImport';
 import { telemetry } from '../services/telemetryService';
+import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
+import type { TelemetryFeature } from '../services/telemetryPayload';
 import {
   IMPORT_TITLES,
   changeOptionsDraft,
@@ -133,10 +135,20 @@ export async function importSemanticModel(
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
-  const invalid = (message: string, actions: ErrorActions = {}): undefined => {
-    if (!quiet) telemetry.feature('importSemanticModelInvalid');
+  /** The model does not import: `importSemanticModelInvalid` and why (`reason`); quiet, the draft is dropped as unreadable. */
+  const invalid = (message: string, actions: ErrorActions = {}, reason?: TelemetryFeature): undefined => {
+    if (quiet) dropQuietly(deps.draft, 'unreadable');
+    else {
+      telemetry.feature('importSemanticModelInvalid');
+      if (reason) telemetry.feature(reason);
+    }
     showError(message, actions);
     return undefined;
+  };
+  /** The input could not be taken in (too many files, too much text, a file that does not read). */
+  const limited = (limit: ImportInputLimit): void => {
+    if (quiet) dropQuietly(deps.draft, 'unreadable');
+    else telemetry.feature(IMPORT_LIMIT_FEATURES[limit]);
   };
 
   // 1. The folder, and the models in it.
@@ -148,11 +160,15 @@ export async function importSemanticModel(
   const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
   // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
   if (quick && (walk.truncated || walk.files.length === 0)) {
-    if (quiet) return undefined;
+    if (quiet) {
+      dropQuietly(deps.draft, 'nothingFound');
+      return undefined;
+    }
     telemetry.feature('quickImportFellBack');
     return importSemanticModel(deps);
   }
   if (walk.truncated) {
+    limited('tooManyFiles');
     showError(
       `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
       { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
@@ -164,7 +180,10 @@ export async function importSemanticModel(
   const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
   const entries = findSemanticModels([...fullOf.keys()]);
   if (entries.length === 0 && quick) {
-    if (quiet) return undefined;
+    if (quiet) {
+      dropQuietly(deps.draft, 'nothingFound');
+      return undefined;
+    }
     telemetry.feature('quickImportFellBack');
     return importSemanticModel(deps);
   }
@@ -172,8 +191,11 @@ export async function importSemanticModel(
     return invalid(
       `${TITLE}: no semantic model found in ${folderName}. Pick the folder that holds <Name>.SemanticModel (saved as TMDL or as model.bim), or that folder itself.`,
       { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
+      'importSemanticModelNoModel',
     );
   }
+  // Several models (not the switcher's own re-entry, which names the one it wants).
+  if (entries.length > 1 && !scope && quick?.model === undefined) telemetry.feature('importSemanticModelSeveral');
   let entry = entries[0];
   /** With a draft and several models: the switcher, and how a choice on it re-enters. */
   let modelScopes: { scopes: DraftScopes; onScope: (id: string) => unknown } | undefined;
@@ -217,11 +239,13 @@ export async function importSemanticModel(
       text = await ui.readFile(fullOf.get(file) ?? file);
     } catch (err) {
       log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
+      limited('unreadable');
       showError(`${TITLE} couldn't read ${file}. Check that the file still exists and that you can open it, then try again.`);
       return undefined;
     }
     chars += text.length;
     if (chars > MAX_SEMANTIC_MODEL_CHARS) {
+      limited('tooMuchText');
       showError(`${TITLE}: ${entry.name} holds more than ${Math.round(MAX_SEMANTIC_MODEL_CHARS / 1024 / 1024)} MB of model files, too much to import at once.`);
       return undefined;
     }
@@ -236,6 +260,7 @@ export async function importSemanticModel(
       return invalid(
         describeImportProblems(TITLE, read.problems),
         first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {},
+        entry.kind === 'tmdl' ? 'importSemanticModelParseTmdl' : 'importSemanticModelParseBim',
       );
     }
     converted = semanticModelToDbml(read.model);

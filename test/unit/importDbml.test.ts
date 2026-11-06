@@ -47,6 +47,18 @@ import { buildLogicalDisplaySubjectArea } from '../../src/services/stageDisplay'
 import { telemetry } from '../../src/services/telemetryService';
 import { WHICH_LAYER_FOR_DIAGRAM } from '../../src/services/layerWording';
 
+// A file whose text starts with the marker reads as a parser that threw (telemetry: importDbmlParserThrew); every other file reads as it is.
+const PARSER_THROWS = '// erd-studio-test: the parser throws';
+vi.mock('../../src/services/dbmlImportParse', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/dbmlImportParse')>();
+  return {
+    ...actual,
+    readDbml: (text: string, ...rest: unknown[]) => (text.startsWith(PARSER_THROWS)
+      ? { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser stopped: boom' }] }
+      : (actual.readDbml as (t: string, ...r: unknown[]) => unknown)(text, ...rest)),
+  };
+});
+
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
 const DBML_FIXTURES = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml');
@@ -488,9 +500,35 @@ describe('Import DBML — a file it cannot import', () => {
     expect(ui.openedAt[0].filePath).toBe(file);
     expect(ui.openedAt[0].line).toBeGreaterThan(0);
     expect(ui.picks).toEqual([]);
-    expect(features()).toEqual(['importDbmlInvalid']);
+    expect(features()).toEqual(['importDbmlInvalid', 'importDbmlInvalidSyntax']);
     expect(errorNames()).toEqual([]);
     expect(erdFiles()).toEqual(['layers.json']);
+  });
+
+  it('a parser that throws is ours: importDbmlParserThrew, never importDbmlInvalid (the message is the same)', async () => {
+    makeProject('v5');
+    const file = dbmlFile('odd.dbml', `${PARSER_THROWS}\nTable a {\n  id int\n}\n`);
+    const ui = fakeUi({ file });
+
+    await expect(importDbml(deps(ui))).resolves.toBeUndefined();
+
+    expect(ui.errors[0].message).toMatch(/^Import DBML: odd\.dbml isn't valid DBML/);
+    expect(errorNames()).toEqual(['importDbmlParserThrew']);
+    expect(features()).toEqual([]);
+  });
+
+  it('a file with use lines (a multi-file dbdiagram project) counts importDbmlInvalidUse', async () => {
+    makeProject('v5');
+    const file = dbmlFile('main.dbml', "use * from './tables.dbml'\n");
+    await importDbml(deps(fakeUi({ file })));
+    expect(features()).toEqual(['importDbmlInvalid', 'importDbmlInvalidUse']);
+  });
+
+  it('several fields on one line count importDbmlSeveralFieldsOneLine', async () => {
+    makeProject('v5');
+    const file = dbmlFile('one.dbml', 'Table t {\n  id int [pk] name varchar\n  x int\n}\n');
+    await importDbml(deps(fakeUi({ file })));
+    expect(features()).toEqual(['importDbmlInvalid', 'importDbmlInvalidSyntax', 'importDbmlSeveralFieldsOneLine']);
   });
 
   it('a file with no tables: says there is nothing to import', async () => {
@@ -502,6 +540,7 @@ describe('Import DBML — a file it cannot import', () => {
 
     expect(ui.infos).toEqual(['Import DBML: empty.dbml has no tables, so there is nothing to import.']);
     expect(ui.picks).toEqual([]);
+    expect(features()).toEqual(['importDbmlNoTables']);
     expect(erdFiles()).toEqual(['layers.json']);
   });
 
@@ -515,6 +554,7 @@ describe('Import DBML — a file it cannot import', () => {
       message: "Import DBML couldn't read shop.dbml. Check that the file still exists and that you can open it, then try again.",
       buttons: [TRY_AGAIN_BUTTON],
     });
+    expect(features()[0]).toBe('importInputUnreadable');
 
     await vi.waitFor(() => expect(fs.existsSync(erd('silver', 'shop.json'))).toBe(true));
     // Try Again does not ask for the file again.
@@ -597,6 +637,7 @@ describe('Import DBML — the name', () => {
       message: 'A diagram named "shop" already exists in the Silver layer.',
       buttons: [OPEN_IT_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON],
     });
+    expect(features()[0]).toBe('importStopNameTaken');
     await vi.waitFor(() => expect(fs.existsSync(erd('silver', 'shop-copy.json'))).toBe(true));
     expect(fs.readFileSync(erd('silver', 'shop.json'), 'utf-8')).toBe('{}');
     expect(ui.dialogs).toHaveLength(1);
@@ -634,6 +675,7 @@ describe('Import DBML — the name', () => {
     expect(lms.tableExists('orders')).toBe(false);
     expect(fs.readFileSync(erd('silver', 'shop.json'), 'utf-8')).toBe('{}');
     expect(errorNames()).toEqual([]);
+    expect(features()).toEqual(['importStopNameTaken']);
   });
 });
 
@@ -862,6 +904,7 @@ describe('Import DBML — where relationships go', () => {
       message: 'Import DBML: logical-models/orders.yml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
       buttons: [SHOW_FILE_BUTTON],
     });
+    expect(features()).toEqual(['importStopUnsaved']);
     await vi.waitFor(() => expect(ui.shownFiles).toEqual([ordersPath]));
     expect(ui.confirms).toEqual([]);
     expect(fs.readFileSync(ordersPath, 'utf-8')).toBe(ordersYml);
@@ -886,6 +929,7 @@ describe('Import DBML — where relationships go', () => {
     });
     await vi.waitFor(() => expect(ui.openedAt).toEqual([{ filePath: ordersPath, line: 2, column: undefined }]));
     expect(errorNames()).toEqual([]);
+    expect(features()).toEqual(['importStopRefusedWrite']);
     expect(lms.tableExists('customers')).toBe(false);
   });
 });
@@ -917,7 +961,8 @@ describe('Import DBML — a write that fails', () => {
     expect(lms.tableExists('orders')).toBe(false);
     expect(fs.existsSync(erd('silver', 'shop.json'))).toBe(false);
     expect(fs.existsSync(erd('silver'))).toBe(false);
-    expect(errorNames()).toEqual(['importDbmlFailed']);
+    // Its write class: not the user's permissions or disk, so ours.
+    expect(errorNames()).toEqual(['importDbmlFailed', 'writeFailedOurs']);
     expect(features()).not.toContain('importDbml');
     expect(written).toEqual([]);
   });
@@ -941,6 +986,8 @@ describe('Import DBML — a write that fails', () => {
       buttons: [TRY_AGAIN_BUTTON],
     });
     expect(ui.errors[0].message).not.toContain(tmp);
+    expect(features()).toContain('writeFailedPermission');
+    expect(errorNames()).toEqual(['importDbmlFailed']);
     await vi.waitFor(() => expect(fs.existsSync(erd('silver', 'shop.json'))).toBe(true));
     // Try Again kept the file and the layer, and offered the same name.
     expect(ui.dialogs).toHaveLength(1);
@@ -959,6 +1006,7 @@ describe('Import DBML — a write that fails', () => {
     expect(ui.errors[0].message).toBe(
       "Import DBML couldn't save the diagram: the disk is full. Free up some space, then try again. Nothing was changed.",
     );
+    expect(features()).toContain('writeFailedDiskFull');
   });
 
   it('a library file that fails after the subject area is written: the subject area is removed and the file put back', async () => {
@@ -1123,6 +1171,7 @@ describe('Import DBML — no layers', () => {
     await expect(importDbml(d)).resolves.toBeUndefined();
 
     expect(ui.errors).toEqual([{ message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }]);
+    expect(features()).toEqual(['importStopNoLayers']);
     await vi.waitFor(() => expect(ui.addLayers).toBe(1));
     expect(erdFiles()).toEqual(['layers.json']);
   });

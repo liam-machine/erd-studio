@@ -537,7 +537,14 @@ Read the draft on its own: `draftKept / draftShown` is how often a draft became 
 diagram, and `draftShownAuto` against `draftKept`, `draftDiscarded` and
 `draftClosed` says whether opening it on the ERD Studio icon helps; a high
 `draftChangeOptions` says a default (files, layer, name, folder) guesses wrong,
-and a high `draftUnavailable` that the automatic draft is often not buildable.
+and a high `draftUnavailable` that the automatic draft is often not buildable
+(`draftUnavailable<Source>` says which draft, `draftDrop*` why).
+
+Read the first draft's quality per source `S` (2.0): `draftThin<S> / draftSource<S>`
+is how often that importer's first draft is thin, `draftKeptThin<S> / draftKept`
+whether people keep thin drafts anyway, and `draftRejectedFast<S> / draftSource<S>`
+how often a draft is rejected at a glance. The quality flags are counted off the
+onboarding trail (`featureQuiet`), so they never crowd out what the user did.
 
 Read the suggestion against the click: for each `startSuggested<X>`, the
 installs that clicked the matching start (`*Import<X>` for the imports,
@@ -819,7 +826,7 @@ A day whose activation threw before it recorded its outcome is still sent (it wo
 - `draftNoPkMost` — a SQL or DBML first draft where at least half the tables have no primary key.
 - `draftWideTablesMost` — a first draft where at least half the tables have more than 30 columns.
 - `draftRelsInferable` — a draft with no or few relationships whose column names look like keys of other drafted tables.
-- `draftLeftOut` — the draft left some tables out.
+- `draftLeftOut` — the draft leaves out things its source held (views, indexes, statements and the like).
 - `draftCapped` — the draft was capped at its size limit.
 - `draftReusesLibrary` — the draft reuses or changes tables already in the library.
 - `draftThinDbt` — a thin dbt first draft (3+ tables, and no relationships, mostly orphans, mostly empty or mostly untyped).
@@ -855,6 +862,9 @@ A day whose activation threw before it recorded its outcome is still sent (it wo
 - `importSqlRejectedGrant` — the first rejected SQL statement was a GRANT.
 - `importSqlRejectedSetUse` — the first rejected SQL statement was a SET or USE.
 - `importSqlRejectedOther` — the first rejected SQL statement was something else.
+
+The clause is matched on the device against fixed keywords: the line the parser stopped on when it starts a statement of its own (a `COMMENT ON` or `SET` run into the `CREATE TABLE` before it, for want of a semicolon), else the rejected statement's own leading keywords. Only `CREATE TABLE` and `CREATE TYPE` statements are parsed by the grammar, so the others appear only in that run-on case.
+
 - `importSqlFailPostgres` — the rejected SQL was read as PostgreSQL.
 - `importSqlFailMysql` — the rejected SQL was read as MySQL.
 - `importSqlFailSqlserver` — the rejected SQL was read as SQL Server.

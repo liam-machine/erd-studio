@@ -274,7 +274,8 @@ describe('Open Example Diagram', () => {
     await vi.waitFor(() => expect(ui.opened).toEqual([erd(EXAMPLE_LAYER, 'coffee-shop.json')]));
     expect(ui.errors).toEqual(['A diagram named "taken" already exists in the Gold layer.']);
     expect(ui.reads).toEqual([]);
-    expect(features()).toEqual(['exampleDiagram']);
+    // The name taken is the project's state (importStopNameTaken); the example itself is counted once.
+    expect(features()).toEqual(['importStopNameTaken', 'exampleDiagram']);
   });
 
   it('a project without a gold layer is asked for one, as any import is', async () => {

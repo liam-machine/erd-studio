@@ -59,6 +59,7 @@ import { log } from '../services/logger';
 import { pathKey } from '../services/pathKey';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
+import { recordWriteFailure } from '../services/importTelemetry';
 
 export const OPEN_EXAMPLE_PROJECT_COMMAND = 'erdStudio.openExampleProject';
 
@@ -184,6 +185,7 @@ export async function openExampleProject(deps: OpenExampleProjectDeps, resume?: 
     writeFilesWithRollback(writes, { io: deps.io });
   } catch (err) {
     telemetry.error('exampleWriteFailed');
+    recordWriteFailure(err, telemetry);
     log.error(`[ERD Studio] ${OPEN_EXAMPLE_PROJECT_TITLE}: could not write ${chosen.id}:`, err);
     const left = err instanceof FileWriteRollbackFailed
       ? `These files could not be removed, so delete them yourself: ${err.unrestored.map((p) => path.relative(parent, p)).join(', ')}.`

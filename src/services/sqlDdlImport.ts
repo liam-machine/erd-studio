@@ -107,6 +107,61 @@ export interface SqlDdlProblem {
   /** 1-based line in that file, when the problem has one. */
   line?: number;
   message: string;
+  /** What kind of problem (telemetry only, never shown): absent for a dialect that is not one. */
+  kind?: SqlProblemKind;
+  /** A `parse` problem: the clause the parser rejected, matched on the device against fixed keywords (telemetry only). */
+  clause?: SqlClause;
+}
+
+/**
+ * The kinds of {@link SqlDdlProblem}: a statement the grammar could not read
+ * (`parse`), one it read but that cannot be a table (`structure`: no closing
+ * parenthesis, no columns, a column twice, an enum with no values), a table
+ * defined twice, no CREATE TABLE at all, or no files.
+ */
+export type SqlProblemKind = 'parse' | 'structure' | 'duplicateTable' | 'noCreateTable' | 'noFiles';
+
+/** The leading keywords of a rejected clause, as fixed classes (telemetry only). */
+export type SqlClause = 'CreateTable' | 'CreateOrReplace' | 'AlterTable' | 'CreateView' | 'CommentOn' | 'CreateIndex' | 'Grant' | 'SetUse' | 'Other';
+
+/**
+ * The class of a statement or line by its leading keywords, or undefined when
+ * it does not start one (a column definition, a closing parenthesis).
+ * Matched on the device; only the class leaves.
+ */
+export function sqlClauseOf(text: string): SqlClause | undefined {
+  const words = text.replace(/^[\s(]+/, '').toUpperCase().split(/[^A-Z_]+/).filter(Boolean).slice(0, 8);
+  const [w0, w1] = words;
+  if (w0 === 'CREATE') {
+    if (w1 === 'OR' && words[2] === 'REPLACE') return 'CreateOrReplace';
+    // CREATE [GLOBAL] [TEMPORARY | TRANSIENT | …] TABLE, CREATE [UNIQUE] [CLUSTERED] INDEX, CREATE [MATERIALIZED] VIEW.
+    const what = words.slice(1).find((w) => w === 'TABLE' || w === 'VIEW' || w === 'INDEX');
+    if (what === 'TABLE') return 'CreateTable';
+    if (what === 'VIEW') return 'CreateView';
+    if (what === 'INDEX') return 'CreateIndex';
+    return 'Other';
+  }
+  if (w0 === 'ALTER') return w1 === 'TABLE' ? 'AlterTable' : 'Other';
+  if (w0 === 'COMMENT' && w1 === 'ON') return 'CommentOn';
+  if (w0 === 'GRANT' || w0 === 'REVOKE' || w0 === 'DENY') return 'Grant';
+  if (w0 === 'SET' || w0 === 'USE') return 'SetUse';
+  if (w0 === 'INSERT' || w0 === 'UPDATE' || w0 === 'DELETE' || w0 === 'DROP' || w0 === 'SELECT' || w0 === 'WITH'
+    || w0 === 'EXEC' || w0 === 'EXECUTE' || w0 === 'TRUNCATE' || w0 === 'MERGE' || w0 === 'COPY' || w0 === 'RENAME') return 'Other';
+  return undefined;
+}
+
+/**
+ * The clause a parse problem names: the line the parser stopped on when it
+ * starts a statement of its own (a COMMENT ON or GRANT run into the CREATE
+ * TABLE before it, for want of a semicolon), else the statement's own
+ * leading keywords.
+ */
+export function rejectedSqlClause(statementSql: string, line: number | undefined): SqlClause {
+  if (line !== undefined && line >= 1) {
+    const atLine = sqlClauseOf(statementSql.split(/\r?\n/)[line - 1] ?? '');
+    if (atLine) return atLine;
+  }
+  return sqlClauseOf(statementSql) ?? 'Other';
 }
 
 export type SqlDdlToDbmlResult =
@@ -894,7 +949,7 @@ class Converter {
     const open = name.next;
     const close = matchParen(t, open);
     if (close < 0) {
-      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${name.parts.join('.')}: its column list has no closing parenthesis.` });
+      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${name.parts.join('.')}: its column list has no closing parenthesis.`, kind: 'structure' });
       return;
     }
     // `CREATE TABLE x (a, b) AS SELECT` names columns without types.
@@ -920,12 +975,14 @@ class Converter {
         file,
         line: diagnostic.line ? st.line + diagnostic.line - 1 : st.line,
         message: `CREATE TABLE ${label} could not be read: ${diagnostic.message}`,
+        kind: 'parse',
+        clause: rejectedSqlClause(prepared.sql, diagnostic.line),
       });
       return;
     }
     const rawTable = (raw.tables ?? []).find((rt) => sameIdent(rt.name, tableName)) ?? raw.tables?.[0];
     if (!rawTable) {
-      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} could not be read: the parser found no table in it.` });
+      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} could not be read: the parser found no table in it.`, kind: 'parse', clause: rejectedSqlClause(prepared.sql, undefined) });
       return;
     }
     const table: ModelTable = {
@@ -940,14 +997,14 @@ class Converter {
     for (const rf of rawTable.fields ?? []) {
       const key = rf.name.toLowerCase();
       if (seen.has(key)) {
-        this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} has the column ${rf.name} twice.` });
+        this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} has the column ${rf.name} twice.`, kind: 'structure' });
         return;
       }
       seen.add(key);
       table.fields.push(this.toField(rf, prepared, text, columnSources.get(key)));
     }
     if (table.fields.length === 0) {
-      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} has no columns.` });
+      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} has no columns.`, kind: 'structure' });
       return;
     }
     let plainIndexes = 0;
@@ -1145,7 +1202,7 @@ class Converter {
     const origin: Origin = { file, line: st.line };
     const list = readStringList(t, name.next + 2);
     if (!list) {
-      this.problems.push({ file, line: st.line, message: `CREATE TYPE ${name.parts.join('.')} AS ENUM has no value list.` });
+      this.problems.push({ file, line: st.line, message: `CREATE TYPE ${name.parts.join('.')} AS ENUM has no value list.`, kind: 'structure' });
       return;
     }
     this.addEnum({
@@ -1561,6 +1618,7 @@ class Converter {
             file: x.origin.file,
             line: x.origin.line,
             message: `Table ${tableLabel(x)} is defined twice (also in ${y.origin.file}, line ${y.origin.line}).`,
+            kind: 'duplicateTable',
           });
           break;
         }
@@ -1943,7 +2001,7 @@ export function convertSqlDdl(input: SqlDdlToDbmlInput, engine: SqlParseEngine):
   if (!isSqlDialect(input.dialect)) {
     return { ok: false, problems: [{ file: '', message: `Unknown SQL dialect: ${String(input.dialect)}.` }] };
   }
-  if (input.files.length === 0) return { ok: false, problems: [{ file: '', message: 'No SQL files to import.' }] };
+  if (input.files.length === 0) return { ok: false, problems: [{ file: '', message: 'No SQL files to import.', kind: 'noFiles' }] };
   const converter = new Converter(input.dialect, engine);
   const unused: string[] = [];
   for (const file of input.files) {
@@ -1954,7 +2012,7 @@ export function convertSqlDdl(input: SqlDdlToDbmlInput, engine: SqlParseEngine):
   if (converter.tables.length === 0) {
     return {
       ok: false,
-      problems: [{ file: input.files.length === 1 ? input.files[0].name : '', message: `No CREATE TABLE statements with a column list were found in ${input.files.length === 1 ? 'the file' : 'the files'}.` }],
+      problems: [{ file: input.files.length === 1 ? input.files[0].name : '', message: `No CREATE TABLE statements with a column list were found in ${input.files.length === 1 ? 'the file' : 'the files'}.`, kind: 'noCreateTable' }],
     };
   }
   converter.applyDeferred();

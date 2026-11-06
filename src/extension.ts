@@ -184,6 +184,7 @@ import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/example
 import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_PICK_TITLE, TOUR_LABEL, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
+import { DRAFT_DROP_FEATURES, STORAGE_FEATURES, draftUnavailableFeature, type DraftDropReason } from './services/importTelemetry';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
 import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
 import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
@@ -1346,13 +1347,19 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     log: (message) => log.info(message),
     warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
   });
+  // The tracked preview's listener for the page's details being opened (a discard after it is not a rejection at a glance).
+  let draftDetailsOpened: () => void = () => {};
   const draftPreview: DraftPreview = trackedDraftPreview(
     createDraftPreview(context.extensionUri, draftPreviewEvents(
       (key) => telemetry.feature(key),
       (code) => telemetry.error(code),
       (action) => onboardingGuide.onDraftAction(action),
+      () => draftDetailsOpened(),
     )),
     {
+      // The first draft's quality flags, counted off the onboarding trail.
+      featureQuiet: (key) => telemetry.featureQuiet(key),
+      onDetailsOpened: (listener) => { draftDetailsOpened = listener; },
       guide: {
         takeDraft: (draft) => onboardingGuide.takeDraft(draft),
         draftKept: (draft) => onboardingGuide.draftKept(draft),
@@ -1612,6 +1619,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     look: vscodeStartLook(workspaceRoot, semanticDir),
     publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
     onDbtProjectSeen: () => noteUnusedDbtProject(workspaceRoot, undefined, 'look'),
+    feature: (key) => telemetry.featureOnce(key),
+    error: (code) => telemetry.error(code),
   });
   context.subscriptions.push({ dispose: () => startIntent.dispose() });
   startContext = () => startIntent.startContext();
@@ -1968,6 +1977,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', hasSemanticDir);
     knownStorage = projectStorageOf(tableLibraryService);
     void vscode.commands.executeCommand('setContext', 'erdStudio.storage', knownStorage);
+    // How the project is stored (YAML, DBML or half converted): once a day, off the onboarding trail.
+    telemetry.featureQuiet(STORAGE_FEATURES[knownStorage], true);
     // A project that writes the v6 naming (#182) makes `tables/` with its first
     // table, so the view shows from setup on, not only once a table exists;
     // so does a DBML project (its tables live under the layer folders).
@@ -1979,6 +1990,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       const legacy = detectLegacyDbmlTree(fullSemanticDirPath);
       if (legacy) {
         legacyDbmlTreeShown = true;
+        telemetry.feature('legacyDbmlTreeWarned');
         void vscode.window.showWarningMessage(`ERD Studio: ${legacyDbmlTreeMessage(legacy)}`);
       }
     }
@@ -2828,18 +2840,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // automatic draft (the ERD Studio icon), so both write exactly alike.
   const existingSubjectAreas = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
   const validateNewSlug = (value: string, layer: string): string | undefined => validateSubjectAreaSlug(value, layer, existingSubjectAreas());
+  /** Why a quiet run (the automatic draft) ended before its draft: counted beside `draftUnavailable`. */
+  const quietDrop = (reason: DraftDropReason): void => { telemetry.feature(DRAFT_DROP_FEATURES[reason]); };
   /** The draft an import shows: this host's preview, what opened it, staleness, and stage colours only with dbt. */
   const importDraftFor = (trigger: DraftTrigger, quiet = false): ImportDraftOptions => ({
     preview: draftPreview,
     trigger,
-    ...(quiet ? { quiet } : {}),
+    ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
     logicalOnly: !hasDbt,
   });
   const dbtDraftFor = (trigger: DraftTrigger, quiet = false): DbtDraftOptions => ({
     preview: draftPreview,
     trigger,
-    ...(quiet ? { quiet } : {}),
+    ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
   });
   const importDbmlDeps = (draft?: ImportDraftOptions): ImportDbmlDeps => ({
@@ -3829,6 +3843,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }
           }
           ownWrites.recordDelete(filePath);
+          telemetry.feature('diagramDeleted');
           treeProvider.invalidateSubjectArea(filePath);
           treeProvider.refresh();
           refreshDiagramsStatus();
@@ -4775,7 +4790,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       });
       if (!kind || autoDraftAsked || draftPreview.isOpen()) return;
       // Another prompt had this window: the draft waits for a later one.
-      if (!sessionPrompts.claim('draft')) return;
+      if (!sessionPrompts.claim('draft')) {
+        telemetry.featureOnce('draftWaitedForPrompt');
+        return;
+      }
       autoDraftAsked = true;
       if (kind === 'find') await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
       else await context.globalState.update(EXAMPLE_DRAFT_SHOWN_KEY, true);
@@ -4797,6 +4815,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       onDraftAsk = () => {};
       if (!shown) {
         telemetry.feature('draftUnavailable');
+        // Which draft it was going to be (the reason, when there is one, came from its quietDrop).
+        const unavailable = draftUnavailableFeature(kind, kind === 'find' ? intent : undefined);
+        if (unavailable) telemetry.feature(unavailable);
         log.info("[ERD Studio] The automatic draft could not be built; the sidebar's starts remain.");
       }
       await run;

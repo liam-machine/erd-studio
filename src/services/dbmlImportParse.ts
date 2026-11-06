@@ -175,7 +175,13 @@ export interface DbmlModel {
 export type ReadDbmlResult =
   | { ok: true; model: DbmlModel }
   /** `importsOtherFiles`: the file has a `use` declaration (§5.7), so it is part of a multi-file project; nothing was parsed. */
-  | { ok: false; diagnostics: DbmlDiagnostic[]; importsOtherFiles?: true };
+  | {
+    ok: false;
+    diagnostics: DbmlDiagnostic[];
+    importsOtherFiles?: true;
+    /** The parser itself threw or returned nothing: not the file's mistake (telemetry: `importDbmlParserThrew`). */
+    threw?: true;
+  };
 
 /**
  * Import DBML's refusal for a file with `use` lines (native DBML storage,
@@ -301,10 +307,10 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
     }
     raw = compiler.parse.rawDb(parser.DEFAULT_ENTRY);
   } catch (err) {
-    return { ok: false, diagnostics: [{ line: 1, column: 1, message: `The DBML parser stopped: ${messageOf(err)}` }] };
+    return { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: `The DBML parser stopped: ${messageOf(err)}` }] };
   }
   if (!isObject(raw)) {
-    return { ok: false, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser returned nothing for this file.' }] };
+    return { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser returned nothing for this file.' }] };
   }
   return {
     ok: true,

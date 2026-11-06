@@ -161,6 +161,62 @@ describe('StartIntentTracker', () => {
   });
 });
 
+describe('StartIntentTracker telemetry (2.0 B9): fixed keys only, never what the look found', () => {
+  const recorders = () => {
+    const keys: string[] = [];
+    return { keys, feature: (k: string) => { keys.push(k); }, error: (c: string) => { keys.push(`!${c}`); } };
+  };
+
+  it('each timeout counts startLookTimeout; running out of attempts counts startLookGaveUp once', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const look = vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>(() => {}));
+    const { t, advance } = tracker({ look, feature: r.feature, error: r.error });
+    const first = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    await first;
+    expect(r.keys).toEqual(['startLookTimeout']);
+    const retry = t.refresh();
+    await vi.advanceTimersByTimeAsync(2 * START_LOOK_TIMEOUT_MS);
+    await retry;
+    expect(r.keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
+    advance(10 * START_LOOK_FRESH_MS);
+    await t.refresh();
+    expect(r.keys).toHaveLength(3);
+  });
+
+  it('a rejection after our own abort (the timeout) records nothing', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const look = vi.fn((signal: AbortSignal) => new Promise<ReadonlySet<DetectedImportSource>>((_, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const { t } = tracker({ look, feature: r.feature, error: r.error });
+    const pending = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(await pending).toBe('blank');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.keys).toEqual(['startLookTimeout']);
+  });
+
+  it('a real rejection records the error startLookFailed', async () => {
+    const r = recorders();
+    const { t } = tracker({ look: vi.fn(async () => { throw new Error('search unavailable'); }), feature: r.feature, error: r.error });
+    expect(await t.refresh()).toBe('blank');
+    expect(r.keys).toEqual(['!startLookFailed']);
+  });
+
+  it('a context that throws records startContextFailed; a recorder that throws changes nothing', async () => {
+    const r = recorders();
+    const { t, published } = tracker({ context: () => { throw new Error('unreadable'); }, feature: r.feature, error: r.error });
+    await t.refresh();
+    expect(r.keys).toEqual(['!startContextFailed']);
+    const broken = tracker({ look: vi.fn(async () => { throw new Error('x'); }), error: () => { throw new Error('telemetry'); } });
+    expect(await broken.t.refresh()).toBe('blank');
+    expect(published).toEqual(['blank']);
+  });
+});
+
 describe('the look is Import…\'s own detector, stopping when cancelled', () => {
   it('opens no more .sql files once cancelled', async () => {
     let cancelled = false;

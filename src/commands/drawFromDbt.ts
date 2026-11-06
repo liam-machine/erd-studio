@@ -62,6 +62,7 @@ import {
 } from '../services/commandErrors';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
+import { IMPORT_STOP_FEATURES, dropQuietly, recordWriteFailure, type DraftDropReason } from '../services/importTelemetry';
 import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
@@ -133,6 +134,8 @@ export interface DbtDraftOptions {
   quiet?: boolean;
   /** Bumped by the semantic-dir watchers for changes that are not ERD Studio's own. */
   generation?(): number;
+  /** A quiet run ended before its draft showed: why (the host counts it beside `draftUnavailable`). */
+  quietDrop?(reason: DraftDropReason): void;
 }
 
 /**
@@ -227,6 +230,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const models = listDraftModels(source);
   if (models.length === 0) {
     if (!quiet) telemetry.feature('drawNoModels');
+    dropQuietly(draftOptions, 'nothingFound');
     say(NO_DBT_MODELS_MESSAGE);
     return undefined;
   }
@@ -239,6 +243,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     if (scope) pick = { scope, modelNames: scope.modelNames };
     else if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: no models folder to draft (automatic draft dropped).`);
+      dropQuietly(draftOptions, 'nothingFound');
       return undefined;
     }
   }
@@ -250,8 +255,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   // New Diagram's default instead of asking).
   const creatable = layerService.getCreatableLayers();
   if (creatable.length === 0) {
+    telemetry.feature(IMPORT_STOP_FEATURES.noLayers);
     if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: ${NO_LAYERS_MESSAGE}`);
+      dropQuietly(draftOptions, 'noLayer');
       return undefined;
     }
     telemetry.feature('drawNoLayers');
@@ -282,6 +289,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   const takenAsIs = (!asks || resume?.redraw !== undefined) && deps.validateDomainName(slugFromName(offered), chosenLayer) === undefined;
   if (!takenAsIs && quiet) {
     log.info(`[ERD Studio] ${TITLE}: the folder's name is not a valid diagram name (automatic draft dropped).`);
+    dropQuietly(draftOptions, 'badName');
     return undefined;
   }
   const name = takenAsIs ? offered : await vscode.window.showInputBox({
@@ -308,6 +316,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   if (draft.modelNames.length === 0) {
     if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: none of the folder's models could be drawn (automatic draft dropped).`);
+      dropQuietly(draftOptions, 'nothingDrawable');
       return undefined;
     }
     telemetry.feature('drawNothingDrawable');
@@ -331,6 +340,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   });
   // A name is taken in either format: `<slug>.json` and `diagrams/<slug>.dbml` would be one diagram's name twice.
   if (fs.existsSync(path.join(layerDir, `${slug}.json`)) || fs.existsSync(dbmlDiagramPath)) {
+    telemetry.feature(IMPORT_STOP_FEATURES.nameTaken);
     nameTaken();
     return undefined;
   }
@@ -386,6 +396,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     if (!dbml) for (const model of routed.changed) tableLibraryService.serializeTable(model);
   } catch (err) {
     if (isRefusedWrite(err)) {
+      telemetry.feature(IMPORT_STOP_FEATURES.refusedWrite);
       showRefusal(err, 'Nothing was changed.', path.join(workspaceRoot, semanticDir));
       return undefined;
     }
@@ -404,6 +415,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     });
   };
   if (dirty.length > 0) {
+    telemetry.feature(IMPORT_STOP_FEATURES.unsaved);
     showUnsaved(dirty[0]);
     return undefined;
   }
@@ -553,21 +565,26 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
   function reportWriteFailure(outcome: Extract<Awaited<ReturnType<typeof writeNewSubjectArea>>, { ok: false }>): void {
     const { error: err, undone } = outcome;
     if (outcome.nameTaken) {
+      telemetry.feature(IMPORT_STOP_FEATURES.nameTaken);
       nameTaken();
       return;
     }
     // A file the write would change (another diagram it re-renders, §5.7) has unsaved edits.
     if (err instanceof UnsavedFilesRefused) {
+      telemetry.feature(IMPORT_STOP_FEATURES.unsaved);
       showUnsaved(err.filePaths[0]);
       return;
     }
     const result = writeOutcome(undone, semanticDir);
     // A refusal is explained, not a failure, so it is not counted (as on the canvas).
     if (isRefusedWrite(err)) {
+      telemetry.feature(IMPORT_STOP_FEATURES.refusedWrite);
       showRefusal(err, result, path.join(workspaceRoot, semanticDir));
       return;
     }
     telemetry.error('drawWriteFailed');
+    // Its class: the user's permissions or disk, or ours.
+    recordWriteFailure(err, telemetry);
     const why = environmentWriteProblem(err, workspaceRoot, `${semanticDir}/${chosenLayer}`);
     if (!why) {
       const doing = 'while saving the diagram';

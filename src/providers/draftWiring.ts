@@ -17,6 +17,13 @@
  * unit-tested with plain fakes.
  */
 
+import {
+  draftKeptQualityFeature,
+  draftQualityFlags,
+  draftRejectedFastFeature,
+  draftShownQualityFeatures,
+  type DraftQuality,
+} from '../services/draftTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import type { GuideActionPayload } from '../types/onboardingGuide';
 import type {
@@ -61,6 +68,16 @@ export interface TrackedDraftPreviewDeps {
   claim(): void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
   feature(key: TelemetryFeature): void;
+  /**
+   * Counts a key without adding it to the onboarding trail (`telemetry.featureQuiet`):
+   * the draft's quality flags (`draftTelemetry.ts`), so they never use up the first
+   * day's trail. Absent: they are not counted.
+   */
+  featureQuiet?(key: TelemetryFeature): void;
+  /** Registers the listener for the page's details being opened (`draftPreviewEvents`' `onDetailsOpened`). */
+  onDetailsOpened?(listener: () => void): void;
+  /** The clock (tests). Default `Date.now`. */
+  now?(): number;
   /** A Keep wrote the draft (Import DBML's or Import from dbt's writer: into this folder). */
   onKept(draft: Draft): unknown;
   /** Every draft handed to the page (the automatic draft's "was anything shown?"). */
@@ -94,6 +111,25 @@ export interface TrackedDraftPreviewDeps {
 export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPreviewDeps): DraftPreview {
   /** The page's last answer while it stays open: `scope` and `keep` are followed by a redraw. */
   let lastAnswer: DraftAnswer['kind'] | undefined;
+  const now = (): number => (deps.now ? deps.now() : Date.now());
+  /** When the page (not a redraw of it) showed, and whether its details were opened since: a rejection at a glance. */
+  let askedAt = 0;
+  let detailsSeen = false;
+  deps.onDetailsOpened?.(() => { detailsSeen = true; });
+  /** Quality keys are telemetry only: a failure to work them out never reaches the flow. */
+  const quiet = (keys: () => readonly (TelemetryFeature | undefined)[]): void => {
+    if (!deps.featureQuiet) return;
+    try {
+      for (const key of keys()) if (key) deps.featureQuiet(key);
+    } catch { /* never breaks the draft */ }
+  };
+  const quality = (draft: Draft): DraftQuality | null => {
+    try {
+      return draftQualityFlags(draft);
+    } catch {
+      return null;
+    }
+  };
   return {
     isOpen: () => inner.isOpen(),
     showing: () => inner.showing?.(),
@@ -109,6 +145,10 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
         if (draft.source === 'example' || draft.source === 'exampleProject') deps.feature('draftExampleShown');
         const source = DRAFT_SOURCE_FEATURES[draft.source];
         if (source) deps.feature(source);
+        // Does the first draft look any good? Flags only, off the trail (B6).
+        quiet(() => draftShownQualityFeatures(quality(draft)));
+        askedAt = now();
+        detailsSeen = false;
       }
       lastAnswer = undefined;
       // Phase A of the onboarding guide: decided (and its flag written) before the page shows.
@@ -119,6 +159,9 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
       lastAnswer = answer.kind;
       const counted = ANSWER_FEATURES[answer.kind];
       if (counted) deps.feature(counted);
+      if (answer.kind === 'discard' || answer.kind === 'closed') {
+        quiet(() => [draftRejectedFastFeature(draft.source, now() - askedAt, detailsSeen)]);
+      }
       if (answer.kind === 'discard' || answer.kind === 'closed') deps.guide?.draftLeft(draft);
       if (answer.kind === 'otherStart') {
         const { command, args } = DRAFT_OTHER_START_COMMANDS[answer.start];
@@ -136,6 +179,8 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
           settled = true;
           if (outcome.kept) {
             deps.feature('draftKept');
+            // The draft this Keep answered: the one actually written, after any scope change.
+            quiet(() => [draftKeptQualityFeature(quality(draft))]);
             deps.guide?.draftKept(draft);
             if (draft.keep.writer === 'importDbml' || draft.keep.writer === 'drawFromDbt') {
               Promise.resolve(deps.onKept(draft)).then(undefined, (err: unknown) => deps.warn?.('Could not mark the folder as started:', err));
@@ -153,9 +198,14 @@ export function draftPreviewEvents(
   feature: (key: TelemetryFeature) => void,
   error: (code: TelemetryErrorCode) => void,
   guide?: (action: GuideActionPayload) => void,
+  /** Told when the details open (`trackedDraftPreview`'s `onDetailsOpened`: a later discard is not a rejection at a glance). */
+  onDetailsOpened?: () => void,
 ): DraftPreviewEvents {
   return {
-    detailsOpened: () => feature('draftDetailsOpened'),
+    detailsOpened: () => {
+      feature('draftDetailsOpened');
+      onDetailsOpened?.();
+    },
     layoutFailed: () => error('draftLayoutFailed'),
     ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
   };

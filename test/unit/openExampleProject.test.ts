@@ -278,7 +278,8 @@ describe('Open an Example Project…', () => {
     const state = memento();
     expect(await openExampleProject({ globalState: state, ui, homeDir: home, io })).toBeUndefined();
 
-    expect(errors()).toEqual(['exampleWriteFailed']);
+    // Its write class: an error with no errno is not the user's permissions or disk, so ours.
+    expect(errors()).toEqual(['exampleWriteFailed', 'writeFailedOurs']);
     expect(features()).toEqual([]);
     expect(fs.readdirSync(home)).toEqual([]);
     expect(ui.errorMessages).toHaveLength(1);

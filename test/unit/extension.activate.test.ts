@@ -3865,6 +3865,8 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     expect(draftPanels()).toEqual([]);
     expect(errors).not.toHaveBeenCalled();
     expect(keys()).toContain('draftUnavailable');
+    // Which draft it was, and why it was dropped (telemetry 2.0 B9): fixed keys only.
+    expect(keys()).toEqual(expect.arrayContaining(['draftUnavailableDbml', 'draftDropUnreadable']));
     expect(keys().filter((k) => /Invalid|Cancelled|FellBack|^draftShown/.test(k))).toEqual([]);
     expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
   });
