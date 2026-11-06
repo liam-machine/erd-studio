@@ -5,7 +5,7 @@
  * main entry can name them without importing the parser.
  */
 
-import type { Relationship, SemanticTable, TableLoadError, TableRelationship } from './semantic.js';
+import type { LoaderWarningCode, Relationship, SemanticTable, TableLoadError, TableRelationship } from './semantic.js';
 
 /** One thing a DBML reader noticed: a warning on a file that was read, or why part of it was not. */
 export interface DbmlProblem {
@@ -189,6 +189,12 @@ export interface DbmlSubjectAreaReading {
   /** False with a repeated Note name or a second Project: the writer refuses the file until it is fixed (§2.5). */
   writable: boolean;
   warnings: string[];
+  /**
+   * Each warning's fixed code, index for index with `warnings` (2.0), so a
+   * host can count or log them without the text. Optional: absent from a
+   * reader older than 2.0's; a missing entry is `other`.
+   */
+  warningCodes?: LoaderWarningCode[];
   /** Each member's `use` line. Optional: absent from a reader older than this field. */
   uses?: DbmlMemberUse[];
   /** The file declares at least one Table and has no table `use` line: most likely a dropped-in single-file DBML to import. */

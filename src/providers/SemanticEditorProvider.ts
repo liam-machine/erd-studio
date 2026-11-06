@@ -164,6 +164,15 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticTable, TableRelationship, UnifiedSubjectArea } from '../types/semantic';
 import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import {
+  canvasLayoutTelemetry,
+  dbmlDiagramFeatures,
+  loaderWarningFeatures,
+  slowCanvasLoad,
+  subjectAreaLoadDetailCode,
+  webviewErrorCodes,
+} from '../services/telemetryCanvas';
+import { ReadyWatch } from '../services/readyWatch';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
 import { subjectAreaLoadErrorCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
@@ -218,7 +227,7 @@ import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/db
 import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
 import { applyFileWrites, writtenPaths } from './applyFileWrites';
-import { primeLayoutOnlyReading } from '../services/dbmlDiagramReadings';
+import { primeLayoutOnlyReading, readDbmlDiagram } from '../services/dbmlDiagramReadings';
 import { changedMemberPath, dbmlResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
 import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
 import type { DbmlDraftTable, DbmlTableHome, NewRefFileChoice } from '../services/dbmlLibraryWrites';
@@ -501,6 +510,7 @@ import {
   validateGoToTablePayload,
   validateTableActionPayload,
   validateLayoutFinishedPayload,
+  validateWebviewErrorPayload,
   validateViewFilePayload,
   validateExtraPairs,
   validateMarkKey,
@@ -1552,6 +1562,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const panelKey = document.uri.toString();
     this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
     this.lastActivePanelKey = panelKey;
+    // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
+    const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
+      ready: (slow) => { if (slow) telemetry.feature('readySlowOver10s'); },
+      noReady: () => telemetry.error('webviewNoReadyCanvas'),
+    });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
@@ -1586,6 +1601,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
           // The onboarding guide: fixed action ids mapped to fixed commands and a fixed URL; writes no file.
           'guide',
+          // Usage telemetry only (2.0 B13): a crash's kind and area.
+          'webviewError',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           log.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -1607,6 +1624,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // cleared its error, so a suppressed repeat would leave it showing
             // "Loading domain…" for ever.
             this.lastLoadError.delete(panelKey);
+            readyWatch.ready();
             {
               const readyAt = Date.now();
               canvasLog.info(`Opening ${document.uri.fsPath}`);
@@ -1620,6 +1638,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               canvasLog.info(posted === undefined
                 ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
                 : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready`);
+              // A large diagram that took long to read (2.0 B17): once a day.
+              if (posted !== undefined && slowCanvasLoad(Date.now() - readyAt)) telemetry.featureOnce('canvasLoadOver20s');
               const entry = this.openPanels.get(panelKey);
               if (posted !== undefined && entry?.webview === webviewPanel.webview) {
                 entry.loaded = true;
@@ -1671,6 +1691,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
               break;
             }
+            telemetry.feature('dbmlEmbeddedTablesImport');
             await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
             break;
           }
@@ -1968,6 +1989,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 telemetry.error('layoutFailed');
                 if (payload.firstOpen) telemetry.error('firstLayoutFailed');
               }
+              // 2.0 B17: the failure's class, the stack-safe fallback, a slow first-open layout.
+              const big = canvasLayoutTelemetry(payload);
+              for (const code of big.errors) telemetry.error(code);
+              for (const feature of big.features) telemetry.feature(feature);
+            }
+            break;
+          }
+          case 'webviewError': {
+            // Usage telemetry only (2.0 B13): the canvas crashed or hit an
+            // uncaught error. Fixed kind and area only; the text stays in the
+            // webview. Writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateWebviewErrorPayload(payload)) {
+              for (const code of webviewErrorCodes(payload.kind, payload.area)) telemetry.error(code);
+            } else {
+              log.warn('[SemanticEditorProvider] Ignoring a webviewError with an unknown kind or area');
             }
             break;
           }
@@ -2437,6 +2474,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // The onboarding trail: the canvas went behind another tab and came back, or closed.
     const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => {
       telemetry.canvasVisible(panelKey, e.webviewPanel.visible);
+      readyWatch.visibility(e.webviewPanel.visible);
       if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
         this.lastActivePanelKey = panelKey;
       }
@@ -2445,6 +2483,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       messageSubscription.dispose();
       changeSubscription.dispose();
       viewStateSubscription.dispose();
+      readyWatch.dispose();
       telemetry.canvasClosed(panelKey);
       this.forgetPanel(panelKey, webviewPanel.webview);
       this.backwardsDrawn.delete(document.uri.toString());
@@ -4593,7 +4632,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     telemetry.catalog(hasCatalog);
+    this.recordDiagramFlags(document);
     if (stage === 'logical') this.scheduleRelationshipSurvey(document);
+  }
+
+  /**
+   * Usage telemetry for a canvas's first load (2.0 B14): how the diagram
+   * renders degraded — the loader's warning codes (a table not found, DBML
+   * from another tool) and, for a DBML diagram, what its reading found (the
+   * remembered one: no compile). Presence flags, once a day each. Never throws.
+   */
+  private recordDiagramFlags(document: vscode.TextDocument): void {
+    try {
+      const fsPath = document.uri.fsPath;
+      const features = loaderWarningFeatures(this.subjectAreaService.loaderWarningCodes(fsPath));
+      if (subjectAreaStorageOf(fsPath) === 'dbml') features.push(...dbmlDiagramFeatures(readDbmlDiagram(document.getText(), fsPath)));
+      for (const feature of features) telemetry.featureOnce(feature);
+    } catch (err) {
+      log.debug(`[SemanticEditorProvider] Diagram flags not recorded: ${err instanceof Error ? err.name : 'unknown'}`);
+    }
   }
 
   /**
@@ -4688,6 +4745,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.lastLoadError.set(errorKey, payload.message);
     telemetry.error('domainLoad');
     telemetry.error(subjectAreaLoadErrorCode(failure));
+    if (failure !== 'missing') {
+      // 2.0 B14: a failure over a live canvas (often an assistant part-way
+      // through writing several files) is only flagged; one that keeps the
+      // canvas from opening also says why, from core's fixed fields.
+      if (this.openPanels.get(errorKey)?.loaded) {
+        telemetry.feature('domainLoadOverLive');
+      } else {
+        telemetry.feature('domainLoadBlocking');
+        const detail = subjectAreaLoadDetailCode(err);
+        if (detail) telemetry.error(detail);
+      }
+    }
     if (failure === 'missing') {
       // The canvas's file was removed (an Undo of Convert, a delete or a
       // `git checkout` outside ERD Studio): expected, and the screen says

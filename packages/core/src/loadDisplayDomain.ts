@@ -48,7 +48,7 @@
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
-import type { SubjectAreaFormat, TableLoadError, NodePosition, SemanticTable } from './types/semantic.js';
+import type { SubjectAreaFormat, TableLoadError, NodePosition, SemanticTable, LoaderWarningCode } from './types/semantic.js';
 import { usesTableLibrary } from './types/semantic.js';
 import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStorageReader } from './types/dbmlStorage.js';
 import type { LayerConfig } from './types/layer.js';
@@ -185,8 +185,13 @@ export interface LoadDisplaySubjectAreaOptions {
    * only when this is on and `maxModels` is finite.
    */
   ignoreStrayPositions?: boolean;
-  /** Receives repair warnings. Default console.warn. */
-  warn?: (message: string) => void;
+  /**
+   * Receives repair warnings. Default console.warn. The second argument
+   * (2.0) is always passed: the warning's fixed {@link LoaderWarningCode},
+   * for a host to count or log without the message (which may name tables
+   * and paths). A host written for one argument ignores it.
+   */
+  warn?: (message: string, code?: LoaderWarningCode) => void;
   /**
    * The DBML readers, `dbmlStorageReader` from `@erd-studio/core/dbml`.
    * Required to read a `.dbml` diagram (without it one throws a
@@ -310,7 +315,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     dbml,
     readFieldsFile = false,
   } = options;
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const sink = options.warn ?? ((message: string) => console.warn(message));
+  // Every warning carries its code; one passed only a message is `other`.
+  const warn = (message: string, code: LoaderWarningCode = 'other'): void => sink(message, code);
 
   // 0. Limits that are not numbers would silently switch themselves off.
   checkLimit('loadDisplaySubjectArea', 'maxParallelReads', maxParallelReads, { min: 1, integer: true });
@@ -330,7 +337,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   const diagram = isDbml ? diagramPathOf(domainPath) : undefined;
   if (isDbml) {
     if (!diagram) {
-      throw new SubjectAreaValidationError(dbmlNotADiagramMessage(domainPath));
+      throw new SubjectAreaValidationError(dbmlNotADiagramMessage(domainPath), 'notADiagram');
     }
     if (!dbml) {
       throw new SubjectAreaValidationError(
@@ -346,7 +353,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   const readLayersText = async (): Promise<string | null | undefined> => {
     const text = await readFile(layersPath);
     if (text !== null && text !== undefined && text.length > maxDomainChars) {
-      warn(`${layersPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the default layers`);
+      warn(`${layersPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the default layers`, 'layersFile');
       return null;
     }
     return text;
@@ -355,12 +362,12 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     const text = await readFile(fieldsPath);
     if (text === null || text === undefined) return undefined;
     if (text.length > maxDomainChars) {
-      warn(`${fieldsPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the starting set of fields`);
+      warn(`${fieldsPath} is ${text.length} characters long; at most ${maxDomainChars} are read. Using the starting set of fields`, 'fieldsFile');
       return undefined;
     }
     const { list, problems } = parseFieldsText(text, { maxNodes: maxYamlNodes, maxChars: maxYamlChars });
     for (const problem of problems) {
-      warn(`${fieldsPath}${problem.line !== undefined ? ` (line ${problem.line})` : ''}: ${problem.message}`);
+      warn(`${fieldsPath}${problem.line !== undefined ? ` (line ${problem.line})` : ''}: ${problem.message}`, 'fieldsFile');
     }
     // A file that cannot be read as a field list is no list: the renderer's starting set.
     return problems.some((p) => p.code === 'fieldsYamlInvalid') ? undefined : list;
@@ -378,7 +385,8 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   let document: unknown;
   if (isDbml && dbml) {
     reading = dbml.parseSubjectArea(domainText, domainPath);
-    for (const message of reading.warnings) warn(`${domainPath}: ${message}`);
+    const codes = reading.warningCodes;
+    reading.warnings.forEach((message, i) => warn(`${domainPath}: ${message}`, codes?.[i] ?? 'other'));
     document = reading.obj;
   } else {
     document = parseSubjectAreaJson(domainText, domainPath);
@@ -386,7 +394,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   const { obj, format } = validateSubjectAreaDocument(document, domainPath);
 
   // 4-5. Layers, from the semantic dir the domain sits in.
-  const layers = parseLayersText(await readLayersText(), warn);
+  const layers = parseLayersText(await readLayersText(), (message) => warn(message, 'layersFile'));
   const layerLookup: LayerLookup = {
     hasLayer: (id) => layers.some((l) => l.id === id),
     getValidLayerIds: () => layers.map((l) => l.id),
@@ -465,13 +473,13 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         return;
       }
       // The YAML table's own warnings (a parse error, say) follow the mixed-state one.
-      const parseWarnings: string[] = [];
-      const table = parseTable(name, text, maxYamlChars, maxYamlNodes, (m) => parseWarnings.push(m));
+      const parseWarnings: Array<[string, LoaderWarningCode | undefined]> = [];
+      const table = parseTable(name, text, maxYamlChars, maxYamlNodes, (m, code) => parseWarnings.push([m, code]));
       // An empty file, or one with no name:, is no table: it is drawn as missing, and says so below.
       if (reading && (table.model !== null || table.loadError !== undefined)) {
-        warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)`);
+        warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)`, 'yamlTableInDbml');
       }
-      for (const m of parseWarnings) warn(m);
+      for (const [m, code] of parseWarnings) warn(m, code);
       parsed.set(name, table);
     });
 
@@ -484,7 +492,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         const path = `${prefix}${rel}`;
         const text = await readFile(path);
         if (text === null || text === undefined) {
-          warn(`${domainPath}: imports ${rel}, which does not exist; its relationships are not drawn`);
+          warn(`${domainPath}: imports ${rel}, which does not exist; its relationships are not drawn`, 'relationshipsFileMissing');
           return undefined;
         }
         if (text.length > maxRelationshipsChars) {
@@ -524,9 +532,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
   // does in the extension. Here that is reported as the invalid domain it is.
   // A TypeError thrown by the caller's `warn` is passed through as it is.
   const callerErrors = new WeakSet<object>();
-  const callerWarn = (message: string): void => {
+  const callerWarn = (message: string, code?: LoaderWarningCode): void => {
     try {
-      warn(message);
+      warn(message, code);
     } catch (err) {
       if (err !== null && typeof err === 'object') {
         callerErrors.add(err);
@@ -573,7 +581,7 @@ function buildDisplaySubjectArea(
     parsed: ReadonlyMap<string, ParsedTable>;
     readOnly: boolean;
     ignoreStrayPositions: boolean;
-    warn: (message: string) => void;
+    warn: (message: string, code?: LoaderWarningCode) => void;
     /** A DBML diagram's own version (D8), applied to the Unified and Display `schemaVersion` only. */
     schemaVersion?: number;
     /** The name when the file names none (a DBML diagram's stem). */
@@ -707,13 +715,13 @@ function parseTable(
   text: string | null | undefined,
   maxChars: number,
   maxNodes: number,
-  warn: (message: string) => void,
+  warn: (message: string, code?: LoaderWarningCode) => void,
 ): ParsedTable {
   if (text === null || text === undefined) {
     return NO_TABLE;
   }
   if (text.length > maxChars) {
-    warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`);
+    warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`, 'modelUnreadable');
     return NO_TABLE;
   }
   try {
@@ -722,7 +730,7 @@ function parseTable(
     const fits = (max: number, used: number): number => (used > 0 ? Math.floor(max / used) : Infinity);
     return { model, copies: Math.min(fits(maxNodes, nodes), fits(maxChars, chars)) };
   } catch (err) {
-    warn(`Failed to read model "${name}": ${err instanceof Error ? err.message : String(err)}`);
+    warn(`Failed to read model "${name}": ${err instanceof Error ? err.message : String(err)}`, 'modelUnreadable');
     if (err instanceof YamlNodeLimitError || err instanceof YamlCharLimitError) {
       return NO_TABLE;
     }
@@ -737,16 +745,16 @@ function parseDbmlTable(
   text: string,
   dbml: DbmlStorageReader,
   maxChars: number,
-  warn: (message: string) => void,
+  warn: (message: string, code?: LoaderWarningCode) => void,
   schemaFolder: string | undefined,
 ): ParsedTable {
   if (text.length > maxChars) {
-    warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`);
+    warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`, 'modelUnreadable');
     return NO_TABLE;
   }
   const reading = dbml.parseTable(text, name, schemaFolder !== undefined ? { schemaFolder } : undefined);
   if (!reading.ok) {
-    warn(`Failed to read model "${name}": ${reading.error.message}`);
+    warn(`Failed to read model "${name}": ${reading.error.message}`, 'modelUnreadable');
     const { kind, line, mergeConflict, code, target } = reading.error;
     return {
       ...NO_TABLE,

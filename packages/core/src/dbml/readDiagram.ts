@@ -9,7 +9,7 @@
  * unreadable. Only a syntax error, or an error left after blanking, does.
  */
 
-import type { Annotation, AnnotationColor, Relationship } from '../types/semantic.js';
+import type { Annotation, AnnotationColor, LoaderWarningCode, Relationship } from '../types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, DBML_SCHEMA_VERSION, WRITTEN_SCHEMA_VERSION } from '../types/semantic.js';
 import type { DbmlMemberUse, DbmlSubjectAreaReading } from '../types/dbmlStorage.js';
 import {
@@ -127,7 +127,7 @@ function invalidDbml(filePath: string, d: ParserDiagnostic): SubjectAreaFileErro
     'invalid-dbml',
     filePath,
     `Invalid DBML in subject area file ${filePath} at line ${d.line}, column ${d.column}: ${d.message} [${d.code}].${hint}`,
-    { line: d.line, column: d.column },
+    { line: d.line, column: d.column, dbmlErrorClass: d.errorClass },
   );
 }
 
@@ -139,6 +139,7 @@ function compile(text: string, parser: DbmlParserModule, filePath: string): Comp
       'invalid-dbml',
       filePath,
       `Invalid DBML in subject area file ${filePath}: the DBML parser stopped: ${err instanceof Error ? err.message : String(err)}`,
+      { parserThrew: true },
     );
   }
 }
@@ -217,10 +218,18 @@ export function parseSubjectAreaDbml(
   }
   if (syntax.length > 0) throw invalidDbml(filePath, syntax[0]);
   const where = diagramPathOf(filePath);
-  if (where === undefined) throw new SubjectAreaValidationError(dbmlNotADiagramMessage(filePath));
+  if (where === undefined) throw new SubjectAreaValidationError(dbmlNotADiagramMessage(filePath), 'notADiagram');
 
   const { layer, name: stem } = where;
   const warnings: string[] = [];
+  // Each warning's code, index for index (`warningCodes`): `coded(code)`
+  // right after a push codes it, and any warning pushed before it uncoded
+  // (the helpers that take `warnings` itself, the rarer notes) is `other`.
+  const warningCodes: LoaderWarningCode[] = [];
+  const coded = (code: LoaderWarningCode = 'other'): void => {
+    while (warningCodes.length < warnings.length - 1) warningCodes.push('other');
+    if (warningCodes.length < warnings.length) warningCodes.push(code);
+  };
   const blanks: Array<{ start: number; end: number }> = [];
   const members: string[] = [];
   const uses: DbmlMemberUse[] = [];
@@ -250,6 +259,7 @@ export function parseSubjectAreaDbml(
       }
       if (use.role === 'ignored') {
         warnings.push(`Line ${line}: the use line for '${importPath}' does not import a table ERD Studio can read; it is ignored`);
+        coded('usePathMismatch');
         continue;
       }
       const name = use.name!;
@@ -262,9 +272,11 @@ export function parseSubjectAreaDbml(
         const misnamed = specified.find((n) => n.toLowerCase() !== name.toLowerCase());
         if (misnamed !== undefined) {
           warnings.push(`Line ${line}: the use line imports table ${misnamed} from '${importPath}', whose file is named ${name} (usePathMismatch); the table is read by its file name`);
+          coded('usePathMismatch');
         }
       } else {
         warnings.push(`Line ${line}: the use line for ${name} points at '${importPath}', not at a table file in <layer>/tables/<schema>/ (usePathMismatch); the table is still read by name`);
+        coded('usePathMismatch');
       }
       members.push(name);
       uses.push({ name, path: importPath, resolved, line });
@@ -276,11 +288,13 @@ export function parseSubjectAreaDbml(
       blanks.push({ start: node.start, end: node.end });
       if (lower === 'table') declaredTables++;
       warnings.push(`Line ${line}: a ${type} is declared in the diagram file; ERD Studio shows only tables from the library through use lines, and keeps it as written`);
+      coded('inlineElement');
       continue;
     }
     if (lower === METADATA_ELEMENT) {
       blanks.push({ start: node.start, end: node.end });
       warnings.push(`Line ${line}: a Metadata block is declared in the diagram file; ERD Studio reads table properties only from the table file, and keeps it as written`);
+      coded('inlineElement');
       continue;
     }
     if (lower === 'project') {
@@ -340,6 +354,7 @@ export function parseSubjectAreaDbml(
   if (schemaVersion > CURRENT_SCHEMA_VERSION) {
     throw new SubjectAreaValidationError(
       `${filePath} has erd_schema_version ${schemaVersion} but this extension only supports up to version ${CURRENT_SCHEMA_VERSION}. Please update the extension.`,
+      'newerSchema',
     );
   }
 
@@ -382,7 +397,11 @@ export function parseSubjectAreaDbml(
     severity: p.code === 'layoutBadValue' || p.code === 'layoutMergeConflict' ? 'error' : 'warning',
     ...(p.code === 'layoutMergeConflict' ? { mergeConflict: true as const } : {}),
   }));
-  for (const problem of layoutProblems) warnings.push(problem.line !== undefined ? `Line ${problem.line}: ${problem.message}` : problem.message);
+  coded();
+  for (const problem of layoutProblems) {
+    warnings.push(problem.line !== undefined ? `Line ${problem.line}: ${problem.message}` : problem.message);
+    coded(problem.code === 'layoutMergeConflict' ? 'layoutMergeConflict' : 'layoutProblem');
+  }
   const view = erdLayoutView(layout, members, noteIds);
   viewConfig.positions = view.positions;
 
@@ -424,8 +443,11 @@ export function parseSubjectAreaDbml(
   };
   const holdsOwnTables = declaredTables > 0 && uses.length === 0;
   if (holdsOwnTables) {
+    coded();
     warnings.push('The diagram declares its own Tables and imports none from the library: it looks like a single-file DBML to import (ERD Studio: Import DBML)');
+    coded('foreignDbml');
   }
+  coded();
   return {
     obj,
     schemaVersion,
@@ -435,6 +457,7 @@ export function parseSubjectAreaDbml(
     otherUses,
     writable,
     warnings,
+    warningCodes,
     uses,
     holdsOwnTables,
     ...(unlinked.length > 0 ? { unlinked } : {}),

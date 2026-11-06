@@ -74,6 +74,7 @@ import {
 } from '../types/aiAssistants';
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
+import { ReadyWatch } from '../services/readyWatch';
 import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
@@ -766,6 +767,8 @@ export class GettingStartedPanel {
   /** The viewer chose something on the page (any message but the page's own: `GETTING_STARTED_PASSIVE_TYPES`). */
   private choseSomething = false;
   private disposed = false;
+  /** Did the page come up (2.0 B13)? Timed while the panel is visible. */
+  private readonly readyWatch: ReadyWatch;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -801,7 +804,15 @@ export class GettingStartedPanel {
   ) {
     this.deps = deps;
     panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri, pageModeForDeps(deps));
+    this.readyWatch = new ReadyWatch(panel.visible !== false, {
+      ready: (slow) => {
+        telemetry.feature('welcomePanelReady');
+        if (slow) telemetry.feature('readySlowOver10s');
+      },
+      noReady: () => telemetry.error('webviewNoReadyWelcome'),
+    });
     this.disposables.push(
+      panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
           telemetry.error('welcomePanelFailed');
@@ -945,6 +956,7 @@ export class GettingStartedPanel {
     switch (msg.type) {
       case 'ready':
       case 'refreshStatus':
+        if (msg.type === 'ready') { this.readyWatch.ready(); }
         await this.postStatus();
         break;
       case 'setupAiHelper':
@@ -1010,6 +1022,7 @@ export class GettingStartedPanel {
   }
 
   dispose(): void {
+    this.readyWatch.dispose();
     if (GettingStartedPanel.current === this) { GettingStartedPanel.current = undefined; }
     if (!this.disposed) {
       this.disposed = true;

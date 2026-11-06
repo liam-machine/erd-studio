@@ -16,6 +16,7 @@ import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
+import { isLayoutFailure, isWebviewErrorArea, isWebviewErrorKind, type LayoutFailure, type WebviewErrorPayload } from '../types/webviewError';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, TABLE_ROLE_VALUES, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isRationaleFieldKey, isValidTableAlias, normalisePosix, rationaleKeyToFieldKey } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
@@ -861,12 +862,27 @@ export function validateViewFilePayload(value: unknown): value is { line: number
   return positive(line) && (column === undefined || positive(column));
 }
 
-/** `layoutFinished` (usage telemetry only): a non-negative finite duration, a boolean and an optional `firstOpen` boolean. */
-export function validateLayoutFinishedPayload(value: unknown): value is { ms: number; ok: boolean; firstOpen?: boolean } {
+/**
+ * `layoutFinished` (usage telemetry only): a non-negative finite duration, a
+ * boolean, an optional `firstOpen` boolean, and (2.0) an optional `failure`
+ * from `LAYOUT_FAILURES` and an optional `fallback: true`.
+ */
+export function validateLayoutFinishedPayload(value: unknown): value is {
+  ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true;
+} {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const { ms, ok, firstOpen } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown };
+  const { ms, ok, firstOpen, failure, fallback } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown; failure?: unknown; fallback?: unknown };
   return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean'
-    && (firstOpen === undefined || typeof firstOpen === 'boolean');
+    && (firstOpen === undefined || typeof firstOpen === 'boolean')
+    && (failure === undefined || isLayoutFailure(failure))
+    && (fallback === undefined || fallback === true);
+}
+
+/** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */
+export function validateWebviewErrorPayload(value: unknown): value is WebviewErrorPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { kind, area } = value as { kind?: unknown; area?: unknown };
+  return isWebviewErrorKind(kind) && isWebviewErrorArea(area);
 }
 
 // ---------------------------------------------------------------------------

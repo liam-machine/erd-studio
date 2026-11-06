@@ -14,7 +14,7 @@
  *                         toggleDiscrepancy, requestFeedbackContext,
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
  *                         copyFeedbackReport, openFeedbackLink,
- *                         layoutFinished (usage telemetry only)
+ *                         layoutFinished, webviewError (usage telemetry only)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -36,6 +36,7 @@ import type { AnnotationColor, Cardinality, DesignTable, Stage } from './semanti
 import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
+import type { LayoutFailure, WebviewErrorPayload } from './webviewError';
 import type {
   FeedbackAiProviderChoice,
   FeedbackAnalysis,
@@ -677,7 +678,24 @@ export interface RefreshManifestMessage {
  */
 export interface LayoutFinishedMessage {
   type: 'layoutFinished';
-  payload: { ms: number; ok: boolean; firstOpen?: boolean };
+  /**
+   * `failure` (2.0, optional): why a failed layout failed, classified in the
+   * webview (`LAYOUT_FAILURES`). `fallback` (2.0, optional): the layout
+   * overflowed the worker's stack and was laid out again with the stack-safe
+   * placement. An older webview sends neither.
+   */
+  payload: { ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true };
+}
+
+/**
+ * The canvas crashed or hit an uncaught error (2.0 B13): its kind and the
+ * area it started in, fixed enums only — never the error's text, which stays
+ * in the webview (the Send Feedback dialog's recent errors). Usage telemetry
+ * only: writes nothing, so it is on the physical allowlist.
+ */
+export interface WebviewErrorMessage {
+  type: 'webviewError';
+  payload: WebviewErrorPayload;
 }
 
 /**
@@ -1096,7 +1114,8 @@ export type WebviewMessage =
   | MoveTableMessage
   | CopyTablePathMessage
   | RevealTableInLibraryMessage
-  | LayoutFinishedMessage;
+  | LayoutFinishedMessage
+  | WebviewErrorMessage;
 
 // ---------------------------------------------------------------------------
 // Finding a table across the project (the canvas's ways out of one diagram)

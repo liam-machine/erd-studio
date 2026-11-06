@@ -76,6 +76,7 @@ import { TelemetryService, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
+import { tableFileDetailCode } from './services/telemetryCanvas';
 import { notifyTableFileError, shouldWarnAboutTableFile, showRefusedWrite } from './commands/openModelFile';
 import { isRefusedWrite } from './services/newSubjectAreaWriter';
 import { showCommandFailure } from './commands/commandFailure';
@@ -1513,6 +1514,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
     telemetry.error(tableFileErrorCode(error.kind));
+    // 2.0 B14: a `.dbml` table file's own rule or DBML class, from its fixed code.
+    const detail = tableFileDetailCode(error.kind, error.code);
+    if (detail) telemetry.error(detail);
     // Once per broken file per session (the service never re-reports a path, #113),
     // and not again in a later session while the file is unchanged (#164).
     if (shouldWarnAboutTableFile(context.workspaceState, error.filePath)) {

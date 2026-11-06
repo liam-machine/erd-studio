@@ -14,6 +14,7 @@ import type {
   Layer,
   TableLoadError,
   TableLoadErrorKind,
+  LoaderWarningCode,
   DbmlMetadataTarget,
   NodePosition,
   Relationship,
@@ -100,12 +101,28 @@ export class SubjectAreaFileError extends Error {
   readonly column?: number;
   /** What the JSON mistake looks like, when `line` locates one; absent for a conflict. */
   readonly syntaxProblem?: JsonSyntaxProblem;
+  /**
+   * An `invalid-dbml` diagram only: the class of the DBML diagnostic that
+   * stopped the read (`syntax`, `invalid`, `binding`, `interpreter`), for a
+   * host's telemetry or logs without reading the message. Optional: absent
+   * for a conflict, a parser that threw, and from cores older than 2.0's.
+   */
+  readonly dbmlErrorClass?: DbmlErrorClass;
+  /**
+   * An `invalid-dbml` diagram only: the DBML parser itself threw (most
+   * likely ERD Studio's bug, not the file's) rather than report a
+   * diagnostic. Optional: absent otherwise, and from cores older than 2.0's.
+   */
+  readonly parserThrew?: true;
 
   constructor(
     readonly reason: SubjectAreaFileErrorReason,
     readonly filePath: string,
     message: string,
-    options: { mergeConflict?: boolean; line?: number; column?: number; syntaxProblem?: JsonSyntaxProblem } = {},
+    options: {
+      mergeConflict?: boolean; line?: number; column?: number; syntaxProblem?: JsonSyntaxProblem;
+      dbmlErrorClass?: DbmlErrorClass; parserThrew?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'SubjectAreaFileError';
@@ -113,6 +130,8 @@ export class SubjectAreaFileError extends Error {
     if (options.line !== undefined) this.line = options.line;
     if (options.column !== undefined) this.column = options.column;
     if (options.syntaxProblem !== undefined) this.syntaxProblem = options.syntaxProblem;
+    if (options.dbmlErrorClass !== undefined) this.dbmlErrorClass = options.dbmlErrorClass;
+    if (options.parserThrew === true) this.parserThrew = true;
     this.transient = reason === 'empty' || ((reason === 'invalid-json' || reason === 'invalid-dbml') && !this.mergeConflict);
   }
 }
@@ -293,7 +312,25 @@ export function locateJsonSyntaxError(
  * Its `name` is deliberately left as `Error`, so logs that print the error
  * read exactly as they did when these were plain `Error`s.
  */
-export class SubjectAreaValidationError extends Error {}
+export class SubjectAreaValidationError extends Error {
+  /**
+   * Which refusal this is, when it is one a host may treat apart: a newer
+   * schema version than this core reads (`newerSchema` — a teammate on a
+   * newer ERD Studio), a file that is not a diagram (`notADiagram`), or a
+   * legacy or hybrid layout no longer read (`legacyFormat`). Absent for every
+   * other refusal, and from cores older than 2.0's. Named `kind`, not
+   * `reason`: `SubjectAreaFileError.reason` already means something else.
+   */
+  readonly kind?: SubjectAreaValidationKind;
+
+  constructor(message?: string, kind?: SubjectAreaValidationKind) {
+    super(message);
+    if (kind !== undefined) this.kind = kind;
+  }
+}
+
+/** {@link SubjectAreaValidationError.kind}. */
+export type SubjectAreaValidationKind = 'newerSchema' | 'notADiagram' | 'legacyFormat';
 
 export const VALID_CARDINALITIES: ReadonlySet<Cardinality> = new Set<Cardinality>([
   'many-to-one', 'one-to-one', 'one-to-many', 'many-to-many',
@@ -376,7 +413,8 @@ export function validateSubjectAreaDocument(
     throw new SubjectAreaValidationError(
       `Subject area file ${filePath} has schemaVersion ${obj.schemaVersion} ` +
       `but this extension only supports up to version ${CURRENT_JSON_SCHEMA_VERSION}. ` +
-      'Please update the extension.'
+      'Please update the extension.',
+      'newerSchema',
     );
   }
 
@@ -386,7 +424,7 @@ export function validateSubjectAreaDocument(
   const format = detectSubjectAreaFormat(obj);
   const unsupported = describeUnsupportedSubjectAreaFormat(format, filePath, obj);
   if (unsupported) {
-    throw new SubjectAreaValidationError(unsupported);
+    throw new SubjectAreaValidationError(unsupported, 'legacyFormat');
   }
 
   return { obj: format === 'v6' ? normaliseSubjectAreaDocument(obj) : obj, format };
@@ -548,8 +586,13 @@ export interface BuildUnifiedSubjectAreaContext {
    * reporting the model as missing.
    */
   getModelError?: (name: string) => TableLoadError | null;
-  /** Receives repair warnings (dropped entries, defaulted values). Defaults to console.warn. */
-  warn?: (message: string) => void;
+  /**
+   * Receives repair warnings (dropped entries, defaulted values). Defaults to
+   * console.warn. The second argument (2.0) is always passed: the warning's
+   * fixed {@link LoaderWarningCode} (`modelNotFound`, `modelUnreadable`,
+   * `other`), for a host to count without the message.
+   */
+  warn?: (message: string, code?: LoaderWarningCode) => void;
   /**
    * What dbt's tests say about keys (#133 L1): how the read winner tells a
    * link's copies apart when no key is flagged. Without it, flags only.
@@ -567,7 +610,9 @@ export function buildUnifiedSubjectArea(
   format: SubjectAreaFormat,
   ctx: BuildUnifiedSubjectAreaContext,
 ): UnifiedSubjectArea {
-  const warn = ctx.warn ?? ((message: string) => console.warn(message));
+  const sink = ctx.warn ?? ((message: string) => console.warn(message));
+  // Every warning carries a code; the repair helpers below pass only the message (`other`).
+  const warn = (message: string, code: LoaderWarningCode = 'other'): void => sink(message, code);
   const { filePath } = ctx;
 
   const domain = typeof obj.domain === 'string' ? obj.domain : ctx.domainNameFallback;
@@ -631,7 +676,7 @@ function parseStageData(
   filePath: string,
   getModel: ((name: string) => SemanticTable | null) | undefined,
   getModelError: ((name: string) => TableLoadError | null) | undefined,
-  warn: (message: string) => void,
+  warn: (message: string, code?: LoaderWarningCode) => void,
   dbt?: DbtKeyIndex,
 ): StageData | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -656,11 +701,11 @@ function parseStageData(
           // Broken reference — create a placeholder so the UI can show an error
           const loadError = getModelError?.(name) ?? null;
           if (loadError) {
-            warn(`Model "${name}": ${describeTableLoadError(loadError)}`);
+            warn(`Model "${name}": ${describeTableLoadError(loadError)}`, 'modelUnreadable');
             const placeholder: UnreadableTablePlaceholder = { name, columns: [], loadError: { ...loadError } };
             models.push(placeholder);
           } else {
-            warn(`Model "${name}" not found in the table library`);
+            warn(`Model "${name}" not found in the table library`, 'modelNotFound');
             models.push({ name, columns: [] });
           }
         }

@@ -28,6 +28,7 @@ import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
 import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
 import {
   runElkLayout,
+  classifyLayoutFailure,
   detectLayerBound,
   detectStrategy,
   type PartitionStrategy,
@@ -478,9 +479,20 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
     setIsLayouting(true);
     const startedAt = performance.now();
-    const reportLayout = (ok: boolean) => {
+    // Usage telemetry (2.0 B17): the stack-safe fallback, and a failure's class (never its text).
+    let fallback = false;
+    const reportLayout = (ok: boolean, err?: unknown) => {
       const ms = Math.round(performance.now() - startedAt);
-      const done: WebviewMessage = { type: 'layoutFinished', payload: firstOpen ? { ms, ok, firstOpen } : { ms, ok } };
+      const done: WebviewMessage = {
+        type: 'layoutFinished',
+        payload: {
+          ms,
+          ok,
+          ...(firstOpen ? { firstOpen } : {}),
+          ...(!ok ? { failure: classifyLayoutFailure(err) } : {}),
+          ...(fallback ? { fallback: true as const } : {}),
+        },
+      };
       vscode.postMessage(done);
     };
 
@@ -497,6 +509,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           domain.viewConfig.layoutOptions,
         ),
         partitionStrategy,
+        { onStackFallback: () => { fallback = true; } },
       );
 
       // Optimistic update: update domain in store so React Flow re-renders
@@ -523,7 +536,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       reportLayout(true);
       setLayoutDirty(false);
     } catch (err) {
-      reportLayout(false);
+      reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
       const detail = err instanceof Error ? err.message : String(err);
       setToastMessage(`Auto layout failed: ${detail}`);
