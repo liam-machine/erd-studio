@@ -25,15 +25,25 @@ Running this Worker means holding data about other people's use of the
 extension. Keep these promises — the extension makes them to users on your
 behalf (its `telemetry.json` lists every field):
 
-1. **Store only the validated body fields.** A row is the fields in
-   `schema.sql`, every one of them an enum, a bucket, a bounded integer, a date,
-   a strictly matched version string or the install id — plus `received_day`,
-   the UTC date the Worker received it. There is no free text anywhere in the
-   schema. Unknown keys in the body are **dropped**, not stored. The one
-   ordered field, `trail` (an install's first week and days the guide runs),
-   is a list of `[event, gap, window, repeat]` whose event is a listed
-   feature key, `!` + a listed error code or a fixed marker, and whose numbers
-   are bounded integers; it carries no time of day.
+1. **Store only the validated body fields, and the Worker's own counts of
+   them.** A `heartbeats` row is the fields in `schema.sql`, every one of them
+   an enum, a bucket, a bounded integer, a date, a strictly matched version
+   string or the install id — plus `received_day`, the UTC date the Worker
+   received it. There is no free text anywhere in the schema. Unknown keys in
+   the body are **dropped**, not stored. The one ordered field, `trail` (an
+   install's first week and days the guide runs), is a list of
+   `[event, gap, window, repeat]` whose event is a listed feature key, `!` + a
+   listed error code or a fixed marker, and whose numbers are bounded
+   integers; it carries no time of day. The only other table, `worker_daily`
+   (migration `0005`), is the Worker's ledger of what it received: per UTC day
+   the Worker saw the request (`day`), extension version family (`ext_family`,
+   `major.minor` from a parsed body's `extVersion`, else `other`), `outcome`
+   (`ok` / `denied`) and `reason` (`none`, `body_size`, `json` or
+   `shape_<field>`, the field from a fixed list), a count of heartbeats (`n`)
+   and how many unknown `features` keys, `errors` keys and trail events it
+   dropped (`dropped_features`, `dropped_errors`, `dropped_trail`). It holds
+   no install id, no IP or header, no body text and never the name of a
+   dropped key, only how many there were.
 2. **No IP addresses, no user-agents, no location, no headers.** The Worker
    never reads `request.cf` and reads exactly one header, `Content-Length`, as a
    size pre-check. Cloudflare itself sees the connecting IP to route the
@@ -47,7 +57,8 @@ behalf (its `telemetry.json` lists every field):
    can be measured.) One person with two profiles or machines is two ids.
 4. **90-day retention, enforced by the Worker itself.** A daily Cron Trigger
    (`17 3 * * *` UTC) runs
-   `DELETE FROM heartbeats WHERE received_day < date('now', '-90 days')`. Raw
+   `DELETE FROM heartbeats WHERE received_day < date('now', '-90 days')`, and
+   the same for the ledger (`DELETE FROM worker_daily WHERE day < …`). Raw
    rows never live on Cloudflare longer than that. Only per-day **aggregates**
    (no install ids) are kept longer — see "The local archive" below.
 5. **No payloads in logs.** `log()` in `src/index.js` takes fixed labels and
@@ -55,13 +66,17 @@ behalf (its `telemetry.json` lists every field):
 
 If you change what is collected, change the contract in the extension, this
 Worker, a new migration plus `schema.sql`, the extension's `telemetry.json` and
-the local archive together.
+the local archive together. That includes the `worker_daily` ledger: a new
+column, outcome or reason (including a new entry in `SHAPE_FIELDS`) is a
+change to what is collected, documented in promise 1 above.
 
 ---
 
 ## What it does
 
-- `POST /v1/heartbeat` — validate, upsert, `204`.
+- `POST /v1/heartbeat` — validate, upsert, `204`. Every heartbeat request that
+  gets past the kill switch, the path and the method also adds one to its
+  `worker_daily` ledger row (below), whether it was accepted or refused.
 - `GET` / `HEAD /known-fixes` — the bundled [known-fixes registry](#known-fixes-registry),
   `200`, `Cache-Control: public, max-age=300`. Static, the same for every
   caller, no D1, and **not logged at all** (see below).
@@ -69,19 +84,30 @@ the local archive together.
   path). No CORS headers: the caller is the VS Code extension host, not a
   browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **16,384 bytes** → `413`, counted while streaming, so a missing or
+- Body over **32,768 bytes** → `413`, counted while streaming, so a missing or
   lying `Content-Length` does not help. (A real heartbeat is under a kilobyte;
   one with every feature and error key at its cap passed 8 KB with the import
-  guide's keys, so the cap went from 8,192 to 16,384 bytes in the same change:
-  deploy the Worker before that release. The extension's `telemetryPayload`
-  test reads this limit and fails if that ever stops fitting.)
+  guide's keys, so the cap went from 8,192 to 16,384 bytes, and passes 16 KB
+  with the 2.0.0 launch keys, so it went to 32,768 bytes in 2.0.0: deploy the
+  Worker before that release. The extension's `telemetryPayload` test reads
+  this limit and fails if that ever stops fitting, and the extension trims its
+  own body below 16 KB, so a Worker still at the older cap never refuses a
+  whole day.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
   written. `day` must be a real calendar date, not in the future and at most 7
   days before today (UTC). Unknown top-level keys and unknown `features` /
   `errors` keys are dropped; zero counts are dropped.
 - Upsert on `(install_id, day)`, last write wins.
 - A D1 failure → `503`. The extension drops failed heartbeats silently and never
-  retries, so a D1 outage loses a day of data and nothing else.
+  retries, so a D1 outage loses a day of data and nothing else. A failed
+  heartbeat upsert writes no ledger row (it is a log line only).
+- **The ledger** — one upsert per heartbeat request into `worker_daily`
+  (`n = n + 1`, each `dropped_*` plus what this body dropped), keyed on
+  `(day, ext_family, outcome, reason)`. It runs through `ctx.waitUntil`, after
+  the response is decided, inside a `try`/`catch`: a ledger failure logs
+  `ledger_error` with the error's name and never changes a response. It is
+  never written for a `404`, a `405`, `/known-fixes` or the kill switch (still
+  a `503` with no D1 access at all).
 
 ## Known-fixes registry
 
@@ -151,6 +177,20 @@ Rules for adding entries:
   those rules, so one bad entry cannot break the others.
 
 ## Deploy
+
+> **Freeze until 2.0 is on `main`.** No change to `telemetry/**` — `known-fixes.json`
+> included — merges to `main` until ERD Studio 2.0 has been released from
+> `main`. `deploy.yml` deploys whenever `main`'s `telemetry/` differs from the
+> `telemetry-worker-deployed` tag (`c01d3873`, the same as `origin/main`'s
+> `telemetry/` today), so any such merge would redeploy the 1.7.x Worker over
+> the 2.0 one that pre-releases need (hand-deployed from the 2.0 branch with
+> `npm run migrate` and then `npm run deploy`, as in "First setup, or
+> deploying by hand" below), and the 2.0 keys would be dropped. Before the
+> stable 2.0 merge, check (read-only) that `SELECT name FROM d1_migrations`
+> lists `0004_onboarding_trail.sql` and `0005_worker_daily.sql`: a migration
+> applied by hand with `d1 execute --file` is not recorded, so the workflow
+> would re-run it and fail (`duplicate column` for 0004), blocking the
+> release. The freeze ends with the 2.0.0 release from `main`.
 
 ### Automatically, on merge to `main`
 
@@ -281,8 +321,12 @@ npx wrangler tail --format pretty
 ```
 
 Lines look like `{"at":"…","event":"ok","status":204}`,
-`{"at":"…","event":"denied","status":400,"reason":"shape"}` and, once a day,
-`{"at":"…","event":"retention","deleted":42}`. That is the whole vocabulary.
+`{"at":"…","event":"denied","status":400,"reason":"shape"}`, rarely
+`{"at":"…","event":"ledger_error","kind":"Error"}` (the `worker_daily` upsert
+failed; the response was unaffected) and, once a day,
+`{"at":"…","event":"retention","deleted":42}` and
+`{"at":"…","event":"retention","table":"worker_daily","deleted":3}`. That is
+the whole vocabulary.
 
 ## Querying
 
@@ -387,7 +431,7 @@ appended after the native DBML keys:
 | Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); counts as having seen a start). Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed: asked again in a later window). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
 | Draft | the **Draft-first** start (`docs/dev/draft-first.md`): a read-only draft of the folder's logical model in an editor tab, nothing written until **Keep**. `draftShown` (a draft was shown, any source and trigger; a redraw of the page on show is not another), `draftShownAuto` (opened by the ERD Studio icon alone: the empty Diagrams view, once per folder for a find, once per machine for the example), `draftExampleShown` (an example: the coffee shop or a bundled project), `draftSourceSqlDdl` `draftSourceSemanticModel` `draftSourceDbml` `draftSourceDbt` (which kind of find, never a name, path or count). Its answer: `draftKept` (Keep wrote it, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml` / `drawFromDbt` / `exampleDiagram` / `exampleOpened`; counts as having chosen a start), `draftChangeOptions` (Change options…: the step-by-step flow, ending in a draft again), `draftDiscarded` (Discard), `draftClosed` (the tab was closed without a choice), `draftOtherStart` (one of Other Ways to Start; the start's own key says which), `draftScopeChanged` (the Folder / Model / Example switcher), `draftDetailsOpened` (the schema panel or details drawer), `draftRefreshed` (Keep found the project's files changed and redrew). `draftAfterOpenFolder`: a draft's **Open Folder…** (the no-folder example's primary, the guide's *Open your folder*) reloaded the window into a folder and that folder's draft showed at once, in place of its start suggestion (the guide carries on, without More ways to start; with diagrams there, the guide carries on on the newest instead and this is not counted). `draftUnavailable`: the automatic draft could not be built (several dialects, nothing readable after all) and was dropped quietly, leaving the sidebar's starts; a quiet run never counts the import's `*Cancelled` or `*Invalid` keys. Errors: `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK layout failed; the fallback placement was drawn) |
 | Guide | the onboarding guide, **Show Me Around** (`src/types/onboardingGuide.ts`): coach marks on the first draft (phase A: the banner, More ways to start, Keep) and then on the first diagram opened after it (phase B: a table, a relationship, the toolbar, Logical / Physical in a dbt project, the sidebar, the files and the AI helper, a finish with Star on GitHub). `guideStarted` (it began: once per run), `guideStartedFromCommand` (the **Show Me Around** command started it, beside `guideStarted`), `guideDraftDone` (phase A ended with Keep), `guideCanvasStarted` (phase B began), `guideCompleted` (Done or Star on GitHub on the last step), `guideSkippedOnDraft` / `guideSkippedOnCanvas` (Skip guide or Esc: it ends for good on that machine), `guideStarClicked` (Star on GitHub; the host opens the repository's page), `guideAiHelperClicked` (the files step's Set Up My AI Helper, beside the command's own `setupAiHelper`). Where people stop, step by step: `guideStepDraftBanner` `guideStepDraftMoreWays` `guideStepDraftKeep` `guideStepCanvasTable` `guideStepCanvasRelationship` `guideStepCanvasToolbar` `guideStepCanvasStages` `guideStepCanvasSidebar` `guideStepCanvasFiles` `guideStepCanvasFinish` (each the first time that step showed in a run; Back and Next never count a step twice), `guideBack` (Back was pressed: a step was read twice), `guideLeftDraft` (the draft was discarded or its tab closed while the guide ran on it: left without Keep or Skip). `diagramsNudgeShowMeAround` (the existing-diagrams notice's **Show Me Around**: a project that already has diagrams shows no draft, so phase A never runs there; the button opens the newest diagram and runs phase B on it, counted beside `guideStarted`, `guideStartedFromCommand` and `guideCanvasStarted`). Read `guideCompleted / guideCanvasStarted` for how many finish, and `guideDraftDone / guideStarted` beside `draftKept / draftShown` for whether the guide helps a draft become a diagram. Read the step keys in order as a funnel (installs per key): the biggest fall from one step to the next is the step people stop at; the skip keys say whether they chose to (Skip guide or Esc), `guideLeftDraft` that they left the draft, and the rest closed the tab or the window. `guideStepCanvasRelationship` is missing for a diagram with no relationship and `guideStepCanvasStages` outside a dbt project, `guideStepDraftMoreWays` when the draft offers no other start: compare each with the step before it only on installs that can see it |
-| Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
+| Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more), `dayContinued` (2.0: the day's first entry when its window was activated on an earlier UTC day). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
 | What it suggested | `startSuggestedConvert`, `startSuggestedDrawFromDbt`, `startSuggestedImportSemanticModel`, `startSuggestedImportSqlDdl`, `startSuggestedImportDbmlFile`, `startSuggestedBlank` (each at most 1 a day: the empty Diagrams view, or the Welcome panel's leading card, showed that suggestion; which surface is `sidebarStartShown` / `gettingStartedOpened`. One key per suggestion rather than per surface: the walkthrough's display cannot be observed, and the click keys already name the surface) |
 | Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button), `diagramsNudgeShowMeAround` (its **Show Me Around**: the same diagram, with the guide's canvas part) |
 | Watched how | No longer sent since Show Me Around replaced the six short clips; kept for older versions: `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
@@ -651,6 +695,19 @@ install can fire the same code a hundred times.
 
 The day after shipping (and again a week later):
 
+0. Ask the Worker's ledger whether the new version is getting through at all,
+   before reading anything else:
+
+   ```bash
+   npx wrangler d1 execute erd-studio-telemetry --remote --command \
+     "SELECT ext_family,outcome,reason,SUM(n),SUM(dropped_features),SUM(dropped_errors),SUM(dropped_trail) FROM worker_daily WHERE day>=date('now','-2 days') GROUP BY 1,2,3"
+   ```
+
+   Any `denied` row for a `2.x` family means the Worker refuses that
+   version's heartbeats: a Worker hotfix. Any `dropped_*` above 0 on a `2.x`
+   family means the Worker's lists are older than that version's keys:
+   redeploy the Worker from the release's `telemetry/`. A version with no
+   ledger rows at all is one nobody is running (yet).
 1. Run query 0 and check the new version is reporting at all. No rows after
    two days with the old version still reporting means the heartbeat broke.
 2. Run query 1 for the new version, then query 3.
@@ -686,6 +743,325 @@ version past the 90 days, add query 1's aggregate (day, version, code,
 installs, total; no install ids) to `.traffic/telemetry.mjs` as
 `telemetry-relationships.csv`, and have the `erd-traffic` report flag any
 `relInv*` row and the week-on-week change of each `relState*` share.
+
+## Keys added in 2.0.0
+
+The 2.0.0 launch telemetry appends these keys to `FEATURES`, `ERROR_CODES` and
+`TRAIL_MARKERS` (in `src/services/telemetryPayload.ts` and `src/index.js`, in
+the same order), grouped by the plan item that records each one. Every one is
+a fixed key or a presence flag computed on the device: never a name, a path,
+a message or a count of tables. A sum over `features` excludes
+`heartbeatProvisional`, which marks an interim same-day copy, not a use.
+
+**B2 — a same-day interim copy of the summary (first week, or a day with a new error).**
+
+- `heartbeatProvisional` — set on an interim same-day copy of the summary only, never on the final or in the stored counters; every sum over features must exclude it.
+
+**B3 — the body was trimmed to stay under the size guard.**
+
+- `heartbeatTrimmed` — the body was over the size guard, so the trail (and then single-count feature keys) were left out.
+
+**B4 — activation timing, the host dbt search, and why activation failed (by phase).**
+
+- `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out.
+- `activationFailed` (error) — activation threw (the total; one phase code beside it).
+- `activationFailedDiscovery` (error) — activation threw while finding the project.
+- `activationFailedServices` (error) — activation threw while creating the services.
+- `activationFailedViews` (error) — activation threw while registering the views.
+- `activationFailedWatchers` (error) — activation threw while starting the file watchers.
+- `activationFailedCommands` (error) — activation threw while registering the commands.
+- `activationFailedPrompts` (error) — activation threw while running the start prompts.
+- `activationPromptFailed` (error) — the start suggestion or the automatic draft failed after activation.
+- `dbtSearchFailed` (error) — the host search for a dbt_project.yml threw (an error, not a feature: only layoutFailed may end in Failed among the features).
+
+**B5 — updates and mixed-version days.**
+
+- `extUpdated` — the first activation after ERD Studio was updated (survives the update reload).
+- `extUpdatedMajor` — that update changed the major version.
+- `versionMixed` — the day was counted by more than one ERD Studio version.
+
+**B6 — first-draft quality, as presence flags computed on the device (never a name, path or count).**
+
+- `draftOrphansMost` — a first draft of at least 3 tables where at least half the tables are in no relationship.
+- `draftEmptyTablesMost` — a first draft where at least half the tables have no columns.
+- `draftUntypedMost` — a first draft where at least half the columns have no data type.
+- `draftNoPkMost` — a SQL or DBML first draft where at least half the tables have no primary key.
+- `draftWideTablesMost` — a first draft where at least half the tables have more than 30 columns.
+- `draftRelsInferable` — a draft with no or few relationships whose column names look like keys of other drafted tables.
+- `draftLeftOut` — the draft left some tables out.
+- `draftCapped` — the draft was capped at its size limit.
+- `draftReusesLibrary` — the draft reuses or changes tables already in the library.
+- `draftThinDbt` — a thin dbt first draft (3+ tables, and no relationships, mostly orphans, mostly empty or mostly untyped).
+- `draftThinSqlDdl` — a thin SQL DDL first draft.
+- `draftThinSemanticModel` — a thin semantic model first draft.
+- `draftThinDbml` — a thin DBML first draft.
+- `draftRelsNoneDbt` — a dbt first draft of 2+ tables with no relationships.
+- `draftRelsNoneSqlDdl` — a SQL DDL first draft of 2+ tables with no relationships.
+- `draftRelsNoneSemanticModel` — a semantic model first draft of 2+ tables with no relationships.
+- `draftRelsNoneDbml` — a DBML first draft of 2+ tables with no relationships.
+- `draftKeptThinDbt` — a thin dbt draft was kept.
+- `draftKeptThinSqlDdl` — a thin SQL DDL draft was kept.
+- `draftKeptThinSemanticModel` — a thin semantic model draft was kept.
+- `draftKeptThinDbml` — a thin DBML draft was kept.
+- `draftRejectedFastDbt` — a dbt draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastSqlDdl` — a SQL DDL draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastSemanticModel` — a semantic model draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastDbml` — a DBML draft was discarded or closed within 15 s, with no details opened.
+- `diagramDeleted` — a diagram was deleted.
+
+**B7 — why an import failed or stopped.**
+
+- `importSqlInvalidParse` — Import SQL DDL: a statement could not be parsed (the user SQL).
+- `importSqlInvalidStructure` — Import SQL DDL: the SQL parsed but its structure could not be converted.
+- `importSqlInvalidDuplicateTable` — Import SQL DDL: a table was defined twice.
+- `importSqlInvalidNoCreateTable` — Import SQL DDL: no CREATE TABLE statement was found.
+- `importSqlRejectedCreateTable` — the first rejected SQL statement was a CREATE TABLE.
+- `importSqlRejectedCreateOrReplace` — the first rejected SQL statement was a CREATE OR REPLACE.
+- `importSqlRejectedAlterTable` — the first rejected SQL statement was an ALTER TABLE.
+- `importSqlRejectedCreateView` — the first rejected SQL statement was a CREATE VIEW.
+- `importSqlRejectedCommentOn` — the first rejected SQL statement was a COMMENT ON.
+- `importSqlRejectedCreateIndex` — the first rejected SQL statement was a CREATE INDEX.
+- `importSqlRejectedGrant` — the first rejected SQL statement was a GRANT.
+- `importSqlRejectedSetUse` — the first rejected SQL statement was a SET or USE.
+- `importSqlRejectedOther` — the first rejected SQL statement was something else.
+- `importSqlFailPostgres` — the rejected SQL was read as PostgreSQL.
+- `importSqlFailMysql` — the rejected SQL was read as MySQL.
+- `importSqlFailSqlserver` — the rejected SQL was read as SQL Server.
+- `importSqlFailSnowflake` — the rejected SQL was read as Snowflake.
+- `importSqlFailDatabricks` — the rejected SQL was read as Databricks.
+- `importSqlTryAnotherDialect` — Try Another Dialect was pressed.
+- `quickSqlNoDialect` — the quick SQL import could not choose a dialect.
+- `quickSqlDialectFallback` — the quick SQL import fell back to another dialect.
+- `importDbmlInvalidUse` — Import DBML: the file uses other files (a multi-file dbdiagram project).
+- `importDbmlInvalidSyntax` — Import DBML: the file is not DBML the parser can read.
+- `importDbmlSeveralFieldsOneLine` — Import DBML: several fields were written on one line.
+- `importDbmlNoTables` — Import DBML: the file has no tables.
+- `importSemanticModelNoModel` — Import Semantic Model: no model was found.
+- `importSemanticModelParseTmdl` — Import Semantic Model: a TMDL model could not be read.
+- `importSemanticModelParseBim` — Import Semantic Model: a model.bim could not be read.
+- `importSemanticModelSeveral` — Import Semantic Model: more than one model was found.
+- `importLimitTooManyFiles` — an import found more files than it reads.
+- `importLimitFileTooBig` — an import file was over the size limit.
+- `importLimitTooMuchText` — the import input was over the total text limit.
+- `importInputUnreadable` — an import file could not be read.
+- `importStopNoLayers` — an import stopped: the project has no layers.
+- `importStopYamlInDbml` — an import stopped: a YAML table is in the way in a DBML project.
+- `importStopUnsaved` — an import stopped: a file it would change has unsaved edits.
+- `importStopNameTaken` — an import stopped: the diagram name is taken.
+- `importStopRefusedWrite` — an import stopped: the write was refused.
+- `writeFailedPermission` — a write failed for lack of permission (the user disk, not ours).
+- `writeFailedDiskFull` — a write failed because the disk is full.
+- `importSqlEngineLoadFailed` (error) — the SQL importer itself could not load (for example a VSIX missing its bundle).
+- `importDbmlParserThrew` (error) — the DBML parser threw while reading an import.
+- `writeFailedOurs` (error) — a write failed for a reason that is not permission or disk space.
+
+**B9 — why the automatic draft did not appear, and start-screen look failures.**
+
+- `draftUnavailableSqlDdl` — the automatic SQL DDL draft did not appear.
+- `draftUnavailableSemanticModel` — the automatic semantic model draft did not appear.
+- `draftUnavailableDbml` — the automatic DBML draft did not appear.
+- `draftUnavailableDbt` — the automatic dbt draft did not appear.
+- `draftUnavailableExample` — the automatic example draft did not appear.
+- `draftWaitedForPrompt` — the automatic draft waited because another prompt had the window.
+- `draftDropNothingFound` — a quiet draft was dropped: nothing to draw was found.
+- `draftDropUnreadable` — a quiet draft was dropped: its files could not be read.
+- `draftDropNoLayer` — a quiet draft was dropped: no layer to put it in.
+- `draftDropBadName` — a quiet draft was dropped: no valid diagram name.
+- `draftDropNothingDrawable` — a quiet draft was dropped: nothing it found could be drawn.
+- `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
+- `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
+- `startLookTimeout` — the start screen look at the folder timed out.
+- `startLookGaveUp` — the start screen gave up looking at the folder.
+- `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
+- `startContextFailed` (error) — refreshing the start screen context threw.
+
+**B10 — command failures shown to the user.**
+
+- `newDiagramNameTaken` — New Diagram: the name was taken.
+- `newDiagramNoLayers` — New Diagram: the project has no layers.
+- `commandFailedOurs` (error) — a command showed an error that names what it was doing (ours).
+- `newDiagramWriteFailed` (error) — New Diagram could not write the diagram.
+- `layersFileFailed` (error) — layers.json could not be written.
+- `renameDiagramFailed` (error) — Rename Diagram failed.
+- `deleteDiagramFailed` (error) — Delete Diagram failed.
+- `exampleSaveFailed` (error) — Open an Example Project could not save the example.
+
+**B11 — Convert to DBML: refusal kinds, stops and storage state.**
+
+- `convertRefusedReservedLayer` — Convert to DBML refused: a layer uses a reserved name.
+- `convertRefusedLegacyFiles` — Convert to DBML refused: legacy files are in the way.
+- `convertRefusedOther` — Convert to DBML refused for another reason.
+- `convertStopUnsaved` — Convert to DBML stopped: unsaved files.
+- `convertStopChangedDuringPreview` — Convert to DBML stopped: files changed during the preview.
+- `convertNothingToDo` — Convert to DBML had nothing to convert.
+- `convertLeftAsIs` — Convert to DBML finished and left some files as they were.
+- `convertOver60s` — Convert to DBML took more than 60 s to apply.
+- `storageYaml` — the open project is stored as YAML and JSON (once a day).
+- `storageDbml` — the open project is stored as DBML (once a day).
+- `storageMixed` — the open project is half converted (once a day).
+- `legacyDbmlTreeWarned` — the warning about the 1.9 pre-release DBML folder layout was shown.
+- `canvasJsonV6` — a canvas opened a v6 JSON diagram (once a day).
+- `convertToDbmlSelfCheck` (error) — Convert to DBML refused because its own self-check failed (ours).
+- `convertToDbmlUnrestored` (error) — Convert to DBML failed and some files could not be put back.
+- `convertSaveFailed` (error) — Convert to DBML could not save a file (an error, beside saveFailed).
+
+**B12 — canvas handler failures, protocol rejects, watcher refresh failures.**
+
+- `editRefused` — a canvas edit was refused with an explanation to the user.
+- `canvasReconnectReload` — a canvas asked the host to reload it.
+- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it).
+- `handlerFailedModel` (error) — a model handler threw.
+- `handlerFailedColumn` (error) — a column handler threw.
+- `handlerFailedKey` (error) — a key handler threw.
+- `handlerFailedDetails` (error) — a details handler threw.
+- `handlerFailedLayout` (error) — a layout handler threw.
+- `handlerFailedAnnotation` (error) — an annotation handler threw.
+- `handlerFailedUndo` (error) — an undo or redo handler threw.
+- `handlerFailedStage` (error) — a stage switch handler threw.
+- `handlerFailedCompare` (error) — a compare or sync handler threw.
+- `handlerFailedRefresh` (error) — a refresh handler threw.
+- `handlerFailedOther` (error) — another canvas handler threw.
+- `dbmlWriteOverlap` (error) — the DBML writer produced overlapping edits (ours).
+- `messageUnknownType` (error) — the host received a canvas message type it does not know.
+- `physicalEditDropped` (error) — an edit message reached the read-only Physical stage and was dropped.
+- `refreshFailed` (error) — a file watcher refresh threw (the total; one kind beside it).
+- `refreshFailedManifest` (error) — refreshing after manifest.json changed threw.
+- `refreshFailedCatalog` (error) — refreshing after catalog.json changed threw.
+- `refreshFailedTable` (error) — refreshing after a table file changed threw.
+- `refreshFailedDiagram` (error) — refreshing after a diagram file changed threw.
+- `refreshFailedLayers` (error) — refreshing after layers.json changed threw.
+- `refreshFailedDbtYml` (error) — refreshing after a dbt yml file changed threw.
+
+**B13 — webview crashes and panels that never became ready.**
+
+- `draftPageReady` — a draft page reported ready.
+- `welcomePanelReady` — the Welcome panel reported ready.
+- `readySlowOver10s` — a panel became ready more than 10 s after it was shown.
+- `webviewCrash` (error) — a webview area crashed while rendering (the total; one area beside it).
+- `webviewCrashCanvas` (error) — the canvas crashed.
+- `webviewCrashDetailPanel` (error) — the Detail panel crashed.
+- `webviewCrashToolbar` (error) — the toolbar crashed.
+- `webviewCrashDialogs` (error) — a dialog crashed.
+- `webviewCrashCompare` (error) — the compare view crashed.
+- `webviewCrashGuide` (error) — the Show Me Around guide crashed.
+- `webviewCrashDraft` (error) — the draft page crashed.
+- `webviewCrashOther` (error) — another webview area crashed.
+- `webviewWindowError` (error) — an uncaught error in a webview.
+- `webviewRejection` (error) — an unhandled promise rejection in a webview.
+- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
+- `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
+- `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
+
+**B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
+
+- `domainLoadBlocking` — a diagram load failure blocked the canvas from opening.
+- `domainLoadOverLive` — a diagram failed to reload over a live canvas (often an assistant part-way through writing).
+- `dbmlLayoutBadLine` — an erd_layout line could not be read.
+- `dbmlLayoutDuplicateKey` — erd_layout lists a table twice.
+- `dbmlLayoutBadValue` — an erd_layout value is not valid.
+- `dbmlLayoutConflict` — erd_layout holds git merge conflict markers.
+- `dbmlDiagramReadOnly` — a DBML diagram opened read-only (a repeated Note name or a second Project).
+- `dbmlPendingRefs` — a DBML diagram has relationships waiting for their tables.
+- `dbmlUnlinkedTables` — a DBML diagram draws tables that are not linked into the project.
+- `dbmlEmbeddedTablesShown` — a DBML diagram holding its own Tables was shown.
+- `diagramWarnModelNotFound` — a diagram names a table that was not found.
+- `diagramWarnForeignDbml` — a diagram holds DBML from another tool.
+- `dbmlEmbeddedTablesImport` — the import of embedded Tables was chosen.
+- `domainLoadDbmlSyntax` (error) — a DBML diagram has a syntax error.
+- `domainLoadDbmlInvalid` (error) — DBML rejects a diagram.
+- `domainLoadDbmlBinding` (error) — a DBML diagram names something not declared.
+- `domainLoadDbmlParserThrew` (error) — the DBML parser threw on a diagram (ours).
+- `domainLoadNewerSchema` (error) — a diagram was written by a newer ERD Studio.
+- `domainLoadNotADiagram` (error) — the file is not a diagram.
+- `domainLoadLegacyFormat` (error) — a diagram is in a format ERD Studio no longer reads.
+- `modelFileDbmlNotOneTable` (error) — a .dbml table file is not one Table.
+- `modelFileDbmlNameMismatch` (error) — a .dbml table file name differs from its Table.
+- `modelFileDbmlUnsupportedElement` (error) — a .dbml table file holds an element it may not.
+- `modelFileDbmlMetadataTarget` (error) — a .dbml table file sets metadata on something not in it.
+- `modelFileDbmlBinding` (error) — a .dbml table file names something not declared.
+- `modelFileDbmlInterpreter` (error) — the DBML interpreter rejected a .dbml table file.
+
+**B15 — time to the first draft and the first diagram, from the first run.**
+
+- `ttfDraftUnder1m` — the first draft showed within a minute of the first run.
+- `ttfDraft1to5m` — the first draft showed 1 to 5 minutes after the first run.
+- `ttfDraft5to30m` — the first draft showed 5 to 30 minutes after the first run.
+- `ttfDraftOver30m` — the first draft showed more than 30 minutes after the first run, the same day.
+- `ttfDraftLaterDay` — the first draft showed on a later day.
+- `ttfDiagramUnder1m` — the first diagram with tables opened within a minute of the first run.
+- `ttfDiagram1to5m` — the first diagram with tables opened 1 to 5 minutes after the first run.
+- `ttfDiagram5to30m` — the first diagram with tables opened 5 to 30 minutes after the first run.
+- `ttfDiagramOver30m` — the first diagram with tables opened more than 30 minutes after the first run, the same day.
+- `ttfDiagramLaterDay` — the first diagram with tables opened on a later day.
+
+**B16 — AI helper hooks that were skipped, and helper install failures.**
+
+- `hookSkippedJsonc` — an assistant hook was left out: its settings file has comments or trailing commas.
+- `hookSkippedNotJson` — an assistant hook was left out: its settings file is not JSON.
+- `hookSkippedShape` — an assistant hook was left out: its hooks value has another shape.
+- `hookSkippedOwnScript` — an assistant hook was left out: a script the user wrote is at its path.
+- `hookSkippedNewerScript` — an assistant hook was left out: the script is from a newer ERD Studio.
+- `hookSkippedCopilot` — the GitHub Copilot hook was left out.
+- `hookSkippedCodex` — the Codex hook was left out.
+- `hookSkippedGemini` — the Gemini CLI hook was left out.
+- `harnessInstallFailed` (error) — an AI helper install failed (the total; one target beside it).
+- `harnessInstallFailedClaude` (error) — the Claude Code helper install failed.
+- `harnessInstallFailedAgents` (error) — the Agent Skills helper install failed.
+- `harnessInstallFailedCopilot` (error) — the GitHub Copilot helper install failed.
+- `harnessInstallFailedGemini` (error) — the Gemini CLI helper install failed.
+- `harnessInstallFailedCodex` (error) — the Codex helper install failed.
+- `launcherRefreshFailed` (error) — refreshing the installed CLI launcher failed.
+- `harnessUpdateFailed` (error) — Install AI Helper Files or Update All failed.
+
+**B17 — big diagrams: slow loads, layout failures and the draft layout.**
+
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day).
+- `layoutStackFallback` — an auto layout fell back to the stacked placement.
+- `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
+- `draftLayoutOver5s` — a draft page layout took more than 5 s.
+- `draftFitZoomUnder30` — a draft fitted to the screen at under 30% zoom.
+- `draftLayoutFallback` — a draft page layout fell back to the simple placement.
+- `draftClosedWhileLayingOut` — a draft page closed before its layout finished.
+- `layoutFailedTimeout` (error) — an auto layout timed out.
+- `layoutFailedWorker` (error) — the layout worker crashed.
+- `layoutFailedStack` (error) — an auto layout ran out of stack.
+
+**B18 — known-fix prompt answers, Welcome failures and small onboarding dead ends.**
+
+- `knownFixOffered` — the "a newer version fixes this" notification was shown.
+- `knownFixUpdate` — its Update button was pressed.
+- `knownFixReload` — its Reload Window button was pressed.
+- `knownFixDismissed` — it was dismissed.
+- `trySampleCloned` — the sample project was cloned into a folder.
+- `trySampleZip` — the sample project was downloaded as a zip.
+- `trySampleGithub` — the sample project's GitHub page was opened.
+- `noFolderWarned` — a command that needs a folder was run with none open.
+- `welcomeFailedStart` (error) — a Welcome panel start button failed.
+- `welcomeFailedSetup` (error) — the Welcome panel Set Up My AI Helper failed.
+- `welcomeFailedOpenAssistant` (error) — the Welcome panel Open Claude Code or Open Copilot Chat failed.
+- `welcomeFailedSample` (error) — the Welcome panel Try the Sample Project failed.
+- `welcomeFailedStatus` (error) — the Welcome panel status check failed.
+- `welcomeFailedOther` (error) — another Welcome panel message failed.
+- `startCommandFailed` (error) — a start command run from the start screen threw.
+- `sidebarListFailed` (error) — the Diagrams view could not list the diagrams.
+- `exampleOpenFailed` (error) — an example could not be opened.
+- `guideOpenFailed` (error) — the Show Me Around guide could not be opened.
+
+**B19 — every logged error, by area.**
+
+- `loggedError` (error) — ERD Studio logged an error (the total; one area beside it).
+- `loggedErrorCanvas` (error) — a logged error from the canvas.
+- `loggedErrorImport` (error) — a logged error from an import.
+- `loggedErrorDraft` (error) — a logged error from a draft.
+- `loggedErrorSidebar` (error) — a logged error from the sidebar.
+- `loggedErrorHarness` (error) — a logged error from the AI helper.
+- `loggedErrorDbt` (error) — a logged error from the dbt integration.
+- `loggedErrorOther` (error) — a logged error from anywhere else.
+
+**B15 — trail marker.**
+
+- `dayContinued` (trail marker) — the first entry of a trail whose window was activated on an earlier UTC day (it crossed midnight).
 
 ## The local archive
 
@@ -727,12 +1103,15 @@ npm run check  # node --check, then tsc --noEmit over the JSDoc types (strict)
 The tests drive the Worker's `fetch` and `scheduled` handlers against an
 in-memory D1 stand-in that records every statement and bound parameter. They
 cover routing, the kill switch, the body cap (including a streamed body with no
-`Content-Length`), every rejection path, unknown-key dropping and the exact
-column binding. The last group checks the privacy promises across the whole
+`Content-Length`), every rejection path, unknown-key dropping, the exact
+column binding and the `worker_daily` ledger (each outcome and reason, the
+dropped counts, the version family, no row for the kill switch, a `404` / `405`
+or a failed upsert, and a ledger failure that leaves the response alone). The last group checks the privacy promises across the whole
 run: no IP, user-agent, country or other header value is ever bound to SQL,
 and no payload, header or install id ever appears in a log line.
 `test/schema.test.mjs` holds `schema.sql`, `migrations/` and the Worker's
-`INSERT` to the same columns.
+`INSERT`s to the same columns, table by table, and the ledger's `ON CONFLICT`
+to the `worker_daily` primary key.
 
 They are invisible to the repo's vitest suite (whose `include` is
 `test/unit/**` at the root); `ci.yml`'s `telemetry` job runs them on every PR,

@@ -650,10 +650,10 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
   });
 
-  it('appends the Run dbt parse outcome keys at the very end, in order', () => {
+  it('appends the Run dbt parse outcome keys after the guide ones, in order', () => {
     const at = FEATURES.indexOf('dbtParseLaunched');
     expect(at).toBe(FEATURES.indexOf('draftAfterOpenFolder') + 1);
-    expect(FEATURES.slice(at)).toEqual([
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtCompileNoStart') + 1)).toEqual([
       'dbtParseLaunched', 'dbtParseRefresh', 'dbtParseNoDbt', 'dbtParseVenvDeclined', 'dbtParseCloudCli',
       'dbtParseBusy', 'dbtParseNoProfiles', 'dbtParseNoStart', 'dbtParseStopped', 'dbtParseExitOk',
       'dbtParseExitFail', 'dbtParseOkNoManifest',
@@ -668,8 +668,29 @@ describe('allowlists agree with the Worker', () => {
       'dbtCompileLaunched', 'dbtCompileNoDbt', 'dbtCompileVenvDeclined', 'dbtCompileExitOk', 'dbtCompileExitFail',
       'dbtCompileStopped', 'dbtCompileNoStart',
     ]);
-    expect(FEATURES.at(-1)).toBe('dbtCompileNoStart');
-    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1, ERROR_CODES.indexOf('manifestRetryFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']);
+  });
+
+  it('appends the 2.0.0 launch keys after every earlier one, so no index moves', () => {
+    expect(FEATURES.indexOf('heartbeatProvisional')).toBe(FEATURES.indexOf('dbtCompileNoStart') + 1);
+    expect(ERROR_CODES.indexOf('activationFailed')).toBe(ERROR_CODES.indexOf('manifestRetryFailed') + 1);
+    expect(FEATURES.at(-1)).toBe('noFolderWarned');
+    expect(ERROR_CODES.at(-1)).toBe('loggedErrorOther');
+    // Liam's decision for B6: no table-count bucket is ever a key.
+    expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
+  });
+
+  it('the Worker README lists every 2.0.0 key, one line each, under Keys added in 2.0.0', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    const at = readme.indexOf('## Keys added in 2.0.0');
+    expect(at).toBeGreaterThan(0);
+    const next = readme.indexOf('\n## ', at + 1);
+    const section = readme.slice(at, next === -1 ? undefined : next);
+    const added = [
+      ...FEATURES.slice(FEATURES.indexOf('heartbeatProvisional')),
+      ...ERROR_CODES.slice(ERROR_CODES.indexOf('activationFailed')),
+    ];
+    for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
   });
 
   it('every dbt parse failure category and placeholder adapter has its feature key', () => {
