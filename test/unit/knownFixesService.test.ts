@@ -94,6 +94,14 @@ describe('startKnownFixes', () => {
     expect(shown).not.toHaveBeenCalled();
   });
 
+  it('never fetches the registry for the loggedError catch-all codes', async () => {
+    start();
+    telemetry.error('loggedError');
+    telemetry.error('loggedErrorOther');
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('is off when the user turns erdStudio.checkKnownFixes off — and a workspace cannot turn it back on', async () => {
     mock._setMockConfiguration('erdStudio', 'checkKnownFixes', { globalValue: false, workspaceValue: true });
     const shown = vi.spyOn(vscode.window, 'showInformationMessage');

@@ -473,8 +473,10 @@ day-0 rows with no `.erd-studio`, no diagrams and no harness. From the 2.0
 release on, `firstRun` is the denominator: a tenure-0 install without it is
 a returning user. A day-0 row only arrives when the install activates again
 on a later UTC day (the heartbeat for a day is sent by a later activation),
-so an install that tried ERD Studio once and never came back is not in any
-cohort.
+so on versions before 2.0 an install that tried ERD Studio once and never came
+back is not in any cohort. From 2.0 a first-week install also sends interim
+same-day copies (`heartbeatProvisional`, B2), so such an install arrives as a
+day-0 row that still holds the marker: a bounce (see *Bounces* below).
 
 ```bash
 # The funnel: installs first seen 8–35 days ago (and on or after 2026-10-05), each counted once at the furthest step it reached.
@@ -749,6 +751,69 @@ The day after shipping (and again a week later):
 3. Run query 6 against the previous version.
 4. Glance at query 5 if the release touched the Move command, and at query 4
    weekly.
+5. From 2.0, compare error rates per version family and tenure (below), then
+   read the new-user first day and the import quality per source.
+
+**Reading 2.0 rows.**
+
+- *Internal installs.* The author's machines run with `ERD_STUDIO_INTERNAL=1`,
+  which the extension ORs into `dev`; the usual `COALESCE(dev, 0) = 0` leaves
+  them out. There is no setting and no other marker.
+- *Interim copies never double count.* The Worker keeps one row per install
+  and day (last write wins) and the final replaces the interim, so row and
+  install counts are right as they are. Exclude `heartbeatProvisional` from any
+  sum over `features`, and for rates use finished days only
+  (`day < date('now','-1 day')` and no `heartbeatProvisional`): a finished day
+  still holding the marker is a bounce or a lost final, counted on its own. A
+  same-day number that includes interim rows is provisional; say so.
+- *Mixed and trimmed days.* `versionMixed` marks a day two extension versions
+  counted (an update mid-day): leave it out of per-version comparisons.
+  `heartbeatTrimmed` marks a body cut under the 15 KB guard (its trail first):
+  more than a few rows means the guard or the trail needs a look.
+- *Upgraders.* `extUpdated` / `extUpdatedMajor` count the first start after an
+  update. Tenure is days since the install's first heartbeat, so an upgrader
+  reads as `1-7` or older, never `0`, unless it had telemetry off before.
+
+Error rates per version family and tenure: installs with any error per
+install-day, finished single-version days only. Run it per code too (join
+`json_each(h.errors)`, count `DISTINCT install_id` per key) and read installs
+affected per 100 install-days against the last 1.x stable's rate over the 28
+days before 2.0.0. Treat a code at 1.5× its 1.x rate or more as a regression
+only when at least 2 installs are affected; tenure `0` (the first day) matters
+most.
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT CASE WHEN ext_version LIKE '2.%' THEN '2.x' ELSE '1.x' END AS fam,
+       CASE WHEN tenure = '0' THEN '0' WHEN tenure = '1-7' THEN '1-7' ELSE '8+' END AS t,
+       COUNT(*) AS install_days, COUNT(DISTINCT install_id) AS installs,
+       SUM(CASE WHEN errors <> '{}' THEN 1 ELSE 0 END) AS days_with_error
+FROM heartbeats
+WHERE COALESCE(dev, 0) = 0 AND day >= date('now','-14 days') AND day < date('now','-1 day')
+  AND json_extract(features, '$.heartbeatProvisional') IS NULL
+  AND json_extract(features, '$.versionMixed') IS NULL
+GROUP BY 1, 2"
+```
+
+The new-user first day: `firstRun` is the denominator; `ttfDraft*` and
+`ttfDiagram*` are recorded once per install, so installs per bucket is the
+time-to-first-draft and time-to-first-diagram distribution; bounces are the
+query under *Bounces*.
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT f.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) f
+WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-14 days') AND h.ext_version LIKE '2.%'
+  AND (f.key = 'firstRun' OR f.key LIKE 'ttf%' OR f.key LIKE 'draftUnavailable%' OR f.key LIKE 'draftDrop%')
+GROUP BY 1 ORDER BY 1"
+```
+
+Import quality per source (`Dbt`, `SqlDdl`, `SemanticModel`, `Dbml`; example
+drafts carry no flags): read `draftThin<S>`, `draftRelsNone<S>`,
+`draftKeptThin<S>` and `draftRejectedFast<S>` against `draftSource<S>`, in
+installs. Swap the `LIKE` list above for `'draftSource%'`, `'draftThin%'`,
+`'draftRelsNone%'`, `'draftKeptThin%'` and `'draftRejectedFast%'`. A source
+whose drafts are mostly thin, or closed within 15 s, loses too much on import.
 
 Investigate when:
 
@@ -770,6 +835,20 @@ Investigate when:
   rename and remove cascades.
 - In the Move funnel, `relMoveCompleted` well below `relMoveStarted` minus
   `relMoveCancelled`, or any `relMoveWriteFailed`.
+- **From 2.0:** any `convertToDbmlUnrestored` (a user's files left half
+  converted: top priority); any `activationFailed` (its phase code says where);
+  any `webviewCrash*` or `webviewNoReady*`; `handlerFailed*`, `dbmlWriteOverlap`
+  or `refreshFailed*` on the new version but not the previous one;
+  `importSqlEngineLoadFailed` or `importDbmlParserThrew` (the importer itself
+  broke). `domainLoadDbml*` (other than `ParserThrew`), `modelFileDbml*` (other
+  than `Interpreter`), `domainLoadNewerSchema` and the `writeFailedPermission`
+  / `writeFailedDiskFull` features are the user's files or machine: judge them
+  by what the user is told. `loggedError*` counts every logged error by area,
+  some about the user's own files: read it only for failures no narrower code
+  explains.
+
+The scheduled **product manager** routine (`.claude/routines/product-manager.md`,
+STEP 2.0) runs the ledger check every run and these comparisons weekly.
 
 The local archive (below) already picks the new keys up: its per-day
 feature and error CSVs come from `json_each`, so `rel*` keys land there with no
@@ -1099,7 +1178,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `loggedErrorDbt` (error) — a logged error from the dbt integration.
 - `loggedErrorOther` (error) — a logged error from anywhere else.
 
-The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`.
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself.
 
 **B15 — trail marker.**
 

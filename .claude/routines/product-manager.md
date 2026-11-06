@@ -44,7 +44,21 @@ Check out `liam-machine/erd-studio` (clone if needed) and `git fetch origin main
 
 **Telemetry:** Cloudflare D1 `erd-studio-telemetry` (id `58f599b8-709f-47bf-9164-057cfdd06050`), table `heartbeats`: one row per install per UTC day, schema in `telemetry/schema.sql`; `errors` / `features` are JSON objects (use `json_each`); every field is described in `telemetry.json` and CLAUDE.md "Usage telemetry". Query it with the Cloudflare Developer Platform connector's D1 query tool (ToolSearch `cloudflare d1`). If it is unavailable or unauthorised, say so in the journal and the summary and do the work that needs none (STEP 0, STEP 1, STEP 3 for user reports and the proactive sweep, the journal); never guess at data. Always `COALESCE(dev,0)=0`. Keep queries small (D1 rejects large UNIONs). Default window: last 14 days; widen when a question needs it. Count installs with `COUNT(DISTINCT install_id)`.
 
-**Code meanings:** `ERROR_CODES` / `FEATURES` in `src/services/telemetryPayload.ts` (with comments), then grep `telemetry.error('<code>')` and helpers (`subjectAreaLoadErrorCode`, `tableFileErrorCode`, `manifestFailureCode`). `manifestMissing` is retired; ignore it.
+**Code meanings:** `ERROR_CODES` / `FEATURES` in `src/services/telemetryPayload.ts` (with comments), then grep `telemetry.error('<code>')` and helpers (`subjectAreaLoadErrorCode`, `tableFileErrorCode`, `manifestFailureCode`). `manifestMissing` is retired; ignore it. Every key 2.0.0 added is listed, one line each, in `telemetry/README.md` → "Keys added in 2.0.0", grouped by plan item (B2–B19).
+
+**Reading 2.0 data (from extension 2.0.0 on).** Four rules apply to every query below:
+
+- **Internal installs are dev rows.** Liam's own machines run with `ERD_STUDIO_INTERNAL=1`, which the extension ORs into `dev`, so `COALESCE(dev,0)=0` already leaves them out. There is no setting for it and no other marker: never try to spot "Liam's install" any other way.
+- **Interim copies are not extra rows.** First-week installs, and any install that hits a new error code, send up to 3 same-day interim copies of *today* (`features.heartbeatProvisional = 1`). The Worker upserts one row per `(install_id, day)`, last write wins, and the next day's final replaces the interim. So counting rows or `COUNT(DISTINCT install_id)` never double counts. What you must do:
+  - exclude the key from every sum over `features` (`AND f.key <> 'heartbeatProvisional'` in a `json_each`);
+  - for rates and baselines, use finished days only: `day < date('now','-1 day')` **and** `json_extract(features,'$.heartbeatProvisional') IS NULL`. A finished day that still holds the marker is a day whose final never came (a bounce, see `telemetry/README.md` → "Bounces"); count those separately, never in a rate;
+  - a same-day read (launch day, or checking a new version early) may include interim rows, but say "provisional" next to every such number.
+- **`heartbeatTrimmed`** marks a body cut under the 15 KB guard: its trail (and, in the worst case, some single-count features) are missing. Report how many rows carry it; more than a handful means the guard needs a look.
+- **`versionMixed`** marks a day counted by two extension versions (an update mid-day). Leave those rows out of per-version comparisons (`json_extract(features,'$.versionMixed') IS NULL`) and say how many you left out. `extUpdated` / `extUpdatedMajor` count the first start after an update; `tenure` is days since the install's first heartbeat, so an upgrader is never tenure `'0'` unless it had telemetry off before.
+
+**The Worker's ledger.** Table `worker_daily` (migration 0005): one row per UTC day × extension family (`M.m`, or `other`) × outcome (`ok` / `denied`) × reason (`none`, `body_size`, `json`, `shape_<field>`), with `n` heartbeats and `dropped_features` / `dropped_errors` / `dropped_trail` (unknown keys the Worker dropped from accepted bodies). No install id, no key names. Read it first every run (STEP 2.0).
+
+**`telemetry/**` is frozen on `main` until 2.0 is released from `main`** (`known-fixes.json` included): a merge there would redeploy the 1.7.x Worker over the hand-deployed 2.0 one and drop the 2.0 keys. Your known-fixes PRs go into `develop` as before; never propose, open or ask for a PR that changes `telemetry/**` on `main` while the freeze holds. The freeze ends when `CHANGELOG.md` on `origin/main` has a `2.0.0` heading.
 
 ## The run
 
@@ -75,6 +89,47 @@ For an issue **filed by someone other than Liam**:
 
 For Liam's own issues: no replies; just use them as context.
 
+### STEP 2.0 — Is 2.0 getting through, and is it worse than 1.x?
+
+Run every time while any `2.x` version is the latest release or in pre-release; skip it (one journal line) before then.
+
+1. **Ledger (every run, first).**
+
+   ```sql
+   SELECT ext_family, outcome, reason, SUM(n) AS n, SUM(dropped_features) AS df, SUM(dropped_errors) AS de, SUM(dropped_trail) AS dt
+   FROM worker_daily WHERE day >= date('now','-3 days') GROUP BY 1,2,3 ORDER BY 1,2,3
+   ```
+
+   - Any `denied` row for a `2.x` family: the Worker refuses that version's heartbeats. Raise a `bug` titled "Worker refuses 2.x heartbeats (<reason>)", labels `telemetry`, `bug`, `needs-triage`, top of the summary. `body_size` means the client's size guard failed; `shape_<field>` names the field the Worker rejected.
+   - Any `df`, `de` or `dt` above 0 on a `2.x` family: the deployed Worker's key lists are older than that version's. Raise "Worker lists are stale for 2.x: redeploy" (same labels), and say every 2.x key count is an undercount until it is fixed.
+   - `denied` / dropped rows on `1.x` or `other` are noise unless they grow; journal only.
+   - No `worker_daily` rows at all for a family that has heartbeats: the ledger is down (0005 not applied, or the Worker is older than B1). Say so in the summary.
+2. **Per-version error rates, by tenure (first run of each week).** Finished, single-version, non-dev days only. The baseline is the last 1.x stable over the 28 days before the first 2.0.0 heartbeat; work it out once, write it to the journal's **Metric baselines** with the date, and reuse it.
+
+   ```sql
+   SELECT CASE WHEN ext_version LIKE '2.%' THEN '2.x' ELSE '1.x' END AS fam,
+          CASE WHEN tenure = '0' THEN '0' WHEN tenure = '1-7' THEN '1-7' ELSE '8+' END AS t,
+          COUNT(*) AS install_days, COUNT(DISTINCT install_id) AS installs,
+          SUM(CASE WHEN errors <> '{}' THEN 1 ELSE 0 END) AS days_with_error
+   FROM heartbeats
+   WHERE COALESCE(dev,0)=0 AND day >= date('now','-14 days') AND day < date('now','-1 day')
+     AND json_extract(features,'$.heartbeatProvisional') IS NULL
+     AND json_extract(features,'$.versionMixed') IS NULL
+   GROUP BY 1,2
+   ```
+
+   Then per code: `SELECT <fam>, <t>, e.key, COUNT(DISTINCT h.install_id) AS installs, SUM(e.value) AS total FROM heartbeats h, json_each(h.errors) e WHERE <same filters> GROUP BY 1,2,3`, and report installs affected per 100 install-days. Flag a code on 2.x at 1.5× its 1.x rate or more **only when at least 2 installs are affected**; a code that exists only on 2.x has no baseline, so treat its first occurrence as STEP 2 does. Tenure `'0'` on 2.x is new users' first day: weigh it most.
+3. **New-user first day (first run of each week).** From 2.0.0, `firstRun` is the denominator (one per new install; `tenure = '0'` alone is not a new install, see `telemetry/README.md` → "Who counts as a new install"). Report, over installs whose `firstRun` row is in the window:
+   - how many reached a draft and a diagram, and how fast: `ttfDraft*` and `ttfDiagram*` (`Under1m`, `1to5m`, `5to30m`, `Over30m`, `LaterDay`), each recorded once per install;
+   - bounces (first row tenure `'0'`, still `heartbeatProvisional`, nothing later; the README's query) from D+1, final from D+8;
+   - why the automatic draft did not show: `draftUnavailable<Source>` beside `draftDrop<Reason>` (`NothingFound`, `Unreadable`, `NoLayer`, `BadName`, `NothingDrawable`, `NoDialect`, `NeedsChoice`), and `draftWaitedForPrompt`;
+   - start-screen look failures: `startLookTimeout`, `startLookGaveUp`, and the errors `startLookFailed` / `startContextFailed`.
+
+   Counts this small are evidence, not trends: compare with the journal baseline and say when the base is too small to tell.
+4. **Import quality, per source (first run of each week).** Sources are `Dbt`, `SqlDdl`, `SemanticModel` and `Dbml`; example drafts carry no flags. For each source, against its `draftSource<S>` installs: `draftThin<S>` and `draftRelsNone<S>` (shown), `draftKeptThin<S>` (kept anyway) and `draftRejectedFast<S>` (closed within 15 s without opening details). The source-less flags (`draftOrphansMost`, `draftEmptyTablesMost`, `draftUntypedMost`, `draftNoPkMost`, `draftWideTablesMost`, `draftRelsInferable`, `draftLeftOut`, `draftCapped`, `draftReusesLibrary`) say what the thin drafts lack. A source whose drafts are mostly thin or rejected fast is a `product` issue (the importer loses too much), not a bug. Failures, by source: `importSqlInvalid<Kind>`, `importSqlRejected<Clause>`, `importSqlFail<Dialect>`, `importDbmlInvalid*`, `importSemanticModel*`, `importLimit*`, `importStop*`; and the errors `importSqlEngineLoadFailed` and `importDbmlParserThrew` (ours).
+
+Every number here is an aggregate. The privacy rules above apply unchanged: no install ids, no raw rows, never a count below 2 next to an os + host + version combination, and never a link between telemetry and a person.
+
 ### STEP 2 — Errors users hit (telemetry)
 
 1. Get installs and occurrences per error code per `ext_version`.
@@ -87,6 +142,11 @@ For Liam's own issues: no replies; just use them as context.
    - (a) **Extension bug** (any `*Failed`, `domainLoadInternal`, `relInv*`, `relHandlerFailed`, `editRejected`, `manifestTimeout`, …): any occurrence on the latest version is genuine → raise (`bug`), or REFLECT if you cannot tell what failed.
    - (b) **User-environment error** (broken model YAML, bad projectPath, missing diagram, malformed manifest or domain JSON): a broken user file is not itself a bug. Run STEP 3 on it; raise (`ux`) when the experience misses the bar, or when the same install hits it again on a later day (a sign they could not get out). Frame it as "users can't recover from X". Unsure → REFLECT.
    - (c) **Benign** (a cancel, an error the user is told about and recovers from): journal only, with the reason. Not sure it's benign → REFLECT.
+
+   **The 2.0 vocabulary** (meanings in `telemetry/README.md` → "Keys added in 2.0.0"):
+   - **(a) ours:** `activationFailed` + its phase (`activationFailedDiscovery` … `Prompts`: the phase is where to look), `activationPromptFailed`, `dbtSearchFailed`; `handlerFailed` + its group, `dbmlWriteOverlap` (the DBML writer refused its own overlapping edits), `messageUnknownType`, `physicalEditDropped`, `refreshFailed` + its kind; `webviewCrash` + its area, `webviewWindowError`, `webviewRejection`, `webviewNoReady*` (a panel that never said ready while visible); `layoutFailedTimeout` / `Worker` / `Stack`; `commandFailedOurs`, `writeFailedOurs`, `newDiagramWriteFailed`, `layersFileFailed`, `renameDiagramFailed`, `deleteDiagramFailed`, `exampleSaveFailed`, `exampleOpenFailed`, `guideOpenFailed`, `startCommandFailed`, `sidebarListFailed`, `welcomeFailed*`; `convertToDbmlSelfCheck`, `convertToDbmlUnrestored` (files left half converted: top priority, like `relMoveRestoreFailed`), `convertSaveFailed`; `importSqlEngineLoadFailed`, `importDbmlParserThrew`, `domainLoadDbmlParserThrew`, `modelFileDbmlInterpreter`; `harnessInstallFailed*` and `harnessUpdateFailed` unless a `writeFailedPermission` / `writeFailedDiskFull` feature sits beside it, `launcherRefreshFailed`.
+   - **(b) user environment:** `domainLoadDbmlSyntax`, `domainLoadDbmlInvalid`, `domainLoadDbmlBinding`, `domainLoadNotADiagram`, `domainLoadLegacyFormat`, `modelFileDbmlNotOneTable` / `NameMismatch` / `UnsupportedElement` / `MetadataTarget` / `Binding`; `domainLoadNewerSchema` (a file from a newer version: the fix is the update prompt, so check STEP 4); the features `writeFailedPermission`, `writeFailedDiskFull` and `importSqlInvalidParse`. Judge them by STEP 3. The `domainLoadBlocking` / `domainLoadOverLive` features say whether the user saw an error page or kept a live canvas.
+   - **`loggedError*` (the catch-all, one per `log.error` by area):** not a candidate on its own. It counts every logged error, including some about the user's own files (a broken table file read on every refresh). Use it to find failures no narrower code covers: when `loggedError<Area>` rises on 2.x with no narrow code beside it on the same install-days, REFLECT (a site that should get its own code, or a `log.error` that should be a warning). `loggedErrorOther` is mostly lines tagged `[ERD Studio]` (commands and imports).
 
 ### STEP 3 — Experience audit
 
@@ -105,7 +165,7 @@ Users on an old version who hit a bug that is already fixed should be told to up
 
 1. **Version lag:** the share of active installs (last 7 days) on each version, by host (`host`: VS Code, Cursor, …) and registry. A host lagging behind (e.g. Open VSX builds such as Cursor or VSCodium) or a large share stuck more than one release behind is a `product` issue. Hypothesise why: auto-update off, Open VSX lag, a pending reload.
 2. **Fixed-but-still-hit:** for each code seen only on versions older than its fix, count the installs still hitting it in the window. Those are the users an update prompt would help; record the numbers in the journal.
-3. **Known-fixes registry:** once `telemetry/known-fixes.json` exists on develop (the in-extension "a newer version fixes this — Update" prompt reads it), make sure every fixed error code and every fixed user-reported problem that maps to a code has an entry, in the format its README documents. Open one PR per run into develop adding missing entries (labels `telemetry`, `known-fixes`). Until it exists, list the entries it *would* need in the journal under **Known fixes (pending registry)**.
+3. **Known-fixes registry:** once `telemetry/known-fixes.json` exists on develop (the in-extension "a newer version fixes this — Update" prompt reads it), make sure every fixed error code and every fixed user-reported problem that maps to a code has an entry, in the format its README documents. Open one PR per run into develop adding missing entries (labels `telemetry`, `known-fixes`); while the `telemetry/**` freeze on `main` holds (Setup), those entries reach users only with the 2.0.0 release, so say so in the PR. Until it exists, list the entries it *would* need in the journal under **Known fixes (pending registry)**.
 
 ### STEP 5 — Journeys and adoption
 
@@ -119,7 +179,8 @@ Using the fields in `telemetry.json`, compare this window against the baselines 
 - AI-helper setup and harness installs;
 - getting-started video progress;
 - retention (`activeDays28`, `canvasDays28`);
-- first-run failures (`firstLayoutFailed`, …).
+- first-run failures (`firstLayoutFailed`, …);
+- from 2.0.0: STEP 2.0's first-day numbers (time to first draft and diagram, bounces, why the automatic draft did not show) and import quality per source; slow first loads (`activationOver10s`, `canvasLoadOver20s`, `firstLayoutOver5s`, `draftLayoutOver5s`, `draftFitZoomUnder30`); Convert to DBML outcomes (`convertRefused*`, `convertStop*`, `convertNothingToDo`, `convertLeftAsIs`) and storage mix (`storageYaml` / `storageDbml` / `storageMixed`); known-fix prompt answers (`knownFixOffered` → `knownFixUpdate` / `knownFixReload` / `knownFixDismissed`); skipped AI-helper hooks (`hookSkipped*`).
 
 Look for friction: a step most users don't reach, a sudden drop after a release, a feature nobody finds, cancels where people give up. For each finding with real evidence, raise a `product` issue:
 
@@ -229,6 +290,6 @@ Write the journal, then end with a short summary:
 - gaps followed up;
 - Confluence follow-ups raised, and the ones now ready to bump (links here only, never in the journal);
 - codes skipped, with reasons;
-- telemetry health (no heartbeats in 2 days → the Worker may be down).
+- telemetry health (no heartbeats in 2 days → the Worker may be down; from 2.0, the STEP 2.0 ledger result: any `denied` or dropped keys on 2.x, and how many rows were `heartbeatTrimmed`).
 
 If nothing moved, say so in one line.

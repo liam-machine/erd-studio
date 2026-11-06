@@ -78,7 +78,12 @@ export function startKnownFixes(context: vscode.ExtensionContext): KnownFixesChe
       await vscode.commands.executeCommand('workbench.action.reloadWindow');
     },
   });
-  setErrorCodeListener(code => checker.check(code));
+  // loggedError* (telemetry 2.0 B19) counts every log.error by area: too broad
+  // for a registry entry, so it never triggers the registry download on its own.
+  setErrorCodeListener(code => {
+    if (code.startsWith('loggedError')) return;
+    checker.check(code);
+  });
   context.subscriptions.push({ dispose: () => setErrorCodeListener(undefined) });
   return checker;
 }

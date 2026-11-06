@@ -9,7 +9,7 @@
  * not in the allowlists (`telemetryPayload.ts`) and a search finds its use.
  */
 
-import { classifyWriteFailure } from './commandErrors';
+import { writeFailureKey } from './importTelemetry';
 import { ERROR_CODES, type TelemetryErrorCode, type TelemetryFeature } from './telemetryPayload';
 import type { WebviewMessageType } from '../types/messages';
 import type { AssistantHookSkipReason, SkippedAssistantHook } from '../types/harness';
@@ -59,10 +59,9 @@ export type DbtSearchOutcome = 'ok' | 'timeout' | 'error';
  * an errno in its message), never a path.
  */
 export function writeFailureFeature(err: unknown): TelemetryFeature | undefined {
-  const failure = classifyWriteFailure(err);
-  if (failure === 'permission') return 'writeFailedPermission';
-  if (failure === 'disk-full') return 'writeFailedDiskFull';
-  return undefined;
+  // One mapping for every write class: importTelemetry's writeFailureKey.
+  const key = writeFailureKey(err);
+  return 'feature' in key ? key.feature : undefined;
 }
 
 // ---------------------------------------------------------------------------
