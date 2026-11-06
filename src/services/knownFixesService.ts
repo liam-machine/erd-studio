@@ -20,7 +20,7 @@ import {
   type KnownFixChoice,
   type ShownKnownFixes,
 } from './knownFixes';
-import { setErrorCodeListener } from './telemetryService';
+import { setErrorCodeListener, telemetry } from './telemetryService';
 
 /** The registry, served by the telemetry Worker (`telemetry/known-fixes.json`). */
 export const KNOWN_FIXES_ENDPOINT = 'https://erd-studio-telemetry.w2solutions.ai/known-fixes';
@@ -56,11 +56,21 @@ export function startKnownFixes(context: vscode.ExtensionContext): KnownFixesChe
     getShown: () => context.globalState.get<ShownKnownFixes>(SHOWN_KEY),
     setShown: (value) => void context.globalState.update(SHOWN_KEY, value),
     installedVersions: () => installedVersions(context.extensionUri?.fsPath),
+    // The prompt's outcome is usage telemetry (B18): whether the self-healing loop works.
+    // Fixed keys only; like every feature, nothing is recorded while telemetry is off.
     notify: async (message, pendingReload): Promise<KnownFixChoice> => {
       const primary = pendingReload ? RELOAD : UPDATE;
+      telemetry.feature('knownFixOffered');
       const picked = await vscode.window.showInformationMessage(message, primary, NOT_NOW);
-      if (picked === RELOAD) return 'reload';
-      if (picked === UPDATE) return 'update';
+      if (picked === RELOAD) {
+        telemetry.feature('knownFixReload');
+        return 'reload';
+      }
+      if (picked === UPDATE) {
+        telemetry.feature('knownFixUpdate');
+        return 'update';
+      }
+      telemetry.feature('knownFixDismissed');
       return 'dismissed';
     },
     openExtension: () => openExtensionPage(),

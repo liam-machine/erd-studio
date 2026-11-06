@@ -87,6 +87,14 @@ describe('editTableDbml refusals', () => {
     const err = refusal(() => refuseOverlaps('tables/x.dbml', () => applyTextEdits('abc', [{ start: 0, end: 2, text: '' }, { start: 1, end: 3, text: '' }])));
     expect(err.message).toBe('ERD Studio could not apply this change to tables/x.dbml safely, so nothing was written. Make the change in the file by hand.');
     expect(err.file).toBe('tables/x.dbml');
+    // Hosts tell a writer bug from a file problem by the reason (the message is the same).
+    expect(err.reason).toBe('overlap');
+  });
+
+  it('a refusal for the file itself carries no overlap reason', () => {
+    const table = readTable(BARE_TABLE, 'fct_order').table;
+    const err = refusal(() => editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { file: 'tables/fct_order.dbml' }));
+    expect(err.reason).toBeUndefined();
   });
 
   it('a property a Metadata block in another file sets is refused (D25)', () => {

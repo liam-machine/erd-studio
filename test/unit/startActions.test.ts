@@ -226,6 +226,15 @@ describe('erdStudio.start', () => {
     expect(pick).not.toHaveBeenCalled();
   });
 
+  it('a start command that throws counts startCommandFailed and rethrows unchanged (B18)', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    const boom = new Error('boom');
+    const executeCommand = vi.fn(async () => { throw boom; });
+    await expect(runStart({ action: 'example', from: 'sidebar' }, { context: () => ({ hasProject: false, hasDbt: false }), executeCommand, pick: vi.fn() }))
+      .rejects.toBe(boom);
+    expect(error.mock.calls).toEqual([['startCommandFailed']]);
+  });
+
   it('without a valid argument, asks which start (from the same rule) and counts nothing', async () => {
     const feature = vi.spyOn(telemetry, 'feature');
     const executeCommand = vi.fn(async () => undefined);

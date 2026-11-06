@@ -775,6 +775,8 @@ a message or a count of tables. A sum over `features` excludes
 - `activationPromptFailed` (error) — the start suggestion or the automatic draft failed after activation.
 - `dbtSearchFailed` (error) — the host search for a dbt_project.yml threw (an error, not a feature: only layoutFailed may end in Failed among the features).
 
+A day whose activation threw before it recorded its outcome is still sent (it would otherwise be lost); its `activation` field then reads `no_project`, the fallback. Leave out rows whose `errors` hold `activationFailed` when counting the no-project funnel.
+
 **B5 — updates and mixed-version days.**
 
 - `extUpdated` — the first activation after ERD Studio was updated (survives the update reload).
@@ -1033,7 +1035,7 @@ a message or a count of tables. A sum over `features` excludes
 - `knownFixUpdate` — its Update button was pressed.
 - `knownFixReload` — its Reload Window button was pressed.
 - `knownFixDismissed` — it was dismissed.
-- `trySampleCloned` — the sample project was cloned into a folder.
+- `trySampleCloned` — Git's clone of the sample project ran to the end without an error (`git.clone` resolves with nothing, so a folder dialog the user closed counts too).
 - `trySampleZip` — the sample project was downloaded as a zip.
 - `trySampleGithub` — the sample project's GitHub page was opened.
 - `noFolderWarned` — a command that needs a folder was run with none open.
@@ -1058,6 +1060,8 @@ a message or a count of tables. A sum over `features` excludes
 - `loggedErrorHarness` (error) — a logged error from the AI helper.
 - `loggedErrorDbt` (error) — a logged error from the dbt integration.
 - `loggedErrorOther` (error) — a logged error from anywhere else.
+
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`.
 
 **B15 — trail marker.**
 

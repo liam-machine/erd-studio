@@ -288,6 +288,7 @@ export async function openExampleDraft(deps: ExampleDraftDeps, scopeId: string =
         if (answer.kind === 'keep') {
           // Save This Example…: the folder dialog onward, unchanged.
           const saved = await openExampleProject(deps.project, { example }).catch((err: unknown) => {
+            telemetry.error('exampleSaveFailed');
             log.error(`[ERD Studio] ${OPEN_EXAMPLE_PROJECT_TITLE}: Save This Example failed:`, err);
             return undefined;
           });

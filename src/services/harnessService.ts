@@ -127,6 +127,8 @@ export interface HarnessInstallResult {
   filePath: string;
   alreadyExisted: boolean;
   error?: string;
+  /** The failure's errno (`EACCES`, `ENOSPC`, …) when it had one: usage telemetry's write class, never a path. */
+  errno?: string;
   /** Workspace-relative (POSIX) paths this install wrote, set on success. */
   filesWritten?: string[];
   /**
@@ -1797,12 +1799,14 @@ export class HarnessService {
         filesRemoved,
       };
     } catch (err) {
+      const errno = errnoOf(err);
       return {
         target,
         success: false,
         filePath,
         alreadyExisted,
         error: err instanceof Error ? err.message : String(err),
+        ...(errno ? { errno } : {}),
       };
     }
   }
@@ -2237,7 +2241,10 @@ export class HarnessService {
         if (!filesWritten.includes(f)) { filesWritten.push(f); }
       }
       if (!result.success) {
-        return { status: 'failed', unmanaged: [], filesWritten, targets, ...skipped, error: result.error };
+        return {
+          status: 'failed', unmanaged: [], filesWritten, targets, ...skipped, error: result.error,
+          failedTarget: t, ...(result.errno ? { errno: result.errno } : {}),
+        };
       }
     }
     // Every folder was current but a hook was missing (removed, or a new assistant appeared).
@@ -2434,4 +2441,10 @@ export class HarnessService {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     return true;
   }
+}
+
+/** A Node error's `code` (`EACCES`, `ENOSPC`, …), when it has a short upper-case one. */
+function errnoOf(err: unknown): string | undefined {
+  const code = err && typeof err === 'object' && 'code' in err ? (err as { code: unknown }).code : undefined;
+  return typeof code === 'string' && /^E[A-Z0-9]{2,15}$/.test(code) ? code : undefined;
 }

@@ -205,6 +205,8 @@ export class SubjectAreaTreeProvider
     private readonly dbmlIcon?: DbmlFileIconResolver,
     /** Each DBML table's layer and schema, by lower-cased name (`tableHomesOf`). Optional: without it no diagram names other layers. */
     private readonly tableHomes?: () => ReadonlyMap<string, TableHome>,
+    /** Told when a root listing throws (usage telemetry's `sidebarListFailed`). Optional. */
+    private readonly onListFailed?: () => void,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
   }
@@ -457,13 +459,21 @@ export class SubjectAreaTreeProvider
       // rows, so the "No diagrams yet" welcome never flashes over a project
       // that has diagrams while the window opens.
       let rows = 0;
+      let failed = false;
       try {
         const children = this.rootChildren();
         rows = children.length;
         return children;
+      } catch (err) {
+        // A listing that threw found nothing: the empty view's start buttons
+        // ("No diagrams yet") must not show over a project that may have diagrams.
+        failed = true;
+        treeLog.error('Listing the diagrams failed:', err);
+        try { this.onListFailed?.(); } catch { /* counting never breaks the view */ }
+        throw err;
       } finally {
         const loading = rows > 0;
-        if (this.loading !== loading) {
+        if (!failed && this.loading !== loading) {
           this.loading = loading;
           this.onLoadingChange?.(loading);
         }
