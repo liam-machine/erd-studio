@@ -16,6 +16,7 @@ import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
+import { isCanvasLineStyle } from '../types/lineStyle';
 import {
   CRASH_DETAIL_MAX,
   isCrashFallbackAction,
@@ -666,6 +667,21 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
     validateStringList(payload.webviewErrors, 'Webview errors') ??
     validateFeedbackSubjectAreaSummary(payload.domain)
   );
+}
+
+/**
+ * Validate a `setLineStyle` payload: `{ lineStyle }`, one of
+ * `CANVAS_LINE_STYLES` (`curved` or `hops`).
+ */
+export function validateSetLineStylePayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Line style must be an object.';
+  }
+  const payload = value as { lineStyle?: unknown };
+  if (!isCanvasLineStyle(payload.lineStyle)) {
+    return 'Line style must be "curved" or "hops".';
+  }
+  return null;
 }
 
 /**

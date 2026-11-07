@@ -1489,6 +1489,19 @@
           "default": "compact",
           "markdownDescription": "How much the rows of the **Diagrams**, **Table Library** and **Relationships** views say beside their names. **Show Row Details** and **Hide Row Details**, in each view's **…** menu, switch it."
         },
+        "erdStudio.canvas.lineStyle": {
+          "type": "string",
+          "enum": [
+            "curved",
+            "hops"
+          ],
+          "enumDescriptions": [
+            "Curved lines: soft curves that go around tables. Where two lines cross, the one underneath is cut; where a line has to pass under a table, a faint dashed line shows its way.",
+            "Square lines that go around tables, with a small hop where two lines cross."
+          ],
+          "default": "curved",
+          "markdownDescription": "How diagrams draw their relationship lines. **Curved** and **Hops**, in the diagram's toolbar, switch it for every diagram."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",
