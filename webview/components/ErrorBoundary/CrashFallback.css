@@ -79,3 +79,9 @@
 .crash-fallback__button--secondary:hover:not(:disabled) {
   background: var(--selection-bg);
 }
+
+.crash-fallback__hint {
+  margin: 12px 0 0;
+  line-height: 1.5;
+  color: var(--dim-fg);
+}

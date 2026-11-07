@@ -17,7 +17,9 @@ import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvid
 import { validateCrashFallbackPayload } from '../../src/providers/payloadValidation';
 import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
 import { draftPreviewEvents } from '../../src/providers/draftWiring';
-import { crashFeedbackPrefill } from '../../src/services/commandErrors';
+import { crashFeedbackPrefill, noReadyFeedbackPrefill } from '../../src/services/commandErrors';
+import { askNoReadyRecovery, noReadyMessage, NO_READY_RELOAD_BUTTON } from '../../src/providers/noReadyRecovery';
+import { READY_TIMEOUT_MS } from '../../src/services/readyWatch';
 import { handlerGroupOf } from '../../src/services/runtimeTelemetry';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -92,7 +94,7 @@ function buildProvider() {
   );
 }
 
-async function openCanvas() {
+async function openCanvas({ ready = true }: { ready?: boolean } = {}) {
   const file = diagramPath(root, 'yaml', 'silver', 'showcase');
   const doc = makeDoc(file);
   const provider = buildProvider();
@@ -102,7 +104,7 @@ async function openCanvas() {
     panel as unknown as import('vscode').WebviewPanel,
     {} as import('vscode').CancellationToken,
   );
-  await panel._simulateMessage({ type: 'ready' });
+  if (ready) await panel._simulateMessage({ type: 'ready' });
   // The canvas is the focused tab.
   vscode.window.tabGroups.activeTabGroup.activeTab = { input: new vscode.TabInputCustom(doc.uri, SUBJECT_AREA_EDITOR_VIEW_TYPE) };
   return { provider, panel };
@@ -136,6 +138,39 @@ describe('the canvas crash screen (crashFallback)', () => {
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(extensionRoot, { recursive: true, force: true });
+  });
+
+  it('a canvas that never becomes ready offers Reload and Send Feedback in a notification', async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(NO_READY_RELOAD_BUTTON as never);
+      const error = vi.spyOn(telemetry, 'error');
+      const { panel } = await openCanvas({ ready: false });
+      const before = panel.webview.html;
+      await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS);
+      expect(error).toHaveBeenCalledWith('webviewNoReadyCanvas');
+      expect(warn).toHaveBeenCalledWith(noReadyMessage('canvas'), 'Reload', 'Send Feedback');
+      expect(noReadyMessage('canvas')).toContain('not in your files');
+      expect(panel.webview.html).not.toBe(before);
+      expect(featureKeys()).toContain('crashFallbackReload');
+
+      // The second canvas's user picks Send Feedback: the canvas-less flow, with the no-ready prefill.
+      warn.mockResolvedValue('Send Feedback' as never);
+      const second = await openCanvas({ ready: false });
+      const html = second.panel.webview.html;
+      await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS);
+      expect(featureKeys()).toContain('crashFallbackFeedback');
+      expect(reportBugCalls()).toEqual([['erdStudio.reportBug', noReadyFeedbackPrefill('canvas')]]);
+      expect(second.panel.webview.html).toBe(html);
+
+      // A canvas that says ready in time is never asked about.
+      warn.mockClear();
+      await openCanvas();
+      await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS * 2);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Reload gives the panel a new page, which loads the diagram again on its ready', async () => {
@@ -199,12 +234,19 @@ describe('the canvas crash screen (crashFallback)', () => {
     expect(reportBugCalls()).toHaveLength(1);
     expect(posted(panel).filter((m) => m.type === 'error').length).toBe(errorsBefore);
 
+    // A known button with an over-long detail or a bad area still opens Send Feedback, without them.
+    feature.mockClear();
+    await panel._simulateMessage({ type: 'crashFallback', payload: { action: 'feedback', area: '/Users/x', detail: 'x'.repeat(CRASH_DETAIL_MAX + 1) } });
+    expect(reportBugCalls()).toHaveLength(2);
+    expect(featureKeys()).toContain('crashFallbackFeedback');
+    expect(JSON.stringify(reportBugCalls()[1])).not.toContain('x'.repeat(CRASH_DETAIL_MAX + 1));
+
     feature.mockClear();
     await panel._simulateMessage({ type: 'crashFallback', payload: { action: 'rm -rf' } });
     await panel._simulateMessage({ type: 'crashFallback' });
     expect(featureKeys()).not.toContain('crashFallbackReload');
     expect(featureKeys()).not.toContain('crashFallbackFeedback');
-    expect(reportBugCalls()).toHaveLength(1);
+    expect(reportBugCalls()).toHaveLength(2);
   });
 });
 
@@ -248,11 +290,13 @@ describe('crashFallback payload and prefill', () => {
 describe('the draft page crash screen', () => {
   const allowance: DraftMessageAllowance = { keepable: true, changeOptions: true, scopeIds: new Set(), otherStarts: new Set() };
 
-  it('parses the passive crashFallback, dropping a detail on Reload and refusing a bad one', () => {
+  it('parses the passive crashFallback, dropping a detail on Reload or a bad one, and refusing a bad action', () => {
     expect(parseDraftToHost({ type: 'crashFallback', action: 'reload', detail: 'x' }, allowance)).toEqual({ type: 'crashFallback', action: 'reload' });
     expect(parseDraftToHost({ type: 'crashFallback', action: 'feedback', detail: 'boom', extra: 1 }, allowance))
       .toEqual({ type: 'crashFallback', action: 'feedback', detail: 'boom' });
-    expect(parseDraftToHost({ type: 'crashFallback', action: 'feedback', detail: 'x'.repeat(CRASH_DETAIL_MAX + 1) }, allowance)).toBeUndefined();
+    expect(parseDraftToHost({ type: 'crashFallback', action: 'feedback', detail: 'x'.repeat(CRASH_DETAIL_MAX + 1) }, allowance))
+      .toEqual({ type: 'crashFallback', action: 'feedback' });
+    expect(parseDraftToHost({ type: 'crashFallback', action: 'feedback', detail: 42 }, allowance)).toEqual({ type: 'crashFallback', action: 'feedback' });
     expect(parseDraftToHost({ type: 'crashFallback', action: 'keep' }, allowance)).toBeUndefined();
   });
 
@@ -266,6 +310,45 @@ describe('the draft page crash screen', () => {
     events.crashFallback?.('sqlDdl', 'feedback', 'TypeError: nope');
     expect(features).toEqual(['crashFallbackReload', 'crashFallbackFeedback']);
     expect(openFeedback).toHaveBeenCalledWith(crashFeedbackPrefill('draft', { detail: 'TypeError: nope' }));
+  });
+
+  it('a draft page that never becomes ready offers the same two buttons; Reload gives it a new page', async () => {
+    vi.useFakeTimers();
+    try {
+      DraftPreviewPanel.close();
+      _resetMockWebviewPanels();
+      const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(NO_READY_RELOAD_BUTTON as never);
+      const noReady = vi.fn();
+      const noReadyChoice = vi.fn();
+      void DraftPreviewPanel.show(vscode.Uri.file('/ext'), draftOf('large'), { noReady, noReadyChoice });
+      const panel = lastPanel();
+      const before = panel.webview.html;
+      await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS);
+      expect(noReady).toHaveBeenCalledWith('sqlDdl');
+      expect(warn).toHaveBeenCalledWith(noReadyMessage('draft'), 'Reload', 'Send Feedback');
+      expect(panel.webview.html).not.toBe(before);
+      expect(noReadyChoice).toHaveBeenCalledWith('sqlDdl', 'reload');
+      DraftPreviewPanel.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the wiring counts a no-ready choice with the crash keys and opens the no-ready prefill', async () => {
+    const features: string[] = [];
+    const openFeedback = vi.fn();
+    const events = draftPreviewEvents((k) => features.push(k), () => {}, undefined, undefined, openFeedback);
+    events.noReadyChoice?.('sqlDdl', 'reload');
+    expect(features).toEqual(['crashFallbackReload']);
+    expect(openFeedback).not.toHaveBeenCalled();
+    events.noReadyChoice?.('sqlDdl', 'feedback');
+    expect(features).toEqual(['crashFallbackReload', 'crashFallbackFeedback']);
+    expect(openFeedback).toHaveBeenCalledWith(noReadyFeedbackPrefill('draft'));
+    // Dismissed (or the notification failed): nothing.
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    expect(await askNoReadyRecovery('draft')).toBeUndefined();
+    vi.spyOn(vscode.window, 'showWarningMessage').mockRejectedValue(new Error('no'));
+    expect(await askNoReadyRecovery('canvas')).toBeUndefined();
   });
 
   it('Reload gives the preview a new page; the waiting flow keeps waiting and the new page gets the draft again', async () => {

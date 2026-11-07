@@ -81,7 +81,9 @@ import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
+import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
+import { askNoReadyRecovery } from './noReadyRecovery';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -1464,6 +1466,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.openPanels.has(input.uri.toString()) ? input.uri.fsPath : undefined;
   }
 
+  /**
+   * The crash screen's two buttons (the page's `crashFallback`), and the same
+   * two in the host's notification for a canvas that never became ready.
+   * Reload gives the panel a new page; Send Feedback opens the canvas-less
+   * flow with `prefill`. Telemetry counts the button only.
+   */
+  private async crashChoice(
+    action: CrashFallbackAction,
+    panelKey: string,
+    webviewPanel: vscode.WebviewPanel,
+    document: vscode.TextDocument,
+    prefill: FeedbackPrefill,
+  ): Promise<void> {
+    if (action === 'reload') {
+      telemetry.feature('crashFallbackReload');
+      canvasLog.info(`Reloading the canvas of ${document.uri.fsPath}`);
+      const entry = this.openPanels.get(panelKey);
+      if (entry?.webview === webviewPanel.webview) entry.loaded = false;
+      // A new page (a fresh nonce, so the html always changes): it says `ready` and loads again.
+      webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+      return;
+    }
+    telemetry.feature('crashFallbackFeedback');
+    this.markCrashed(panelKey, webviewPanel.webview);
+    // The canvas-less Send Feedback (requestFeedbackDialog skips a crashed canvas).
+    await vscode.commands.executeCommand('erdStudio.reportBug', prefill);
+  }
+
   /** Note that `webview` (still this panel's) shows the crash screen. */
   private markCrashed(panelKey: string, webview: vscode.Webview): void {
     const entry = this.openPanels.get(panelKey);
@@ -1627,7 +1657,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
     const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
       ready: (slow) => { if (slow) telemetry.feature('readySlowOver10s'); },
-      noReady: () => telemetry.error('webviewNoReadyCanvas'),
+      noReady: () => {
+        telemetry.error('webviewNoReadyCanvas');
+        // The page never mounted, so its crash screen cannot show: the host
+        // offers the same two buttons in a notification.
+        void askNoReadyRecovery('canvas').then((action) => {
+          if (!action || this.openPanels.get(panelKey)?.webview !== webviewPanel.webview) return undefined;
+          return this.crashChoice(action, panelKey, webviewPanel, document, noReadyFeedbackPrefill('canvas'));
+        }).catch((err: unknown) => log.warn('[SemanticEditorProvider] The blank-canvas recovery failed', err));
+      },
     });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
@@ -2084,24 +2122,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'crashFallback': {
             // The crash screen's buttons (CanvasCrashFallback). Writes nothing,
             // so it is on the physical allowlist. Telemetry counts the button only.
-            const payload = (message as { payload?: unknown }).payload;
-            if (!validateCrashFallbackPayload(payload)) {
-              log.warn('[SemanticEditorProvider] Ignoring a crashFallback with an unknown action or a bad detail');
+            const raw = (message as { payload?: unknown }).payload;
+            // A known button with a bad area or detail still works (the button
+            // never goes dead); only the extras are dropped.
+            const action = (raw as { action?: unknown } | null | undefined)?.action;
+            const payload = validateCrashFallbackPayload(raw)
+              ? raw
+              : isCrashFallbackAction(action) ? { action } : undefined;
+            if (!payload) {
+              log.warn('[SemanticEditorProvider] Ignoring a crashFallback with an unknown action');
               break;
             }
-            if (payload.action === 'reload') {
-              telemetry.feature('crashFallbackReload');
-              canvasLog.info(`Reloading the canvas of ${document.uri.fsPath} after a crash`);
-              const entry = this.openPanels.get(panelKey);
-              if (entry?.webview === webviewPanel.webview) entry.loaded = false;
-              // A new page (a fresh nonce, so the html always changes): it says `ready` and loads again.
-              webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
-            } else {
-              telemetry.feature('crashFallbackFeedback');
-              this.markCrashed(panelKey, webviewPanel.webview);
-              // The canvas-less Send Feedback (requestFeedbackDialog skips a crashed canvas).
-              await vscode.commands.executeCommand('erdStudio.reportBug', crashFeedbackPrefill('canvas', payload));
-            }
+            if (payload !== raw) log.warn('[SemanticEditorProvider] Dropped a bad area or detail from a crashFallback');
+            await this.crashChoice(payload.action, panelKey, webviewPanel, document, crashFeedbackPrefill('canvas', payload));
             break;
           }
           case 'openFieldsFile': {

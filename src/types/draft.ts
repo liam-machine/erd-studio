@@ -391,8 +391,9 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
     case 'crashFallback': {
       const { action, detail } = raw;
       if (!isCrashFallbackAction(action)) return undefined;
-      if (detail !== undefined && (typeof detail !== 'string' || detail.length > CRASH_DETAIL_MAX)) return undefined;
-      return { type: 'crashFallback', action, ...(action === 'feedback' && detail ? { detail } : {}) };
+      // A bad detail is dropped, never the button press (the button never goes dead).
+      const kept = typeof detail === 'string' && detail.length <= CRASH_DETAIL_MAX ? detail : undefined;
+      return { type: 'crashFallback', action, ...(action === 'feedback' && kept ? { detail: kept } : {}) };
     }
     default:
       return undefined;
@@ -513,6 +514,13 @@ export interface DraftPreviewEvents {
    * and, for `feedback`, opens Send Feedback with `detail` in the prefill.
    */
   crashFallback?(source: DraftSource, action: CrashFallbackAction, detail?: string): void;
+  /**
+   * A button on the host's notification for a page that never became ready
+   * (after `noReady`; optional). The preview has already reloaded the page for
+   * `reload`; the wiring counts the button with the crash screen's keys and,
+   * for `feedback`, opens Send Feedback.
+   */
+  noReadyChoice?(source: DraftSource, action: CrashFallbackAction): void;
   /** ELK laid the draft out (optional, 2.0 B17). */
   layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true }): void;
   /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */

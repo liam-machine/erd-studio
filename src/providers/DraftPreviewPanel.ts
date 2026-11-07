@@ -38,6 +38,7 @@ import {
 } from '../types/draft';
 import { createLogger } from '../services/logger';
 import { ReadyWatch } from '../services/readyWatch';
+import { askNoReadyRecovery } from './noReadyRecovery';
 
 const log = createLogger('DraftPreviewPanel');
 
@@ -216,7 +217,16 @@ export class DraftPreviewPanel {
     webview.html = this.pageHtml();
     this.readyWatch = new ReadyWatch(panel.visible !== false, {
       ready: (slow) => this.events.pageReady?.(this.view.source, slow),
-      noReady: () => this.events.noReady?.(this.view.source),
+      noReady: () => {
+        this.events.noReady?.(this.view.source);
+        // The page never mounted, so its crash screen cannot show: the host
+        // offers the same two buttons in a notification.
+        void askNoReadyRecovery('draft').then((action) => {
+          if (!action || this.disposed) return;
+          if (action === 'reload') this.reloadPage();
+          this.events.noReadyChoice?.(this.view.source, action);
+        });
+      },
     });
     this.disposables.push(
       webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message)),

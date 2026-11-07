@@ -457,6 +457,12 @@ export class TelemetryService implements vscode.Disposable {
       if (pending) void this.context.globalState.update(UPGRADED_INSTALL_KEY, true);
     }
     this.rollover();
+    // B5: telemetry turned off while ERD Studio was not running (no event
+    // reached discard()) still forgets an open major-update window, so turning
+    // it back on later never reopens the trail.
+    if (!this.enabled() && this.context.globalState.get<string>(MAJOR_SEEN_KEY) !== undefined) {
+      void this.context.globalState.update(MAJOR_SEEN_KEY, undefined);
+    }
     if (pending) {
       void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
       // B5: a major update opens another TRAIL_DAYS window for the trail and

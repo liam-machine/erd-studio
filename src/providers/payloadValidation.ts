@@ -898,7 +898,9 @@ export function validateWebviewErrorPayload(value: unknown): value is WebviewErr
  * `crashFallback` (the canvas's crash screen): an `action` from its fixed
  * list; for `feedback` an optional `area` from the fixed list and an optional
  * `detail` string of at most `CRASH_DETAIL_MAX` characters (the page cuts it
- * there). Anything else is refused, never trimmed into shape.
+ * there, after redacting). Anything else fails, never trimmed into shape;
+ * the canvas handler then keeps a known `action` alone and drops the area and
+ * detail, so the button never goes dead.
  */
 export function validateCrashFallbackPayload(value: unknown): value is CrashFallbackPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

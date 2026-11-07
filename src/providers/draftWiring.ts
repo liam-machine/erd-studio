@@ -24,7 +24,7 @@ import {
   draftShownQualityFeatures,
   type DraftQuality,
 } from '../services/draftTelemetry';
-import { crashFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
+import { crashFeedbackPrefill, noReadyFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { draftLayoutFeatures, webviewErrorCodes } from '../services/telemetryCanvas';
 import type { GuideActionPayload } from '../types/onboardingGuide';
@@ -230,6 +230,15 @@ export function draftPreviewEvents(
       }
       feature('crashFallbackFeedback');
       void Promise.resolve(openFeedback?.(crashFeedbackPrefill('draft', detail ? { detail } : {}))).catch(() => undefined);
+    },
+    // The same two buttons, from the host's notification for a page that never became ready.
+    noReadyChoice: (_source, action) => {
+      if (action === 'reload') {
+        feature('crashFallbackReload');
+        return;
+      }
+      feature('crashFallbackFeedback');
+      void Promise.resolve(openFeedback?.(noReadyFeedbackPrefill('draft'))).catch(() => undefined);
     },
     layoutFinished: (source, layout) => {
       if (isExample(source)) return;

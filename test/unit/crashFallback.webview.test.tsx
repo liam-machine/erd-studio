@@ -9,7 +9,7 @@
  * `crashFallback`. Send Feedback carries the first line only, paths redacted.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 const mockPostMessage = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useVsCodeApi', () => ({
@@ -18,11 +18,13 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 }));
 
 import { AreaErrorBoundary } from '../../webview/components/ErrorBoundary/AreaErrorBoundary';
-import { CrashFallback, CrashFallbackBoundary, caughtCrashOf } from '../../webview/components/ErrorBoundary/CrashFallback';
+import { CrashFallback, CrashFallbackBoundary, RELOAD_STUCK_MS, caughtCrashOf } from '../../webview/components/ErrorBoundary/CrashFallback';
 import { CanvasCrashFallback } from '../../webview/components/ErrorBoundary/CanvasCrashFallback';
 import { DraftCrashFallback } from '../../webview-draft/components/DraftCrashFallback';
 import { installWebviewErrorReporting, reportCaughtRenderCrash, tagCrashArea } from '../../webview/lib/webviewErrors';
 import type { DraftToHost } from '../../src/types/draft';
+import { CRASH_DETAIL_MAX, cutCrashDetail } from '../../src/types/webviewError';
+import { validateCrashFallbackPayload } from '../../src/providers/payloadValidation';
 
 let boom: Error;
 function Boom(): never {
@@ -105,6 +107,25 @@ describe('CrashFallbackBoundary', () => {
     expect(caughtCrashOf(tagged)).toEqual({ detail: 'd' });
     expect(caughtCrashOf(42)).toEqual({ detail: '' });
   });
+
+  it('caughtCrashOf redacts before it cuts, so a detail that redaction lengthens still fits and is accepted', () => {
+    const raw = new Error('Could not draw /a/b.yml ' + 'x'.repeat(400));
+    const { detail } = caughtCrashOf(raw);
+    expect(detail.length).toBeLessThanOrEqual(CRASH_DETAIL_MAX);
+    expect(detail.startsWith('Could not draw {path}/{file}.yml x')).toBe(true);
+    expect(detail.endsWith('…')).toBe(true);
+    expect(validateCrashFallbackPayload({ action: 'feedback', detail })).toBe(true);
+  });
+
+  it('a cut never leaves half a placeholder', () => {
+    // The 300-character cut would land inside the `{project}` a path near the end becomes.
+    const raw = new Error(`${'w'.repeat(CRASH_DETAIL_MAX - 6)} /Users/someone/acme/.erd-studio/silver/sales.json`);
+    const { detail } = caughtCrashOf(raw);
+    expect(detail.length).toBeLessThanOrEqual(CRASH_DETAIL_MAX);
+    expect(detail).not.toContain('someone');
+    expect(detail).toMatch(/w…$/);
+    expect(cutCrashDetail('short')).toBe('short');
+  });
 });
 
 describe('CrashFallback', () => {
@@ -123,6 +144,25 @@ describe('CrashFallback', () => {
     // Pressed once: it says so and cannot be pressed again while the page reloads.
     const reloading = screen.getByRole('button', { name: 'Reloading…' }) as HTMLButtonElement;
     expect(reloading.disabled).toBe(true);
+  });
+
+  it('a Reload the host never answers comes back after a while with a way out', async () => {
+    vi.useFakeTimers();
+    try {
+      const onReload = vi.fn();
+      render(<CrashFallback surface="canvas" onReload={onReload} onSendFeedback={() => {}} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      expect(screen.queryByRole('status')).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(RELOAD_STUCK_MS); });
+      const again = screen.getByRole('button', { name: 'Reload' }) as HTMLButtonElement;
+      expect(again.disabled).toBe(false);
+      expect(screen.getByRole('status').textContent).toContain('Close and reopen the tab, or run Developer: Reload Window.');
+      expect(screen.getByRole('status').className).toBe('crash-fallback__hint');
+      fireEvent.click(again);
+      expect(onReload).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the draft page says nothing has been written yet', () => {

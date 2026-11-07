@@ -701,6 +701,37 @@ describe('B5: the trail and onboarding copies in the 7 days after a major update
     telemetry.feature('compare');
     expect(stored(context)?.trail).toBeUndefined();
   });
+
+  it('opt-out while ERD Studio was not running: the next start with telemetry off forgets the window', async () => {
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(context, '1.9.8', '2.0.0');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBe(TODAY);
+    // The service stops (VS Code closed), and telemetry is turned off with no
+    // service listening: no change event reaches it.
+    for (const s of services) s.dispose();
+    services = [];
+    (vscode.env as { isTelemetryEnabled: boolean }).isTelemetryEnabled = false;
+    expect(context.globalState.get(MAJOR_SEEN)).toBe(TODAY);
+
+    at('2026-11-07');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBeUndefined();
+    for (const s of services) s.dispose();
+    services = [];
+
+    // Back on inside what would have been the window: no trail, no onboarding copies.
+    mock._setMockTelemetryEnabled(true);
+    at('2026-11-08');
+    fetchMock.mockClear();
+    startService(context);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    telemetry.feature('draftDiscarded');
+    expect(stored(context)?.trail).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10 * 60 * SECOND);
+    expect(provisional()).toHaveLength(0);
+  });
 });
 
 describe('B15: time to first draft and diagram', () => {

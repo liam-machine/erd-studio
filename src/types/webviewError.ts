@@ -94,14 +94,39 @@ export interface CrashFallbackPayload {
 }
 
 /**
- * A caught crash's first line, cut to {@link CRASH_DETAIL_MAX} characters
- * (the caller redacts it). Never the stack: the report's reader gets what the
- * error said, and the stack's file URLs say nothing of the user's.
+ * A caught crash's first line, uncut and unredacted (at most
+ * {@link CRASH_FIRST_LINE_MAX} characters, so redaction never works on a huge
+ * message). Never the stack: the report's reader gets what the error said,
+ * and the stack's file URLs say nothing of the user's.
  */
-export function crashDetailOf(error: unknown): string {
+export function crashFirstLineOf(error: unknown): string {
   const raw = error instanceof Error
     ? (error.name && error.name !== 'Error' ? `${error.name}: ${error.message}` : error.message)
     : typeof error === 'string' ? error : '';
-  const firstLine = raw.split('\n', 1)[0]?.trim() ?? '';
-  return firstLine.length > CRASH_DETAIL_MAX ? `${firstLine.slice(0, CRASH_DETAIL_MAX - 1)}…` : firstLine;
+  return (raw.split('\n', 1)[0]?.trim() ?? '').slice(0, CRASH_FIRST_LINE_MAX);
+}
+
+/** How much of a crash's first line is looked at before it is redacted and cut. */
+export const CRASH_FIRST_LINE_MAX = 4 * CRASH_DETAIL_MAX;
+
+/**
+ * Cut an already-redacted crash detail to {@link CRASH_DETAIL_MAX}
+ * characters, ending on `…`. A cut never leaves half a `redactPaths`
+ * placeholder (`{pa`): it steps back to before the open brace.
+ */
+export function cutCrashDetail(text: string): string {
+  if (text.length <= CRASH_DETAIL_MAX) return text;
+  let cut = text.slice(0, CRASH_DETAIL_MAX - 1);
+  const open = cut.lastIndexOf('{');
+  if (open > cut.lastIndexOf('}')) cut = cut.slice(0, open);
+  return `${cut.trimEnd()}…`;
+}
+
+/**
+ * A caught crash's first line, cut to {@link CRASH_DETAIL_MAX} characters.
+ * The crash screen redacts before it cuts (`caughtCrashOf`), since
+ * `redactPaths` can make the text longer.
+ */
+export function crashDetailOf(error: unknown): string {
+  return cutCrashDetail(crashFirstLineOf(error));
 }

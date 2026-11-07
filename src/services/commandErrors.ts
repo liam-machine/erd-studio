@@ -15,7 +15,7 @@ import * as path from 'path';
 import { SubjectAreaFileError, SubjectAreaValidationError, type JsonSyntaxProblem } from '@erd-studio/core';
 
 import { redactPaths, type FeedbackKind } from '../types/feedback';
-import { CRASH_DETAIL_MAX, type WebviewErrorArea } from '../types/webviewError';
+import { cutCrashDetail, type WebviewErrorArea } from '../types/webviewError';
 
 /** The button that opens Send Feedback prefilled with the failure. */
 export const SEND_FEEDBACK_BUTTON = 'Send Feedback';
@@ -120,7 +120,7 @@ export function crashFeedbackPrefill(
 ): FeedbackPrefill {
   const page = surface === 'draft' ? 'The draft preview' : 'The diagram canvas';
   const where = crash.area ? CRASH_AREA_WORDS[crash.area] : undefined;
-  const detail = (crash.detail ?? '').slice(0, CRASH_DETAIL_MAX).trim();
+  const detail = cutCrashDetail(redactPaths(crash.detail ?? '')).trim();
   return {
     kind: 'bug',
     title: `${surface === 'draft' ? 'The draft preview' : 'The canvas'} stopped working`,
@@ -128,6 +128,20 @@ export function crashFeedbackPrefill(
       `${page} crashed and showed the "stopped working" screen${where ? `; it started in ${where}` : ''}.`
       + `\n\nError: ${detail || '(no message)'}`,
     ),
+  };
+}
+
+/**
+ * Send Feedback's prefill when a canvas or the draft preview never finished
+ * opening (no `ready` 30 s after it was shown; `askNoReadyRecovery`): which
+ * page, and nothing else. There was no crash screen and no error text.
+ */
+export function noReadyFeedbackPrefill(surface: 'canvas' | 'draft'): FeedbackPrefill {
+  const page = surface === 'draft' ? 'The draft preview' : 'The diagram canvas';
+  return {
+    kind: 'bug',
+    title: `${surface === 'draft' ? 'The draft preview' : 'The canvas'} did not open`,
+    description: `${page} stayed blank and never finished opening.\n\nError: (no message)`,
   };
 }
 

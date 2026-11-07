@@ -17,11 +17,11 @@
  * that just crashed, and may be what crashed.
  */
 
-import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
 
 import { crashAreaOf, reportCaughtRenderCrash } from '../../lib/webviewErrors';
 import { redactPaths } from '../../../src/types/feedback';
-import { crashDetailOf, isWebviewErrorArea, type WebviewErrorArea } from '../../../src/types/webviewError';
+import { crashFirstLineOf, cutCrashDetail, isWebviewErrorArea, type WebviewErrorArea } from '../../../src/types/webviewError';
 
 import './CrashFallback.css';
 
@@ -38,7 +38,9 @@ export function caughtCrashOf(error: unknown): CaughtCrash {
   const area = crashAreaOf(error);
   return {
     ...(isWebviewErrorArea(area) ? { area } : {}),
-    detail: redactPaths(crashDetailOf(error)),
+    // Redact, then cut: a placeholder can be longer than the path it replaces,
+    // and a detail over CRASH_DETAIL_MAX would be refused by the host.
+    detail: cutCrashDetail(redactPaths(crashFirstLineOf(error))),
   };
 }
 
@@ -79,9 +81,25 @@ export interface CrashFallbackProps {
   onSendFeedback: () => void;
 }
 
+/**
+ * How long Reload waits for the host to replace the page before it comes back
+ * with a hint. The page is normally gone well before this; it stays only when
+ * no host is listening (the extension restarted under an open panel).
+ */
+export const RELOAD_STUCK_MS = 5_000;
+
 /** The crash screen itself: plain words and two buttons. */
 export function CrashFallback({ surface, onReload, onSendFeedback }: CrashFallbackProps) {
   const [reloading, setReloading] = useState(false);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (!reloading) return undefined;
+    const timer = setTimeout(() => {
+      setReloading(false);
+      setStuck(true);
+    }, RELOAD_STUCK_MS);
+    return () => clearTimeout(timer);
+  }, [reloading]);
   const what = surface === 'draft' ? 'The draft preview' : 'This diagram';
   return (
     <div className="crash-fallback" role="alert">
@@ -116,6 +134,11 @@ export function CrashFallback({ surface, onReload, onSendFeedback }: CrashFallba
             Send Feedback
           </button>
         </div>
+        {stuck && (
+          <p className="crash-fallback__hint" role="status">
+            Still here? Close and reopen the tab, or run Developer: Reload Window.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -786,9 +786,12 @@ The day after shipping (and again a week later):
   update. Tenure is days since the install's first heartbeat, so an upgrader
   reads as `1-7` or older, never `0`, unless it had telemetry off before. From
   2.0 the 7 days from an `extUpdatedMajor` day also send the trail and the
-  onboarding interim copies, so a trail or `heartbeatProvisional` row on an
-  older tenure is an upgrader's first 2.x week: tell the cohorts apart by the
-  install's `extUpdatedMajor` row in D1, never by joining into the archive.
+  onboarding interim copies, so an onboarding interim copy or a trail on an
+  older tenure *can* be an upgrader's first 2.x week. It is not proof: an
+  error-day interim copy goes out on any tenure, and a day the guide starts
+  keeps a trail on any tenure. Identify upgraders only by the install's
+  `extUpdatedMajor` day in D1 (its day `d0` to `d0 + 6`), never by tenure plus
+  a marker, and never by joining into the archive.
 
 Error rates per version family and tenure: installs with an error both
 families can send, per install-day, finished single-version days only. The
@@ -1100,8 +1103,8 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
 - `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
 - `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
-- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded.
-- `crashFallbackFeedback` — the crash screen had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
+- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons.
+- `crashFallbackFeedback` — the crash screen, or that notification, had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
 
 **B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
 
