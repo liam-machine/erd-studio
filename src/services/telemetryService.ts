@@ -58,6 +58,7 @@ import {
   recordTrail,
   retractTrail,
   trailKept,
+  onboardingWindowDay,
   nextTrailWindow,
   TRAIL_AWAY_MIN_MS,
   trailError,
@@ -78,7 +79,6 @@ import {
   type TrailEvent,
   type TrailMarker,
   TRAIL_DAYS,
-  daysBetween,
   MAX_PROVISIONAL_SENDS,
 } from './telemetryPayload';
 import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
@@ -105,6 +105,12 @@ const PROVISIONAL_KEY = 'erdStudio.telemetry.provisional';
 export const PENDING_UPDATE_KEY = 'erdStudio.telemetry.pendingUpdate';
 /** B5: this install's first counted start was an update, so it is not a new user's first week. Never sent. */
 const UPGRADED_INSTALL_KEY = 'erdStudio.telemetry.upgradedInstall';
+/**
+ * B5: the UTC day of the first start after a major update (1.x to 2.x). The
+ * trail and the onboarding interim copies are kept for {@link TRAIL_DAYS}
+ * days from it. Only the day is kept, never a version. Never sent.
+ */
+const MAJOR_SEEN_KEY = 'erdStudio.telemetry.majorSeenDay';
 /** B15: epoch ms of the first run, and whether the first draft / diagram has been timed. Never sent. */
 const FIRST_RUN_AT_KEY = 'erdStudio.telemetry.firstRunAt';
 const FIRST_DRAFT_DONE_KEY = 'erdStudio.telemetry.firstDraftDone';
@@ -265,7 +271,7 @@ export class TelemetryService implements vscode.Disposable {
 
   /** `state` with `event` on its trail at `now`, if the trail is kept today. */
   withTrail(state: DailyCounters, event: TrailEvent, now: number): DailyCounters {
-    if (!trailKept(state, this.firstSeenDay(state.day), event)) return state;
+    if (!trailKept(state, this.firstSeenDay(state.day), event, this.majorSeenDay())) return state;
     if (this.trailWindow?.day !== state.day) this.trailWindow = { day: state.day, n: nextTrailWindow(state) };
     // B15: today's trail begins in a window that was activated on an earlier UTC day.
     const begun = Array.isArray(state.trail) && state.trail.length > 0;
@@ -406,15 +412,19 @@ export class TelemetryService implements vscode.Disposable {
     }
   }
 
-  /**
-   * B2/B5: whether `day` may send onboarding interim copies: within the
-   * install's first {@link TRAIL_DAYS} days, and not an install whose first
-   * counted start was an update (an existing user, not a new one).
-   */
+  /** B2/B5: whether `day` may send onboarding interim copies ({@link onboardingWindowDay}). */
   private onboardingDay(day: string): boolean {
-    if (this.context.globalState.get<boolean>(UPGRADED_INSTALL_KEY)) return false;
-    const age = daysBetween(this.firstSeenDay(day), day);
-    return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+    return onboardingWindowDay(day, {
+      firstSeenDay: this.firstSeenDay(day),
+      upgradedInstall: this.context.globalState.get<boolean>(UPGRADED_INSTALL_KEY) === true,
+      majorSeenDay: this.majorSeenDay(),
+    });
+  }
+
+  /** B5: the day of the first start after the latest major update, if any. */
+  private majorSeenDay(): string | undefined {
+    const stored = this.context.globalState.get<string>(MAJOR_SEEN_KEY);
+    return typeof stored === 'string' ? stored : undefined;
   }
 
   /**
@@ -449,6 +459,9 @@ export class TelemetryService implements vscode.Disposable {
     this.rollover();
     if (pending) {
       void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
+      // B5: a major update opens another TRAIL_DAYS window for the trail and
+      // the onboarding interim copies (a minor or patch update never does).
+      if (pending.major === true && this.enabled()) void this.context.globalState.update(MAJOR_SEEN_KEY, utcDay(new Date()));
       // Counted, not put on the trail: it would come before this window's windowOpened.
       this.update((s) => (pending.major === true ? recordFeatureOnce(recordFeatureOnce(s, 'extUpdated'), 'extUpdatedMajor') : recordFeatureOnce(s, 'extUpdated')));
     }
@@ -492,6 +505,7 @@ export class TelemetryService implements vscode.Disposable {
     void this.context.globalState.update(FIRST_CANVAS_KEY, undefined);
     void this.context.globalState.update(PROVISIONAL_KEY, undefined);
     void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
+    void this.context.globalState.update(MAJOR_SEEN_KEY, undefined);
     void this.context.globalState.update(FIRST_RUN_AT_KEY, undefined);
     void this.context.globalState.update(FIRST_DRAFT_DONE_KEY, undefined);
     void this.context.globalState.update(FIRST_DIAGRAM_DONE_KEY, undefined);
