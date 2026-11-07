@@ -28,6 +28,8 @@ import {
   heartbeatBytes,
   heartbeatHash,
   isMajorUpdate,
+  onboardingWindowDay,
+  withinTrailDays,
   nextDay,
   provisionalBody,
   provisionalDue,
@@ -454,9 +456,9 @@ describe('B2: interim copies', () => {
     expect(provisional().filter((b) => b.day === '2026-11-06')).toHaveLength(1);
   });
 
-  it('an install whose first counted start was an update gets no onboarding copies, but still error ones', async () => {
+  it('an install whose first counted start was a minor update gets no onboarding copies, but still error ones', async () => {
     const context = makeContext();
-    await context.globalState.update(PENDING_UPDATE_KEY, { major: true });
+    await context.globalState.update(PENDING_UPDATE_KEY, { major: false });
     startService(context);
     telemetry.activation('project_found', true, 1);
     telemetry.feature('draftDiscarded');
@@ -565,6 +567,142 @@ describe('B5: updates and internal installs', () => {
   });
 });
 
+describe('B5: the trail and onboarding copies in the 7 days after a major update', () => {
+  const MAJOR_SEEN = 'erdStudio.telemetry.majorSeenDay';
+  const trailOf = (context: vscode.ExtensionContext) => stored(context)?.trail?.map((e) => e[0]);
+  const at = (day: string) => vi.setSystemTime(new Date(`${day}T10:00:00Z`));
+
+  it('withinTrailDays: the start day and the six after it, never before or a malformed start', () => {
+    for (let d = 0; d < 7; d++) expect(withinTrailDays(TODAY, `2026-11-${String(5 + d).padStart(2, '0')}`)).toBe(true);
+    expect(withinTrailDays(TODAY, '2026-11-12')).toBe(false);
+    expect(withinTrailDays(TODAY, '2026-11-04')).toBe(false);
+    expect(withinTrailDays(undefined, TODAY)).toBe(false);
+    expect(withinTrailDays('not-a-day', TODAY)).toBe(false);
+  });
+
+  it('onboardingWindowDay: a new install\'s first week, or the week after a major update for anyone', () => {
+    expect(onboardingWindowDay(TODAY, { firstSeenDay: TODAY })).toBe(true);
+    expect(onboardingWindowDay(TODAY, { firstSeenDay: TODAY, upgradedInstall: true })).toBe(false);
+    expect(onboardingWindowDay(TODAY, { firstSeenDay: TODAY, upgradedInstall: true, majorSeenDay: TODAY })).toBe(true);
+    expect(onboardingWindowDay('2026-11-11', { firstSeenDay: '2026-01-01', majorSeenDay: TODAY })).toBe(true);
+    expect(onboardingWindowDay('2026-11-12', { firstSeenDay: '2026-01-01', majorSeenDay: TODAY })).toBe(false);
+    expect(onboardingWindowDay(TODAY, { firstSeenDay: '2026-01-01' })).toBe(false);
+  });
+
+  it('a major update opens the window: the day is kept (no version), the trail runs and onboarding copies are sent', async () => {
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(context, '1.9.8', '2.0.0');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBe(TODAY);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    expect(trailOf(context)).toEqual(['windowOpened', 'compare']);
+    // The settle look two minutes in, then an onboarding end-point, as in a first week.
+    await vi.advanceTimersByTimeAsync(PROVISIONAL_SETTLE_MS);
+    expect(provisional()).toHaveLength(1);
+    telemetry.feature('draftDiscarded');
+    await vi.advanceTimersByTimeAsync(PROVISIONAL_DEBOUNCE_MS);
+    expect(provisional()).toHaveLength(2);
+    expect(provisional()[1].features).toMatchObject({ extUpdatedMajor: 1, draftDiscarded: 1 });
+    expect(provisional()[1].trail?.map((e) => e[0])).toContain('draftDiscarded');
+  });
+
+  it('an install first counted on a major update gets the window too', async () => {
+    const context = makeContext();
+    await context.globalState.update(PENDING_UPDATE_KEY, { major: true });
+    startService(context);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('draftDiscarded');
+    await vi.advanceTimersByTimeAsync(PROVISIONAL_DEBOUNCE_MS);
+    expect(provisional()).toHaveLength(1);
+  });
+
+  it('the window is the update day and the six after it; the seventh day is back to normal', async () => {
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(context, '1.9.8', '2.0.0');
+    startService(context);
+    for (const s of services) s.dispose();
+    services = [];
+
+    at('2026-11-11');
+    startService(context);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    expect(stored(context)?.day).toBe('2026-11-11');
+    expect(trailOf(context)).toEqual(['windowOpened', 'compare']);
+    for (const s of services) s.dispose();
+    services = [];
+
+    at('2026-11-12');
+    fetchMock.mockClear();
+    startService(context);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    telemetry.feature('draftDiscarded');
+    expect(stored(context)?.day).toBe('2026-11-12');
+    expect(stored(context)?.trail).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10 * 60 * SECOND);
+    expect(provisional()).toHaveLength(0);
+    // The guide still begins a trail on any later day.
+    telemetry.feature('guideStarted');
+    expect(trailOf(context)).toEqual(['guideStarted']);
+  });
+
+  it('a minor or patch update never widens it', async () => {
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(context, '2.0.0', '2.1.0');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBeUndefined();
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    telemetry.feature('draftDiscarded');
+    expect(stored(context)?.features.extUpdated).toBe(1);
+    expect(stored(context)?.trail).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10 * 60 * SECOND);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a later major update starts a new window from its own day', async () => {
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await context.globalState.update(MAJOR_SEEN, '2026-06-01');
+    await notePendingUpdate(context, '2.4.0', '3.0.0');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBe(TODAY);
+  });
+
+  it('opt-out: off at the update keeps no window; off during it forgets the window; back on, no trail', async () => {
+    // Off when the update happened: nothing is noted.
+    mock._setMockConfiguration('erdStudio', 'telemetry.enabled', { globalValue: false });
+    const off = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(off, '1.9.8', '2.0.0');
+    startService(off);
+    expect(off.globalState.get(MAJOR_SEEN)).toBeUndefined();
+    mock._resetMockConfiguration();
+
+    // Noted while on, but off by the next start: no window is opened.
+    const later = makeContext({ firstSeen: '2026-01-01' });
+    await later.globalState.update(PENDING_UPDATE_KEY, { major: true });
+    mock._setMockTelemetryEnabled(false);
+    startService(later);
+    expect(later.globalState.get(MAJOR_SEEN)).toBeUndefined();
+    mock._setMockTelemetryEnabled(true);
+
+    // On at the update, then turned off inside the window: the day is forgotten.
+    const context = makeContext({ firstSeen: '2026-01-01' });
+    await notePendingUpdate(context, '1.9.8', '2.0.0');
+    startService(context);
+    expect(context.globalState.get(MAJOR_SEEN)).toBe(TODAY);
+    mock._setMockTelemetryEnabled(false);
+    expect(context.globalState.get(MAJOR_SEEN)).toBeUndefined();
+    telemetry.feature('compare');
+    expect(stored(context)?.trail).toBeUndefined();
+    mock._setMockTelemetryEnabled(true);
+    telemetry.activation('project_found', true, 1);
+    telemetry.feature('compare');
+    expect(stored(context)?.trail).toBeUndefined();
+  });
+});
+
 describe('B15: time to first draft and diagram', () => {
   it('times the first real draft and the first diagram with tables, once per install', async () => {
     const { context } = startService();
@@ -614,8 +752,9 @@ describe('B15: time to first draft and diagram', () => {
     telemetry.canvasOpened('logical', 'v5', 3);
     expect(context.globalState.get('erdStudio.telemetry.firstDraftDone')).toBe(true);
     void context.globalState.update(PENDING_UPDATE_KEY, { major: false });
+    void context.globalState.update('erdStudio.telemetry.majorSeenDay', TODAY);
     mock._setMockTelemetryEnabled(false);
-    for (const key of ['firstRunAt', 'firstDraftDone', 'firstDiagramDone', 'pendingUpdate', 'provisional']) {
+    for (const key of ['firstRunAt', 'firstDraftDone', 'firstDiagramDone', 'pendingUpdate', 'provisional', 'majorSeenDay']) {
       expect(context.globalState.get(`erdStudio.telemetry.${key}`), key).toBeUndefined();
     }
   });

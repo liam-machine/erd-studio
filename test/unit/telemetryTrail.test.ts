@@ -135,6 +135,13 @@ describe('when the trail is kept', () => {
     expect(trailKept(emptyCounters('2026-11-12'), '2026-11-05', 'compare')).toBe(false);
   });
 
+  it('the seven days from the first start after a major update, then not', () => {
+    for (let d = 0; d < TRAIL_DAYS; d++) expect(trailKept(emptyCounters(`2027-02-${String(1 + d).padStart(2, '0')}`), '2026-11-05', 'compare', '2027-02-01')).toBe(true);
+    expect(trailKept(emptyCounters('2027-02-08'), '2026-11-05', 'compare', '2027-02-01')).toBe(false);
+    expect(trailKept(emptyCounters('2027-01-31'), '2026-11-05', 'compare', '2027-02-01')).toBe(false);
+    expect(trailKept(emptyCounters('2027-02-01'), '2026-11-05', 'compare', undefined)).toBe(false);
+  });
+
   it('any later day the guide runs, from guideStarted on, for the rest of that day', () => {
     const late = emptyCounters('2027-02-01');
     expect(trailKept(late, '2026-11-05', 'compare')).toBe(false);

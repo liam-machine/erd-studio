@@ -1533,15 +1533,37 @@ export function recordError(state: DailyCounters, code: TelemetryErrorCode): Dai
 }
 
 /**
- * Whether the trail is kept today: an install's first {@link TRAIL_DAYS} days,
- * a day whose trail has already begun, or the event that begins it anyway
- * (the guide starting, also on a later day through Show Me Around).
+ * Whether `day` is one of the {@link TRAIL_DAYS} days that start on
+ * `startDay` (that day and the six after it). An absent or malformed start,
+ * or a day before it, is never in.
  */
-export function trailKept(state: DailyCounters, firstSeenDay: string, event: TrailEvent): boolean {
+export function withinTrailDays(startDay: string | undefined, day: string): boolean {
+  if (!startDay) return false;
+  const age = daysBetween(startDay, day);
+  return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+}
+
+/**
+ * Whether the trail is kept today: an install's first {@link TRAIL_DAYS} days,
+ * the {@link TRAIL_DAYS} days from the start after a major update
+ * (`majorSeenDay`, B5; never a minor or patch update), a day whose trail has
+ * already begun, or the event that begins it anyway (the guide starting, also
+ * on a later day through Show Me Around).
+ */
+export function trailKept(state: DailyCounters, firstSeenDay: string, event: TrailEvent, majorSeenDay?: string): boolean {
   if (Array.isArray(state.trail)) return true;
   if (event === 'guideStarted') return true;
-  const age = daysBetween(firstSeenDay, state.day);
-  return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+  return withinTrailDays(firstSeenDay, state.day) || withinTrailDays(majorSeenDay, state.day);
+}
+
+/**
+ * B2/B5: whether `day` may send onboarding (and settle) interim copies: an
+ * install's first {@link TRAIL_DAYS} days, unless its first counted start was
+ * an update (an existing user, not a new one), or the {@link TRAIL_DAYS} days
+ * from the start after a major update. Error copies need neither.
+ */
+export function onboardingWindowDay(day: string, o: { firstSeenDay: string; upgradedInstall?: boolean; majorSeenDay?: string }): boolean {
+  return (!o.upgradedInstall && withinTrailDays(o.firstSeenDay, day)) || withinTrailDays(o.majorSeenDay, day);
 }
 
 /** The window number this window takes in today's trail: one past the highest so far. */
