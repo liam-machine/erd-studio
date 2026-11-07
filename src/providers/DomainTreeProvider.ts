@@ -205,6 +205,8 @@ export class SubjectAreaTreeProvider
     private readonly dbmlIcon?: DbmlFileIconResolver,
     /** Each DBML table's layer and schema, by lower-cased name (`tableHomesOf`). Optional: without it no diagram names other layers. */
     private readonly tableHomes?: () => ReadonlyMap<string, TableHome>,
+    /** Told when a root listing throws (usage telemetry's `sidebarListFailed`). Optional. */
+    private readonly onListFailed?: () => void,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
   }
@@ -461,6 +463,13 @@ export class SubjectAreaTreeProvider
         const children = this.rootChildren();
         rows = children.length;
         return children;
+      } catch (err) {
+        // Logged and counted (usage telemetry). What the view shows is as
+        // before: a listing that threw found no rows, so the empty view's
+        // start buttons show rather than "Loading diagrams…" for good.
+        treeLog.error('Listing the diagrams failed:', err);
+        try { this.onListFailed?.(); } catch { /* counting never breaks the view */ }
+        throw err;
       } finally {
         const loading = rows > 0;
         if (this.loading !== loading) {

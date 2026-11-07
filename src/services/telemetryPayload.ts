@@ -460,6 +460,182 @@ export const FEATURES = [
   'dbtCompileExitFail',
   'dbtCompileStopped',       // the user stopped Run dbt compile
   'dbtCompileNoStart',       // Run dbt compile's executable could not be started or quoted
+  // 2.0.0 launch telemetry (plan items B2 to B19), appended in item order: no draft size buckets, nothing for B8 or B20.
+  // 2.0 B2 — a same-day interim copy of the summary (first week, or a day with a new error)
+  'heartbeatProvisional',
+  // 2.0 B3 — the body was trimmed to stay under the size guard
+  'heartbeatTrimmed',
+  // 2.0 B4 — activation timing, the host dbt search, and why activation failed (by phase)
+  'activationOver10s',
+  'dbtSearchTimedOut',
+  // 2.0 B5 — updates and mixed-version days
+  'extUpdated',
+  'extUpdatedMajor',
+  'versionMixed',
+  // 2.0 B6 — first-draft quality, as presence flags computed on the device (never a name, path or count)
+  'draftOrphansMost',
+  'draftEmptyTablesMost',
+  'draftUntypedMost',
+  'draftNoPkMost',
+  'draftWideTablesMost',
+  'draftRelsInferable',
+  'draftLeftOut',
+  'draftCapped',
+  'draftReusesLibrary',
+  'draftThinDbt',
+  'draftThinSqlDdl',
+  'draftThinSemanticModel',
+  'draftThinDbml',
+  'draftRelsNoneDbt',
+  'draftRelsNoneSqlDdl',
+  'draftRelsNoneSemanticModel',
+  'draftRelsNoneDbml',
+  'draftKeptThinDbt',
+  'draftKeptThinSqlDdl',
+  'draftKeptThinSemanticModel',
+  'draftKeptThinDbml',
+  'draftRejectedFastDbt',
+  'draftRejectedFastSqlDdl',
+  'draftRejectedFastSemanticModel',
+  'draftRejectedFastDbml',
+  'diagramDeleted',
+  // 2.0 B7 — why an import failed or stopped
+  'importSqlInvalidParse',
+  'importSqlInvalidStructure',
+  'importSqlInvalidDuplicateTable',
+  'importSqlInvalidNoCreateTable',
+  'importSqlRejectedCreateTable',
+  'importSqlRejectedCreateOrReplace',
+  'importSqlRejectedAlterTable',
+  'importSqlRejectedCreateView',
+  'importSqlRejectedCommentOn',
+  'importSqlRejectedCreateIndex',
+  'importSqlRejectedGrant',
+  'importSqlRejectedSetUse',
+  'importSqlRejectedOther',
+  'importSqlFailPostgres',
+  'importSqlFailMysql',
+  'importSqlFailSqlserver',
+  'importSqlFailSnowflake',
+  'importSqlFailDatabricks',
+  'importSqlTryAnotherDialect',
+  'quickSqlNoDialect',
+  'quickSqlDialectFallback',
+  'importDbmlInvalidUse',
+  'importDbmlInvalidSyntax',
+  'importDbmlSeveralFieldsOneLine',
+  'importDbmlNoTables',
+  'importSemanticModelNoModel',
+  'importSemanticModelParseTmdl',
+  'importSemanticModelParseBim',
+  'importSemanticModelSeveral',
+  'importLimitTooManyFiles',
+  'importLimitFileTooBig',
+  'importLimitTooMuchText',
+  'importInputUnreadable',
+  'importStopNoLayers',
+  'importStopYamlInDbml',
+  'importStopUnsaved',
+  'importStopNameTaken',
+  'importStopRefusedWrite',
+  'writeFailedPermission',
+  'writeFailedDiskFull',
+  // 2.0 B9 — why the automatic draft did not appear, and start-screen look failures
+  'draftUnavailableSqlDdl',
+  'draftUnavailableSemanticModel',
+  'draftUnavailableDbml',
+  'draftUnavailableDbt',
+  'draftUnavailableExample',
+  'draftWaitedForPrompt',
+  'draftDropNothingFound',
+  'draftDropUnreadable',
+  'draftDropNoLayer',
+  'draftDropBadName',
+  'draftDropNothingDrawable',
+  'draftDropNoDialect',
+  'draftDropNeedsChoice',
+  'startLookTimeout',
+  'startLookGaveUp',
+  // 2.0 B10 — command failures shown to the user
+  'newDiagramNameTaken',
+  'newDiagramNoLayers',
+  // 2.0 B11 — Convert to DBML: refusal kinds, stops and storage state
+  'convertRefusedReservedLayer',
+  'convertRefusedLegacyFiles',
+  'convertRefusedOther',
+  'convertStopUnsaved',
+  'convertStopChangedDuringPreview',
+  'convertNothingToDo',
+  'convertLeftAsIs',
+  'convertOver60s',
+  'storageYaml',
+  'storageDbml',
+  'storageMixed',
+  'legacyDbmlTreeWarned',
+  'canvasJsonV6',
+  // 2.0 B12 — canvas handler failures, protocol rejects, watcher refresh failures
+  'editRefused',
+  'canvasReconnectReload',
+  // 2.0 B13 — webview crashes and panels that never became ready
+  'draftPageReady',
+  'welcomePanelReady',
+  'readySlowOver10s',
+  // 2.0 B14 — why a DBML diagram failed to load, and diagrams that render degraded
+  'domainLoadBlocking',
+  'domainLoadOverLive',
+  'dbmlLayoutBadLine',
+  'dbmlLayoutDuplicateKey',
+  'dbmlLayoutBadValue',
+  'dbmlLayoutConflict',
+  'dbmlDiagramReadOnly',
+  'dbmlPendingRefs',
+  'dbmlUnlinkedTables',
+  'dbmlEmbeddedTablesShown',
+  'diagramWarnModelNotFound',
+  'diagramWarnForeignDbml',
+  'dbmlEmbeddedTablesImport',
+  // 2.0 B15 — time to the first draft and the first diagram, from the first run
+  'ttfDraftUnder1m',
+  'ttfDraft1to5m',
+  'ttfDraft5to30m',
+  'ttfDraftOver30m',
+  'ttfDraftLaterDay',
+  'ttfDiagramUnder1m',
+  'ttfDiagram1to5m',
+  'ttfDiagram5to30m',
+  'ttfDiagramOver30m',
+  'ttfDiagramLaterDay',
+  // 2.0 B16 — AI helper hooks that were skipped, and helper install failures
+  'hookSkippedJsonc',
+  'hookSkippedNotJson',
+  'hookSkippedShape',
+  'hookSkippedOwnScript',
+  'hookSkippedNewerScript',
+  'hookSkippedCopilot',
+  'hookSkippedCodex',
+  'hookSkippedGemini',
+  // 2.0 B17 — big diagrams: slow loads, layout failures and the draft layout
+  'canvasLoadOver20s',
+  'layoutStackFallback',
+  'firstLayoutOver5s',
+  'draftLayoutOver5s',
+  'draftFitZoomUnder30',
+  'draftLayoutFallback',
+  'draftClosedWhileLayingOut',
+  // 2.0 B18 — known-fix prompt answers, Welcome failures and small onboarding dead ends
+  'knownFixOffered',
+  'knownFixUpdate',
+  'knownFixReload',
+  'knownFixDismissed',
+  'trySampleCloned',
+  'trySampleZip',
+  'trySampleGithub',
+  'noFolderWarned',
+  // 2.0 review — a stage switch or comparison met a diagram file the user broke (theirs, not ours)
+  'handlerFileProblem',
+  // 2.0 — the crash screen a webview shows after a render crash: which button was pressed
+  'crashFallbackReload',
+  'crashFallbackFeedback',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -606,6 +782,120 @@ export const ERROR_CODES = [
   'dbtRunFailed',
   // Re-reading manifest.json after it changed threw (#243): the diagrams may be stale until a reload.
   'manifestRetryFailed',
+  // 2.0.0 launch telemetry (plan items B4 to B19), appended in item order.
+  // 2.0 B4 — activation timing, the host dbt search, and why activation failed (by phase)
+  'activationFailed',
+  'activationFailedDiscovery',
+  'activationFailedServices',
+  'activationFailedViews',
+  'activationFailedWatchers',
+  'activationFailedCommands',
+  'activationFailedPrompts',
+  'activationPromptFailed',
+  'dbtSearchFailed',
+  // 2.0 B7 — why an import failed or stopped
+  'importSqlEngineLoadFailed',
+  'importDbmlParserThrew',
+  'writeFailedOurs',
+  // 2.0 B9 — why the automatic draft did not appear, and start-screen look failures
+  'startLookFailed',
+  'startContextFailed',
+  // 2.0 B10 — command failures shown to the user
+  'commandFailedOurs',
+  'newDiagramWriteFailed',
+  'layersFileFailed',
+  'renameDiagramFailed',
+  'deleteDiagramFailed',
+  'exampleSaveFailed',
+  // 2.0 B11 — Convert to DBML: refusal kinds, stops and storage state
+  'convertToDbmlSelfCheck',
+  'convertToDbmlUnrestored',
+  'convertSaveFailed',
+  // 2.0 B12 — canvas handler failures, protocol rejects, watcher refresh failures
+  'handlerFailed',
+  'handlerFailedModel',
+  'handlerFailedColumn',
+  'handlerFailedKey',
+  'handlerFailedDetails',
+  'handlerFailedLayout',
+  'handlerFailedAnnotation',
+  'handlerFailedUndo',
+  'handlerFailedStage',
+  'handlerFailedCompare',
+  'handlerFailedRefresh',
+  'handlerFailedOther',
+  'dbmlWriteOverlap',
+  'messageUnknownType',
+  'physicalEditDropped',
+  'refreshFailed',
+  'refreshFailedManifest',
+  'refreshFailedCatalog',
+  'refreshFailedTable',
+  'refreshFailedDiagram',
+  'refreshFailedLayers',
+  'refreshFailedDbtYml',
+  // 2.0 B13 — webview crashes and panels that never became ready
+  'webviewCrash',
+  'webviewCrashCanvas',
+  'webviewCrashDetailPanel',
+  'webviewCrashToolbar',
+  'webviewCrashDialogs',
+  'webviewCrashCompare',
+  'webviewCrashGuide',
+  'webviewCrashDraft',
+  'webviewCrashOther',
+  'webviewWindowError',
+  'webviewRejection',
+  'webviewNoReadyCanvas',
+  'webviewNoReadyDraft',
+  'webviewNoReadyWelcome',
+  // 2.0 B14 — why a DBML diagram failed to load, and diagrams that render degraded
+  'domainLoadDbmlSyntax',
+  'domainLoadDbmlInvalid',
+  'domainLoadDbmlBinding',
+  'domainLoadDbmlParserThrew',
+  'domainLoadNewerSchema',
+  'domainLoadNotADiagram',
+  'domainLoadLegacyFormat',
+  'modelFileDbmlNotOneTable',
+  'modelFileDbmlNameMismatch',
+  'modelFileDbmlUnsupportedElement',
+  'modelFileDbmlMetadataTarget',
+  'modelFileDbmlBinding',
+  'modelFileDbmlInterpreter',
+  // 2.0 B16 — AI helper hooks that were skipped, and helper install failures
+  'harnessInstallFailed',
+  'harnessInstallFailedClaude',
+  'harnessInstallFailedAgents',
+  'harnessInstallFailedCopilot',
+  'harnessInstallFailedGemini',
+  'harnessInstallFailedCodex',
+  'launcherRefreshFailed',
+  'harnessUpdateFailed',
+  // 2.0 B17 — big diagrams: slow loads, layout failures and the draft layout
+  'layoutFailedTimeout',
+  'layoutFailedWorker',
+  'layoutFailedStack',
+  // 2.0 B18 — known-fix prompt answers, Welcome failures and small onboarding dead ends
+  'welcomeFailedStart',
+  'welcomeFailedSetup',
+  'welcomeFailedOpenAssistant',
+  'welcomeFailedSample',
+  'welcomeFailedStatus',
+  'welcomeFailedOther',
+  'startCommandFailed',
+  'sidebarListFailed',
+  'exampleOpenFailed',
+  'guideOpenFailed',
+  // 2.0 B19 — every logged error, by area
+  'loggedError',
+  'loggedErrorCanvas',
+  'loggedErrorImport',
+  'loggedErrorDraft',
+  'loggedErrorSidebar',
+  'loggedErrorHarness',
+  'loggedErrorDbt',
+  'loggedErrorOther',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -626,6 +916,8 @@ export const TRAIL_MARKERS = [
   'canvasClosed',
   'canvasHidden',
   'canvasShown',
+  // 2.0 B15 — the first entry of a trail whose window was activated on an earlier UTC day
+  'dayContinued',
 ] as const;
 export type TrailMarker = (typeof TRAIL_MARKERS)[number];
 /**
@@ -657,6 +949,12 @@ export type TrailEntry = [event: TrailEvent, gap: number, window: number, repeat
 export const TRAIL_DAYS = 7;
 /** At most this many entries a day; later ones are only counted (`trailDropped`). */
 export const MAX_TRAIL = 100;
+/**
+ * B15: entries past this many take only errors (`!code`) and the
+ * `windowClosed` / `canvasClosed` markers, so a busy day still shows what went
+ * wrong and how it ended. Other events past it are only counted.
+ */
+export const TRAIL_GENERAL_MAX = 90;
 export const MAX_TRAIL_GAP_S = 3600;
 export const MAX_TRAIL_WINDOWS = 20;
 export const MAX_TRAIL_DROPPED = 10000;
@@ -1059,7 +1357,24 @@ export function stampEnv(state: DailyCounters, env: CounterEnv): DailyCounters {
     && state.env.host === env.host
     && state.env.remote === env.remote
     && state.env.dev === dev;
-  return same ? state : { ...state, env: { ...env, dev } };
+  if (same) return state;
+  // B5: something was already counted today by another ERD Studio version (an
+  // update mid-day, or an old window still open beside a new one). The env
+  // that nextDay carries over to an empty new day is not a mixed day. Call
+  // this before the reducer that counts the new event, as update() does.
+  const mixed = Boolean(state.env?.extVersion) && state.env?.extVersion !== env.extVersion && hasCounts(state);
+  const stamped: DailyCounters = { ...state, env: { ...env, dev } };
+  return mixed ? recordFeatureOnce(stamped, 'versionMixed') : stamped;
+}
+
+/** Whether anything was counted on `state`'s day: an activation, a canvas, a feature or an error. */
+export function hasCounts(state: DailyCounters): boolean {
+  return (
+    state.activations > 0 ||
+    state.canvasOpens > 0 ||
+    Object.keys(state.features ?? {}).length > 0 ||
+    Object.keys(state.errors ?? {}).length > 0
+  );
 }
 
 export function recordAssistants(state: DailyCounters, found: readonly TelemetryAssistant[]): DailyCounters {
@@ -1221,15 +1536,37 @@ export function recordError(state: DailyCounters, code: TelemetryErrorCode): Dai
 }
 
 /**
- * Whether the trail is kept today: an install's first {@link TRAIL_DAYS} days,
- * a day whose trail has already begun, or the event that begins it anyway
- * (the guide starting, also on a later day through Show Me Around).
+ * Whether `day` is one of the {@link TRAIL_DAYS} days that start on
+ * `startDay` (that day and the six after it). An absent or malformed start,
+ * or a day before it, is never in.
  */
-export function trailKept(state: DailyCounters, firstSeenDay: string, event: TrailEvent): boolean {
+export function withinTrailDays(startDay: string | undefined, day: string): boolean {
+  if (!startDay) return false;
+  const age = daysBetween(startDay, day);
+  return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+}
+
+/**
+ * Whether the trail is kept today: an install's first {@link TRAIL_DAYS} days,
+ * the {@link TRAIL_DAYS} days from the start after a major update
+ * (`majorSeenDay`, B5; never a minor or patch update), a day whose trail has
+ * already begun, or the event that begins it anyway (the guide starting, also
+ * on a later day through Show Me Around).
+ */
+export function trailKept(state: DailyCounters, firstSeenDay: string, event: TrailEvent, majorSeenDay?: string): boolean {
   if (Array.isArray(state.trail)) return true;
   if (event === 'guideStarted') return true;
-  const age = daysBetween(firstSeenDay, state.day);
-  return Number.isFinite(age) && age >= 0 && age < TRAIL_DAYS;
+  return withinTrailDays(firstSeenDay, state.day) || withinTrailDays(majorSeenDay, state.day);
+}
+
+/**
+ * B2/B5: whether `day` may send onboarding (and settle) interim copies: an
+ * install's first {@link TRAIL_DAYS} days, unless its first counted start was
+ * an update (an existing user, not a new one), or the {@link TRAIL_DAYS} days
+ * from the start after a major update. Error copies need neither.
+ */
+export function onboardingWindowDay(day: string, o: { firstSeenDay: string; upgradedInstall?: boolean; majorSeenDay?: string }): boolean {
+  return (!o.upgradedInstall && withinTrailDays(o.firstSeenDay, day)) || withinTrailDays(o.majorSeenDay, day);
 }
 
 /** The window number this window takes in today's trail: one past the highest so far. */
@@ -1253,13 +1590,18 @@ export function recordTrail(state: DailyCounters, event: TrailEvent, now: number
     const folded: TrailEntry = [last[0], last[1], last[2], Math.min(last[3] + 1, MAX_COUNTER)];
     return { ...state, trail: [...trail.slice(0, -1), folded], trailAt: now };
   }
-  if (trail.length >= MAX_TRAIL) {
+  if (trail.length >= MAX_TRAIL || (trail.length >= TRAIL_GENERAL_MAX && !isReservedTrailEvent(event))) {
     return { ...state, trail, trailDropped: Math.min((state.trailDropped ?? 0) + 1, MAX_TRAIL_DROPPED), trailAt: now };
   }
   const gap = trail.length === 0 || typeof state.trailAt !== 'number'
     ? 0
     : Math.min(Math.max(0, Math.round((now - state.trailAt) / 1000)), MAX_TRAIL_GAP_S);
   return { ...state, trail: [...trail, [event, gap, w, 1]], trailAt: now, trailPrevAt: state.trailAt };
+}
+
+/** The events the trail's last {@link MAX_TRAIL} − {@link TRAIL_GENERAL_MAX} places are kept for. */
+export function isReservedTrailEvent(event: TrailEvent): boolean {
+  return event.startsWith('!') || event === 'windowClosed' || event === 'canvasClosed';
 }
 
 /**
@@ -1308,7 +1650,8 @@ export function heartbeatDue(state: DailyCounters, today: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(state.day)) return false;
   const age = daysBetween(state.day, today);
   if (!(age >= 1 && age <= MAX_HEARTBEAT_AGE_DAYS)) return false;
-  if (state.activation === null) return false;
+  // An activation that threw before it recorded its outcome is still sent (B4).
+  if (state.activation === null && !((state.errors.activationFailed ?? 0) > 0)) return false;
   return (
     state.activations > 0 ||
     state.canvasOpens > 0 ||
@@ -1380,4 +1723,185 @@ function allowedCounts<K extends string>(
     if (n > 0) out[key] = n;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// 2.0 delivery: same-day interim copies (B2), the size guard (B3), updates
+// (B5) and time to the first draft and diagram (B15)
+// ---------------------------------------------------------------------------
+
+/** B2: at most this many interim copies of a day are sent that day. */
+export const MAX_PROVISIONAL_SENDS = 3;
+
+/**
+ * Why an interim copy is being considered: an onboarding end-point (a draft
+ * answered, the guide skipped or left, the first diagram with tables), a new
+ * error code today, or the settle timer a couple of minutes after start.
+ */
+export type ProvisionalReason = 'onboarding' | 'error' | 'settle';
+
+/**
+ * The onboarding end-points (B2 trigger a): counting one of these on a day
+ * that may send interim copies schedules one.
+ */
+export const PROVISIONAL_ONBOARDING_FEATURES: readonly TelemetryFeature[] = [
+  'draftDiscarded',
+  'draftClosed',
+  'draftKept',
+  'guideSkippedOnDraft',
+  'guideSkippedOnCanvas',
+  'guideLeftDraft',
+  'draftRejectedFastDbt',
+  'draftRejectedFastSqlDdl',
+  'draftRejectedFastSemanticModel',
+  'draftRejectedFastDbml',
+];
+
+/**
+ * What an update from `before` to `after` (the same day) asks of the interim
+ * sender: `error` when an error code appears for the first time today (any
+ * tenure), `onboarding` when an end-point was counted or the day's first
+ * diagram with tables opened, or nothing. The B19 catch-all (`loggedError*`)
+ * never asks on its own: it also counts problems with the user's own files,
+ * and a failure of ours records its own code beside it.
+ */
+export function provisionalTrigger(before: DailyCounters, after: DailyCounters): 'error' | 'onboarding' | undefined {
+  if (before.day !== after.day) return undefined;
+  for (const code of Object.keys(after.errors ?? {})) {
+    if (code.startsWith('loggedError')) continue;
+    if (!(code in (before.errors ?? {}))) return 'error';
+  }
+  for (const f of PROVISIONAL_ONBOARDING_FEATURES) {
+    if ((after.features?.[f] ?? 0) > (before.features?.[f] ?? 0)) return 'onboarding';
+  }
+  if (before.modelCount === 'none' && after.modelCount !== 'none') return 'onboarding';
+  return undefined;
+}
+
+export interface ProvisionalCheck {
+  /** Today may send onboarding interim copies: the install's first week, and not an upgrade (B5). */
+  trailDay: boolean;
+  /** Interim copies already sent today. */
+  sentToday: number;
+  /** {@link heartbeatHash} of the last interim copy sent today. */
+  lastHash?: string;
+  /** {@link heartbeatHash} of the copy that would be sent now. */
+  hash: string;
+  reason: ProvisionalReason;
+}
+
+/**
+ * Whether an interim copy of today's counters `state` should be sent now:
+ * it is today's, fewer than {@link MAX_PROVISIONAL_SENDS} went today, it
+ * differs from the last one, an error asked for it or today may send
+ * onboarding copies, and something was counted. A day with no activation is
+ * allowed only when activation itself failed (B4).
+ */
+export function provisionalDue(state: DailyCounters, today: string, o: ProvisionalCheck): boolean {
+  if (state.day !== today) return false;
+  if (!(o.sentToday < MAX_PROVISIONAL_SENDS)) return false;
+  if (o.hash === o.lastHash) return false;
+  if (o.reason !== 'error' && !o.trailDay) return false;
+  if (state.activation === null && !((state.errors?.activationFailed ?? 0) > 0)) return false;
+  return hasCounts(state);
+}
+
+/**
+ * A short fingerprint of a body, `heartbeatProvisional` left out, so the same
+ * counts are not sent twice in a day. FNV-1a over the JSON; it never leaves
+ * the device.
+ */
+export function heartbeatHash(body: HeartbeatBody): string {
+  const { heartbeatProvisional: _ignored, ...features } = body.features;
+  const text = JSON.stringify({ ...body, features });
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${text.length.toString(36)}-${h.toString(36)}`;
+}
+
+/** `body` marked as an interim same-day copy. The stored counters never carry the key. */
+export function provisionalBody(body: HeartbeatBody): HeartbeatBody {
+  return { ...body, features: { ...body.features, heartbeatProvisional: 1 } };
+}
+
+/**
+ * B3: the body size the extension keeps under, below the Worker's old
+ * 16,384-byte cap, so a Worker not yet at 32,768 never refuses a whole day.
+ */
+export const HEARTBEAT_SOFT_LIMIT = 15000;
+
+/** The UTF-8 size of `body` as posted. */
+export function heartbeatBytes(body: HeartbeatBody): number {
+  return new TextEncoder().encode(JSON.stringify(body)).byteLength;
+}
+
+/** Never dropped by {@link trimHeartbeat}: they describe the send itself. */
+const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set(['heartbeatProvisional', 'heartbeatTrimmed']);
+
+/**
+ * `body` cut down to `limit` bytes, marked `heartbeatTrimmed`, or `body`
+ * itself when it already fits. In order, until it fits: the trail (with
+ * `trailDropped`: the Worker refuses one without the other), then feature
+ * keys counted once, then the other feature keys, then error codes — each in
+ * reverse list order, so the newest keys go first. It only removes data.
+ */
+export function trimHeartbeat(body: HeartbeatBody, limit: number = HEARTBEAT_SOFT_LIMIT): HeartbeatBody {
+  if (heartbeatBytes(body) <= limit) return body;
+  const { trail: _trail, trailDropped: _dropped, ...rest } = body;
+  const out: HeartbeatBody = { ...rest, features: { ...body.features, heartbeatTrimmed: 1 }, errors: { ...body.errors } };
+  let size = heartbeatBytes(out);
+  if (size <= limit) return out;
+  const drop = (counts: Record<string, number | undefined>, key: string): void => {
+    if (size <= limit || counts[key] === undefined) return;
+    delete counts[key];
+    size = heartbeatBytes(out);
+  };
+  const features = out.features as Record<string, number | undefined>;
+  const reversed = [...FEATURES].reverse().filter((f) => !UNTRIMMED_FEATURES.has(f));
+  for (const f of reversed) if (features[f] === 1) drop(features, f);
+  for (const f of reversed) drop(features, f);
+  for (const e of [...ERROR_CODES].reverse()) drop(out.errors as Record<string, number | undefined>, e);
+  return out;
+}
+
+/** B5: the update from `previous` to `current` changed the major version. */
+export function isMajorUpdate(previous: string, current: string): boolean {
+  const major = (v: string) => /^(\d+)\./.exec(v)?.[1];
+  return major(previous) !== major(current);
+}
+
+/**
+ * B15: the non-example draft sources. `trackedDraftPreview` counts one of
+ * these with every draft it shows that is not an example (its
+ * `DRAFT_SOURCE_FEATURES`; a test holds the two lists equal), so the first one
+ * counted is the install's first real draft.
+ */
+export const FIRST_DRAFT_FEATURES: readonly TelemetryFeature[] = [
+  'draftSourceSqlDdl',
+  'draftSourceSemanticModel',
+  'draftSourceDbml',
+  'draftSourceDbt',
+];
+
+const TTF_FEATURES = {
+  draft: ['ttfDraftUnder1m', 'ttfDraft1to5m', 'ttfDraft5to30m', 'ttfDraftOver30m', 'ttfDraftLaterDay'],
+  diagram: ['ttfDiagramUnder1m', 'ttfDiagram1to5m', 'ttfDiagram5to30m', 'ttfDiagramOver30m', 'ttfDiagramLaterDay'],
+} as const satisfies Record<string, readonly TelemetryFeature[]>;
+
+/**
+ * B15: the bucket for the time from the first run (`firstRunAt`, epoch ms,
+ * kept on the device) to the first draft or diagram at `now`. Under 30
+ * minutes by minutes; past that, `Over30m` on the same UTC day and `LaterDay`
+ * after it. A clock that went backwards counts as under a minute.
+ */
+export function ttfFeature(kind: 'draft' | 'diagram', firstRunAt: number, now: number): TelemetryFeature {
+  const [under1m, to5m, to30m, over30m, laterDay] = TTF_FEATURES[kind];
+  const ms = now - firstRunAt;
+  if (ms < 60_000) return under1m;
+  if (ms < 5 * 60_000) return to5m;
+  if (ms < 30 * 60_000) return to30m;
+  return utcDay(new Date(firstRunAt)) === utcDay(new Date(now)) ? over30m : laterDay;
 }

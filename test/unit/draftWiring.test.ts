@@ -181,6 +181,101 @@ describe('trackedDraftPreview: the gate and the funnel', () => {
   });
 });
 
+describe('trackedDraftPreview: the first draft\'s quality (telemetry 2.0 B6), off the trail', () => {
+  /** Three tables and no relationship: a thin draft. */
+  function thin(source: DraftSource, keep: Draft['keep'] = { writer: 'none' }): Draft {
+    const d = draft(source, 'start', keep);
+    const t = (name: string) => ({ name, schema: '', description: '', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true, isForeignKey: false, isNaturalKey: false }] });
+    return { ...d, display: { models: [t('a'), t('b'), t('c')], relationships: [] } as unknown as Draft['display'] };
+  }
+
+  function quality(answers: ScriptedAnswer[]) {
+    const inner = fakeDraftPreview(answers);
+    const features: string[] = [];
+    const quiet: string[] = [];
+    let details: () => void = () => {};
+    let now = 1_000;
+    const preview = trackedDraftPreview(inner, {
+      claim: () => {},
+      executeCommand: async () => {},
+      feature: (key) => { features.push(key); },
+      featureQuiet: (key) => { quiet.push(key); },
+      onDetailsOpened: (listener) => { details = listener; },
+      now: () => now,
+      onKept: () => {},
+    });
+    return { preview, features, quiet, openDetails: () => details(), advance: (ms: number) => { now += ms; } };
+  }
+
+  it('a thin draft records its flags once, through featureQuiet only; a redraw does not count them again', async () => {
+    const w = quality([{ scope: 'b' }, 'keep']);
+    await w.preview.ask(thin('dbt'));
+    expect(w.quiet).toEqual(['draftOrphansMost', 'draftThinDbt', 'draftRelsNoneDbt']);
+    const keep = await w.preview.ask(thin('dbt'));
+    if (keep.kind !== 'keep') throw new Error('expected keep');
+    expect(w.quiet.filter((k) => k === 'draftThinDbt')).toHaveLength(1);
+    // No quality key reaches the trail-carrying recorder.
+    expect(w.features.some((k) => /^draft(Thin|RelsNone|Orphans|KeptThin|RejectedFast)/.test(k))).toBe(false);
+  });
+
+  it('Keep after a scope change measures the draft actually kept', async () => {
+    const w = quality([{ scope: 'b' }, 'keep']);
+    await w.preview.ask(draft('sqlDdl', 'start'));
+    const keep = await w.preview.ask(thin('sqlDdl', IMPORT_KEEP));
+    if (keep.kind !== 'keep') throw new Error('expected keep');
+    keep.settle({ kept: true });
+    expect(w.quiet).toEqual(['draftKeptThinSqlDdl']);
+
+    const fine = quality(['keep']);
+    const k = await fine.preview.ask(draft('sqlDdl', 'start', IMPORT_KEEP));
+    if (k.kind !== 'keep') throw new Error('expected keep');
+    k.settle({ kept: true });
+    expect(fine.quiet).toEqual([]);
+  });
+
+  it('a discard at 10 s with no details is a rejection at a glance; with details opened, or after 15 s, it is not', async () => {
+    const fast = quality(['discard']);
+    const asked = fast.preview.ask(draft('dbt', 'sidebar'));
+    fast.advance(10_000);
+    await asked;
+    expect(fast.quiet).toEqual(['draftRejectedFastDbt']);
+
+    const looked = quality(['discard']);
+    const asking = looked.preview.ask(draft('dbt', 'sidebar'));
+    looked.openDetails();
+    looked.advance(10_000);
+    await asking;
+    expect(looked.quiet).toEqual([]);
+
+    const slow = quality(['closed']);
+    const later = slow.preview.ask(draft('semanticModel', 'start'));
+    slow.advance(20_000);
+    await later;
+    expect(slow.quiet).toEqual([]);
+
+    // An example is never counted.
+    const example = quality(['closed']);
+    await example.preview.ask(draft('example', 'example'));
+    expect(example.quiet).toEqual([]);
+  });
+
+  it('a draft whose flags cannot be worked out still shows and counts its funnel keys', async () => {
+    const w = quality(['closed']);
+    const broken = { ...draft('dbt', 'start'), display: { get models(): never { throw new Error('bad'); } } as unknown as Draft['display'] };
+    await expect(w.preview.ask(broken)).resolves.toEqual({ kind: 'closed' });
+    expect(w.features).toEqual(['draftShown', 'draftSourceDbt', 'draftClosed']);
+  });
+
+  it('the page\'s details event tells the tracked preview, beside draftDetailsOpened', () => {
+    const features: string[] = [];
+    let told = 0;
+    const events = draftPreviewEvents((k) => features.push(k), () => {}, undefined, () => { told++; });
+    events.detailsOpened('dbt');
+    expect(features).toEqual(['draftDetailsOpened']);
+    expect(told).toBe(1);
+  });
+});
+
 describe('DraftGeneration', () => {
   it('counts the bumps (the watchers\' changes that are not ERD Studio\'s own)', () => {
     const g = new DraftGeneration();

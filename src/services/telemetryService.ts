@@ -10,6 +10,11 @@
  * `erdStudio.telemetry.enabled` is off. Every failure is dropped silently: no
  * retry, no toast, no log line.
  *
+ * During an install's first week, and on any day a new error code is counted,
+ * an interim copy of today's summary may also go out the same day (at most
+ * {@link MAX_PROVISIONAL_SENDS}, marked `heartbeatProvisional`, through the
+ * same logger); the final one the next day replaces it in the Worker.
+ *
  * Call sites use the {@link telemetry} facade, one short line each. It is a
  * no-op until {@link TelemetryService} is constructed, so code that runs
  * without one (tests, the no-project fallback) needs no guard.
@@ -23,6 +28,16 @@ import { safeBaseUrl } from './feedbackAnalysisService';
 import {
   buildHeartbeat,
   emptyCounters,
+  FIRST_DRAFT_FEATURES,
+  heartbeatHash,
+  isMajorUpdate,
+  provisionalBody,
+  provisionalDue,
+  provisionalTrigger,
+  trimHeartbeat,
+  ttfFeature,
+  type HeartbeatEnv,
+  type ProvisionalReason,
   hostBucket,
   rememberDay,
   remoteBucket,
@@ -43,6 +58,7 @@ import {
   recordTrail,
   retractTrail,
   trailKept,
+  onboardingWindowDay,
   nextTrailWindow,
   TRAIL_AWAY_MIN_MS,
   trailError,
@@ -62,6 +78,8 @@ import {
   type TelemetryPlatform,
   type TrailEvent,
   type TrailMarker,
+  TRAIL_DAYS,
+  MAX_PROVISIONAL_SENDS,
 } from './telemetryPayload';
 import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
 import type { RelationshipInvariant, RelationshipSurvey } from './relationshipHealth';
@@ -78,10 +96,41 @@ const FIRST_SEEN_KEY = 'erdStudio.telemetry.firstSeenDay';
 const ACTIVE_DAYS_KEY = 'erdStudio.telemetry.activeDays';
 const CANVAS_DAYS_KEY = 'erdStudio.telemetry.canvasDays';
 const FIRST_CANVAS_KEY = 'erdStudio.telemetry.firstCanvasDay';
+/** B2: today's interim copies — `{ day, sent, hash }`. Never sent. */
+const PROVISIONAL_KEY = 'erdStudio.telemetry.provisional';
+/**
+ * B5: an update happened (`{ major }`), written before the update reload can
+ * return from `activate()` and read on the next start. No version text.
+ */
+export const PENDING_UPDATE_KEY = 'erdStudio.telemetry.pendingUpdate';
+/** B5: this install's first counted start was an update, so it is not a new user's first week. Never sent. */
+const UPGRADED_INSTALL_KEY = 'erdStudio.telemetry.upgradedInstall';
+/**
+ * B5: the UTC day of the first start after a major update (1.x to 2.x). The
+ * trail and the onboarding interim copies are kept for {@link TRAIL_DAYS}
+ * days from it. Only the day is kept, never a version. Never sent.
+ */
+const MAJOR_SEEN_KEY = 'erdStudio.telemetry.majorSeenDay';
+/** B15: epoch ms of the first run, and whether the first draft / diagram has been timed. Never sent. */
+const FIRST_RUN_AT_KEY = 'erdStudio.telemetry.firstRunAt';
+const FIRST_DRAFT_DONE_KEY = 'erdStudio.telemetry.firstDraftDone';
+const FIRST_DIAGRAM_DONE_KEY = 'erdStudio.telemetry.firstDiagramDone';
 
 const HEARTBEAT_EVENT = 'heartbeat';
 const ROLLOVER_INTERVAL_MS = 60 * 60 * 1000;
 const SEND_TIMEOUT_MS = 5_000;
+/** B2: an interim copy waits this long after the event that asked for it (debounced). */
+export const PROVISIONAL_DEBOUNCE_MS = 30_000;
+/** B2: on a first-week day, an interim copy is considered this long after start. */
+export const PROVISIONAL_SETTLE_MS = 2 * 60_000;
+/** Bodies waiting for the logger's sender; more than this and the oldest is dropped. */
+const MAX_OUTGOING = 4;
+
+interface StoredProvisional {
+  day: string;
+  sent: number;
+  hash: string;
+}
 
 interface StoredInstall {
   id: string;
@@ -113,13 +162,19 @@ export class TelemetryService implements vscode.Disposable {
    * is handed and prefixes the event name, so the sender posts the body
    * {@link buildHeartbeat} produced rather than whatever arrives through it.
    */
-  private outgoing: HeartbeatBody | null = null;
+  private outgoing: HeartbeatBody[] = [];
   /** The running environment, stamped onto the day's counters on every update. */
   private readonly env: CounterEnv;
   /** This window's number in today's onboarding trail, once it has added to it. */
   private trailWindow: { day: string; n: number } | undefined;
   /** When each away marker was added (`window`, or a canvas by key), for a quick return to take it back. */
   private readonly awaySince = new Map<string, number>();
+  /** The UTC day this window activated, for the trail's `dayContinued` (B15). */
+  private readonly activationDay = utcDay(new Date());
+  /** B2: the pending debounced interim copy, and why (an error outranks onboarding). */
+  private provisionalTimer: ReturnType<typeof setTimeout> | undefined;
+  private provisionalReason: ProvisionalReason | undefined;
+  private settleTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.env = {
@@ -127,14 +182,15 @@ export class TelemetryService implements vscode.Disposable {
       vscodeVersion: vscode.version,
       host: hostBucket(vscode.env.appName ?? ''),
       remote: remoteBucket(vscode.env.remoteName, vscode.env.uiKind === vscode.UIKind.Web),
-      dev: context.extensionMode !== undefined && context.extensionMode !== vscode.ExtensionMode.Production,
+      // B5: Liam's own installs set ERD_STUDIO_INTERNAL=1, read once here; there is no setting for it.
+      dev: (context.extensionMode !== undefined && context.extensionMode !== vscode.ExtensionMode.Production)
+        || process.env.ERD_STUDIO_INTERNAL === '1',
     };
     this.logger = vscode.env.createTelemetryLogger(
       {
         sendEventData: (eventName) => {
           if (!eventName.endsWith(HEARTBEAT_EVENT)) return;
-          const body = this.outgoing;
-          this.outgoing = null;
+          const body = this.outgoing.shift();
           if (body) void postHeartbeat(body);
         },
         // Never send stack traces or error details.
@@ -164,6 +220,7 @@ export class TelemetryService implements vscode.Disposable {
 
   dispose(): void {
     clearInterval(this.timer);
+    this.cancelProvisional();
     for (const d of this.disposables) d.dispose();
     if (active === this) active = undefined;
   }
@@ -189,9 +246,14 @@ export class TelemetryService implements vscode.Disposable {
     if (!this.enabled()) return;
     this.rollover();
     const state = this.context.globalState.get<DailyCounters>(COUNTERS_KEY) ?? emptyCounters(utcDay(new Date()));
-    const next = stampEnv(reducer(state), this.env);
+    // Stamped before the reducer counts anything, so stampEnv sees what an
+    // earlier version had counted today (versionMixed, B5).
+    const next = reducer(stampEnv(state, this.env));
     // Nothing changed (a trail marker on a day without a trail): no write.
-    if (next !== state) void this.context.globalState.update(COUNTERS_KEY, next);
+    if (next === state) return;
+    void this.context.globalState.update(COUNTERS_KEY, next);
+    const trigger = provisionalTrigger(state, next);
+    if (trigger) this.scheduleProvisional(trigger, PROVISIONAL_DEBOUNCE_MS);
   }
 
   /**
@@ -209,9 +271,12 @@ export class TelemetryService implements vscode.Disposable {
 
   /** `state` with `event` on its trail at `now`, if the trail is kept today. */
   withTrail(state: DailyCounters, event: TrailEvent, now: number): DailyCounters {
-    if (!trailKept(state, this.firstSeenDay(state.day), event)) return state;
+    if (!trailKept(state, this.firstSeenDay(state.day), event, this.majorSeenDay())) return state;
     if (this.trailWindow?.day !== state.day) this.trailWindow = { day: state.day, n: nextTrailWindow(state) };
-    return recordTrail(state, event, now, this.trailWindow.n);
+    // B15: today's trail begins in a window that was activated on an earlier UTC day.
+    const begun = Array.isArray(state.trail) && state.trail.length > 0;
+    const first = !begun && this.activationDay < state.day ? recordTrail(state, 'dayContinued', now, this.trailWindow.n) : state;
+    return recordTrail(first, event, now, this.trailWindow.n);
   }
 
   /**
@@ -256,7 +321,26 @@ export class TelemetryService implements vscode.Disposable {
 
   private send(state: DailyCounters, today: string): void {
     if (!telemetryEndpoint()) return;
-    this.outgoing = buildHeartbeat(state, {
+    this.post(buildHeartbeat(state, this.heartbeatEnv(state, today)));
+  }
+
+  /**
+   * Hand `body` to the logger, trimmed under the size guard (B3). The sender
+   * takes bodies in the order they were queued, so an interim copy never
+   * replaces a final one that is waiting. A body is queued only while the
+   * logger would pass it on (telemetry level at usage), so nothing waits to be
+   * posted on its own later.
+   */
+  private post(body: HeartbeatBody): void {
+    if (!this.logger.isUsageEnabled) return;
+    const sent = trimHeartbeat(body);
+    this.outgoing.push(sent);
+    if (this.outgoing.length > MAX_OUTGOING) this.outgoing.shift();
+    this.logger.logUsage(HEARTBEAT_EVENT, { ...sent });
+  }
+
+  private heartbeatEnv(state: DailyCounters, today: string): HeartbeatEnv {
+    return {
       installId: this.installId(today),
       extVersion: this.env.extVersion,
       vscodeVersion: this.env.vscodeVersion,
@@ -268,11 +352,79 @@ export class TelemetryService implements vscode.Disposable {
       host: this.env.host,
       remote: this.env.remote,
       dev: this.env.dev,
+    };
+  }
+
+  /**
+   * B2: ask for an interim copy `delay` ms from now. A later ask replaces the
+   * earlier (debounced); an error outranks onboarding. The timer is unref'd.
+   */
+  private scheduleProvisional(reason: ProvisionalReason, delay: number): void {
+    if (this.provisionalTimer) clearTimeout(this.provisionalTimer);
+    this.provisionalReason = this.provisionalReason === 'error' ? 'error' : reason;
+    this.provisionalTimer = setTimeout(() => {
+      const why = this.provisionalReason ?? reason;
+      this.provisionalTimer = undefined;
+      this.provisionalReason = undefined;
+      this.sendProvisional(why);
+    }, delay);
+    this.provisionalTimer.unref?.();
+  }
+
+  private cancelProvisional(): void {
+    if (this.provisionalTimer) clearTimeout(this.provisionalTimer);
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.provisionalTimer = undefined;
+    this.provisionalReason = undefined;
+    this.settleTimer = undefined;
+  }
+
+  /**
+   * B2: send an interim copy of today's counters now, if {@link provisionalDue}
+   * allows it. Same body as the final, plus `heartbeatProvisional` (in the
+   * body only, never the stored counters), through the same logger. Never throws.
+   */
+  sendProvisional(reason: ProvisionalReason): void {
+    try {
+      if (!this.enabled() || !telemetryEndpoint() || !this.logger.isUsageEnabled) return;
+      // No rollover here: a finished day is the hourly timer's to send. A
+      // stale day is simply not today's (provisionalDue).
+      const today = utcDay(new Date());
+      const state = this.context.globalState.get<DailyCounters>(COUNTERS_KEY);
+      if (!state) return;
+      const body = buildHeartbeat(state, this.heartbeatEnv(state, today));
+      const hash = heartbeatHash(body);
+      const stored = this.context.globalState.get<StoredProvisional>(PROVISIONAL_KEY);
+      const sameDay = stored?.day === today;
+      const sentToday = sameDay && typeof stored?.sent === 'number' ? stored.sent : 0;
+      const due = provisionalDue(state, today, {
+        trailDay: this.onboardingDay(state.day),
+        sentToday,
+        lastHash: sameDay ? stored?.hash : undefined,
+        hash,
+        reason,
+      });
+      if (!due) return;
+      void this.context.globalState.update(PROVISIONAL_KEY, { day: today, sent: Math.min(sentToday + 1, MAX_PROVISIONAL_SENDS), hash } satisfies StoredProvisional);
+      this.post(provisionalBody(body));
+    } catch {
+      // Telemetry never breaks the caller.
+    }
+  }
+
+  /** B2/B5: whether `day` may send onboarding interim copies ({@link onboardingWindowDay}). */
+  private onboardingDay(day: string): boolean {
+    return onboardingWindowDay(day, {
+      firstSeenDay: this.firstSeenDay(day),
+      upgradedInstall: this.context.globalState.get<boolean>(UPGRADED_INSTALL_KEY) === true,
+      majorSeenDay: this.majorSeenDay(),
     });
-    // The sender takes `outgoing` and clears it. If the logger declines
-    // (telemetry level below usage) it stays until the next day's send
-    // replaces it, and is never posted on its own.
-    this.logger.logUsage(HEARTBEAT_EVENT, { ...this.outgoing });
+  }
+
+  /** B5: the day of the first start after the latest major update, if any. */
+  private majorSeenDay(): string | undefined {
+    const stored = this.context.globalState.get<string>(MAJOR_SEEN_KEY);
+    return typeof stored === 'string' ? stored : undefined;
   }
 
   /**
@@ -297,17 +449,72 @@ export class TelemetryService implements vscode.Disposable {
 
   /** Called on activation, before anything is counted. */
   start(): void {
+    const pending = this.context.globalState.get<{ major?: boolean }>(PENDING_UPDATE_KEY);
     if (!this.context.globalState.get<string>(FIRST_SEEN_KEY)) {
       void this.context.globalState.update(FIRST_SEEN_KEY, utcDay(new Date()));
+      // B5: first counted on an update (a user from before telemetry, or one
+      // who had it off): an existing user, never an onboarding week.
+      if (pending) void this.context.globalState.update(UPGRADED_INSTALL_KEY, true);
     }
     this.rollover();
+    // B5: telemetry turned off while ERD Studio was not running (no event
+    // reached discard()) still forgets an open major-update window, so turning
+    // it back on later never reopens the trail.
+    if (!this.enabled() && this.context.globalState.get<string>(MAJOR_SEEN_KEY) !== undefined) {
+      void this.context.globalState.update(MAJOR_SEEN_KEY, undefined);
+    }
+    if (pending) {
+      void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
+      // B5: a major update opens another TRAIL_DAYS window for the trail and
+      // the onboarding interim copies (a minor or patch update never does).
+      if (pending.major === true && this.enabled()) void this.context.globalState.update(MAJOR_SEEN_KEY, utcDay(new Date()));
+      // Counted, not put on the trail: it would come before this window's windowOpened.
+      this.update((s) => (pending.major === true ? recordFeatureOnce(recordFeatureOnce(s, 'extUpdated'), 'extUpdatedMajor') : recordFeatureOnce(s, 'extUpdated')));
+    }
+    // B2 trigger (c): a first-week day gets one look a couple of minutes in.
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    if (this.enabled() && this.onboardingDay(utcDay(new Date()))) {
+      this.settleTimer = setTimeout(() => {
+        this.settleTimer = undefined;
+        this.sendProvisional('settle');
+      }, PROVISIONAL_SETTLE_MS);
+      this.settleTimer.unref?.();
+    }
+  }
+
+  /** B15: the first run, timed from now. Kept on the device; only buckets are sent. */
+  noteFirstRun(): void {
+    if (!this.enabled() || this.context.globalState.get<number>(FIRST_RUN_AT_KEY) !== undefined) return;
+    void this.context.globalState.update(FIRST_RUN_AT_KEY, Date.now());
+  }
+
+  /**
+   * B15: the first real draft or first diagram with tables since the first
+   * run, bucketed once per install. Installs with no recorded first run (from
+   * before 2.0) are never timed.
+   */
+  firstOf(kind: 'draft' | 'diagram'): void {
+    if (!this.enabled()) return;
+    const doneKey = kind === 'draft' ? FIRST_DRAFT_DONE_KEY : FIRST_DIAGRAM_DONE_KEY;
+    const firstRunAt = this.context.globalState.get<number>(FIRST_RUN_AT_KEY);
+    if (typeof firstRunAt !== 'number' || this.context.globalState.get<boolean>(doneKey)) return;
+    void this.context.globalState.update(doneKey, true);
+    const feature = ttfFeature(kind, firstRunAt, Date.now());
+    this.record((s) => recordFeatureOnce(s, feature), feature, true);
   }
 
   private discard(): void {
+    this.cancelProvisional();
     void this.context.globalState.update(COUNTERS_KEY, emptyCounters(utcDay(new Date())));
     void this.context.globalState.update(ACTIVE_DAYS_KEY, undefined);
     void this.context.globalState.update(CANVAS_DAYS_KEY, undefined);
     void this.context.globalState.update(FIRST_CANVAS_KEY, undefined);
+    void this.context.globalState.update(PROVISIONAL_KEY, undefined);
+    void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
+    void this.context.globalState.update(MAJOR_SEEN_KEY, undefined);
+    void this.context.globalState.update(FIRST_RUN_AT_KEY, undefined);
+    void this.context.globalState.update(FIRST_DRAFT_DONE_KEY, undefined);
+    void this.context.globalState.update(FIRST_DIAGRAM_DONE_KEY, undefined);
   }
 }
 
@@ -328,6 +535,23 @@ async function postHeartbeat(body: HeartbeatBody): Promise<void> {
     // Dropped on purpose: telemetry never retries and never complains.
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * B5: called in `activate()` before the update reload can return early, with
+ * the version last activated and the one running now. Remembers that an
+ * update happened (and whether the major version changed), never the
+ * versions, for the next {@link TelemetryService.start} to count. Nothing is
+ * kept while telemetry is off. Never throws.
+ */
+export async function notePendingUpdate(context: vscode.ExtensionContext, previous: string | undefined, current: string): Promise<void> {
+  try {
+    if (!previous || previous === current) return;
+    if (!vscode.env.isTelemetryEnabled || getErdStudioSetting<boolean>(TELEMETRY_ENABLED_SETTING, true) === false) return;
+    await context.globalState.update(PENDING_UPDATE_KEY, { major: isMajorUpdate(previous, current) });
+  } catch {
+    // Telemetry never blocks activation.
   }
 }
 
@@ -364,6 +588,7 @@ export const telemetry = {
   canvasOpened(stage: TelemetryStage, format: TelemetrySchemaFormat, modelCount: number): void {
     active?.record(s => recordCanvasOpen(s, { stage, format, modelCount }), 'canvasOpened');
     active?.markDay('canvas');
+    if (modelCount > 0) active?.firstOf('diagram');
   },
   /** AI assistants detected on this machine (`detectAssistants()` ids). */
   assistants(found: readonly TelemetryAssistant[]): void {
@@ -392,10 +617,20 @@ export const telemetry = {
   },
   feature(feature: TelemetryFeature): void {
     active?.record(s => recordFeature(s, feature), feature);
+    if (FIRST_DRAFT_FEATURES.includes(feature)) active?.firstOf('draft');
   },
   /** Count `feature` at most once per day (a presence flag). */
   featureOnce(feature: TelemetryFeature): void {
     active?.record(s => recordFeatureOnce(s, feature), feature, true);
+    if (feature === 'firstRun') active?.noteFirstRun();
+  },
+  /**
+   * Count `feature` without adding it to the onboarding trail (`once`: at most
+   * once per day): for flags that describe what was shown or found rather
+   * than something the user did, so they never use up the first day's trail.
+   */
+  featureQuiet(feature: TelemetryFeature, once = false): void {
+    active?.update(s => (once ? recordFeatureOnce(s, feature) : recordFeature(s, feature)));
   },
   error(code: TelemetryErrorCode): void {
     errorRecorded(code);

@@ -14,7 +14,8 @@
  *                         toggleDiscrepancy, requestFeedbackContext,
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
  *                         copyFeedbackReport, openFeedbackLink,
- *                         layoutFinished (usage telemetry only)
+ *                         layoutFinished, webviewError (usage telemetry only),
+ *                         crashFallback (the crash screen's two buttons)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -36,6 +37,7 @@ import type { AnnotationColor, Cardinality, DesignTable, Stage } from './semanti
 import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
+import type { CrashFallbackPayload, LayoutFailure, WebviewErrorPayload } from './webviewError';
 import type {
   FeedbackAiProviderChoice,
   FeedbackAnalysis,
@@ -677,7 +679,39 @@ export interface RefreshManifestMessage {
  */
 export interface LayoutFinishedMessage {
   type: 'layoutFinished';
-  payload: { ms: number; ok: boolean; firstOpen?: boolean };
+  /**
+   * `failure` (2.0, optional): why a failed layout failed, classified in the
+   * webview (`LAYOUT_FAILURES`). `fallback` (2.0, optional): the layout
+   * overflowed the worker's stack and was laid out again with the stack-safe
+   * placement. An older webview sends neither.
+   */
+  payload: { ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true };
+}
+
+/**
+ * The canvas crashed or hit an uncaught error (2.0 B13): its kind and the
+ * area it started in, fixed enums only — never the error's text, which stays
+ * in the webview (the Send Feedback dialog's recent errors). Usage telemetry
+ * only: writes nothing, so it is on the physical allowlist.
+ */
+export interface WebviewErrorMessage {
+  type: 'webviewError';
+  payload: WebviewErrorPayload;
+}
+
+/**
+ * A button on the canvas's crash screen (`CanvasCrashFallback`, shown after a
+ * render crash instead of a blank panel): `reload` — the host reloads this
+ * panel's page; `feedback` — the host opens Send Feedback without the canvas
+ * (its in-page dialog went down with the tree), prefilled with `area` and
+ * `detail` (the crash's first line, paths already redacted in the page and
+ * again by the host) for the user to read before anything is sent. Telemetry
+ * counts the button only (`crashFallbackReload` / `crashFallbackFeedback`).
+ * Writes nothing, so it is on the physical allowlist.
+ */
+export interface CrashFallbackMessage {
+  type: 'crashFallback';
+  payload: CrashFallbackPayload;
 }
 
 /**
@@ -1096,7 +1130,9 @@ export type WebviewMessage =
   | MoveTableMessage
   | CopyTablePathMessage
   | RevealTableInLibraryMessage
-  | LayoutFinishedMessage;
+  | LayoutFinishedMessage
+  | WebviewErrorMessage
+  | CrashFallbackMessage;
 
 // ---------------------------------------------------------------------------
 // Finding a table across the project (the canvas's ways out of one diagram)

@@ -37,6 +37,8 @@ import {
   type DraftView,
 } from '../types/draft';
 import { createLogger } from '../services/logger';
+import { ReadyWatch } from '../services/readyWatch';
+import { askNoReadyRecovery } from './noReadyRecovery';
 
 const log = createLogger('DraftPreviewPanel');
 
@@ -133,6 +135,12 @@ export class DraftPreviewPanel {
   private guide: DraftGuideStart | undefined;
   private disposed = false;
   private readonly disposables: vscode.Disposable[] = [];
+  /** Did the page come up (2.0 B13)? Timed while the tab is visible. */
+  private readonly readyWatch: ReadyWatch;
+  /** The id of the draft the page is laying out (posted with `autoLayout`, no `layoutFinished` / `layoutFailed` yet). */
+  private layingOut: string | undefined;
+  /** The extension's `dist/` folder (the page's script and stylesheet). */
+  private readonly dist: vscode.Uri;
 
   /** The open tab, if any (tests). */
   static get currentPanel(): DraftPreviewPanel | undefined {
@@ -205,18 +213,58 @@ export class DraftPreviewPanel {
     this.view = toDraftView(draft);
     this.events = events;
     const webview = panel.webview;
-    const dist = vscode.Uri.joinPath(extensionUri, 'dist');
-    webview.html = buildDraftPreviewHtml({
-      cspSource: webview.cspSource,
-      nonce: crypto.randomBytes(16).toString('base64'),
-      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(dist, 'draft.js')).toString(),
-      styleUri: webview.asWebviewUri(vscode.Uri.joinPath(dist, 'draft.css')).toString(),
-      title: draft.title,
+    this.dist = vscode.Uri.joinPath(extensionUri, 'dist');
+    webview.html = this.pageHtml();
+    this.readyWatch = new ReadyWatch(panel.visible !== false, {
+      ready: (slow) => this.events.pageReady?.(this.view.source, slow),
+      noReady: () => {
+        this.events.noReady?.(this.view.source);
+        // The page never mounted, so its crash screen cannot show: the host
+        // offers the same two buttons in a notification.
+        void askNoReadyRecovery('draft').then((action) => {
+          if (!action || this.disposed) return;
+          if (action === 'reload') this.reloadPage();
+          this.events.noReadyChoice?.(this.view.source, action);
+        });
+      },
     });
     this.disposables.push(
       webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message)),
       panel.onDidDispose(() => this.dispose()),
+      panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
     );
+  }
+
+  /** The page's HTML, with a fresh nonce (so a reload always changes it). */
+  private pageHtml(): string {
+    const webview = this.panel.webview;
+    return buildDraftPreviewHtml({
+      cspSource: webview.cspSource,
+      nonce: crypto.randomBytes(16).toString('base64'),
+      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(this.dist, 'draft.js')).toString(),
+      styleUri: webview.asWebviewUri(vscode.Uri.joinPath(this.dist, 'draft.css')).toString(),
+      title: this.draft.title,
+    });
+  }
+
+  /**
+   * The crash screen's Reload: a new page for the same draft. Nothing the
+   * flow waits on changes (the pending `ask` keeps waiting, a queued choice
+   * stays queued); the new page says `ready` and is sent the draft and the
+   * guide again.
+   */
+  private reloadPage(): void {
+    if (this.disposed) return;
+    this.ready = false;
+    this.layingOut = undefined;
+    this.panel.webview.html = this.pageHtml();
+  }
+
+  /** Post the draft on show, noting that the page lays it out first when it has no stored positions. */
+  private postDraft(): void {
+    const laysOut = this.view.autoLayout && this.view.display.models.length > 0;
+    this.layingOut = laysOut ? this.view.id : undefined;
+    this.post({ type: 'draft', view: this.view });
   }
 
   /** The draft on show (tests). */
@@ -230,7 +278,7 @@ export class DraftPreviewPanel {
     this.draft = draft;
     this.view = toDraftView(draft);
     this.panel.title = draft.title;
-    if (this.ready) this.post({ type: 'draft', view: this.view });
+    if (this.ready) this.postDraft();
   }
 
   /** Wait for the next decision on the draft on show. */
@@ -286,7 +334,8 @@ export class DraftPreviewPanel {
     switch (message.type) {
       case 'ready':
         this.ready = true;
-        this.post({ type: 'draft', view: this.view });
+        this.readyWatch.ready();
+        this.postDraft();
         this.postGuide();
         return;
       case 'guide': {
@@ -298,7 +347,29 @@ export class DraftPreviewPanel {
         this.events.detailsOpened?.(this.view.source);
         return;
       case 'layoutFailed':
+        this.layingOut = undefined;
         this.events.layoutFailed?.(this.view.source);
+        return;
+      case 'laidOut':
+        // Only the draft being laid out: a late one for a draft since replaced says nothing.
+        if (this.layingOut === message.id) this.layingOut = undefined;
+        return;
+      case 'layoutFinished': {
+        this.layingOut = undefined;
+        const { type: _type, ...layout } = message;
+        this.events.layoutFinished?.(this.view.source, layout);
+        return;
+      }
+      case 'pageError':
+        this.events.pageError?.(this.view.source, message.kind);
+        return;
+      case 'crashFallback':
+        if (message.action === 'reload') this.reloadPage();
+        try {
+          this.events.crashFallback?.(this.view.source, message.action, message.detail);
+        } catch (err) {
+          log.warn('The draft preview\'s crash screen action failed:', err instanceof Error ? err.message : String(err));
+        }
         return;
       default:
         return;
@@ -307,6 +378,8 @@ export class DraftPreviewPanel {
 
   /** A choice, answered to the waiting `ask`. */
   private choose(message: DraftToHost): void {
+    // A choice made while the layout runs is no abandoned page.
+    this.layingOut = undefined;
     switch (message.type) {
       case 'keep': {
         const generation = this.generation;
@@ -351,6 +424,15 @@ export class DraftPreviewPanel {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.readyWatch.dispose();
+    if (this.layingOut !== undefined && this.layingOut === this.view.id) {
+      try {
+        this.events.closedWhileLayingOut?.(this.view.source);
+      } catch {
+        // Telemetry never stops the tab closing.
+      }
+    }
+    this.layingOut = undefined;
     if (DraftPreviewPanel.current === this) DraftPreviewPanel.current = undefined;
     this.queued = undefined;
     this.answer({ kind: 'closed' });

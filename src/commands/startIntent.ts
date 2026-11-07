@@ -23,6 +23,7 @@
  * vscode-free: the look, the context and the publishing are injected.
  */
 
+import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import {
   startIntentFor,
   startNeedsLook,
@@ -58,6 +59,10 @@ export interface StartIntentDeps {
   onDbtProjectSeen?(): void;
   timeoutMs?: number;
   now?(): number;
+  /** Counts a fixed key (`startLookTimeout`, `startLookGaveUp`; the host counts each once a day). */
+  feature?(key: TelemetryFeature): void;
+  /** Counts a fixed error code (`startLookFailed`, `startContextFailed`). */
+  error?(code: TelemetryErrorCode): void;
 }
 
 /** What a look found: the sources, and how many CREATE TABLEs the `.sql` files hold when it could tell exactly. */
@@ -83,6 +88,13 @@ export class StartIntentTracker {
 
   constructor(private readonly deps: StartIntentDeps) {}
 
+  /** Telemetry never changes what the tracker decides. */
+  private count(record: () => void): void {
+    try {
+      record();
+    } catch { /* ignored */ }
+  }
+
   /** Where the folder stands now, with the last look's findings (none before the first look). */
   startContext(): StartContext {
     return { ...this.deps.context(), found: this.found };
@@ -105,6 +117,7 @@ export class StartIntentTracker {
     try {
       ctx = this.deps.context();
     } catch {
+      this.count(() => this.deps.error?.('startContextFailed'));
       // The empty Diagrams view waits (Loading…) until a suggestion is published:
       // never leave it waiting. A blank diagram is always a valid start.
       if (this.published === undefined && !this.disposed) {
@@ -170,7 +183,11 @@ export class StartIntentTracker {
       });
       try {
         const result = await Promise.race([
-          this.deps.look(controller.signal).catch(() => new Set<DetectedImportSource>()),
+          this.deps.look(controller.signal).catch(() => {
+            // Our own abort after a timeout is not a failure of the look.
+            if (!controller.signal.aborted) this.count(() => this.deps.error?.('startLookFailed'));
+            return new Set<DetectedImportSource>();
+          }),
           timedOut,
         ]);
         if (result === 'timeout') {
@@ -178,8 +195,10 @@ export class StartIntentTracker {
           this.found = new Set();
           this.sqlTables = undefined;
           this.timeouts++;
+          this.count(() => this.deps.feature?.('startLookTimeout'));
           // Stale (looked at again on the next refresh) until the attempts run out.
           this.lookedAt = this.timeouts >= START_LOOK_ATTEMPTS ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+          if (this.lookedAt === Number.POSITIVE_INFINITY) this.count(() => this.deps.feature?.('startLookGaveUp'));
         } else {
           const findings: StartLookFindings = isFindings(result) ? result : { sources: result };
           this.found = findings.sources;

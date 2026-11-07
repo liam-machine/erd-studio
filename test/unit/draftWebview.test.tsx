@@ -212,6 +212,16 @@ describe('large (several schemas)', () => {
     expect(posts.filter((p) => p.type === 'detailsOpened')).toHaveLength(1);
   });
 
+  it('a finished layout posts laidOut for the draft at once, and once only (2.0 B17)', async () => {
+    const draft = fixture('large');
+    const { posts } = renderPage(draft, vi.fn<Layout>(async () => ({})));
+    await act(async () => {});
+    expect(posts.filter((p) => p.type === 'laidOut')).toEqual([{ type: 'laidOut', id: draft.id }]);
+    const nav = screen.getByRole('navigation', { name: 'Schemas' });
+    await act(async () => { fireEvent.click(within(nav).getByRole('button', { name: 'hr, 15 tables' })); });
+    expect(posts.filter((p) => p.type === 'laidOut')).toHaveLength(1);
+  });
+
   it('a failed layout draws the fallback placement and posts layoutFailed once for the draft', async () => {
     const layout = vi.fn<Layout>(async () => { throw new Error('ELK layout worker crashed'); });
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

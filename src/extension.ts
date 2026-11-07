@@ -72,10 +72,22 @@ import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndRelo
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
-import { TelemetryService, telemetry } from './services/telemetryService';
+import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
+import {
+  REFRESH_FAILED,
+  SLOW_ACTIVATION_MS,
+  activationFailureCodes,
+  harnessFailureKeys,
+  loggedErrorCodes,
+  type ActivationPhase,
+  type DbtSearchOutcome,
+  type RefreshKind,
+} from './services/runtimeTelemetry';
+import { setErrorHook } from './services/logger';
+import { tableFileDetailCode } from './services/telemetryCanvas';
 import { notifyTableFileError, shouldWarnAboutTableFile, showRefusedWrite } from './commands/openModelFile';
 import { isRefusedWrite } from './services/newSubjectAreaWriter';
 import { showCommandFailure } from './commands/commandFailure';
@@ -173,6 +185,7 @@ import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/example
 import { START_COMMAND, START_INTENT_CONTEXT_KEY, START_PICK_PLACEHOLDER, START_PICK_TITLE, TOUR_LABEL, isQuickImportArg, startDraftTriggerOf, type StartContext, type StartIntent } from './types/startActions';
 import { createDraftPreview } from './providers/DraftPreviewPanel';
 import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './providers/draftWiring';
+import { DRAFT_DROP_FEATURES, STORAGE_FEATURES, draftUnavailableFeature, type DraftDropReason } from './services/importTelemetry';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
 import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
 import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
@@ -365,21 +378,25 @@ const HOST_DBT_SEARCH_MAX = 50;
  * The folders holding dbt_project.yml by the host's own search
  * (`workspace.findFiles`: every depth, hidden folders, symbolic links, as
  * the `workspaceContains` activation event looks), skipping the folders the
- * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. Undefined when
- * it does not answer within `timeoutMs` or fails (the walk alone decides).
+ * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. No `paths` when
+ * it does not answer within `timeoutMs` (`timeout`) or fails (`error`): the
+ * walk alone decides. The outcome is for usage telemetry (B4).
  */
-async function findHostDbtProjects(timeoutMs: number): Promise<string[] | undefined> {
+export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: string[]; outcome: DbtSearchOutcome }> {
   const folders = workspaceFolderPaths();
-  if (folders.length === 0) return [];
+  if (folders.length === 0) return { paths: [], outcome: 'ok' };
   const source = new vscode.CancellationTokenSource();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
-      .then((uris) => sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), () => undefined);
-    const timedOut = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), timeoutMs); });
+      .then(
+        (uris): { paths?: string[]; outcome: DbtSearchOutcome } => ({ paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' }),
+        (): { outcome: DbtSearchOutcome } => ({ outcome: 'error' }),
+      );
+    const timedOut = new Promise<{ outcome: DbtSearchOutcome }>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
     return await Promise.race([search, timedOut]);
   } catch {
-    return undefined;
+    return { outcome: 'error' };
   } finally {
     if (timer) clearTimeout(timer);
     source.cancel();
@@ -441,7 +458,9 @@ async function selectDbtProject(
   target?: string,
 ): Promise<void> {
   // The host's whole search, so a project deeper than the walk is listed too.
-  const resolution = resolveWorkspaceProject(context, await findHostDbtProjects(5000));
+  const search = await findHostDbtProjects(5000);
+  if (search.outcome === 'error') telemetry.error('dbtSearchFailed');
+  const resolution = resolveWorkspaceProject(context, search.paths);
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
     // so no candidates means a plain folder: there is no dbt project to pick.
@@ -650,11 +669,23 @@ function hostToolingProbe(): ToolingProbe {
   };
 }
 
-function recordHarnessInstalls(results: HarnessInstallResult[]): void {
+/**
+ * Install AI Helper Files… and Update All: each target installed, and each
+ * that failed with its target and write class (B16), plus
+ * `harnessUpdateFailed` once when any did. Fixed codes only.
+ */
+export function recordHarnessInstalls(results: HarnessInstallResult[]): void {
+  let failed = false;
   for (const r of results) {
     const feature = r.success ? HARNESS_INSTALL_FEATURES[r.target.id] : undefined;
     if (feature) telemetry.feature(feature);
+    if (r.success) continue;
+    failed = true;
+    const keys = harnessFailureKeys(r.target.id, r.errno);
+    for (const code of keys.errors) telemetry.error(code);
+    for (const key of keys.features) telemetry.feature(key);
   }
+  if (failed) telemetry.error('harnessUpdateFailed');
 }
 
 /**
@@ -671,8 +702,42 @@ export const NEEDS_DBT_PROJECT_MESSAGE =
 /** Regenerate dbt selectors.yml in a folder without dbt_project.yml. */
 const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is no selectors.yml to generate.';
 
+/**
+ * A file watcher's listener, guarded (B12): a refresh that throws or rejects
+ * counts `refreshFailed` and its kind, and is logged here instead of
+ * becoming an unhandled rejection. What the listener does is unchanged.
+ */
+export function guardRefresh<A extends unknown[]>(kind: RefreshKind, listener: (...args: A) => unknown): (...args: A) => void {
+  const failed = (err: unknown): void => {
+    telemetry.error('refreshFailed');
+    telemetry.error(REFRESH_FAILED[kind]);
+    log.error(`[ERD Studio] A refresh after a ${kind} change failed:`, err);
+  };
+  return (...args: A): void => {
+    try {
+      const result = listener(...args);
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        Promise.resolve(result).catch(failed);
+      }
+    } catch (err) {
+      failed(err);
+    }
+  };
+}
+
+/** Run `fn`; a throw counts `code` (a fixed error code) and is rethrown unchanged. */
+async function countThrow<T>(code: TelemetryErrorCode, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    telemetry.error(code);
+    throw err;
+  }
+}
+
 /** "Open a folder first", with a button for each way out (#205). */
 export async function showNoProjectWarning(): Promise<void> {
+  telemetry.feature('noFolderWarned');
   const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Folder…', 'Open Settings');
   if (choice === 'Open Folder…') {
     void vscode.commands.executeCommand('vscode.openFolder');
@@ -1104,7 +1169,41 @@ export function logProjectSummary(facts: {
   );
 }
 
+/**
+ * The stretch of activation running now (B4): set at six checkpoints in
+ * {@link activateInner}, read only if it throws.
+ */
+let activationPhase: ActivationPhase = 'Discovery';
+
+/** Enter `phase`; a no-op Disposable, so a checkpoint can sit in a `subscriptions.push(…)` list. */
+function activationCheckpoint(phase: ActivationPhase): vscode.Disposable {
+  activationPhase = phase;
+  return { dispose: () => {} };
+}
+
+/**
+ * Activation, observed (B4): a throw records `activationFailed` and the phase
+ * it happened in, then is rethrown unchanged (VS Code reports it as before).
+ * A throw before the TelemetryService exists (the first lines of
+ * activateInner) cannot be recorded: the facade is a no-op until then. The
+ * exception's text stays in the local log.
+ */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  activationPhase = 'Discovery';
+  try {
+    return await activateInner(context);
+  } catch (err) {
+    try {
+      for (const code of activationFailureCodes(activationPhase)) telemetry.error(code);
+      log.error(`[ERD Studio] Activation failed (${activationPhase}):`, err);
+    } catch {
+      // Recording must never replace the activation error.
+    }
+    throw err;
+  }
+}
+
+async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
@@ -1127,6 +1226,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // host crashes mid-recovery.
   const currentVersion = context.extension.packageJSON.version as string;
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
+  // Telemetry's update flag (no version text), written before the reload
+  // below can return, so the next activation still counts the update.
+  await notePendingUpdate(context, previousVersion, currentVersion);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   // Fresh install: remember that the Welcome panel is owed, even if this
   // activation has no dbt project and returns early below. Captured here,
@@ -1149,6 +1251,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const telemetryService = new TelemetryService(context);
   context.subscriptions.push(telemetryService);
   telemetryService.start();
+  // Every logged error, by area (B19): the hook hears only the line's source
+  // tag, mapped to a fixed code; never the text. Removed on deactivation.
+  setErrorHook((source) => { for (const code of loggedErrorCodes(source)) telemetry.error(code); });
+  context.subscriptions.push({ dispose: () => setErrorHook(undefined) });
   // The onboarding funnel's denominator: a true first run on this machine
   // (the one that owes the walkthrough), not an existing user's first
   // heartbeat from a telemetry-bearing version (telemetry/README.md).
@@ -1242,13 +1348,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log: (message) => log.info(message),
     warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
   });
+  // The tracked preview's listener for the page's details being opened (a discard after it is not a rejection at a glance).
+  let draftDetailsOpened: () => void = () => {};
   const draftPreview: DraftPreview = trackedDraftPreview(
     createDraftPreview(context.extensionUri, draftPreviewEvents(
       (key) => telemetry.feature(key),
       (code) => telemetry.error(code),
       (action) => onboardingGuide.onDraftAction(action),
+      () => draftDetailsOpened(),
+      // The crash screen's Send Feedback: the canvas-less flow (a draft tab is no canvas).
+      (prefill) => vscode.commands.executeCommand('erdStudio.reportBug', prefill),
     )),
     {
+      // The first draft's quality flags, counted off the onboarding trail.
+      featureQuiet: (key) => telemetry.featureQuiet(key),
+      onDetailsOpened: (listener) => { draftDetailsOpened = listener; },
       guide: {
         takeDraft: (draft) => onboardingGuide.takeDraft(draft),
         draftKept: (draft) => onboardingGuide.draftKept(draft),
@@ -1283,7 +1397,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // The project path fills in the folder's part; an empty window gets the example.
   let showMeAroundInProject: () => Promise<boolean> = async () => false;
   context.subscriptions.push(
-    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, async () => {
+    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, () => countThrow('guideOpenFailed', async () => {
       if (await showMeAroundInProject()) return;
       if (draftPreview.isOpen()) {
         draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
@@ -1291,10 +1405,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       onboardingGuide.requestDraft();
       await runExampleDraft('example');
-    }),
+    })),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => runExampleDraft('example')),
+    vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => countThrow('exampleOpenFailed', () => runExampleDraft('example'))),
     // Open Example Diagram stays registered (hidden from the palette) as an alias of the
     // one example command, so old keybindings and the setup skill's mention keep working.
     vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => vscode.commands.executeCommand(OPEN_EXAMPLE_PROJECT_COMMAND)),
@@ -1336,7 +1450,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // The host's own search for dbt_project.yml (every depth), bounded so it
   // never holds activation up; the walk alone decides when it is late.
-  const hostDbtProjects = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+  const hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+  const hostDbtProjects = hostDbtSearch.paths;
+  if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
+  else if (hostDbtSearch.outcome === 'error') telemetry.error('dbtSearchFailed');
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
@@ -1419,6 +1536,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
+  activationPhase = 'Services';
   log.info(hasDbt
     ? `ERD Studio: Found dbt project at ${workspaceRoot}`
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
@@ -1504,6 +1622,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     look: vscodeStartLook(workspaceRoot, semanticDir),
     publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
     onDbtProjectSeen: () => noteUnusedDbtProject(workspaceRoot, undefined, 'look'),
+    feature: (key) => telemetry.featureOnce(key),
+    error: (code) => telemetry.error(code),
   });
   context.subscriptions.push({ dispose: () => startIntent.dispose() });
   startContext = () => startIntent.startContext();
@@ -1513,6 +1633,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Fixed keys only — `error.message` may quote the file and never leaves the machine.
     telemetry.error('modelFileParse');
     telemetry.error(tableFileErrorCode(error.kind));
+    // 2.0 B14: a `.dbml` table file's own rule or DBML class, from its fixed code.
+    const detail = tableFileDetailCode(error.kind, error.code);
+    if (detail) telemetry.error(detail);
     // Once per broken file per session (the service never re-reports a path, #113),
     // and not again in a later session while the file is unchanged (#164).
     if (shouldWarnAboutTableFile(context.workspaceState, error.filePath)) {
@@ -1658,6 +1781,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
+    // The listing threw (B18): counted; the view keeps "Loading diagrams…" rather than a fake empty start.
+    () => telemetry.error('sidebarListFailed'),
   );
   /** Where Convert Project to DBML stands in this project (src/services/convertOffer.ts). */
   const convertOfferState = (): ConvertOfferState => ({
@@ -1858,6 +1983,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', hasSemanticDir);
     knownStorage = projectStorageOf(tableLibraryService);
     void vscode.commands.executeCommand('setContext', 'erdStudio.storage', knownStorage);
+    // How the project is stored (YAML, DBML or half converted): once a day, off the onboarding trail.
+    telemetry.featureQuiet(STORAGE_FEATURES[knownStorage], true);
     // A project that writes the v6 naming (#182) makes `tables/` with its first
     // table, so the view shows from setup on, not only once a table exists;
     // so does a DBML project (its tables live under the layer folders).
@@ -1869,19 +1996,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const legacy = detectLegacyDbmlTree(fullSemanticDirPath);
       if (legacy) {
         legacyDbmlTreeShown = true;
+        telemetry.feature('legacyDbmlTreeWarned');
         void vscode.window.showWarningMessage(`ERD Studio: ${legacyDbmlTreeMessage(legacy)}`);
       }
     }
   });
   const refreshContextKeys = viewRefreshes.gate('contextKeys', refreshContextKeysNow);
   refreshContextKeys();
+  const projectReadMs = elapsedMs(activationStart);
   logProjectSummary({
     storage: knownStorage,
     tables: () => tableLibraryService.listTableFiles().length,
     diagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length,
     hasDbt,
-    activationMs: elapsedMs(activationStart),
+    activationMs: projectReadMs,
   });
+  if (projectReadMs > SLOW_ACTIVATION_MS) telemetry.featureOnce('activationOver10s');
 
   // A diagram in a picker: its layer and table count, and its tables as the
   // detail line, so typing a table's name finds every diagram that shows it.
@@ -1949,7 +2079,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
     } else if (hostDbtProjects === undefined) {
       // The host's search was late: let it finish, off activation's path.
-      void findHostDbtProjects(60_000).then((late) => {
+      void findHostDbtProjects(60_000).then(({ paths: late, outcome }) => {
+        if (outcome === 'error') telemetry.error('dbtSearchFailed');
         const found = late?.find((dir) => !samePath(dir, workspaceRoot));
         if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
       });
@@ -1986,12 +2117,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // File watchers
   // -------------------------------------------------------------------------
   // No manifest / catalog / dbt source / dbt_project.yml watchers without dbt.
+  activationPhase = 'Watchers';
   const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir, dbtConfig, undefined, { dbt: hasDbt });
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
   let manifestChangeGen = 0;
-  const manifestChangedSubscription = fileWatcherService.onManifestChanged(
+  const manifestChangedSubscription = fileWatcherService.onManifestChanged(guardRefresh('Manifest',
     async () => {
       // Captured before any await: the refresh below can outlast the grace on a
       // large project. A Run dbt parse / compile run says it finished itself.
@@ -2058,28 +2190,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
       }
     },
-  );
+  ));
 
   // Catalog changed → refresh open editors, SILENTLY. `dbt docs generate`
   // writes manifest.json and catalog.json minutes apart and the manifest
   // handler above already announces itself; a second toast for the same command
   // would say nothing new.
-  const catalogChangedSubscription = fileWatcherService.onCatalogChanged(async () => {
+  const catalogChangedSubscription = fileWatcherService.onCatalogChanged(guardRefresh('Catalog', async () => {
     catalogService.invalidate();
     await editorProvider.refreshAllOpenSubjectAreas();
-  });
+  }));
 
   // A DBML relationships file changed externally: its Refs may belong to any
   // table (a Ref attaches wherever its owner is, from any file), so every open
   // canvas is redrawn (§5.4). Never a table event.
-  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(async () => {
+  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(guardRefresh('Table', async () => {
     draftGeneration.bump();
     tableLibraryService.invalidateRelationships();
     await editorProvider.refreshAllOpenSubjectAreas();
     treeProvider.refresh();
     tableLibraryProvider.refresh();
     refreshContextKeys();
-  });
+  }));
 
   // A `.yml` table or `.json` diagram ERD Studio did not write appeared in a
   // DBML project: most likely an AI helper set up before 2.0 (§5.4). Said
@@ -2121,7 +2253,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(guardRefresh('Diagram', ({ uri, created }) => {
     draftGeneration.bump();
     // A change to a diagram file reaches an open canvas through its document
     // (a DBML diagram's positions are in it too, in its erd_layout).
@@ -2136,7 +2268,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryProvider.refresh();
     // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
     refreshContextKeys();
-  });
+  }));
 
   // Rename Subject Area records its created and deleted files as own writes,
   // so the watcher skips them: the side effects its change and delete events
@@ -2250,7 +2382,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // (pull, checkout, merge, rebase) trigger file-delete events on Windows (delete-
   // then-rename) and macOS (atomic rename via FSEvents), causing mass YAML
   // modifications. Instead, offer to run the manual sync command.
-  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(({ uris }) => {
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(guardRefresh('Diagram', ({ uris }) => {
     draftGeneration.bump();
     // An open canvas whose file is gone says so at once, instead of staying
     // editable until a refresh fails (#161).
@@ -2280,12 +2412,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.commands.executeCommand('erdStudio.syncDomainTags');
       }
     });
-  });
+  }));
 
   // layers.json changed externally (git pull, manual edit, delete) → drop the
   // cached layer list so the tree, decorations and domain listing pick up the
   // new layers; warn if the file is now unreadable.
-  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(() => {
+  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(guardRefresh('Layers', () => {
     draftGeneration.bump();
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea();
@@ -2294,21 +2426,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     decorationProvider.refresh();
     refreshContextKeys();
     warnIfLayerConfigBroken();
-  });
+  }));
 
   // fields.yml (the project's field list) changed outside ERD Studio → drop
   // the cached list and redraw the open canvases with it. Never writes.
-  const fieldsConfigChangedSubscription = fileWatcherService.onFieldsConfigChanged(() => {
+  const fieldsConfigChangedSubscription = fileWatcherService.onFieldsConfigChanged(guardRefresh('Layers', () => {
     void editorProvider.onFieldsFileChanged().catch((err) => {
       log.error('[ERD Studio] Redraw after a fields.yml change failed:', err);
     });
-  });
+  }));
 
   // Table files changed outside ERD Studio → refresh the diagrams that use
   // them and the views, once per watcher batch: Edit > Undo of Convert
   // reports 1,100 tables in one batch while it is still deleting files, and
   // per-table work listed the library again for every one of them.
-  const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(({ tables: changed }) => {
+  const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(guardRefresh('Table', ({ tables: changed }) => {
     draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
     tableLibraryService.invalidateTables(names);
@@ -2318,7 +2450,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tableLibraryProvider.refresh();
     // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
     refreshContextKeys();
-  });
+  }));
 
   // Many project files changing at once (Edit > Undo of Convert Project to
   // DBML, a branch switch): the watcher holds its events until the files are
@@ -2342,12 +2474,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // dbt schema .yml changed → refresh physical stage
-  const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(
+  const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(guardRefresh('DbtYml',
     async () => {
       ymlParserService.invalidate();
       await editorProvider.refreshAllOpenSubjectAreas();
     },
-  );
+  ));
 
   // dbt_project.yml path config changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
@@ -2589,7 +2721,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const nameTaken = (existing: string): void => {
       const layerLabel = layerService.getLayer(layer)?.label ?? layer;
       showCommandFailure(
-        { title: NEW_DIAGRAM_TITLE, message: diagramNameTakenMessage(slug, layerLabel), buttons: [OPEN_IT_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON] },
+        { title: NEW_DIAGRAM_TITLE, message: diagramNameTakenMessage(slug, layerLabel), buttons: [OPEN_IT_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON], code: 'newDiagramNameTaken' },
         undefined,
         {
           openIt: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(existing), SUBJECT_AREA_EDITOR_VIEW_TYPE),
@@ -2714,18 +2846,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // automatic draft (the ERD Studio icon), so both write exactly alike.
   const existingSubjectAreas = () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
   const validateNewSlug = (value: string, layer: string): string | undefined => validateSubjectAreaSlug(value, layer, existingSubjectAreas());
+  /** Why a quiet run (the automatic draft) ended before its draft: counted beside `draftUnavailable`. */
+  const quietDrop = (reason: DraftDropReason): void => { telemetry.feature(DRAFT_DROP_FEATURES[reason]); };
   /** The draft an import shows: this host's preview, what opened it, staleness, and stage colours only with dbt. */
   const importDraftFor = (trigger: DraftTrigger, quiet = false): ImportDraftOptions => ({
     preview: draftPreview,
     trigger,
-    ...(quiet ? { quiet } : {}),
+    ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
     logicalOnly: !hasDbt,
   });
   const dbtDraftFor = (trigger: DraftTrigger, quiet = false): DbtDraftOptions => ({
     preview: draftPreview,
     trigger,
-    ...(quiet ? { quiet } : {}),
+    ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
   });
   const importDbmlDeps = (draft?: ImportDraftOptions): ImportDbmlDeps => ({
@@ -2840,6 +2974,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   context.subscriptions.push(
+    activationCheckpoint('Views'),
     { dispose() { clearTimeout(manifestRetryTimeout); } },
     configChangedSubscription,
     treeProvider,
@@ -2908,6 +3043,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeDataProvider: helpProvider,
       canSelectMany: false,
     }),
+    activationCheckpoint('Commands'),
     (() => {
       const deps: RelationshipsViewDeps = {
         relationshipLocation: (rel) => tableLibraryService.relationshipLocation(rel),
@@ -3602,7 +3738,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!layer) {
           const creatableLayers = layerService.getCreatableLayers();
           if (creatableLayers.length === 0) {
-            showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON] }, undefined);
+            showCommandFailure({ title: NEW_DIAGRAM_TITLE, message: NO_LAYERS_MESSAGE, buttons: [ADD_LAYER_BUTTON], code: 'newDiagramNoLayers' }, undefined);
             return;
           }
           // No diagrams yet, so nothing to tell the layers apart by: the first
@@ -3713,6 +3849,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
           }
           ownWrites.recordDelete(filePath);
+          telemetry.feature('diagramDeleted');
           treeProvider.invalidateSubjectArea(filePath);
           treeProvider.refresh();
           refreshDiagramsStatus();
@@ -4619,6 +4756,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
     }),
   );
+  activationPhase = 'Prompts';
   /** Set by the end of activate(): show the next offered prompt when `from` held the window but showed nothing. */
   let handOverActivationPrompt: (from: SessionPromptKind) => Promise<void> = async () => {};
   // Activation's own prompt is decided: shown, or handed on by the start suggestion
@@ -4658,7 +4796,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (!kind || autoDraftAsked || draftPreview.isOpen()) return;
       // Another prompt had this window: the draft waits for a later one.
-      if (!sessionPrompts.claim('draft')) return;
+      if (!sessionPrompts.claim('draft')) {
+        telemetry.featureOnce('draftWaitedForPrompt');
+        return;
+      }
       autoDraftAsked = true;
       if (kind === 'find') await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
       else await context.globalState.update(EXAMPLE_DRAFT_SHOWN_KEY, true);
@@ -4680,10 +4821,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       onDraftAsk = () => {};
       if (!shown) {
         telemetry.feature('draftUnavailable');
+        // Which draft it was going to be (the reason, when there is one, came from its quietDrop).
+        const unavailable = draftUnavailableFeature(kind, kind === 'find' ? intent : undefined);
+        if (unavailable) telemetry.feature(unavailable);
         log.info("[ERD Studio] The automatic draft could not be built; the sidebar's starts remain.");
       }
       await run;
-    }).catch((err: unknown) => log.warn('[ERD Studio] The automatic draft failed:', err));
+    }).catch((err: unknown) => {
+      telemetry.error('activationPromptFailed');
+      log.warn('[ERD Studio] The automatic draft failed:', err);
+    });
   };
 
   // First run (spec C.5, addendum P4). A fresh install opens the Get Started
@@ -4897,7 +5044,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             sessionPrompts.release('startSuggestion');
             await handOverActivationPrompt('startSuggestion');
-          }).catch((err: unknown) => log.warn('[ERD Studio] The start suggestion failed:', err))
+          }).catch((err: unknown) => {
+            telemetry.error('activationPromptFailed');
+            log.warn('[ERD Studio] The start suggestion failed:', err);
+          })
             .finally(() => settleActivationPrompts());
         }, 0);
       });
@@ -5054,7 +5204,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // installed it (Set Up My AI Helper). The second documented exception to
   // "no unprompted writes": it writes outside the workspace, only after that
   // opt-in, and never throws or toasts.
-  void cliLauncher.refreshIfInstalled(launcherOptions);
+  void cliLauncher.refreshIfInstalled(launcherOptions).then((refresh) => {
+    if (refresh.outcome === 'failed') telemetry.error('launcherRefreshFailed');
+  }, () => { telemetry.error('launcherRefreshFailed'); });
 
   // ---------------------------------------------------------------------------
   // Legacy command aliases

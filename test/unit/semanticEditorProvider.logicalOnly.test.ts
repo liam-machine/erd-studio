@@ -117,6 +117,14 @@ describe('SemanticEditorProvider in logical-only mode', () => {
     expect(featureOnce).not.toHaveBeenCalledWith('manifestMissingCanvas');
   });
 
+  it('a v6 JSON diagram counts canvasJsonV6 once a day, off the onboarding trail (still the v5 format)', async () => {
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
+    const canvasOpened = vi.spyOn(telemetry, 'canvasOpened');
+    await openIn(buildProvider(root, true), file);
+    expect(quiet).toHaveBeenCalledWith('canvasJsonV6', true);
+    expect(canvasOpened).toHaveBeenCalledWith('logical', 'v5', 1);
+  });
+
   it('answers a physical switch with the logical stage, echoing requestId', async () => {
     const panel = await openIn(buildProvider(root, true), file);
     await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 7 } });

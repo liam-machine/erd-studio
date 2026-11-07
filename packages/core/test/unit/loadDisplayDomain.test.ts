@@ -443,7 +443,7 @@ describe('loadDisplaySubjectArea', () => {
       { maxYamlChars: 200, warn },
     ).result;
     expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['big', 0], ['small', 1]]);
-    expect(warn).toHaveBeenCalledWith('Model "big" not found in the table library');
+    expect(warn).toHaveBeenCalledWith('Model "big" not found in the table library', 'modelNotFound');
   });
 
   it('shows a model over maxYamlNodes, or with a YAML error, as a placeholder', async () => {
@@ -486,6 +486,7 @@ describe('loadDisplaySubjectArea', () => {
     expect(domain.models[0].columns).toHaveLength(0);
     expect(warn).toHaveBeenCalledWith(
       'Failed to read model "wide": YAML document expands to more than 1048576 characters of text',
+      'modelUnreadable',
     );
     expect(JSON.stringify(domain).length).toBeLessThan(yml.length);
   });
@@ -507,6 +508,7 @@ describe('loadDisplaySubjectArea', () => {
       expect(domain.models[1].columns).toEqual([]);
       expect(warn).toHaveBeenCalledWith(
         'Model "m" is listed more times than its file\'s budget allows; only the first 1 are read',
+        'other',
       );
       expect(warn.mock.calls.filter(([m]) => String(m).includes('listed more times'))).toHaveLength(1);
       expect(() => JSON.stringify(domain)).not.toThrow();
@@ -594,6 +596,7 @@ describe('loadDisplaySubjectArea', () => {
     }
     expect(warn).toHaveBeenCalledWith(
       `.erd-studio/layers.json is ${layers.length} characters long; at most ${layers.length - 1} are read. Using the default layers`,
+      'layersFile',
     );
     const silver = await load(files, { domainPath: '.erd-studio/silver/s.json', maxDomainChars: layers.length - 1 }).result;
     expect(silver.layerConfig?.id).toBe('silver');

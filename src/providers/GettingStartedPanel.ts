@@ -74,6 +74,8 @@ import {
 } from '../types/aiAssistants';
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
+import { harnessFailureKeys, hookSkippedFeatures, welcomeFailureCode } from '../services/runtimeTelemetry';
+import { ReadyWatch } from '../services/readyWatch';
 import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
@@ -185,6 +187,9 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
   if (await gitCloneAvailable()) {
     try {
       await vscode.commands.executeCommand('git.clone', SAMPLE_REPO_CLONE_URL);
+      // The command resolves with nothing to tell a clone from a folder dialog
+      // the user closed, so this counts a git.clone that did not throw.
+      telemetry.feature('trySampleCloned');
       return 'cloned';
     } catch (err) {
       telemetry.error('sampleCloneFailed');
@@ -200,8 +205,10 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     SAMPLE_OPEN_ON_GITHUB_ACTION,
   );
   if (pick === SAMPLE_DOWNLOAD_ZIP_ACTION) {
+    telemetry.feature('trySampleZip');
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_ZIP_URL));
   } else if (pick === SAMPLE_OPEN_ON_GITHUB_ACTION) {
+    telemetry.feature('trySampleGithub');
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_URL));
   }
   return 'fallback';
@@ -660,8 +667,15 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
         ? deps.harness.installRecommended(deps.root, { replaceUnmanaged: true, assistants })
         : deps.harness.installRecommended(deps.root, { replaceUnmanaged: false, keepUnmanaged: true, assistants });
     }
+    // AI helper hooks left out on purpose: why, and for which tool (B16; presence flags).
+    for (const key of hookSkippedFeatures(result.skippedHooks)) telemetry.featureOnce(key);
     if (result.status === 'failed' || result.status === 'needs-confirmation') {
       telemetry.error('setupHarnessFailed');
+      if (result.status === 'failed') {
+        const keys = harnessFailureKeys(result.failedTarget, result.errno);
+        for (const code of keys.errors) telemetry.error(code);
+        for (const key of keys.features) telemetry.feature(key);
+      }
       return {
         ok: false,
         filesWritten: result.filesWritten,
@@ -766,6 +780,8 @@ export class GettingStartedPanel {
   /** The viewer chose something on the page (any message but the page's own: `GETTING_STARTED_PASSIVE_TYPES`). */
   private choseSomething = false;
   private disposed = false;
+  /** Did the page come up (2.0 B13)? Timed while the panel is visible. */
+  private readonly readyWatch: ReadyWatch;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -801,10 +817,20 @@ export class GettingStartedPanel {
   ) {
     this.deps = deps;
     panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri, pageModeForDeps(deps));
+    this.readyWatch = new ReadyWatch(panel.visible !== false, {
+      ready: (slow) => {
+        telemetry.feature('welcomePanelReady');
+        if (slow) telemetry.feature('readySlowOver10s');
+      },
+      noReady: () => telemetry.error('webviewNoReadyWelcome'),
+    });
     this.disposables.push(
+      panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
           telemetry.error('welcomePanelFailed');
+          // Which button broke (B18): the message type, mapped to a fixed code.
+          telemetry.error(welcomeFailureCode(isGettingStartedToHost(message) ? message.type : undefined));
           log.error('[GettingStarted] Message handler failed:', err);
         });
       }),
@@ -879,6 +905,7 @@ export class GettingStartedPanel {
       if (intent !== intentNow || summary) { this.post({ type: 'status', payload: { ...withIntent(intent), summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
+      telemetry.error('welcomeFailedStatus');
       log.error('[GettingStarted] Status check failed:', err);
     }
   }
@@ -945,6 +972,7 @@ export class GettingStartedPanel {
     switch (msg.type) {
       case 'ready':
       case 'refreshStatus':
+        if (msg.type === 'ready') { this.readyWatch.ready(); }
         await this.postStatus();
         break;
       case 'setupAiHelper':
@@ -1010,6 +1038,7 @@ export class GettingStartedPanel {
   }
 
   dispose(): void {
+    this.readyWatch.dispose();
     if (GettingStartedPanel.current === this) { GettingStartedPanel.current = undefined; }
     if (!this.disposed) {
       this.disposed = true;

@@ -7,7 +7,12 @@
  * Layout: a draft with no stored position (`autoLayout`) is laid out with the
  * canvas's own ELK options before it is drawn (`Laying out N tables…`), the
  * schema on show only; ELK failing draws the host's fallback placement and
- * posts `layoutFailed` once per draft.
+ * posts `layoutFailed` once per draft. A layout that finished posts
+ * `laidOut` at once, then `layoutFinished` (usage telemetry, 2.0 B17) once
+ * the canvas has fitted it: how long it took, whether the fitted zoom is
+ * readable, and whether it needed the stack-safe placement. A page in a
+ * background tab may not fit it until it is shown again, so `laidOut` is
+ * what tells the host the layout is no longer running.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +24,9 @@ import type { DisplaySubjectArea } from '../src/types/display';
 import type { NodePosition } from '../src/types/semantic';
 import type { DraftHost } from './lib/draftHost';
 import { layoutDraft as defaultLayout, withPositions } from './lib/draftLayout';
+import { fittedZoomOf } from './lib/fitZoom';
+import type { LayoutHooks } from '../webview/lib/elkLayout';
+import { fitZoomBucket } from '../src/types/webviewError';
 import { filterDisplayToSchema } from './lib/filterDisplayToSchema';
 import { BUSY_LABELS, layingOutLabel } from './lib/wording';
 import { DraftBanner } from './components/DraftBanner';
@@ -29,7 +37,7 @@ import { DraftGuide } from './components/DraftGuide';
 export interface DraftAppProps {
   host: DraftHost;
   /** The layout (tests replace it: jsdom runs no ELK worker). */
-  layout?: (display: DisplaySubjectArea) => Promise<Record<string, NodePosition>>;
+  layout?: (display: DisplaySubjectArea, hooks?: LayoutHooks) => Promise<Record<string, NodePosition>>;
 }
 
 type HostBusy = 'keep' | 'scope' | undefined;
@@ -52,6 +60,11 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   /** Laid-out positions per `<view id>\u0000<schema>`; `null`: ELK failed. */
   const [layouts, setLayouts] = useState<ReadonlyMap<string, Record<string, NodePosition> | null>>(new Map());
   const layoutFailedFor = useRef<string | undefined>();
+  /** The draft whose finished layout was reported (`laidOut`, once per draft: a schema filter's own layout says nothing). */
+  const laidOutFor = useRef<string | undefined>();
+  /** A finished layout waiting for the canvas to fit it, to report (`layoutFinished`). */
+  const layoutDone = useRef<{ key: string; ms: number; fallback: boolean } | undefined>();
+  const canvasRef = useRef<HTMLElement>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
 
@@ -101,9 +114,17 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
     if (!layingOut || !filtered || !view || layoutKey === undefined) return;
     let cancelled = false;
     const viewId = view.id;
-    layout(filtered).then(
+    const startedAt = performance.now();
+    let fallback = false;
+    layout(filtered, { onStackFallback: () => { fallback = true; } }).then(
       (positions) => {
-        if (!cancelled) setLayouts((prev) => new Map(prev).set(layoutKey, positions));
+        if (cancelled) return;
+        layoutDone.current = { key: layoutKey, ms: Math.round(performance.now() - startedAt), fallback };
+        setLayouts((prev) => new Map(prev).set(layoutKey, positions));
+        if (laidOutFor.current !== viewId) {
+          laidOutFor.current = viewId;
+          hostRef.current.post({ type: 'laidOut', id: viewId });
+        }
       },
       (err: unknown) => {
         if (cancelled) return;
@@ -135,6 +156,19 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   }, []);
   const postToHost = useCallback((message: Parameters<DraftHost['post']>[0]) => hostRef.current.post(message), []);
   const endGuide = useCallback(() => setGuide(undefined), []);
+  // The canvas fitted a draft it was handed laid out: report the layout (2.0 B17).
+  const onCanvasReady = useCallback(() => {
+    const done = layoutDone.current;
+    if (!done || done.key !== layoutKey) return;
+    layoutDone.current = undefined;
+    const zoom = fittedZoomOf(canvasRef.current);
+    hostRef.current.post({
+      type: 'layoutFinished',
+      ms: done.ms,
+      fitZoom: zoom === undefined ? 'ok' : fitZoomBucket(zoom),
+      ...(done.fallback ? { fallback: true as const } : {}),
+    });
+  }, [layoutKey]);
   const onTogglePanel = useCallback(() => {
     if (!panelOpen) hostRef.current.post({ type: 'detailsOpened' });
     setPanelOpen(!panelOpen);
@@ -180,7 +214,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
             onSelect={setSchema}
           />
         )}
-        <main className="draft-canvas" aria-label="Diagram">
+        <main className="draft-canvas" aria-label="Diagram" ref={canvasRef}>
           {layingOut ? (
             <p className="draft-canvas__placeholder" role="status">{status}</p>
           ) : (
@@ -189,6 +223,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
               className="draft-canvas__erd"
               domain={shown}
               logicalOnly={view.logicalOnly}
+              onReady={onCanvasReady}
             />
           )}
         </main>

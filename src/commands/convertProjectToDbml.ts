@@ -39,7 +39,7 @@ import {
   showErrorWithActions as showErrorWith,
   type ErrorActions,
 } from '../services/commandErrors';
-import { dbmlConversionIsEmpty, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
+import { dbmlConversionIsEmpty, dbmlConversionRefusalKind, describeDbmlConversion, isDbmlSelfCheckRefusal, planDbmlConversion } from '../services/dbmlConversion';
 import type { DbmlConversionPhase, DbmlConversionPlan } from '../services/dbmlConversion';
 import { removeEmptiedLibraryFolders } from '../services/dbmlConversionCleanup';
 import { buildConvertReview, thousands } from '../services/dbmlConversionReview';
@@ -48,6 +48,7 @@ import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
+import { CONVERT_SLOW_MS, convertRefusalKeys } from '../services/importTelemetry';
 import { createLogger, phaseTimer, plural } from '../services/logger';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 
@@ -398,6 +399,11 @@ async function runConversion(
   // What stops it, in the panel: Check Again plans again; Close (or closing the tab) ends the run.
   const refused = async (): Promise<ConvertProjectOutcome> => {
     telemetry.feature('convertToDbmlRefused');
+    // Why, by kind (the self-check is ours: an error); the refusals' text stays in the log.
+    for (const key of convertRefusalKeys(plan.refusals.map(dbmlConversionRefusalKind))) {
+      if ('error' in key) telemetry.error(key.error);
+      else telemetry.feature(key.feature);
+    }
     await rememberDeadEnd(deps, true);
     convertLog.warn(`Stopped before writing: ${plural(plan.refusals.length, 'problem')}, ${plural(plan.leftAsIs.length, 'file')} left as is`);
     for (const refusal of plan.refusals) convertLog.warn(`Problem: ${refusal}`);
@@ -426,6 +432,7 @@ async function runConversion(
   // 4. Nothing to convert. Files left as they are until fixed (D26/D27) are listed, with Check Again.
   if (dbmlConversionIsEmpty(plan) && plan.leftAsIs.length > 0) return refused();
   if (dbmlConversionIsEmpty(plan)) {
+    telemetry.feature('convertNothingToDo');
     await rememberDeadEnd(deps, true);
     void vscode.window.showInformationMessage(deps.tableLibraryService.projectStorage() === 'dbml'
       ? 'This project is already stored as DBML.'
@@ -441,6 +448,7 @@ async function runConversion(
   ];
   const dirtyPaths = dirtyFiles(touched(plan));
   if (dirtyPaths.length > 0) {
+    telemetry.feature('convertStopUnsaved');
     const dirty = dirtyPaths.map((p) => projectRelative(deps.workspaceRoot, p));
     const saveAndRetry = async (): Promise<void> => {
       for (const [i, filePath] of dirtyPaths.entries()) {
@@ -483,6 +491,7 @@ async function runConversion(
   const changed = dbmlConversionFingerprint(deps.workspaceRoot, deps.semanticDir) !== planned.fingerprint;
   const again = changed ? (await planWithProgress(deps)).plan : plan;
   if (again.refusals.length > 0 || describeDbmlConversion(again) !== describeDbmlConversion(plan) || dirtyFiles(touched(again)).length > 0) {
+    telemetry.feature('convertStopChangedDuringPreview');
     showErrorWithActions(
       `${CONVERT_TO_DBML_TITLE}: the project changed while the preview was open. ${nothingChanged()} Run it again.`,
       { [TRY_AGAIN_BUTTON]: retry },
@@ -513,6 +522,7 @@ async function runConversion(
   // 9. One WorkspaceEdit, reconciled by applyFileWrites when VS Code refuses part of it.
   // From here it cannot be cancelled: the notification says what it is doing.
   const applyTimer = phaseTimer(convertLog, 'Apply');
+  const applyStarted = Date.now();
   convertLog.info(`Applying ${plural(writes.length, 'file write')}`);
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: false },
@@ -523,7 +533,11 @@ async function runConversion(
       await breathe();
     }),
   ).then(
-    (outcome) => { applyTimer.end(outcome); return outcome; },
+    (outcome) => {
+      applyTimer.end(outcome);
+      if (outcome === 'converted' && Date.now() - applyStarted > CONVERT_SLOW_MS) telemetry.feature('convertOver60s');
+      return outcome;
+    },
     (err: unknown) => { applyTimer.end('stopped by an error'); throw err; },
   );
 }
@@ -567,6 +581,8 @@ async function applyConversion(
     if (!applied.ok) {
       removeNewFolders();
       telemetry.error('convertToDbmlFailed');
+      // Files it could not put back: the project is half written until Convert runs again.
+      if (applied.unrestored.length > 0) telemetry.error('convertToDbmlUnrestored');
       if (applied.unrestored.length === 0) {
         showErrorWithActions(
           `${CONVERT_TO_DBML_TITLE}: VS Code didn't accept the conversion, so nothing was changed. ` +
@@ -623,9 +639,11 @@ async function applyConversion(
     // would only lead back here until one of them changes.
     await rememberDeadEnd(deps, plan.leftAsIs.length > 0);
     telemetry.feature('convertToDbml');
+    if (plan.leftAsIs.length > 0) telemetry.feature('convertLeftAsIs');
     progress.counted = true;
     if (unsaved.length > 0) {
       telemetry.error('saveFailed');
+      telemetry.error('convertSaveFailed');
       showErrorWithActions(
         `${CONVERT_TO_DBML_TITLE}: could not save ${listFiles(unsaved.map((p) => projectRelative(deps.workspaceRoot, p)))}; ` +
           'the change is open in the editor but not on disk. Save it from its tab.',

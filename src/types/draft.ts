@@ -28,6 +28,15 @@
 
 import type { DisplaySubjectArea } from './display';
 import { DRAFT_GUIDE_ACTIONS, parseGuideAction, type GuideActionPayload } from './onboardingGuide';
+import {
+  CRASH_DETAIL_MAX,
+  isCrashFallbackAction,
+  isWebviewErrorKind,
+  FIT_ZOOM_BUCKETS,
+  type CrashFallbackAction,
+  type FitZoomBucket,
+  type WebviewErrorKind,
+} from './webviewError';
 
 // ---------------------------------------------------------------------------
 // Where a draft comes from, and what opened it
@@ -274,15 +283,42 @@ export type DraftToHost =
   | { type: 'detailsOpened' }
   /** Passive: ELK failed, the fallback placement is drawn (telemetry only). */
   | { type: 'layoutFailed' }
+  /**
+   * Passive (2.0 B17): ELK laid the draft out in `ms`, the canvas fitted it
+   * at `fitZoom`, and `fallback` when it needed the stack-safe placement
+   * (telemetry only).
+   */
+  | { type: 'layoutFinished'; ms: number; fitZoom: FitZoomBucket; fallback?: true }
+  /**
+   * Passive (2.0 B17): ELK finished laying out the draft `id`, posted as soon
+   * as the positions arrive. `layoutFinished` waits for the canvas to fit
+   * them, which a page in a background tab may never do (no animation
+   * frames), so this is what tells the host the layout is no longer running.
+   */
+  | { type: 'laidOut'; id: string }
+  /** Passive (2.0 B13): the page crashed or hit an uncaught error; its kind only, never the text (telemetry only). */
+  | { type: 'pageError'; kind: WebviewErrorKind; area: 'draft' }
+  /**
+   * Passive: a button on the page's crash screen (shown after a render crash
+   * instead of a blank page). `reload`: the preview reloads the page, the
+   * draft on show and the waiting flow stay as they were. `feedback`: the
+   * wiring opens Send Feedback, prefilled with `detail` (the crash's first
+   * line, paths already redacted) for the user to read before anything is
+   * sent. Never closes the page or answers the flow.
+   */
+  | { type: 'crashFallback'; action: CrashFallbackAction; detail?: string }
   /** Passive: the onboarding guide showed a step or was skipped (`DRAFT_GUIDE_ACTIONS` only). */
   | ({ type: 'guide' } & GuideActionPayload);
 
 export const DRAFT_TO_HOST_TYPES = [
   'ready', 'keep', 'changeOptions', 'discard', 'otherStart', 'scope', 'detailsOpened', 'layoutFailed', 'guide',
+  'layoutFinished', 'pageError', 'laidOut', 'crashFallback',
 ] as const satisfies readonly DraftToHost['type'][];
 
 /** Messages that are not a choice: they never close the page or answer the flow. */
-export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set(['ready', 'detailsOpened', 'layoutFailed', 'guide']);
+export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set([
+  'ready', 'detailsOpened', 'layoutFailed', 'guide', 'layoutFinished', 'pageError', 'laidOut', 'crashFallback',
+]);
 
 /** What the draft on show allows: a message for anything else is dropped. */
 export interface DraftMessageAllowance {
@@ -340,6 +376,24 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
       const { type: _type, ...rest } = raw;
       const action = parseGuideAction(rest, DRAFT_GUIDE_ACTIONS);
       return action ? { type: 'guide', ...action } : undefined;
+    }
+    case 'layoutFinished': {
+      const { ms, fitZoom, fallback } = raw;
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return undefined;
+      if (typeof fitZoom !== 'string' || !(FIT_ZOOM_BUCKETS as readonly string[]).includes(fitZoom)) return undefined;
+      if (fallback !== undefined && fallback !== true) return undefined;
+      return { type: 'layoutFinished', ms, fitZoom: fitZoom as FitZoomBucket, ...(fallback ? { fallback: true as const } : {}) };
+    }
+    case 'laidOut':
+      return typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 200 ? { type: 'laidOut', id: raw.id } : undefined;
+    case 'pageError':
+      return isWebviewErrorKind(raw.kind) && raw.area === 'draft' ? { type: 'pageError', kind: raw.kind, area: 'draft' } : undefined;
+    case 'crashFallback': {
+      const { action, detail } = raw;
+      if (!isCrashFallbackAction(action)) return undefined;
+      // A bad detail is dropped, never the button press (the button never goes dead).
+      const kept = typeof detail === 'string' && detail.length <= CRASH_DETAIL_MAX ? detail : undefined;
+      return { type: 'crashFallback', action, ...(action === 'feedback' && kept ? { detail: kept } : {}) };
     }
     default:
       return undefined;
@@ -448,6 +502,29 @@ export interface DraftGuideStart {
 export interface DraftPreviewEvents {
   detailsOpened(source: DraftSource): void;
   layoutFailed(source: DraftSource): void;
+  /** The page said ready (`slow`: more than 10 s after it was shown; optional, 2.0 B13). */
+  pageReady?(source: DraftSource, slow: boolean): void;
+  /** The page stayed visible 30 s without saying ready (optional, 2.0 B13). */
+  noReady?(source: DraftSource): void;
+  /** The page crashed or hit an uncaught error (optional, 2.0 B13). */
+  pageError?(source: DraftSource, kind: WebviewErrorKind): void;
+  /**
+   * A button on the page's crash screen was pressed (optional). The preview
+   * has already reloaded the page for `reload`; the wiring counts the button
+   * and, for `feedback`, opens Send Feedback with `detail` in the prefill.
+   */
+  crashFallback?(source: DraftSource, action: CrashFallbackAction, detail?: string): void;
+  /**
+   * A button on the host's notification for a page that never became ready
+   * (after `noReady`; optional). The preview has already reloaded the page for
+   * `reload`; the wiring counts the button with the crash screen's keys and,
+   * for `feedback`, opens Send Feedback.
+   */
+  noReadyChoice?(source: DraftSource, action: CrashFallbackAction): void;
+  /** ELK laid the draft out (optional, 2.0 B17). */
+  layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true }): void;
+  /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */
+  closedWhileLayingOut?(source: DraftSource): void;
   /** The onboarding guide showed a step or was skipped on the page (optional: older wiring has none). */
   guide?(action: GuideActionPayload, view: DraftView): void;
 }

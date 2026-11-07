@@ -3,13 +3,19 @@
 A small Cloudflare Worker that receives ERD Studio's anonymous daily usage
 heartbeat and stores it in a Cloudflare D1 database.
 
-Each install sends **at most one** small JSON document per UTC day, describing
-the previous day in counts and buckets: how many times a canvas was opened,
-which features were used, which error codes fired, the extension and VS Code
-versions and the OS family. The extension sends it only when VS Code's own
-telemetry setting is on **and** `erdStudio.telemetry.enabled` is not turned off.
-It goes through `vscode.env.createTelemetryLogger`, so VS Code's telemetry
-output channel shows exactly what was sent.
+Each install sends one small JSON document per UTC day, describing that day
+in counts and buckets: how many times a canvas was opened, which features were
+used, which error codes fired, the extension and VS Code versions and the OS
+family. The final one goes out after the day ends (on the next activation or
+hourly check). During an install's first week, the 7 days after a major
+update (1.x to 2.x), and on any day a new error code is counted, an
+**interim copy** of the same day's summary may also go out that
+day, marked `heartbeatProvisional`, at most three a day; the final one replaces
+it (the same `(install_id, day)` row). The extension sends only when VS Code's
+own telemetry setting is on **and** `erdStudio.telemetry.enabled` is not turned
+off. Every send goes through `vscode.env.createTelemetryLogger`, so VS Code's
+telemetry output channel shows exactly what was sent. Turning telemetry off
+stops any further sends; an interim copy already sent that day stays.
 
 **Nothing in this directory is part of the extension.** It has no dependencies,
 no build step and no npm install: the file that deploys is `src/index.js`
@@ -25,15 +31,26 @@ Running this Worker means holding data about other people's use of the
 extension. Keep these promises — the extension makes them to users on your
 behalf (its `telemetry.json` lists every field):
 
-1. **Store only the validated body fields.** A row is the fields in
-   `schema.sql`, every one of them an enum, a bucket, a bounded integer, a date,
-   a strictly matched version string or the install id — plus `received_day`,
-   the UTC date the Worker received it. There is no free text anywhere in the
-   schema. Unknown keys in the body are **dropped**, not stored. The one
-   ordered field, `trail` (an install's first week and days the guide runs),
-   is a list of `[event, gap, window, repeat]` whose event is a listed
-   feature key, `!` + a listed error code or a fixed marker, and whose numbers
-   are bounded integers; it carries no time of day.
+1. **Store only the validated body fields, and the Worker's own counts of
+   them.** A `heartbeats` row is the fields in `schema.sql`, every one of them
+   an enum, a bucket, a bounded integer, a date, a strictly matched version
+   string or the install id — plus `received_day`, the UTC date the Worker
+   received it. There is no free text anywhere in the schema. Unknown keys in
+   the body are **dropped**, not stored. The one ordered field, `trail` (an
+   install's first week, the 7 days after a major update and days the guide
+   runs), is a list of
+   `[event, gap, window, repeat]` whose event is a listed feature key, `!` + a
+   listed error code or a fixed marker, and whose numbers are bounded
+   integers; it carries no time of day. The only other table, `worker_daily`
+   (migration `0005`), is the Worker's ledger of what it received: per UTC day
+   the Worker saw the request (`day`), extension version family (`ext_family`,
+   `major.minor` from a parsed body's `extVersion`, else `other`), `outcome`
+   (`ok` / `denied`) and `reason` (`none`, `body_size`, `json` or
+   `shape_<field>`, the field from a fixed list), a count of heartbeats (`n`)
+   and how many unknown `features` keys, `errors` keys and trail events it
+   dropped (`dropped_features`, `dropped_errors`, `dropped_trail`). It holds
+   no install id, no IP or header, no body text and never the name of a
+   dropped key, only how many there were.
 2. **No IP addresses, no user-agents, no location, no headers.** The Worker
    never reads `request.cf` and reads exactly one header, `Content-Length`, as a
    size pre-check. Cloudflare itself sees the connecting IP to route the
@@ -47,21 +64,30 @@ behalf (its `telemetry.json` lists every field):
    can be measured.) One person with two profiles or machines is two ids.
 4. **90-day retention, enforced by the Worker itself.** A daily Cron Trigger
    (`17 3 * * *` UTC) runs
-   `DELETE FROM heartbeats WHERE received_day < date('now', '-90 days')`. Raw
+   `DELETE FROM heartbeats WHERE received_day < date('now', '-90 days')`, and
+   the same for the ledger (`DELETE FROM worker_daily WHERE day < …`). Raw
    rows never live on Cloudflare longer than that. Only per-day **aggregates**
    (no install ids) are kept longer — see "The local archive" below.
 5. **No payloads in logs.** `log()` in `src/index.js` takes fixed labels and
    numbers only; the tests capture every log line and search it for canaries.
+   Cloudflare's Workers Logs (`[observability]` in `wrangler.toml`) do keep
+   each request's time, so an interim copy's send time sits in those logs for
+   their retention period; D1 itself stores only `received_day`, never a
+   `received_at` or any time of day.
 
 If you change what is collected, change the contract in the extension, this
 Worker, a new migration plus `schema.sql`, the extension's `telemetry.json` and
-the local archive together.
+the local archive together. That includes the `worker_daily` ledger: a new
+column, outcome or reason (including a new entry in `SHAPE_FIELDS`) is a
+change to what is collected, documented in promise 1 above.
 
 ---
 
 ## What it does
 
-- `POST /v1/heartbeat` — validate, upsert, `204`.
+- `POST /v1/heartbeat` — validate, upsert, `204`. Every heartbeat request that
+  gets past the kill switch, the path and the method also adds one to its
+  `worker_daily` ledger row (below), whether it was accepted or refused.
 - `GET` / `HEAD /known-fixes` — the bundled [known-fixes registry](#known-fixes-registry),
   `200`, `Cache-Control: public, max-age=300`. Static, the same for every
   caller, no D1, and **not logged at all** (see below).
@@ -69,19 +95,32 @@ the local archive together.
   path). No CORS headers: the caller is the VS Code extension host, not a
   browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **16,384 bytes** → `413`, counted while streaming, so a missing or
+- Body over **32,768 bytes** → `413`, counted while streaming, so a missing or
   lying `Content-Length` does not help. (A real heartbeat is under a kilobyte;
   one with every feature and error key at its cap passed 8 KB with the import
-  guide's keys, so the cap went from 8,192 to 16,384 bytes in the same change:
-  deploy the Worker before that release. The extension's `telemetryPayload`
-  test reads this limit and fails if that ever stops fitting.)
+  guide's keys, so the cap went from 8,192 to 16,384 bytes, and passes 16 KB
+  with the 2.0.0 launch keys, so it went to 32,768 bytes in 2.0.0: deploy the
+  Worker before that release. The extension's `telemetryPayload` test reads
+  this limit and fails if that ever stops fitting, and the extension trims its
+  own body below 16 KB, so a Worker still at the older cap never refuses a
+  whole day.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
-  written. `day` must be a real calendar date, not in the future and at most 7
-  days before today (UTC). Unknown top-level keys and unknown `features` /
+  written. `day` must be a real calendar date, at most 7 days before today
+  (UTC) and not in the future, except that tomorrow is accepted within an
+  hour of midnight UTC (a client clock running a little fast, whose interim
+  copy names its own new day). Unknown top-level keys and unknown `features` /
   `errors` keys are dropped; zero counts are dropped.
 - Upsert on `(install_id, day)`, last write wins.
 - A D1 failure → `503`. The extension drops failed heartbeats silently and never
-  retries, so a D1 outage loses a day of data and nothing else.
+  retries, so a D1 outage loses a day of data and nothing else. A failed
+  heartbeat upsert writes no ledger row (it is a log line only).
+- **The ledger** — one upsert per heartbeat request into `worker_daily`
+  (`n = n + 1`, each `dropped_*` plus what this body dropped), keyed on
+  `(day, ext_family, outcome, reason)`. It runs through `ctx.waitUntil`, after
+  the response is decided, inside a `try`/`catch`: a ledger failure logs
+  `ledger_error` with the error's name and never changes a response. It is
+  never written for a `404`, a `405`, `/known-fixes` or the kill switch (still
+  a `503` with no D1 access at all).
 
 ## Known-fixes registry
 
@@ -151,6 +190,20 @@ Rules for adding entries:
   those rules, so one bad entry cannot break the others.
 
 ## Deploy
+
+> **Freeze until 2.0 is on `main`.** No change to `telemetry/**` — `known-fixes.json`
+> included — merges to `main` until ERD Studio 2.0 has been released from
+> `main`. `deploy.yml` deploys whenever `main`'s `telemetry/` differs from the
+> `telemetry-worker-deployed` tag (`c01d3873`, the same as `origin/main`'s
+> `telemetry/` today), so any such merge would redeploy the 1.7.x Worker over
+> the 2.0 one that pre-releases need (hand-deployed from the 2.0 branch with
+> `npm run migrate` and then `npm run deploy`, as in "First setup, or
+> deploying by hand" below), and the 2.0 keys would be dropped. Before the
+> stable 2.0 merge, check (read-only) that `SELECT name FROM d1_migrations`
+> lists `0004_onboarding_trail.sql` and `0005_worker_daily.sql`: a migration
+> applied by hand with `d1 execute --file` is not recorded, so the workflow
+> would re-run it and fail (`duplicate column` for 0004), blocking the
+> release. The freeze ends with the 2.0.0 release from `main`.
 
 ### Automatically, on merge to `main`
 
@@ -281,8 +334,12 @@ npx wrangler tail --format pretty
 ```
 
 Lines look like `{"at":"…","event":"ok","status":204}`,
-`{"at":"…","event":"denied","status":400,"reason":"shape"}` and, once a day,
-`{"at":"…","event":"retention","deleted":42}`. That is the whole vocabulary.
+`{"at":"…","event":"denied","status":400,"reason":"shape"}`, rarely
+`{"at":"…","event":"ledger_error","kind":"Error"}` (the `worker_daily` upsert
+failed; the response was unaffected) and, once a day,
+`{"at":"…","event":"retention","deleted":42}` and
+`{"at":"…","event":"retention","table":"worker_daily","deleted":3}`. That is
+the whole vocabulary.
 
 ## Querying
 
@@ -387,7 +444,7 @@ appended after the native DBML keys:
 | Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); counts as having seen a start). Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed: asked again in a later window). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
 | Draft | the **Draft-first** start (`docs/dev/draft-first.md`): a read-only draft of the folder's logical model in an editor tab, nothing written until **Keep**. `draftShown` (a draft was shown, any source and trigger; a redraw of the page on show is not another), `draftShownAuto` (opened by the ERD Studio icon alone: the empty Diagrams view, once per folder for a find, once per machine for the example), `draftExampleShown` (an example: the coffee shop or a bundled project), `draftSourceSqlDdl` `draftSourceSemanticModel` `draftSourceDbml` `draftSourceDbt` (which kind of find, never a name, path or count). Its answer: `draftKept` (Keep wrote it, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml` / `drawFromDbt` / `exampleDiagram` / `exampleOpened`; counts as having chosen a start), `draftChangeOptions` (Change options…: the step-by-step flow, ending in a draft again), `draftDiscarded` (Discard), `draftClosed` (the tab was closed without a choice), `draftOtherStart` (one of Other Ways to Start; the start's own key says which), `draftScopeChanged` (the Folder / Model / Example switcher), `draftDetailsOpened` (the schema panel or details drawer), `draftRefreshed` (Keep found the project's files changed and redrew). `draftAfterOpenFolder`: a draft's **Open Folder…** (the no-folder example's primary, the guide's *Open your folder*) reloaded the window into a folder and that folder's draft showed at once, in place of its start suggestion (the guide carries on, without More ways to start; with diagrams there, the guide carries on on the newest instead and this is not counted). `draftUnavailable`: the automatic draft could not be built (several dialects, nothing readable after all) and was dropped quietly, leaving the sidebar's starts; a quiet run never counts the import's `*Cancelled` or `*Invalid` keys. Errors: `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK layout failed; the fallback placement was drawn) |
 | Guide | the onboarding guide, **Show Me Around** (`src/types/onboardingGuide.ts`): coach marks on the first draft (phase A: the banner, More ways to start, Keep) and then on the first diagram opened after it (phase B: a table, a relationship, the toolbar, Logical / Physical in a dbt project, the sidebar, the files and the AI helper, a finish with Star on GitHub). `guideStarted` (it began: once per run), `guideStartedFromCommand` (the **Show Me Around** command started it, beside `guideStarted`), `guideDraftDone` (phase A ended with Keep), `guideCanvasStarted` (phase B began), `guideCompleted` (Done or Star on GitHub on the last step), `guideSkippedOnDraft` / `guideSkippedOnCanvas` (Skip guide or Esc: it ends for good on that machine), `guideStarClicked` (Star on GitHub; the host opens the repository's page), `guideAiHelperClicked` (the files step's Set Up My AI Helper, beside the command's own `setupAiHelper`). Where people stop, step by step: `guideStepDraftBanner` `guideStepDraftMoreWays` `guideStepDraftKeep` `guideStepCanvasTable` `guideStepCanvasRelationship` `guideStepCanvasToolbar` `guideStepCanvasStages` `guideStepCanvasSidebar` `guideStepCanvasFiles` `guideStepCanvasFinish` (each the first time that step showed in a run; Back and Next never count a step twice), `guideBack` (Back was pressed: a step was read twice), `guideLeftDraft` (the draft was discarded or its tab closed while the guide ran on it: left without Keep or Skip). `diagramsNudgeShowMeAround` (the existing-diagrams notice's **Show Me Around**: a project that already has diagrams shows no draft, so phase A never runs there; the button opens the newest diagram and runs phase B on it, counted beside `guideStarted`, `guideStartedFromCommand` and `guideCanvasStarted`). Read `guideCompleted / guideCanvasStarted` for how many finish, and `guideDraftDone / guideStarted` beside `draftKept / draftShown` for whether the guide helps a draft become a diagram. Read the step keys in order as a funnel (installs per key): the biggest fall from one step to the next is the step people stop at; the skip keys say whether they chose to (Skip guide or Esc), `guideLeftDraft` that they left the draft, and the rest closed the tab or the window. `guideStepCanvasRelationship` is missing for a diagram with no relationship and `guideStepCanvasStages` outside a dbt project, `guideStepDraftMoreWays` when the draft offers no other start: compare each with the step before it only on installs that can see it |
-| Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
+| Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), the 7 days from the first start after a major update (2.0: `extUpdatedMajor`, the same window from `erdStudio.telemetry.majorSeenDay`; never a minor or patch update), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest; from 2.0 the last 10 places, past `TRAIL_GENERAL_MAX` = 90, take only `!code` errors and the `windowClosed` / `canvasClosed` markers, so a busy day still shows what broke and how it ended), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more), `dayContinued` (2.0: the day's first entry when its window was activated on an earlier UTC day). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
 | What it suggested | `startSuggestedConvert`, `startSuggestedDrawFromDbt`, `startSuggestedImportSemanticModel`, `startSuggestedImportSqlDdl`, `startSuggestedImportDbmlFile`, `startSuggestedBlank` (each at most 1 a day: the empty Diagrams view, or the Welcome panel's leading card, showed that suggestion; which surface is `sidebarStartShown` / `gettingStartedOpened`. One key per suggestion rather than per surface: the walkthrough's display cannot be observed, and the click keys already name the surface) |
 | Chose a start | `welcomeBlank` `welcomeImport` `welcomeExample` `welcomeConvert` `welcomeDrawFromDbt`; `walkthroughBlank` … `walkthroughDrawFromDbt`; `sidebarBlank` … `sidebarDrawFromDbt` (`welcomeOpenDiagram` is a returning user's "Open your diagrams"); the direct imports, a click less than Import…'s picker: `welcomeImportSemanticModel` `welcomeImportSqlDdl` `welcomeImportDbmlFile`, `walkthroughImportSemanticModel` `walkthroughImportSqlDdl` `walkthroughImportDbmlFile`, `sidebarImportSemanticModel` `sidebarImportSqlDdl` `sidebarImportDbmlFile`; `diagramsNudgeOpened` (its Open button), `diagramsNudgeShowMeAround` (its **Show Me Around**: the same diagram, with the guide's canvas part) |
 | Watched how | No longer sent since Show Me Around replaced the six short clips; kept for older versions: `howToClipPlayed` (the Welcome panel's short "Watch how" clip for the suggestion was played; which clip follows from that day's `startSuggested*`, or, with none that day, the example's (no folder open). Passive: a viewer who watched and closed the panel still counts `welcomeLeftNoChoice`) |
@@ -420,8 +477,10 @@ day-0 rows with no `.erd-studio`, no diagrams and no harness. From the 2.0
 release on, `firstRun` is the denominator: a tenure-0 install without it is
 a returning user. A day-0 row only arrives when the install activates again
 on a later UTC day (the heartbeat for a day is sent by a later activation),
-so an install that tried ERD Studio once and never came back is not in any
-cohort.
+so on versions before 2.0 an install that tried ERD Studio once and never came
+back is not in any cohort. From 2.0 a first-week install also sends interim
+same-day copies (`heartbeatProvisional`, B2), so such an install arrives as a
+day-0 row that still holds the marker: a bounce (see *Bounces* below).
 
 ```bash
 # The funnel: installs first seen 8–35 days ago (and on or after 2026-10-05), each counted once at the furthest step it reached.
@@ -484,7 +543,14 @@ Read the draft on its own: `draftKept / draftShown` is how often a draft became 
 diagram, and `draftShownAuto` against `draftKept`, `draftDiscarded` and
 `draftClosed` says whether opening it on the ERD Studio icon helps; a high
 `draftChangeOptions` says a default (files, layer, name, folder) guesses wrong,
-and a high `draftUnavailable` that the automatic draft is often not buildable.
+and a high `draftUnavailable` that the automatic draft is often not buildable
+(`draftUnavailable<Source>` says which draft, `draftDrop*` why).
+
+Read the first draft's quality per source `S` (2.0): `draftThin<S> / draftSource<S>`
+is how often that importer's first draft is thin, `draftKeptThin<S> / draftKept`
+whether people keep thin drafts anyway, and `draftRejectedFast<S> / draftSource<S>`
+how often a draft is rejected at a glance. The quality flags are counted off the
+onboarding trail (`featureQuiet`), so they never crowd out what the user did.
 
 Read the suggestion against the click: for each `startSuggested<X>`, the
 installs that clicked the matching start (`*Import<X>` for the imports,
@@ -522,6 +588,21 @@ ORDER BY day DESC LIMIT 50"
 
 To follow one install over its first week, add `install_id` to the SELECT and
 `ORDER BY install_id, day` — in D1 only, never into the archive.
+
+**Bounces.** An install *bounced* when its first row has tenure `'0'`, its
+latest row still contains `heartbeatProvisional` (only the interim copy of
+that day ever arrived) and it has no later row. Report it as "silent since day
+0 (provisional)" from D+1, and as final from D+8, once `MAX_HEARTBEAT_AGE_DAYS`
+(7) has passed and no final for that day can still be sent.
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT h.day, h.ext_version, COUNT(*) AS bounced FROM heartbeats h
+WHERE COALESCE(h.dev, 0) = 0 AND h.tenure = '0'
+  AND json_extract(h.features, '$.heartbeatProvisional') = 1
+  AND NOT EXISTS (SELECT 1 FROM heartbeats l WHERE l.install_id = h.install_id AND l.day > h.day)
+GROUP BY 1, 2 ORDER BY 1 DESC"
+```
 
 ### Relationship health (#133)
 
@@ -644,19 +725,120 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 
 ### Watching a release
 
-A heartbeat describes the *previous* UTC day and is sent on the next
-activation, so a release shipped on day D has its first rows on D+1 and most of
-them by D+2. Numbers are small: read `installs`, not `total`, because one
+A final heartbeat describes the *previous* UTC day and is sent on the next
+activation, so a release shipped on day D has most of its rows by D+2. Rows
+can arrive the same day: first-week installs, installs in the 7 days after a
+major update and any install that hits a new error send an interim copy (`heartbeatProvisional` in `features`) within
+minutes, and the final replaces it the next day. A row still holding
+`heartbeatProvisional` is a day whose final has not arrived (yet). Every sum
+over `features` excludes `heartbeatProvisional`. Numbers are small: read `installs`, not `total`, because one
 install can fire the same code a hundred times.
 
 The day after shipping (and again a week later):
 
+0. Ask the Worker's ledger whether the new version is getting through at all,
+   before reading anything else:
+
+   ```bash
+   npx wrangler d1 execute erd-studio-telemetry --remote --command \
+     "SELECT ext_family,outcome,reason,SUM(n),SUM(dropped_features),SUM(dropped_errors),SUM(dropped_trail) FROM worker_daily WHERE day>=date('now','-2 days') GROUP BY 1,2,3"
+   ```
+
+   The 2.0 contract starts with the `1.9.x` pre-releases: read family `1.9`
+   exactly as `2.*` here and below. Any `denied` `shape_<field>` row for a
+   2.0-contract family means the Worker refuses that version's heartbeats: a
+   Worker hotfix. (A few `shape_day` rows are a client clock more than an
+   hour fast: an interim copy names the client's own today, and the Worker
+   accepts tomorrow only within an hour of its midnight.) `body_size` and
+   `json` denials are refused before the body is read, so their family is
+   always `other`: any `body_size` row at all means a client's 16 KB size
+   guard failed, since no well-behaved version sends more than 32 KB. Any
+   `dropped_*` above 0 on a 2.0-contract family means the Worker's lists are
+   older than that version's keys: redeploy the Worker from the release's
+   `telemetry/`. A version with no ledger rows at all is one nobody is
+   running (yet).
 1. Run query 0 and check the new version is reporting at all. No rows after
    two days with the old version still reporting means the heartbeat broke.
 2. Run query 1 for the new version, then query 3.
 3. Run query 6 against the previous version.
 4. Glance at query 5 if the release touched the Move command, and at query 4
    weekly.
+5. From 2.0, compare error rates per version family and tenure (below), then
+   read the new-user first day and the import quality per source.
+
+**Reading 2.0 rows.**
+
+- *Internal installs.* The author's machines run with `ERD_STUDIO_INTERNAL=1`,
+  which the extension ORs into `dev`; the usual `COALESCE(dev, 0) = 0` leaves
+  them out. There is no setting and no other marker.
+- *Interim copies never double count.* The Worker keeps one row per install
+  and day (last write wins) and the final replaces the interim, so row and
+  install counts are right as they are. Exclude `heartbeatProvisional` from any
+  sum over `features`, and for rates use finished days only
+  (`day < date('now','-1 day')` and no `heartbeatProvisional`): a finished day
+  still holding the marker is a bounce or a lost final, counted on its own. A
+  same-day number that includes interim rows is provisional; say so.
+- *Mixed and trimmed days.* `versionMixed` marks a day two extension versions
+  counted (an update mid-day): leave it out of per-version comparisons.
+  `heartbeatTrimmed` marks a body cut under the 15 KB guard (its trail first):
+  more than a few rows means the guard or the trail needs a look.
+- *Upgraders.* `extUpdated` / `extUpdatedMajor` count the first start after an
+  update. Tenure is days since the install's first heartbeat, so an upgrader
+  reads as `1-7` or older, never `0`, unless it had telemetry off before. From
+  2.0 the 7 days from an `extUpdatedMajor` day also send the trail and the
+  onboarding interim copies, so an onboarding interim copy or a trail on an
+  older tenure *can* be an upgrader's first 2.x week. It is not proof: an
+  error-day interim copy goes out on any tenure, and a day the guide starts
+  keeps a trail on any tenure. Identify upgraders only by the install's
+  `extUpdatedMajor` day in D1 (its day `d0` to `d0 + 6`), never by tenure plus
+  a marker, and never by joining into the archive.
+
+Error rates per version family and tenure: installs with an error both
+families can send, per install-day, finished single-version days only. The
+2.0 family is the `1.9.x` pre-releases and `2.x`; the baseline is the last
+1.x stable (below `1.9`) over the 28 days before the first `1.9.x`
+heartbeat, and `<shared codes>` is the list of error codes that baseline
+recorded (never `loggedError*`). Do not compare `errors <> '{}'` across
+families: 2.0 sends codes 1.x never had (`loggedError*` for every logged
+error, `handlerFailed*`, `refreshFailed*`, `webviewNoReady*`), so the same day
+reads as an error day on 2.0 and clean on 1.x. Run it per code too (join
+`json_each(h.errors)`, count `DISTINCT install_id` per key) and read installs
+affected per 100 install-days against the baseline. Treat a shared code at
+1.5× its 1.x rate or more as a regression only when at least 2 installs are
+affected; tenure `0` (the first day) matters most.
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT CASE WHEN ext_version LIKE '2.%' OR ext_version LIKE '1.9.%' THEN '2.0' ELSE '1.x' END AS fam,
+       CASE WHEN tenure = '0' THEN '0' WHEN tenure = '1-7' THEN '1-7' ELSE '8+' END AS t,
+       COUNT(*) AS install_days, COUNT(DISTINCT install_id) AS installs,
+       SUM(CASE WHEN EXISTS (SELECT 1 FROM json_each(errors) e WHERE e.key IN (<shared codes>)) THEN 1 ELSE 0 END) AS days_with_shared_error
+FROM heartbeats
+WHERE COALESCE(dev, 0) = 0 AND day >= date('now','-14 days') AND day < date('now','-1 day')
+  AND json_extract(features, '$.heartbeatProvisional') IS NULL
+  AND json_extract(features, '$.versionMixed') IS NULL
+GROUP BY 1, 2"
+```
+
+The new-user first day: `firstRun` is the denominator; `ttfDraft*` and
+`ttfDiagram*` are recorded once per install, so installs per bucket is the
+time-to-first-draft and time-to-first-diagram distribution; bounces are the
+query under *Bounces*.
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command "
+SELECT f.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) f
+WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-14 days') AND (h.ext_version LIKE '2.%' OR h.ext_version LIKE '1.9.%')
+  AND (f.key = 'firstRun' OR f.key LIKE 'ttf%' OR f.key LIKE 'draftUnavailable%' OR f.key LIKE 'draftDrop%')
+GROUP BY 1 ORDER BY 1"
+```
+
+Import quality per source (`Dbt`, `SqlDdl`, `SemanticModel`, `Dbml`; example
+drafts carry no flags): read `draftThin<S>`, `draftRelsNone<S>`,
+`draftKeptThin<S>` and `draftRejectedFast<S>` against `draftSource<S>`, in
+installs. Swap the `LIKE` list above for `'draftSource%'`, `'draftThin%'`,
+`'draftRelsNone%'`, `'draftKeptThin%'` and `'draftRejectedFast%'`. A source
+whose drafts are mostly thin, or closed within 15 s, loses too much on import.
 
 Investigate when:
 
@@ -678,6 +860,20 @@ Investigate when:
   rename and remove cascades.
 - In the Move funnel, `relMoveCompleted` well below `relMoveStarted` minus
   `relMoveCancelled`, or any `relMoveWriteFailed`.
+- **From 2.0:** any `convertToDbmlUnrestored` (a user's files left half
+  converted: top priority); any `activationFailed` (its phase code says where);
+  any `webviewCrash*` or `webviewNoReady*`; `handlerFailed*`, `dbmlWriteOverlap`
+  or `refreshFailed*` on the new version but not the previous one;
+  `importSqlEngineLoadFailed` or `importDbmlParserThrew` (the importer itself
+  broke). `domainLoadDbml*` (other than `ParserThrew`), `modelFileDbml*` (other
+  than `Interpreter`), `domainLoadNewerSchema` and the `writeFailedPermission`
+  / `writeFailedDiskFull` features are the user's files or machine: judge them
+  by what the user is told. `loggedError*` counts every logged error by area,
+  some about the user's own files: read it only for failures no narrower code
+  explains.
+
+The scheduled **product manager** routine (`.claude/routines/product-manager.md`,
+STEP 2.0) runs the ledger check every run and these comparisons weekly.
 
 The local archive (below) already picks the new keys up: its per-day
 feature and error CSVs come from `json_each`, so `rel*` keys land there with no
@@ -686,6 +882,341 @@ version past the 90 days, add query 1's aggregate (day, version, code,
 installs, total; no install ids) to `.traffic/telemetry.mjs` as
 `telemetry-relationships.csv`, and have the `erd-traffic` report flag any
 `relInv*` row and the week-on-week change of each `relState*` share.
+
+## Keys added in 2.0.0
+
+The 2.0.0 launch telemetry appends these keys to `FEATURES`, `ERROR_CODES` and
+`TRAIL_MARKERS` (in `src/services/telemetryPayload.ts` and `src/index.js`, in
+the same order), grouped by the plan item that records each one. Every one is
+a fixed key or a presence flag computed on the device: never a name, a path,
+a message or a count of tables. A sum over `features` excludes
+`heartbeatProvisional`, which marks an interim same-day copy, not a use.
+
+**B2 — a same-day interim copy of the summary (first week, the week after a major update, or a day with a new error).**
+
+- `heartbeatProvisional` — set on an interim same-day copy of the summary only, never on the final or in the stored counters; every sum over features must exclude it.
+
+**B3 — the body was trimmed to stay under the size guard.**
+
+- `heartbeatTrimmed` — the body was over the size guard, so the trail (and then single-count feature keys) were left out.
+
+**B4 — activation timing, the host dbt search, and why activation failed (by phase).**
+
+- `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out.
+- `activationFailed` (error) — activation threw (the total; one phase code beside it).
+- `activationFailedDiscovery` (error) — activation threw while finding the project.
+- `activationFailedServices` (error) — activation threw while creating the services.
+- `activationFailedViews` (error) — activation threw while registering the views.
+- `activationFailedWatchers` (error) — activation threw while starting the file watchers.
+- `activationFailedCommands` (error) — activation threw while registering the commands.
+- `activationFailedPrompts` (error) — activation threw while running the start prompts.
+- `activationPromptFailed` (error) — the start suggestion or the automatic draft failed after activation.
+- `dbtSearchFailed` (error) — the host search for a dbt_project.yml threw (an error, not a feature: only layoutFailed may end in Failed among the features).
+
+A day whose activation threw before it recorded its outcome is still sent (it would otherwise be lost); its `activation` field then reads `no_project`, the fallback. Leave out rows whose `errors` hold `activationFailed` when counting the no-project funnel.
+
+**B5 — updates and mixed-version days.**
+
+- `extUpdated` — the first activation after ERD Studio was updated (survives the update reload).
+- `extUpdatedMajor` — that update changed the major version.
+- `versionMixed` — the day was counted by more than one ERD Studio version.
+
+**B6 — first-draft quality, as presence flags computed on the device (never a name, path or count).**
+
+- `draftOrphansMost` — a first draft of at least 3 tables where at least half the tables are in no relationship.
+- `draftEmptyTablesMost` — a first draft where at least half the tables have no columns.
+- `draftUntypedMost` — a first draft where at least half the columns have no data type.
+- `draftNoPkMost` — a SQL or DBML first draft where at least half the tables have no primary key.
+- `draftWideTablesMost` — a first draft where at least half the tables have more than 30 columns.
+- `draftRelsInferable` — a draft with no or few relationships whose column names look like keys of other drafted tables.
+- `draftLeftOut` — the draft leaves out things its source held (views, indexes, statements and the like).
+- `draftCapped` — the draft was capped at its size limit.
+- `draftReusesLibrary` — the draft reuses or changes tables already in the library.
+- `draftThinDbt` — a thin dbt first draft (3+ tables, and no relationships, mostly orphans, mostly empty or mostly untyped).
+- `draftThinSqlDdl` — a thin SQL DDL first draft.
+- `draftThinSemanticModel` — a thin semantic model first draft.
+- `draftThinDbml` — a thin DBML first draft.
+- `draftRelsNoneDbt` — a dbt first draft of 2+ tables with no relationships.
+- `draftRelsNoneSqlDdl` — a SQL DDL first draft of 2+ tables with no relationships.
+- `draftRelsNoneSemanticModel` — a semantic model first draft of 2+ tables with no relationships.
+- `draftRelsNoneDbml` — a DBML first draft of 2+ tables with no relationships.
+- `draftKeptThinDbt` — a thin dbt draft was kept.
+- `draftKeptThinSqlDdl` — a thin SQL DDL draft was kept.
+- `draftKeptThinSemanticModel` — a thin semantic model draft was kept.
+- `draftKeptThinDbml` — a thin DBML draft was kept.
+- `draftRejectedFastDbt` — a dbt draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastSqlDdl` — a SQL DDL draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastSemanticModel` — a semantic model draft was discarded or closed within 15 s, with no details opened.
+- `draftRejectedFastDbml` — a DBML draft was discarded or closed within 15 s, with no details opened.
+- `diagramDeleted` — a diagram was deleted.
+
+**B7 — why an import failed or stopped.**
+
+- `importSqlInvalidParse` — Import SQL DDL: a statement could not be parsed (the user SQL).
+- `importSqlInvalidStructure` — Import SQL DDL: the SQL parsed but its structure could not be converted.
+- `importSqlInvalidDuplicateTable` — Import SQL DDL: a table was defined twice.
+- `importSqlInvalidNoCreateTable` — Import SQL DDL: no CREATE TABLE statement was found.
+- `importSqlRejectedCreateTable` — the first rejected SQL statement was a CREATE TABLE.
+- `importSqlRejectedCreateOrReplace` — the first rejected SQL statement was a CREATE OR REPLACE.
+- `importSqlRejectedAlterTable` — the first rejected SQL statement was an ALTER TABLE.
+- `importSqlRejectedCreateView` — the first rejected SQL statement was a CREATE VIEW.
+- `importSqlRejectedCommentOn` — the first rejected SQL statement was a COMMENT ON.
+- `importSqlRejectedCreateIndex` — the first rejected SQL statement was a CREATE INDEX.
+- `importSqlRejectedGrant` — the first rejected SQL statement was a GRANT.
+- `importSqlRejectedSetUse` — the first rejected SQL statement was a SET or USE.
+- `importSqlRejectedOther` — the first rejected SQL statement was something else.
+
+The clause is matched on the device against fixed keywords: the line the parser stopped on when it starts a statement of its own (a `COMMENT ON` or `SET` run into the `CREATE TABLE` before it, for want of a semicolon), else the rejected statement's own leading keywords. Only `CREATE TABLE` and `CREATE TYPE` statements are parsed by the grammar, so the others appear only in that run-on case.
+
+- `importSqlFailPostgres` — the rejected SQL was read as PostgreSQL.
+- `importSqlFailMysql` — the rejected SQL was read as MySQL.
+- `importSqlFailSqlserver` — the rejected SQL was read as SQL Server.
+- `importSqlFailSnowflake` — the rejected SQL was read as Snowflake.
+- `importSqlFailDatabricks` — the rejected SQL was read as Databricks.
+- `importSqlTryAnotherDialect` — Try Another Dialect was pressed.
+- `quickSqlNoDialect` — the quick SQL import could not choose a dialect.
+- `quickSqlDialectFallback` — the quick SQL import fell back to another dialect.
+- `importDbmlInvalidUse` — Import DBML: the file uses other files (a multi-file dbdiagram project).
+- `importDbmlInvalidSyntax` — Import DBML: the file is not DBML the parser can read.
+- `importDbmlSeveralFieldsOneLine` — Import DBML: several fields were written on one line.
+- `importDbmlNoTables` — Import DBML: the file has no tables.
+- `importSemanticModelNoModel` — Import Semantic Model: no model was found.
+- `importSemanticModelParseTmdl` — Import Semantic Model: a TMDL model could not be read.
+- `importSemanticModelParseBim` — Import Semantic Model: a model.bim could not be read.
+- `importSemanticModelSeveral` — Import Semantic Model: more than one model was found.
+- `importLimitTooManyFiles` — an import found more files than it reads.
+- `importLimitFileTooBig` — an import file was over the size limit.
+- `importLimitTooMuchText` — the import input was over the total text limit.
+- `importInputUnreadable` — an import file could not be read.
+- `importStopNoLayers` — an import stopped: the project has no layers.
+- `importStopYamlInDbml` — an import stopped: a YAML table is in the way in a DBML project.
+- `importStopUnsaved` — an import stopped: a file it would change has unsaved edits.
+- `importStopNameTaken` — an import stopped: the diagram name is taken.
+- `importStopRefusedWrite` — an import stopped: the write was refused.
+- `writeFailedPermission` — a write failed for lack of permission (the user disk, not ours).
+- `writeFailedDiskFull` — a write failed because the disk is full.
+- `importSqlEngineLoadFailed` (error) — the SQL importer itself could not load (for example a VSIX missing its bundle).
+- `importDbmlParserThrew` (error) — the DBML parser threw while reading an import.
+- `writeFailedOurs` (error) — a write failed for a reason that is not permission or disk space.
+
+**B9 — why the automatic draft did not appear, and start-screen look failures.**
+
+- `draftUnavailableSqlDdl` — the automatic SQL DDL draft did not appear.
+- `draftUnavailableSemanticModel` — the automatic semantic model draft did not appear.
+- `draftUnavailableDbml` — the automatic DBML draft did not appear.
+- `draftUnavailableDbt` — the automatic dbt draft did not appear.
+- `draftUnavailableExample` — the automatic example draft did not appear.
+- `draftWaitedForPrompt` — the automatic draft waited because another prompt had the window.
+- `draftDropNothingFound` — a quiet draft was dropped: nothing to draw was found.
+- `draftDropUnreadable` — a quiet draft was dropped: its files could not be read.
+- `draftDropNoLayer` — a quiet draft was dropped: no layer to put it in.
+- `draftDropBadName` — a quiet draft was dropped: no valid diagram name.
+- `draftDropNothingDrawable` — a quiet draft was dropped: nothing it found could be drawn.
+- `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
+- `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
+- `startLookTimeout` — the start screen look at the folder timed out.
+- `startLookGaveUp` — the start screen gave up looking at the folder.
+- `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
+- `startContextFailed` (error) — refreshing the start screen context threw.
+
+**B10 — command failures shown to the user.**
+
+- `newDiagramNameTaken` — New Diagram: the name was taken.
+- `newDiagramNoLayers` — New Diagram: the project has no layers.
+- `commandFailedOurs` (error) — a command showed an error that names what it was doing (ours).
+- `newDiagramWriteFailed` (error) — New Diagram could not write the diagram (ours).
+- `layersFileFailed` (error) — a layer command could not read or write layers.json (ours).
+- `renameDiagramFailed` (error) — Rename Diagram failed (ours).
+- `deleteDiagramFailed` (error) — Delete Diagram failed (ours).
+
+These four name the operation and are recorded only beside `commandFailedOurs`.
+A failure that is the user's environment or file (a file another program has
+open, a folder ERD Studio may not write, a full disk, a diagram file with a
+mistake in it, a save VS Code refused) records no error code: only the
+`writeFailedPermission` / `writeFailedDiskFull` feature, when it is one.
+- `exampleSaveFailed` (error) — Open an Example Project could not save the example.
+
+**B11 — Convert to DBML: refusal kinds, stops and storage state.**
+
+- `convertRefusedReservedLayer` — Convert to DBML refused: a layer uses a reserved name.
+- `convertRefusedLegacyFiles` — Convert to DBML refused: legacy files are in the way.
+- `convertRefusedOther` — Convert to DBML refused for another reason.
+- `convertStopUnsaved` — Convert to DBML stopped: unsaved files.
+- `convertStopChangedDuringPreview` — Convert to DBML stopped: files changed during the preview.
+- `convertNothingToDo` — Convert to DBML had nothing to convert.
+- `convertLeftAsIs` — Convert to DBML finished and left some files as they were.
+- `convertOver60s` — Convert to DBML took more than 60 s to apply.
+- `storageYaml` — the open project is stored as YAML and JSON (once a day).
+- `storageDbml` — the open project is stored as DBML (once a day).
+- `storageMixed` — the open project is half converted (once a day).
+- `legacyDbmlTreeWarned` — the warning about the 1.9 pre-release DBML folder layout was shown.
+- `canvasJsonV6` — a canvas opened a v6 JSON diagram (once a day).
+- `convertToDbmlSelfCheck` (error) — Convert to DBML refused because its own self-check failed (ours).
+- `convertToDbmlUnrestored` (error) — Convert to DBML failed and some files could not be put back.
+- `convertSaveFailed` (error) — Convert to DBML could not save a file (an error, beside saveFailed).
+
+**B12 — canvas handler failures, protocol rejects, watcher refresh failures.**
+
+- `editRefused` — a canvas edit was refused with an explanation to the user.
+- `handlerFileProblem` — a canvas stage switch or comparison met a diagram file the user or an assistant broke, removed or locked (core's file and validation errors, except a DBML parser that threw or core's own `TypeError`); the user is told what is wrong with the file. Not a failure of ours, so no `handlerFailed*` beside it.
+- `canvasReconnectReload` — a canvas asked the host to reload it.
+- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it).
+- `handlerFailedModel` (error) — a model handler threw.
+- `handlerFailedColumn` (error) — a column handler threw.
+- `handlerFailedKey` (error) — a key handler threw.
+- `handlerFailedDetails` (error) — a details handler threw.
+- `handlerFailedLayout` (error) — a layout handler threw.
+- `handlerFailedAnnotation` (error) — an annotation handler threw.
+- `handlerFailedUndo` (error) — an undo or redo handler threw.
+- `handlerFailedStage` (error) — a stage switch handler threw.
+- `handlerFailedCompare` (error) — a compare or sync handler threw.
+- `handlerFailedRefresh` (error) — a refresh handler threw.
+- `handlerFailedOther` (error) — another canvas handler threw.
+- `dbmlWriteOverlap` (error) — the DBML writer produced overlapping edits (ours).
+- `messageUnknownType` (error) — the host received a canvas message type it does not know.
+- `physicalEditDropped` (error) — an edit message reached the read-only Physical stage and was dropped.
+- `refreshFailed` (error) — a file watcher refresh threw (the total; one kind beside it).
+- `refreshFailedManifest` (error) — refreshing after manifest.json changed threw.
+- `refreshFailedCatalog` (error) — refreshing after catalog.json changed threw.
+- `refreshFailedTable` (error) — refreshing after a table file changed threw.
+- `refreshFailedDiagram` (error) — refreshing after a diagram file changed threw.
+- `refreshFailedLayers` (error) — refreshing after layers.json changed threw.
+- `refreshFailedDbtYml` (error) — refreshing after a dbt yml file changed threw.
+
+**B13 — webview crashes and panels that never became ready.**
+
+- `draftPageReady` — a draft page reported ready.
+- `welcomePanelReady` — the Welcome panel reported ready.
+- `readySlowOver10s` — a panel became ready more than 10 s after it was shown.
+- `webviewCrash` (error) — a webview area crashed while rendering (the total; one area beside it).
+- `webviewCrashCanvas` (error) — the canvas crashed.
+- `webviewCrashDetailPanel` (error) — the Detail panel crashed.
+- `webviewCrashToolbar` (error) — the toolbar crashed.
+- `webviewCrashDialogs` (error) — a dialog crashed.
+- `webviewCrashCompare` (error) — the compare view crashed.
+- `webviewCrashGuide` (error) — the Show Me Around guide crashed.
+- `webviewCrashDraft` (error) — the draft page crashed.
+- `webviewCrashOther` (error) — another webview area crashed.
+- `webviewWindowError` (error) — an uncaught error in a webview.
+- `webviewRejection` (error) — an unhandled promise rejection in a webview.
+- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
+- `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
+- `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
+- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons.
+- `crashFallbackFeedback` — the crash screen, or that notification, had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
+
+**B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
+
+- `domainLoadBlocking` — a diagram load failure blocked the canvas from opening.
+- `domainLoadOverLive` — a diagram failed to reload over a live canvas (often an assistant part-way through writing).
+- `dbmlLayoutBadLine` — an erd_layout line could not be read.
+- `dbmlLayoutDuplicateKey` — erd_layout lists a table twice.
+- `dbmlLayoutBadValue` — an erd_layout value is not valid.
+- `dbmlLayoutConflict` — erd_layout holds git merge conflict markers.
+- `dbmlDiagramReadOnly` — a DBML diagram opened read-only (a repeated Note name or a second Project).
+- `dbmlPendingRefs` — a DBML diagram has relationships waiting for their tables.
+- `dbmlUnlinkedTables` — a DBML diagram draws tables that are not linked into the project.
+- `dbmlEmbeddedTablesShown` — a DBML diagram holding its own Tables was shown.
+- `diagramWarnModelNotFound` — a diagram names a table that was not found.
+- `diagramWarnForeignDbml` — a diagram holds DBML from another tool.
+- `dbmlEmbeddedTablesImport` — the import of embedded Tables was chosen.
+- `domainLoadDbmlSyntax` (error) — a DBML diagram has a syntax error.
+- `domainLoadDbmlInvalid` (error) — DBML rejects a diagram.
+- `domainLoadDbmlBinding` (error) — a DBML diagram names something not declared.
+- `domainLoadDbmlParserThrew` (error) — the DBML parser threw on a diagram (ours).
+- `domainLoadNewerSchema` (error) — a diagram was written by a newer ERD Studio.
+- `domainLoadNotADiagram` (error) — the file is not a diagram.
+- `domainLoadLegacyFormat` (error) — a diagram is in a format ERD Studio no longer reads.
+- `modelFileDbmlNotOneTable` (error) — a .dbml table file is not one Table.
+- `modelFileDbmlNameMismatch` (error) — a .dbml table file name differs from its Table.
+- `modelFileDbmlUnsupportedElement` (error) — a .dbml table file holds an element it may not.
+- `modelFileDbmlMetadataTarget` (error) — a .dbml table file sets metadata on something not in it.
+- `modelFileDbmlBinding` (error) — a .dbml table file names something not declared.
+- `modelFileDbmlInterpreter` (error) — the DBML interpreter rejected a .dbml table file.
+
+**B15 — time to the first draft and the first diagram, from the first run.**
+
+- `ttfDraftUnder1m` — the first draft showed within a minute of the first run.
+- `ttfDraft1to5m` — the first draft showed 1 to 5 minutes after the first run.
+- `ttfDraft5to30m` — the first draft showed 5 to 30 minutes after the first run.
+- `ttfDraftOver30m` — the first draft showed more than 30 minutes after the first run, the same day.
+- `ttfDraftLaterDay` — the first draft showed more than 30 minutes after the first run, on a later UTC day.
+- `ttfDiagramUnder1m` — the first diagram with tables opened within a minute of the first run.
+- `ttfDiagram1to5m` — the first diagram with tables opened 1 to 5 minutes after the first run.
+- `ttfDiagram5to30m` — the first diagram with tables opened 5 to 30 minutes after the first run.
+- `ttfDiagramOver30m` — the first diagram with tables opened more than 30 minutes after the first run, the same day.
+- `ttfDiagramLaterDay` — the first diagram with tables opened more than 30 minutes after the first run, on a later UTC day.
+
+**B16 — AI helper hooks that were skipped, and helper install failures.**
+
+- `hookSkippedJsonc` — an assistant hook was left out: its settings file has comments or trailing commas.
+- `hookSkippedNotJson` — an assistant hook was left out: its settings file is not JSON.
+- `hookSkippedShape` — an assistant hook was left out: its hooks value has another shape.
+- `hookSkippedOwnScript` — an assistant hook was left out: a script the user wrote is at its path.
+- `hookSkippedNewerScript` — an assistant hook was left out: the script is from a newer ERD Studio.
+- `hookSkippedCopilot` — the GitHub Copilot hook was left out.
+- `hookSkippedCodex` — the Codex hook was left out.
+- `hookSkippedGemini` — the Gemini CLI hook was left out.
+- `harnessInstallFailed` (error) — an AI helper install failed (the total; one target beside it).
+- `harnessInstallFailedClaude` (error) — the Claude Code helper install failed.
+- `harnessInstallFailedAgents` (error) — the Agent Skills helper install failed.
+- `harnessInstallFailedCopilot` (error) — the GitHub Copilot helper install failed.
+- `harnessInstallFailedGemini` (error) — the Gemini CLI helper install failed.
+- `harnessInstallFailedCodex` (error) — the Codex helper install failed.
+- `launcherRefreshFailed` (error) — refreshing the installed CLI launcher failed.
+- `harnessUpdateFailed` (error) — Install AI Helper Files or Update All failed.
+
+**B17 — big diagrams: slow loads, layout failures and the draft layout.**
+
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day).
+- `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
+- `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
+- `draftLayoutOver5s` — a draft page layout took more than 5 s.
+- `draftFitZoomUnder30` — a draft fitted to the screen at under 30% zoom.
+- `draftLayoutFallback` — a draft page layout ran out of stack and was laid out again with the stack-safe placement.
+- `draftClosedWhileLayingOut` — a draft page closed before its layout finished.
+- `layoutFailedTimeout` (error) — an auto layout timed out.
+- `layoutFailedWorker` (error) — the layout worker crashed.
+- `layoutFailedStack` (error) — an auto layout ran out of stack.
+
+**B18 — known-fix prompt answers, Welcome failures and small onboarding dead ends.**
+
+- `knownFixOffered` — the "a newer version fixes this" notification was shown.
+- `knownFixUpdate` — its Update button was pressed.
+- `knownFixReload` — its Reload Window button was pressed.
+- `knownFixDismissed` — it was dismissed.
+- `trySampleCloned` — Git's clone of the sample project ran to the end without an error (`git.clone` resolves with nothing, so a folder dialog the user closed counts too).
+- `trySampleZip` — the sample project was downloaded as a zip.
+- `trySampleGithub` — the sample project's GitHub page was opened.
+- `noFolderWarned` — a command that needs a folder was run with none open.
+- `welcomeFailedStart` (error) — a Welcome panel start button failed.
+- `welcomeFailedSetup` (error) — the Welcome panel Set Up My AI Helper failed.
+- `welcomeFailedOpenAssistant` (error) — the Welcome panel Open Claude Code or Open Copilot Chat failed.
+- `welcomeFailedSample` (error) — the Welcome panel Try the Sample Project failed.
+- `welcomeFailedStatus` (error) — the Welcome panel status check failed.
+- `welcomeFailedOther` (error) — another Welcome panel message failed.
+- `startCommandFailed` (error) — a start command run from the start screen threw.
+- `sidebarListFailed` (error) — the Diagrams view could not list the diagrams.
+- `exampleOpenFailed` (error) — an example could not be opened.
+- `guideOpenFailed` (error) — the Show Me Around guide could not be opened.
+
+**B19 — every logged error, by area.**
+
+- `loggedError` (error) — ERD Studio logged an error (the total; one area beside it).
+- `loggedErrorCanvas` (error) — a logged error from the canvas.
+- `loggedErrorImport` (error) — a logged error from an import.
+- `loggedErrorDraft` (error) — a logged error from a draft.
+- `loggedErrorSidebar` (error) — a logged error from the sidebar.
+- `loggedErrorHarness` (error) — a logged error from the AI helper.
+- `loggedErrorDbt` (error) — a logged error from the dbt integration.
+- `loggedErrorOther` (error) — a logged error from anywhere else.
+
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
+
+**B15 — trail marker.**
+
+- `dayContinued` (trail marker) — the first entry of a trail whose window was activated on an earlier UTC day (it crossed midnight).
 
 ## The local archive
 
@@ -717,6 +1248,12 @@ npx wrangler dev            # http://127.0.0.1:8787, local D1 simulation
 
 Local state lives in `.wrangler/` (gitignored).
 
+To mark your own everyday installs so their rows can be left out like a dev
+host's, start VS Code with `ERD_STUDIO_INTERNAL=1` in its environment (for
+example `launchctl setenv ERD_STUDIO_INTERNAL 1` on macOS, then restart VS
+Code). The extension reads it once at activation and ORs it into `dev`. There
+is no setting for it.
+
 ## Checks
 
 ```bash
@@ -727,12 +1264,15 @@ npm run check  # node --check, then tsc --noEmit over the JSDoc types (strict)
 The tests drive the Worker's `fetch` and `scheduled` handlers against an
 in-memory D1 stand-in that records every statement and bound parameter. They
 cover routing, the kill switch, the body cap (including a streamed body with no
-`Content-Length`), every rejection path, unknown-key dropping and the exact
-column binding. The last group checks the privacy promises across the whole
+`Content-Length`), every rejection path, unknown-key dropping, the exact
+column binding and the `worker_daily` ledger (each outcome and reason, the
+dropped counts, the version family, no row for the kill switch, a `404` / `405`
+or a failed upsert, and a ledger failure that leaves the response alone). The last group checks the privacy promises across the whole
 run: no IP, user-agent, country or other header value is ever bound to SQL,
 and no payload, header or install id ever appears in a log line.
 `test/schema.test.mjs` holds `schema.sql`, `migrations/` and the Worker's
-`INSERT` to the same columns.
+`INSERT`s to the same columns, table by table, and the ledger's `ON CONFLICT`
+to the `worker_daily` primary key.
 
 They are invisible to the repo's vitest suite (whose `include` is
 `test/unit/**` at the root); `ci.yml`'s `telemetry` job runs them on every PR,
@@ -746,11 +1286,15 @@ must stay green in a clone that has never touched this directory.
 
 > Moved from the root `CLAUDE.md`. Read before touching `src/services/telemetryPayload.ts`, `telemetryService.ts` or any `telemetry.*` call site.
 
-One anonymous heartbeat per UTC day, describing the **previous** day. The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
+One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0) at most `MAX_PROVISIONAL_SENDS` = 3 same-day interim copies of today (B2, below). The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
 
 - **`src/services/telemetryPayload.ts`** is pure (no `vscode`, no Node built-ins): `FEATURES` and `ERROR_CODES` (typed unions — an unlisted key cannot be recorded; as with the getting-started funnel keys, user cancels and routes such as `drawCancelScope` / `setupHelperCancelled` / `openClaudeCli` are FEATURES, and only something that broke (`drawWriteFailed`, `firstLayoutFailed`, `launcherRuntimeUnverified`, …) is an ERROR_CODE, which a test enforces; and a test fails if the Worker's lists in `telemetry/src/index.js` differ key for key or in order — a new key is harmless to an old Worker, which drops unknown `features` keys one at a time, but redeploy it before the extension ships or the new counts are lost), the bucket helpers, `DailyCounters`, the `record*` reducers (caps: activations 50, canvasOpens 200, each feature/error 100), `heartbeatDue()` (skips a day with nothing counted and a day older than the Worker's 7-day window) and `buildHeartbeat()`, which rebuilds the body field by field from the allowlists so nothing stray in stored state reaches the wire. There is no field that can hold a name, path or message — keep it that way; `test/unit/telemetryPayload.test.ts` feeds real-looking names and paths through every recorder and asserts none appear in the JSON.
-- **`src/services/telemetryService.ts`** owns globalState (counters, the random `installId` — `crypto.randomUUID()`, minted once per VS Code profile and **never rotated** (it was, every 30 days, until 1.6.2), **never** `vscode.env.machineId` — the first-seen day for `tenure`, and the on-device retention state: recent active / canvas days (`rememberDay`, 28-day window) and the first canvas day, sent only as buckets and cleared by `discard()`). Every `update()` stamps the counters with the running `CounterEnv` (`stampEnv`: ext / VS Code version, `hostBucket(appName)`, `remoteBucket(remoteName, uiKind)`, `dev` from `extensionMode`), so a day is labelled with the build that counted it, the day rollover (on activation and an hourly `setInterval`, cleared on dispose), and the send: `vscode.env.createTelemetryLogger(sender, { ignoreBuiltInCommonProperties: true })` → `logUsage('heartbeat', …)`. VS Code's logger prefixes the event name and clones/scrubs the data, so the sender posts the body `buildHeartbeat()` produced (held in `outgoing`) rather than what arrives through it; `sendErrorData` is a no-op. POST to `TELEMETRY_ENDPOINT` with a 5 s `AbortController`; every failure is swallowed — no retry, toast or log. The URL passes through `safeBaseUrl()` (exported from `feedbackAnalysisService`) — one https rule for every outbound base URL. `setTelemetryEndpointForTests()` is the test seam.
+- **`src/services/telemetryService.ts`** owns globalState (counters, the random `installId` — `crypto.randomUUID()`, minted once per VS Code profile and **never rotated** (it was, every 30 days, until 1.6.2), **never** `vscode.env.machineId` — the first-seen day for `tenure`, and the on-device retention state: recent active / canvas days (`rememberDay`, 28-day window) and the first canvas day, sent only as buckets and cleared by `discard()`). Every `update()` stamps the counters with the running `CounterEnv` (`stampEnv`: ext / VS Code version, `hostBucket(appName)`, `remoteBucket(remoteName, uiKind)`, `dev` from `extensionMode`), so a day is labelled with the build that counted it, the day rollover (on activation and an hourly `setInterval`, cleared on dispose), and the send: `vscode.env.createTelemetryLogger(sender, { ignoreBuiltInCommonProperties: true })` → `logUsage('heartbeat', …)`. VS Code's logger prefixes the event name and clones/scrubs the data, so the sender posts the body `buildHeartbeat()` produced (held in `outgoing`) rather than what arrives through it; `sendErrorData` is a no-op. POST to `TELEMETRY_ENDPOINT` with a 5 s `AbortController`; every failure is swallowed — no retry, toast or log (a retry for the final is deferred to after 2.0). Bodies wait in an in-order queue (`outgoing`) and are queued only while `logger.isUsageEnabled`, so an interim copy never replaces a final waiting to be posted and nothing is posted on its own later. The URL passes through `safeBaseUrl()` (exported from `feedbackAnalysisService`) — one https rule for every outbound base URL. `setTelemetryEndpointForTests()` is the test seam.
 - **Switches.** Nothing is recorded or sent unless `vscode.env.isTelemetryEnabled` **and** `erdStudio.telemetry.enabled` (read via `getErdStudioSetting`, user scope only) allow it; switching either off (`onDidChangeTelemetryEnabled`, `onDidChangeConfiguration`) discards the day's counters so they are never sent later. The service is constructed at the top of `activate()`, before the no-project return, so `no_project` activations count.
+- **Interim copies (2.0, B2).** `TelemetryService.update()` compares the counters before and after each change (`provisionalTrigger`): a new error code today (on any tenure — `relationshipInvariants` goes through `update` too) or an onboarding end-point (`PROVISIONAL_ONBOARDING_FEATURES`: a draft answered, the guide skipped or left, a fast rejection) or the day's first diagram with tables schedules `sendProvisional` 30 s later (debounced, an error outranks onboarding); a first-week day also gets one look 2 min after `start()`. `provisionalDue` sends only today's counters, fewer than 3 a day (`erdStudio.telemetry.provisional` = `{ day, sent, hash }` in globalState, shared by every window), when the body's `heartbeatHash` (FNV-1a of the JSON, `heartbeatProvisional` left out; it never leaves the device) differs from the last one, with something counted and an activation (unless `activationFailed`). Onboarding and settle copies need an onboarding day (`onboardingWindowDay`): a first-week day of an install whose first counted start was not an update (`erdStudio.telemetry.upgradedInstall`), or any day in the 7 after a major update (`majorSeenDay`); otherwise only error copies are sent. The body is the final's plus `features.heartbeatProvisional = 1`, never in the stored counters; it goes through the same `logUsage` path. Timers are unref'd and cleared on dispose and on opt-out; there is no send on deactivate (it is synchronous and also runs on reload).
+- **Size guard (2.0, B3).** Every body passes `trimHeartbeat()` before `logUsage`: over `HEARTBEAT_SOFT_LIMIT` = 15,000 bytes (under the Worker's old 16,384 cap as well as the new 32,768), it loses `trail` and `trailDropped` together (the Worker refuses one without the other), then feature keys counted once, then other feature keys, then error codes, each newest first, until it fits, and gains `heartbeatTrimmed`. The flag is set in the body only: today's counters describe a different day from the one trimmed.
+- **Updates and internal installs (2.0, B5).** `notePendingUpdate()` runs in `activate()` before the update reload can return, and stores `erdStudio.telemetry.pendingUpdate` = `{ major }` (never a version); the next `start()` clears it and counts `extUpdated` (plus `extUpdatedMajor`). `stampEnv` runs before each reducer and sets `versionMixed` when another extension version had already counted something today (the env `nextDay` carries over to an empty day does not count). `process.env.ERD_STUDIO_INTERNAL === '1'`, read once in the constructor, is ORed into `dev`; there is no setting. A major update (`{ major: true }`) also stores `erdStudio.telemetry.majorSeenDay` = that start's UTC day (never a version, never sent; only while telemetry is on, cleared on opt-out with the rest): `trailKept` and `onboardingWindowDay` keep the trail and the onboarding interim copies for `TRAIL_DAYS` from it (`withinTrailDays`), with the same codes and caps as a first week. A minor or patch update never writes it; a later major update moves it to its own day.
+- **Time to first draft and diagram (2.0, B15).** `featureOnce('firstRun')` stores `erdStudio.telemetry.firstRunAt` (epoch ms, never sent). The first `draftSource*` feature (`FIRST_DRAFT_FEATURES`, the draft preview's non-example sources) and the first `canvasOpened` with tables each record one `ttf*` bucket (`ttfFeature`), once per install (`firstDraftDone` / `firstDiagramDone`); installs without a `firstRunAt` (from before 2.0) are never timed. `withTrail` puts `dayContinued` first when today's trail begins in a window activated on an earlier UTC day. `discard()` also clears the interim record, the pending update, `firstRunAt` and both done flags.
 - **Call sites** use the `telemetry` facade — one short line each, taking only fixed keys, booleans and counts, and a no-op while no service exists (tests, the CLI, the MCP server). Canvas edit kinds are counted in one place, the `EDIT_FEATURES` map in `SemanticEditorProvider` (one per accepted message, after the physical guard); layout timing comes from the webview's `layoutFinished` message (telemetry only, physical allowlist) and video progress from the Welcome panel's `videoProgress`. Detected assistants (`detectAiAssistants()`, deferred off the activation path) and version-marked harness targets are recorded on activation; `domainCreatedExternal` comes from the semantic watcher's `created` flag, with `subjectAreasCreatedHere` excluding createDomain / renameDomain, which write outside the own-write tracker. They live in `extension.ts` (activation outcome, Draw from dbt via `src/commands/drawFromDbt.ts`, Export Diagram via `src/commands/exportDiagram.ts`, harness installs via `recordHarnessInstalls`, `migrateToV5`, `layersInvalid`, the no-canvas Send Feedback), `SemanticEditorProvider` (canvas open on `ready` with stage / format / model count / manifest state / catalog, physical stage, compare, sync plan, dbt compile, Execute with Claude, notes, host-requested auto layout, add model / relationship, `addModelsFromDbt` (`addFromDbt`), a logical canvas opening on zero models (`emptyCanvas`), feedback dialog open, `domainLoad`, `editRejected`) and `GettingStartedPanel` (the Claude setup-skill install). Services the CLI and MCP server share stay vscode-free: `ManifestService` (`onLoadFailure`: missing / malformed / timeout — `ManifestParseTimeoutError`), `CatalogService` (`onReadFailure`) and `TableLibraryService` (`onParseFailure`, once per broken file) take a plain callback that only `activate()` sets. The generic `agents` harness target is counted as `harnessInstallAgents`. `runDbtParse` / `runDbtCompile` record fixed outcome and category keys only (`DBT_PARSE_FAILURE_FEATURES`, `NO_CREDS_ADAPTER_FEATURES`); dbt's output stays in memory and in the user's terminal, and their own errors are `dbtRunFailed` with nothing but `err.name` in the log.
 - **Physical tooling** — how the workspaces ERD Studio is used in build their tables, so the Physical stage learns the most-used non-dbt sources first. `src/services/physicalTooling.ts` (pure, vscode-free, every file access through an injected `ToolingProbe`) returns subsets of `PHYSICAL_TOOLS` / `PLATFORMS` and nothing else: marker file names (`dbt_project.yml`, `databricks.yml`, `*.sqlproj`, Fabric `<item>.<Type>/.platform`, `*.pbip`, `flyway.conf`, `schema.prisma`, …), plus a fixed pattern in the head of a few small files — `CREATE TABLE` in up to 40 `.sql` files (not under `macros/`), a Databricks notebook header, SQLMesh's `gateways:` / `model_defaults:`, a SQL project's `<DSP>`, a `dbt-<adapter>` package, a `.dbml` that is not our own export. The dbt warehouse comes from the first 8 KB of `manifest.json` (`metadata.adapter_type`); dbt's `profiles.yml` (credentials) is never read. `recordPhysicalTooling(context)` in `extension.ts` runs it 15 s after both activation outcomes (`no_project` too: outside dbt repos ERD Studio activates only when someone opens it), once per workspace per UTC day (`erdStudio.telemetry.physicalToolingDay` in `workspaceState`), and not at all while `telemetry.enabled()` is false; `vscode.workspace.findFiles` with `TOOLING_EXCLUDE` (dependencies, build output, virtual environments, `.erd-studio`). Unlike `assistants`, `nextDay` does not carry it over — it describes workspaces, not the machine. `test/unit/physicalTooling.test.ts` drives it over an in-memory workspace through the real globs and asserts nothing but allowlisted values comes back.
 - **Relationship health (#133)** — `src/services/relationshipHealth.ts` (pure, vscode-free, linear, never throws, returns fixed codes and counts only): `commitRelationshipWrite` runs `auditRelationshipWrite(op, input, plan)` on the planned result inside the `applySubjectAreaEdit` mutator, **before** `applyEdit` — broken invariants go to `telemetry.relationshipInvariants` (`relInv*` errors) plus one `console.warn` of codes; it **never blocks or alters the edit** — and, on success, the behaviours used to `telemetry.relationshipUsage` (`relDragTurned` = a one-to-many drawn in a library project, stored turned; `relDirectionAsked` / `relCreateAnyway` are read at the host from the payload and key evidence, so no telemetry message was added). The Move runs `checkLibraryRewrite` before writing and records `moveUsage(plan)` on completion; `recordCanvasOpen` (logical) records `surveyLibrary` as once-a-day `relState*` presence flags. Refusals the user is told about throw `EditRefused` (provider) or `RelationshipsRewriteRefused` (`TableLibraryService`, which also calls `onSyncRefused` → `relSyncRefused`); only other throws in a relationship handler count as `relHandlerFailed`. `planRelationshipWrite`'s keys-win refusal carries `reason: 'keysWin'` (→ `relSwapRefusedKey`). Invariant groups come from what the canvas draws (as `drawnGroupOf`), so `relationshipHealth.statespace.test.ts` holds the check silent over the exhaustive checker's universes — a new false positive fails CI. Monitoring queries and the release checklist are in `telemetry/README.md`.

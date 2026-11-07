@@ -237,6 +237,26 @@ export function isDbmlSelfCheckRefusal(refusal: string): boolean {
   return refusal.endsWith(DBML_SELF_CHECK_REFUSAL_END);
 }
 
+/** How a reserved-layer refusal starts (its kind is read back from it: {@link dbmlConversionRefusalKind}). */
+const RESERVED_LAYER_REFUSAL_START = 'This project has a layer called "';
+/** How the 1.9 pre-release files refusal starts. */
+const LEGACY_FILES_REFUSAL_START = 'Delete these ERD Studio 1.9 pre-release files first';
+
+/** A refusal's kind, for telemetry only (the refusal's text, with its paths and names, stays in the log). */
+export type DbmlConversionRefusalKind = 'selfCheck' | 'reservedLayer' | 'legacyFiles' | 'other';
+
+/**
+ * The kind of a refusal in {@link DbmlConversionPlan.refusals}: the planner's
+ * self-check (ours), a layer with a reserved name, the 1.9 pre-release files
+ * in the way, or anything else (a DBML file Convert must change but cannot).
+ */
+export function dbmlConversionRefusalKind(refusal: string): DbmlConversionRefusalKind {
+  if (isDbmlSelfCheckRefusal(refusal)) return 'selfCheck';
+  if (refusal.startsWith(RESERVED_LAYER_REFUSAL_START)) return 'reservedLayer';
+  if (refusal.startsWith(LEGACY_FILES_REFUSAL_START)) return 'legacyFiles';
+  return 'other';
+}
+
 /** What the planner is doing, for a progress message. */
 export type DbmlConversionPhase = 'planning' | 'checking';
 
@@ -715,7 +735,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
   if (reserved.length > 0) {
     const plan = emptyPlan();
     for (const name of reserved) {
-      plan.refusals.push(`This project has a layer called "${name}". ${reservedLayerRefusal(name)} Rename that layer (its folder and its id in layers.json), then convert.`);
+      plan.refusals.push(`${RESERVED_LAYER_REFUSAL_START}${name}". ${reservedLayerRefusal(name)} Rename that layer (its folder and its id in layers.json), then convert.`);
     }
     return plan;
   }
@@ -726,7 +746,7 @@ export async function planDbmlConversion(input: DbmlConversionInput, options: Db
     const shown = legacy.slice(0, LEGACY_FILES_LISTED);
     const more = legacy.length - shown.length;
     plan.refusals.push(
-      'Delete these ERD Studio 1.9 pre-release files first (they are not converted and would be left beside the new tree): ' +
+      `${LEGACY_FILES_REFUSAL_START} (they are not converted and would be left beside the new tree): ` +
         `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}.`,
     );
     return plan;

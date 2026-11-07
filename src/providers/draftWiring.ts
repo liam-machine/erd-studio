@@ -17,7 +17,16 @@
  * unit-tested with plain fakes.
  */
 
+import {
+  draftKeptQualityFeature,
+  draftQualityFlags,
+  draftRejectedFastFeature,
+  draftShownQualityFeatures,
+  type DraftQuality,
+} from '../services/draftTelemetry';
+import { crashFeedbackPrefill, noReadyFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
+import { draftLayoutFeatures, webviewErrorCodes } from '../services/telemetryCanvas';
 import type { GuideActionPayload } from '../types/onboardingGuide';
 import type {
   Draft,
@@ -61,6 +70,16 @@ export interface TrackedDraftPreviewDeps {
   claim(): void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
   feature(key: TelemetryFeature): void;
+  /**
+   * Counts a key without adding it to the onboarding trail (`telemetry.featureQuiet`):
+   * the draft's quality flags (`draftTelemetry.ts`), so they never use up the first
+   * day's trail. Absent: they are not counted.
+   */
+  featureQuiet?(key: TelemetryFeature): void;
+  /** Registers the listener for the page's details being opened (`draftPreviewEvents`' `onDetailsOpened`). */
+  onDetailsOpened?(listener: () => void): void;
+  /** The clock (tests). Default `Date.now`. */
+  now?(): number;
   /** A Keep wrote the draft (Import DBML's or Import from dbt's writer: into this folder). */
   onKept(draft: Draft): unknown;
   /** Every draft handed to the page (the automatic draft's "was anything shown?"). */
@@ -94,6 +113,25 @@ export interface TrackedDraftPreviewDeps {
 export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPreviewDeps): DraftPreview {
   /** The page's last answer while it stays open: `scope` and `keep` are followed by a redraw. */
   let lastAnswer: DraftAnswer['kind'] | undefined;
+  const now = (): number => (deps.now ? deps.now() : Date.now());
+  /** When the page (not a redraw of it) showed, and whether its details were opened since: a rejection at a glance. */
+  let askedAt = 0;
+  let detailsSeen = false;
+  deps.onDetailsOpened?.(() => { detailsSeen = true; });
+  /** Quality keys are telemetry only: a failure to work them out never reaches the flow. */
+  const quiet = (keys: () => readonly (TelemetryFeature | undefined)[]): void => {
+    if (!deps.featureQuiet) return;
+    try {
+      for (const key of keys()) if (key) deps.featureQuiet(key);
+    } catch { /* never breaks the draft */ }
+  };
+  const quality = (draft: Draft): DraftQuality | null => {
+    try {
+      return draftQualityFlags(draft);
+    } catch {
+      return null;
+    }
+  };
   return {
     isOpen: () => inner.isOpen(),
     showing: () => inner.showing?.(),
@@ -109,6 +147,10 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
         if (draft.source === 'example' || draft.source === 'exampleProject') deps.feature('draftExampleShown');
         const source = DRAFT_SOURCE_FEATURES[draft.source];
         if (source) deps.feature(source);
+        // Does the first draft look any good? Flags only, off the trail (B6).
+        quiet(() => draftShownQualityFeatures(quality(draft)));
+        askedAt = now();
+        detailsSeen = false;
       }
       lastAnswer = undefined;
       // Phase A of the onboarding guide: decided (and its flag written) before the page shows.
@@ -119,6 +161,9 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
       lastAnswer = answer.kind;
       const counted = ANSWER_FEATURES[answer.kind];
       if (counted) deps.feature(counted);
+      if (answer.kind === 'discard' || answer.kind === 'closed') {
+        quiet(() => [draftRejectedFastFeature(draft.source, now() - askedAt, detailsSeen)]);
+      }
       if (answer.kind === 'discard' || answer.kind === 'closed') deps.guide?.draftLeft(draft);
       if (answer.kind === 'otherStart') {
         const { command, args } = DRAFT_OTHER_START_COMMANDS[answer.start];
@@ -136,6 +181,8 @@ export function trackedDraftPreview(inner: DraftPreview, deps: TrackedDraftPrevi
           settled = true;
           if (outcome.kept) {
             deps.feature('draftKept');
+            // The draft this Keep answered: the one actually written, after any scope change.
+            quiet(() => [draftKeptQualityFeature(quality(draft))]);
             deps.guide?.draftKept(draft);
             if (draft.keep.writer === 'importDbml' || draft.keep.writer === 'drawFromDbt') {
               Promise.resolve(deps.onKept(draft)).then(undefined, (err: unknown) => deps.warn?.('Could not mark the folder as started:', err));
@@ -153,11 +200,53 @@ export function draftPreviewEvents(
   feature: (key: TelemetryFeature) => void,
   error: (code: TelemetryErrorCode) => void,
   guide?: (action: GuideActionPayload) => void,
+  /** Told when the details open (`trackedDraftPreview`'s `onDetailsOpened`: a later discard is not a rejection at a glance). */
+  onDetailsOpened?: () => void,
+  /** Open Send Feedback (`erdStudio.reportBug`) with this prefill: the crash screen's Send Feedback. */
+  openFeedback?: (prefill: FeedbackPrefill) => unknown,
 ): DraftPreviewEvents {
+  // The built-in examples are left out of the layout keys (2.0 B17): their size is ERD Studio's, not the user's.
+  const isExample = (source: DraftSource): boolean => source === 'example' || source === 'exampleProject';
   return {
-    detailsOpened: () => feature('draftDetailsOpened'),
+    detailsOpened: () => {
+      feature('draftDetailsOpened');
+      onDetailsOpened?.();
+    },
     layoutFailed: () => error('draftLayoutFailed'),
     ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
+    pageReady: (_source, slow) => {
+      feature('draftPageReady');
+      if (slow) feature('readySlowOver10s');
+    },
+    noReady: () => error('webviewNoReadyDraft'),
+    pageError: (_source, kind) => {
+      for (const code of webviewErrorCodes(kind, 'draft')) error(code);
+    },
+    // The crash screen's buttons: the preview has reloaded the page for Reload.
+    crashFallback: (_source, action, detail) => {
+      if (action === 'reload') {
+        feature('crashFallbackReload');
+        return;
+      }
+      feature('crashFallbackFeedback');
+      void Promise.resolve(openFeedback?.(crashFeedbackPrefill('draft', detail ? { detail } : {}))).catch(() => undefined);
+    },
+    // The same two buttons, from the host's notification for a page that never became ready.
+    noReadyChoice: (_source, action) => {
+      if (action === 'reload') {
+        feature('crashFallbackReload');
+        return;
+      }
+      feature('crashFallbackFeedback');
+      void Promise.resolve(openFeedback?.(noReadyFeedbackPrefill('draft'))).catch(() => undefined);
+    },
+    layoutFinished: (source, layout) => {
+      if (isExample(source)) return;
+      for (const key of draftLayoutFeatures(layout)) feature(key);
+    },
+    closedWhileLayingOut: (source) => {
+      if (!isExample(source)) feature('draftClosedWhileLayingOut');
+    },
   };
 }
 

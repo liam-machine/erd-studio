@@ -100,7 +100,8 @@ describe('readDbml: diagnostics', () => {
   it('never throws, even for a parser that does', () => {
     const broken = { ...v10, Compiler: class { constructor() { throw new Error('boom'); } } } as unknown as DbmlParserModule;
     const result = readDbml('Table a { id int }', broken);
-    expect(result).toEqual({ ok: false, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser stopped: boom' }] });
+    // `threw`: the parser's failure, not the file's (Import DBML counts importDbmlParserThrew).
+    expect(result).toEqual({ ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser stopped: boom' }] });
   });
 
   it('reads an empty file as an empty model', () => {
