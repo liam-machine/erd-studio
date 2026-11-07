@@ -1,0 +1,1077 @@
+// https://dbml.dbdiagram.io/docs#project-definition
+// Using dbml-renderer to generate the SVG
+// dbml-renderer -i system_documentation\schema.dbml -o .\system_documentation\media\schema.generated.svg
+Project "baw-server on PostgreSQL" {
+  database_type: 'PostgreSQL'
+  Note: 'Pre-release version 2024-11-05'
+}
+
+TableGroup CMS {
+  "comfy_cms_categories"
+  "comfy_cms_categorizations"
+  "comfy_cms_files"
+  "comfy_cms_fragments"
+  "comfy_cms_layouts"
+  "comfy_cms_pages"
+  "comfy_cms_revisions"
+  "comfy_cms_sites"
+  "comfy_cms_snippets"
+}
+
+TableGroup Rails {
+  "ar_internal_metadata"
+  "schema_migrations"
+}
+
+
+
+Enum "analysis_jobs_item_result" {
+  "success"
+  "failed"
+  "killed"
+  "cancelled"
+}
+
+
+Enum "analysis_jobs_item_status" {
+  "new"
+  "queued"
+  "working"
+  "finished"
+}
+
+Enum "analysis_jobs_item_transition" {
+  "queue"
+  "retry"
+  "cancel"
+  "finish"
+}
+
+Table "active_storage_attachments" {
+  "id" bigint [pk, not null]
+  "name" "character varying" [not null]
+  "record_type" "character varying" [not null]
+  "record_id" bigint [not null]
+  "blob_id" bigint [not null]
+  "created_at" timestamp [not null]
+
+  Indexes {
+    blob_id [type: btree, name: "index_active_storage_attachments_on_blob_id"]
+    (record_type, record_id, name, blob_id) [type: btree, unique, name: "index_active_storage_attachments_uniqueness"]
+  }
+}
+
+Table "active_storage_blobs" {
+  "id" bigint [pk, not null]
+  "key" "character varying" [not null]
+  "filename" "character varying" [not null]
+  "content_type" "character varying"
+  "metadata" text
+  "byte_size" bigint [not null]
+  "checksum" "character varying" [not null]
+  "created_at" timestamp [not null]
+  "service_name" "character varying" [not null]
+
+  Indexes {
+    key [type: btree, unique, name: "index_active_storage_blobs_on_key"]
+  }
+}
+
+Table "active_storage_variant_records" {
+  "id" bigint [pk, not null]
+  "blob_id" bigint [not null]
+  "variation_digest" "character varying" [not null]
+
+  Indexes {
+    (blob_id, variation_digest) [type: btree, unique, name: "index_active_storage_variant_records_uniqueness"]
+  }
+}
+
+Table "analysis_jobs" {
+  "id" integer [pk, not null]
+  "name" "character varying" [not null]
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "description" text
+  "started_at" timestamp
+  "overall_status" "character varying" [not null]
+  "overall_status_modified_at" timestamp [not null]
+  "overall_count" integer [not null]
+  "overall_duration_seconds" numeric(14,4) [not null]
+  "overall_data_length_bytes" bigint [not null, default: 0]
+  "filter" jsonb [note: 'API filter to include recordings in this job. If blank then all recordings are included.']
+  "system_job" boolean [not null, default: false, note: 'If true this job is automatically run and not associated with a single project. We can have multiple system jobs.']
+  "ongoing" boolean [not null, default: false, note: 'If true the filter for this job will be evaluated after a harvest. If more items are found the job will move to the processing stage if needed and process the new recordings.']
+  "project_id" integer [note: 'Project this job is associated with. This field simply influences which jobs are shown on a project page.']
+  "retry_count" integer [not null, default: 0, note: 'Count of retries']
+  "amend_count" integer [not null, default: 0, note: 'Count of amendments']
+  "suspend_count" integer [not null, default: 0, note: 'Count of suspensions']
+  "resume_count" integer [not null, default: 0, note: 'Count of resumptions']
+
+  Indexes {
+    (name, creator_id) [type: btree, unique, name: "analysis_jobs_name_uidx"]
+    creator_id [type: btree, name: "index_analysis_jobs_on_creator_id"]
+    deleter_id [type: btree, name: "index_analysis_jobs_on_deleter_id"]
+    project_id [type: btree, name: "index_analysis_jobs_on_project_id"]
+    updater_id [type: btree, name: "index_analysis_jobs_on_updater_id"]
+  }
+}
+
+Table "analysis_jobs_items" {
+  "id" bigint [pk, not null]
+  "analysis_job_id" integer [not null]
+  "audio_recording_id" integer [not null]
+  "queue_id" "character varying(255)"
+  "status" analysis_jobs_item_status [not null, default: `'new'::public.analysis_jobs_item_status`, note: 'Current status of this job item']
+  "created_at" timestamp [not null]
+  "queued_at" timestamp
+  "work_started_at" timestamp
+  "finished_at" timestamp
+  "cancel_started_at" timestamp
+  "script_id" integer [not null, note: 'Script used for this item']
+  "attempts" integer [not null, default: 0, note: 'Number of times this job item has been attempted']
+  "transition" analysis_jobs_item_transition [note: 'The pending transition to apply to this item. Any high-latency action should be done via transition and on a worker rather than in a web request.']
+  "result" analysis_jobs_item_result [note: 'Result of this job item']
+  "error" text [note: 'Error message if this job item failed']
+  "used_walltime_seconds" integer [note: 'Walltime used by this job item']
+  "used_memory_bytes" integer [note: 'Memory used by this job item']
+  "import_success" boolean [note: 'Did importing audio events succeed?']
+
+  Indexes {
+    (analysis_job_id, script_id, audio_recording_id) [type: btree, unique, name: "index_analysis_jobs_items_are_unique"]
+    analysis_job_id [type: btree, name: "index_analysis_jobs_items_on_analysis_job_id"]
+    audio_recording_id [type: btree, name: "index_analysis_jobs_items_on_audio_recording_id"]
+    script_id [type: btree, name: "index_analysis_jobs_items_on_script_id"]
+    queue_id [type: btree, unique, name: "queue_id_uidx"]
+  }
+}
+
+Table "analysis_jobs_scripts" {
+  "analysis_job_id" integer [not null]
+  "script_id" integer [not null]
+  "custom_settings" text [note: 'Custom settings for this script and analysis job']
+
+  Indexes {
+    (analysis_job_id, script_id) [pk, name: "analysis_jobs_scripts_pkey"]
+  }
+}
+
+Table "anonymous_user_statistics" {
+  "bucket" tsrange [unique, not null, default: `tsrange((CURRENT_DATE)::timestampwithouttimezone,(CURRENT_DATE+'1 day'::interval))`]
+  "audio_segment_download_count" bigint [default: 0]
+  "audio_original_download_count" bigint [default: 0]
+  "audio_download_duration" numeric [default: 0.0]
+}
+
+Table "ar_internal_metadata" {
+  "key" "character varying" [pk, not null]
+  "value" "character varying"
+  "created_at" timestamp(6) [not null]
+  "updated_at" timestamp(6) [not null]
+}
+
+Table "audio_event_comments" {
+  "id" integer [pk, not null]
+  "audio_event_id" integer [not null]
+  "comment" text [not null]
+  "flag" "character varying"
+  "flag_explain" text
+  "flagger_id" integer
+  "flagged_at" timestamp
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Indexes {
+    audio_event_id [type: btree, name: "index_audio_event_comments_on_audio_event_id"]
+    creator_id [type: btree, name: "index_audio_event_comments_on_creator_id"]
+    deleter_id [type: btree, name: "index_audio_event_comments_on_deleter_id"]
+    flagger_id [type: btree, name: "index_audio_event_comments_on_flagger_id"]
+    updater_id [type: btree, name: "index_audio_event_comments_on_updater_id"]
+  }
+}
+
+Table "audio_event_import_files" {
+  "id" bigint [pk, not null]
+  "audio_event_import_id" integer [not null]
+  "analysis_jobs_item_id" integer
+  "path" "character varying" [note: 'Path to the file on disk, relative to the analysis job item. Not used for uploaded files']
+  "additional_tag_ids" "integer[]" [note: 'Additional tag ids applied for this import']
+  "created_at" timestamp(6) [not null]
+  "file_hash" text [not null, note: 'Hash of the file contents used for uniqueness checking']
+
+  Indexes {
+    analysis_jobs_item_id [type: btree, name: "index_audio_event_import_files_on_analysis_jobs_item_id"]
+    audio_event_import_id [type: btree, name: "index_audio_event_import_files_on_audio_event_import_id"]
+  }
+}
+
+Table "audio_event_imports" {
+  "id" bigint [pk, not null]
+  "name" "character varying"
+  "description" text
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp(6)
+  "created_at" timestamp(6) [not null]
+  "updated_at" timestamp(6) [not null]
+  "analysis_job_id" integer [note: 'Analysis job that created this import']
+
+  Indexes {
+    analysis_job_id [type: btree, name: "index_audio_event_imports_on_analysis_job_id"]
+  }
+}
+
+Table "audio_events" {
+  "id" integer [pk, not null]
+  "audio_recording_id" integer [not null]
+  "start_time_seconds" numeric(10,4) [not null]
+  "end_time_seconds" numeric(10,4)
+  "low_frequency_hertz" numeric(10,4)
+  "high_frequency_hertz" numeric(10,4)
+  "is_reference" boolean [not null, default: false]
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "channel" integer
+  "provenance_id" integer [note: 'Source of this event']
+  "score" numeric [note: 'Score or confidence for this event.']
+  "audio_event_import_file_id" integer
+  "import_file_index" integer [note: 'Index of the row/entry in the file that generated this event']
+
+  Indexes {
+    audio_event_import_file_id [type: btree, name: "index_audio_events_on_audio_event_import_file_id"]
+    audio_recording_id [type: btree, name: "index_audio_events_on_audio_recording_id"]
+    creator_id [type: btree, name: "index_audio_events_on_creator_id"]
+    deleter_id [type: btree, name: "index_audio_events_on_deleter_id"]
+    provenance_id [type: btree, name: "index_audio_events_on_provenance_id"]
+    updater_id [type: btree, name: "index_audio_events_on_updater_id"]
+  }
+}
+
+Table "audio_events_tags" {
+  "id" integer [pk, not null]
+  "audio_event_id" integer [not null]
+  "tag_id" integer [not null]
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Indexes {
+    (audio_event_id, tag_id) [type: btree, unique, name: "index_audio_events_tags_on_audio_event_id_and_tag_id"]
+    creator_id [type: btree, name: "index_audio_events_tags_on_creator_id"]
+    updater_id [type: btree, name: "index_audio_events_tags_on_updater_id"]
+  }
+}
+
+Table "audio_recording_statistics" {
+  "audio_recording_id" bigint [not null]
+  "bucket" tsrange [not null, default: `tsrange((CURRENT_DATE)::timestampwithouttimezone,(CURRENT_DATE+'1 day'::interval))`]
+  "original_download_count" bigint [default: 0]
+  "segment_download_count" bigint [default: 0]
+  "segment_download_duration" numeric [default: 0.0]
+  "analyses_completed_count" bigint [default: 0]
+
+  Indexes {
+    (audio_recording_id, bucket) [pk, name: "audio_recording_statistics_pkey"]
+    (audio_recording_id, bucket) [unique, name: "constraint_baw_audio_recording_statistics_unique"]
+    audio_recording_id [type: btree, name: "index_audio_recording_statistics_on_audio_recording_id"]
+  }
+}
+
+Table "audio_recordings" {
+  "id" integer [pk, not null]
+  "uuid" "character varying(36)" [not null]
+  "uploader_id" integer [not null]
+  "recorded_date" timestamp [not null]
+  "site_id" integer [not null]
+  "duration_seconds" numeric(10,4) [not null]
+  "sample_rate_hertz" integer
+  "channels" integer
+  "bit_rate_bps" integer
+  "media_type" "character varying" [not null]
+  "data_length_bytes" bigint [not null]
+  "file_hash" "character varying(524)" [not null]
+  "status" "character varying" [default: `'new'::charactervarying`]
+  "notes" text
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "created_at" timestamp
+  "updated_at" timestamp
+  "deleted_at" timestamp
+  "original_file_name" "character varying"
+  "recorded_utc_offset" "character varying(20)"
+
+  Indexes {
+    (created_at, updated_at) [type: btree, name: "audio_recordings_created_updated_at"]
+    (`lower((file_hash)::text)`, id) [type: btree, name: "audio_recordings_icase_file_hash_id_idx"]
+    `lower((file_hash)::text)` [type: btree, name: "audio_recordings_icase_file_hash_idx"]
+    (`lower((uuid)::text)`, id) [type: btree, name: "audio_recordings_icase_uuid_id_idx"]
+    `lower((uuid)::text)` [type: btree, name: "audio_recordings_icase_uuid_idx"]
+    uuid [type: btree, unique, name: "audio_recordings_uuid_uidx"]
+    creator_id [type: btree, name: "index_audio_recordings_on_creator_id"]
+    deleter_id [type: btree, name: "index_audio_recordings_on_deleter_id"]
+    site_id [type: btree, name: "index_audio_recordings_on_site_id"]
+    updater_id [type: btree, name: "index_audio_recordings_on_updater_id"]
+    uploader_id [type: btree, name: "index_audio_recordings_on_uploader_id"]
+  }
+}
+
+Table "bookmarks" {
+  "id" integer [pk, not null]
+  "audio_recording_id" integer
+  "offset_seconds" numeric(10,4)
+  "name" "character varying"
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "created_at" timestamp
+  "updated_at" timestamp
+  "description" text
+  "category" "character varying"
+
+  Indexes {
+    (name, creator_id) [type: btree, unique, name: "bookmarks_name_creator_id_uidx"]
+    audio_recording_id [type: btree, name: "index_bookmarks_on_audio_recording_id"]
+    creator_id [type: btree, name: "index_bookmarks_on_creator_id"]
+    updater_id [type: btree, name: "index_bookmarks_on_updater_id"]
+  }
+}
+
+Table "comfy_cms_categories" {
+  "id" bigint [pk, not null]
+  "site_id" integer [not null]
+  "label" "character varying" [not null]
+  "categorized_type" "character varying" [not null]
+
+  Indexes {
+    (site_id, categorized_type, label) [type: btree, unique, name: "index_cms_categories_on_site_id_and_cat_type_and_label"]
+  }
+}
+
+Table "comfy_cms_categorizations" {
+  "id" bigint [pk, not null]
+  "category_id" integer [not null]
+  "categorized_type" "character varying" [not null]
+  "categorized_id" integer [not null]
+
+  Indexes {
+    (category_id, categorized_type, categorized_id) [type: btree, unique, name: "index_cms_categorizations_on_cat_id_and_catd_type_and_catd_id"]
+  }
+}
+
+Table "comfy_cms_files" {
+  "id" bigint [pk, not null]
+  "site_id" integer [not null]
+  "label" "character varying" [not null, default: `''::charactervarying`]
+  "description" text
+  "position" integer [not null, default: 0]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    (site_id, position) [type: btree, name: "index_comfy_cms_files_on_site_id_and_position"]
+  }
+}
+
+Table "comfy_cms_fragments" {
+  "id" bigint [pk, not null]
+  "record_type" "character varying"
+  "record_id" bigint
+  "identifier" "character varying" [not null]
+  "tag" "character varying" [not null, default: `'text'::charactervarying`]
+  "content" text
+  "boolean" boolean [not null, default: false]
+  "datetime" timestamp
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    boolean [type: btree, name: "index_comfy_cms_fragments_on_boolean"]
+    datetime [type: btree, name: "index_comfy_cms_fragments_on_datetime"]
+    identifier [type: btree, name: "index_comfy_cms_fragments_on_identifier"]
+    (record_type, record_id) [type: btree, name: "index_comfy_cms_fragments_on_record_type_and_record_id"]
+  }
+}
+
+Table "comfy_cms_layouts" {
+  "id" bigint [pk, not null]
+  "site_id" integer [not null]
+  "parent_id" integer
+  "app_layout" "character varying"
+  "label" "character varying" [not null]
+  "identifier" "character varying" [not null]
+  "content" text
+  "css" text
+  "js" text
+  "position" integer [not null, default: 0]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    (parent_id, position) [type: btree, name: "index_comfy_cms_layouts_on_parent_id_and_position"]
+    (site_id, identifier) [type: btree, unique, name: "index_comfy_cms_layouts_on_site_id_and_identifier"]
+  }
+}
+
+Table "comfy_cms_pages" {
+  "id" bigint [pk, not null]
+  "site_id" integer [not null]
+  "layout_id" integer
+  "parent_id" integer
+  "target_page_id" integer
+  "label" "character varying" [not null]
+  "slug" "character varying"
+  "full_path" "character varying" [not null]
+  "content_cache" text
+  "position" integer [not null, default: 0]
+  "children_count" integer [not null, default: 0]
+  "is_published" boolean [not null, default: true]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    is_published [type: btree, name: "index_comfy_cms_pages_on_is_published"]
+    (parent_id, position) [type: btree, name: "index_comfy_cms_pages_on_parent_id_and_position"]
+    (site_id, full_path) [type: btree, name: "index_comfy_cms_pages_on_site_id_and_full_path"]
+  }
+}
+
+Table "comfy_cms_revisions" {
+  "id" bigint [pk, not null]
+  "record_type" "character varying" [not null]
+  "record_id" integer [not null]
+  "data" text
+  "created_at" timestamp
+
+  Indexes {
+    (record_type, record_id, created_at) [type: btree, name: "index_cms_revisions_on_rtype_and_rid_and_created_at"]
+  }
+}
+
+Table "comfy_cms_sites" {
+  "id" bigint [pk, not null]
+  "label" "character varying" [not null]
+  "identifier" "character varying" [not null]
+  "hostname" "character varying" [not null]
+  "path" "character varying"
+  "locale" "character varying" [not null, default: `'en'::charactervarying`]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    hostname [type: btree, name: "index_comfy_cms_sites_on_hostname"]
+  }
+}
+
+Table "comfy_cms_snippets" {
+  "id" bigint [pk, not null]
+  "site_id" integer [not null]
+  "label" "character varying" [not null]
+  "identifier" "character varying" [not null]
+  "content" text
+  "position" integer [not null, default: 0]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    (site_id, identifier) [type: btree, unique, name: "index_comfy_cms_snippets_on_site_id_and_identifier"]
+    (site_id, position) [type: btree, name: "index_comfy_cms_snippets_on_site_id_and_position"]
+  }
+}
+
+Table "comfy_cms_translations" {
+  "id" bigint [pk, not null]
+  "locale" "character varying" [not null]
+  "page_id" integer [not null]
+  "layout_id" integer
+  "label" "character varying" [not null]
+  "content_cache" text
+  "is_published" boolean [not null, default: true]
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+
+  Indexes {
+    is_published [type: btree, name: "index_comfy_cms_translations_on_is_published"]
+    locale [type: btree, name: "index_comfy_cms_translations_on_locale"]
+    page_id [type: btree, name: "index_comfy_cms_translations_on_page_id"]
+  }
+}
+
+Table "dataset_items" {
+  "id" integer [pk, not null]
+  "dataset_id" integer
+  "audio_recording_id" integer
+  "creator_id" integer
+  "start_time_seconds" numeric [not null]
+  "end_time_seconds" numeric [not null]
+  "order" numeric
+  "created_at" timestamp
+
+  Indexes {
+    (start_time_seconds, end_time_seconds) [type: btree, name: "dataset_items_idx"]
+  }
+}
+
+Table "datasets" {
+  "id" integer [pk, not null]
+  "creator_id" integer
+  "updater_id" integer
+  "name" "character varying"
+  "description" text
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+}
+
+Table "harvest_items" {
+  "id" bigint [pk, not null]
+  "path" "character varying"
+  "status" "character varying"
+  "info" jsonb
+  "audio_recording_id" integer
+  "uploader_id" integer [not null]
+  "created_at" timestamp(6) [not null]
+  "updated_at" timestamp(6) [not null]
+  "harvest_id" integer
+  "deleted" boolean [default: false]
+
+  Indexes {
+    harvest_id [type: btree, name: "index_harvest_items_on_harvest_id"]
+    info [type: gin, name: "index_harvest_items_on_info"]
+    path [type: btree, name: "index_harvest_items_on_path"]
+    status [type: btree, name: "index_harvest_items_on_status"]
+  }
+}
+
+Table "harvests" {
+  "id" bigint [pk, not null]
+  "streaming" boolean
+  "status" "character varying"
+  "last_upload_at" timestamp(6)
+  "upload_user" "character varying"
+  "upload_password" "character varying"
+  "project_id" integer [not null]
+  "mappings" jsonb
+  "creator_id" integer
+  "updater_id" integer
+  "created_at" timestamp(6) [not null]
+  "updated_at" timestamp(6) [not null]
+  "last_metadata_review_at" timestamp(6)
+  "last_mappings_change_at" timestamp(6)
+  "upload_user_expiry_at" timestamp(6)
+  "name" "character varying"
+}
+
+Table "permissions" {
+  "id" integer [pk, not null]
+  "creator_id" integer [not null]
+  "level" "character varying" [not null]
+  "project_id" integer [not null]
+  "user_id" integer
+  "updater_id" integer
+  "created_at" timestamp
+  "updated_at" timestamp
+  "allow_logged_in" boolean [not null, default: false]
+  "allow_anonymous" boolean [not null, default: false]
+
+  Indexes {
+    creator_id [type: btree, name: "index_permissions_on_creator_id"]
+    project_id [type: btree, name: "index_permissions_on_project_id"]
+    updater_id [type: btree, name: "index_permissions_on_updater_id"]
+    user_id [type: btree, name: "index_permissions_on_user_id"]
+    (project_id, allow_anonymous) [type: btree, unique, name: "permissions_project_allow_anonymous_uidx"]
+    (project_id, allow_logged_in) [type: btree, unique, name: "permissions_project_allow_logged_in_uidx"]
+    (project_id, user_id) [type: btree, unique, name: "permissions_project_user_uidx"]
+  }
+}
+
+Table "progress_events" {
+  "id" integer [pk, not null]
+  "creator_id" integer
+  "dataset_item_id" integer
+  "activity" "character varying"
+  "created_at" timestamp
+}
+
+Table "projects" {
+  "id" integer [pk, not null]
+  "name" "character varying" [not null]
+  "description" text
+  "urn" "character varying"
+  "notes" text
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp
+  "image_file_name" "character varying"
+  "image_content_type" "character varying"
+  "image_file_size" bigint
+  "image_updated_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "allow_original_download" "character varying"
+  "allow_audio_upload" boolean [default: false]
+
+  Indexes {
+    creator_id [type: btree, name: "index_projects_on_creator_id"]
+    deleter_id [type: btree, name: "index_projects_on_deleter_id"]
+    updater_id [type: btree, name: "index_projects_on_updater_id"]
+    name [type: btree, unique, name: "projects_name_uidx"]
+  }
+}
+
+Table "projects_saved_searches" {
+  "project_id" integer [not null]
+  "saved_search_id" integer [not null]
+
+  Indexes {
+    project_id [type: btree, name: "index_projects_saved_searches_on_project_id"]
+    (project_id, saved_search_id) [type: btree, name: "index_projects_saved_searches_on_project_id_and_saved_search_id"]
+    saved_search_id [type: btree, name: "index_projects_saved_searches_on_saved_search_id"]
+  }
+}
+
+Table "projects_sites" {
+  "project_id" integer [not null]
+  "site_id" integer [not null]
+
+  Indexes {
+    project_id [type: btree, name: "index_projects_sites_on_project_id"]
+    (project_id, site_id) [type: btree, name: "index_projects_sites_on_project_id_and_site_id"]
+    site_id [type: btree, name: "index_projects_sites_on_site_id"]
+  }
+}
+
+Table "provenances" {
+  "id" integer [pk, not null]
+  "name" "character varying"
+  "version" "character varying"
+  "url" "character varying"
+  "description" text [note: 'Markdown description of this source']
+  "score_minimum" numeric [note: 'Lower bound for scores emitted by this source, if known']
+  "score_maximum" numeric [note: 'Upper bound for scores emitted by this source, if known']
+  "creator_id" integer
+  "updater_id" integer
+  "deleter_id" integer
+  "created_at" timestamp(6) [not null]
+  "updated_at" timestamp(6) [not null]
+  "deleted_at" timestamp(6)
+}
+
+Table "questions" {
+  "id" integer [pk, not null]
+  "creator_id" integer
+  "updater_id" integer
+  "text" text
+  "data" text
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+}
+
+Table "questions_studies" {
+  "question_id" integer [not null]
+  "study_id" integer [not null]
+}
+
+Table "regions" {
+  "id" bigint [pk, not null]
+  "name" "character varying"
+  "description" text
+  "notes" jsonb
+  "project_id" integer [not null]
+  "creator_id" integer
+  "updater_id" integer
+  "deleter_id" integer
+  "created_at" timestamp(6)
+  "updated_at" timestamp(6)
+  "deleted_at" timestamp
+}
+
+Table "responses" {
+  "id" integer [pk, not null]
+  "creator_id" integer
+  "dataset_item_id" integer
+  "question_id" integer
+  "study_id" integer
+  "created_at" timestamp
+  "data" text
+}
+
+Table "saved_searches" {
+  "id" integer [pk, not null]
+  "name" "character varying" [not null]
+  "description" text
+  "stored_query" jsonb [not null]
+  "creator_id" integer [not null]
+  "created_at" timestamp [not null]
+  "deleter_id" integer
+  "deleted_at" timestamp
+
+  Indexes {
+    creator_id [type: btree, name: "index_saved_searches_on_creator_id"]
+    deleter_id [type: btree, name: "index_saved_searches_on_deleter_id"]
+    (name, creator_id) [type: btree, unique, name: "saved_searches_name_creator_id_uidx"]
+  }
+}
+
+Table "schema_migrations" {
+  "version" "character varying" [pk, not null]
+}
+
+Table "scripts" {
+  "id" integer [pk, not null]
+  "name" "character varying" [not null]
+  "description" "character varying"
+  "analysis_identifier" "character varying" [not null, note: 'a unique identifier for this script in the analysis system, used in directory names. [-a-z0-0_]']
+  "version" integer [not null, default: 1, note: 'Version of this script - not the version of program the script runs!']
+  "verified" boolean [default: false]
+  "group_id" integer
+  "creator_id" integer [not null]
+  "created_at" timestamp [not null]
+  "executable_command" text [not null]
+  "executable_settings" text
+  "executable_settings_media_type" "character varying(255)" [default: `'text/plain'::charactervarying`]
+  "executable_settings_name" "character varying"
+  "resources" jsonb [note: 'Resources required by this script in the PBS format.']
+  "provenance_id" integer
+  "event_import_glob" "character varying" [note: 'Glob pattern to match result files that should be imported as audio events']
+
+  Indexes {
+    creator_id [type: btree, name: "index_scripts_on_creator_id"]
+    group_id [type: btree, name: "index_scripts_on_group_id"]
+    provenance_id [type: btree, name: "index_scripts_on_provenance_id"]
+  }
+}
+
+Table "sites" {
+  "id" integer [pk, not null]
+  "name" "character varying" [not null]
+  "longitude" numeric(9,6)
+  "latitude" numeric(9,6)
+  "notes" text
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "deleter_id" integer
+  "deleted_at" timestamp
+  "image_file_name" "character varying"
+  "image_content_type" "character varying"
+  "image_file_size" bigint
+  "image_updated_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "description" text
+  "tzinfo_tz" "character varying(255)"
+  "rails_tz" "character varying(255)"
+  "region_id" integer
+
+  Indexes {
+    creator_id [type: btree, name: "index_sites_on_creator_id"]
+    deleter_id [type: btree, name: "index_sites_on_deleter_id"]
+    updater_id [type: btree, name: "index_sites_on_updater_id"]
+  }
+}
+
+Table "studies" {
+  "id" integer [pk, not null]
+  "creator_id" integer
+  "updater_id" integer
+  "dataset_id" integer
+  "name" "character varying"
+  "created_at" timestamp [not null]
+  "updated_at" timestamp [not null]
+}
+
+Table "tag_groups" {
+  "id" integer [pk, not null]
+  "group_identifier" "character varying(255)" [not null]
+  "created_at" timestamp [not null]
+  "creator_id" integer [not null]
+  "tag_id" integer [not null]
+
+  Indexes {
+    tag_id [type: btree, name: "index_tag_groups_on_tag_id"]
+    (tag_id, group_identifier) [type: btree, unique, name: "tag_groups_uidx"]
+  }
+}
+
+Table "tags" {
+  "id" integer [pk, not null]
+  "text" "character varying" [not null]
+  "is_taxonomic" boolean [not null, default: false]
+  "type_of_tag" "character varying" [not null, default: `'general'::charactervarying`]
+  "retired" boolean [not null, default: false]
+  "notes" jsonb
+  "creator_id" integer [not null]
+  "updater_id" integer
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Indexes {
+    creator_id [type: btree, name: "index_tags_on_creator_id"]
+    updater_id [type: btree, name: "index_tags_on_updater_id"]
+    text [type: btree, unique, name: "tags_text_uidx"]
+  }
+}
+
+Table "user_statistics" {
+  "user_id" bigint [not null]
+  "bucket" tsrange [not null, default: `tsrange((CURRENT_DATE)::timestampwithouttimezone,(CURRENT_DATE+'1 day'::interval))`]
+  "audio_segment_download_count" bigint [default: 0]
+  "audio_original_download_count" bigint [default: 0]
+  "audio_download_duration" numeric [default: 0.0]
+  "analyses_completed_count" bigint [default: 0]
+  "analyzed_audio_duration" numeric [not null, default: 0.0]
+
+  Indexes {
+    (user_id, bucket) [unique, name: "constraint_baw_user_statistics_unique"]
+    (user_id, bucket) [pk, name: "user_statistics_pkey"]
+    user_id [type: btree, name: "index_user_statistics_on_user_id"]
+  }
+}
+
+Table "users" {
+  "id" integer [pk, not null]
+  "email" "character varying" [not null]
+  "user_name" "character varying" [not null]
+  "encrypted_password" "character varying" [not null]
+  "reset_password_token" "character varying"
+  "reset_password_sent_at" timestamp
+  "remember_created_at" timestamp
+  "sign_in_count" integer [default: 0]
+  "current_sign_in_at" timestamp
+  "last_sign_in_at" timestamp
+  "current_sign_in_ip" "character varying"
+  "last_sign_in_ip" "character varying"
+  "confirmation_token" "character varying"
+  "confirmed_at" timestamp
+  "confirmation_sent_at" timestamp
+  "unconfirmed_email" "character varying"
+  "failed_attempts" integer [default: 0]
+  "unlock_token" "character varying"
+  "locked_at" timestamp
+  "authentication_token" "character varying"
+  "invitation_token" "character varying"
+  "created_at" timestamp
+  "updated_at" timestamp
+  "roles_mask" integer
+  "image_file_name" "character varying"
+  "image_content_type" "character varying"
+  "image_file_size" bigint
+  "image_updated_at" timestamp(6)
+  "preferences" text
+  "tzinfo_tz" "character varying(255)"
+  "rails_tz" "character varying(255)"
+  "last_seen_at" timestamp
+
+  Indexes {
+    authentication_token [type: btree, unique, name: "index_users_on_authentication_token"]
+    confirmation_token [type: btree, unique, name: "index_users_on_confirmation_token"]
+    email [type: btree, unique, name: "index_users_on_email"]
+    user_name [type: btree, unique, name: "users_user_name_unique"]
+  }
+}
+
+Ref "analysis_jobs_creator_id_fk":"users"."id" < "analysis_jobs"."creator_id"
+
+Ref "analysis_jobs_deleter_id_fk":"users"."id" < "analysis_jobs"."deleter_id"
+
+Ref "analysis_jobs_updater_id_fk":"users"."id" < "analysis_jobs"."updater_id"
+
+Ref "audio_event_comments_audio_event_id_fk":"audio_events"."id" < "audio_event_comments"."audio_event_id" [delete: cascade]
+
+Ref "audio_event_comments_creator_id_fk":"users"."id" < "audio_event_comments"."creator_id"
+
+Ref "audio_event_comments_deleter_id_fk":"users"."id" < "audio_event_comments"."deleter_id"
+
+Ref "audio_event_comments_flagger_id_fk":"users"."id" < "audio_event_comments"."flagger_id"
+
+Ref "audio_event_comments_updater_id_fk":"users"."id" < "audio_event_comments"."updater_id"
+
+Ref "audio_event_imports_creator_id_fk":"users"."id" < "audio_event_imports"."creator_id"
+
+Ref "audio_event_imports_deleter_id_fk":"users"."id" < "audio_event_imports"."deleter_id"
+
+Ref "audio_event_imports_updater_id_fk":"users"."id" < "audio_event_imports"."updater_id"
+
+Ref "audio_events_audio_recording_id_fk":"audio_recordings"."id" < "audio_events"."audio_recording_id"
+
+Ref "audio_events_creator_id_fk":"users"."id" < "audio_events"."creator_id"
+
+Ref "audio_events_deleter_id_fk":"users"."id" < "audio_events"."deleter_id"
+
+Ref "audio_events_tags_audio_event_id_fk":"audio_events"."id" < "audio_events_tags"."audio_event_id" [delete: cascade]
+
+Ref "audio_events_tags_creator_id_fk":"users"."id" < "audio_events_tags"."creator_id"
+
+Ref "audio_events_tags_tag_id_fk":"tags"."id" < "audio_events_tags"."tag_id"
+
+Ref "audio_events_tags_updater_id_fk":"users"."id" < "audio_events_tags"."updater_id"
+
+Ref "audio_events_updater_id_fk":"users"."id" < "audio_events"."updater_id"
+
+Ref "audio_recordings_creator_id_fk":"users"."id" < "audio_recordings"."creator_id"
+
+Ref "audio_recordings_deleter_id_fk":"users"."id" < "audio_recordings"."deleter_id"
+
+Ref "audio_recordings_site_id_fk":"sites"."id" < "audio_recordings"."site_id"
+
+Ref "audio_recordings_updater_id_fk":"users"."id" < "audio_recordings"."updater_id"
+
+Ref "audio_recordings_uploader_id_fk":"users"."id" < "audio_recordings"."uploader_id"
+
+Ref "bookmarks_audio_recording_id_fk":"audio_recordings"."id" < "bookmarks"."audio_recording_id"
+
+Ref "bookmarks_creator_id_fk":"users"."id" < "bookmarks"."creator_id"
+
+Ref "bookmarks_updater_id_fk":"users"."id" < "bookmarks"."updater_id"
+
+Ref "fk_rails_0521146902":"analysis_jobs"."id" < "audio_event_imports"."analysis_job_id"
+
+Ref "fk_rails_08dae8d3d9":"users"."id" < "harvests"."updater_id"
+
+Ref "fk_rails_15ae5d1422":"audio_event_import_files"."id" < "audio_events"."audio_event_import_file_id" [delete: cascade]
+
+Ref "fk_rails_15ea2f07e1":"dataset_items"."id" < "progress_events"."dataset_item_id"
+
+Ref "fk_rails_1b78df6070":"users"."id" < "questions"."updater_id"
+
+Ref "fk_rails_1b93a0a373":"analysis_jobs_items"."id" < "audio_event_import_files"."analysis_jobs_item_id"
+
+Ref "fk_rails_1ba11222e1":"tags"."id" < "tag_groups"."tag_id"
+
+Ref "fk_rails_21f8d26270":"users"."id" < "questions"."creator_id"
+
+Ref "fk_rails_220bbcd4e4":"users"."id" < "harvest_items"."uploader_id"
+
+Ref "fk_rails_293d8f544c":"users"."id" < "provenances"."deleter_id"
+
+Ref "fk_rails_325af149a3":"questions"."id" < "responses"."question_id"
+
+Ref "fk_rails_41770507e5":"datasets"."id" < "studies"."dataset_id"
+
+Ref "fk_rails_4362b81edd":"users"."id" < "studies"."updater_id"
+
+Ref "fk_rails_50c0011a46":"scripts"."id" < "analysis_jobs_items"."script_id"
+
+Ref "fk_rails_51009e83c9":"studies"."id" < "responses"."study_id"
+
+Ref "fk_rails_522df5cc92":"audio_recordings"."id" < "analysis_jobs_items"."audio_recording_id"
+
+Ref "fk_rails_5bf6548424":"users"."id" < "dataset_items"."creator_id"
+
+Ref "fk_rails_6a5ffa3b4f":"studies"."id" < "questions_studies"."study_id"
+
+Ref "fk_rails_6d8adad6a1":"harvests"."id" < "harvest_items"."harvest_id"
+
+Ref "fk_rails_6f222e0805":"audio_recordings"."id" < "audio_recording_statistics"."audio_recording_id"
+
+Ref "fk_rails_7a62c4269f":"dataset_items"."id" < "responses"."dataset_item_id"
+
+Ref "fk_rails_7b0ec7081d":"projects"."id" < "harvests"."project_id"
+
+Ref "fk_rails_81c0fed756":"projects"."id" < "analysis_jobs"."project_id"
+
+Ref "fk_rails_81ed124069":"audio_recordings"."id" < "dataset_items"."audio_recording_id"
+
+Ref "fk_rails_86f75840f2":"analysis_jobs"."id" < "analysis_jobs_items"."analysis_job_id"
+
+Ref "fk_rails_8829b783ca":"regions"."id" < "sites"."region_id"
+
+Ref "fk_rails_993965df05":"active_storage_blobs"."id" < "active_storage_variant_records"."blob_id"
+
+Ref "fk_rails_9f083d42e6":"analysis_jobs"."id" < "analysis_jobs_scripts"."analysis_job_id"
+
+Ref "fk_rails_a2bcbc219c":"users"."id" < "regions"."deleter_id"
+
+Ref "fk_rails_a4ae2a454b":"users"."id" < "user_statistics"."user_id"
+
+Ref "fk_rails_a7a3c29a3c":"users"."id" < "responses"."creator_id"
+
+Ref "fk_rails_a93b9e488e":"projects"."id" < "regions"."project_id"
+
+Ref "fk_rails_a94a68aa0b":"users"."id" < "studies"."creator_id"
+
+Ref "fk_rails_b0e8ff71e8":"scripts"."id" < "analysis_jobs_scripts"."script_id"
+
+Ref "fk_rails_be11349b96":"audio_event_imports"."id" < "audio_event_import_files"."audio_event_import_id" [delete: cascade]
+
+Ref "fk_rails_c2337cbe35":"users"."id" < "datasets"."updater_id"
+
+Ref "fk_rails_c3b3935057":"active_storage_blobs"."id" < "active_storage_attachments"."blob_id"
+
+Ref "fk_rails_c7ae81b3ab":"questions"."id" < "questions_studies"."question_id"
+
+Ref "fk_rails_c97bdfad35":"datasets"."id" < "dataset_items"."dataset_id"
+
+Ref "fk_rails_cf446a18ca":"users"."id" < "progress_events"."creator_id"
+
+Ref "fk_rails_d6ac8b2936":"users"."id" < "provenances"."creator_id"
+
+Ref "fk_rails_dc2d52ddad":"audio_recordings"."id" < "harvest_items"."audio_recording_id"
+
+Ref "fk_rails_df2b719b60":"provenances"."id" < "scripts"."provenance_id"
+
+Ref "fk_rails_e1f487fcb6":"users"."id" < "harvests"."creator_id"
+
+Ref "fk_rails_e821b1ee82":"provenances"."id" < "audio_events"."provenance_id"
+
+Ref "fk_rails_e89672d43e":"users"."id" < "regions"."creator_id"
+
+Ref "fk_rails_eec5c78eb1":"users"."id" < "provenances"."updater_id"
+
+Ref "fk_rails_f67676d1b2":"users"."id" < "regions"."updater_id"
+
+Ref "fk_rails_faaf9c0bcd":"users"."id" < "datasets"."creator_id"
+
+Ref "permissions_creator_id_fk":"users"."id" < "permissions"."creator_id"
+
+Ref "permissions_project_id_fk":"projects"."id" < "permissions"."project_id"
+
+Ref "permissions_updater_id_fk":"users"."id" < "permissions"."updater_id"
+
+Ref "permissions_user_id_fk":"users"."id" < "permissions"."user_id"
+
+Ref "projects_creator_id_fk":"users"."id" < "projects"."creator_id"
+
+Ref "projects_deleter_id_fk":"users"."id" < "projects"."deleter_id"
+
+Ref "projects_saved_searches_project_id_fk":"projects"."id" < "projects_saved_searches"."project_id"
+
+Ref "projects_saved_searches_saved_search_id_fk":"saved_searches"."id" < "projects_saved_searches"."saved_search_id"
+
+Ref "projects_sites_project_id_fk":"projects"."id" < "projects_sites"."project_id"
+
+Ref "projects_sites_site_id_fk":"sites"."id" < "projects_sites"."site_id"
+
+Ref "projects_updater_id_fk":"users"."id" < "projects"."updater_id"
+
+Ref "saved_searches_creator_id_fk":"users"."id" < "saved_searches"."creator_id"
+
+Ref "saved_searches_deleter_id_fk":"users"."id" < "saved_searches"."deleter_id"
+
+Ref "scripts_creator_id_fk":"users"."id" < "scripts"."creator_id"
+
+Ref "scripts_group_id_fk":"scripts"."id" < "scripts"."group_id"
+
+Ref "sites_creator_id_fk":"users"."id" < "sites"."creator_id"
+
+Ref "sites_deleter_id_fk":"users"."id" < "sites"."deleter_id"
+
+Ref "sites_updater_id_fk":"users"."id" < "sites"."updater_id"
+
+Ref "tags_creator_id_fk":"users"."id" < "tags"."creator_id"
+
+Ref "tags_updater_id_fk":"users"."id" < "tags"."updater_id"
+
