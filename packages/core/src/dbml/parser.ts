@@ -213,6 +213,20 @@ export function compileOne(
   return compiled;
 }
 
+/**
+ * Drop every compile {@link compileOne} keeps (both caches) and the line
+ * index {@link lineAt} keeps, so a host that reads files it does not
+ * control frees what a load parsed (a compile holds the AST and its
+ * Compiler: a few hundred bytes of heap per character of DBML) instead of
+ * holding up to 40 of them until later compiles push them out. The next
+ * read of any file compiles it again; nothing else changes.
+ */
+export function clearCompileCaches(): void {
+  cache.clear();
+  diagramCache.clear();
+  lineIndex = undefined;
+}
+
 /** A lex and parse of one file, without binding or interpreting it. */
 export interface ParsedSyntax {
   /** The program node. */

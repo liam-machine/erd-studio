@@ -17,7 +17,7 @@ import { createRequire, syncBuiltinESMExports } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
-import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, isDbmlLayerName } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, dbmlTableFinder, isDbmlLayerName } from '@erd-studio/core';
 import { TableLibraryService, hasTablesLibrary, tablesDirIsLayer } from '../../src/services/logicalModelService';
 import { COARSE_RACY_MS, RACY_MS, TableLibraryIndex, isRacyBuild } from '../../src/services/tableLibraryIndex';
 
@@ -733,5 +733,35 @@ describe('what one listing costs (readdir calls, counted)', () => {
     lib.invalidateIndex();
     lib.listTableFiles();
     expect(readdirsOf(() => { for (let i = 0; i < 20; i++) lib.findTableFile('gold_s1_t2'); })).toBe(0);
+  });
+});
+
+describe('core\'s dbmlTableFinder answers what the index answers (the Confluence app\'s findDbmlTable)', () => {
+  it('in a DBML project, for every name and spelling, over layers, schema folders and case variants', () => {
+    write('gold/tables/finance/fct_order.dbml', dbmlTable('fct_order', undefined, 'finance'));
+    write('gold/tables/sales/Fct_Order.dbml', dbmlTable('Fct_Order', undefined, 'sales'));
+    write('silver/tables/crm/fct_order.dbml', dbmlTable('fct_order', undefined, 'crm'));
+    write('silver/tables/crm/Dim_Date.dbml', dbmlTable('Dim_Date', undefined, 'crm'));
+    write('bronze/tables/raw/dim_date.dbml', dbmlTable('dim_date', undefined, 'raw'));
+    write('Platinum/tables/x/dim_odd.dbml', dbmlTable('dim_odd', undefined, 'x'));
+    write('silver/tables/zeta/dim_odd.dbml', dbmlTable('dim_odd', undefined, 'zeta'));
+    write('gold/relationships/gold.dbml', HEADER);
+    write('gold/diagrams/sales.dbml', "Project sales {\n  erd_schema_version: '7'\n}\n");
+    ageLibrary();
+    const listed: string[] = [];
+    const walk = (dir: string): void => {
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, d.name);
+        if (d.isDirectory()) walk(p);
+        else listed.push(relOf(p));
+      }
+    };
+    walk(semantic);
+    const find = dbmlTableFinder(listed);
+    const lib = service();
+    for (const name of ['fct_order', 'Fct_Order', 'FCT_ORDER', ' fct_order', 'dim_date', 'Dim_Date', 'dim_odd', 'missing']) {
+      const byIndex = lib.findTableFile(name);
+      expect([name, find(name)]).toEqual([name, byIndex === null ? null : relOf(byIndex)]);
+    }
   });
 });

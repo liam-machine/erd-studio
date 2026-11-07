@@ -288,6 +288,46 @@ export function dbmlTablePath(layer: string, schema: string, name: string): stri
   return `${layer}/${TABLES_DIR}/${schema}/${name}${DBML_EXTENSION}`;
 }
 
+/** The collator the extension's table index sorts layers, schema folders and files with. */
+const compareListedNames = new Intl.Collator().compare;
+
+/**
+ * A `findDbmlTable` for `loadDisplaySubjectArea`, from one listing of the
+ * project's DBML tables: `paths` are files relative to the semantic dir, and
+ * any that is not `{layer}/tables/{schema}/{name}.dbml` is ignored. It
+ * answers which listed file holds a name in the extension's order (its
+ * table index, the DBML part of §3.4): the layers, then each layer's schema
+ * folders, sorted by `Intl.Collator`; in the first folder that holds the
+ * name, `{name}.dbml` spelled exactly, else the first (in that order) of
+ * any case, the name trimmed. Null when no listed file does.
+ */
+export function dbmlTableFinder(paths: Iterable<string>): (name: string) => string | null {
+  type Listed = { layer: string; schema: string; file: string; rel: string };
+  const byKey = new Map<string, Listed[]>();
+  for (const path of paths) {
+    if (typeof path !== 'string') continue;
+    const tree = dbmlTreePathOf(path);
+    if (tree?.kind !== 'table' || tree.schema === undefined) continue;
+    const rel = normalisePosix(path);
+    const listed: Listed = { layer: tree.layer, schema: tree.schema, file: `${tree.name}${DBML_EXTENSION}`, rel };
+    const key = tree.name.trim().toLowerCase();
+    const list = byKey.get(key);
+    if (list) list.push(listed);
+    else byKey.set(key, [listed]);
+  }
+  for (const list of byKey.values()) {
+    list.sort((a, b) => compareListedNames(a.layer, b.layer) || compareListedNames(a.schema, b.schema) || compareListedNames(a.file, b.file));
+  }
+  return (name: string): string | null => {
+    if (typeof name !== 'string') return null;
+    const list = byKey.get(name.trim().toLowerCase());
+    if (!list) return null;
+    const first = list[0];
+    const exact = list.find((l) => l.layer === first.layer && l.schema === first.schema && l.file === `${name}${DBML_EXTENSION}`);
+    return (exact ?? first).rel;
+  };
+}
+
 /** A relationships file: `L/relationships/stem.dbml`. */
 export function relationshipsFilePath(layer: string, stem: string): string {
   return `${layer}/${RELATIONSHIPS_DIR}/${stem}${DBML_EXTENSION}`;

@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { FileTooLargeError, TooManyTablesError, loadDisplaySubjectArea, type LoadDisplaySubjectAreaOptions } from '../../src/loadDisplayDomain';
 import { SubjectAreaValidationError } from '../../src/domain';
 import { dbmlStorageReader } from '../../src/dbml/index';
+import { dbmlTableFinder } from '../../src/storage';
 
 type Files = Record<string, string>;
 
@@ -324,6 +325,135 @@ describe('loadDisplaySubjectArea: DBML diagrams', () => {
     it('maxRelationshipsChars must be a number', async () => {
       await expect(load(project(), { maxRelationshipsChars: Number.NaN }).promise).rejects.toThrow(TypeError);
     });
+  });
+});
+
+describe('loadDisplaySubjectArea: findDbmlTable (a member whose use line is stale)', () => {
+  // dim_customer moved from gold/tables/finance/ to silver/tables/sales/, a folder no use line names.
+  const moved = (): Files => {
+    const files = project({ '.erd-studio/silver/tables/sales/dim_customer.dbml': 'Table sales.dim_customer {\n  customer_key int [pk]\n  region text\n}\n' });
+    delete files['.erd-studio/gold/tables/finance/dim_customer.dbml'];
+    return files;
+  };
+  const listing = (files: Files): string[] =>
+    Object.keys(files).filter((p) => p.startsWith('.erd-studio/')).map((p) => p.slice('.erd-studio/'.length));
+
+  it('without it, the moved table draws as missing (unchanged)', async () => {
+    const domain = await load(moved()).promise;
+    const customer = domain.models.find((m) => m.name === 'dim_customer')!;
+    expect(customer.columns).toEqual([]);
+    expect(customer.layer).toBeUndefined();
+  });
+
+  it('with it, the table is read from the file the host finds: its schema and layer from that file, its relationships attached, with a warning', async () => {
+    const files = moved();
+    const asked: string[] = [];
+    const { promise, reads, warnings } = load(files, {
+      findDbmlTable: (name) => {
+        asked.push(name);
+        return dbmlTableFinder(listing(files))(name);
+      },
+    });
+    const domain = await promise;
+    const customer = domain.models.find((m) => m.name === 'dim_customer')!;
+    expect(customer.columns.map((c) => c.name)).toEqual(['customer_key', 'region']);
+    expect(customer.schema).toBe('sales');
+    expect(customer.layer).toBe('silver');
+    expect(links(domain)).toEqual(['fct_order.customer_key>dim_customer.customer_key']);
+    // Asked only for the member the probe missed, after every probe.
+    expect(asked).toEqual(['dim_customer']);
+    const customerReads = reads.filter((p) => p.includes('/dim_customer.'));
+    expect(customerReads[customerReads.length - 1]).toBe('.erd-studio/silver/tables/sales/dim_customer.dbml');
+    expect(customerReads.slice(0, -1).every((p) => p !== '.erd-studio/silver/tables/sales/dim_customer.dbml')).toBe(true);
+    expect(warnings).toContain(
+      'Table "dim_customer" is not at its use line\'s path (gold/tables/finance/dim_customer.dbml); it was read from silver/tables/sales/dim_customer.dbml. The next ERD Studio edit fixes the line',
+    );
+  });
+
+  it('draws what it drew before when every member is where its use line says: never asked', async () => {
+    const asked: string[] = [];
+    const without = await load(project()).promise;
+    const withIt = await load(project(), { findDbmlTable: async (name) => { asked.push(name); return null; } }).promise;
+    expect(asked).toEqual([]);
+    expect(withIt).toEqual(without);
+  });
+
+  it('a YAML table the probe finds by name wins over the hook (the extension\'s order: logical-models/ first)', async () => {
+    const files = moved();
+    files['.erd-studio/logical-models/dim_customer.yml'] = 'name: dim_customer\ncolumns:\n  - name: from_yml\n    dataType: int\n';
+    const asked: string[] = [];
+    const domain = await load(files, { findDbmlTable: (name) => { asked.push(name); return dbmlTableFinder(listing(files))(name); } }).promise;
+    expect(asked).toEqual([]);
+    expect(domain.models.find((m) => m.name === 'dim_customer')!.columns.map((c) => c.name)).toEqual(['from_yml']);
+  });
+
+  it('a member with no use line (erd_unlinked_tables) is never looked up', async () => {
+    const files = project();
+    files[DIAGRAM] = files[DIAGRAM].replace("  erd_schema_version: '7'", "  erd_schema_version: '7'\n  erd_unlinked_tables: 'dim_loose'");
+    files['.erd-studio/silver/tables/misc/dim_loose.dbml'] = 'Table crm.dim_loose {\n  id int [pk]\n}\n';
+    const asked: string[] = [];
+    const domain = await load(files, { findDbmlTable: (name) => { asked.push(name); return 'silver/tables/misc/dim_loose.dbml'; } }).promise;
+    expect(asked).not.toContain('dim_loose');
+    expect(domain.models.find((m) => m.name === 'dim_loose')?.columns ?? []).toEqual([]);
+  });
+
+  it.each([
+    ['a relationships file', 'gold/relationships/gold.dbml'],
+    ['a diagram', 'gold/diagrams/sales.dbml'],
+    ['a path outside the semantic dir', '../outside/tables/sales/dim_customer.dbml'],
+    ['an absolute path', '/silver/tables/sales/dim_customer.dbml'],
+    ['a backslash path', 'silver\\tables\\sales\\dim_customer.dbml'],
+    ['a table of another name', 'silver/tables/sales/dim_other.dbml'],
+    ['a path already probed', 'gold/tables/finance/dim_customer.dbml'],
+    ['a non-string', 42 as never],
+  ])('ignores %s: the member draws as missing, and nothing else is read', async (_label, answer) => {
+    const files = moved();
+    files['.erd-studio/silver/tables/sales/dim_other.dbml'] = 'Table sales.dim_other {\n  id int [pk]\n}\n';
+    const { promise, reads } = load(files, { findDbmlTable: () => answer });
+    const domain = await promise;
+    expect(domain.models.find((m) => m.name === 'dim_customer')!.columns).toEqual([]);
+    expect(reads.filter((p) => p.includes('/sales/') || p.includes('outside'))).toEqual([]);
+    expect(reads.filter((p) => p === '.erd-studio/gold/tables/finance/dim_customer.dbml')).toHaveLength(1);
+  });
+
+  it('a found path whose file is gone draws as missing', async () => {
+    const domain = await load(moved(), { findDbmlTable: () => 'silver/tables/crm/dim_customer.dbml' }).promise;
+    expect(domain.models.find((m) => m.name === 'dim_customer')!.columns).toEqual([]);
+  });
+
+  it('a found file in another case is read, and its Table checked against the member\'s name', async () => {
+    const files = moved();
+    files['.erd-studio/silver/tables/sales/Dim_Customer.dbml'] = files['.erd-studio/silver/tables/sales/dim_customer.dbml'].replace('sales.dim_customer', 'sales.Dim_Customer');
+    delete files['.erd-studio/silver/tables/sales/dim_customer.dbml'];
+    const domain = await load(files, { findDbmlTable: (name) => dbmlTableFinder(listing(files))(name) }).promise;
+    expect(domain.models.find((m) => m.name.toLowerCase() === 'dim_customer')!.columns.map((c) => c.name)).toEqual(['customer_key', 'region']);
+  });
+
+  it('maxYamlChars still limits the found file', async () => {
+    const files = moved();
+    const { promise, warnings } = load(files, { findDbmlTable: (name) => dbmlTableFinder(listing(files))(name), maxYamlChars: 60 });
+    const domain = await promise;
+    expect(domain.models.find((m) => m.name === 'dim_customer')!.columns).toEqual([]);
+    expect(warnings.some((w) => w.includes('"dim_customer" is') && w.includes('at most 60'))).toBe(true);
+  });
+
+  it('a rejection is passed through', async () => {
+    await expect(load(moved(), { findDbmlTable: async () => { throw new Error('listing failed'); } }).promise).rejects.toThrow('listing failed');
+  });
+
+  it('must be a function', async () => {
+    await expect(load(project(), { findDbmlTable: 'yes' as never }).promise).rejects.toThrow(TypeError);
+  });
+
+  it('a JSON diagram never asks', async () => {
+    const files: Files = {
+      '.erd-studio/layers.json': LAYERS,
+      '.erd-studio/gold/mixed.json': JSON.stringify({ schemaVersion: 5, domain: 'mixed', layer: 'gold', description: '', logical: { models: ['dim_customer'], relationships: [] }, viewConfig: { positions: {} } }),
+      '.erd-studio/silver/tables/sales/dim_customer.dbml': 'Table sales.dim_customer {\n  customer_key int [pk]\n}\n',
+    };
+    const asked: string[] = [];
+    await load(files, { domainPath: '.erd-studio/gold/mixed.json', findDbmlTable: (name) => { asked.push(name); return null; } }).promise;
+    expect(asked).toEqual([]);
   });
 });
 

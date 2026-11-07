@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { compileOne } from '../../src/dbml/parser';
+import { clearDbmlCompileCaches, dbmlStorageReader } from '../../src/dbml/index';
 import { parseSubjectAreaDbml } from '../../src/dbml/readDiagram';
 
 const DIAGRAM = `Project d {
@@ -39,5 +40,26 @@ describe('compileOne caches', () => {
     const before = parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml');
     for (let i = 0; i < 100; i++) compileOne(`Table u${i} {\n  id INT [pk]\n}\n`);
     expect(parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml')).toEqual(before);
+  });
+
+  it('clearDbmlCompileCaches drops both caches: every file compiles again, and reads the same', () => {
+    const table = 'Table cleared {\n  id INT [pk]\n}\n';
+    const tableBefore = compileOne(table);
+    const diagramBefore = compileOne(DIAGRAM, undefined, undefined, { diagram: true });
+    const readBefore = parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml');
+    clearDbmlCompileCaches();
+    expect(compileOne(table)).not.toBe(tableBefore);
+    expect(compileOne(DIAGRAM, undefined, undefined, { diagram: true })).not.toBe(diagramBefore);
+    clearDbmlCompileCaches();
+    expect(parseSubjectAreaDbml(DIAGRAM, 'gold/diagrams/d.dbml')).toEqual(readBefore);
+    expect(dbmlStorageReader.parseTable(table, 'cleared')).toEqual(dbmlStorageReader.parseTable(table, 'cleared'));
+  });
+
+  it('clearing between compiles keeps nothing: a compile made after a clear is the only one cached', () => {
+    const a = compileOne('Table a1 {\n  id INT [pk]\n}\n');
+    clearDbmlCompileCaches();
+    const b = compileOne('Table b1 {\n  id INT [pk]\n}\n');
+    expect(compileOne('Table b1 {\n  id INT [pk]\n}\n')).toBe(b);
+    expect(compileOne('Table a1 {\n  id INT [pk]\n}\n')).not.toBe(a);
   });
 });
