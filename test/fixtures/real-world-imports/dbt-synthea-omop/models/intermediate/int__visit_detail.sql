@@ -1,0 +1,24 @@
+SELECT
+    row_number() OVER (ORDER BY e.encounter_id) AS visit_detail_id
+    , e.encounter_id
+    , e.person_id
+    , CASE
+        WHEN lower(e.encounter_class) IN ('ambulatory', 'wellness', 'outpatient') THEN 9202
+        WHEN lower(e.encounter_class) IN ('emergency', 'urgentcare') THEN 9203
+        WHEN lower(e.encounter_class) = 'inpatient' THEN 9201
+        ELSE 0
+    END AS visit_detail_concept_id
+    , e.encounter_start_date AS visit_detail_start_date
+    , e.encounter_start_datetime AS visit_detail_start_datetime
+    , e.encounter_stop_date AS visit_detail_end_date
+    , e.encounter_stop_datetime AS visit_detail_end_datetime
+    , e.provider_id
+    , e.encounter_class AS visit_detail_source_value
+    , v.visit_occurrence_id
+    , e.total_encounter_cost
+    , e.encounter_payer_coverage
+FROM {{ ref( 'int__visits_encounters') }} AS ve
+INNER JOIN {{ ref ('int__visits') }} AS v
+    ON ve.visit_id = v.visit_id
+INNER JOIN {{ ref ('int__encounters') }} AS e
+    ON ve.encounter_id = e.encounter_id
