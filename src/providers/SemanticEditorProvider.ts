@@ -81,7 +81,7 @@ import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -557,6 +557,7 @@ import {
   validateTableActionPayload,
   validateLayoutFinishedPayload,
   validateWebviewErrorPayload,
+  validateCrashFallbackPayload,
   validateViewFilePayload,
   validateExtraPairs,
   validateMarkKey,
@@ -1017,6 +1018,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       compareRequest?: number;
       /** The webview answered `ready` with its diagram: a reveal can be posted now. */
       loaded?: boolean;
+      /**
+       * The page crashed while rendering and shows the crash screen (a render
+       * `webviewError` or a `crashFallback` arrived; cleared by its next
+       * `ready`): Send Feedback must not be routed to its dead dialog.
+       */
+      crashed?: boolean;
     }
   >();
 
@@ -1457,17 +1464,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.openPanels.has(input.uri.toString()) ? input.uri.fsPath : undefined;
   }
 
+  /** Note that `webview` (still this panel's) shows the crash screen. */
+  private markCrashed(panelKey: string, webview: vscode.Webview): void {
+    const entry = this.openPanels.get(panelKey);
+    if (entry?.webview === webview) entry.crashed = true;
+  }
+
   /**
    * If the active editor tab is one of our canvases, ask its webview to open
    * the Feedback dialog (so the report can include the diagnostics chips and
-   * the optional analysis). Returns false when no canvas is active so the
-   * caller can fall back to the canvas-less QuickPick flow.
+   * the optional analysis). Returns false when no canvas is active, or when
+   * the active one shows the crash screen, so the caller can fall back to the
+   * canvas-less QuickPick flow.
    */
   requestFeedbackDialog(prefill?: OpenFeedbackMessage['payload']): boolean {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     if (!(input instanceof vscode.TabInputCustom)) return false;
     const panel = this.openPanels.get(input.uri.toString());
-    if (!panel) return false;
+    // A crashed canvas shows the crash screen: its Feedback dialog went down with the tree.
+    if (!panel || panel.crashed) return false;
     const msg: OpenFeedbackMessage = { type: 'openFeedback', payload: prefill };
     this.post(panel.webview, msg);
     return true;
@@ -1650,6 +1665,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'guide',
           // Usage telemetry only (2.0 B13): a crash's kind and area.
           'webviewError',
+          // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
+          'crashFallback',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           telemetry.error('physicalEditDropped');
@@ -1673,6 +1690,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // "Loading domain…" for ever.
             this.lastLoadError.delete(panelKey);
             readyWatch.ready();
+            {
+              // A fresh page (first load, or the crash screen's Reload): not crashed.
+              const entry = this.openPanels.get(panelKey);
+              if (entry?.webview === webviewPanel.webview) entry.crashed = false;
+            }
             {
               const readyAt = Date.now();
               canvasLog.info(`Opening ${document.uri.fsPath}`);
@@ -2052,8 +2074,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const payload = (message as { payload?: unknown }).payload;
             if (validateWebviewErrorPayload(payload)) {
               for (const code of webviewErrorCodes(payload.kind, payload.area)) telemetry.error(code);
+              // A render crash always ends on the crash screen (the page's root boundary).
+              if (payload.kind === 'render') this.markCrashed(panelKey, webviewPanel.webview);
             } else {
               log.warn('[SemanticEditorProvider] Ignoring a webviewError with an unknown kind or area');
+            }
+            break;
+          }
+          case 'crashFallback': {
+            // The crash screen's buttons (CanvasCrashFallback). Writes nothing,
+            // so it is on the physical allowlist. Telemetry counts the button only.
+            const payload = (message as { payload?: unknown }).payload;
+            if (!validateCrashFallbackPayload(payload)) {
+              log.warn('[SemanticEditorProvider] Ignoring a crashFallback with an unknown action or a bad detail');
+              break;
+            }
+            if (payload.action === 'reload') {
+              telemetry.feature('crashFallbackReload');
+              canvasLog.info(`Reloading the canvas of ${document.uri.fsPath} after a crash`);
+              const entry = this.openPanels.get(panelKey);
+              if (entry?.webview === webviewPanel.webview) entry.loaded = false;
+              // A new page (a fresh nonce, so the html always changes): it says `ready` and loads again.
+              webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+            } else {
+              telemetry.feature('crashFallbackFeedback');
+              this.markCrashed(panelKey, webviewPanel.webview);
+              // The canvas-less Send Feedback (requestFeedbackDialog skips a crashed canvas).
+              await vscode.commands.executeCommand('erdStudio.reportBug', crashFeedbackPrefill('canvas', payload));
             }
             break;
           }

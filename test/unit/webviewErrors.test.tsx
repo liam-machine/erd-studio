@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * Webview crash capture (2.0 B13): the area boundaries add no fallback UI —
- * a render crash still fails the page as before — they only tag the error
- * with the innermost area, and the page's listener reports the kind and area
- * once (never the text). Capped per kind; ResizeObserver noise is dropped;
+ * Webview crash capture (2.0 B13): the area boundaries add no fallback UI of
+ * their own — they only tag the error with the innermost area and rethrow it
+ * (the page's root boundary shows the crash screen: crashFallback.webview.test.tsx),
+ * and the page's listener reports the kind and area once (never the text). Capped per kind; ResizeObserver noise is dropped;
  * the draft page posts `pageError`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

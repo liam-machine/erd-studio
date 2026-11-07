@@ -138,6 +138,8 @@ export class DraftPreviewPanel {
   private readonly readyWatch: ReadyWatch;
   /** The id of the draft the page is laying out (posted with `autoLayout`, no `layoutFinished` / `layoutFailed` yet). */
   private layingOut: string | undefined;
+  /** The extension's `dist/` folder (the page's script and stylesheet). */
+  private readonly dist: vscode.Uri;
 
   /** The open tab, if any (tests). */
   static get currentPanel(): DraftPreviewPanel | undefined {
@@ -210,14 +212,8 @@ export class DraftPreviewPanel {
     this.view = toDraftView(draft);
     this.events = events;
     const webview = panel.webview;
-    const dist = vscode.Uri.joinPath(extensionUri, 'dist');
-    webview.html = buildDraftPreviewHtml({
-      cspSource: webview.cspSource,
-      nonce: crypto.randomBytes(16).toString('base64'),
-      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(dist, 'draft.js')).toString(),
-      styleUri: webview.asWebviewUri(vscode.Uri.joinPath(dist, 'draft.css')).toString(),
-      title: draft.title,
-    });
+    this.dist = vscode.Uri.joinPath(extensionUri, 'dist');
+    webview.html = this.pageHtml();
     this.readyWatch = new ReadyWatch(panel.visible !== false, {
       ready: (slow) => this.events.pageReady?.(this.view.source, slow),
       noReady: () => this.events.noReady?.(this.view.source),
@@ -227,6 +223,31 @@ export class DraftPreviewPanel {
       panel.onDidDispose(() => this.dispose()),
       panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
     );
+  }
+
+  /** The page's HTML, with a fresh nonce (so a reload always changes it). */
+  private pageHtml(): string {
+    const webview = this.panel.webview;
+    return buildDraftPreviewHtml({
+      cspSource: webview.cspSource,
+      nonce: crypto.randomBytes(16).toString('base64'),
+      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(this.dist, 'draft.js')).toString(),
+      styleUri: webview.asWebviewUri(vscode.Uri.joinPath(this.dist, 'draft.css')).toString(),
+      title: this.draft.title,
+    });
+  }
+
+  /**
+   * The crash screen's Reload: a new page for the same draft. Nothing the
+   * flow waits on changes (the pending `ask` keeps waiting, a queued choice
+   * stays queued); the new page says `ready` and is sent the draft and the
+   * guide again.
+   */
+  private reloadPage(): void {
+    if (this.disposed) return;
+    this.ready = false;
+    this.layingOut = undefined;
+    this.panel.webview.html = this.pageHtml();
   }
 
   /** Post the draft on show, noting that the page lays it out first when it has no stored positions. */
@@ -331,6 +352,14 @@ export class DraftPreviewPanel {
       }
       case 'pageError':
         this.events.pageError?.(this.view.source, message.kind);
+        return;
+      case 'crashFallback':
+        if (message.action === 'reload') this.reloadPage();
+        try {
+          this.events.crashFallback?.(this.view.source, message.action, message.detail);
+        } catch (err) {
+          log.warn('The draft preview\'s crash screen action failed:', err instanceof Error ? err.message : String(err));
+        }
         return;
       default:
         return;

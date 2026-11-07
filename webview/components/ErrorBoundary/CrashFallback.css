@@ -1,0 +1,81 @@
+/* The crash screen (CrashFallback.tsx): fills the panel the crash left blank. Theme colours only. */
+
+.crash-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+  font-size: 13px;
+}
+
+.crash-fallback__panel {
+  max-width: 440px;
+  padding: 20px 24px;
+
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--error-fg);
+  border-radius: 6px;
+}
+
+.crash-fallback__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.crash-fallback__body {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.crash-fallback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.crash-fallback__button {
+  padding: 6px 14px;
+
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: 1px solid transparent;
+  border-radius: 3px;
+
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.crash-fallback__button:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+
+.crash-fallback__button:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.crash-fallback__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.crash-fallback__button--secondary {
+  background: transparent;
+  color: var(--editor-fg);
+  border-color: var(--panel-border);
+}
+
+.crash-fallback__button--secondary:hover:not(:disabled) {
+  background: var(--selection-bg);
+}

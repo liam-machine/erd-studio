@@ -1356,6 +1356,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       (code) => telemetry.error(code),
       (action) => onboardingGuide.onDraftAction(action),
       () => draftDetailsOpened(),
+      // The crash screen's Send Feedback: the canvas-less flow (a draft tab is no canvas).
+      (prefill) => vscode.commands.executeCommand('erdStudio.reportBug', prefill),
     )),
     {
       // The first draft's quality flags, counted off the onboarding trail.

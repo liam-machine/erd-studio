@@ -16,7 +16,16 @@ import type { DuplicateMode, FeedbackKind } from '../types/feedback';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
-import { isLayoutFailure, isWebviewErrorArea, isWebviewErrorKind, type LayoutFailure, type WebviewErrorPayload } from '../types/webviewError';
+import {
+  CRASH_DETAIL_MAX,
+  isCrashFallbackAction,
+  isLayoutFailure,
+  isWebviewErrorArea,
+  isWebviewErrorKind,
+  type CrashFallbackPayload,
+  type LayoutFailure,
+  type WebviewErrorPayload,
+} from '../types/webviewError';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, TABLE_ROLE_VALUES, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isRationaleFieldKey, isValidTableAlias, normalisePosix, rationaleKeyToFieldKey } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
@@ -883,6 +892,20 @@ export function validateWebviewErrorPayload(value: unknown): value is WebviewErr
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const { kind, area } = value as { kind?: unknown; area?: unknown };
   return isWebviewErrorKind(kind) && isWebviewErrorArea(area);
+}
+
+/**
+ * `crashFallback` (the canvas's crash screen): an `action` from its fixed
+ * list; for `feedback` an optional `area` from the fixed list and an optional
+ * `detail` string of at most `CRASH_DETAIL_MAX` characters (the page cuts it
+ * there). Anything else is refused, never trimmed into shape.
+ */
+export function validateCrashFallbackPayload(value: unknown): value is CrashFallbackPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { action, area, detail } = value as { action?: unknown; area?: unknown; detail?: unknown };
+  return isCrashFallbackAction(action)
+    && (area === undefined || isWebviewErrorArea(area))
+    && (detail === undefined || (typeof detail === 'string' && detail.length <= CRASH_DETAIL_MAX));
 }
 
 // ---------------------------------------------------------------------------

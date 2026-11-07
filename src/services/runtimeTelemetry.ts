@@ -145,6 +145,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   revealTableInLibrary: 'other',
   layoutFinished: 'layout',
   webviewError: 'other',
+  crashFallback: 'other',
 };
 
 const HANDLER_FAILED: Record<Exclude<HandlerGroup, 'relationship'>, TelemetryErrorCode> = {

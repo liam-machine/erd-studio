@@ -1,14 +1,19 @@
 /**
  * Webview crash reporting (ERD Studio 2.0 B13), shared by the canvas
  * (`webview/`) and the draft page (`webview-draft/`). Nothing here changes
- * what the user sees: a render crash still blanks the page as it always did
- * (the area boundaries only tag the error on its way up, then rethrow it), and
- * the host is told only the crash's kind and area — never its text, stack or
- * a name. The text stays in the page (the Send Feedback dialog's recent
- * errors, which the user reads before anything is sent).
+ * what the user sees: the area boundaries only tag a render crash on its way
+ * up and rethrow it, and the page's root boundary (`CrashFallbackBoundary`)
+ * catches it and shows the crash screen. The host is told only the crash's
+ * kind and area — never its text, stack or a name. The text stays in the page
+ * (the Send Feedback dialog's recent errors, and the crash screen's Send
+ * Feedback prefill, which the user reads before anything is sent).
  *
  * Listeners are installed once per page, outside React, so they still hear
- * the error React rethrows after it has unmounted the tree.
+ * an error React rethrows after it has unmounted the tree. A crash the root
+ * boundary catches never reaches them in a production build (React reports a
+ * caught error to the console only), so the boundary reports it through
+ * {@link reportCaughtRenderCrash}; the two routes share one "already reported"
+ * set, so a crash is counted once whichever hears it first.
  */
 
 import type { WebviewCrashArea, WebviewErrorKind } from '../../src/types/webviewError';
@@ -33,6 +38,23 @@ export const MAX_WEBVIEW_ERROR_REPORTS = 5;
 const BENIGN_ERROR = /ResizeObserver loop/i;
 
 export type WebviewErrorReporter = (kind: WebviewErrorKind, area: WebviewCrashArea) => void;
+
+/** The installed reporter's route for a crash a boundary caught (undefined: nothing installed). */
+let caughtCrashReporter: ((error: unknown) => void) | undefined;
+
+/**
+ * Report a render crash the page's root boundary caught (and so did not let
+ * reach the window): `render` in the area an area boundary tagged it with, or
+ * the installed fallback area. Once per error object, under the same caps as
+ * the listeners; does nothing when no reporting is installed, and never throws.
+ */
+export function reportCaughtRenderCrash(error: unknown): void {
+  try {
+    caughtCrashReporter?.(error);
+  } catch {
+    // Reporting never adds an error of its own.
+  }
+}
 
 /**
  * Listen for uncaught errors and unhandled rejections on `target` (the
@@ -84,10 +106,19 @@ export function installWebviewErrorReporting(
     }
     send('rejection', fallbackArea);
   };
+  const onCaught = (error: unknown): void => {
+    if (typeof error === 'object' && error !== null) {
+      if (reported.has(error)) return;
+      reported.add(error);
+    }
+    send('render', crashAreaOf(error) ?? fallbackArea);
+  };
   target.addEventListener('error', onError);
   target.addEventListener('unhandledrejection', onRejection);
+  caughtCrashReporter = onCaught;
   return () => {
     target.removeEventListener('error', onError);
     target.removeEventListener('unhandledrejection', onRejection);
+    if (caughtCrashReporter === onCaught) caughtCrashReporter = undefined;
   };
 }
