@@ -1,0 +1,41 @@
+name: fct_payment
+schema: retail
+description: Payments against orders
+grain: One row per payment
+modelRole: transaction-fact
+columns:
+  - name: payment_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: order_key
+    dataType: INT
+    description: FK to fct_order
+    isForeignKey: true
+  - name: customer_key
+    dataType: INT
+    description: Paid by
+    isForeignKey: true
+  - name: payment_method_key
+    dataType: INT
+    description: Paid with
+    isForeignKey: true
+  - name: paid_at
+    dataType: TIMESTAMP
+    description: When it cleared
+  - name: amount
+    dataType: DECIMAL
+    description: Amount paid
+relationships:
+  - fromColumn: order_key
+    toModel: fct_order
+    toColumn: order_key
+    cardinality: many-to-one
+  - fromColumn: customer_key
+    toModel: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one
+  - fromColumn: payment_method_key
+    toModel: dim_payment_method
+    toColumn: payment_method_key
+    cardinality: many-to-one

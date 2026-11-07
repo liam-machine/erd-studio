@@ -1,0 +1,57 @@
+name: fct_return
+schema: retail
+description: Returned sale lines
+grain: One row per returned line
+modelRole: transaction-fact
+columns:
+  - name: return_line_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: sale_line_key
+    dataType: INT
+    description: The sale returned
+    isForeignKey: true
+  - name: return_date_key
+    dataType: INT
+    description: Return date
+    isForeignKey: true
+  - name: customer_key
+    dataType: INT
+    description: FK to dim_customer
+    isForeignKey: true
+  - name: product_key
+    dataType: INT
+    description: FK to dim_product
+    isForeignKey: true
+  - name: store_key
+    dataType: INT
+    description: Returned to
+    isForeignKey: true
+  - name: return_reason
+    dataType: VARCHAR
+    description: Reason code
+  - name: refund_amount
+    dataType: DECIMAL
+    description: Amount refunded
+relationships:
+  - fromColumn: sale_line_key
+    toModel: fct_sale
+    toColumn: sale_line_key
+    cardinality: many-to-one
+  - fromColumn: return_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+  - fromColumn: customer_key
+    toModel: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one
+  - fromColumn: product_key
+    toModel: dim_product
+    toColumn: product_key
+    cardinality: many-to-one
+  - fromColumn: store_key
+    toModel: dim_store
+    toColumn: store_key
+    cardinality: many-to-one

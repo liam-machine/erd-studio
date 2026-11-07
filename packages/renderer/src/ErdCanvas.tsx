@@ -27,6 +27,9 @@
  * table carry moving direction arrows (`useHoverFocus`). Both are local,
  * ephemeral presentation: nothing is posted and no prop is needed.
  *
+ * Relationship lines are routed around the tables in one of two styles,
+ * `lineStyle` `curved` (the default) or `hops`; the reader cannot change it.
+ *
  * Derived from the extension webview's `EditorCanvas` (`webview/App.tsx`),
  * keeping its React Flow configuration.
  */
@@ -70,6 +73,7 @@ import type { GraphNode, GraphEdge } from './lib/nodeOverlays';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { Legend } from './components/Legend/Legend';
 import { StatusBar } from './components/StatusBar/StatusBar';
+import { DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
 
 /**
  * The canvas the reader last clicked, pointed at or focused. An Escape with
@@ -102,6 +106,14 @@ export interface ErdCanvasProps {
    * false: the stage colours, as before.
    */
   logicalOnly?: boolean;
+  /**
+   * How relationship lines are drawn. Both route the lines around the tables:
+   * `curved` (the default) with soft curves, a halo where two lines cross and
+   * a faint dashed "x-ray" where a line has to pass under a table; `hops`
+   * with square corners and a small hop where two lines cross. Anything else
+   * reads as `curved`.
+   */
+  lineStyle?: LineStyle;
   className?: string;
   style?: CSSProperties;
 }
@@ -207,6 +219,7 @@ function ErdCanvasInner({
   onLayoutModifiedChange,
   onReady,
   logicalOnly = false,
+  lineStyle: lineStyleProp,
   className,
   style,
   handleRef,
@@ -234,6 +247,12 @@ function ErdCanvasInner({
       storeApi.setState({ logicalOnly });
     }
   }, [logicalOnly, storeApi]);
+
+  // The line style follows the prop.
+  const lineStyle = isLineStyle(lineStyleProp) ? lineStyleProp : DEFAULT_LINE_STYLE;
+  useEffect(() => {
+    storeApi.getState().setLineStyle(lineStyle);
+  }, [lineStyle, storeApi]);
 
   // Latest callbacks, so a parent passing new closures re-runs nothing.
   const onLayoutModifiedChangeRef = useRef(onLayoutModifiedChange);
@@ -447,7 +466,13 @@ function ErdCanvasInner({
 
 export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function ErdCanvas(props, ref) {
   const renderable = useMemo(() => toRenderableSubjectArea(props.domain), [props.domain]);
-  const [store] = useState(() => createCanvasStore({ domain: renderable, logicalOnly: props.logicalOnly === true }));
+  const [store] = useState(() =>
+    createCanvasStore({
+      domain: renderable,
+      logicalOnly: props.logicalOnly === true,
+      lineStyle: isLineStyle(props.lineStyle) ? props.lineStyle : DEFAULT_LINE_STYLE,
+    }),
+  );
 
   return (
     <CanvasStoreProvider store={store}>

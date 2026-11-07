@@ -1,12 +1,14 @@
 /**
- * The canvas backdrop: the dotted background and the minimap. Render it as a
- * child of `<ReactFlow>`.
+ * The canvas backdrop: the dotted background, the minimap and the line
+ * routing (`EdgeRouter`, the x-ray `EdgeOverlay`, `LayerLineColour`). Render
+ * it as a child of `<ReactFlow>`.
  */
 
 import { Background, BackgroundVariant, MiniMap, type Node } from '@xyflow/react';
 import { stageNodeColor } from '../lib/stageColors';
 import type { TableFlowNode, AnnotationFlowNode } from '../types/graph';
 import { useEditorStore } from '../store/editorStore';
+import { EdgeRouter, EdgeOverlay, LayerLineColour } from './EdgeRouting';
 
 /** Minimap fill for annotation nodes, keyed by annotation colour. */
 export const ANNOTATION_MINIMAP_COLORS: Record<string, string> = {
@@ -40,6 +42,9 @@ export function CanvasBackdrop() {
   return (
     <>
       <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+      <EdgeRouter />
+      <LayerLineColour />
+      <EdgeOverlay />
       <MiniMap
         position="bottom-right"
         pannable

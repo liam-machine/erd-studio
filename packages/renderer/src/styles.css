@@ -26,3 +26,4 @@
 @import './components/Legend/Legend.css';
 @import './components/StatusBar/StatusBar.css';
 @import './styles/theme.css';
+@import './canvas/EdgeRouting.css';
