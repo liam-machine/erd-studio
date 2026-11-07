@@ -61,3 +61,47 @@ export const FIT_ZOOM_READABLE = 0.3;
 export function fitZoomBucket(zoom: number): FitZoomBucket {
   return Number.isFinite(zoom) && zoom < FIT_ZOOM_READABLE ? 'under30' : 'ok';
 }
+
+/**
+ * The two buttons of the screen a webview shows after a render crash (the
+ * canvas's and the draft page's crash fallback): `reload` the panel, or open
+ * Send Feedback. The page sends the choice; the host acts on it.
+ */
+export const CRASH_FALLBACK_ACTIONS = ['reload', 'feedback'] as const;
+export type CrashFallbackAction = (typeof CRASH_FALLBACK_ACTIONS)[number];
+
+export function isCrashFallbackAction(value: unknown): value is CrashFallbackAction {
+  return typeof value === 'string' && (CRASH_FALLBACK_ACTIONS as readonly string[]).includes(value);
+}
+
+/**
+ * The longest crash `detail` a page may send (the error's first line, paths
+ * already reduced to their shape by `redactPaths`). It goes only into the
+ * Send Feedback prefill the user reads before anything is sent; never into
+ * telemetry.
+ */
+export const CRASH_DETAIL_MAX = 300;
+
+/**
+ * The `crashFallback` payload (canvas → host): the button pressed, and for
+ * `feedback` where the crash started and its first line, for the report's
+ * prefill only.
+ */
+export interface CrashFallbackPayload {
+  action: CrashFallbackAction;
+  area?: WebviewErrorArea;
+  detail?: string;
+}
+
+/**
+ * A caught crash's first line, cut to {@link CRASH_DETAIL_MAX} characters
+ * (the caller redacts it). Never the stack: the report's reader gets what the
+ * error said, and the stack's file URLs say nothing of the user's.
+ */
+export function crashDetailOf(error: unknown): string {
+  const raw = error instanceof Error
+    ? (error.name && error.name !== 'Error' ? `${error.name}: ${error.message}` : error.message)
+    : typeof error === 'string' ? error : '';
+  const firstLine = raw.split('\n', 1)[0]?.trim() ?? '';
+  return firstLine.length > CRASH_DETAIL_MAX ? `${firstLine.slice(0, CRASH_DETAIL_MAX - 1)}…` : firstLine;
+}

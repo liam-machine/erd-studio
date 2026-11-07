@@ -633,6 +633,9 @@ export const FEATURES = [
   'noFolderWarned',
   // 2.0 review — a stage switch or comparison met a diagram file the user broke (theirs, not ours)
   'handlerFileProblem',
+  // 2.0 — the crash screen a webview shows after a render crash: which button was pressed
+  'crashFallbackReload',
+  'crashFallbackFeedback',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

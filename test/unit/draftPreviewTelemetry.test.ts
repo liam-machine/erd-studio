@@ -37,6 +37,7 @@ function events(): { [K in keyof DraftPreviewEvents]-?: ReturnType<typeof vi.fn>
     pageError: vi.fn(),
     layoutFinished: vi.fn(),
     closedWhileLayingOut: vi.fn(),
+    crashFallback: vi.fn(),
   };
 }
 

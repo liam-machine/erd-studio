@@ -674,7 +674,8 @@ describe('allowlists agree with the Worker', () => {
   it('appends the 2.0.0 launch keys after every earlier one, so no index moves', () => {
     expect(FEATURES.indexOf('heartbeatProvisional')).toBe(FEATURES.indexOf('dbtCompileNoStart') + 1);
     expect(ERROR_CODES.indexOf('activationFailed')).toBe(ERROR_CODES.indexOf('manifestRetryFailed') + 1);
-    expect(FEATURES.at(-1)).toBe('handlerFileProblem');
+    expect(FEATURES.indexOf('crashFallbackReload')).toBe(FEATURES.indexOf('handlerFileProblem') + 1);
+    expect(FEATURES.at(-1)).toBe('crashFallbackFeedback');
     expect(ERROR_CODES.at(-1)).toBe('loggedErrorOther');
     // Liam's decision for B6: no table-count bucket is ever a key.
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);

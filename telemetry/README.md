@@ -1100,6 +1100,8 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
 - `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
 - `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
+- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded.
+- `crashFallbackFeedback` — the crash screen had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
 
 **B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
 

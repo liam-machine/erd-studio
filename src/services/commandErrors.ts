@@ -15,6 +15,7 @@ import * as path from 'path';
 import { SubjectAreaFileError, SubjectAreaValidationError, type JsonSyntaxProblem } from '@erd-studio/core';
 
 import { redactPaths, type FeedbackKind } from '../types/feedback';
+import { CRASH_DETAIL_MAX, type WebviewErrorArea } from '../types/webviewError';
 
 /** The button that opens Send Feedback prefilled with the failure. */
 export const SEND_FEEDBACK_BUTTON = 'Send Feedback';
@@ -91,6 +92,42 @@ export function feedbackPrefill(title: string, doing: string, err: unknown): Fee
     kind: 'bug',
     title: `${title} failed`,
     description: redactPaths(`${title} hit a problem ${doing}.\n\nError: ${raw}`),
+  };
+}
+
+/** Where a canvas crash started, in the words of the report (`other`: not said). */
+const CRASH_AREA_WORDS: Readonly<Record<WebviewErrorArea, string | undefined>> = {
+  canvas: 'the canvas',
+  detailPanel: 'the Detail panel',
+  toolbar: 'the toolbar',
+  dialogs: 'a dialog',
+  compare: 'the compare view',
+  guide: 'the Show Me Around guide',
+  other: undefined,
+};
+
+/**
+ * Send Feedback's prefill for the crash screen's **Send Feedback** (the
+ * canvas's or the draft page's): which page crashed, where on the canvas it
+ * started, and the crash's first line as the page sent it, through
+ * `redactPaths()` again here (the page already did) and cut to
+ * `CRASH_DETAIL_MAX`. The user reads it in Send Feedback before anything is
+ * sent, and nothing analyses it: the canvas-less flow has no model.
+ */
+export function crashFeedbackPrefill(
+  surface: 'canvas' | 'draft',
+  crash: { area?: WebviewErrorArea; detail?: string } = {},
+): FeedbackPrefill {
+  const page = surface === 'draft' ? 'The draft preview' : 'The diagram canvas';
+  const where = crash.area ? CRASH_AREA_WORDS[crash.area] : undefined;
+  const detail = (crash.detail ?? '').slice(0, CRASH_DETAIL_MAX).trim();
+  return {
+    kind: 'bug',
+    title: `${surface === 'draft' ? 'The draft preview' : 'The canvas'} stopped working`,
+    description: redactPaths(
+      `${page} crashed and showed the "stopped working" screen${where ? `; it started in ${where}` : ''}.`
+      + `\n\nError: ${detail || '(no message)'}`,
+    ),
   };
 }
 
