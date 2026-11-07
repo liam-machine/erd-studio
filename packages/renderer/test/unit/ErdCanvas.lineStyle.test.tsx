@@ -137,6 +137,28 @@ describe('ErdCanvas lineStyle', () => {
     expect(Math.min(...ys) < 0 || Math.max(...ys) > 120).toBe(true);
   });
 
+  it('hands the diagram\'s layer colour to the CSS (colour on hover), and clears it without one', async () => {
+    const coloured: DisplaySubjectArea = {
+      ...domain(),
+      layerConfig: { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: 'var(--layer-silver)' } as DisplaySubjectArea['layerConfig'],
+    };
+    const view = render(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={coloured} logicalOnly />
+      </div>,
+    );
+    await settle();
+    const root = () => view.container.querySelector<HTMLElement>('.react-flow')!;
+    expect(root().style.getPropertyValue('--diagram-layer-color')).toBe('var(--layer-silver)');
+    view.rerender(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={domain()} logicalOnly />
+      </div>,
+    );
+    await settle();
+    expect(root().style.getPropertyValue('--diagram-layer-color')).toBe('');
+  });
+
   it('posts nothing, with two canvases on a page each routing its own diagram', async () => {
     const post = vi.spyOn(NOOP_CANVAS_HOST, 'postMessage');
     const view = render(

@@ -1,5 +1,5 @@
-/* Line routing (EdgeRouting.tsx): the x-ray overlay and the halo casing.
-   Theme variables only. */
+/* Line routing (EdgeRouting.tsx): the x-ray overlay, the halo casing, and
+   the logical-only canvas's colour on hover. Theme variables only. */
 
 /* ---- Overlay above the cards (x-ray tunnels) ----
    The x-ray: a line's stretch under a card, drawn again above the cards as a
@@ -99,4 +99,24 @@
   stroke: var(--editor-bg);
   stroke-width: 7;
   stroke-linecap: butt;
+}
+
+/* ---- Colour on hover (logical-only canvas) ----
+   theme.css turns --stage-logical neutral grey on a logical-only canvas, so
+   lines, their '*' / '1' and role labels are grey at rest. The lines you are
+   looking at light up in the diagram's layer colour (LayerLineColour puts it
+   in --diagram-layer-color on the React Flow root): the hovered or selected
+   table's lines, their labels and adornments, their moving arrows and their
+   x-ray ghosts. With no layer colour they stay the neutral grey. Table
+   borders stay neutral. A dbt (stage-coloured) canvas is not affected. */
+
+.editor-canvas--neutral .fk-edge--logical.fk-edge--lit,
+.editor-canvas--neutral .fk-edge--logical.fk-edge--flowing,
+.editor-canvas--neutral .fk-edge__flow--logical,
+.editor-canvas--neutral .fk-edge__adornment--lit {
+  --stage-logical: var(--diagram-layer-color, var(--canvas-neutral-line));
+}
+
+.editor-canvas--neutral .edge-overlay__tunnel--logical.edge-overlay__tunnel--lit {
+  color: var(--diagram-layer-color, var(--canvas-neutral-line));
 }

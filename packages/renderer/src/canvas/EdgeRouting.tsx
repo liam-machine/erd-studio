@@ -1,5 +1,5 @@
 /**
- * Line routing on the canvas. Render both as children of `<ReactFlow>`
+ * Line routing on the canvas. Render all three as children of `<ReactFlow>`
  * (CanvasBackdrop does), in the editor and in the viewer alike: none of them
  * posts to a host or shows an editing affordance.
  *
@@ -9,6 +9,8 @@
  *   canvas has its own routing engine (router memory and performance guard).
  * - `EdgeOverlay` draws what has to sit above the cards: the x-ray stretches
  *   of a line that passes under a table (the `curved` style).
+ * - `LayerLineColour` hands the diagram's layer colour to the CSS, which a
+ *   logical-only canvas lights the focused lines with (EdgeRouting.css).
  */
 
 import { useEffect, useId, useRef } from 'react';
@@ -30,6 +32,26 @@ import { CURVE_RADIUS, ROUNDED_RADIUS } from '../lib/edgeRouting/render/corners'
 import { edgeFocusRole } from '../lib/canvasFocus';
 import type { FkEdgeData } from '../types/graph';
 import './EdgeRouting.css';
+
+/**
+ * The diagram's own layer colour, as `--diagram-layer-color` on the React
+ * Flow root, so a logical-only canvas can light its focused lines with it
+ * (EdgeRouting.css). Cleared when the diagram has no layer colour: the lines
+ * then stay neutral grey.
+ */
+export function LayerLineColour() {
+  const domNode = useStore((s) => s.domNode);
+  const color = useEditorStore((s) => s.domain?.layerConfig?.color);
+  useEffect(() => {
+    if (!domNode) return;
+    if (color) domNode.style.setProperty('--diagram-layer-color', color);
+    else domNode.style.removeProperty('--diagram-layer-color');
+    return () => {
+      domNode.style.removeProperty('--diagram-layer-color');
+    };
+  }, [domNode, color]);
+  return null;
+}
 
 /** The number of FK lines the router would route (for the engine's hard cap). */
 function fkLineCount(edges: readonly Edge[]): number {
