@@ -73,8 +73,11 @@ export function directionChoice(
   return { text: `Each ${from.model} row points at one ${to.model}`, detail };
 }
 
-export const DIRECTION_QUESTION = 'Which side holds the foreign key?';
-export const DIRECTION_MISSING_HINT = 'Pick which side holds the foreign key — ERD Studio has no key or dbt test to tell.';
+// About what the relationship means, not where it is saved: the Ref (or yml entry) records it either way.
+export const DIRECTION_QUESTION = 'Which way does this relationship point?';
+export const DIRECTION_MISSING_HINT = "Pick one: neither table marks these columns as its key, and dbt has no test to tell. Once a table's primary key is marked, ERD Studio works this out itself.";
+/** The same hint in a folder with no dbt project, where no dbt test could tell. */
+export const DIRECTION_MISSING_HINT_LOGICAL = "Pick one: neither table marks these columns as its key. Once a table's primary key is marked, ERD Studio works this out itself.";
 
 /** The "mark as primary key" checkbox's label. */
 export function markKeyLabel(model: string, columns: readonly string[]): string {
@@ -99,4 +102,44 @@ export function pairColumnUsed(column: string): string {
 /** The dialog's title: "New Relationship", or "New Composite Relationship" with two or more pairs. */
 export function dialogTitle(editing: boolean, pairCount: number): string {
   return `${editing ? 'Edit' : 'New'} ${pairCount > 1 ? 'Composite ' : ''}Relationship`;
+}
+
+/** The New / Edit Relationship dialog's "How many?" field label. */
+export const HOW_MANY_LABEL = 'How many?';
+
+/** The cardinalities the dialog offers, in its order (one-to-many is stored turned round, #133). */
+export type DialogCardinality = 'many-to-one' | 'one-to-one' | 'many-to-many';
+
+/** The one vocabulary for a cardinality's name, used by every menu and dialog. */
+export const CARDINALITY_NAMES: Record<'many-to-one' | 'one-to-many' | 'one-to-one' | 'many-to-many', string> = {
+  'many-to-one': 'Many-to-one',
+  'one-to-many': 'One-to-many',
+  'one-to-one': 'One-to-one',
+  'many-to-many': 'Many-to-many',
+};
+
+/** The notation, kept for tooltips only. */
+const CARDINALITY_NOTATION: Record<DialogCardinality, string> = {
+  'many-to-one': 'N:1, *→1',
+  'one-to-one': '1:1',
+  'many-to-many': 'N:M, *↔*',
+};
+
+/**
+ * One "How many?" option, phrased with the chosen tables: "Many fct_order
+ * rows → one dim_customer", "One fct_order row → one dim_customer",
+ * "Many → many". Before both tables are chosen it says "Many → one". The
+ * notation is in `title` only.
+ */
+export function cardinalityChoice(cardinality: DialogCardinality, from: string, to: string): { text: string; title: string } {
+  const title = `${CARDINALITY_NAMES[cardinality]} (${CARDINALITY_NOTATION[cardinality]})`;
+  const named = from !== '' && to !== '';
+  switch (cardinality) {
+    case 'many-to-one':
+      return { text: named ? `Many ${from} rows → one ${to}` : 'Many → one', title };
+    case 'one-to-one':
+      return { text: named ? `One ${from} row → one ${to}` : 'One → one', title };
+    default:
+      return { text: 'Many → many', title };
+  }
 }

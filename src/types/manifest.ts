@@ -8,6 +8,14 @@
 
 import type { Meta } from './semantic';
 
+/**
+ * The `manifest.metadata.env` key a Parse without your credentials run
+ * writes (ERD Studio sets `DBT_ENV_CUSTOM_ENV_ERD_STUDIO_THROWAWAY_PROFILE=1`
+ * in dbt's environment, and dbt copies it there without the prefix). Its
+ * schemas come from placeholder connection details, so they are blanked.
+ */
+export const THROWAWAY_MARKER_KEY = 'ERD_STUDIO_THROWAWAY_PROFILE';
+
 /** Column metadata from a dbt manifest node. */
 export interface ManifestColumn {
   name: string;
@@ -44,6 +52,13 @@ export interface ManifestModelInfo {
   projectName: string;
   /** Schema the model is materialised in */
   schema: string;
+  /**
+   * The custom schema the developer configured (`config.schema`: `+schema:`
+   * or `config(schema=…)`), which is the same on every machine, unlike
+   * `schema` (`dbt_liam_finance` in dev, `finance` in prod). Absent when none
+   * is set. A DBML table's schema folder (§2.4).
+   */
+  configSchema?: string;
   /**
    * Relation name dbt builds the model as, when it differs from `name` (the
    * `alias` config). dbt fills `alias` in on every node — equal to the name
@@ -96,6 +111,12 @@ export interface ManifestWorkerResult {
   resourceDocs?: Record<string, ManifestModelInfo>;
   /** Composite foreign keys declared by constraints or dbt_constraints tests (#133 L2) */
   compositeForeignKeys?: CompositeForeignKey[];
+  /**
+   * Written by Parse without your credentials (`THROWAWAY_MARKER_KEY` in
+   * `metadata.env`): its schemas are placeholders and were blanked. Absent
+   * means false (older results).
+   */
+  placeholderProfile?: boolean;
 }
 
 /** Error result from the manifest worker thread. */
@@ -139,4 +160,9 @@ export interface ManifestData {
    * literals stay valid.
    */
   compositeForeignKeys?: CompositeForeignKey[];
+  /**
+   * Written by Parse without your credentials: schemas are placeholders and
+   * were blanked. Absent means false (older results, hand-built literals).
+   */
+  placeholderProfile?: boolean;
 }

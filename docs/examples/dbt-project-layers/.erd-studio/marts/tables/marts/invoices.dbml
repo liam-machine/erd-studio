@@ -1,0 +1,13 @@
+Table marts.invoices [
+  role: 'transaction-fact',
+  grain: 'One row per invoice'
+] {
+  Note: 'Invoices, for finance.'
+
+  invoice_id  STRING          [pk, natural_key: 'true']
+  customer_id STRING          [foreign_key: 'true']
+  invoiced_on DATE
+  amount_due  "DECIMAL(12,2)" [additive_type: 'additive']
+  amount_paid "DECIMAL(12,2)" [additive_type: 'additive']
+  is_paid     BOOLEAN
+}

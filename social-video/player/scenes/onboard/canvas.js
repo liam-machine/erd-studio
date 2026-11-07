@@ -11,7 +11,7 @@
 // cut between the two scenes is seamless.
 import { appear, card, COLORS, easeInOut, easeOut, edge, ICON, lerp, node, pointer, seg, toolbar } from '../../lib.js';
 
-// Types: Draw from dbt copies each column's `data_type` from the schema .yml or the manifest and
+// Types: Import from dbt copies each column's `data_type` from the schema .yml or the manifest and
 // never reads catalog.json, so a project whose yml declares no types (the sample's marts do not)
 // drafts every column as `unknown`. The real canvas prints that word; here it is drawn dim, and
 // onboard/check fills the real types in on the Physical switch, where catalog.json supplies them.

@@ -50,21 +50,42 @@ function renderNode(extra: Partial<TableFlowNode['data']> = {}, columns?: Column
   return render(<Node data={data} selected={false} />);
 }
 
-describe('TableNode schema badge tooltip', () => {
-  it('names the database schema the abbreviation stands for', () => {
+describe('TableNode layer badge tooltip', () => {
+  it('names the layer the table lives in, then its schema', () => {
     const { container } = renderNode({ stage: 'physical', readOnly: true, schema: 'silver' });
     const badge = container.querySelector('.model-node__badge')!;
 
     expect(badge.textContent).toBe('SLV');
-    expect(badge.getAttribute('aria-label')).toBe('Database schema: silver');
+    expect(badge.getAttribute('aria-label')).toBe('Layer: silver\nSchema: silver');
   });
 
-  it('still explains itself when dbt has resolved no schema', () => {
+  it('says on the physical stage that dbt has resolved no schema', () => {
+    const { container } = renderNode({ stage: 'physical', readOnly: true });
+    const badge = container.querySelector('.model-node__badge')!;
+
+    expect(badge.textContent).toBe('SLV');
+    expect(badge.getAttribute('aria-label')).toBe(
+      'Layer: silver\nNo dbt schema resolved (run dbt compile or dbt docs generate).',
+    );
+  });
+
+  it('does not talk about dbt on the logical stage', () => {
     const { container } = renderNode();
     const badge = container.querySelector('.model-node__badge')!;
 
-    expect(badge.className).toContain('model-node__badge--layer');
-    expect(badge.getAttribute('aria-label')).toContain('no dbt schema resolved');
+    expect(badge.getAttribute('aria-label')).toBe('Layer: silver');
+    expect(badge.className).toBe('model-node__badge');
+  });
+
+  it('uses the layer config\'s abbreviation and label', () => {
+    const { container } = renderNode({
+      schema: 'sales',
+      layerConfig: { id: 'silver', label: 'Silver', abbreviation: 'S', color: '#a0a0a0', order: 1, creatable: true },
+    });
+    const badge = container.querySelector('.model-node__badge')!;
+
+    expect(badge.textContent).toBe('S');
+    expect(badge.getAttribute('aria-label')).toBe('Layer: Silver\nSchema: sales');
   });
 });
 
@@ -189,7 +210,7 @@ describe('TableNode header hover card', () => {
     const badge = container.querySelector('.model-node__badge')!;
 
     hover(badge);
-    expect(tip()!.textContent).toBe('Database schema: silver');
+    expect(tip()!.textContent).toBe('Layer: silver\nSchema: silver');
 
     fireEvent.mouseLeave(badge);
     expect(tip()).toBeNull();
@@ -210,5 +231,71 @@ describe('TableNode header hover card', () => {
   it('renders no card for a node with no provenance chip', () => {
     const { container } = renderNode();
     expect(container.querySelector('.model-node__source')).toBeNull();
+  });
+});
+
+describe('TableNode header: the table\'s own layer, its schema and its warehouse name', () => {
+  const RAW = { id: 'raw_vault', label: 'Raw Vault', abbreviation: 'RV', color: '#64748b', order: 0, creatable: true };
+  const BUSINESS = { id: 'business_vault', label: 'Business Vault', abbreviation: 'BV', color: '#8b5cf6', order: 1, creatable: true };
+
+  it('badges a table with its own layer and colour, not the diagram\'s, and says it is borrowed', () => {
+    const { container } = renderNode({
+      modelName: 'hub_customer', layer: 'business_vault', layerConfig: BUSINESS, schema: 'raw_vault',
+      tableLayer: 'raw_vault', tableLayerConfig: RAW, otherLayer: true,
+    });
+    const badge = container.querySelector('.model-node__badge')!;
+    expect(badge.textContent).toBe('RV');
+    expect(badge.getAttribute('aria-label')).toBe('Layer: Raw Vault\nSchema: raw_vault\nFrom another layer: this diagram is in Business Vault.');
+    const node = container.querySelector('.model-node') as HTMLElement;
+    expect(node.className).toContain('model-node--layered');
+    expect(node.className).toContain('model-node--other-layer');
+    expect(node.style.getPropertyValue('--model-node-layer-color')).toBe('#64748b');
+  });
+
+  it('reads the name as the sidebar does: the schema as a prefix when it is not the layer\'s name, then the name, then the alias', () => {
+    const { container } = renderNode({
+      modelName: 'zuora_account', schema: 'zuora', tableLayer: 'raw', shownSchema: 'zuora', alias: 'account', label: 'zuora.account',
+    });
+    const name = container.querySelector('.model-node__name')!;
+    expect(container.querySelector('.model-node__schema')!.textContent).toBe('zuora.');
+    expect(container.querySelector('.model-node__model-id')!.textContent).toBe('as account');
+    expect(name.textContent).toBe('zuora.zuora_accountas account');
+  });
+
+  it('badges a table whose own layer is not known (YAML, physical) with the diagram\'s layer, and prefixes its schema', () => {
+    const { container } = renderNode({ stage: 'physical', readOnly: true, schema: 'analytics', shownSchema: 'analytics', alias: undefined });
+    const badge = container.querySelector('.model-node__badge')!;
+    expect(badge.textContent).toBe('SLV');
+    expect(badge.getAttribute('aria-label')).toBe('Layer: silver\nSchema: analytics');
+    expect(container.querySelector('.model-node__schema')!.textContent).toBe('analytics.');
+    expect(container.querySelector('.model-node')!.className).not.toContain('model-node--layered');
+  });
+});
+
+describe('TableNode in a single-layer project', () => {
+  const ONLY = { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 0, creatable: true };
+
+  it('draws no layer badge and no strip, but keeps the schema prefix', () => {
+    const { container } = renderNode({
+      schema: 'sales', shownSchema: 'sales', tableLayer: 'silver', tableLayerConfig: ONLY, layerConfig: ONLY, singleLayer: true,
+    });
+    expect(container.querySelector('.model-node__badge')).toBeNull();
+    expect(container.querySelector('.model-node')!.className).not.toContain('model-node--layered');
+    expect(container.querySelector('.model-node__schema')!.textContent).toBe('sales.');
+  });
+
+  it('draws both in a project with more than one layer', () => {
+    const { container } = renderNode({ tableLayer: 'silver', tableLayerConfig: ONLY, layerConfig: ONLY });
+    expect(container.querySelector('.model-node__badge')!.textContent).toBe('SLV');
+    expect(container.querySelector('.model-node')!.className).toContain('model-node--layered');
+  });
+});
+
+describe('TableNode selection ring colour', () => {
+  it('marks the stage being viewed, a ghost on the Physical tab included', () => {
+    const { container } = renderNode({ stage: 'physical', readOnly: true, isGhost: true, ghostReason: 'not-in-project' });
+    const node = container.querySelector('.model-node')!;
+    expect(node.className).toContain('model-node--ghost');
+    expect(node.className).toContain('model-node--stage-physical');
   });
 });

@@ -1,0 +1,16 @@
+Table gold.dim_products_005 [
+  role: 'dimension',
+  grain: 'One row per products 005'
+] {
+  products_005_key BIGINT [pk, note: 'Primary key of dim_products_005']
+  is_active BIGINT [note: 'is active of the products 005 row']
+  category "DECIMAL(18,2)" [note: 'category of the products 005 row']
+  is_current "DECIMAL(18,2)" [note: 'is current of the products 005 row']
+  status STRING [note: 'status of the products 005 row']
+  notes DOUBLE [note: 'notes of the products 005 row']
+  is_current_5 TIMESTAMP_NTZ [note: 'is current 5 of the products 005 row']
+  effective_date DATE [note: 'effective date of the products 005 row']
+  contracts_qa_019_key BIGINT [note: 'FK to fct_contracts_qa_019', foreign_key: 'true']
+  projects_sap_013_key BIGINT [note: 'FK to fct_projects_sap_013', foreign_key: 'true']
+  Note: 'Synthetic gold table dim_products_005'
+}

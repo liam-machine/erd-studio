@@ -1,0 +1,14 @@
+Table dim_date [schema: 'gold'] {
+  date_key      int [
+    pk,
+    note: '''
+  The calendar date as YYYYMMDD.
+      Indented line kept exactly.
+    '''
+  ]
+  calendar_date date
+  Note: '''
+    One row per calendar day.
+        - nested bullet, indentation is part of the value
+    '''
+}

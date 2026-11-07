@@ -1,0 +1,157 @@
+/// One row per sales order line.
+table Sales
+	lineageTag: 6f1d2c3b-4a5e-4f60-8172-93a4b5c6d7e8
+
+	/// Revenue after discounts.
+	measure 'Total Sales' = SUM(Sales[Sales Amount])
+		formatString: \$#,0.00;(\$#,0.00);\$#,0.00
+		lineageTag: 1a2b3c4d-0001-4000-8000-000000000001
+
+	measure 'Sales YoY %' =
+			VAR _cur = [Total Sales]
+			VAR _prev = CALCULATE ( [Total Sales], SAMEPERIODLASTYEAR ( 'Date Table'[Date] ) )
+			RETURN
+				DIVIDE ( _cur - _prev, _prev )
+		formatString: 0.0%;-0.0%;0.0%
+		lineageTag: 1a2b3c4d-0001-4000-8000-000000000002
+
+	measure 'Order Count' = ```
+			DISTINCTCOUNT ( Sales[SalesOrderNumber] )
+			```
+		formatString: 0
+		lineageTag: 1a2b3c4d-0001-4000-8000-000000000003
+
+	column SalesOrderLineKey
+		dataType: int64
+		isKey
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000001
+		summarizeBy: none
+		sourceColumn: SalesOrderLineKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column SalesOrderNumber
+		dataType: string
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: SalesOrderNumber
+
+		annotation SummarizationSetBy = Automatic
+
+	column CustomerKey
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: CustomerKey
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ProductKey
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: ProductKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column OrderDateKey
+		dataType: int64
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: OrderDateKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column ShipDateKey
+		dataType: int64
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000006
+		summarizeBy: none
+		sourceColumn: ShipDateKey
+
+		annotation SummarizationSetBy = Automatic
+
+	/// When the order was placed (local time).
+	column OrderDate
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000007
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+		variation Variation
+			isDefault
+			relationship: 5e6f7a8b-0005-4000-8000-000000000005
+			defaultHierarchy: LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+	column Quantity
+		dataType: int64
+		formatString: 0
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000008
+		summarizeBy: sum
+		sourceColumn: Quantity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Unit Price'
+		dataType: decimal
+		formatString: \$#,0.00;(\$#,0.00);\$#,0.00
+		lineageTag: 2b3c4d5e-0001-4000-8000-000000000009
+		summarizeBy: none
+		sourceColumn: UnitPrice
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Quantity × unit price, after the line discount.
+	column 'Sales Amount'
+		dataType: decimal
+		formatString: \$#,0.00;(\$#,0.00);\$#,0.00
+		lineageTag: 2b3c4d5e-0001-4000-8000-00000000000a
+		summarizeBy: sum
+		sourceColumn: SalesAmount
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Margin on the line.
+	column 'Line Margin' = Sales[Sales Amount] - RELATED ( 'Product'[Standard Cost] ) * Sales[Quantity]
+		dataType: decimal
+		formatString: \$#,0.00;(\$#,0.00);\$#,0.00
+		lineageTag: 2b3c4d5e-0001-4000-8000-00000000000b
+		summarizeBy: sum
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsReturned
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 2b3c4d5e-0001-4000-8000-00000000000c
+		summarizeBy: none
+		sourceColumn: IsReturned
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Sales = m
+		mode: import
+		queryGroup: Staging
+		source =
+				let
+					Source = Sql.Database(ServerName, "AdventureWorksDW"),
+					dbo_FactInternetSales = Source{[Schema="dbo",Item="FactInternetSales"]}[Data],
+					#"Renamed Columns" = Table.RenameColumns(dbo_FactInternetSales, {{"SalesAmount", "SalesAmount"}})
+				in
+					#"Renamed Columns"
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation
+

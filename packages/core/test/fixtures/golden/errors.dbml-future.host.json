@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "<root>/.erd-studio/silver/diagrams/dbml-future.dbml has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension."
+  }
+}

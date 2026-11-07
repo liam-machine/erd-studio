@@ -1,0 +1,22 @@
+Table gold.fct_employees_fleet_010 [
+  role: 'fact',
+  grain: 'One row per employees fleet 010'
+] {
+  employees_fleet_010_key BIGINT [pk, note: 'Primary key of fct_employees_fleet_010']
+  loaded_at INT [note: 'loaded at of the employees fleet 010 row']
+  amount DOUBLE [note: 'amount of the employees fleet 010 row', additive_type: 'non-additive']
+  effective_date DOUBLE [note: 'effective date of the employees fleet 010 row']
+  amount_3 "DECIMAL(18,2)" [note: 'amount 3 of the employees fleet 010 row', additive_type: 'non-additive']
+  notes BOOLEAN [note: 'notes of the employees fleet 010 row']
+  notes_5 DOUBLE [note: 'notes 5 of the employees fleet 010 row']
+  weight_kg STRING [note: 'weight kg of the employees fleet 010 row', additive_type: 'non-additive']
+  notes_7 TIMESTAMP_NTZ [note: 'notes 7 of the employees fleet 010 row']
+  owner_name BIGINT [note: 'owner name of the employees fleet 010 row']
+  created_at INT [note: 'created at of the employees fleet 010 row']
+  is_current DOUBLE [note: 'is current of the employees fleet 010 row']
+  loaded_at_11 STRING [note: 'loaded at 11 of the employees fleet 010 row']
+  region BOOLEAN [note: 'region of the employees fleet 010 row']
+  created_at_13 BOOLEAN [note: 'created at 13 of the employees fleet 010 row']
+  addresses_002_key BIGINT [note: 'FK to dim_addresses_002', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_employees_fleet_010'
+}

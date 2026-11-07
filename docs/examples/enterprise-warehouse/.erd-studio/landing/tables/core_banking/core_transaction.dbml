@@ -1,0 +1,10 @@
+Table core_banking.core_transaction [owner: 'data-engineering'] {
+  Note: 'Posted transactions as the core banking system sends them.'
+
+  txn_id     STRING    [pk, natural_key: 'true']
+  account_no STRING    [foreign_key: 'true']
+  posted_at  TIMESTAMP
+  amount     "DECIMAL(18,2)"
+  channel    STRING
+  _loaded_at TIMESTAMP [note: 'When the loader landed the row']
+}

@@ -22,7 +22,9 @@ this file is out of date: say so in the report.
 
 | If the fix touches… | …then also | Tag |
 |---|---|---|
-| Domain JSON, model yml or `layers.json` shape (`packages/core/src/types/semantic.ts`, a field, a naming rule, a relationship storage rule) | `SCHEMA_CONTENT` in `src/services/harnessService.ts` | [convention] |
+| The DBML storage format (2.0's default, layer-first: `<layer>/tables/<schema>/`, `<layer>/relationships/`, `<layer>/diagrams/`): a table, relationships or diagram `.dbml` file, a diagram's `erd_layout`, the path grammar (`packages/core/src/storage.ts`), the DBML codec (`packages/core/src/dbml/`, `erdLayout.ts`, `dbmlRichProperties.ts`, `src/providers/subjectAreaCodec.ts`) or where Refs live (`src/services/dbmlLibraryWrites.ts`, `dbmlRelationshipsIndex.ts`) | Everything in the row below, plus the DBML twins under `packages/core/test/fixtures/dbml/`, `test/fixtures/dbml-native/`, the storage rows of `docs/dev/dbml.md`, and `npm run test:e2e:dbml` | [convention] |
+| A relationships file (`<layer>/relationships/*.dbml`): its Refs, `use` lines, which file a new Ref goes in, or which files a diagram imports | `planDbmlLibraryWrites` with `placeNewRef` / `relationshipsImportsFor` (`src/services/dbmlRelationshipsIndex.ts`) stay the only placer and the one imports rule (`planRelationshipWrite` still decides the relationships), and `settleDbmlDiagramWrites` the one settle; `doctor`'s `erd.dbmlProblems` checks in `src/cli/dbmlProblems.ts` and their table in `docs/dev/onboarding-and-cli.md`; Convert's planner (`src/services/dbmlConversion.ts`) when the change affects what it writes | [convention] |
+| Domain JSON, model yml or `layers.json` shape (`packages/core/src/types/semantic.ts`, a field, a naming rule, a relationship storage rule) | `SCHEMA_CONTENT` in `src/services/harnessService.ts` (its `SKILL_PART`, `DBML_PART` and `LEGACY_PART`) | [convention] |
 | | **Bump `HARNESS_VERSION`** (the same file). Every installed harness then shows "outdated", which is the point. | [convention] |
 | | `docs/semantic-domain-json-reference.md`, plus a "still read" note for any shape the writer stops producing | [convention] |
 | | A fixture of the **old** shape under `packages/core/test/fixtures/` and its golden. Old files must always render (Confluence can't migrate). | [convention] |
@@ -31,7 +33,7 @@ this file is out of date: say so in the report.
 | The setup skill markdown (`src/harness/claude/erd-studio-setup/**`) | A new `references/*.md` must be listed in `src/services/harnessAssets.ts`. SKILL.md must stay under 500 lines. Both skill-folder variants come from the same source. | [CI] |
 | | Bump `HARNESS_VERSION`: the installed setup skill is version-marked. | [convention] |
 | The `erd-studio` CLI's output or flags | The setup skill text that reads that output (`SKILL.md`, `references/*.md`), and the CLI section of `CLAUDE.md` | [convention] |
-| A new on-disk shape the reader must accept | `detectSubjectAreaFormat()` stays the **only** detector. Never add a second one. | [convention] |
+| A new on-disk shape the reader must accept | `detectSubjectAreaFormat()` (JSON), `detectProjectStorage()` (storage) and `classifySemanticFile()` (paths) each stay the **only** detector. Never add a second one. | [convention] |
 
 ## Packages: a shipped product (the Confluence app)
 

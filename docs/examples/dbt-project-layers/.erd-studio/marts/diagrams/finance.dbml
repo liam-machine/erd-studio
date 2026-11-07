@@ -1,0 +1,14 @@
+use { table marts.customers }       from '../tables/marts/customers.dbml'
+use { table marts.invoices }        from '../tables/marts/invoices.dbml'
+use { table marts.monthly_revenue } from '../tables/marts/monthly_revenue.dbml'
+use * from '../relationships/marts.dbml'
+
+Project finance {
+  Note: 'The finance marts (models/marts/finance/).'
+  erd_schema_version: '7'
+  erd_layout: '''
+    customers 12 46
+    invoices 428 12
+    monthly_revenue 288 334
+  '''
+}

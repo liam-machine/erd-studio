@@ -1,0 +1,370 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ERD Studio fields",
+  "description": "The fields this project records: .erd-studio/fields.yml. Two lists, tables and columns, in the order the Detail panel shows them. A bare name is a built-in field exactly as ERD Studio ships it; an entry with a key is a built-in in your own words, or a field of your own. Without this file a project uses the starting set. Reference: https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md#field-list-erd-studiofieldsyml",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "The file format version. 1 today; leave it out and it reads as 1."
+    },
+    "tables": {
+      "type": "array",
+      "description": "Fields recorded on tables, in display order. Leave the list out to use the starting set's table fields (grain, purpose, decisions, open_questions, role, scd_strategy, measures); an empty list means none.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/tableBuiltInName"
+          },
+          {
+            "$ref": "#/definitions/tableEntry"
+          }
+        ]
+      }
+    },
+    "columns": {
+      "type": "array",
+      "description": "Fields recorded on columns, in display order. Leave the list out to use the starting set's column fields (natural_key, scd_type, additive_type); an empty list means none.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/columnBuiltInName"
+          },
+          {
+            "$ref": "#/definitions/columnEntry"
+          }
+        ]
+      }
+    },
+    "left_out": {
+      "type": "array",
+      "description": "dbt meta: keys that are another tool's settings (Lightdash's dimension or metrics, say): never copied or offered. A table that already has one still shows it.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "tableBuiltInName": {
+      "type": "string",
+      "description": "A built-in table field, exactly as ERD Studio ships it.",
+      "enum": [
+        "grain",
+        "purpose",
+        "decisions",
+        "open_questions",
+        "role",
+        "scd_strategy",
+        "measures",
+        "source_of_truth",
+        "freshness",
+        "known_issues",
+        "retention",
+        "design",
+        "role_choice",
+        "grain_choice"
+      ],
+      "enumDescriptions": [
+        "Grain (text). One row per ___. The one sentence that says what a row is.",
+        "Purpose (text). Who uses this table and the question it answers.",
+        "Decisions (text). A choice a later editor might undo, and why.",
+        "Open questions (text). What is still undecided. Assistants ask about these and never guess.",
+        "Table role (choice). Which kind of table this is: conformed-dim, transaction-fact, …",
+        "History (text, dimensions only). How this dimension keeps history: which columns track changes and which overwrite.",
+        "Measures (text, facts only). How the measures add up: which sum across every dimension and which do not.",
+        "Source of truth (value, optional). The system this data is mastered in.",
+        "Freshness (text, optional). How fresh it must be, and how often it loads.",
+        "Known issues (text, optional). Data problems a consumer should know before trusting a number.",
+        "Retention (text, optional, people only). How long rows are kept, and why.",
+        "Design (retired: still read and shown, never offered). Move to Decisions, or to Purpose.",
+        "Role choice (retired: still read and shown, never offered). Move to Decisions.",
+        "Grain choice (retired: still read and shown, never offered). Move to Decisions."
+      ]
+    },
+    "columnBuiltInName": {
+      "type": "string",
+      "description": "A built-in column field, exactly as ERD Studio ships it.",
+      "enum": [
+        "natural_key",
+        "scd_type",
+        "additive_type",
+        "business_rule"
+      ],
+      "enumDescriptions": [
+        "Natural key (yes-no). The business identifier, like an order number or a customer code.",
+        "SCD type (choice 0, 1, 2; dimensions only). 0 never changes, 1 overwrites, 2 keeps history.",
+        "Additivity (choice; facts only). Additive, semi-additive or non-additive.",
+        "Business rule (text, optional). How the value is worked out, in business terms."
+      ]
+    },
+    "tableKey": {
+      "type": "string",
+      "description": "The setting's name in the table file. Lower case letters, digits and underscores (DBML lower-cases setting names), not starting with a digit, and not a reserved name: DBML's own settings (note, pk, default, …), ERD Studio's (schema, alias, meta_json, …), or anything starting erd_, rationale_ or meta_. A built-in's own key (grain, role, natural_key, …) is allowed: it rewords that built-in.",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/tableBuiltInName"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "enum": [
+                  "note",
+                  "headercolor",
+                  "color",
+                  "pk",
+                  "primary key",
+                  "primary_key",
+                  "unique",
+                  "ref",
+                  "dep",
+                  "not null",
+                  "not_null",
+                  "null",
+                  "increment",
+                  "default",
+                  "name",
+                  "type",
+                  "check",
+                  "update",
+                  "delete",
+                  "inactive",
+                  "example",
+                  "schema",
+                  "alias",
+                  "role",
+                  "grain",
+                  "foreign_key",
+                  "natural_key",
+                  "scd_type",
+                  "additive_type",
+                  "meta_json",
+                  "erd_placeholder",
+                  "linked_table",
+                  "json",
+                  "dbml",
+                  "constructor",
+                  "__proto__"
+                ]
+              },
+              {
+                "pattern": "^(erd_|rationale_|meta_)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "columnKey": {
+      "type": "string",
+      "description": "The setting's name in the table file. Lower case letters, digits and underscores (DBML lower-cases setting names), not starting with a digit, and not a reserved name: DBML's own settings (note, pk, default, …), ERD Studio's (schema, alias, meta_json, …), or anything starting erd_, rationale_ or meta_. A built-in's own key (grain, role, natural_key, …) is allowed: it rewords that built-in.",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/columnBuiltInName"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "enum": [
+                  "note",
+                  "headercolor",
+                  "color",
+                  "pk",
+                  "primary key",
+                  "primary_key",
+                  "unique",
+                  "ref",
+                  "dep",
+                  "not null",
+                  "not_null",
+                  "null",
+                  "increment",
+                  "default",
+                  "name",
+                  "type",
+                  "check",
+                  "update",
+                  "delete",
+                  "inactive",
+                  "example",
+                  "schema",
+                  "alias",
+                  "role",
+                  "grain",
+                  "foreign_key",
+                  "natural_key",
+                  "scd_type",
+                  "additive_type",
+                  "meta_json",
+                  "erd_placeholder",
+                  "linked_table",
+                  "json",
+                  "dbml",
+                  "constructor",
+                  "__proto__"
+                ]
+              },
+              {
+                "pattern": "^(erd_|rationale_|meta_)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "tableEntry": {
+      "type": "object",
+      "description": "A built-in table field in your own words (its key plus label, guidance or filled_by), or a table field of your own.",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/tableKey"
+        },
+        "label": {
+          "type": "string",
+          "description": "What the canvas and the assistant call it. Built-ins have one already."
+        },
+        "type": {
+          "type": "string",
+          "description": "How it is filled in. A built-in's type cannot be changed (ignored, with a warning).",
+          "enum": [
+            "text",
+            "value",
+            "choice",
+            "yes-no"
+          ],
+          "enumDescriptions": [
+            "The default. A sentence or two of explanation: a text box, with the guidance as its placeholder.",
+            "One short value with no fixed list, like a team or a system name: a one-line box.",
+            "One of the field's values: a dropdown. Needs at least two values.",
+            "True or false: a yes or no dropdown, written 'true' or 'false'."
+          ]
+        },
+        "values": {
+          "type": "array",
+          "description": "For a choice: the only values allowed, in dropdown order (at least two).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "guidance": {
+          "type": "string",
+          "description": "One sentence: what to write. It is the canvas placeholder and the assistant's instruction."
+        },
+        "filled_by": {
+          "type": "string",
+          "description": "Who fills it in.",
+          "enum": [
+            "anyone",
+            "people",
+            "dbt"
+          ],
+          "enumDescriptions": [
+            "The default: people or the AI.",
+            "People only: an assistant writes only a value the user gives it.",
+            "Copied from the dbt model's meta:, never typed in. With no value in dbt, nothing is written."
+          ]
+        },
+        "show_for": {
+          "type": "string",
+          "description": "Which tables it suits, read from the table's role. A field with a value always shows anyway. A built-in's show_for cannot be changed.",
+          "enum": [
+            "all",
+            "dimensions",
+            "facts"
+          ],
+          "enumDescriptions": [
+            "The default: every table.",
+            "Dimensions: conformed-dim, domain-dim, gold-dim and reference (and tables with no role).",
+            "Facts: transaction-fact, periodic-snapshot, accumulating-snapshot, factless-fact and gold-fact (and tables with no role)."
+          ]
+        }
+      }
+    },
+    "columnEntry": {
+      "type": "object",
+      "description": "A built-in column field in your own words (its key plus label, guidance or filled_by), or a column field of your own.",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/columnKey"
+        },
+        "label": {
+          "type": "string",
+          "description": "What the canvas and the assistant call it. Built-ins have one already."
+        },
+        "type": {
+          "type": "string",
+          "description": "How it is filled in. A built-in's type cannot be changed (ignored, with a warning).",
+          "enum": [
+            "text",
+            "value",
+            "choice",
+            "yes-no"
+          ],
+          "enumDescriptions": [
+            "The default. A sentence or two of explanation: a text box, with the guidance as its placeholder.",
+            "One short value with no fixed list, like a team or a system name: a one-line box.",
+            "One of the field's values: a dropdown. Needs at least two values.",
+            "True or false: a yes or no dropdown, written 'true' or 'false'."
+          ]
+        },
+        "values": {
+          "type": "array",
+          "description": "For a choice: the only values allowed, in dropdown order (at least two).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "guidance": {
+          "type": "string",
+          "description": "One sentence: what to write. It is the canvas placeholder and the assistant's instruction."
+        },
+        "filled_by": {
+          "type": "string",
+          "description": "Who fills it in.",
+          "enum": [
+            "anyone",
+            "people",
+            "dbt"
+          ],
+          "enumDescriptions": [
+            "The default: people or the AI.",
+            "People only: an assistant writes only a value the user gives it.",
+            "Copied from the dbt model's meta:, never typed in. With no value in dbt, nothing is written."
+          ]
+        },
+        "show_for": {
+          "type": "string",
+          "description": "Which tables it suits, read from the table's role. A field with a value always shows anyway. A built-in's show_for cannot be changed.",
+          "enum": [
+            "all",
+            "dimensions",
+            "facts"
+          ],
+          "enumDescriptions": [
+            "The default: every table.",
+            "Dimensions: conformed-dim, domain-dim, gold-dim and reference (and tables with no role).",
+            "Facts: transaction-fact, periodic-snapshot, accumulating-snapshot, factless-fact and gold-fact (and tables with no role)."
+          ]
+        }
+      }
+    }
+  }
+}

@@ -65,7 +65,8 @@
         "fromColumn": "customer_id",
         "toModel": "dim_customer",
         "toColumn": "customer_id",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -92,7 +93,7 @@
       "order": 0
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

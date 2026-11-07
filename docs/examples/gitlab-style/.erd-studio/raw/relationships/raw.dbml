@@ -1,0 +1,5 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table zuora.zuora_account }      from '../tables/zuora/zuora_account.dbml'
+use { table zuora.zuora_subscription } from '../tables/zuora/zuora_subscription.dbml'
+
+Ref: zuora.zuora_subscription.accountid >? zuora.zuora_account.id

@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { relationshipKey } from '../../src/domain';
 import { parseTableText } from '../../src/logicalModel';
 import {
-  canonicalRelationship, linkKey, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH, respellRelationship, reverseRelationship,
+  canonicalRelationship, linkKey, nextCompositeKey, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH, respellRelationship, reverseRelationship,
   sameLink,
 } from '../../src/relationships';
 import type { Cardinality, Relationship } from '../../src/types/semantic';
@@ -140,5 +140,14 @@ describe('respellRelationship — ends spelled as the models spell them (#133 L4
     const twins = [{ name: 'm', columns: [{ name: 'Key' }, { name: 'key' }] }, { name: 'n', columns: [{ name: 'k' }] }];
     const rel = { fromModel: 'm', fromColumn: 'key', toModel: 'n', toColumn: 'K', cardinality: 'many-to-one' as const };
     expect(respellRelationship(rel, twins)).toMatchObject({ fromColumn: 'key', toColumn: 'k' });
+  });
+});
+
+describe('nextCompositeKey (moved to core, shared by the planner and the DBML reader)', () => {
+  it('is fk_<toModel> lowercased, then _2, _3, … while the file uses it, without case', () => {
+    expect(nextCompositeKey([], 'Sat_Customer')).toBe('fk_sat_customer');
+    expect(nextCompositeKey([{ compositeKey: 'FK_SAT_CUSTOMER' }], 'sat_customer')).toBe('fk_sat_customer_2');
+    expect(nextCompositeKey([{ compositeKey: 'fk_sat_customer' }, { compositeKey: 'fk_sat_customer_2' }, {}], 'sat_customer')).toBe('fk_sat_customer_3');
+    expect(nextCompositeKey([{ compositeKey: 'fk_sat_customer_2' }], 'sat_customer')).toBe('fk_sat_customer');
   });
 });

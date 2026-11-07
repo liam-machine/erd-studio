@@ -1,0 +1,4 @@
+// ERD Studio relationships. Each Ref belongs to its foreign-key table, which lives in this folder; every table a Ref names has a use line here.
+use { table dim_date } from './dim_date.dbml'
+
+Ref "previous day": dim_date.previous_date_key > dim_date.date_key

@@ -1,31 +1,34 @@
 # Modelling approaches
 
-This is the reference for the modelling-style step (Stage 3) and for applying it (Stage 4) and
+<!-- dbt-only -->This is the reference for the modelling-style step (Stage 3) and for applying it (Stage 4) and
 reviewing it (Stage 5). It has four jobs: explain how the project's style is detected (the
 inventory's `conventions`), give you a trustworthy summary of each common technique when you
 cannot look one up, say exactly which ERD Studio fields each rule maps to, and describe the saved
-`.erd-studio/modelling-approach.md` file.
+`.erd-studio/modelling-approach.md` file.<!-- /dbt-only --><!-- no-dbt -->This is the reference for the modelling style (walkthrough step 3) and for applying it (step 4).
+It gives you a trustworthy summary of each common technique when you cannot look one up, says
+exactly which ERD Studio fields each rule maps to, and describes the saved
+`.erd-studio/modelling-approach.md` file.<!-- /no-dbt -->
 
 ## Contents
 1. Looking up the standard
 2. What you may set — and what you must not change
-3. The approaches (Kimball, Data Vault 2.0, Inmon / 3NF, One Big Table, Activity Schema, dbt
-   layers, custom house rules)
-4. Detecting the style — the inventory's `conventions`
+3. The approaches (Kimball, Data Vault 2.0, Inmon / 3NF, One Big Table, Activity Schema, <!-- dbt-only -->dbt
+   layers, <!-- /dbt-only -->custom house rules)
+<!-- dbt-only -->4. Detecting the style — the inventory's `conventions`<!-- /dbt-only -->
 5. The saved file
-6. Conformance review
+<!-- dbt-only -->6. Conformance review<!-- /dbt-only -->
 
 ---
 
 ## 1. Looking up the standard
 
-The style was detected and confirmed (section 4), or the user described it in their own words.
+<!-- dbt-only -->The style was detected and confirmed (section 4)<!-- /dbt-only --><!-- no-dbt -->The user agreed a proposed style<!-- /no-dbt -->, or the user described it in their own words.
 Your job is to turn that into concrete, checkable rules — and to get those rules from a real
 source rather than memory.
 
 1. **If you have a web search or web fetch tool**, use it once or twice to confirm the current
    conventions, preferring the canonical sources listed under each approach below (they are the
-   authors' own sites or dbt's official docs). Narrate it first: "Looking up Kimball's
+   authors' own sites<!-- dbt-only --> or dbt's official docs<!-- /dbt-only -->). Narrate it first: "Looking up Kimball's
    dimensional modelling standards on kimballgroup.com."
 2. **If you have no web tool, or the lookup fails or is slow**, use the summary in this file and
    say so: "I'm using the summary of Kimball's rules that ships with ERD Studio."
@@ -42,20 +45,23 @@ the rule list says exactly that.
 
 ## 2. What you may set — and what you must not change
 
-The approach is applied only through **design fields that the ERD Studio diff does not compare**,
-so applying it can never create drift. All of these live in `logical-models/<name>.yml`, and the
-ERD Studio schema skill defines their format:
+The approach is applied <!-- dbt-only -->only <!-- /dbt-only -->through **design fields<!-- dbt-only --> that the ERD Studio diff does not compare**,
+so applying it can never create drift<!-- /dbt-only --><!-- no-dbt -->**<!-- /no-dbt -->. All of these live in the table's file — a `.dbml` table
+file (`<layer>/tables/<schema>/<name>.dbml`), or a `.yml` (`logical-models/<name>.yml`) in a project from before
+2.0 — and the ERD Studio schema skill defines their format. The names below are the YAML ones; in
+DBML they are `role`, `grain`, each text field by its key (`decisions`, `scd_strategy`, …), `scd_type`,
+`additive_type` and `natural_key`, every value quoted (`scd_type: '2'`, `natural_key: 'true'`):
 
 | Field | Level | Valid values | Use it for |
 |---|---|---|---|
-| `modelRole` | model | exactly one of `conformed-dim`, `domain-dim`, `transaction-fact`, `periodic-snapshot`, `accumulating-snapshot`, `factless-fact`, `reference`, `gold-fact`, `gold-dim` | The table's job in the approach. If no value fits, **leave it out** and explain in `rationale.roleChoice` — never invent a value |
-| `grain` | model | one sentence, "One row per …" | What one row means. Write it only when a unique key (or composite unique test) backs it; otherwise add the model to "to confirm" |
-| `rationale` | model | object with optional string fields `purpose`, `design`, `grainChoice`, `roleChoice`, `scdStrategy`, `measures` | One short sentence citing the approach, e.g. `design: Kimball transaction fact, per .erd-studio/modelling-approach.md` |
-| `scdType` | column | `0` (never changes), `1` (overwrite), `2` (keep history) | Dimension attributes, describing what the dbt model **actually** does. SCD Types 3, 4, 6 and 7 have no value: describe them in `rationale.scdStrategy`, and set `scdType` only on columns that truly behave as 0, 1 or 2 |
+| `modelRole` | model | exactly one of `conformed-dim`, `domain-dim`, `transaction-fact`, `periodic-snapshot`, `accumulating-snapshot`, `factless-fact`, `reference`, `gold-fact`, `gold-dim` | The table's job in the approach. If no value fits, **leave it out** and explain in `rationale.decisions` — never invent a value |
+| `grain` | model | one sentence, "One row per …" | What one row means. <!-- dbt-only -->Write it only when a unique key (or composite unique test) backs it; otherwise add the model to "to confirm"<!-- /dbt-only --><!-- no-dbt -->Write it on every table; when unsure, add the table to "to confirm"<!-- /no-dbt --> |
+| `rationale` | model | the text fields `.erd-studio/fields.yml` lists, by their camelCase key: `purpose`, `decisions`, `openQuestions`, `scdStrategy`, `measures`, … (never the retired `design`, `grainChoice` or `roleChoice`) | One short sentence each; `decisions` cites the approach, e.g. `decisions: Kimball transaction fact, per .erd-studio/modelling-approach.md`. A choice you cannot make is a question in `openQuestions`, asked to the user |
+| `scdType` | column | `0` (never changes), `1` (overwrite), `2` (keep history) | Dimension attributes<!-- dbt-only -->, describing what the dbt model **actually** does<!-- /dbt-only -->. SCD Types 3, 4, 6 and 7 have no value: describe them in `rationale.scdStrategy`, and set `scdType` only on columns that truly behave as 0, 1 or 2 |
 | `additiveType` | column | `additive`, `semi-additive`, `non-additive` | Numeric measures on fact tables |
-| `isNaturalKey` | column | `true` (omit otherwise) | The source system's business key (customer code, SKU, a hub's business key) — **even when it is also the primary key** because the table has no surrogate key (flag the missing surrogate in the review). Other attributes such as `email` stay unflagged unless the approach names them a business key |
+| `isNaturalKey` | column | `true` (omit otherwise) | The source system's business key (customer code, SKU, a hub's business key) — **even when it is also the primary key** because the table has no surrogate key<!-- dbt-only --> (flag the missing surrogate in the review)<!-- /dbt-only -->. Other attributes such as `email` stay unflagged unless the approach names them a business key |
 
-Rules for Stage 4 (the as-built model). The principle behind all of them: **these fields describe
+<!-- dbt-only -->Rules for Stage 4 (the as-built model). The principle behind all of them: **these fields describe
 what dbt does today. A rule dbt does not meet yet goes in the saved file's "Target-design backlog",
 never into a field** — the Physical tab copies `isPrimaryKey`, `isForeignKey`, `isNaturalKey`,
 `scdType` and `additiveType` from the logical model onto dbt's columns, so a target value there
@@ -74,8 +80,13 @@ would make the read-only Physical tab claim something about the dbt project that
 - When unsure of a model's role or grain, leave the field out and add it to a short "to confirm"
   list for Stage 6. A blank field is honest; a wrong one is misleading.
 
-Metadata (`meta:` — owner, source system, personal data…) is not part of the approach and follows
-its own list: `references/metadata.md`. Like the fields above, the diff never compares it.
+Which fields a table records, the team's metadata (owner, source system, personal data…)
+included, is `.erd-studio/fields.yml`'s list, not part of the approach: `references/metadata.md`.
+Like the fields above, the diff never compares them.<!-- /dbt-only -->
+<!-- no-dbt -->When unsure of a table's role or grain, leave the field out and add it to a short "to confirm"
+list. A blank field is honest; a wrong one is misleading. Which fields a table records, the
+team's own (owner, source system, personal data…) included, is `.erd-studio/fields.yml`'s list,
+not part of the approach, as the walkthrough's step 3 says.<!-- /no-dbt -->
 
 `additiveType` guide: amounts, quantities, counts → `additive`; balances, stock levels,
 headcounts (true at a point in time, not summable across dates) → `semi-additive`; prices, rates,
@@ -102,9 +113,9 @@ Core rules:
    and 2 — see section 2.)
 8. Fact types: transaction, periodic snapshot, accumulating snapshot, factless.
 
-Recognise it in dbt: `fct_`/`dim_` (or `fact_`/`dimension_`) prefixes, a `marts/` folder, a date
+<!-- dbt-only -->Recognise it in dbt: `fct_`/`dim_` (or `fact_`/`dimension_`) prefixes, a `marts/` folder, a date
 dimension, dbt snapshots feeding dimensions.
-
+<!-- /dbt-only -->
 Mapping:
 | Concept | ERD Studio |
 |---|---|
@@ -112,15 +123,15 @@ Mapping:
 | Any other dimension | `modelRole: domain-dim` |
 | Small code/lookup list | `modelRole: reference` |
 | Transaction / periodic snapshot / accumulating snapshot / factless fact | `transaction-fact` / `periodic-snapshot` / `accumulating-snapshot` / `factless-fact` |
-| Grain declaration | `grain`, plus `rationale.grainChoice` when the user explained why |
+| Grain declaration | `grain`, plus `rationale.decisions` when the user explained why |
 | SCD type | `scdType` per dimension column; `rationale.scdStrategy` for the overall policy |
 | Measure additivity | `additiveType` per measure |
 | Business key (the source system's id, even when it is also the PK) | `isNaturalKey: true` |
 
 Sources: Kimball Group, "Dimensional Modeling Techniques" —
 https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/ ;
-Kimball & Ross, *The Data Warehouse Toolkit*, 3rd ed. (Wiley, 2013); dbt Developer Blog,
-"Building a Kimball dimensional model with dbt" — https://docs.getdbt.com/blog/kimball-dimensional-model
+Kimball & Ross, *The Data Warehouse Toolkit*, 3rd ed. (Wiley, 2013)<!-- dbt-only -->; dbt Developer Blog,
+"Building a Kimball dimensional model with dbt" — https://docs.getdbt.com/blog/kimball-dimensional-model<!-- /dbt-only -->
 
 ### Data Vault 2.0
 
@@ -135,28 +146,29 @@ Core rules:
 6. Reporting happens in **information marts** — usually Kimball-style stars built on the vault —
    often through point-in-time (PIT) and bridge tables.
 
-Recognise it in dbt: `hub_`, `lnk_`/`link_`, `sat_`, `pit_`, `bridge_` prefixes; columns such as
+<!-- dbt-only -->Recognise it in dbt: `hub_`, `lnk_`/`link_`, `sat_`, `pit_`, `bridge_` prefixes; columns such as
 `*_hk`/`*_hash`/`hashdiff`, `load_date`/`load_datetime`, `record_source`; the AutomateDV
 (formerly dbtvault) or datavault4dbt packages in `packages.yml`.
-
-Mapping — ERD Studio's roles are dimensional, so vault tables get the **closest** role and the
-rationale says so (tell the user this once):
+<!-- /dbt-only -->
+Mapping — ERD Studio's roles are dimensional, so vault tables get the **closest** role and
+`rationale.decisions` says so (tell the user this once):
 | Vault table | ERD Studio |
 |---|---|
-| Hub | `modelRole: conformed-dim`; `rationale.roleChoice: "Data Vault hub — conformed-dim is the closest ERD Studio role"`; business key `isNaturalKey: true`; grain "One row per <business key>" |
-| Link | `modelRole: factless-fact` (keys only); `rationale.roleChoice` names it a link; grain "One row per unique <hub A>–<hub B> combination" |
-| Satellite | `modelRole: domain-dim`; `rationale.roleChoice` names it a satellite of its parent; descriptive columns `scdType: 2` (history kept by insert); grain "One row per <parent key> per change (load date)" |
-| PIT (point-in-time) | `modelRole: periodic-snapshot`; `rationale.roleChoice: "Data Vault point-in-time (PIT) table"`; grain "One row per <hub key> per snapshot date" |
-| Bridge | `modelRole: factless-fact`; `rationale.roleChoice` names it a Data Vault bridge |
+| Hub | `modelRole: conformed-dim`; `rationale.decisions: "Data Vault hub — conformed-dim is the closest ERD Studio role"`; business key `isNaturalKey: true`; grain "One row per <business key>" |
+| Link | `modelRole: factless-fact` (keys only); `rationale.decisions` names it a link; grain "One row per unique <hub A>–<hub B> combination" |
+| Satellite | `modelRole: domain-dim`; `rationale.decisions` names it a satellite of its parent; descriptive columns `scdType: 2` (history kept by insert); grain "One row per <parent key> per change (load date)" |
+| PIT (point-in-time) | `modelRole: periodic-snapshot`; `rationale.decisions: "Data Vault point-in-time (PIT) table"`; grain "One row per <hub key> per snapshot date" |
+| Bridge | `modelRole: factless-fact`; `rationale.decisions` names it a Data Vault bridge |
 | Information-mart facts and dimensions | Kimball mapping above |
 
-If the user would rather not use approximate roles, leave `modelRole` out on vault tables and put
-the vault type in `rationale.roleChoice` only.
+If the user would rather not use approximate roles, or `.erd-studio/fields.yml` leaves the
+dimensional fields out, leave `modelRole` and `scdType` out on vault tables and put the vault type in
+`rationale.decisions` only.
 
 Sources: Linstedt & Olschimke, *Building a Scalable Data Warehouse with Data Vault 2.0* (Morgan
-Kaufmann, 2015); Data Vault Alliance — https://datavaultalliance.com/ ; AutomateDV docs —
+Kaufmann, 2015); Data Vault Alliance — https://datavaultalliance.com/<!-- dbt-only --> ; AutomateDV docs —
 https://automate-dv.readthedocs.io/en/latest/ ; dbt Developer Blog, "Data Vault 2.0 with dbt
-Cloud" — https://docs.getdbt.com/blog/data-vault-with-dbt-cloud
+Cloud" — https://docs.getdbt.com/blog/data-vault-with-dbt-cloud<!-- /dbt-only -->
 
 ### Inmon / 3NF (Corporate Information Factory)
 
@@ -170,13 +182,13 @@ Core rules:
    reporting.
 5. Natural and surrogate keys, with foreign keys between entities.
 
-Recognise it in dbt: many narrow entity tables without `fct_`/`dim_` prefixes, lookup tables for
+<!-- dbt-only -->Recognise it in dbt: many narrow entity tables without `fct_`/`dim_` prefixes, lookup tables for
 codes, association tables joining two entities, `effective_from`/`effective_to` columns, an
 `edw`/`core`/`integration` folder. `conventions` reports it as `inmon-3nf` — from table shape alone
 always a weak guess (section 4).
-
+<!-- /dbt-only -->
 Mapping: normalised entity tables usually fit no role — leave `modelRole` out and write
-`rationale.roleChoice: "3NF entity table (Inmon)"`; code/lookup tables → `reference`; downstream
+`rationale.decisions: "3NF entity table (Inmon)"`; code/lookup tables → `reference`; downstream
 data marts → the Kimball mapping. Grain is "One row per <entity>" (per version, where effective
 dates exist). History columns → `scdType: 2` on the tracked attributes.
 
@@ -194,16 +206,16 @@ Core rules:
    columnar warehouses.
 5. Nested or repeated fields (arrays, structs) are acceptable where the warehouse supports them.
 
-Recognise it in dbt: a few very wide mart models (dozens or hundreds of columns), names like
+<!-- dbt-only -->Recognise it in dbt: a few very wide mart models (dozens or hundreds of columns), names like
 `obt_`, `wide_`, `<thing>_enriched`, few relationship tests between marts.
-
+<!-- /dbt-only -->
 Mapping: wide event/measure tables → `gold-fact`; wide descriptive tables → `gold-dim`; `grain`
 on every model (this approach lives or dies by it); `additiveType` on measures; mention in
-`rationale.design` which upstream models it flattens, if known.
+`rationale.decisions` which upstream models it flattens, if known.
 
 Sources: Fivetran, "Data warehouse modeling: Star schema vs. OBT" —
-https://www.fivetran.com/blog/star-schema-vs-obt ; dbt Labs, "Guide to dimensional modeling"
-(discusses wide tables vs stars) — https://www.getdbt.com/blog/guide-to-dimensional-modeling
+https://www.fivetran.com/blog/star-schema-vs-obt<!-- dbt-only --> ; dbt Labs, "Guide to dimensional modeling"
+(discusses wide tables vs stars) — https://www.getdbt.com/blog/guide-to-dimensional-modeling<!-- /dbt-only -->
 
 ### Activity Schema
 
@@ -220,18 +232,18 @@ Core rules (version 2.0):
    query time.
 6. An optional entity table holds the entity's descriptive attributes.
 
-Recognise it in dbt: `*_stream` models with the columns above, one model per activity
+<!-- dbt-only -->Recognise it in dbt: `*_stream` models with the columns above, one model per activity
 transformation, the `narrator`/`activity_schema` packages.
-
+<!-- /dbt-only -->
 Mapping: stream tables → `transaction-fact`, grain "One row per activity occurrence";
 `revenue_impact` → `additive`; entity table → `conformed-dim`; `activity_id` or the entity id →
-`isNaturalKey` where it is a business identifier. Say in `rationale.design` that relationships are
+`isNaturalKey` where it is a business identifier. Say in `rationale.decisions` that relationships are
 resolved at query time, so few lines on the diagram is expected.
 
 Sources: Activity Schema — https://activityschema.com/ ; the 2.0 specification —
 https://github.com/ActivitySchema/ActivitySchema
 
-### dbt layered project (staging → intermediate → marts)
+<!-- dbt-only -->### dbt layered project (staging → intermediate → marts)
 
 This is a way to **organise a dbt project**, and it is usually combined with a modelling style
 for the marts (most often Kimball). Say so when you recognise it.
@@ -261,7 +273,7 @@ diagram at all, get no `modelRole` (they mirror a source table) except small cod
 Sources: dbt Labs, "How we structure our dbt projects" —
 https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview ; dbt docs,
 "Snapshots" (SCD Type 2 in dbt) — https://docs.getdbt.com/docs/build/snapshots
-
+<!-- /dbt-only -->
 ### Custom house rules
 
 When the user describes their own conventions ("every table has a `_sk` key", "amounts in cents",
@@ -271,14 +283,14 @@ When the user describes their own conventions ("every table has a `_sk` key", "a
 3. If a rule is unclear, ask **one** clarifying question — the most important one — and proceed
    with your best reading of the rest.
 4. Map each rule to a field from section 2 where one fits. Rules no field can hold (naming
-   conventions, materialisation, testing policy) are recorded in the saved file and checked in
-   the conformance review only.
+   conventions<!-- dbt-only -->, materialisation, testing policy<!-- /dbt-only --><!-- no-dbt -->, for example<!-- /no-dbt -->) are recorded in the saved file<!-- dbt-only --> and checked in
+   the conformance review<!-- /dbt-only --> only.
 5. If they name a known technique as well, use its mapping for everything their rules do not
    override.
 
 ---
 
-## 4. Detecting the style — the inventory's `conventions`
+<!-- dbt-only -->## 4. Detecting the style — the inventory's `conventions`
 
 `inventory` (both `--summary` and full) carries a `conventions` object, computed from the
 project's files only — model names, folders, schemas, model and column descriptions, the shape of
@@ -381,8 +393,8 @@ holds keys to other tables and amounts to add up" — never paste the raw string
 
 **When no style is agreed** (shape `none`, or the user says they follow none), mirror dbt
 faithfully:
-- write no approach into `.erd-studio/modelling-approach.md` (it may still get only a metadata
-  list — `references/metadata.md` section 4), look nothing up, play nothing back;
+- write no approach into `.erd-studio/modelling-approach.md` (the field list may still be saved,
+  in `.erd-studio/fields.yml` — `references/metadata.md` section 4), look nothing up, play nothing back;
 - `grain` only where one `unique` key (or composite unique test) backs it — "One row per
   `<key>`";
 - `modelRole` only where it is unambiguous without a style: a small code/lookup seed →
@@ -396,7 +408,7 @@ faithfully:
 A user who says "not sure" to a weak guess gets the best guess — except an `inmon-3nf` guess from
 table shape alone, where "not sure" means mirroring dbt. A user who overrides in their own
 words gets the usual lookup, play-back and saved file — their words beat the detection.
-
+<!-- /dbt-only -->
 ## 5. The saved file
 
 `.erd-studio/modelling-approach.md` is free-form markdown for people and AI assistants. ERD Studio
@@ -406,9 +418,11 @@ every future AI edit to read and follow it. Write it with this shape:
 ```markdown
 # Modelling approach
 
-**Technique:** Kimball dimensional modelling (marts), dbt layered project structure
+<!-- dbt-only -->**Technique:** Kimball dimensional modelling (marts), dbt layered project structure
 **Detected from:** 5 `dim_` and 3 `fct_` models, `models/staging` + `models/marts` folders
-**Agreed:** 2026-09-24
+**Agreed:** 2026-09-24<!-- /dbt-only -->
+<!-- no-dbt -->**Technique:** Kimball dimensional modelling
+**Chosen:** proposed for a new design, agreed 2026-09-24<!-- /no-dbt -->
 
 ## In our words
 
@@ -423,42 +437,38 @@ every future AI edit to read and follow it. Write it with this shape:
 
 ## How ERD Studio records it
 
-The fields describe what dbt does **today**. A rule dbt does not meet yet is listed under
+<!-- dbt-only -->The fields describe what dbt does **today**. A rule dbt does not meet yet is listed under
 "Target-design backlog" instead of being written into a field.
-
+<!-- /dbt-only -->
 | Rule | ERD Studio field |
 |---|---|
 | 1 | `grain` on every fact; `modelRole: transaction-fact` |
 | 2 | `modelRole: conformed-dim` |
 | 3 | `isNaturalKey: true` on the source system's id (also when it is the primary key) |
-| 4 | `scdType: 2` on tracked `dim_customer` columns *where dbt keeps history* (a snapshot, or `valid_from`/`valid_to` columns). Otherwise `scdType: 1`, with the gap listed under Target-design backlog |
-
-## Metadata
-
-(Only when the team keeps metadata — see `references/metadata.md` section 4.)
-
-| Key | On | Values | Source |
-|---|---|---|---|
-| `owner` | models | team name, e.g. `crm-team` | dbt |
+<!-- dbt-only -->| 4 | `scdType: 2` on tracked `dim_customer` columns *where dbt keeps history* (a snapshot, or `valid_from`/`valid_to` columns). Otherwise `scdType: 1`, with the gap listed under Target-design backlog |<!-- /dbt-only --><!-- no-dbt -->| 4 | `scdType: 2` on the tracked `dim_customer` columns |<!-- /no-dbt -->
 
 ## Sources
 
-- Kimball Group, "Dimensional Modeling Techniques" — https://www.kimballgroup.com/…
+- Kimball Group, "Dimensional Modeling Techniques" — https://www.kimballgroup.com/…<!-- dbt-only -->
 
 ## Target-design backlog
 
 (Only when the user chose to record improvements — see the conformance review. Differences listed
-here are intentional: later runs report them as backlog items and never "fix" them.)
+here are intentional: later runs report them as backlog items and never "fix" them.)<!-- /dbt-only -->
 ```
 
 On a re-run, update the file in place when the user says "change it"; keep the old quote under a
 "Previously" heading only if they ask.
 
-The file can also hold only a title and the `## Metadata` section (a quick start agrees no style,
-but may save the metadata list). With nothing more than that, the style is still to be agreed:
-Stage 3b detects it as if there were no file, and writing the approach later adds the other
-sections around the existing `## Metadata`, which is kept as it is.
+The fields the team records are not in this file: they are `.erd-studio/fields.yml`'s list. An
+older file may still have a `## Metadata` table, the team's list from before fields.yml: follow it
+until it moves<!-- dbt-only --> (`references/metadata.md` section 7)<!-- /dbt-only -->, and never add one.
 
+The file can also hold only a title and that `## Metadata` section. With nothing more than that,
+the style is still to be agreed<!-- dbt-only -->:
+Stage 3b detects it as if there were no file<!-- /dbt-only -->, and writing the approach later adds the other
+sections around the existing `## Metadata`, which is kept as it is.
+<!-- dbt-only -->
 ## 6. Conformance review
 
 Run this only when a style was agreed (never after mirroring dbt with no style), after the
@@ -513,4 +523,4 @@ If nothing departs, say so in one line and skip the offer. Otherwise offer:
   Target-design backlog are intentional. Report them as backlog items, recommend **keep**, and
   never apply the matching fix.
 - Never edit dbt files for this. The only dbt edit the walkthrough ever offers is adding
-  `relationships` tests (verify-and-fix.md, section 5), on a yes.
+  `relationships` tests (verify-and-fix.md, section 5), on a yes.<!-- /dbt-only -->

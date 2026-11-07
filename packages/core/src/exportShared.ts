@@ -1,7 +1,6 @@
 /**
  * The traversal the diagram exporters share (`exportDbml.ts`,
- * `exportDbmlRich.ts`, `exportMermaid.ts`, and the `.dbdiagram` layout in
- * `dbdiagramLayout.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
+ * `exportDbmlRich.ts` with its `erd_layout`, and `exportMermaid.ts`): one tolerant pass over a `DisplaySubjectArea` that settles
  * which models, columns and relationships an export describes, in what order,
  * and why anything was left out. The formats differ only in syntax and in how
  * much of each model they carry, so they always describe the same relationships.
@@ -19,16 +18,37 @@
 import type { DisplaySubjectArea } from './types/display.js';
 import type { Rationale } from './types/semantic.js';
 import { backwardsRelationshipNote, compositeGroupProblem, foreignKeyAtTo, linkKey } from './relationships.js';
+import { RATIONALE_FIELD_KEYS } from './fields.js';
 
-/** Rationale keys in display order, with the label an export prints. */
-export const RATIONALE_LABELS: ReadonlyArray<readonly [keyof Rationale, string]> = [
-  ['purpose', 'Purpose'],
-  ['design', 'Design'],
-  ['grainChoice', 'Grain choice'],
-  ['roleChoice', 'Role choice'],
-  ['scdStrategy', 'SCD strategy'],
-  ['measures', 'Measures'],
-];
+/**
+ * The label an export prints for each rationale key. The six keys of the
+ * first release keep the labels they always printed (so no export of an old
+ * file changes); the context-field keys print their catalogue label. Labels
+ * are the export's own, never a project's fields.yml wording.
+ */
+const RATIONALE_EXPORT_LABELS: Readonly<Record<keyof Rationale, string>> = {
+  purpose: 'Purpose',
+  decisions: 'Decisions',
+  openQuestions: 'Open questions',
+  design: 'Design',
+  grainChoice: 'Grain choice',
+  roleChoice: 'Role choice',
+  scdStrategy: 'SCD strategy',
+  measures: 'Measures',
+  sourceOfTruth: 'Source of truth',
+  freshness: 'Freshness',
+  knownIssues: 'Known issues',
+  retention: 'Retention',
+};
+
+/**
+ * Rationale keys in export order (`RATIONALE_FIELD_KEYS`, the order the
+ * storage writer uses too), with the label an export prints. The six keys of
+ * the first release keep their relative order.
+ */
+export const RATIONALE_LABELS: ReadonlyArray<readonly [keyof Rationale, string]> = RATIONALE_FIELD_KEYS.map(
+  (key) => [key, RATIONALE_EXPORT_LABELS[key]] as const,
+);
 
 /** Cardinalities an export can draw. Anything else is skipped with a reason. */
 export type ExportCardinality = 'many-to-one' | 'one-to-many' | 'one-to-one' | 'many-to-many';
@@ -100,6 +120,8 @@ export interface ExportSticky {
   linkedModel?: string;
   /** The note's colour as stored (`AnnotationColor`), when it has one. */
   color?: string;
+  /** The note's box on the canvas, as stored (rich DBML writes it in `erd_layout`); absent when not a finite x and y. */
+  box?: { x: number; y: number; width?: number; height?: number };
 }
 
 export interface PreparedSubjectArea {
@@ -405,7 +427,11 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
     if (!body.trim()) continue;
     const linked = text(raw.linkedModel).trim();
     const color = text(raw.color).trim();
-    stickies.push({ text: body, ...(linked ? { linkedModel: linked } : {}), ...(color ? { color } : {}) });
+    const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    const box = finite(raw.x) && finite(raw.y)
+      ? { x: raw.x, y: raw.y, ...(finite(raw.width) ? { width: raw.width } : {}), ...(finite(raw.height) ? { height: raw.height } : {}) }
+      : undefined;
+    stickies.push({ text: body, ...(linked ? { linkedModel: linked } : {}), ...(color ? { color } : {}), ...(box ? { box } : {}) });
   }
 
   return {

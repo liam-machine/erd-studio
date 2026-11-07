@@ -21,7 +21,7 @@ import type { DisplaySubjectArea, ManifestModelPreview } from '../../src/types/d
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { TableTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
-import type { ErrorMessage } from '../../src/types/messages';
+import type { ErrorMessage, RevealRelationshipMessage } from '../../src/types/messages';
 import type {
   FeedbackAnalysis,
   FeedbackCapabilities,
@@ -81,6 +81,12 @@ export interface EditorState extends CanvasState {
   fkDialogEditData: FkDialogEditData | null;
   /** Whether the add existing model dialog is open. */
   addExistingModelDialogOpen: boolean;
+  /**
+   * What the Add Existing Table dialog's search starts as when it opens: the
+   * name the New Table dialog refused because the Table Library has it. Empty
+   * for every other opening.
+   */
+  addExistingModelDialogSearch: string;
   /** Error message from the extension host, if any. */
   error: string | null;
   /**
@@ -95,7 +101,7 @@ export interface EditorState extends CanvasState {
    * The domain file is empty or not valid JSON (#186), with where the JSON
    * mistake is when the host located it; null unless the host said so.
    */
-  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number } | null;
+  errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number; fileType?: 'JSON' | 'DBML' } | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: TableTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -112,8 +118,6 @@ export interface EditorState extends CanvasState {
    * so a later payload without the flag cancels a layout that has not started.
    */
   pendingAutoLayout: boolean;
-  /** Whether the welcome modal is visible. */
-  welcomeModalOpen: boolean;
   /** Whether the Feedback dialog is visible. */
   feedbackDialogOpen: boolean;
   /** Prefill for the Feedback dialog (from the command palette / error screens). */
@@ -140,6 +144,13 @@ export interface EditorState extends CanvasState {
   syncMode: boolean;
   /** Per-discrepancy ground truth selections (key → 'logical' | 'physical'). */
   syncSelections: Record<string, GroundTruth>;
+  /**
+   * Table keys whose decision the Sync modal inferred from the table's
+   * columns, each with the side it set (lib/syncSelections). Kept here, not
+   * in the modal, so closing and reopening Sync does not turn an inferred
+   * decision into one the user made. Any user action on a key drops it.
+   */
+  syncInferredTableKeys: Record<string, GroundTruth>;
   /** Whether the manifest is stale (source files newer than manifest). */
   manifestStale: boolean;
   /** Info about the last generated sync plan, or null. */
@@ -152,6 +163,18 @@ export interface EditorState extends CanvasState {
   canvasMode: 'pan' | 'select';
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
+  /**
+   * A relationship the host asked to show (`revealRelationship`, the sidebar's
+   * Open in Diagram). `useRevealRelationship` selects and centres its line
+   * once the diagram has settled, then clears it. Not persisted.
+   */
+  pendingReveal: RevealRelationshipMessage['payload'] | null;
+  /**
+   * A table the host asked to show (`revealTable`: Open in Diagram or Go to
+   * Table on a table, Add to Diagram…). `useRevealTable` selects and centres
+   * it once the diagram has settled, then clears it. Not persisted.
+   */
+  pendingTableReveal: string | null;
   /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
@@ -169,6 +192,11 @@ export interface EditorState extends CanvasState {
   /** The user closed the "Run dbt parse" hint; the host persists it too. */
   manifestHintDismissed: boolean;
   /**
+   * The user closed the drag-to-relate tip (DragHint). Persisted per webview
+   * by useStatePersistence (vscode.setState); never sent to the host.
+   */
+  dragHintDismissed: boolean;
+  /**
    * The open project has no `dbt_project.yml`, so there is no Physical stage
    * to show (the host's `logicalOnly` envelope flag). The Toolbar hides the
    * stage tabs, Diff (and with it Sync) and the manifest refresh; Alt+2, the
@@ -177,6 +205,12 @@ export interface EditorState extends CanvasState {
    * and is deliberately NOT touched by `setDomain`.
    */
   logicalOnly: boolean;
+  /**
+   * The host said this DBML diagram declares Tables of its own and has no
+   * table `use` line (`dbmlEmbeddedTables`, §2.5): a single-file DBML to
+   * import. Cleared by every `domainLoaded`; the host re-sends it after one.
+   */
+  embeddedTables: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -191,12 +225,16 @@ export interface EditorActions extends CanvasActions {
   openFkDialogForEdit: (editData: FkDialogEditData) => void;
   /** Clear FK dialog edit data (called on dialog close). */
   clearFkDialogEditData: () => void;
-  /** Open/close the add existing model dialog. */
-  setAddExistingModelDialogOpen: (open: boolean) => void;
+  /** Open/close the add existing model dialog, optionally with its search filled in. */
+  setAddExistingModelDialogOpen: (open: boolean, initialSearch?: string) => void;
+  /** Hide (or, restoring persisted state, keep hidden) the drag-to-relate tip. */
+  setDragHintDismissed: (dismissed: boolean) => void;
   /** Hide the physical-source notice for the rest of this session. */
   dismissPhysicalSourceNotice: () => void;
   /** Store the `manifestMissing` flag of the latest host payload. */
   setManifestMissing: (missing: boolean) => void;
+  /** Show (or clear) the "This file holds its own tables" banner. */
+  setEmbeddedTables: (embedded: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -223,8 +261,6 @@ export interface EditorActions extends CanvasActions {
   triggerAutoLayout: () => void;
   /** Set / clear the first-open auto layout request (see `pendingAutoLayout`). */
   setPendingAutoLayout: (pending: boolean) => void;
-  /** Toggle the welcome modal visibility. */
-  setWelcomeModalOpen: (open: boolean) => void;
   /** Open/close the Feedback dialog, optionally with prefilled fields. */
   setFeedbackDialogOpen: (
     open: boolean,
@@ -251,8 +287,24 @@ export interface EditorActions extends CanvasActions {
   setSyncMode: (active: boolean) => void;
   /** Set ground truth for a single discrepancy item. */
   setSyncSelection: (key: string, choice: GroundTruth) => void;
+  /**
+   * Pick a side for one item, or clear the decision when that side is
+   * already the chosen one (the Sync modal's click-again-to-undo).
+   */
+  toggleSyncSelection: (key: string, choice: GroundTruth) => void;
+  /** Drop the decision for one item, leaving it undecided. */
+  clearSyncSelection: (key: string) => void;
   /** Set ground truth for multiple items at once (bulk). */
   setSyncSelectionBulk: (keys: string[], choice: GroundTruth) => void;
+  /** Drop the decisions for several items at once (clicking a table's Keep all again). */
+  clearSyncSelectionBulk: (keys: string[]) => void;
+  /**
+   * The Sync modal's inferred table decision: set the table key to `choice`
+   * and record it as inferred, or with null clear both.
+   */
+  setInferredTableChoice: (key: string, choice: GroundTruth | null) => void;
+  /** Restore which table keys were inferred (webview state persistence), after their selections. */
+  restoreSyncInferredTableKeys: (inferred: Record<string, GroundTruth>) => void;
   /** Clear all sync selections. */
   clearSyncSelections: () => void;
   /** Set manifest staleness flag. */
@@ -263,6 +315,10 @@ export interface EditorActions extends CanvasActions {
   setCanvasMode: (mode: 'pan' | 'select') => void;
   /** Show (or clear with null) a transient toast notification. */
   setToastMessage: (message: string | null) => void;
+  /** Set / clear the relationship to show (see `pendingReveal`). */
+  setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
+  /** Set / clear the table to show (see `pendingTableReveal`). */
+  setPendingTableReveal: (modelName: string | null) => void;
 }
 
 /**
@@ -277,6 +333,14 @@ function samePhysicalSources(
 ): boolean {
   if (!a || !b) { return !a && !b; }
   return a.yml === b.yml && a.manifest === b.manifest && a.catalog === b.catalog;
+}
+
+/** `inferred` without `keys`: the same object when none of them is in it. */
+function withoutInferred(inferred: Record<string, GroundTruth>, keys: readonly string[]): Record<string, GroundTruth> {
+  if (!keys.some((key) => key in inferred)) return inferred;
+  const next = { ...inferred };
+  for (const key of keys) delete next[key];
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +359,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   fkDialogPrefill: null,
   fkDialogEditData: null,
   addExistingModelDialogOpen: false,
+  addExistingModelDialogSearch: '',
   error: null,
   errorKind: null,
   errorMergeConflict: false,
@@ -304,7 +369,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   _searchFocusFn: null,
   _autoLayoutFn: null,
   pendingAutoLayout: false,
-  welcomeModalOpen: false,
   feedbackDialogOpen: false,
   feedbackPrefill: null,
   feedbackDiagnostics: null,
@@ -318,14 +382,19 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   discrepancyReport: null,
   syncMode: false,
   syncSelections: {},
+  syncInferredTableKeys: {},
   manifestStale: false,
   syncPlanGenerated: null,
   canvasMode: 'pan',
   toastMessage: null,
+  pendingReveal: null,
+  pendingTableReveal: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
+  dragHintDismissed: false,
   logicalOnly: false,
+  embeddedTables: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -337,19 +406,19 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   openFkDialogForEdit: (editData) =>
     set({ newFkDialogOpen: true, fkDialogEditData: editData, fkDialogPrefill: null }),
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
-  setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
+  setAddExistingModelDialogOpen: (open, initialSearch) =>
+    set({ addExistingModelDialogOpen: open, addExistingModelDialogSearch: open ? (initialSearch ?? '') : '' }),
+  setDragHintDismissed: (dismissed) => set({ dragHintDismissed: dismissed }),
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
+  setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly
       ? {
           logicalOnly: true,
           discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
-          syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
-          // Closed, never dismissed: the host persists nothing, so the modal
-          // still greets this user the first time they open a dbt project.
-          welcomeModalOpen: false,
+          syncMode: false, syncSelections: {}, syncInferredTableKeys: {}, manifestStale: false, syncPlanGenerated: null,
         }
       : { logicalOnly: false },
   ),
@@ -378,7 +447,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     if (_autoLayoutFn) _autoLayoutFn();
   },
   setPendingAutoLayout: (pending) => set({ pendingAutoLayout: pending }),
-  setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
   setFeedbackDialogOpen: (open, prefill = null) =>
     set(
       open
@@ -412,25 +480,79 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDiscrepancyVisible: (visible) => set({
     discrepancyVisible: visible,
     // Clear sync state when discrepancy overlay is hidden
-    ...(!visible ? { syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null } : {}),
+    ...(!visible ? { syncMode: false, syncSelections: {}, syncInferredTableKeys: {}, manifestStale: false, syncPlanGenerated: null } : {}),
   }),
   setDiscrepancyCompareStage: (stage) => set({ discrepancyCompareStage: stage }),
   setDiscrepancyReport: (report) => set({ discrepancyReport: report }),
   setSyncMode: (active) => set({ syncMode: active, syncPlanGenerated: null }),
+  // Every change to the decisions discards a prepared plan: it was built
+  // from the old ones, so "N actions ready" would no longer be true.
+  // A user action on a key also makes its decision the user's own
+  // (`withoutInferred`); only setInferredTableChoice records an inferred one.
   setSyncSelection: (key, choice) =>
-    set((state) => ({ syncSelections: { ...state.syncSelections, [key]: choice } })),
+    set((state) => ({
+      syncSelections: { ...state.syncSelections, [key]: choice },
+      syncInferredTableKeys: withoutInferred(state.syncInferredTableKeys, [key]),
+      syncPlanGenerated: null,
+    })),
+  toggleSyncSelection: (key, choice) =>
+    set((state) => {
+      const next = { ...state.syncSelections };
+      if (next[key] === choice) delete next[key];
+      else next[key] = choice;
+      return { syncSelections: next, syncInferredTableKeys: withoutInferred(state.syncInferredTableKeys, [key]), syncPlanGenerated: null };
+    }),
+  clearSyncSelection: (key) =>
+    set((state) => {
+      if (!(key in state.syncSelections)) return {};
+      const next = { ...state.syncSelections };
+      delete next[key];
+      return { syncSelections: next, syncInferredTableKeys: withoutInferred(state.syncInferredTableKeys, [key]), syncPlanGenerated: null };
+    }),
   setSyncSelectionBulk: (keys, choice) =>
     set((state) => {
       const next = { ...state.syncSelections };
       for (const key of keys) next[key] = choice;
-      return { syncSelections: next };
+      return { syncSelections: next, syncInferredTableKeys: withoutInferred(state.syncInferredTableKeys, keys), syncPlanGenerated: null };
     }),
-  clearSyncSelections: () => set({ syncSelections: {}, syncPlanGenerated: null }),
+  clearSyncSelectionBulk: (keys) =>
+    set((state) => {
+      if (!keys.some((key) => key in state.syncSelections)) return {};
+      const next = { ...state.syncSelections };
+      for (const key of keys) delete next[key];
+      return { syncSelections: next, syncInferredTableKeys: withoutInferred(state.syncInferredTableKeys, keys), syncPlanGenerated: null };
+    }),
+  setInferredTableChoice: (key, choice) =>
+    set((state) => {
+      const selections = { ...state.syncSelections };
+      const inferred = { ...state.syncInferredTableKeys };
+      if (choice === null) {
+        if (!(key in selections) && !(key in inferred)) return {};
+        delete selections[key];
+        delete inferred[key];
+      } else {
+        selections[key] = choice;
+        inferred[key] = choice;
+      }
+      return { syncSelections: selections, syncInferredTableKeys: inferred, syncPlanGenerated: null };
+    }),
+  restoreSyncInferredTableKeys: (inferred) =>
+    set((state) => {
+      // Only entries whose selection still holds the inferred side.
+      const kept: Record<string, GroundTruth> = {};
+      for (const [key, choice] of Object.entries(inferred)) {
+        if ((choice === 'logical' || choice === 'physical') && state.syncSelections[key] === choice) kept[key] = choice;
+      }
+      return { syncInferredTableKeys: kept };
+    }),
+  clearSyncSelections: () => set({ syncSelections: {}, syncInferredTableKeys: {}, syncPlanGenerated: null }),
   setManifestStale: (stale) => set({ manifestStale: stale }),
   setSyncPlanGenerated: (info) => set({ syncPlanGenerated: info }),
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setToastMessage: (message) => set({ toastMessage: message }),
+  setPendingReveal: (target) => set({ pendingReveal: target }),
+  setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.
@@ -456,7 +578,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     ...(state.domain && state.domain.stage !== domain.stage
       ? {
           discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
-          syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
+          syncMode: false, syncSelections: {}, syncInferredTableKeys: {}, manifestStale: false, syncPlanGenerated: null,
           // Reset canvas mode to pan on stage switch; select mode is short-lived UI intent
           // and shouldn't persist across a stage change (physical is read-only).
           canvasMode: 'pan' as const,

@@ -12,13 +12,20 @@
  * When sync mode is active, this panel hides and SyncMergeModal takes over.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { STAGE_HEX } from '@erd-studio/renderer/editor';
 import { stageName } from '../../lib/stageUtils';
 import { StalenessWarning } from './SyncControls';
+import {
+  DISC_PANEL_MAX_WIDTH_PX,
+  compareFocusRightInset,
+  fitViewPadding,
+  fitsBesideDetail,
+  measureTopInsetFrom,
+} from '../../lib/fitViewPadding';
 import type { TableDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './DiscrepancyPanel.css';
@@ -175,11 +182,40 @@ function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: Relati
 // Main component
 // ---------------------------------------------------------------------------
 
+/** The canvas's width in px (0 until measured), kept current as the editor is resized. */
+function useFlowWidth(inside: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const flow = inside?.closest('.react-flow');
+    if (!flow) return undefined;
+    const measure = (): void => setWidth(flow.getBoundingClientRect().width);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(flow);
+    return () => observer.disconnect();
+  }, [inside]);
+  return width;
+}
+
 export function DiscrepancyPanel() {
   const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
   const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  // The Detail Panel shows (top-right) exactly when it is open on a table of
+  // this diagram — the same test DetailPanel itself makes. While it shows,
+  // this panel moves left of it instead of sitting underneath it.
+  const detailPanelShown = useEditorStore(
+    (s) => s.detailPanelOpen && !!s.selectedNode && !!s.domain?.models.some((m) => m.name === s.selectedNode),
+  );
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [panelHeader, setPanelHeader] = useState<HTMLDivElement | null>(null);
+  const headerRef = useCallback((el: HTMLDivElement | null) => { panelRef.current = el; setPanelHeader(el); }, []);
+  // Beside the Detail Panel only on a canvas wide enough to keep room for
+  // the table; on a narrower one this panel stays in its corner, as before.
+  const flowWidth = useFlowWidth(panelHeader);
+  const besideDetail = detailPanelShown && fitsBesideDetail(flowWidth);
   const setDiscrepancyVisible = useEditorStore((s) => s.setDiscrepancyVisible);
   const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
   const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
@@ -209,7 +245,19 @@ export function DiscrepancyPanel() {
     (modelName: string) => {
       selectNode(modelName);
       setDetailPanelOpen(true);
-      fitView({ nodes: [{ id: modelName }], duration: 300, padding: 0.3 });
+      // Zoom the table into the part of the canvas left uncovered: below the
+      // toolbar, and left of the Detail Panel and this panel (beside it on a
+      // wide canvas, under it on a narrow one), never squeezing the table
+      // below a usable width (compareFocusRightInset).
+      const panel = panelRef.current?.closest('.disc-panel') ?? null;
+      const panelWidth = panel?.getBoundingClientRect().width || DISC_PANEL_MAX_WIDTH_PX;
+      const flowNow = panel?.closest('.react-flow')?.getBoundingClientRect().width ?? 0;
+      const rightInset = compareFocusRightInset(flowNow, panelWidth);
+      fitView({
+        nodes: [{ id: modelName }],
+        duration: 300,
+        padding: fitViewPadding(measureTopInsetFrom(panel), rightInset),
+      });
     },
     [selectNode, setDetailPanelOpen, fitView],
   );
@@ -243,8 +291,11 @@ export function DiscrepancyPanel() {
     + summary.undeclaredColumns + relIssueCount;
 
   return (
-    <Panel position="bottom-right" className="disc-panel">
-      <div className="disc-panel__header">
+    <Panel
+      position="bottom-right"
+      className={`disc-panel${besideDetail ? ' disc-panel--beside-detail' : ''}`}
+    >
+      <div className="disc-panel__header" ref={headerRef}>
         <span className="disc-panel__title">
           <span className="disc-panel__stage-label" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
             {stageName(sourceStage)}

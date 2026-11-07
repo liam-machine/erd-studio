@@ -9,7 +9,7 @@ Peer dependencies: `react` and `react-dom` 18.3+, `@xyflow/react` 12.4+.
 | Import | What it is for |
 |---|---|
 | `@erd-studio/renderer` | Showing a domain: the `ErdCanvas` viewer component (below), plus `transformSubjectArea` (a `DisplaySubjectArea` to React Flow nodes and edges), `pickHandleSides`, `repickHandleSides` / `nodeRect`, the diagram exporters re-exported from `@erd-studio/core` (below), and the display, domain and graph types (`DisplaySubjectArea`, `TableFlowNode`, `FkFlowEdge`, …). |
-| `@erd-studio/renderer/editor` | Everything above plus what a host needs to build a full editor around the canvas, as the extension's webview does: the store (below), the host adapter, `useCanvasGraph`, `CanvasBackdrop`, `canvasNodeTypes` / `canvasEdgeTypes`, the components (`TableNode`, `FkEdge`, `AnnotationNode`, `AnnotationEdge`, `DetailPanel`, `Legend`, `KeyBadge`, `KeyBadgeGroup`, `DataTypeSelect`, `ColumnRowEditor`), the canvas hooks and the pure helpers. |
+| `@erd-studio/renderer/editor` | Everything above plus what a host needs to build a full editor around the canvas, as the extension's webview does: the store (below), the host adapter, `useCanvasGraph`, `useHoverFocus` (hover preview and relationship flow: spread its `hoverHandlers` onto `<ReactFlow>` and pass its `flowClassName` as the `className`; without it nothing flows, even on click), `CanvasBackdrop`, `canvasNodeTypes` / `canvasEdgeTypes`, the components (`TableNode`, `FkEdge`, `EdgeFlow` / `EdgeFlowGlyphs` (the moving direction glyphs on a line), `AnnotationNode`, `AnnotationEdge`, `DetailPanel`, `Legend`, `StatusBar`, `KeyBadge`, `KeyBadgeGroup`, `DataTypeSelect`, `ColumnRowEditor`), the canvas hooks and the pure helpers. |
 | `@erd-studio/renderer/store` | The canvas store on its own, with no React Flow runtime: `createCanvasSlice`, `createCanvasStore`, `CanvasStoreProvider`, `useEditorStore`, `useEditorStoreApi` and their types. |
 | `@erd-studio/renderer/sizing` | Model node size estimation (`NODE_WIDTH`, `estimateNodeWidth`, `estimateNodeHeight`, `countVisibleColumnRows`, `resolveNodeDimensions`), for layout code that needs node sizes before React Flow has measured them. No components. |
 | `@erd-studio/renderer/styles.css` | The stylesheet: every component's CSS in cascade order, then the theme tokens. It `@import`s `@xyflow/react/dist/style.css`, which your bundler resolves. |
@@ -18,7 +18,7 @@ All four JavaScript entry points share their modules, so a store or context crea
 
 ## Viewer: `ErdCanvas`
 
-`ErdCanvas` renders a `DisplaySubjectArea` read-only, the way the extension shows a read-only domain: model nodes with their columns and key badges, FK edges, annotations, the minimap, the legend, and the detail panel a click on a model opens. It presents no editing affordances and posts nothing anywhere.
+`ErdCanvas` renders a `DisplaySubjectArea` read-only, the way the extension shows a read-only domain: model nodes with their columns and key badges, FK edges, annotations, the minimap, the legend with the table and relationship counts beside it, and the detail panel a click on a model opens. Closing the panel keeps the table selected (its relationships stay lit, unlike the extension); a click on the empty canvas, or Escape, clears the selection. Escape is heard on `window` and acts only when it is pressed inside the canvas, or with nothing focused for the canvas last clicked, pointed at or focused, so with several canvases on a page it clears only that one's selection. It presents no editing affordances and posts nothing anywhere.
 
 ```tsx
 import { useRef, useState } from 'react';
@@ -43,6 +43,7 @@ function Diagram({ domain }: { domain: DisplaySubjectArea }) {
 | `nodesDraggable` | Let readers move model and annotation nodes (default `false`). Moves are never saved; the edges on a moved node re-pick their sides as it moves. |
 | `onLayoutModifiedChange(modified)` | Called when the layout starts or stops differing from the domain's positions (a node moved; `resetLayout()`, a new domain, or a node moved back). |
 | `onReady()` | Called once, after the first nodes are measured and fitted into view (straight away for an empty domain). |
+| `logicalOnly` | Draw the diagram of a project with no dbt project (default `false`): tables, lines and the selection ring take neutral theme colours instead of the logical stage's blue, so the layer badge carries the colour, and the legend leaves out the Physical stage, ghosts, provenance chips and comparison colours. |
 | `className`, `style` | Applied to the canvas's wrapper element, which fills its parent. |
 
 The ref exposes `resetLayout()`, which puts every node back at its position in the domain with its original edge sides.
@@ -51,7 +52,7 @@ Each `ErdCanvas` has its own store, so several can share a page.
 
 ## Exporting a diagram
 
-The `.` entry re-exports `@erd-studio/core`'s exporters, so a page that shows a diagram with `ErdCanvas` can offer it as text without depending on core itself: `toMermaid`, `toDbml`, `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `exportDiagram`, `diagramExportFileName`, `DIAGRAM_EXPORT_FORMATS`, `DIAGRAM_EXPORT_FILE_EXTENSIONS`, the rich export's layout file (`toDbdiagramLayout`, `serializeDbdiagramLayout`, `dbdiagramLayoutFileName`) and the `DiagramExportFormat`, `DbmlRichOptions`, `DbdiagramLayout` and `DbdiagramTablePosition` types. They are pure functions with no React or DOM use; the same `DisplaySubjectArea` gives the same text everywhere ERD Studio exports it.
+The `.` entry re-exports `@erd-studio/core`'s exporters, so a page that shows a diagram with `ErdCanvas` can offer it as text without depending on core itself: `toMermaid`, `toDbml`, `toDbmlRich`, `DBML_RICH_EXPORT_HEADER`, `exportDiagram`, `diagramExportFileName`, `DIAGRAM_EXPORT_FORMATS`, `DIAGRAM_EXPORT_FILE_EXTENSIONS` and the `DiagramExportFormat` and `DbmlRichOptions` types. Rich DBML is one file per diagram: its Project carries the table positions in `erd_layout`. The exporters are pure functions with no React or DOM use; the same `DisplaySubjectArea` gives the same text everywhere ERD Studio exports it.
 
 ```ts
 import { exportDiagram, diagramExportFileName, type DisplaySubjectArea } from '@erd-studio/renderer';

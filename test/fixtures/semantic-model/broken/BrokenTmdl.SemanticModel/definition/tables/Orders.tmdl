@@ -1,0 +1,10 @@
+table Orders
+
+	measure 'Order Total' = ```
+			SUM ( Orders[Amount] )
+
+	column OrderKey
+		dataType: int64
+		isKey
+		sourceColumn: OrderKey
+

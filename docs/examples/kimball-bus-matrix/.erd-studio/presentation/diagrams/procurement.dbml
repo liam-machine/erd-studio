@@ -1,0 +1,18 @@
+use { table procurement.fct_purchase_order_pipeline } from '../tables/procurement/fct_purchase_order_pipeline.dbml'
+use { table conformed.dim_date }       from '../tables/conformed/dim_date.dbml'
+use { table conformed.dim_product }    from '../tables/conformed/dim_product.dbml'
+use { table conformed.dim_store }      from '../tables/conformed/dim_store.dbml'
+use { table procurement.dim_supplier } from '../tables/procurement/dim_supplier.dbml'
+use * from '../relationships/procurement.dbml'
+
+Project procurement {
+  Note: 'Purchase order pipeline: the procurement row of the bus matrix. dim_date plays three roles.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_date 12 123
+    dim_product 403 310
+    dim_store 596 682
+    dim_supplier 443 12
+    fct_purchase_order_pipeline 869 98
+  '''
+}

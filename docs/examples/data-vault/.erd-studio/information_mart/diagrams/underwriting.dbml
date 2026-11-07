@@ -1,0 +1,16 @@
+use { table underwriting.fct_policy_month } from '../tables/underwriting/fct_policy_month.dbml'
+use { table underwriting.dim_policy }       from '../tables/underwriting/dim_policy.dbml'
+use { table underwriting.dim_customer }     from '../tables/underwriting/dim_customer.dbml'
+use { table shared.dim_date }               from '../tables/shared/dim_date.dbml'
+use * from '../relationships/information_mart.dbml'
+
+Project underwriting {
+  Note: 'Underwriting mart: a Kimball star built from the business vault.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_customer 12 370
+    dim_date 164 135
+    dim_policy 564 12
+    fct_policy_month 820 350
+  '''
+}

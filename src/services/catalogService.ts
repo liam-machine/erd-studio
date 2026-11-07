@@ -29,6 +29,7 @@ import type {
   CatalogNodeInfo,
   CatalogResourceType,
 } from '../types/catalog';
+import { log } from './logger';
 
 /**
  * Upper bound on a catalog we are willing to read into memory. A catalog is
@@ -124,6 +125,14 @@ export class CatalogService {
     }
   }
 
+  /**
+   * The catalog a finished {@link loadCatalog} cached, without reading: for a
+   * synchronous caller. Undefined when there is none or it has not been read.
+   */
+  peekCatalog(): CatalogData | undefined {
+    return this.loaded ? this.cache : undefined;
+  }
+
   /** Drop the cached catalog so the next load re-reads from disk. */
   invalidate(): void {
     this.loadId++;
@@ -140,7 +149,7 @@ export class CatalogService {
         return undefined; // dbt is mid-write; there is nothing to serve and nothing to warn about
       }
       if (stat.size > this.maxBytes) {
-        console.warn(
+        log.warn(
           `[CatalogService] ${catalogPath} is ${stat.size} bytes ` +
             `(limit ${this.maxBytes}) — skipping.`,
         );
@@ -152,7 +161,7 @@ export class CatalogService {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
       if (code !== 'ENOENT') {
-        console.warn(
+        log.warn(
           `[CatalogService] Could not read ${catalogPath}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );

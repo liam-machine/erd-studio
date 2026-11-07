@@ -1,0 +1,201 @@
+{
+  "example": "data-mesh",
+  "layers": [
+    {
+      "id": "source_aligned",
+      "label": "Source-aligned",
+      "abbreviation": "SRC"
+    },
+    {
+      "id": "aggregate",
+      "label": "Aggregate",
+      "abbreviation": "AGG"
+    },
+    {
+      "id": "consumer_aligned",
+      "label": "Consumer-aligned",
+      "abbreviation": "CON"
+    }
+  ],
+  "tables": {
+    "accounts.account": {
+      "layer": "source_aligned",
+      "schema": "accounts",
+      "grain": "One row per customer account",
+      "columns": [
+        "account_id STRING pk nk",
+        "account_type STRING",
+        "country_code STRING",
+        "created_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/source_aligned.dbml"
+    },
+    "customer.customer_profile": {
+      "layer": "aggregate",
+      "schema": "customer",
+      "grain": "One row per customer account",
+      "columns": [
+        "account_id STRING pk fk",
+        "lifetime_orders INT additive",
+        "lifetime_spend DECIMAL(12,2) additive",
+        "last_order_at TIMESTAMP",
+        "preferred_carrier_code STRING"
+      ],
+      "newRelationshipsFile": "aggregate/relationships/customer.dbml"
+    },
+    "delivery_insights.fct_shipment_delivery": {
+      "layer": "consumer_aligned",
+      "schema": "delivery_insights",
+      "role": "accumulating-snapshot",
+      "grain": "One row per shipment",
+      "columns": [
+        "shipment_id STRING pk nk",
+        "account_id STRING fk",
+        "carrier_code STRING fk",
+        "promised_delivery_date DATE",
+        "delivered_at TIMESTAMP",
+        "days_late INT",
+        "is_on_time BOOLEAN"
+      ],
+      "newRelationshipsFile": "consumer_aligned/relationships/delivery_insights.dbml"
+    },
+    "orders.customer_order": {
+      "layer": "source_aligned",
+      "schema": "orders",
+      "grain": "One row per order",
+      "columns": [
+        "order_id STRING pk nk",
+        "account_id STRING fk",
+        "placed_at TIMESTAMP",
+        "parcel_count INT",
+        "declared_value DECIMAL(12,2)"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/orders.dbml"
+    },
+    "payments.payment": {
+      "layer": "source_aligned",
+      "schema": "payments",
+      "grain": "One row per captured payment",
+      "columns": [
+        "payment_id STRING pk nk",
+        "order_id STRING fk",
+        "amount DECIMAL(12,2)",
+        "payment_method STRING",
+        "captured_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/payments.dbml"
+    },
+    "shipping.carrier": {
+      "layer": "source_aligned",
+      "schema": "shipping",
+      "grain": "One row per carrier",
+      "columns": [
+        "carrier_code STRING pk nk",
+        "carrier_name STRING",
+        "service_level STRING"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
+    },
+    "shipping.shipment": {
+      "layer": "source_aligned",
+      "schema": "shipping",
+      "grain": "One row per shipment",
+      "columns": [
+        "shipment_id STRING pk nk",
+        "order_id STRING fk",
+        "carrier_code STRING fk",
+        "promised_delivery_date DATE"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
+    },
+    "shipping.tracking_event": {
+      "layer": "source_aligned",
+      "schema": "shipping",
+      "grain": "One row per scan of a parcel",
+      "columns": [
+        "event_id STRING pk nk",
+        "shipment_id STRING fk",
+        "event_type STRING",
+        "event_at TIMESTAMP",
+        "depot_code STRING"
+      ],
+      "newRelationshipsFile": "source_aligned/relationships/shipping.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "aggregate/diagrams/customer-360.dbml",
+      "name": "customer-360",
+      "layer": "aggregate",
+      "tables": [
+        "accounts.account",
+        "customer.customer_profile"
+      ],
+      "relationships": [
+        "customer_profile.account_id -> account.account_id one-to-one"
+      ]
+    },
+    {
+      "file": "consumer_aligned/diagrams/delivery-performance.dbml",
+      "name": "delivery-performance",
+      "layer": "consumer_aligned",
+      "tables": [
+        "customer.customer_profile",
+        "delivery_insights.fct_shipment_delivery",
+        "shipping.carrier"
+      ],
+      "relationships": [
+        "fct_shipment_delivery.account_id -> customer_profile.account_id many-to-one",
+        "fct_shipment_delivery.carrier_code -> carrier.carrier_code many-to-one"
+      ]
+    },
+    {
+      "file": "source_aligned/diagrams/orders.dbml",
+      "name": "orders",
+      "layer": "source_aligned",
+      "tables": [
+        "accounts.account",
+        "orders.customer_order"
+      ],
+      "relationships": [
+        "customer_order.account_id -> account.account_id many-to-one"
+      ]
+    },
+    {
+      "file": "source_aligned/diagrams/payments.dbml",
+      "name": "payments",
+      "layer": "source_aligned",
+      "tables": [
+        "accounts.account",
+        "delivery_insights.fct_shipment_delivery",
+        "orders.customer_order",
+        "payments.payment",
+        "shipping.shipment",
+        "shipping.tracking_event"
+      ],
+      "relationships": [
+        "customer_order.account_id -> account.account_id many-to-one",
+        "payment.order_id -> customer_order.order_id many-to-one",
+        "shipment.order_id -> customer_order.order_id many-to-one",
+        "tracking_event.shipment_id -> shipment.shipment_id many-to-one"
+      ]
+    },
+    {
+      "file": "source_aligned/diagrams/shipping.dbml",
+      "name": "shipping",
+      "layer": "source_aligned",
+      "tables": [
+        "customer.customer_profile",
+        "orders.customer_order",
+        "shipping.carrier",
+        "shipping.shipment",
+        "shipping.tracking_event"
+      ],
+      "relationships": [
+        "shipment.carrier_code -> carrier.carrier_code many-to-one",
+        "shipment.order_id -> customer_order.order_id many-to-one",
+        "tracking_event.shipment_id -> shipment.shipment_id many-to-one"
+      ]
+    }
+  ]
+}

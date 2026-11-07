@@ -1,0 +1,8 @@
+// Customers and their profiles, split out of gold.dbml by hand. ERD Studio never moves a Ref out of this file.
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer }     from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_region }       from '../tables/gold/dim_region.dbml'
+
+Ref: gold.dim_customer.customer_key ?- gold.customer_profile.customer_key
+Ref region: gold.customer_profile.preferred_region_code <>? gold.dim_region.region_code
+Ref parent: gold.dim_customer.parent_customer_key >? gold.dim_customer.customer_key

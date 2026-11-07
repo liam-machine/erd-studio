@@ -1,0 +1,13 @@
+name: fct_refund
+schema: gold
+columns:
+  - name: refund_key
+    dataType: INT
+    isPrimaryKey: true
+  - name: order_line_id
+    dataType: BIGINT
+relationships:
+  - fromColumn: order_line_id
+    toTable: fct_order
+    toColumn: order_line_id
+    cardinality: many-to-one

@@ -262,7 +262,7 @@ export const hostEdit = (w: World, original: Ends, p: Relationship, d: SubjectAr
   hostWrite(w, { kind: 'edit', original, drawn: p }, d);
 export const hostRemove = (w: World, keys: Ends[], d: SubjectAreaName = 'D1'): Outcome => hostWrite(w, { kind: 'remove', keys }, d);
 
-/** Add Existing Model / Draw from dbt: `fct` joins D3 (which holds `dim`) with dbt's relationship. */
+/** Add Existing Model / Import from dbt: `fct` joins D3 (which holds `dim`) with dbt's relationship. */
 export function hostRoute(w: World, dbt: Relationship): Outcome {
   const out = clone(w);
   out.domModels.D3 = ['dim', 'fct'];
@@ -583,7 +583,7 @@ export function opsFor(w: World, d: SubjectAreaName = 'D1', opts: { renames?: bo
     ops.push({ name: 'bystander: delete' + at, targets: [linkKey(by)], ...host(d, { kind: 'remove', keys: [ends] }) });
   }
 
-  // Add Existing Model / Draw from dbt: dbt's canonical relationship.
+  // Add Existing Model / Import from dbt: dbt's canonical relationship.
   const known = storedCopies(w).some((c) => linkKey(c.rel) === L_KEY);
   if (d === 'D1') for (const dbt of [fd('many-to-one'), fd('one-to-one'), { ...reverseEnds(fd('one-to-one')) }]) {
     ops.push({

@@ -5,9 +5,9 @@
 -- This is what those migrations add up to, in one place to read;
 -- test/schema.test.mjs fails when the two disagree.
 --
--- One row per install per UTC day. No IP, user-agent, geo or header is ever
--- stored; `received_day` is the date the Worker received the row, and the daily
--- cron deletes rows whose received_day is more than 90 days old.
+-- heartbeats: one row per install per UTC day. No IP, user-agent, geo or header
+-- is ever stored; `received_day` is the date the Worker received the row, and
+-- the daily cron deletes rows whose received_day is more than 90 days old.
 CREATE TABLE IF NOT EXISTS heartbeats (
   install_id TEXT NOT NULL,
   day TEXT NOT NULL,
@@ -42,7 +42,29 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   -- look that day, or predates the fields.
   physical_tools TEXT,           -- JSON array
   platforms TEXT,                -- JSON array
+  -- Added by migrations/0004_onboarding_trail.sql. NULL on a day without a trail.
+  trail TEXT,                    -- JSON array of [event, gap, window, repeat]
+  trail_dropped INTEGER,
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);
 CREATE INDEX IF NOT EXISTS idx_heartbeats_received ON heartbeats(received_day);
+
+-- Added by migrations/0005_worker_daily.sql: the Worker's own ledger, one row
+-- per UTC day the Worker received requests, extension version family
+-- (major.minor, or 'other'), outcome ('ok' / 'denied') and reason ('none',
+-- 'body_size', 'json' or 'shape_<field>'): how many heartbeats arrived and how
+-- many unknown features / errors keys and trail events were dropped from the
+-- accepted ones. No install id, IP, header, body text or key name. The daily
+-- cron deletes rows whose day is more than 90 days old.
+CREATE TABLE IF NOT EXISTS worker_daily (
+  day TEXT NOT NULL,
+  ext_family TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  dropped_features INTEGER NOT NULL DEFAULT 0,
+  dropped_errors INTEGER NOT NULL DEFAULT 0,
+  dropped_trail INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, ext_family, outcome, reason)
+);

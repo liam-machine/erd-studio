@@ -1,0 +1,7 @@
+// A diagram where the ERD Studio 1.9 pre-release wrote it (<layer>/<name>.dbml): 2.0 does not read it.
+use { table dim_customer } from '../tables/dim_customer.dbml'
+use * from '../tables/_relationships.dbml'
+
+Project old {
+  erd_schema_version: '7'
+}

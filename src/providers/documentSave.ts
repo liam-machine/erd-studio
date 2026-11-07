@@ -18,17 +18,49 @@
  * resolved false and the document is still dirty, e.g. the file changed on
  * disk), `threw` (save() threw, e.g. a closed document) or `reopenFailed`
  * (re-opening the document by URI threw, e.g. a file system error).
+ *
+ * Every ERD Studio save goes through {@link saveWithoutFormatting}: VS Code
+ * runs its save participants (format on save among them) for an extension's
+ * `save()` as for the user's own, and ERD Studio is the `.dbml` formatter.
+ * Its writes already end with the formatter, so its own saves skip it: a
+ * layout-only move's undo anchor, or an Undo flushed to disk, must leave the
+ * bytes exactly as they are, whatever `editor.formatOnSave` says.
  */
 
 import * as vscode from 'vscode';
 import type { SaveFailure } from '../services/telemetryPayload';
+import { log } from '../services/logger';
+
+/** URIs (as strings) ERD Studio is saving right now, with how many of its saves of each are in flight. */
+const ownSaves = new Map<string, number>();
+
+/** Whether ERD Studio itself is saving `uri` right now (Format Document then answers with no edits). */
+export function isErdStudioSaving(uri: vscode.Uri): boolean {
+  return ownSaves.has(uri.toString());
+}
+
+/**
+ * `doc.save()`, with format on save skipped for this save (see above). The
+ * caller handles the result exactly as it would `save()`'s.
+ */
+export async function saveWithoutFormatting(doc: vscode.TextDocument): Promise<boolean> {
+  const key = doc.uri.toString();
+  ownSaves.set(key, (ownSaves.get(key) ?? 0) + 1);
+  try {
+    return await doc.save();
+  } finally {
+    const left = (ownSaves.get(key) ?? 1) - 1;
+    if (left > 0) ownSaves.set(key, left);
+    else ownSaves.delete(key);
+  }
+}
 
 export async function saveDocumentByUri(uri: vscode.Uri, onFailure?: (reason: SaveFailure) => void): Promise<boolean> {
   let doc: vscode.TextDocument;
   try {
     doc = await vscode.workspace.openTextDocument(uri);
   } catch (err) {
-    console.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
+    log.error(`[saveDocumentByUri] could not save ${uri.fsPath}:`, err);
     onFailure?.('reopenFailed');
     return false;
   }
@@ -38,12 +70,12 @@ export async function saveDocumentByUri(uri: vscode.Uri, onFailure?: (reason: Sa
 /** Save `doc`; true when its bytes are on disk afterwards (see above). Never throws. */
 export async function saveDocument(doc: vscode.TextDocument, onFailure?: (reason: SaveFailure) => void): Promise<boolean> {
   try {
-    const saved = await doc.save();
+    const saved = await saveWithoutFormatting(doc);
     if (saved || !doc.isDirty) return true;
     onFailure?.('refused');
     return false;
   } catch (err) {
-    console.error(`[saveDocument] could not save ${doc.uri.fsPath}:`, err);
+    log.error(`[saveDocument] could not save ${doc.uri.fsPath}:`, err);
     onFailure?.('threw');
     return false;
   }

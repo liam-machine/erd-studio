@@ -136,6 +136,68 @@ describe('workspace package boundaries', () => {
     expect(hits).toEqual([]);
   });
 
+  // Native DBML storage (§4.1 bundle rules 1–3): the parser stays behind the
+  // `@erd-studio/core/dbml` subpath, so the webview and the renderer never load it.
+  it('(g) only packages/core/src/dbml/ (and the host\'s Import DBML parser) import @dbml/parse', () => {
+    const allowed = new Set([
+      path.join(ROOT, 'src/services/dbmlImportParse.ts'),
+    ]);
+    const roots = [CORE_SRC, RENDERER_SRC, path.join(ROOT, 'src'), path.join(ROOT, 'webview'), path.join(ROOT, 'mcp-server/src')];
+    const violations: string[] = [];
+    for (const file of roots.flatMap((r) => walk(r)).filter(isSource)) {
+      if (file.startsWith(path.join(CORE_SRC, 'dbml') + path.sep) || allowed.has(file)) continue;
+      for (const spec of importsOf(file)) {
+        if (/^@dbml\/parse(\/|$)/.test(spec)) violations.push(`${rel(file)} imports ${spec}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('(h) nothing reachable from core\'s main entry makes a value import from ./dbml/', () => {
+    /** Relative imports that load a module at runtime (`import type` / `export type` load nothing). */
+    const valueImports = (file: string): string[] => {
+      const text = fs.readFileSync(file, 'utf8');
+      const specs: string[] = [];
+      for (const m of text.matchAll(/\b(import|export)\s+(type\s+)?(?:[^'";]*?\sfrom\s+)?['"]([^'"]+)['"]/g)) {
+        if (!m[2]) specs.push(m[3]);
+      }
+      for (const m of text.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(m[1]);
+      return specs.filter((s) => s.startsWith('.'));
+    };
+    const resolve = (from: string, spec: string): string => {
+      const base = path.resolve(path.dirname(from), spec).replace(/\.js$/, '');
+      for (const candidate of [`${base}.ts`, path.join(base, 'index.ts')]) if (fs.existsSync(candidate)) return candidate;
+      return base;
+    };
+    const seen = new Set<string>();
+    const queue = [path.join(CORE_SRC, 'index.ts')];
+    const violations: string[] = [];
+    while (queue.length > 0) {
+      const file = queue.pop()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const spec of valueImports(file)) {
+        const target = resolve(file, spec);
+        if (target.startsWith(path.join(CORE_SRC, 'dbml') + path.sep)) violations.push(`${rel(file)} imports ${spec}`);
+        else if (fs.existsSync(target)) queue.push(target);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(10);
+    expect(violations).toEqual([]);
+  });
+
+  it('(i) the webview and the renderer never import @erd-studio/core/dbml, and the webview tsconfig has no path for it', () => {
+    const violations: string[] = [];
+    for (const file of [...walk(path.join(ROOT, 'webview')), ...walk(RENDERER_SRC)].filter(isSource)) {
+      for (const spec of importsOf(file)) {
+        if (spec === '@erd-studio/core/dbml' || /packages\/core\/src\/dbml/.test(spec)) violations.push(`${rel(file)} imports ${spec}`);
+      }
+    }
+    expect(violations).toEqual([]);
+    const webviewConfig = fs.readFileSync(path.join(ROOT, 'tsconfig.webview.json'), 'utf8');
+    expect(webviewConfig).not.toContain('@erd-studio/core/dbml');
+  });
+
   it('(f) the extension store and the ELK runner load without React Flow', async () => {
     const store = await import('../../webview/store/editorStore');
     const elk = await import('../../webview/lib/elkLayout');

@@ -1,0 +1,14 @@
+Table party.party_relationship [
+  grain: 'One row per pair of parties per kind of relationship',
+  owner: 'customer-data'
+] {
+  Note: 'How two parties are related: a director of a company, a guardian of a minor, an employer.'
+
+  from_party_id     BIGINT [foreign_key: 'true']
+  to_party_id       BIGINT [foreign_key: 'true']
+  relationship_type STRING [note: 'director_of, guardian_of, employer_of']
+  valid_from        DATE
+  indexes {
+    (from_party_id, to_party_id, relationship_type) [pk]
+  }
+}

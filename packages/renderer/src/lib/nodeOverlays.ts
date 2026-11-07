@@ -14,6 +14,12 @@
  * This lets selection / search / expansion changes avoid re-running the full
  * domain transform (which would also drop `measured` and force React Flow to
  * re-measure every node).
+ *
+ * What counts as "connected" is `computeCanvasFocus` (`canvasFocus.ts`), the
+ * same rule the hover preview uses. Hover itself never comes through here:
+ * every `setEdges` re-renders every `FkEdge`, which is fine once per click but
+ * not on every pointer move, so hover dims with a root CSS class instead
+ * (`useHoverFocus`).
  */
 
 import type {
@@ -23,6 +29,7 @@ import type {
   AnnotationFlowEdge,
 } from '../types/graph';
 import { matchesTableSearch } from './modelLabels';
+import { computeCanvasFocus } from './canvasFocus';
 
 export type GraphNode = TableFlowNode | AnnotationFlowNode;
 export type GraphEdge = FkFlowEdge | AnnotationFlowEdge;
@@ -41,40 +48,6 @@ export interface OverlayState {
 }
 
 /**
- * Compute the set of node ids that stay bright for the current selection.
- * - Node selected: the node plus every FK neighbour.
- * - Edge selected: the two endpoint models.
- * - Nothing selected: empty set (and `hasSelection` false).
- */
-function computeConnectedNodeIds(
-  edges: GraphEdge[],
-  selectedNode: string | null,
-  selectedEdge: string | null,
-): Set<string> {
-  const connected = new Set<string>();
-  if (selectedNode) {
-    connected.add(selectedNode);
-    for (const edge of edges) {
-      if (edge.type !== 'fk' || !edge.data) continue;
-      const fk = edge.data as FkFlowEdge['data'];
-      if (!fk) continue;
-      if (fk.fromModel === selectedNode) connected.add(fk.toModel);
-      if (fk.toModel === selectedNode) connected.add(fk.fromModel);
-    }
-  } else if (selectedEdge) {
-    const edge = edges.find((e) => e.id === selectedEdge);
-    if (edge?.type === 'fk' && edge.data) {
-      const fk = edge.data as FkFlowEdge['data'];
-      if (fk) {
-        connected.add(fk.fromModel);
-        connected.add(fk.toModel);
-      }
-    }
-  }
-  return connected;
-}
-
-/**
  * Apply dimming + expansion overlays to nodes and edges.
  *
  * Returns the input arrays untouched (same reference) when no element changed.
@@ -86,8 +59,11 @@ export function applyNodeOverlays(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const { selectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion } = state;
   const hasSelection = selectedNode !== null || selectedEdge !== null;
-  const connected = hasSelection
-    ? computeConnectedNodeIds(edges, selectedNode, selectedEdge)
+  // The shared connectivity rule (`computeCanvasFocus`): a selected node and
+  // its FK neighbours, or a selected edge's two endpoints. An unknown edge
+  // leaves nothing bright, as before.
+  const connected: ReadonlySet<string> = hasSelection
+    ? computeCanvasFocus(edges, { node: selectedNode, edge: selectedEdge })?.nodes ?? new Set<string>()
     : new Set<string>();
   const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
 

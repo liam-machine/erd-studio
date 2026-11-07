@@ -6,7 +6,7 @@
  * - Source column (dropdown, filtered by source model)
  * - Target model (dropdown)
  * - Target column (dropdown, filtered by target model)
- * - Cardinality (many-to-one / one-to-one)
+ * - How many? (many-to-one / one-to-one / many-to-many)
  *
  * Mode detection:
  * - Create mode: fkDialogEditData is null (sends addRelationship)
@@ -15,21 +15,24 @@
  * When editing, the approval status is preserved by the extension host.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@xyflow/react';
-import { canonicalRelationship, keyEvidenceDetail, linkKey, sameLink } from '@erd-studio/core';
+import { canonicalRelationship, foreignKeyEnd, keyEvidenceDetail, linkKey, sameLink } from '@erd-studio/core';
 import type { LinkEnd } from '@erd-studio/core';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useSend } from '../../hooks/useMessageBus';
+import { useMessageBus, useSend } from '../../hooks/useMessageBus';
+import type { ExtensionMessage } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
 import { keysContradictionWarning, orientCanvasLink } from '../../lib/relationshipDirection';
 import {
-  ABSORB_HINT, ADD_PAIR_LABEL, COMPOSITE_MANY_TO_MANY_ERROR, COMPOSITE_MANY_TO_MANY_TITLE, DIRECTION_MISSING_HINT, DIRECTION_QUESTION,
-  PAIR_INCOMPLETE, dialogTitle, directionChoice, directionSentence, markKeyLabel, pairColumnUsed,
+  ABSORB_HINT, ADD_PAIR_LABEL, COMPOSITE_MANY_TO_MANY_ERROR, COMPOSITE_MANY_TO_MANY_TITLE, DIRECTION_MISSING_HINT, DIRECTION_MISSING_HINT_LOGICAL, DIRECTION_QUESTION,
+  HOW_MANY_LABEL, PAIR_INCOMPLETE, cardinalityChoice, dialogTitle, directionChoice, directionSentence, markKeyLabel, pairColumnUsed,
 } from '../../lib/relationshipDialog';
 import { MAX_COMPOSITE_PAIRS } from '@erd-studio/core';
 import type { Cardinality } from '../../../src/types/semantic';
+import type { NewRelationshipFileChoice } from '../../../src/types/messages';
+import { sameName } from '../../../src/types/naming';
 import './NewFkDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -125,14 +128,85 @@ function isAbsorbable(rel: ExistingLink, fromModel: string, toModel: string): bo
   return !rel.compositeKey && ends === [lower(fromModel), lower(toModel)].sort().join('\u0000');
 }
 
+/** The columns the dialog reads from a model when it suggests defaults. */
+type ModelColumns = { name: string; columns: ReadonlyArray<{ name: string; isPrimaryKey?: boolean }> };
+
+/** The model's only primary-key column; none for no key or a composite key. */
+function singlePrimaryKey(model: ModelColumns | undefined): string {
+  const pk = (model?.columns ?? []).filter((c) => c.isPrimaryKey);
+  return pk.length === 1 ? pk[0].name : '';
+}
+
+/** The model's column named like `column` (any case), as the model spells it; none without one. */
+function columnNamedLike(model: ModelColumns | undefined, column: string): string {
+  if (!column.trim()) return '';
+  return (model?.columns ?? []).find((c) => sameName(c.name, column))?.name ?? '';
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/**
+ * "Will be stored in .erd-studio/gold/relationships/gold.dbml": the file a
+ * new relationship goes to, from the host's `newRelationshipFiles` answer
+ * (`placeNewRef` for the table that holds the foreign key, `foreignKeyEnd`).
+ * Undefined before the answer, for a YAML project, or when that table has none.
+ */
+export function storedInText(
+  newRefFiles: Readonly<Record<string, string>> | undefined,
+  link: { fromModel: string; toModel: string; cardinality: Cardinality },
+): string | undefined {
+  if (!newRefFiles || !link.fromModel || !link.toModel) return undefined;
+  const fk = foreignKeyEnd({ fromModel: link.fromModel, fromColumn: '', toModel: link.toModel, toColumn: '', cardinality: link.cardinality });
+  const file = newRefFiles[fk.model.toLowerCase()];
+  return file ? `Will be stored in ${file}` : undefined;
+}
+
+/**
+ * The relationships files the New Relationship dialog offers a new
+ * relationship ("Stored in"): the host's `choices` for the table that holds
+ * its foreign key (`foreignKeyEnd`), `placeNewRef`'s answer first. Undefined
+ * with fewer than two, before the answer, or for a YAML project: the dialog
+ * then shows the plain "Will be stored in …" line.
+ */
+export function storedInChoices(
+  choices: Readonly<Record<string, readonly NewRelationshipFileChoice[]>> | undefined,
+  link: { fromModel: string; toModel: string; cardinality: Cardinality },
+): readonly NewRelationshipFileChoice[] | undefined {
+  if (!choices || !link.fromModel || !link.toModel) return undefined;
+  const fk = foreignKeyEnd({ fromModel: link.fromModel, fromColumn: '', toModel: link.toModel, toColumn: '', cardinality: link.cardinality });
+  const list = choices[fk.model.toLowerCase()];
+  return list && list.length >= 2 ? list : undefined;
+}
+
+/** A "Stored in" option's words: its project-relative path, the first one marked as the default. */
+export function storedInChoiceLabel(choice: NewRelationshipFileChoice, index: number): string {
+  return index === 0 ? `${choice.projectPath} (default)` : choice.projectPath;
+}
+
+/**
+ * Under "Will be stored in …": how to give the foreign-key table's schema a
+ * file of its own, when the new relationship is about to go into its layer's
+ * shared file (`<layer>/relationships/<layer>.dbml`) and the schema is not the
+ * layer's name. `placeNewRef` uses `<layer>/relationships/<schema>.dbml` once
+ * that file exists, and never creates it. Undefined otherwise.
+ */
+export function schemaFileHint(file: string | undefined, schema: string | undefined): string | undefined {
+  if (!file || !schema) return undefined;
+  const m = /^(.*\/)?([^/]+)\/relationships\/([^/]+)\.dbml$/.exec(file);
+  if (!m) return undefined;
+  const [, , layer, stem] = m;
+  if (stem.toLowerCase() !== layer.toLowerCase() || schema.toLowerCase() === layer.toLowerCase()) return undefined;
+  const dir = file.slice(0, file.length - `${stem}.dbml`.length);
+  return `That is the ${layer} layer's shared file. To keep the ${schema} schema's relationships apart, create ${dir}${schema}.dbml (it can hold just a comment).`;
+}
 
 export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const domain = useEditorStore((s) => s.domain);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const fkDialogPrefill = useEditorStore((s) => s.fkDialogPrefill);
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
   const fkDialogEditData = useEditorStore((s) => s.fkDialogEditData);
@@ -289,7 +363,9 @@ export function NewFkDialog() {
 
   // "Mark as primary key" (#133 L1): offered when the "one" side's model
   // flags no key and nothing says the columns are not its key; ticked when
-  // dbt says they are unique.
+  // dbt says they are unique, or when the user just answered which way it
+  // points (their answer says those columns are the key, and marking it
+  // means the next relationship to that table is not asked again).
   const toModelDef = models.find((m) => m.name === toModel);
   const markKey = useMemo(() => {
     if (!complete || (direction !== 'decided' && direction !== 'chosen')) return null;
@@ -298,9 +374,12 @@ export function NewFkDialog() {
     const evidence = keyEvidenceDetail(toModelDef, toCols);
     if (evidence.evidence === 'not-key') return null;
     const id = `${linkId}|${toModel}`.toLowerCase();
-    const checked = markKeyChoice?.for === id ? markKeyChoice.checked : evidence.source === 'dbt' && evidence.evidence === 'whole-key';
+    const answered = direction === 'chosen' && chosenDirection === fromEndId;
+    const checked = markKeyChoice?.for === id
+      ? markKeyChoice.checked
+      : answered || (evidence.source === 'dbt' && evidence.evidence === 'whole-key');
     return { id, checked, label: markKeyLabel(toModel, toCols) };
-  }, [complete, direction, cardinality, toModelDef, toCols, linkId, toModel, markKeyChoice]);
+  }, [complete, direction, cardinality, toModelDef, toCols, linkId, toModel, markKeyChoice, chosenDirection, fromEndId]);
 
   // Keys win (#133): warn, but allow, a many side that is its model's whole key.
   const keysWarning = useMemo(
@@ -311,6 +390,47 @@ export function NewFkDialog() {
     ),
     [fromModel, fromColumn, toModel, toColumn, cardinality, domain, pairsFilled, extraPairs.length, allPairs],
   );
+
+  // Where the new relationship goes (DBML; an edited one stays where it is):
+  // asked for when the dialog opens to create one, answered by `newRelationshipFiles`.
+  const [newRefFiles, setNewRefFiles] = useState<Record<string, string> | undefined>(undefined);
+  const [newRefChoices, setNewRefChoices] = useState<Record<string, NewRelationshipFileChoice[]> | undefined>(undefined);
+  useMessageBus(useCallback((msg: ExtensionMessage) => {
+    if (msg.type !== 'newRelationshipFiles') return;
+    setNewRefFiles(msg.payload.files);
+    setNewRefChoices(msg.payload.choices);
+  }, []));
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(() => {
+    if (isOpen && !isEditMode) sendRef.current({ type: 'requestNewRelationshipFiles' });
+  }, [isOpen, isEditMode]);
+  // "Stored in" (DBML, creating on the logical stage): the files the foreign-key table's
+  // relationship may go to, when there are two or more; the user's pick, per table.
+  const fileChoices = useMemo(
+    () => (isEditMode || domain?.stage === 'physical' ? undefined : storedInChoices(newRefChoices, { fromModel, toModel, cardinality })),
+    [isEditMode, domain, newRefChoices, fromModel, toModel, cardinality],
+  );
+  const fkTable = fromModel && toModel
+    ? foreignKeyEnd({ fromModel, fromColumn: '', toModel, toColumn: '', cardinality }).model.toLowerCase()
+    : '';
+  const [pickedFile, setPickedFile] = useState<{ for: string; path: string } | null>(null);
+  const chosenFile = fileChoices
+    ? fileChoices.find((c) => pickedFile?.for === fkTable && c.path === pickedFile.path) ?? fileChoices[0]
+    : undefined;
+  const storedIn = useMemo(
+    () => storedInText(newRefFiles, { fromModel, toModel, cardinality }),
+    [newRefFiles, fromModel, toModel, cardinality],
+  );
+  const storedInHint = useMemo(() => {
+    if (!newRefFiles || !fromModel || !toModel) return undefined;
+    const table = domain?.models.find((m) => m.name.toLowerCase() === fkTable);
+    return schemaFileHint(chosenFile?.projectPath ?? newRefFiles[fkTable], table?.schema);
+  }, [newRefFiles, fromModel, toModel, fkTable, chosenFile, domain]);
+  // Sent only for a pick other than the default (`placeNewRef`'s answer, first).
+  const relationshipsFilePayload = fileChoices && chosenFile && chosenFile.path !== fileChoices[0].path
+    ? { relationshipsFile: chosenFile.path }
+    : {};
 
   // Validation — pass original key when editing to skip self-duplicate check
   const errors = useMemo(
@@ -350,6 +470,7 @@ export function NewFkDialog() {
     setTouched({});
     setChosenDirection(null);
     setMarkKeyChoice(null);
+    setPickedFile(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -394,30 +515,54 @@ export function NewFkDialog() {
           ...(role.trim() ? { role: role.trim() } : {}),
           ...markKeyPayload,
           ...extraPairsPayload,
+          ...relationshipsFilePayload,
         },
       });
     }
 
     handleClose();
-  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, role, markKeyPayload, extraPairsPayload, send, handleClose]);
+  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, role, markKeyPayload, extraPairsPayload, relationshipsFilePayload, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
   }, []);
 
+  // Defaults while creating a relationship by hand: the target's single
+  // primary-key column, and the source column named like the target column.
+  // Never while editing, and only ever into an empty field — a prefill from a
+  // drag or anything the user picked stays as it is. A self-reference gets no
+  // source default: the same-named column would be the target column itself.
+  const findModel = useCallback(
+    (name: string) => (name ? models.find((m) => m.name === name) : undefined),
+    [models],
+  );
+  const sourceColumnFor = useCallback(
+    (source: string, target: string, targetColumn: string): string =>
+      (!source || sameName(source, target) ? '' : columnNamedLike(findModel(source), targetColumn)),
+    [findModel],
+  );
+
   // Reset source column when source model changes
   const handleFromModelChange = useCallback((value: string) => {
     setFromModel(value);
-    setFromColumn('');
+    setFromColumn(isEditMode ? '' : sourceColumnFor(value, toModel, toColumn));
     setExtraPairs((pairs) => pairs.map((p) => ({ ...p, fromColumn: '' })));
-  }, []);
+  }, [isEditMode, sourceColumnFor, toModel, toColumn]);
 
   // Reset target column when target model changes
   const handleToModelChange = useCallback((value: string) => {
     setToModel(value);
-    setToColumn('');
+    const pk = isEditMode ? '' : singlePrimaryKey(findModel(value));
+    setToColumn(pk);
+    if (pk && !fromColumn.trim()) setFromColumn(sourceColumnFor(fromModel, value, pk));
     setExtraPairs((pairs) => pairs.map((p) => ({ ...p, toColumn: '' })));
-  }, []);
+  }, [isEditMode, findModel, fromColumn, fromModel, sourceColumnFor]);
+
+  // A target column picked by hand also suggests the source column, if that is still empty.
+  const handleToColumnChange = useCallback((value: string) => {
+    setToColumn(value);
+    if (!isEditMode && !fromColumn.trim()) setFromColumn(sourceColumnFor(fromModel, toModel, value));
+  }, [isEditMode, fromColumn, fromModel, toModel, sourceColumnFor]);
 
   // "+ Add another column pair" and its rows (#133 L2).
   const addPair = useCallback(() => {
@@ -445,6 +590,7 @@ export function NewFkDialog() {
       setTouched({});
       setChosenDirection(null);
       setMarkKeyChoice(null);
+      setPickedFile(null);
       setExtraPairs([]);
       // Apply prefilled values
       setFromModel(fkDialogPrefill.fromModel);
@@ -598,7 +744,7 @@ export function NewFkDialog() {
               id="toColumn"
               className={`new-fk-dialog__select ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__select--error' : ''}`}
               value={toColumn}
-              onChange={(e) => setToColumn(e.target.value)}
+              onChange={(e) => handleToColumnChange(e.target.value)}
               onBlur={() => handleBlur('toColumn')}
             >
               <option value="">Select column...</option>
@@ -680,7 +826,7 @@ export function NewFkDialog() {
         {/* Cardinality */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="cardinality">
-            Cardinality
+            {HOW_MANY_LABEL}
           </label>
           <select
             id="cardinality"
@@ -691,14 +837,18 @@ export function NewFkDialog() {
               setCardinalityChosen(true);
             }}
           >
-            <option value="many-to-one">Many-to-One (*→1)</option>
-            <option value="one-to-one">One-to-One (1→1)</option>
+            <option value="many-to-one" title={cardinalityChoice('many-to-one', fromModel, toModel).title}>
+              {cardinalityChoice('many-to-one', fromModel, toModel).text}
+            </option>
+            <option value="one-to-one" title={cardinalityChoice('one-to-one', fromModel, toModel).title}>
+              {cardinalityChoice('one-to-one', fromModel, toModel).text}
+            </option>
             <option
               value="many-to-many"
               disabled={pairCount > 1}
-              title={pairCount > 1 ? COMPOSITE_MANY_TO_MANY_TITLE : undefined}
+              title={pairCount > 1 ? COMPOSITE_MANY_TO_MANY_TITLE : cardinalityChoice('many-to-many', fromModel, toModel).title}
             >
-              Many-to-Many (*↔*)
+              {cardinalityChoice('many-to-many', fromModel, toModel).text}
             </option>
           </select>
           {errors.cardinality && <span className="new-fk-dialog__error">{errors.cardinality}</span>}
@@ -733,7 +883,7 @@ export function NewFkDialog() {
                 </label>
               );
             })}
-            {direction === 'undecided' && <span className="new-fk-dialog__hint">{DIRECTION_MISSING_HINT}</span>}
+            {direction === 'undecided' && <span className="new-fk-dialog__hint">{logicalOnly ? DIRECTION_MISSING_HINT_LOGICAL : DIRECTION_MISSING_HINT}</span>}
           </fieldset>
         )}
         {markKey && (
@@ -802,12 +952,40 @@ export function NewFkDialog() {
                 ? `${fromModel}.(${allPairs.map((p) => p.fromColumn || '?').join(', ')}) → ${toModel}.(${allPairs.map((p) => p.toColumn || '?').join(', ')})`
                 : `${fromModel}.${fromColumn || '?'} → ${toModel}.${toColumn || '?'}`}
               <span className="new-fk-dialog__preview-cardinality">
-                ({cardinality === 'many-to-one' ? '*→1' : cardinality === 'many-to-many' ? '*↔*' : '1→1'})
+                ({cardinalityChoice(cardinality === 'many-to-many' || cardinality === 'one-to-one' ? cardinality : 'many-to-one', '', '').text.toLowerCase()})
               </span>
             </span>
           </div>
         )}
       </div>
+
+      {/* Where a new relationship is stored (DBML), just above the buttons: a choice when the layer has several files. */}
+      {!isEditMode && fileChoices && chosenFile ? (
+        <div className="new-fk-dialog__stored-in new-fk-dialog__stored-in--choice">
+          <label className="new-fk-dialog__stored-in-label" htmlFor="relationships-file">
+            Stored in
+          </label>
+          <select
+            id="relationships-file"
+            className="new-fk-dialog__select new-fk-dialog__stored-in-select"
+            value={chosenFile.path}
+            aria-describedby={storedInHint ? 'relationships-file-hint' : undefined}
+            onChange={(e) => setPickedFile({ for: fkTable, path: e.target.value })}
+          >
+            {fileChoices.map((choice, i) => (
+              <option key={choice.path} value={choice.path}>
+                {storedInChoiceLabel(choice, i)}
+              </option>
+            ))}
+          </select>
+          {storedInHint && <div id="relationships-file-hint" className="new-fk-dialog__stored-in-hint">{storedInHint}</div>}
+        </div>
+      ) : !isEditMode && storedIn && (
+        <div className="new-fk-dialog__stored-in">
+          {storedIn}
+          {storedInHint && <div className="new-fk-dialog__stored-in-hint">{storedInHint}</div>}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="new-fk-dialog__footer">

@@ -10,6 +10,7 @@
 import type { Cardinality, Layer, Meta, TableLoadError, TableLoadWarning, TableRole, TableTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
 import type { DbtKeyHint } from '../keyEvidence.js';
+import type { FieldList } from '../fields.js';
 
 // ---------------------------------------------------------------------------
 // Existing model preview (for Add Existing Model dialog)
@@ -39,6 +40,14 @@ export interface ExistingTablePreview extends ManifestModelPreview {
   source: 'logical' | 'yml' | 'manifest';
   /** Relative file path showing where this model is defined (e.g. "models/silver/dim_customer.yml") */
   sourcePath: string;
+  /**
+   * A Table Library row whose file has not been read yet (a large library
+   * opened before its files were read): `schema` and `description` are
+   * empty and `columnCount` is 0 until it is. The extension asks for the
+   * read rows when the Add Existing Table dialog opens. Absent on every row
+   * that was read, and on every row an older host sends.
+   */
+  detailsPending?: true;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +106,14 @@ export interface PhysicalProvenance {
 export interface DisplayTable {
   name: string;
   schema: string;
+  /**
+   * The layer whose folder holds the table's file (`<layer>/tables/<schema>/`,
+   * DBML storage; logical stage only). A diagram belongs to one layer but can
+   * show tables from any, so the canvas badges each table with its own.
+   * Absent for a YAML table, on the physical stage and from older cores: the
+   * table is then drawn as in the diagram's layer.
+   */
+  layer?: Layer;
   /**
    * Warehouse table name when it differs from the model name (dbt `alias`).
    * Logical stage: the model file's `alias`. Physical stage: the alias dbt
@@ -166,6 +183,13 @@ export interface DisplayRelationship {
    * keys do not decide, and in a DisplaySubjectArea from a core before it.
    */
   keysContradict?: true;
+  /**
+   * Set (only ever `true`) by the editor on a logical relationship the open
+   * diagram file holds itself (a YAML/JSON domain's `logical.relationships`),
+   * which removing one of its tables from the diagram removes too. Absent on
+   * a relationship stored in the Table Library, and from older cores.
+   */
+  inDiagramFile?: true;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +215,12 @@ export interface DisplaySubjectArea {
   existingModels?: ExistingTablePreview[];
   /** Layer config for badge styling. */
   layerConfig?: LayerConfig;
+  /**
+   * Every configured layer (layers.json), so a table from another layer
+   * (`DisplayTable.layer`) is drawn in its own layer's colour. Absent from
+   * older cores and when no table names a layer.
+   */
+  layerConfigs?: LayerConfig[];
   /** Whether this stage is read-only for data mutations (physical). */
   readOnly: boolean;
   /** Whether nodes can be dragged to reposition (true for all stages). */
@@ -207,4 +237,31 @@ export interface DisplaySubjectArea {
    * compiled, so this is what tells the webview to say so instead.
    */
   physicalSources?: { yml: boolean; manifest: boolean; catalog: boolean };
+  /**
+   * Set by the editor on an editable logical stage: whether the diagram file
+   * holds relationships of its own (`DisplayRelationship.inDiagramFile`).
+   * `false` means every relationship lives in the Table Library (a DBML
+   * diagram, or a domain with none of its own), so removing a table from the
+   * diagram keeps them. Absent from older cores: treated as `true`, the old
+   * warning that a table's relationships go with it.
+   */
+  relationshipsInDiagramFile?: boolean;
+  /**
+   * Set by the editor on an editable logical stage whose new tables are DBML:
+   * where New Table puts one (`<dir>/<layer>/tables/<schema>/`). `dir` is the
+   * semantic dir relative to the project (`.erd-studio`), `schemas` the
+   * schema folders the layer's tables already use, `defaultSchema` the one
+   * most of this diagram's tables in the layer use, else the layer id.
+   * Absent for a YAML project and from older cores: the dialog asks for no
+   * schema and the table goes where it always did.
+   */
+  newTableSchemas?: { dir: string; layer: string; schemas: string[]; defaultSchema: string };
+  /**
+   * The project's field list (`.erd-studio/fields.yml`), fully resolved: every
+   * definition carries its label, type, values, guidance, `filledBy` and
+   * `showFor`, so a renderer draws the fields without the catalogue. Set only
+   * when the project has a fields.yml. Absent (no file, or an older core)
+   * means the starting set: read it as `fields ?? STARTING_FIELD_LIST`.
+   */
+  fields?: FieldList;
 }

@@ -1,0 +1,8 @@
+Table staging.stg_app__accounts [grain: 'One row per account in the app'] {
+  Note: 'Accounts from the product database.'
+
+  account_id   STRING [pk, natural_key: 'true']
+  account_name STRING
+  industry     STRING
+  signed_up_at TIMESTAMP
+}

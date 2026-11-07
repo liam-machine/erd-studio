@@ -1,0 +1,12 @@
+Table silver.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar date',
+  rationale_purpose: 'Shared date reference for consistent time-based analysis',
+  rationale_design: 'The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence'
+] {
+  date_key INT [pk, note: 'Date key in YYYYMMDD form — meaningful by convention, unlike every other surrogate']
+  calendar_date DATE [note: 'The calendar date — the business key this dimension is identified by', natural_key: 'true']
+  fiscal_year INT [note: 'Fiscal year number']
+  fiscal_quarter VARCHAR [note: 'Fiscal quarter (Q1-Q4)']
+  Note: 'Date dimension with fiscal calendar attributes'
+}

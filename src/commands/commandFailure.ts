@@ -22,6 +22,9 @@ import {
   type ErrorActions,
 } from '../services/commandErrors';
 import { SHOW_FOLDER_BUTTON, type CommandFailure } from '../services/diagramCommandErrors';
+import { log } from '../services/logger';
+import { isTelemetryErrorCode, writeFailureFeature } from '../services/runtimeTelemetry';
+import { telemetry } from '../services/telemetryService';
 import { openTableFileAt } from './openModelFile';
 
 /** `p`, or the nearest folder above it that exists, so Show Folder always reveals something. */
@@ -46,6 +49,7 @@ export function showCommandFailure(
   err: unknown,
   extra: { retry?: () => unknown; showTab?: () => unknown; chooseAnother?: () => unknown; openIt?: () => unknown } = {},
 ): void {
+  recordCommandFailure(failure, err);
   const target = failure.target;
   const reveal = target ? () => vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(nearestExisting(target))) : undefined;
   const available: Record<string, (() => unknown) | undefined> = {
@@ -62,7 +66,7 @@ export function showCommandFailure(
     failure.buttons.flatMap((button) => (available[button] ? [[button, available[button]!]] : [])),
   );
   showErrorWithActions((m, ...items) => vscode.window.showErrorMessage(m, ...items), failure.message, actions, (choice, actionErr) => {
-    console.error(`[ERD Studio] ${failure.title}: "${choice}" failed:`, actionErr);
+    log.error(`[ERD Studio] ${failure.title}: "${choice}" failed:`, actionErr);
     const doing = `while running ${choice}`;
     showCommandFailure(
       { title: failure.title, message: oursMessage(failure.title, doing, 'nothing more was changed'), buttons: [SEND_FEEDBACK_BUTTON], doing },
@@ -71,3 +75,25 @@ export function showCommandFailure(
   });
 }
 
+/**
+ * Usage telemetry for a failure shown (B10): the failure's own code, then
+ * `commandFailedOurs` when it is ours (it says what it was doing), else the
+ * write class of an error the user can fix (permissions, a full disk).
+ * Fixed keys only; the exception's text never leaves the device.
+ */
+export function recordCommandFailure(failure: CommandFailure, err: unknown): void {
+  try {
+    if (failure.code !== undefined) {
+      if (isTelemetryErrorCode(failure.code)) telemetry.error(failure.code);
+      else telemetry.feature(failure.code);
+    }
+    if (failure.doing) {
+      telemetry.error('commandFailedOurs');
+      return;
+    }
+    const writeClass = writeFailureFeature(err);
+    if (writeClass) telemetry.feature(writeClass);
+  } catch {
+    // Counting a failure never stops it being shown.
+  }
+}

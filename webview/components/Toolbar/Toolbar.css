@@ -63,27 +63,42 @@
   white-space: nowrap;
 }
 
+/* The diagram's layer: "[GLD] Gold layer" — the badge the tables carry, then the label. */
 .toolbar__layer-badge {
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
   white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dim-fg);
 }
 
-.toolbar__layer-badge--bronze {
+.toolbar__layer-abbrev {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.toolbar__layer-abbrev--bronze {
   background: var(--layer-bronze-bg);
   color: var(--layer-bronze);
 }
 
-.toolbar__layer-badge--silver {
+.toolbar__layer-abbrev--silver {
   background: var(--layer-silver-bg);
   color: var(--layer-silver);
 }
 
-.toolbar__layer-badge--gold {
+.toolbar__layer-abbrev--gold {
   background: var(--layer-gold-bg);
   color: var(--layer-gold);
 }
@@ -255,6 +270,16 @@
   color: var(--button-fg);
 }
 
+.toolbar__dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar__dropdown-item:disabled:hover {
+  background: transparent;
+  color: var(--editor-fg);
+}
+
 .toolbar__dropdown-item:not(:last-child) {
   border-bottom: 1px solid var(--panel-border);
 }
@@ -306,6 +331,29 @@
   font-size: 11px;
   font-weight: 500;
   text-align: center;
+}
+
+/* No table here matches, some elsewhere in the project do: opens Go to Table. */
+.toolbar__search-elsewhere {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: var(--dim-fg);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.toolbar__search-elsewhere:hover {
+  color: var(--editor-fg);
+}
+
+.toolbar__search-elsewhere:focus-visible {
+  color: var(--editor-fg);
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
 }
 
 /* ---------------------------------------------------------------------------

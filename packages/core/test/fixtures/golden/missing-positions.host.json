@@ -352,49 +352,56 @@
         "fromColumn": "task_key",
         "toModel": "dim_task",
         "toColumn": "task_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "dim_task",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "fct_task_event",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "dim_project",
         "fromColumn": "parent_project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "fct_order",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "fct_task_event",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       },
       {
         "fromModel": "fct_order",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -438,7 +445,7 @@
       "order": 0
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

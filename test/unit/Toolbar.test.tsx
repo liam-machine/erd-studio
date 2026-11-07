@@ -35,16 +35,19 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
   }),
 }));
 
-// Minimal React Flow surface used by Toolbar
+// Minimal React Flow surface used by Toolbar. One shared fitView so a test
+// can see the padding Fit asked for.
+const mockFitView = vi.hoisted(() => vi.fn());
 vi.mock('@xyflow/react', () => ({
-  Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Panel: ({ children, className }: { children: React.ReactNode; className?: string }) => <div className={className}>{children}</div>,
   useReactFlow: () => ({
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
-    fitView: vi.fn(),
+    fitView: mockFitView,
     getNode: vi.fn(),
   }),
   useStore: () => 1, // zoom level
+  useNodesInitialized: () => true, // useRevealRelationship
 }));
 
 vi.mock('../../webview/components/Toolbar/StageTabs', () => ({
@@ -104,7 +107,7 @@ vi.mock('../../webview/store/editorStore', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 
-import { Toolbar } from '../../webview/components/Toolbar/Toolbar';
+import { Toolbar, NO_TABLES_FOR_RELATIONSHIP, compareButtonWording, layerBoundWording } from '../../webview/components/Toolbar/Toolbar';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 
 function makeNode(id: string): TableFlowNode {
@@ -245,7 +248,7 @@ describe('Toolbar layout-dirty button', () => {
  * class, which is what the component actually reads.
  */
 describe('logical-only mode (no dbt project)', () => {
-  const diffButton = () => screen.queryByRole('button', { name: /toggle cross-stage comparison/i });
+  const diffButton = () => screen.queryByRole('button', { name: /^(compare with dbt|compare with design|stop comparing)$/i });
   const refreshButton = () => screen.queryByRole('button', { name: /refresh manifest data/i });
 
   beforeEach(() => {
@@ -269,7 +272,7 @@ describe('logical-only mode (no dbt project)', () => {
     render(<Toolbar {...defaultProps} />);
     expect(screen.queryByTestId('stage-tabs')).toBeNull();
     expect(diffButton()).toBeNull();
-    expect(screen.queryByText(/Diff/)).toBeNull();
+    expect(screen.queryByText(/Diff|Compare with/)).toBeNull();
     expect(refreshButton()).toBeNull();
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
@@ -280,7 +283,7 @@ describe('logical-only mode (no dbt project)', () => {
     expect(screen.getByRole('button', { name: /add table or relationship/i })).toBeTruthy();
     expect(layoutButton()).toBeTruthy();
     const exportButton = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
-    expect(exportButton.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
+    expect(exportButton.getAttribute('title')).toBe('Export as DBML or Mermaid');
   });
 });
 
@@ -321,7 +324,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
 
     expect(screen.getByRole('button', { name: /send feedback/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /open underlying json file/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /open the diagram's file in a text editor/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull();
   });
 
@@ -386,7 +389,7 @@ describe('the top-right corner actions', () => {
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('menuitem', { name: /Export as Mermaid or DBML/ })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Send feedback/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Open as JSON file/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Open file/ })).toBeTruthy();
   });
 
   it('posts exportDiagram (no payload) from the labelled button', () => {
@@ -394,7 +397,7 @@ describe('the top-right corner actions', () => {
     render(<Toolbar {...defaultProps} />);
     const button = screen.getByRole('button', { name: /export diagram as mermaid or dbml/i });
     expect(button.className).toBe('toolbar__corner-button toolbar__corner-button--icon');
-    expect(button.getAttribute('title')).toBe('Export as DBML or Mermaid — open formats, no lock-in');
+    expect(button.getAttribute('title')).toBe('Export as DBML or Mermaid');
 
     fireEvent.click(button);
 
@@ -482,5 +485,103 @@ describe('the top-right corner actions', () => {
 
     expect(screen.queryByRole('menu')).toBeNull();
     expect(screen.getByRole('button', { name: /send feedback/i })).toBeTruthy();
+  });
+});
+
+describe('+ Add → New Relationship', () => {
+  const openAddMenu = () => fireEvent.click(screen.getByRole('button', { name: /add table or relationship/i }));
+  const newRelationship = () => screen.getByRole('menuitem', { name: 'New Relationship' }) as HTMLButtonElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    mockStoreState.domain = mockSubjectArea;
+    mockStoreState.setNewFkDialogOpen = noop;
+  });
+
+  it('opens the dialog on a diagram with tables', () => {
+    const setNewFkDialogOpen = vi.fn();
+    mockStoreState.setNewFkDialogOpen = setNewFkDialogOpen;
+    render(<Toolbar {...defaultProps} />);
+    openAddMenu();
+    expect(newRelationship().disabled).toBe(false);
+    expect(newRelationship().getAttribute('title')).toBeNull();
+    fireEvent.click(newRelationship());
+    expect(setNewFkDialogOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('is disabled, saying why, on a diagram with no tables', () => {
+    const setNewFkDialogOpen = vi.fn();
+    mockStoreState.setNewFkDialogOpen = setNewFkDialogOpen;
+    mockStoreState.domain = { ...mockSubjectArea, models: [] };
+    render(<Toolbar {...defaultProps} nodes={[]} />);
+    openAddMenu();
+    expect(newRelationship().disabled).toBe(true);
+    expect(newRelationship().getAttribute('title')).toBe(NO_TABLES_FOR_RELATIONSHIP);
+    expect(NO_TABLES_FOR_RELATIONSHIP).toMatch(/diagram/);
+    expect(NO_TABLES_FOR_RELATIONSHIP).not.toMatch(/\b(models?|domains?|subject areas?)\b/i);
+    fireEvent.click(newRelationship());
+    expect(setNewFkDialogOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('plain labels', () => {
+  afterEach(() => {
+    mockStoreState.domain = mockSubjectArea;
+    mockStoreState.discrepancyVisible = false;
+  });
+
+  it('the Compare button says what it compares, on each stage', () => {
+    render(<Toolbar {...defaultProps} />);
+    const button = screen.getByRole('button', { name: 'Compare with dbt' });
+    expect(button.textContent).toContain('Compare with dbt');
+    expect(button.getAttribute('title')).toBe('Compare this design with the dbt project');
+    expect(compareButtonWording('physical', false)).toEqual({ label: 'Compare with design', title: 'Compare what dbt has with your design' });
+    expect(compareButtonWording('logical', true, 'physical')).toEqual({ label: 'Stop comparing', title: 'Comparing with dbt — click to stop' });
+  });
+
+  it('+ Add offers New Table and Add Existing Tables', () => {
+    render(<Toolbar {...defaultProps} />);
+    fireEvent.click(screen.getByRole('button', { name: /add table or relationship/i }));
+    expect(screen.getByRole('menuitem', { name: 'New Table' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Add Existing Tables' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /Design Table/ })).toBeNull();
+  });
+
+  it('the layout row counts columns for a left-to-right flow and rows for top-to-bottom', () => {
+    expect(layerBoundWording('RIGHT')).toEqual({ label: 'Max per column', unit: 'per column', hint: 'lower = wider layout, higher = taller layout' });
+    expect(layerBoundWording('DOWN')).toEqual({ label: 'Max per row', unit: 'per row', hint: 'lower = taller layout, higher = wider layout' });
+    render(<Toolbar {...defaultProps} />);
+    openOptionsPanel();
+    expect(screen.getByText('Max per column')).toBeTruthy();
+    expect(screen.getByText(/^auto — \d+ per column for 1 tables$/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '↓' }));
+    expect(screen.getByText('Max per row')).toBeTruthy();
+    expect(screen.queryByText('Max per layer')).toBeNull();
+  });
+});
+
+describe('Toolbar Fit leaves room for itself (dev-host finding 7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('pads the top by the toolbar\'s bottom edge, not a flat 0.1', () => {
+    const { container } = render(<div className="react-flow"><Toolbar {...defaultProps} /></div>);
+    const flow = container.querySelector('.react-flow') as HTMLElement;
+    const toolbar = container.querySelector('.toolbar-container') as HTMLElement;
+    flow.getBoundingClientRect = () => ({ top: 0, bottom: 800, left: 0, right: 1440, width: 1440, height: 800 }) as DOMRect;
+    toolbar.getBoundingClientRect = () => ({ top: 15, bottom: 87, left: 400, right: 1000, width: 600, height: 72 }) as DOMRect;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fit view to show all nodes' }));
+
+    expect(mockFitView).toHaveBeenCalledTimes(1);
+    expect(mockFitView.mock.calls[0][0]).toEqual({
+      padding: { top: '99px', right: 0.1, bottom: 0.1, left: 0.1 },
+      maxZoom: 1,
+      duration: 200,
+    });
   });
 });

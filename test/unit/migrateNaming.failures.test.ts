@@ -112,7 +112,7 @@ describe('Migrate to the New File Naming: failures (#219)', () => {
 
     expect(telemetryError).not.toHaveBeenCalledWith('migrationFailed');
     expect(toasts(error)).toEqual([{
-      message: `${TITLE} hit a problem in ERD Studio while converting the v4 subject areas, so some files may already be converted (source control shows which). ` +
+      message: `${TITLE} hit a problem in ERD Studio while converting the v4 diagrams, so some files may already be converted (source control shows which). ` +
         "This isn't something you did. Please send us a report.",
       buttons: ['Send Feedback', 'Try Again'],
     }]);
@@ -239,7 +239,7 @@ describe('Migrate to the New File Naming: failures (#219)', () => {
     expect(await migrateToTableNaming(deps({ migrateToV5 }))).toBe('failed');
 
     expect(toasts(error)[0].message).toBe(
-      `${TITLE}: VS Code didn't accept the file moves, so the v4 subject areas were converted to the Table Library, but nothing else was changed. ` +
+      `${TITLE}: VS Code didn't accept the file moves, so the v4 diagrams were converted to the Table Library, but nothing else was changed. ` +
         "This is usually a file another program has open or a folder you can't write to.",
     );
   });

@@ -1,0 +1,10 @@
+Table atlas_stable.atlas_stable__main_v1 [alias: 'main_v1'] {
+  Note: 'Main pings, deduplicated each day.'
+
+  document_id          STRING [pk, natural_key: 'true']
+  client_id            STRING
+  submission_timestamp TIMESTAMP
+  sample_id            INT    [note: '0 to 99, for sampling']
+  normalized_channel   STRING
+  payload              JSON
+}

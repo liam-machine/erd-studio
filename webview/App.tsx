@@ -13,6 +13,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
   SelectionMode,
+  type FitViewOptions,
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -22,10 +23,12 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
+import { INITIAL_FIT_VIEW_OPTIONS, initialFitViewOptions } from './lib/fitViewPadding';
 import {
   useColumnExpansion,
   NODE_THRESHOLD,
   useCanvasGraph,
+  useHoverFocus,
   CanvasBackdrop,
   canvasNodeTypes,
   canvasEdgeTypes,
@@ -33,6 +36,7 @@ import {
   CanvasEnvironmentProvider,
   DetailPanel,
   Legend,
+  StatusBar,
   type TableFlowNode,
   type FkFlowEdge,
   type AnnotationFlowNode,
@@ -43,7 +47,6 @@ import { useEditorStore, editorStoreApi } from './store/editorStore';
 import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
-import { StatusBar } from './components/Toolbar/StatusBar';
 import { NewTableDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingTableDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
@@ -51,14 +54,20 @@ import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
+import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
+import { DragHint } from './components/Canvas/DragHint';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
-import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
-import { useReconnectWatchdog } from './hooks/useReconnectWatchdog';
+import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
+import { useLibraryDrop } from './hooks/useLibraryDrop';
+import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
+import { CanvasGuide } from './components/Guide/CanvasGuide';
+import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
+import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -83,6 +92,11 @@ function applySubjectAreaPayload(payload: DisplaySubjectArea): void {
   if (payload.existingModels) {
     s.setExistingModels(payload.existingModels);
   }
+  // The host's canvas context is logical-stage only: the physical stage drops
+  // it. A logical payload keeps the last one until the host's next arrives.
+  if (payload.stage !== 'logical') {
+    s.setCanvasContext(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +111,11 @@ function EditorCanvas() {
   const errorFileProblem = useEditorStore((s) => s.errorFileProblem);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
+  // The first-open fit, decided once from the first nodes the canvas gets: a
+  // large diagram opens on its biggest cluster at a readable zoom, a small one
+  // whole and never past 100% (src: webview/lib/fitViewPadding.ts).
+  const initialFitRef = useRef<FitViewOptions | null>(null);
+  if (initialFitRef.current === null && nodes.length > 0) initialFitRef.current = initialFitViewOptions(nodes, edges);
   const setError = useEditorStore((s) => s.setError);
   const setViewport = useEditorStore((s) => s.setViewport);
   const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
@@ -109,6 +128,8 @@ function EditorCanvas() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
   const canvasMode = useEditorStore((s) => s.canvasMode);
+  // No dbt project: one stage, so the canvas drops the stage colours.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
@@ -199,10 +220,30 @@ function EditorCanvas() {
   const setManifestStale = useEditorStore((s) => s.setManifestStale);
   const setSyncPlanGenerated = useEditorStore((s) => s.setSyncPlanGenerated);
 
+  // The host's `loading` answer (and the table count it carries) until the
+  // diagram or an error arrives: proof the host is connected.
+  const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
+
+  // The onboarding guide's phase B (Show Me Around), when the host starts it on this canvas.
+  const [guide, setGuide] = useState<CanvasGuideStart | null>(null);
+  const endGuide = useCallback(() => setGuide(null), []);
+
+  // Drops of tables on the canvas (a Shift-drag from the Table Library or the
+  // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
+
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
+        case 'loading':
+          setHostLoading({ ...(typeof msg.payload?.tables === 'number' ? { tables: msg.payload.tables } : {}) });
+          break;
+        case 'existingTables':
+          useEditorStore.getState().setManifestModels(msg.payload.manifestModels);
+          useEditorStore.getState().setExistingModels(msg.payload.existingModels);
+          break;
         case 'domainLoaded':
+          setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
           // payload — a later load without the flag cancels a pending layout.
@@ -210,24 +251,25 @@ function EditorCanvas() {
           // Follows every payload: one without the flag (dbt has since run)
           // hides the logical "Run dbt parse" hint.
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
+          // The import banner follows the host: it re-sends it after each load that needs it.
+          useEditorStore.getState().setEmbeddedTables(false);
           // No dbt project: no Physical tab, no Diff. Absent means today's
           // behaviour, so an older host keeps both.
           useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
-          // "The Two Stages" explains a tab the user cannot see, so it waits
-          // (undismissed) until they open a dbt project.
-          if (!msg.welcomeDismissed && msg.logicalOnly !== true) {
-            useEditorStore.getState().setWelcomeModalOpen(true);
-          }
           break;
         case 'stageData':
           // A reply for a stage the user has since switched away from — drop it
           // so the canvas never flips back to the wrong stage.
           if (isStaleStageReply(msg.requestId)) break;
+          setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Stage replies never ask for the first-open layout.
           useEditorStore.getState().setPendingAutoLayout(false);
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
           useEditorStore.getState().setLogicalOnly(msg.logicalOnly === true);
+          break;
+        case 'dbmlEmbeddedTables':
+          useEditorStore.getState().setEmbeddedTables(true);
           break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);
@@ -239,45 +281,80 @@ function EditorCanvas() {
           setSyncPlanGenerated(msg.payload);
           break;
         case 'error':
+          setHostLoading(null);
           useEditorStore.getState().recordError('extension', msg.payload.message);
           setError(
             msg.payload.message,
             msg.payload.kind,
             msg.payload.mergeConflict === true,
             msg.payload.fileProblem
-              ? { problem: msg.payload.fileProblem, line: msg.payload.line, column: msg.payload.column }
+              ? {
+                problem: msg.payload.fileProblem,
+                line: msg.payload.line,
+                column: msg.payload.column,
+                ...(msg.payload.fileType ? { fileType: msg.payload.fileType } : {}),
+              }
               : null,
           );
           break;
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
           break;
+        case 'canvasContext':
+          // Follows each logical payload (the file line, "Not on this diagram", the "+n" chip).
+          if (useEditorStore.getState().domain?.stage === 'logical') {
+            useEditorStore.getState().setCanvasContext(msg.payload);
+          }
+          break;
+        case 'revealRelationship':
+          // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
+          useEditorStore.getState().setPendingReveal(msg.payload);
+          break;
+        case 'revealTable':
+          // Shown once the diagram has settled (useRevealTable, in the Toolbar).
+          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName);
+          break;
+        case 'libraryDragStarted':
+          // "Hold Shift and drop to add …": an editable logical diagram only (useLibraryDrop).
+          if (Array.isArray(msg.payload?.tables)) libraryDragStarted(msg.payload.tables);
+          break;
         case 'feedbackContext':
           useEditorStore
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
           break;
+        case 'guideStart':
+          if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
+          break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Detect orphaned-canvas state: if neither `domainLoaded` nor `error`
-  // arrives within the boot grace period, the extension host probably can't
-  // reach this panel. An error is an answer, so it stops the timer; Retry
+  // Detect orphaned-canvas state: if neither `loading`, `domainLoaded` nor
+  // `error` arrives within the boot grace period, the extension host probably
+  // can't reach this panel. An error is an answer, so it stops the timer; Retry
   // clears it and starts a fresh grace period (see useReconnectWatchdog).
-  const showReconnectOverlay = useReconnectWatchdog(!domain && !error);
+  // `loading` is an answer too: the host is reading a large diagram, so the
+  // canvas waits much longer before it suspects the connection.
+  const showReconnectOverlay = useReconnectWatchdog(!domain && !error, hostLoading ? LOADING_STALL_MS : RECONNECT_GRACE_MS);
 
   const handleReconnect = useCallback(() => {
     vscode.postMessage({ type: 'requestReload' });
+  }, [vscode]);
+
+  // Open the ERD Studio output channel: what the host was doing, and how long it took.
+  const handleShowLogs = useCallback(() => {
+    vscode.postMessage({ type: 'showLogs' });
   }, [vscode]);
 
   // Initial-load failure recovery: clear the error and ask the host for the
   // domain again (same handshake as first mount).
   const handleRetryLoad = useCallback(() => {
     setError(null);
+    setHostLoading(null);
     vscode.postMessage({ type: 'ready' });
   }, [setError, vscode]);
 
@@ -312,6 +389,10 @@ function EditorCanvas() {
   // Nodes/edges from the domain (transform + overlay effects) and the
   // click/selection handlers — the shared canvas core in @erd-studio/renderer.
   const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
+  // Hover a table to preview its relationships; the lines of the hovered or
+  // selected table carry moving direction arrows. Ephemeral: never persisted
+  // or posted.
+  const { hoverHandlers, flowClassName } = useHoverFocus();
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -495,11 +576,13 @@ function EditorCanvas() {
   // reloads the canvas by itself on the save that fixes it.
   if (error && !domain && errorKind === 'domain-file' && errorFileProblem) {
     const { problem, line, column } = errorFileProblem;
+    // The file's own format (a `.dbml` diagram says DBML); older hosts send none, which is JSON.
+    const fileType = errorFileProblem.fileType ?? 'JSON';
     return (
       <div className="editor-message editor-message--error" role="alert">
         {problem === 'syntax' ? (
           <>
-            <p className="editor-message__title">This diagram&apos;s file isn&apos;t valid JSON</p>
+            <p className="editor-message__title">This diagram&apos;s file isn&apos;t valid {fileType}</p>
             <p className="editor-message__detail">{error}</p>
             <p className="editor-message__detail">
               This is a problem in the file, not in ERD Studio — it is often left by a hand edit or an AI
@@ -588,6 +671,9 @@ function EditorCanvas() {
         >
           Report a Bug
         </button>
+        <button type="button" className="editor-message__button" onClick={handleShowLogs}>
+          Show Logs
+        </button>
         <FeedbackDialog />
       </div>
     );
@@ -596,12 +682,14 @@ function EditorCanvas() {
   // --- Loading state ---------------------------------------------------------
 
   if (!domain) {
+    const tables = hostLoading?.tables;
     return (
       <>
-        <div className="editor-message">
-          <p>Loading subject area&hellip;</p>
+        <div className={`editor-message${hostLoading ? ' editor-message--loading' : ''}`} role="status" aria-live="polite">
+          {hostLoading && <span className="editor-message__spinner" aria-hidden="true" />}
+          <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading diagram…'}</p>
         </div>
-        {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} />}
+        {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} onShowLogs={handleShowLogs} />}
       </>
     );
   }
@@ -611,19 +699,24 @@ function EditorCanvas() {
   const selectModeActive = canvasMode === 'select' && !domain.readOnly;
   return (
     <div
-      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}`}
+      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}`}
       // Column flex so the physical-source notice is a strip ABOVE the flow
       // area rather than an overlay on top of the nodes. With the notice
       // hidden this is a one-child flex container — i.e. unchanged.
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
+      // Undefined on the physical stage or a read-only diagram: nothing to drop on.
+      {...dropHandlers}
     >
       {/* "dbt has not been compiled" strip. Renders nothing on the logical
           stage or when any dbt artifact was found. */}
       <PhysicalSourceNotice />
       {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
       <ManifestHint />
+      {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
+      <EmbeddedTablesBanner />
 
       <ReactFlow
+        className={flowClassName}
         // flex basis 0 rather than the default height:100%, so the notice's
         // height comes off the flow area instead of overflowing the editor.
         style={{ flex: '1 1 0', minHeight: 0 }}
@@ -640,7 +733,10 @@ function EditorCanvas() {
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
+        {...hoverHandlers}
         fitView={!shouldSkipFitView}
+        // Leave room for the floating toolbar above the top row of cards.
+        fitViewOptions={initialFitRef.current ?? INITIAL_FIT_VIEW_OPTIONS}
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={domain.readOnly}
@@ -653,20 +749,31 @@ function EditorCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <CanvasBackdrop />
+        {/* The drop highlight and the "Hold Shift and drop" hint (useLibraryDrop). */}
+        <LibraryDropOverlay active={dropActive} hintTables={hintTables} />
         {/* "This diagram is empty" card — logical stage, zero models only. */}
         <EmptyCanvas />
-        <Toolbar
-          nodes={nodes}
-          edges={edges}
-          allExpanded={allExpanded}
-          onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
-          onCollapseAll={collapseAll}
-        />
+        {/* One-time drag-to-relate tip — 2+ tables, no relationships yet. */}
+        <DragHint />
+        {/* Area boundaries tag a render crash's area for usage telemetry and rethrow it: no fallback UI. */}
+        <AreaErrorBoundary area="toolbar">
+          <Toolbar
+            nodes={nodes}
+            edges={edges}
+            allExpanded={allExpanded}
+            onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
+            onCollapseAll={collapseAll}
+          />
+        </AreaErrorBoundary>
         <StatusBar />
-        <DetailPanel />
-        <NewTableDialog />
-        <NewFkDialog />
-        <AddExistingTableDialog />
+        <AreaErrorBoundary area="detailPanel">
+          <DetailPanel />
+        </AreaErrorBoundary>
+        <AreaErrorBoundary area="dialogs">
+          <NewTableDialog />
+          <NewFkDialog />
+          <AddExistingTableDialog />
+        </AreaErrorBoundary>
       </ReactFlow>
 
       {activeToastMessage && (
@@ -683,22 +790,26 @@ function EditorCanvas() {
       <DragLine />
 
       {/* Edge context menu (F401) */}
-      {contextMenu && <ContextMenu />}
+      {contextMenu && <AreaErrorBoundary area="dialogs"><ContextMenu /></AreaErrorBoundary>}
 
-      {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
-      <DiscrepancyPanel />
+      <AreaErrorBoundary area="compare">
+        {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
+        <DiscrepancyPanel />
 
-      {/* Sync merge modal — full-screen takeover when sync mode is active */}
-      <SyncMergeModal />
+        {/* Sync merge modal — full-screen takeover when sync mode is active */}
+        <SyncMergeModal />
+      </AreaErrorBoundary>
 
       {/* Legend panel (bottom-left) */}
       <Legend />
 
-      {/* Welcome modal (first-time users) */}
-      <WelcomeModal />
-
       {/* Feedback dialog (bug reports and feature requests) */}
-      <FeedbackDialog />
+      <AreaErrorBoundary area="dialogs">
+        <FeedbackDialog />
+      </AreaErrorBoundary>
+
+      {/* The onboarding guide's coach marks (Show Me Around), over the canvas. */}
+      {guide && <AreaErrorBoundary area="guide"><CanvasGuide start={guide} onEnd={endGuide} /></AreaErrorBoundary>}
     </div>
   );
 }
@@ -726,7 +837,9 @@ export function App() {
     <CanvasStoreProvider store={editorStoreApi}>
       <CanvasEnvironmentProvider host={vscodeCanvasHost}>
         <ReactFlowProvider>
-          <EditorCanvas />
+          <AreaErrorBoundary area="canvas">
+            <EditorCanvas />
+          </AreaErrorBoundary>
         </ReactFlowProvider>
       </CanvasEnvironmentProvider>
     </CanvasStoreProvider>

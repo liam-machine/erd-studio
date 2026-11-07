@@ -1,0 +1,379 @@
+/* ---------------------------------------------------------------------------
+   Fields (context fields): a table's or a column's fields in the Detail panel.
+   Theme tokens only (styles/theme.css): no colour literals.
+   --------------------------------------------------------------------------- */
+
+.fields-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fields-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fields-section__title {
+  margin: 0;
+}
+
+.fields-section__head .fields-section__title {
+  margin: 0;
+}
+
+.fields-section__customise {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dim-fg);
+  font-size: 10px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.fields-section__customise:hover,
+.fields-section__customise:focus-visible {
+  color: var(--editor-fg);
+}
+
+.fields-section__customise:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+}
+
+.fields-section__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dim-fg);
+}
+
+.fields-section__list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Read-only rows (viewer, physical stage): label above value. */
+.fields-section__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fields-section__row .fields-section__name {
+  margin: 0;
+}
+
+.fields-section__list[hidden] {
+  display: none;
+}
+
+/*
+ * A table's read-only section (viewer, physical stage): two columns, the
+ * muted label beside its value, which wraps; a hairline between rows.
+ */
+.fields-section--read-only:not(.fields-section--compact) .fields-section__list {
+  gap: 0;
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row {
+  display: grid;
+  grid-template-columns: minmax(64px, 34%) minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-top: 1px solid var(--panel-border);
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.fields-section--read-only:not(.fields-section--compact) .fields-section__row:last-child {
+  padding-bottom: 0;
+}
+
+/* The labels read as the header's Schema / Warehouse name labels do (muted,
+   sentence case, weight 500), not as a second level of section headings. */
+.fields-section--read-only:not(.fields-section--compact) .fields-section__name {
+  line-height: 1.6;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* The viewer's fold: the section heading is the button, with the count. */
+.fields-section--collapsible {
+  gap: 0;
+}
+
+.fields-section--collapsible .fields-section__title {
+  margin: 0;
+}
+
+.fields-section--collapsible.fields-section--open {
+  gap: 8px;
+}
+
+.fields-section__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fields-section__toggle:hover {
+  color: var(--editor-fg);
+}
+
+.fields-section__toggle:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.fields-section__chevron {
+  width: 10px;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* "(7)", as the Columns and Relationships headings give theirs. */
+.fields-section__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.fields-section__value {
+  margin: 0;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--editor-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fields-section__value--structured {
+  font-family: var(--vscode-editor-font-family);
+  color: var(--dim-fg);
+}
+
+/* Editor rows */
+.fields-section__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fields-section__field-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 20px;
+}
+
+.fields-section__name {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--dim-fg);
+  overflow-wrap: anywhere;
+}
+
+.fields-section__badge {
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 15px;
+  white-space: nowrap;
+  border: 1px solid var(--panel-border);
+  color: var(--dim-fg);
+}
+
+.fields-section__badge--retired {
+  border-color: var(--warning-fg);
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.fields-section__badge--dbt {
+  border-color: var(--ai-fg);
+  background: var(--ai-bg);
+  color: var(--ai-fg);
+}
+
+.fields-section__actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.fields-section__field:hover .fields-section__actions,
+.fields-section__field:focus-within .fields-section__actions {
+  visibility: visible;
+}
+
+.fields-section__icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--dim-fg);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 3px;
+}
+
+.fields-section__icon-btn:hover,
+.fields-section__icon-btn:focus-visible {
+  color: var(--editor-fg);
+}
+
+.fields-section__text {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--editor-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fields-section__empty-value {
+  color: var(--dim-fg);
+}
+
+.fields-section__placeholder {
+  padding: 3px 6px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim-fg);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: text;
+}
+
+.fields-section__placeholder:hover,
+.fields-section__placeholder:focus-visible {
+  border-color: var(--ai-fg);
+  background: var(--ai-bg);
+  color: var(--editor-fg);
+}
+
+.fields-section__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fields-section__input,
+.fields-section__select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: 12px;
+}
+
+.fields-section__select {
+  cursor: pointer;
+}
+
+.fields-section__input:focus,
+.fields-section__select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.fields-section__input--key {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.fields-section__option--outside {
+  color: var(--warning-fg);
+}
+
+.fields-section__hint {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--dim-fg);
+}
+
+.fields-section__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--panel-border);
+}
+
+.fields-section__group-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dim-fg);
+}
+
+.fields-section__new {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fields-section__new-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.fields-section__error {
+  font-size: 11px;
+  color: var(--error-fg);
+}
+
+.fields-section__warning {
+  font-size: 11px;
+  color: var(--warning-fg);
+}
+
+.fields-section__add-btn {
+  align-self: flex-start;
+}
+
+/* A column's section, at the foot of its expanded row. */
+.fields-section--compact {
+  margin-top: 6px;
+  gap: 4px;
+}
+
+.fields-section--compact .fields-section__list {
+  gap: 4px;
+}
+
+.fields-section--compact .fields-section__add-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+}

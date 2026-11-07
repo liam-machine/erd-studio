@@ -12,6 +12,13 @@
 .fk-edge {
   stroke-width: 2;
   fill: none;
+  /* On the base so un-dimming fades too, not just dimming. */
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+/* A line of the hovered or selected table, carrying the direction arrows. */
+.fk-edge--flowing {
+  stroke-width: 2.5;
 }
 
 /* -----------------------------------------------------------------------
@@ -54,7 +61,6 @@
 .fk-edge--dimmed {
   opacity: 0.25;
   filter: grayscale(0.4);
-  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 .fk-edge--dimmed:hover {
@@ -151,7 +157,49 @@
 .fk-edge__label--dimmed {
   opacity: 0.25;
   filter: grayscale(0.4);
+}
+
+/* Everything an edge draws in the HTML label layer (cardinality labels, role,
+   composite chip, mismatch badge, drawn-backwards ⚠) fades with the hover
+   preview; the transition is on the base so it fades back in as well. */
+.fk-edge__adornment {
   transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+/* -----------------------------------------------------------------------
+   Relationship flow (EdgeFlow): arrows from the 1 end to the * end, two
+   lanes for many-to-many, two dots meeting for one-to-one. The halo, in the
+   canvas background colour, cuts each glyph out of the line it shares a
+   colour with.
+   ----------------------------------------------------------------------- */
+
+.fk-edge__flow-chevron,
+.fk-edge__flow-dot {
+  fill: currentColor;
+  stroke: var(--edge-flow-halo);
+  stroke-width: 1.5;
+  paint-order: stroke fill;
+  stroke-linejoin: round;
+}
+
+.fk-edge__flow--logical {
+  color: var(--stage-logical);
+}
+
+.fk-edge__flow--physical {
+  color: var(--stage-physical);
+}
+
+.fk-edge__flow--ghost {
+  color: var(--stage-ghost);
+}
+
+.fk-edge__flow--discrepancy-extra {
+  color: var(--discrepancy-extra);
+}
+
+.fk-edge__flow--discrepancy-cardinality-mismatch {
+  color: var(--discrepancy-mismatch);
 }
 
 /* -----------------------------------------------------------------------
@@ -253,4 +301,43 @@
   border-color: var(--focus-border);
   background: var(--button-bg);
   color: var(--button-fg);
+}
+
+/* -----------------------------------------------------------------------
+   Hover preview (useHoverFocus)
+   While the root .erd-flow--hover-focus class is on, only the hovered
+   table's lines stay bright. Kept at the end of the file so these rules win
+   over --dimmed and --label--dimmed (test/unit/hoverFocusCss.test.ts pins
+   the order).
+   ----------------------------------------------------------------------- */
+
+.erd-flow--hover-focus .fk-edge {
+  opacity: 0.15;
+  filter: none;
+}
+
+.erd-flow--hover-focus .fk-edge.fk-edge--lit {
+  opacity: 1;
+}
+
+.erd-flow--hover-focus .fk-edge__adornment {
+  opacity: 0.2;
+}
+
+.erd-flow--hover-focus .fk-edge__adornment.fk-edge__adornment--lit {
+  opacity: 1;
+  filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fk-edge,
+  .fk-edge__adornment {
+    transition: none;
+  }
+}
+
+@media print {
+  .fk-edge__flow {
+    display: none;
+  }
 }

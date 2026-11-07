@@ -1,0 +1,12 @@
+// Kept from silver/scroll-test.json by Convert Project to DBML:
+// "logical.viewConfig": {}
+use { table silver.fct_large_table } from '../tables/silver/fct_large_table.dbml'
+
+Project "scroll-test" {
+  Note: 'Test domain — model with many columns for drag-reorder scroll testing'
+  erd_schema_version: '7'
+  erd_model_folder: 'models/silver'
+  erd_layout: '''
+    fct_large_table 100 100
+  '''
+}

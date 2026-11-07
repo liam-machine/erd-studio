@@ -1,0 +1,10 @@
+Table bronze.shopify_order_line_items {
+  Note: 'Order lines as Shopify sends them.'
+
+  id           BIGINT    [pk]
+  order_id     BIGINT    [foreign_key: 'true']
+  product_id   BIGINT    [foreign_key: 'true']
+  quantity     STRING
+  price        STRING
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

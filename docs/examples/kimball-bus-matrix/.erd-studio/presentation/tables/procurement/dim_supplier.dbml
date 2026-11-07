@@ -1,0 +1,11 @@
+Table procurement.dim_supplier [
+  role: 'domain-dim',
+  grain: 'One row per supplier'
+] {
+  Note: 'Suppliers. Only procurement uses it.'
+
+  supplier_key    INT    [pk, note: 'Surrogate key']
+  supplier_number STRING [natural_key: 'true']
+  supplier_name   STRING [scd_type: '1']
+  payment_terms   STRING [scd_type: '1']
+}

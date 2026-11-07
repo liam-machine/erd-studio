@@ -28,6 +28,7 @@ import {
   stickyColourOfHex,
 } from '../../src/dbmlRichProperties';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
+import { RATIONALE_FIELD_KEYS, fieldKeyToRationaleKey, rationaleKeyToFieldKey } from '../../src/fields';
 
 describe('rich DBML property names', () => {
   it('keeps the names the export and import agree on', () => {
@@ -45,7 +46,7 @@ describe('rich DBML property names', () => {
       ...Object.values(DBML_RICH_TABLE_PROPERTIES),
       ...Object.values(DBML_RICH_COLUMN_PROPERTIES),
       ...Object.values(DBML_RICH_NOTE_PROPERTIES),
-      ...RATIONALE_KEYS.map(rationaleProperty),
+      ...RATIONALE_FIELD_KEYS.map(rationaleProperty),
       DBML_RICH_META_JSON_PROPERTY,
       DBML_RICH_PLACEHOLDER_PROPERTY,
     ];
@@ -61,6 +62,23 @@ describe('rich DBML property names', () => {
       expect(rationaleKeyOf(`erd_${rationaleProperty(key)}`)).toBe(key);
     }
     for (const other of ['rationale_', 'rationale_unknown', 'grain', 'erd_grain']) expect(rationaleKeyOf(other)).toBeUndefined();
+  });
+
+  it('reads every rationale-home field of the catalogue, the six of the first release and the new ones', () => {
+    // RATIONALE_KEYS (the legacy six) is a part of the catalogue's list, which rationaleKeyOf now reads whole.
+    for (const key of RATIONALE_KEYS) expect(RATIONALE_FIELD_KEYS).toContain(key);
+    for (const key of RATIONALE_FIELD_KEYS) {
+      expect(rationaleKeyOf(rationaleProperty(key))).toBe(key);
+      expect(rationaleKeyOf(`erd_${rationaleProperty(key)}`)).toBe(key);
+      // The property's snake case is the catalogue's field key.
+      expect(rationaleProperty(key)).toBe(`rationale_${rationaleKeyToFieldKey(key)}`);
+      expect(fieldKeyToRationaleKey(rationaleKeyToFieldKey(key))).toBe(key);
+    }
+    expect(rationaleKeyOf('rationale_open_questions')).toBe('openQuestions');
+    expect(rationaleKeyOf('erd_rationale_source_of_truth')).toBe('sourceOfTruth');
+    expect(rationaleKeyOf('rationale_known_issues')).toBe('knownIssues');
+    // Bare spellings and team keys are not the rich export's: storage reads them (dbml/settings.ts).
+    for (const other of ['open_questions', 'decisions', 'rationale_owner', 'meta_purpose']) expect(rationaleKeyOf(other)).toBeUndefined();
   });
 
   it('strips the erd_ prefix for matching, except from the placeholder marker', () => {

@@ -1,0 +1,8 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table atlas_derived.clients_daily_v6 }     from '../tables/atlas_derived/clients_daily_v6.dbml'
+use { table atlas_derived.clients_first_seen_v1 } from '../tables/atlas_derived/clients_first_seen_v1.dbml'
+use { table atlas_derived.clients_last_seen_v2 } from '../tables/atlas_derived/clients_last_seen_v2.dbml'
+
+Ref: atlas_derived.clients_daily_v6.client_id >? atlas_derived.clients_first_seen_v1.client_id
+
+Ref: atlas_derived.clients_last_seen_v2.client_id >? atlas_derived.clients_first_seen_v1.client_id

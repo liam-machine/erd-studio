@@ -1,0 +1,21 @@
+Table gold.fct_sites_pm_012 [
+  role: 'fact',
+  grain: 'One row per sites pm 012'
+] {
+  sites_pm_012_key BIGINT [pk, note: 'Primary key of fct_sites_pm_012']
+  type_code TIMESTAMP_NTZ [note: 'type code of the sites pm 012 row']
+  weight_kg STRING [note: 'weight kg of the sites pm 012 row', additive_type: 'additive']
+  weight_kg_2 TIMESTAMP_NTZ [note: 'weight kg 2 of the sites pm 012 row', additive_type: 'additive']
+  priority DATE [note: 'priority of the sites pm 012 row']
+  quantity DATE [note: 'quantity of the sites pm 012 row', additive_type: 'additive']
+  weight_kg_5 TIMESTAMP_NTZ [note: 'weight kg 5 of the sites pm 012 row', additive_type: 'non-additive']
+  quantity_6 BIGINT [note: 'quantity 6 of the sites pm 012 row', additive_type: 'semi-additive']
+  amount BIGINT [note: 'amount of the sites pm 012 row', additive_type: 'non-additive']
+  updated_at "DECIMAL(18,2)" [note: 'updated at of the sites pm 012 row']
+  notes BIGINT [note: 'notes of the sites pm 012 row']
+  region INT [note: 'region of the sites pm 012 row']
+  category TIMESTAMP_NTZ [note: 'category of the sites pm 012 row']
+  label STRING [note: 'label of the sites pm 012 row']
+  quantity_13 "DECIMAL(18,2)" [note: 'quantity 13 of the sites pm 012 row', additive_type: 'non-additive']
+  Note: 'Synthetic gold table fct_sites_pm_012'
+}

@@ -16,17 +16,15 @@ import {
   DIAGRAM_EXPORT_FILE_EXTENSIONS,
   SubjectAreaFileError,
   exportDiagram,
-  readDbdiagramLayout,
-  serializeDbdiagramLayout,
   toDbmlRich,
 } from '@erd-studio/core';
+import { readErdLayoutDbml } from '@erd-studio/core/dbml';
 import type { DiagramExportFormat } from '@erd-studio/core';
 import {
   exportFileNames,
   exportSubjectAreaFile,
   exportSubjectAreaFiles,
   filesOf,
-  layoutFileNameFor,
   type SubjectAreaExport,
 } from '../../src/services/diagramExport';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -113,11 +111,8 @@ describe('exportSubjectAreaFile', () => {
       const root = path.join(CORE_FIXTURES, name);
       const result = await exportSubjectAreaFile(subjectAreaServiceFor(root), path.join(root, domainPath), format, { layers: layersOf(root) });
       expect(result.content).toBe(golden(goldenFileName(name, format)));
-      if (format === 'dbml-rich') {
-        expect(result.layout?.content).toBe(golden(`${name}.dbdiagram`));
-      } else {
-        expect(result.layout).toBeUndefined();
-      }
+      // One file: no layout file beside it, in any format.
+      expect(result).not.toHaveProperty('layout');
     });
   });
 
@@ -135,7 +130,7 @@ describe('exportSubjectAreaFile', () => {
     }
   });
 
-  it('a rich export carries its .dbdiagram layout, and its DBML can name another layout file', async () => {
+  it('a rich export is one file, its positions in the Project\'s erd_layout', async () => {
     const subjectAreaService = subjectAreaServiceFor(DBT_PROJECT);
     const result = await exportSubjectAreaFile(subjectAreaService, SHOWCASE, 'dbml-rich');
     const unified = subjectAreaService.getSubjectArea(SHOWCASE);
@@ -143,18 +138,21 @@ describe('exportSubjectAreaFile', () => {
 
     expect(result.fileName).toBe('showcase.dbml');
     expect(result.content).toBe(toDbmlRich(display));
-    expect(result.layout?.fileName).toBe('showcase.dbdiagram');
-    expect(result.layout?.content).toBe(serializeDbdiagramLayout(display));
-    expect(result.layout?.dbmlWithLayoutFileName('showcase.dbdiagram')).toBe(result.content);
-    expect(result.layout?.dbmlWithLayoutFileName('model.dbdiagram')).toBe(toDbmlRich(display, { layoutFileName: 'model.dbdiagram' }));
-    expect(result.layout?.dbmlWithLayoutFileName('model.dbdiagram')).toContain('// Table positions: model.dbdiagram');
-    expect(result.layout?.dbmlWithLayoutFileName('')).not.toContain('Table positions');
+    expect(result.content).not.toContain('dbdiagram');
 
-    // Every 9.1+ parser reads the DBML; the layout reads back with every positioned table.
+    // Every 9.1+ parser reads the DBML; erd_layout reads back with every table placed, as the canvas has it.
     expect(readDbmlRich(result.content).tables.length).toBe(display.models.length);
-    const layout = readDbdiagramLayout(result.layout!.content);
-    expect(layout.problems).toEqual([]);
-    expect(layout.tables.length).toBeGreaterThan(0);
+    const layout = readErdLayoutDbml(result.content)!;
+    expect(layout.problemsAt).toEqual([]);
+    expect(layout.positions).toEqual(unified.viewConfig.positions);
+  });
+
+  it('places a table with no stored position as the canvas would, so erd_layout has every table', async () => {
+    const root = path.join(CORE_FIXTURES, 'missing-positions');
+    const domainPath = path.join(root, CORE_CASES['missing-positions']);
+    const result = await exportSubjectAreaFile(subjectAreaServiceFor(root), domainPath, 'dbml-rich');
+    const layout = readErdLayoutDbml(result.content)!;
+    expect(Object.keys(layout.positions).sort()).toEqual(readDbmlRich(result.content).tables.map((t) => t.name).sort());
   });
 
   it('merges the model library\'s relationships, as the canvas draws them', async () => {
@@ -224,43 +222,30 @@ describe('exportFileNames', () => {
   });
 });
 
-describe('layoutFileNameFor', () => {
-  it('swaps the last extension for .dbdiagram', () => {
-    expect(layoutFileNameFor('showcase.dbml')).toBe('showcase.dbdiagram');
-    expect(layoutFileNameFor('a.b.dbml')).toBe('a.b.dbdiagram');
-    expect(layoutFileNameFor('noext')).toBe('noext.dbdiagram');
-  });
-});
-
 describe('filesOf', () => {
   const rich = (domainName: string, layer: string): SubjectAreaExport => ({
-    content: `dbml ${domainName}.dbdiagram\n`,
+    content: `dbml ${layer} ${domainName}\n`,
     fileName: `${domainName}.dbml`,
     domainName,
     layer,
-    layout: { fileName: `${domainName}.dbdiagram`, content: `layout ${layer}\n`, dbmlWithLayoutFileName: (n) => `dbml ${n}\n` },
   });
 
-  it('follows each rich .dbml with its .dbdiagram, the header naming the layout by its final name', () => {
+  it('gives one file per rich DBML domain, its text unchanged whatever name it gets', () => {
     const files = filesOf([
       { domainPath: '/p/silver/x.json', exported: rich('x', 'silver') },
       { domainPath: '/p/gold/x.json', exported: rich('x', 'gold') },
       { domainPath: '/p/gold/y.json', exported: rich('y', 'gold') },
     ], 'dbml-rich');
     expect(files).toEqual([
-      { domainPath: '/p/silver/x.json', kind: 'diagram', fileName: 'silver-x.dbml', content: 'dbml silver-x.dbdiagram\n' },
-      { domainPath: '/p/silver/x.json', kind: 'layout', fileName: 'silver-x.dbdiagram', content: 'layout silver\n' },
-      { domainPath: '/p/gold/x.json', kind: 'diagram', fileName: 'gold-x.dbml', content: 'dbml gold-x.dbdiagram\n' },
-      { domainPath: '/p/gold/x.json', kind: 'layout', fileName: 'gold-x.dbdiagram', content: 'layout gold\n' },
-      // Not renamed: the export's own text, unchanged.
-      { domainPath: '/p/gold/y.json', kind: 'diagram', fileName: 'y.dbml', content: 'dbml y.dbdiagram\n' },
-      { domainPath: '/p/gold/y.json', kind: 'layout', fileName: 'y.dbdiagram', content: 'layout gold\n' },
+      { domainPath: '/p/silver/x.json', fileName: 'silver-x.dbml', content: 'dbml silver x\n' },
+      { domainPath: '/p/gold/x.json', fileName: 'gold-x.dbml', content: 'dbml gold x\n' },
+      { domainPath: '/p/gold/y.json', fileName: 'y.dbml', content: 'dbml gold y\n' },
     ]);
   });
 
-  it('gives one file per domain for a format with no layout', () => {
+  it('gives one file per domain for every format', () => {
     const files = filesOf([{ domainPath: '/p/a.json', exported: { content: 'x\n', fileName: 'a.mmd', domainName: 'a', layer: 'silver' } }], 'mermaid');
-    expect(files).toEqual([{ domainPath: '/p/a.json', kind: 'diagram', fileName: 'a.mmd', content: 'x\n' }]);
+    expect(files).toEqual([{ domainPath: '/p/a.json', fileName: 'a.mmd', content: 'x\n' }]);
   });
 });
 
@@ -296,21 +281,17 @@ describe('exportSubjectAreaFiles', () => {
       expect(names).toContain('gold-showcase.dbml');
       expect(names).toContain('silver-showcase.dbml');
       expect(new Set(names.map((n) => n.toLowerCase())).size).toBe(names.length);
-      // Each .dbml is followed by its .dbdiagram, of the same domain.
-      for (let i = 0; i < result.files.length; i += 2) {
-        expect(result.files[i].kind).toBe('diagram');
-        expect(result.files[i + 1]).toMatchObject({ kind: 'layout', domainPath: result.files[i].domainPath, fileName: layoutFileNameFor(result.files[i].fileName) });
-        expect(result.files[i].content).toContain(`// Table positions: ${result.files[i + 1].fileName},`);
-      }
+      // One .dbml per domain, no layout file beside it.
+      expect(names.every((n) => n.endsWith('.dbml'))).toBe(true);
+      expect(new Set(result.files.map((f) => f.domainPath)).size).toBe(result.files.length);
       // Gold sorts before silver.
-      const layersInOrder = result.files.filter((f) => f.kind === 'diagram').map((f) => path.basename(path.dirname(f.domainPath)));
+      const layersInOrder = result.files.map((f) => path.basename(path.dirname(f.domainPath)));
       expect(layersInOrder).toEqual([...layersInOrder].sort());
 
-      // The same text the single export gives, bar the renamed layout line.
+      // The same text the single export gives, renamed or not.
       const single = await exportSubjectAreaFile(service, path.join(root, '.erd-studio/silver/showcase.json'), 'dbml-rich', { layers: layersOf(root) });
       const silver = result.files.find((f) => f.fileName === 'silver-showcase.dbml')!;
-      expect(silver.content).toBe(single.layout!.dbmlWithLayoutFileName('silver-showcase.dbdiagram'));
-      expect(result.files.find((f) => f.fileName === 'silver-showcase.dbdiagram')!.content).toBe(single.layout!.content);
+      expect(silver.content).toBe(single.content);
     } finally {
       cleanup();
     }
@@ -320,7 +301,7 @@ describe('exportSubjectAreaFiles', () => {
     const service = subjectAreaServiceFor(DBT_PROJECT);
     const result = await exportSubjectAreaFiles(service, [SHOWCASE], 'mermaid');
     expect(result).toEqual({
-      files: [{ domainPath: SHOWCASE, kind: 'diagram', fileName: 'showcase.mmd', content: (await exportSubjectAreaFile(service, SHOWCASE, 'mermaid')).content }],
+      files: [{ domainPath: SHOWCASE, fileName: 'showcase.mmd', content: (await exportSubjectAreaFile(service, SHOWCASE, 'mermaid')).content }],
       skipped: [],
     });
   });

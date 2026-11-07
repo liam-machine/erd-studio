@@ -51,3 +51,9 @@
   font-size: 9px;
   line-height: 1;
 }
+
+/* "· your design" / "· read from dbt": what the tab is, quieter than its name. */
+.stage-tabs__hint {
+  font-weight: 400;
+  opacity: 0.8;
+}

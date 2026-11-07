@@ -1,0 +1,11 @@
+Table loans.loans_application [owner: 'data-engineering'] {
+  Note: 'Loan applications from the loan origination system.'
+
+  application_id   STRING    [pk, natural_key: 'true']
+  customer_no      STRING
+  product_code     STRING
+  requested_amount "DECIMAL(18,2)"
+  decision         STRING
+  decided_at       TIMESTAMP
+  _loaded_at       TIMESTAMP [note: 'When the loader landed the row']
+}

@@ -1,0 +1,53 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: the canvas layout options.
+
+Project ledger {
+  Note: 'Rationale and meta as model files held them before context fields'
+  erd_layout: '''
+    dim_account 0 0
+    fct_balance 400 0
+  '''
+}
+
+Table silver.dim_account [
+  role: 'conformed-dim',
+  grain: 'One row per account, per version',
+  rationale_purpose: 'Shared account reference for finance reporting',
+  rationale_design: 'Conformed dimension so every mart joins the same account',
+  rationale_grain_choice: 'Versioned rows, because credit limits change and finance reports on history',
+  rationale_role_choice: 'Conformed rather than domain-owned, since three marts use it',
+  rationale_scd_strategy: 'credit_limit is type 2; account_name overwrites',
+  rationale_measures: 'None here; the balances live in fct_balance',
+  meta_owner: 'finance-data',
+  meta_purpose: 'Kept in meta, next to the rationale purpose',
+  meta_json: '{"certified":true,"tags":["finance","conformed"]}'
+] {
+  account_key INT [pk, note: 'Surrogate key, one per version']
+  account_code VARCHAR [note: 'The account number customers see', natural_key: 'true', scd_type: '0', meta_classification: 'internal', meta_json: '{"pii":false}']
+  account_name VARCHAR [note: 'Name on the account', scd_type: '1', meta_business_rule: 'Trimmed, title case', meta_json: '{"pii":true,"sources":["crm","billing"]}']
+  credit_limit "DECIMAL(18,2)" [note: 'Credit limit at the time', scd_type: '2']
+  Note: 'One row per customer account'
+}
+
+Table silver.fct_balance [
+  role: 'periodic-snapshot',
+  grain: 'One row per account per month end',
+  rationale_purpose: 'Month-end balances for the finance close',
+  rationale_measures: 'balance is semi-additive (never sum across months); txn_count is additive',
+  meta_owner: 'finance-data',
+  meta_refresh: 'daily'
+] {
+  account_key INT [note: 'Account at month end']
+  month_end DATE [note: 'Last day of the month']
+  balance "DECIMAL(18,2)" [note: 'Closing balance', additive_type: 'semi-additive', meta_business_rule: 'Ledger balance after the last posting of the month', meta_unit: 'AUD']
+  txn_count INT [note: 'Transactions in the month', additive_type: 'additive']
+  Note: 'Month-end balance per account'
+}
+
+TableGroup silver [color: #a0a0a0, note: 'Layer: Silver'] {
+  silver.dim_account
+  silver.fct_balance
+}
+
+Ref: silver.fct_balance.account_key >? silver.dim_account.account_key

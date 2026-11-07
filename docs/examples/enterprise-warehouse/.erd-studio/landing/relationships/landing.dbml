@@ -1,0 +1,15 @@
+// Landing's relationships: one shared file for all nine source schemas. A source team that wants its own creates landing/relationships/<schema>.dbml.
+use { table cards.cards_account }           from '../tables/cards/cards_account.dbml'
+use { table cards.cards_transaction }       from '../tables/cards/cards_transaction.dbml'
+use { table core_banking.core_account }     from '../tables/core_banking/core_account.dbml'
+use { table core_banking.core_customer }    from '../tables/core_banking/core_customer.dbml'
+use { table core_banking.core_transaction } from '../tables/core_banking/core_transaction.dbml'
+use { table fraud.fraud_alert }             from '../tables/fraud/fraud_alert.dbml'
+
+Ref: cards.cards_transaction.card_account_id >? cards.cards_account.card_account_id
+
+Ref: core_banking.core_account.customer_no >? core_banking.core_customer.customer_no
+
+Ref: core_banking.core_transaction.account_no >? core_banking.core_account.account_no
+
+Ref: fraud.fraud_alert.card_txn_id >? cards.cards_transaction.card_txn_id

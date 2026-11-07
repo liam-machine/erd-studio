@@ -12,6 +12,7 @@ const send = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useMessageBus', () => ({ useSend: () => send }));
 
 const setNewTableDialogOpen = vi.hoisted(() => vi.fn());
+const setAddExistingDialogOpen = vi.hoisted(() => vi.fn());
 const storeState = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('../../webview/store/editorStore', () => ({
   useEditorStore: (selector: (s: Record<string, unknown>) => unknown) => selector(storeState),
@@ -24,7 +25,11 @@ function setSubjectArea(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  Object.assign(storeState, { newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen, logicalOnly: false });
+  Object.assign(storeState, {
+    newModelDialogOpen: false, setNewModelDialogOpen: setNewTableDialogOpen, logicalOnly: false,
+    addExistingModelDialogOpen: false, setAddExistingModelDialogOpen: setAddExistingDialogOpen,
+    existingModels: [], manifestModels: [],
+  });
   setSubjectArea();
 });
 
@@ -32,6 +37,7 @@ afterEach(() => {
   cleanup();
   send.mockClear();
   setNewTableDialogOpen.mockClear();
+  setAddExistingDialogOpen.mockClear();
 });
 
 describe('EmptyCanvas', () => {
@@ -51,13 +57,13 @@ describe('EmptyCanvas', () => {
 
   it('"Add models from dbt" posts addModelsFromDbt', () => {
     const { getByRole } = render(<EmptyCanvas />);
-    fireEvent.click(getByRole('button', { name: 'Add tables from dbt' }));
+    fireEvent.click(getByRole('button', { name: 'Add Tables from dbt' }));
     expect(send).toHaveBeenCalledWith({ type: 'addModelsFromDbt' });
   });
 
-  it('"New table" opens the New Design Table dialog', () => {
+  it('"New Table" opens the New Table dialog', () => {
     const { getByRole } = render(<EmptyCanvas />);
-    fireEvent.click(getByRole('button', { name: 'New table' }));
+    fireEvent.click(getByRole('button', { name: 'New Table' }));
     expect(setNewTableDialogOpen).toHaveBeenCalledWith(true);
     expect(send).not.toHaveBeenCalled();
   });
@@ -85,25 +91,25 @@ describe('EmptyCanvas', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('keeps "Add tables from dbt" as the primary action in a dbt project', () => {
+  it('keeps "Add Tables from dbt" as the primary action in a dbt project', () => {
     const { getByRole } = render(<EmptyCanvas />);
-    expect(getByRole('button', { name: 'Add tables from dbt' }).className).toContain('empty-canvas__button--primary');
-    expect(getByRole('button', { name: 'New table' }).className).not.toContain('empty-canvas__button--primary');
+    expect(getByRole('button', { name: 'Add Tables from dbt' }).className).toContain('empty-canvas__button--primary');
+    expect(getByRole('button', { name: 'New Table' }).className).not.toContain('empty-canvas__button--primary');
   });
 
   describe('without a dbt project (logicalOnly)', () => {
     beforeEach(() => { storeState.logicalOnly = true; });
 
-    it('drops "Add tables from dbt" and says each table is a YAML file', () => {
+    it('drops "Add Tables from dbt" and says each table is a file you can commit', () => {
       const { queryByRole, getByText } = render(<EmptyCanvas />);
-      expect(queryByRole('button', { name: 'Add tables from dbt' })).toBeNull();
-      expect(getByText('Add your first table. Each one is a YAML file you can commit.')).toBeTruthy();
+      expect(queryByRole('button', { name: 'Add Tables from dbt' })).toBeNull();
+      expect(getByText('Add your first table.')).toBeTruthy();
       expect(document.body.textContent).not.toContain('dbt');
     });
 
-    it('makes "New table" the primary action, opening the New Design Table dialog', () => {
+    it('makes "New Table" the primary action, opening the New Table dialog', () => {
       const { getByRole } = render(<EmptyCanvas />);
-      const button = getByRole('button', { name: 'New table' });
+      const button = getByRole('button', { name: 'New Table' });
       expect(button.className).toContain('empty-canvas__button--primary');
       fireEvent.click(button);
       expect(setNewTableDialogOpen).toHaveBeenCalledWith(true);
@@ -121,5 +127,52 @@ describe('EmptyCanvas', () => {
     storeState.newModelDialogOpen = true;
     const { container } = render(<EmptyCanvas />);
     expect(container.innerHTML).toBe('');
+  });
+
+  describe('"Add Existing Tables"', () => {
+    const libraryRow = (name: string) => ({ name, schema: '', description: '', columnCount: 2, source: 'logical', sourcePath: `.erd-studio/tables/${name}.dbml` });
+    const dbtRow = (name: string) => ({ ...libraryRow(name), source: 'yml', sourcePath: `models/${name}.yml` });
+    const addExisting = (get: (role: string, opts: { name: string }) => HTMLElement) => get('button', { name: 'Add Existing Tables' });
+
+    it('is the primary action, opening the Add Existing Tables dialog, when the Table Library has tables this diagram lacks', () => {
+      storeState.existingModels = [libraryRow('dim_customer')];
+      const { getByRole } = render(<EmptyCanvas />);
+      const button = addExisting(getByRole);
+      expect(button.className).toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'Add Tables from dbt' }).className).not.toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'New Table' }).className).not.toContain('empty-canvas__button--primary');
+      fireEvent.click(button);
+      expect(setAddExistingDialogOpen).toHaveBeenCalledWith(true);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('is the primary action without a dbt project too, and the text says to reuse the library', () => {
+      storeState.logicalOnly = true;
+      storeState.existingModels = [libraryRow('dim_customer')];
+      const { getByRole, getByText } = render(<EmptyCanvas />);
+      expect(addExisting(getByRole).className).toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'New Table' }).className).not.toContain('empty-canvas__button--primary');
+      expect(getByText('Reuse tables from your Table Library, or add a new one.')).toBeTruthy();
+      expect(document.body.textContent).not.toContain('dbt');
+    });
+
+    it('is a secondary button when only dbt models are there to add', () => {
+      storeState.existingModels = [dbtRow('stg_orders')];
+      const { getByRole } = render(<EmptyCanvas />);
+      expect(addExisting(getByRole).className).not.toContain('empty-canvas__button--primary');
+      expect(getByRole('button', { name: 'Add Tables from dbt' }).className).toContain('empty-canvas__button--primary');
+    });
+
+    it('is not offered when there is nothing to add', () => {
+      const { queryByRole } = render(<EmptyCanvas />);
+      expect(queryByRole('button', { name: 'Add Existing Tables' })).toBeNull();
+    });
+
+    it('steps aside while the Add Existing Tables dialog is open', () => {
+      storeState.existingModels = [libraryRow('dim_customer')];
+      storeState.addExistingModelDialogOpen = true;
+      const { container } = render(<EmptyCanvas />);
+      expect(container.innerHTML).toBe('');
+    });
   });
 });

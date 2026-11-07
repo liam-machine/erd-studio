@@ -37,6 +37,7 @@ vi.mock('@xyflow/react', () => ({
     getNode: vi.fn(),
   }),
   useStore: () => 1,
+  useNodesInitialized: () => true,
 }));
 
 vi.mock('../../webview/components/Toolbar/StageTabs', () => ({

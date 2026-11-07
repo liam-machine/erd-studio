@@ -1,0 +1,168 @@
+{
+  "example": "bigquery-versioned",
+  "layers": [
+    {
+      "id": "live",
+      "label": "Live",
+      "abbreviation": "LIV"
+    },
+    {
+      "id": "stable",
+      "label": "Stable",
+      "abbreviation": "STB"
+    },
+    {
+      "id": "derived",
+      "label": "Derived",
+      "abbreviation": "DRV"
+    },
+    {
+      "id": "views",
+      "label": "User-facing views",
+      "abbreviation": "VW"
+    }
+  ],
+  "tables": {
+    "atlas.clients_daily": {
+      "layer": "views",
+      "schema": "atlas",
+      "grain": "One row per client per day",
+      "columns": [
+        "submission_date DATE pk",
+        "client_id STRING pk fk",
+        "active_hours_sum FLOAT additive",
+        "search_count_all INT additive",
+        "country STRING"
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
+    },
+    "atlas.clients_first_seen": {
+      "layer": "views",
+      "schema": "atlas",
+      "grain": "One row per client",
+      "columns": [
+        "client_id STRING pk nk",
+        "first_seen_date DATE",
+        "country STRING"
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
+    },
+    "atlas.clients_last_seen": {
+      "layer": "views",
+      "schema": "atlas",
+      "grain": "One row per client per day",
+      "columns": [
+        "submission_date DATE pk",
+        "client_id STRING pk fk",
+        "days_seen_bits INT",
+        "days_since_seen INT"
+      ],
+      "newRelationshipsFile": "views/relationships/views.dbml"
+    },
+    "atlas_derived.clients_daily_v6": {
+      "layer": "derived",
+      "schema": "atlas_derived",
+      "grain": "One row per client per day",
+      "columns": [
+        "submission_date DATE pk",
+        "client_id STRING pk fk",
+        "sample_id INT",
+        "active_hours_sum FLOAT additive",
+        "search_count_all INT additive",
+        "country STRING",
+        "normalized_channel STRING"
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
+    },
+    "atlas_derived.clients_first_seen_v1": {
+      "layer": "derived",
+      "schema": "atlas_derived",
+      "grain": "One row per client",
+      "columns": [
+        "client_id STRING pk nk",
+        "first_seen_date DATE",
+        "country STRING"
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
+    },
+    "atlas_derived.clients_last_seen_v2": {
+      "layer": "derived",
+      "schema": "atlas_derived",
+      "grain": "One row per client per day",
+      "columns": [
+        "submission_date DATE pk",
+        "client_id STRING pk fk",
+        "days_seen_bits INT",
+        "days_since_seen INT"
+      ],
+      "newRelationshipsFile": "derived/relationships/derived.dbml"
+    },
+    "atlas_live.atlas_live__main_v1": {
+      "layer": "live",
+      "schema": "atlas_live",
+      "alias": "main_v1",
+      "columns": [
+        "document_id STRING pk",
+        "client_id STRING",
+        "submission_timestamp TIMESTAMP",
+        "normalized_channel STRING",
+        "payload JSON"
+      ],
+      "newRelationshipsFile": "live/relationships/live.dbml"
+    },
+    "atlas_stable.atlas_stable__main_v1": {
+      "layer": "stable",
+      "schema": "atlas_stable",
+      "alias": "main_v1",
+      "columns": [
+        "document_id STRING pk nk",
+        "client_id STRING",
+        "submission_timestamp TIMESTAMP",
+        "sample_id INT",
+        "normalized_channel STRING",
+        "payload JSON"
+      ],
+      "newRelationshipsFile": "stable/relationships/stable.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "derived/diagrams/clients.dbml",
+      "name": "clients",
+      "layer": "derived",
+      "tables": [
+        "atlas_derived.clients_daily_v6",
+        "atlas_derived.clients_first_seen_v1",
+        "atlas_derived.clients_last_seen_v2"
+      ],
+      "relationships": [
+        "clients_daily_v6.client_id -> clients_first_seen_v1.client_id many-to-one",
+        "clients_last_seen_v2.client_id -> clients_first_seen_v1.client_id many-to-one"
+      ]
+    },
+    {
+      "file": "stable/diagrams/pings.dbml",
+      "name": "pings",
+      "layer": "stable",
+      "tables": [
+        "atlas_live.atlas_live__main_v1",
+        "atlas_stable.atlas_stable__main_v1"
+      ],
+      "relationships": []
+    },
+    {
+      "file": "views/diagrams/clients.dbml",
+      "name": "clients",
+      "layer": "views",
+      "tables": [
+        "atlas.clients_daily",
+        "atlas.clients_first_seen",
+        "atlas.clients_last_seen"
+      ],
+      "relationships": [
+        "clients_daily.client_id -> clients_first_seen.client_id many-to-one",
+        "clients_last_seen.client_id -> clients_first_seen.client_id many-to-one"
+      ]
+    }
+  ]
+}

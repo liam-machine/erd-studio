@@ -1,0 +1,46 @@
+/**
+ * DragHint styles — the one-time drag-to-relate tip, a small card at the
+ * bottom centre of the canvas. Theme tokens only; no literal colours.
+ */
+
+.drag-hint {
+  max-width: min(520px, calc(100% - 32px));
+}
+
+.drag-hint__body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--editor-fg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.drag-hint__text {
+  flex: 1;
+}
+
+.drag-hint__dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.drag-hint__dismiss:hover {
+  opacity: 1;
+}
+
+.drag-hint__dismiss:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}

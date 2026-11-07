@@ -1,0 +1,30 @@
+// Sale lines in the 2.0 spellings: one bare setting per field. The twin of
+// fields-old's fct_sale.dbml, and read as exactly the same table.
+Table gold.fct_sale [
+  role: 'transaction-fact',
+  grain: 'One row per sale line',
+  purpose: 'Revenue by store and day',
+  design: 'A star around the sale line',
+  measures: 'amount is additive; unit_price is not',
+  erd_grain_choice: 'Line level, so returns can be matched',
+  owner: 'sales-data',
+  erd_steward: 'finance',
+  meta_json: '{"pii":false,"tags":["finance","daily"]}',
+  tier: 'gold'
+] {
+  Note: 'Sale lines'
+
+  sale_line_id BIGINT          [pk, note: 'Line id']
+  store_key    INT             [foreign_key: 'true', source: 'pos']
+  amount       "DECIMAL(18,2)" [additive_type: 'additive', unit: 'AUD', meta_json: '{"sensitive":true}', note: 'Line total']
+  unit_price   "DECIMAL(18,2)" [additive_type: 'non-additive']
+}
+
+Metadata Table gold.fct_sale {
+  role_choice: 'A transaction fact: one row per event'
+  reviewed: 'yes'
+}
+
+Metadata Column gold.fct_sale.store_key {
+  source: 'pos-v2'
+}

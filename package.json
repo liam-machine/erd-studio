@@ -1,7 +1,7 @@
 {
   "name": "erd-studio",
   "displayName": "ERD Studio",
-  "description": "Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.",
+  "description": "Logical data modeling in Git, stored as DBML, an open format. Draw ERDs in VS Code as files your AI assistant reads and writes. Import DBML, SQL or Power BI; compare with dbt.",
   "version": "1.7.2",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
@@ -20,6 +20,7 @@
   "keywords": [
     "ERD",
     "DBML",
+    "dbml editor",
     "dbdiagram",
     "logical data model",
     "data model",
@@ -55,7 +56,13 @@
   ],
   "activationEvents": [
     "workspaceContains:**/dbt_project.yml",
-    "workspaceContains:.erd-studio"
+    "workspaceContains:.erd-studio",
+    "workspaceContains:**/*.[sS][qQ][lL]",
+    "workspaceContains:**/*.[dD][bB][mM][lL]",
+    "workspaceContains:**/*.[bB][iI][mM]",
+    "workspaceContains:**/definition.pbism",
+    "workspaceContains:**/model.tmdl",
+    "workspaceContains:**/database.tmdl"
   ],
   "main": "./dist/extension.js",
   "workspaces": [
@@ -88,12 +95,16 @@
           "**/.erd-studio/tables/*/*.yml"
         ],
         "url": "./schemas/logical-model.schema.json"
+      },
+      {
+        "fileMatch": "**/.erd-studio/fields.yml",
+        "url": "./schemas/fields.schema.json"
       }
     ],
     "commands": [
       {
         "command": "erdStudio.drawFromDbt",
-        "title": "Draw from dbt…",
+        "title": "Import from dbt…",
         "category": "ERD Studio",
         "icon": "$(wand)"
       },
@@ -105,6 +116,53 @@
       {
         "command": "erdStudio.openExampleDiagram",
         "title": "Open Example Diagram",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.importModel",
+        "title": "Import…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.importSqlDdl",
+        "title": "Import SQL DDL…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.importSemanticModel",
+        "title": "Import Power BI or Fabric Semantic Model…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.turnOffStartSuggestions",
+        "title": "Turn Off Start Suggestions for This Folder",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.turnOnStartSuggestions",
+        "title": "Turn On Start Suggestions for This Folder",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.showImportGuide",
+        "title": "Bring In Your Data Model…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.showMeAround",
+        "title": "Show Me Around",
+        "category": "ERD Studio",
+        "icon": "$(compass)"
+      },
+      {
+        "command": "erdStudio.openExampleProject",
+        "title": "Open an Example…",
+        "icon": "$(book)",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.start",
+        "title": "Start a Data Model…",
         "category": "ERD Studio"
       },
       {
@@ -121,7 +179,7 @@
       },
       {
         "command": "erdStudio.createDomain",
-        "title": "New Subject Area",
+        "title": "New Diagram…",
         "category": "ERD Studio",
         "icon": "$(add)"
       },
@@ -132,12 +190,12 @@
       },
       {
         "command": "erdStudio.openDomain",
-        "title": "Open Subject Area",
+        "title": "Open Diagram",
         "category": "ERD Studio"
       },
       {
         "command": "erdStudio.deleteDomain",
-        "title": "Delete Subject Area",
+        "title": "Delete Diagram",
         "category": "ERD Studio"
       },
       {
@@ -147,13 +205,14 @@
       },
       {
         "command": "erdStudio.renameDomain",
-        "title": "Rename Subject Area",
+        "title": "Rename Diagram…",
         "category": "ERD Studio"
       },
       {
         "command": "erdStudio.addLayer",
-        "title": "Layer +",
-        "category": "ERD Studio"
+        "title": "New Layer…",
+        "category": "ERD Studio",
+        "icon": "$(new-folder)"
       },
       {
         "command": "erdStudio.editLayer",
@@ -172,7 +231,7 @@
       },
       {
         "command": "erdStudio.installCodingHarness",
-        "title": "Install AI Coding Harness",
+        "title": "Install AI Helper Files…",
         "category": "ERD Studio",
         "icon": "$(hubot)"
       },
@@ -194,6 +253,11 @@
       {
         "command": "erdStudio.migrateToTableNaming",
         "title": "Migrate to the New File Naming",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.convertProjectToDbml",
+        "title": "Convert Project to DBML",
         "category": "ERD Studio"
       },
       {
@@ -224,14 +288,121 @@
         "icon": "$(wand)"
       },
       {
+        "command": "erdStudio.moveTable",
+        "title": "Move Table…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.moveDiagram",
+        "title": "Move Diagram to Layer…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.openInDiagram",
+        "title": "Open in Diagram…",
+        "category": "ERD Studio",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "erdStudio.openRelationshipSource",
+        "title": "Open in File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "erdStudio.goToTable",
+        "title": "Go to Table…",
+        "category": "ERD Studio",
+        "icon": "$(search)"
+      },
+      {
+        "command": "erdStudio.customiseFields",
+        "title": "Customise Fields…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.addToDiagram",
+        "title": "Add to Diagram…",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.revealInTableLibrary",
+        "title": "Reveal in Table Library",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.filterDiagrams",
+        "title": "Filter Diagrams…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearDiagramsFilter",
+        "title": "Clear Diagrams Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.filterTableLibrary",
+        "title": "Filter Table Library…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearTableLibraryFilter",
+        "title": "Clear Table Library Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.filterRelationships",
+        "title": "Filter Relationships…",
+        "category": "ERD Studio",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "erdStudio.clearRelationshipsFilter",
+        "title": "Clear Relationships Filter",
+        "category": "ERD Studio",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "erdStudio.showRowDetails",
+        "title": "Show Row Details",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.hideRowDetails",
+        "title": "Hide Row Details",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.groupRelationshipsByFile",
+        "title": "Group by Relationships File",
+        "category": "ERD Studio",
+        "icon": "$(files)"
+      },
+      {
+        "command": "erdStudio.groupRelationshipsByTable",
+        "title": "Group by Table",
+        "category": "ERD Studio",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "erdStudio.showLogs",
+        "title": "Show Logs",
+        "category": "ERD Studio",
+        "icon": "$(output)"
+      },
+      {
         "command": "erdStudio.showGettingStarted",
-        "title": "Watch Getting Started Video",
+        "title": "Watch the Tour",
         "category": "ERD Studio",
         "icon": "$(play-circle)"
       },
@@ -270,6 +441,13 @@
         "icon": "$(folder-library)"
       }
     ],
+    "submenus": [
+      {
+        "id": "erdStudio.newMenu",
+        "label": "New…",
+        "icon": "$(add)"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -283,7 +461,7 @@
       "erd-studio": [
         {
           "id": "erdStudio.domainTree",
-          "name": "ERD Studio"
+          "name": "Diagrams"
         },
         {
           "id": "erdStudio.modelLibrary",
@@ -291,9 +469,16 @@
           "when": "erdStudio.hasLogicalModelsDir"
         },
         {
-          "id": "erdStudio.myReports",
-          "name": "My Reports",
-          "when": "erdStudio.hasTrackedReports"
+          "id": "erdStudio.relationships",
+          "name": "Relationships",
+          "when": "erdStudio.hasLogicalModelsDir",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "erdStudio.help",
+          "name": "Help & Feedback",
+          "when": "erdStudio.hasProject",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -347,18 +532,48 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "Design your data model as plain files in a Git repo.\n\n[Open Folder](command:workbench.action.files.openFolder)\n\nAny folder works. If it holds a dbt project, ERD Studio also shows what dbt built.",
+        "contents": "Design your data model in Git, as DBML files: an open format, no lock-in.\n\n[Open Folder…](command:workbench.action.files.openFolder)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
         "when": "workspaceFolderCount == 0"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram](command:erdStudio.createDomain)\n\nSaved as YAML and JSON in .erd-studio/, reviewed like code.\n\n[Import DBML](command:erdStudio.importDbml)\n\nFrom dbdiagram.io or any DBML tool. Export back to DBML any time — an open format, no lock-in.\n\nNew to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)\n\nUsing dbt? Open its folder to compare your design with what dbt built.\n\n[Get started](command:erdStudio.showGettingStarted)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject"
+        "contents": "Loading diagrams…",
+        "when": "erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\nRather start blank? [New Diagram](command:erdStudio.createDomain)\n\nAlready have a DBML file, from dbdiagram.io or another tool? [Import DBML](command:erdStudio.importDbml) Export back to DBML or Mermaid any time — an open format, no lock-in.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
-        "when": "erdStudio.hasDbtProject"
+        "contents": "This project is from an older ERD Studio. Convert it once to DBML: nothing is lost.\n\n[Convert to DBML…](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && (erdStudio.storage == yaml || erdStudio.storage == mixed)"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "This dbt project's ERD Studio files are older. Convert them once to DBML: nothing is lost.\n\n[Convert to DBML…](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading && (erdStudio.storage == yaml || erdStudio.storage == mixed)"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == blank"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet. This folder has a Power BI or Fabric semantic model.\n\n[Import your Power BI semantic model](command:erdStudio.start?%5B%7B%22action%22%3A%22importSemanticModel%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSemanticModel"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet. This folder has CREATE TABLE scripts.\n\n[Import your SQL scripts](command:erdStudio.start?%5B%7B%22action%22%3A%22importSqlDdl%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSqlDdl"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet. This folder has a DBML file.\n\n[Import your DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22importDbmlFile%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importDbmlFile"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed"
       },
       {
         "view": "erdStudio.domainTree",
@@ -367,19 +582,172 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables found.\n\nTables are stored as one YAML file each under .erd-studio/.\n\nAdd tables to a subject area using the ERD editor to create them here."
+        "contents": "Loading tables…",
+        "when": "erdStudio.tablesLoading"
+      },
+      {
+        "view": "erdStudio.modelLibrary",
+        "contents": "No tables yet.\n\nEach table is a file in .erd-studio/ you can commit and review like code. Add one on a diagram's canvas, or ask your AI assistant.",
+        "when": "!erdStudio.tablesLoading"
+      },
+      {
+        "view": "erdStudio.relationships",
+        "contents": "No relationships yet.\n\nOn a diagram, drag a column onto a column of another table, or use + Add → New Relationship. Each one shows here under both of its tables."
       }
     ],
     "walkthroughs": [
       {
         "id": "erdStudio.getStarted",
         "title": "Get started with ERD Studio",
-        "description": "Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.",
+        "when": "workspaceFolderCount == 0 || erdStudio.activated",
+        "description": "Design your data model in Git. Let your AI build from it.",
         "steps": [
           {
+            "id": "openProject",
+            "title": "Open the folder your data model lives in",
+            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/, next to your code.\n[Open Folder…](command:workbench.action.files.openFolder)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "workspaceFolderCount == 0",
+            "media": {
+              "svg": "media/walkthrough/open-project.svg",
+              "altText": "A project file list with the .erd-studio folder highlighted."
+            },
+            "completionEvents": [
+              "onContext:erdStudio.hasProject",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "convert",
+            "title": "Convert to DBML",
+            "description": "This project is from an older ERD Studio. Convert it once to DBML: nothing is lost, and Git shows every file it changes.\n[Convert to DBML…](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "A project's tables and diagrams as DBML files, with DBML and Mermaid export."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.convertProjectToDbml",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "convertDbt",
+            "title": "Convert to DBML",
+            "description": "This project is from an older ERD Studio. Convert it once to DBML: nothing is lost, and Git shows every file it changes.\n[Convert to DBML…](command:erdStudio.start?%5B%7B%22action%22%3A%22convert%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasDbtProject && (erdStudio.storage == yaml || erdStudio.storage == mixed)",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "A project's tables and diagrams as DBML files, with DBML and Mermaid export."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.convertProjectToDbml",
+              "onCommand:erdStudio.drawFromDbt",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "newDiagram",
+            "title": "New Diagram",
+            "description": "Add tables on an empty canvas.\n[New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent != importSemanticModel && erdStudio.startIntent != importSqlDdl && erdStudio.startIntent != importDbmlFile",
+            "media": {
+              "svg": "media/walkthrough/new-diagram.svg",
+              "altText": "A new diagram with its first table, and the DBML files a new project keeps it in under .erd-studio."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.importModel",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "importSemanticModel",
+            "title": "Import your Power BI semantic model",
+            "description": "This folder has a Power BI or Fabric semantic model. Its tables and relationships become a diagram; measures stay in Power BI.\n[Import your Power BI semantic model](command:erdStudio.start?%5B%7B%22action%22%3A%22importSemanticModel%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSemanticModel",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "Tables imported into a diagram, kept as DBML files."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.importSemanticModel",
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importModel",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "importSqlDdl",
+            "title": "Import your SQL scripts",
+            "description": "This folder has CREATE TABLE scripts. Their tables, keys and foreign keys become a diagram.\n[Import your SQL scripts](command:erdStudio.start?%5B%7B%22action%22%3A%22importSqlDdl%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSqlDdl",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "Tables imported into a diagram, kept as DBML files."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.importSqlDdl",
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importModel",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "importDbmlFile",
+            "title": "Import your DBML file",
+            "description": "This folder has a DBML file. Its tables and relationships become a diagram.\n[Import your DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22importDbmlFile%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importDbmlFile",
+            "media": {
+              "svg": "media/walkthrough/import-dbml.svg",
+              "altText": "Tables imported into a diagram, kept as DBML files."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importModel",
+              "onCommand:erdStudio.openExampleProject",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "draw",
+            "title": "Import from dbt",
+            "description": "This folder is a dbt project: your dbt models and their relationship tests become a diagram you can edit, by hand or with your AI assistant.\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22walkthrough%22%7D%5D)\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22walkthrough%22%7D%5D)",
+            "when": "erdStudio.hasDbtProject && !erdStudio.hasDiagrams && erdStudio.storage != yaml && erdStudio.storage != mixed",
+            "media": {
+              "svg": "media/walkthrough/draw.svg",
+              "altText": "dbt models picked from a list and drawn as a diagram with relationships."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.drawFromDbt",
+              "onCommand:erdStudio.createDomain",
+              "onCommand:erdStudio.importDbml",
+              "onCommand:erdStudio.importModel",
+              "onCommand:erdStudio.start"
+            ]
+          },
+          {
+            "id": "openDiagram",
+            "title": "Open a diagram from this project",
+            "description": "This project already has diagrams in .erd-studio/. Open one to see its tables and how they relate.\n[Open Diagram](command:erdStudio.openDomain)",
+            "when": "erdStudio.hasDiagrams",
+            "media": {
+              "svg": "media/walkthrough/sample.svg",
+              "altText": "A project folder holding .erd-studio/, and a star schema diagram opened from it."
+            },
+            "completionEvents": [
+              "onCommand:erdStudio.openDomain"
+            ]
+          },
+          {
             "id": "watch",
-            "title": "Watch the one-minute tour",
-            "description": "A one-minute video: draw your dbt project with Draw from dbt, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the video](command:erdStudio.showGettingStarted)",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, edit it by hand or with AI, then compare it with what dbt builds.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "erdStudio.hasDbtProject",
             "media": {
               "svg": "media/walkthrough/watch.svg",
@@ -390,80 +758,28 @@
             ]
           },
           {
-            "id": "openProject",
-            "title": "Open the folder your data model lives in",
-            "description": "Any folder works: ERD Studio keeps your design in .erd-studio/ next to your code. If the folder holds a dbt project, ERD Studio finds it by itself and also shows what dbt built.\n[Open Folder](command:workbench.action.files.openFolder)",
-            "when": "workspaceFolderCount == 0",
-            "media": {
-              "svg": "media/walkthrough/open-project.svg",
-              "altText": "A project file list with dbt_project.yml highlighted."
-            },
-            "completionEvents": [
-              "onContext:erdStudio.hasProject"
-            ]
-          },
-          {
-            "id": "newDiagram",
-            "title": "Draw your first data model — no dbt needed",
-            "description": "Start a blank diagram and add tables on the canvas. Each table is a YAML file in .erd-studio/ that you commit and review like code.\n[New Diagram](command:erdStudio.createDomain)\nNew to data modelling? Start from a small coffee-shop star schema instead.\n[Open Example Diagram](command:erdStudio.openExampleDiagram)",
+            "id": "watchLogical",
+            "title": "Watch the Tour",
+            "description": "Bring in your data model, see its DBML files next to your code, and edit it by hand or with your AI assistant.\n[Watch the Tour](command:erdStudio.showGettingStarted)\nOr: [Show Me Around](command:erdStudio.showMeAround)",
             "when": "!erdStudio.hasDbtProject",
             "media": {
-              "svg": "media/walkthrough/new-diagram.svg",
-              "altText": "A new diagram with its first table, saved as YAML and JSON files in .erd-studio."
+              "svg": "media/walkthrough/watch-logical.svg",
+              "altText": "A video player showing a small diagram of three related tables."
             },
             "completionEvents": [
-              "onCommand:erdStudio.createDomain",
-              "onCommand:erdStudio.openExampleDiagram"
-            ]
-          },
-          {
-            "id": "draw",
-            "title": "Draw your dbt project — no AI needed",
-            "description": "Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.\n[Draw from dbt](command:erdStudio.drawFromDbt)",
-            "when": "erdStudio.hasDbtProject",
-            "media": {
-              "svg": "media/walkthrough/draw.svg",
-              "altText": "dbt models picked from a list and drawn as a diagram with relationships."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.drawFromDbt"
-            ]
-          },
-          {
-            "id": "importDbml",
-            "title": "Start from a DBML file",
-            "description": "From dbdiagram.io or any DBML tool. Export back to DBML or Mermaid any time: an open format, no lock-in.\n[Import DBML…](command:erdStudio.importDbml)",
-            "media": {
-              "svg": "media/walkthrough/import-dbml.svg",
-              "altText": "A DBML file turned into a diagram, with DBML and Mermaid export."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.importDbml"
+              "onCommand:erdStudio.showGettingStarted"
             ]
           },
           {
             "id": "enrich",
             "title": "Enrich it with your AI assistant",
-            "description": "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
+            "description": "Add grain, keys, purpose and decisions, and your team's modelling style. Set Up My AI Helper adds a guide for your AI coding assistant; then type /erd-studio-setup in it.\n[Set Up My AI Helper](command:erdStudio.setupAiHelper)",
             "media": {
               "svg": "media/walkthrough/enrich.svg",
               "altText": "A table with key badges, typed columns and a grain note."
             },
             "completionEvents": [
               "onCommand:erdStudio.setupAiHelper"
-            ]
-          },
-          {
-            "id": "sample",
-            "title": "Using dbt? Try the sample project",
-            "description": "A small dbt project to compare a design with what dbt built.\n[Try the sample project](command:erdStudio.trySampleProject)",
-            "when": "!erdStudio.hasDbtProject",
-            "media": {
-              "svg": "media/walkthrough/sample.svg",
-              "altText": "A sample dbt project folder and the star schema diagram drawn from it."
-            },
-            "completionEvents": [
-              "onCommand:erdStudio.trySampleProject"
             ]
           }
         ]
@@ -472,18 +788,119 @@
     "customEditors": [
       {
         "viewType": "erdStudio.domainEditor",
-        "displayName": "Subject Area Editor",
+        "displayName": "ERD Studio Diagram",
         "selector": [
           {
             "filenamePattern": "**/.erd-studio/*/*.json"
           },
           {
             "filenamePattern": "**/erd-studio/*/*.json"
+          },
+          {
+            "filenamePattern": "**/.erd-studio/*/diagrams/*.dbml"
           }
         ],
         "priority": "default"
       }
     ],
+    "languages": [
+      {
+        "id": "dbml",
+        "aliases": [
+          "DBML"
+        ],
+        "extensions": [
+          ".dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json"
+      },
+      {
+        "id": "dbml-diagram",
+        "aliases": [
+          "DBML Diagram"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/diagrams/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-diagram-light.svg",
+          "dark": "./media/file-icons/dbml-diagram-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-table",
+        "aliases": [
+          "DBML Table"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/tables/*/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-table-light.svg",
+          "dark": "./media/file-icons/dbml-table-dark.svg"
+        }
+      },
+      {
+        "id": "dbml-relationships",
+        "aliases": [
+          "DBML Relationships"
+        ],
+        "filenamePatterns": [
+          "**/.erd-studio/*/relationships/*.dbml"
+        ],
+        "configuration": "./syntaxes/dbml.language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dbml-relationships-light.svg",
+          "dark": "./media/file-icons/dbml-relationships-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dbml",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-diagram",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-table",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      },
+      {
+        "language": "dbml-relationships",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[dbml]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-diagram]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-table]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "[dbml-relationships]": {
+        "editor.defaultFormatter": "liamwynne.erd-studio",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      }
+    },
     "menus": {
       "view/item/context": [
         {
@@ -497,24 +914,59 @@
           "group": "7_modification@1"
         },
         {
-          "command": "erdStudio.deleteDomain",
-          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "command": "erdStudio.moveDiagram",
+          "when": "view == erdStudio.domainTree && viewItem == domain && erdStudio.storage =~ /^(dbml|mixed)$/",
           "group": "7_modification@2"
         },
         {
+          "command": "erdStudio.deleteDomain",
+          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "group": "7_modification@3"
+        },
+        {
+          "command": "erdStudio.createDomain",
+          "when": "view == erdStudio.domainTree && viewItem == layerCreatable",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.createDomain",
+          "when": "view == erdStudio.domainTree && viewItem == layerCreatable",
+          "group": "1_new@1"
+        },
+        {
           "command": "erdStudio.editLayer",
-          "when": "view == erdStudio.domainTree && viewItem == layer",
+          "when": "view == erdStudio.domainTree && viewItem =~ /^layer/",
           "group": "7_modification@1"
         },
         {
           "command": "erdStudio.removeLayer",
-          "when": "view == erdStudio.domainTree && viewItem == layer",
+          "when": "view == erdStudio.domainTree && viewItem =~ /^layer/",
           "group": "7_modification@2"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly)?$/",
+          "group": "navigation@0"
         },
         {
           "command": "erdStudio.revealLogicalModel",
           "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate)?$/",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.addToDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.moveTable",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@0"
         },
         {
           "command": "erdStudio.deleteLogicalModel",
@@ -530,74 +982,223 @@
           "command": "erdStudio.resolveDuplicateModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
           "group": "7_modification@0"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem == relationshipsTable",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping != file",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping == file",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.relationships && viewItem =~ /^(relationship|relationshipsTable)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "view == erdStudio.relationships && viewItem == relationship",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.refreshMyReports",
+          "when": "view == erdStudio.help && viewItem == myReports",
+          "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "erdStudio.moveTable",
+          "when": "resourceLangId == dbml-table && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "resourceLangId == dbml-diagram && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "7_modification@9"
         }
       ],
       "view/title": [
         {
-          "command": "erdStudio.organizeModelLibrary",
-          "when": "view == erdStudio.modelLibrary",
+          "submenu": "erdStudio.newMenu",
+          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
           "group": "navigation@0"
         },
         {
+          "command": "erdStudio.selectDbtProject",
+          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects",
+          "group": "1_project@1"
+        },
+        {
+          "command": "erdStudio.exportAllDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
+          "group": "2_export@1"
+        },
+        {
+          "command": "erdStudio.goToTable",
+          "when": "view == erdStudio.modelLibrary && erdStudio.hasProject",
+          "group": "navigation@0"
+        },
+        {
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "group": "1_organise@0"
+        },
+        {
           "command": "erdStudio.moveRelationshipsToLibrary",
-          "when": "view == erdStudio.modelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
           "group": "1_organise@1"
         },
         {
           "command": "erdStudio.migrateToTableNaming",
-          "when": "view == erdStudio.modelLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage == yaml",
           "group": "1_organise@2"
         },
         {
-          "command": "erdStudio.drawFromDbt",
-          "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
-          "group": "navigation@0"
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "view == erdStudio.modelLibrary && erdStudio.storage != dbml",
+          "group": "1_organise@3"
         },
         {
-          "command": "erdStudio.createDomain",
-          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
-          "group": "navigation@0"
-        },
-        {
-          "command": "erdStudio.importDbml",
-          "when": "view == erdStudio.domainTree && erdStudio.hasProject",
-          "group": "1_create@1"
-        },
-        {
-          "command": "erdStudio.installCodingHarness",
-          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
+          "command": "erdStudio.groupRelationshipsByFile",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsGrouping != file",
           "group": "navigation@1"
         },
         {
-          "command": "erdStudio.addLayer",
-          "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
-          "group": "navigation@2"
-        },
-        {
-          "command": "erdStudio.selectDbtProject",
-          "when": "view == erdStudio.domainTree && erdStudio.hasMultipleDbtProjects",
-          "group": "navigation@7"
-        },
-        {
-          "command": "erdStudio.showGettingStarted",
-          "when": "view == erdStudio.domainTree",
-          "group": "navigation@8"
-        },
-        {
-          "command": "erdStudio.reportBug",
-          "when": "view == erdStudio.domainTree",
-          "group": "navigation@9"
+          "command": "erdStudio.groupRelationshipsByTable",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsGrouping == file",
+          "group": "navigation@1"
         },
         {
           "command": "erdStudio.refreshMyReports",
-          "when": "view == erdStudio.myReports",
+          "when": "view == erdStudio.help && erdStudio.hasTrackedReports",
+          "group": "2_reports@1"
+        },
+        {
+          "command": "erdStudio.showGettingStarted",
+          "when": "view == erdStudio.domainTree && !erdStudio.hasProject",
           "group": "navigation@0"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.hasProject && !erdStudio.diagramsFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.clearDiagramsFilter",
+          "when": "view == erdStudio.domainTree && erdStudio.diagramsFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "view == erdStudio.domainTree && erdStudio.diagramsFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "view == erdStudio.modelLibrary && !erdStudio.tableLibraryFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.clearTableLibraryFilter",
+          "when": "view == erdStudio.modelLibrary && erdStudio.tableLibraryFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "view == erdStudio.modelLibrary && erdStudio.tableLibraryFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "view == erdStudio.relationships && !erdStudio.relationshipsFiltered",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.clearRelationshipsFilter",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsFiltered",
+          "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "view == erdStudio.relationships && erdStudio.relationshipsFiltered",
+          "group": "0_filter@0"
+        },
+        {
+          "command": "erdStudio.showRowDetails",
+          "when": "view =~ /^erdStudio\\.(domainTree|modelLibrary|relationships)$/ && erdStudio.hasProject && erdStudio.sidebarRowDetails != full",
+          "group": "9_rowDetails@0"
+        },
+        {
+          "command": "erdStudio.hideRowDetails",
+          "when": "view =~ /^erdStudio\\.(domainTree|modelLibrary|relationships)$/ && erdStudio.hasProject && erdStudio.sidebarRowDetails == full",
+          "group": "9_rowDetails@0"
         }
       ],
       "commandPalette": [
         {
+          "command": "erdStudio.openExampleDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "erdStudio.hasProject && erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.setupSemanticDirectory",
+          "when": "erdStudio.storage != dbml || !erdStudio.hasSemanticDir"
+        },
+        {
+          "command": "erdStudio.initializeLayerConfig",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.migrateToV5",
+          "when": "erdStudio.storage != dbml"
+        },
+        {
+          "command": "erdStudio.migrateToTableNaming",
+          "when": "erdStudio.storage == yaml"
+        },
+        {
+          "command": "erdStudio.convertProjectToDbml",
+          "when": "erdStudio.hasProject"
+        },
+        {
           "command": "erdStudio.importDbml",
           "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.importModel",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.importSqlDdl",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.importSemanticModel",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.turnOffStartSuggestions",
+          "when": "erdStudio.hasProject && !erdStudio.startSuggestionsOff"
+        },
+        {
+          "command": "erdStudio.turnOnStartSuggestions",
+          "when": "erdStudio.hasProject && erdStudio.startSuggestionsOff"
         },
         {
           "command": "erdStudio.drawFromDbt",
@@ -618,9 +1219,146 @@
         {
           "command": "erdStudio.stripLegacyDomainTags",
           "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.trySampleProject",
+          "when": "erdStudio.hasDbtProject"
+        },
+        {
+          "command": "erdStudio.moveTable",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.moveDiagram",
+          "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.openInDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.openRelationshipSource",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.goToTable",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.customiseFields",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.addToDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.revealInTableLibrary",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.filterDiagrams",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.clearDiagramsFilter",
+          "when": "erdStudio.diagramsFiltered"
+        },
+        {
+          "command": "erdStudio.filterTableLibrary",
+          "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "command": "erdStudio.clearTableLibraryFilter",
+          "when": "erdStudio.tableLibraryFiltered"
+        },
+        {
+          "command": "erdStudio.filterRelationships",
+          "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "command": "erdStudio.clearRelationshipsFilter",
+          "when": "erdStudio.relationshipsFiltered"
+        },
+        {
+          "command": "erdStudio.showRowDetails",
+          "when": "erdStudio.hasProject && erdStudio.sidebarRowDetails != full"
+        },
+        {
+          "command": "erdStudio.hideRowDetails",
+          "when": "erdStudio.hasProject && erdStudio.sidebarRowDetails == full"
+        },
+        {
+          "command": "erdStudio.groupRelationshipsByFile",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.groupRelationshipsByTable",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.start",
+          "when": "false"
+        }
+      ],
+      "erdStudio.newMenu": [
+        {
+          "command": "erdStudio.createDomain",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@1"
+        },
+        {
+          "command": "erdStudio.drawFromDbt",
+          "when": "erdStudio.hasDbtProject",
+          "group": "1_diagram@2"
+        },
+        {
+          "command": "erdStudio.importDbml",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@3"
+        },
+        {
+          "command": "erdStudio.importSqlDdl",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@4"
+        },
+        {
+          "command": "erdStudio.importSemanticModel",
+          "when": "erdStudio.hasProject",
+          "group": "1_diagram@5"
+        },
+        {
+          "command": "erdStudio.addLayer",
+          "when": "erdStudio.hasSemanticDir",
+          "group": "2_layer@1"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "erdStudio.filterDiagrams",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.domainTree"
+      },
+      {
+        "command": "erdStudio.filterTableLibrary",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.modelLibrary"
+      },
+      {
+        "command": "erdStudio.filterRelationships",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == erdStudio.relationships"
+      },
+      {
+        "command": "erdStudio.cancelSidebarFilter",
+        "key": "escape",
+        "when": "erdStudio.sidebarFilterOpen"
+      }
+    ],
     "configuration": {
       "title": "ERD Studio",
       "properties": {
@@ -632,12 +1370,13 @@
         "erdStudio.semanticDir": {
           "type": "string",
           "default": ".erd-studio",
-          "description": "Relative path to ERD Studio subject area files within the project. Changing this requires a window reload."
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams. Changing this requires a window reload."
         },
         "erdStudio.claudeSync.skipPermissions": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
-          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
+          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first. Read from your user settings only: a workspace's `.vscode/settings.json` cannot turn it on."
         },
         "erdStudio.feedback.aiAssist": {
           "scope": "machine",
@@ -700,7 +1439,7 @@
             "telemetry",
             "usesOnlineServices"
           ],
-          "markdownDescription": "Send one anonymous usage heartbeat a day: which ERD Studio features were used and how often, bucketed project sizes and error counts — never names, paths, file contents or error messages. This setting can only turn telemetry **off**: VS Code's `#telemetry.telemetryLevel#` must also allow it, and nothing is sent when that is `off`. See [Telemetry](https://github.com/liam-machine/erd-studio#telemetry) for every field sent and how long it is kept."
+          "markdownDescription": "Send one anonymous usage heartbeat a day, plus at most three same-day interim copies in an install's first week, the week after a major update or on a day with an error: which ERD Studio features were used and how often, bucketed project sizes and error counts — never names, paths, file contents or error messages. This setting can only turn telemetry **off**: VS Code's `#telemetry.telemetryLevel#` must also allow it, and nothing is sent when that is `off`. See [Telemetry](https://github.com/liam-machine/erd-studio/blob/main/telemetry/README.md) for every field sent and how long it is kept."
         },
         "erdStudio.checkKnownFixes": {
           "scope": "machine",
@@ -711,6 +1450,45 @@
           ],
           "markdownDescription": "When ERD Studio hits an error that a newer release already fixes, say so and offer **Update**. The first error in a session downloads the list of known fixes (once a day at most) from ERD Studio's server; the request carries nothing about you, your project or the error — the list is matched on your machine. Works whether or not `#erdStudio.telemetry.enabled#` is on."
         },
+        "erdStudio.startSuggestions": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "When a folder with no diagram opens and ERD Studio finds an obvious start in it (CREATE TABLE scripts, a Power BI or Fabric semantic model, a DBML file), offer once to create the diagram from it; when you open the Diagrams view of a folder with nothing to start from, say so and show how to bring in a data model from Databricks, Snowflake, Power BI or Fabric. Closing either asks again in a later window, at most three times per folder. Set this to `false` in a repository's `.vscode/settings.json` to turn it off for everyone who opens it, or in your user settings to turn it off everywhere. **ERD Studio: Turn Off Start Suggestions for This Folder** turns it off for one folder on this machine only."
+        },
+        "erdStudio.dbml.offerConvert": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When you open a diagram in a YAML/JSON project, offer once a session to convert it to DBML. Your project keeps working as it is either way; turn this off to stop the offer in every workspace. **ERD Studio: Convert Project to DBML** still works from the Command Palette."
+        },
+        "erdStudio.dbml.updateReferencesOnMove": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask each time, with Update, Always and Never.",
+            "Update the files that point at it without asking.",
+            "Leave every file as it is, and ask nothing. A file moved where ERD Studio does not read it is still pointed out."
+          ],
+          "default": "prompt",
+          "markdownDescription": "When you move or rename a `.dbml` file (or a folder of them) in the Explorer in a DBML project, update the diagrams and relationships files that point at it: their `use` lines, and the table's schema (`Table crm.fct_order`) when it lands in another schema folder. Renaming a table file renames the table everywhere, since its file name is its name. Each update is one step for **Edit > Undo**. **Move Table…** and **Move Diagram to Layer…** always update them, whatever this says."
+        },
+        "erdStudio.sidebar.rowDetails": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "enumDescriptions": [
+            "Quiet rows: beside each name, only what is unusual or tells it apart (a warehouse name that differs, a table on no diagram, tables from other layers, a problem). Counts, owners and which diagrams show a table are in each row's hover.",
+            "Every detail beside every name: how many diagrams, tables, schemas and relationships each row holds, each table's owner and how many diagrams show it."
+          ],
+          "default": "compact",
+          "markdownDescription": "How much the rows of the **Diagrams**, **Table Library** and **Relationships** views say beside their names. **Show Row Details** and **Hide Row Details**, in each view's **…** menu, switch it."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",
@@ -719,7 +1497,7 @@
         "dbtSemantic.semanticDir": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.semanticDir#` instead. Legacy values are still honoured.",
-          "description": "Relative path to ERD Studio subject area files within the project"
+          "description": "Folder, relative to the project, that holds ERD Studio's tables and diagrams"
         }
       }
     }
@@ -733,7 +1511,12 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
-    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
+    "regen-fixtures": "esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-fixtures.cjs && node scripts/.regen-fixtures.cjs",
+    "regen:dbt-dbml-fixture": "esbuild scripts/regen-dbt-dbml-fixture.ts --bundle --platform=node --format=cjs --loader:.md=text --log-level=warning --outfile=scripts/.regen-dbt-dbml-fixture.cjs && node scripts/.regen-dbt-dbml-fixture.cjs",
+    "test:e2e:dbml": "node scripts/e2e-dbml.mjs",
+    "eval:sync-ai": "node test/skill-evals/sync-apply/run.mjs",
+    "stories": "node test/stories/run.mjs",
+    "stories:record": "node test/stories/run.mjs --record"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
@@ -746,13 +1529,16 @@
     "jsdom": "^25.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
   },
   "dependencies": {
-    "@dbml/parse": "10.3.1",
+    "@dbml/core": "11.0.0",
+    "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.4.0",
     "@erd-studio/renderer": "0.4.0",
-    "@xyflow/react": "^12.4.0",
+    "@xyflow/react": "^12.5.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

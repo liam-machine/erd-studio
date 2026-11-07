@@ -63,6 +63,12 @@ export interface YmlModelInfo {
   tags: string[];
   /** dbt `meta:` (merged with `config: meta:`), when non-empty. CLI inventory only. */
   meta?: Meta;
+  /**
+   * The custom schema the model's `config: schema:` sets, when it does: the
+   * schema the developer wrote, the same on every machine (a DBML table's
+   * schema folder, §2.4). Absent when none is set.
+   */
+  configSchema?: string;
 }
 
 /**

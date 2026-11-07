@@ -96,32 +96,56 @@
     },
     "rationale": {
       "type": "object",
-      "description": "Why the model is designed this way. Every field is optional; omit the whole object when it would be empty. The canvas shows an \"R\" badge on models that have one.",
+      "description": "The table's built-in text fields (context fields), under camelCase keys (openQuestions, not open_questions). Every field is optional; omit the whole object when it would be empty. Team fields go in meta. The canvas shows an \"R\" badge on models that have one.",
       "additionalProperties": false,
       "properties": {
         "purpose": {
           "type": "string",
-          "description": "What requirements or purpose this model fulfils."
+          "description": "Purpose: who uses this table and the question it answers."
+        },
+        "decisions": {
+          "type": "string",
+          "description": "Decisions: a choice a later editor might undo, and why."
+        },
+        "openQuestions": {
+          "type": "string",
+          "description": "Open questions: what is still undecided. Assistants ask about these and never guess."
         },
         "design": {
           "type": "string",
-          "description": "Why the model was designed this way — trade-offs, constraints, patterns."
+          "description": "Retired (Design): still read and shown. Move its text to decisions, or to purpose."
         },
         "grainChoice": {
           "type": "string",
-          "description": "Why this grain was chosen over alternatives."
+          "description": "Retired (Grain choice): still read and shown. Move its text to decisions."
         },
         "roleChoice": {
           "type": "string",
-          "description": "Why this model role was selected."
+          "description": "Retired (Role choice): still read and shown. Move its text to decisions."
         },
         "scdStrategy": {
           "type": "string",
-          "description": "Overall SCD strategy across dimension attributes."
+          "description": "History: how this dimension keeps history — which columns track changes and which overwrite."
         },
         "measures": {
           "type": "string",
-          "description": "Why measures are structured this way — additive type choices."
+          "description": "Measures: how the measures add up — which sum across every dimension and which do not."
+        },
+        "sourceOfTruth": {
+          "type": "string",
+          "description": "Source of truth: the system this data is mastered in."
+        },
+        "freshness": {
+          "type": "string",
+          "description": "Freshness: how fresh it must be, and how often it loads."
+        },
+        "knownIssues": {
+          "type": "string",
+          "description": "Known issues: data problems a consumer should know before trusting a number."
+        },
+        "retention": {
+          "type": "string",
+          "description": "Retention: how long rows are kept, and why."
         }
       }
     },
@@ -186,7 +210,7 @@
     },
     "meta": {
       "type": "object",
-      "description": "Structured metadata — owner, source system, lineage, anything your team records — in the shape of dbt's `meta:`. Free-form: values may be text, numbers, true/false, lists or nested maps. The canvas shows it in the Detail panel and edits top-level text values; ERD Studio never compares it with dbt.",
+      "description": "Your team's own fields — owner, source system, lineage, anything .erd-studio/fields.yml lists or your team records — in the shape of dbt's `meta:`. Free-form: values may be text, numbers, true/false, lists or nested maps. The canvas shows them in the Detail panel's fields and edits top-level text values; ERD Studio never compares them with dbt.",
       "additionalProperties": true
     },
     "relationship": {

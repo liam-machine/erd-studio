@@ -145,6 +145,38 @@
         "materialized": "ephemeral"
       }
     },
+    "model.my_dbt_project.stg_raw_refunds": {
+      "unique_id": "model.my_dbt_project.stg_raw_refunds",
+      "name": "stg_raw_refunds",
+      "resource_type": "model",
+      "schema": "staging_payments",
+      "description": "Staging model for raw refunds, built in the payments custom schema (+schema: payments)",
+      "original_file_path": "models/staging/stg_raw_refunds.sql",
+      "columns": {
+        "refund_id": {
+          "name": "refund_id",
+          "data_type": "INT",
+          "description": "Refund identifier"
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "data_type": "INT",
+          "description": "FK to payments"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "DECIMAL",
+          "description": "Refund amount"
+        }
+      },
+      "depends_on": {
+        "nodes": []
+      },
+      "config": {
+        "materialized": "view",
+        "schema": "payments"
+      }
+    },
     "test.my_dbt_project.unique_fct_task_event_event_id": {
       "unique_id": "test.my_dbt_project.unique_fct_task_event_event_id",
       "name": "unique_fct_task_event_event_id",

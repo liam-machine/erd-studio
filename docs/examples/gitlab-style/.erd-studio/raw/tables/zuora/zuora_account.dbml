@@ -1,0 +1,10 @@
+// Same warehouse name as sfdc_account (account), in another schema: see that file.
+Table zuora.zuora_account [alias: 'account'] {
+  Note: 'Zuora billing accounts, as extracted.'
+
+  id            STRING [pk, note: 'Zuora account id']
+  accountnumber STRING
+  crmid         STRING [note: 'The Salesforce account id']
+  currency      STRING
+  _uploaded_at  TIMESTAMP
+}

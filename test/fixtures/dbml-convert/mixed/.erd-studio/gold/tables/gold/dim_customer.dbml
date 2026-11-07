@@ -1,0 +1,4 @@
+Table gold.dim_customer {
+  customer_key  INT     [pk]
+  customer_name VARCHAR
+}

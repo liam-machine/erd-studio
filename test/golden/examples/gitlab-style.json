@@ -1,0 +1,246 @@
+{
+  "example": "gitlab-style",
+  "layers": [
+    {
+      "id": "raw",
+      "label": "RAW",
+      "abbreviation": "RAW"
+    },
+    {
+      "id": "prep",
+      "label": "PREP",
+      "abbreviation": "PRP"
+    },
+    {
+      "id": "prod",
+      "label": "PROD",
+      "abbreviation": "PRD"
+    }
+  ],
+  "tables": {
+    "common.dim_billing_account": {
+      "layer": "prod",
+      "schema": "common",
+      "role": "conformed-dim",
+      "grain": "One row per Zuora account",
+      "columns": [
+        "dim_billing_account_id STRING pk",
+        "dim_crm_account_id STRING fk",
+        "billing_account_number STRING nk",
+        "currency STRING"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "common.dim_crm_account": {
+      "layer": "prod",
+      "schema": "common",
+      "role": "conformed-dim",
+      "grain": "One row per Salesforce account",
+      "columns": [
+        "dim_crm_account_id STRING pk",
+        "crm_account_name STRING scd1",
+        "crm_account_type STRING scd1"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "common.dim_date": {
+      "layer": "prod",
+      "schema": "common",
+      "role": "conformed-dim",
+      "grain": "One row per calendar day",
+      "columns": [
+        "date_id INT pk",
+        "date_actual DATE",
+        "first_day_of_month DATE",
+        "fiscal_quarter_name STRING"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "common.dim_subscription": {
+      "layer": "prod",
+      "schema": "common",
+      "role": "domain-dim",
+      "grain": "One row per subscription",
+      "columns": [
+        "dim_subscription_id STRING pk",
+        "dim_billing_account_id STRING fk",
+        "subscription_name STRING nk",
+        "subscription_status STRING scd1",
+        "term_start_date DATE",
+        "term_end_date DATE"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "common.fct_mrr": {
+      "layer": "prod",
+      "schema": "common",
+      "role": "periodic-snapshot",
+      "grain": "One row per subscription per month",
+      "columns": [
+        "mrr_id STRING pk",
+        "dim_date_id INT fk",
+        "dim_subscription_id STRING fk",
+        "dim_billing_account_id STRING fk",
+        "dim_crm_account_id STRING fk",
+        "mrr DECIMAL(18,2) semi-additive",
+        "arr DECIMAL(18,2) semi-additive"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "common_mart.mart_arr": {
+      "layer": "prod",
+      "schema": "common_mart",
+      "role": "gold-fact",
+      "grain": "One row per subscription per month",
+      "columns": [
+        "primary_key STRING pk",
+        "arr_month DATE",
+        "crm_account_name STRING",
+        "billing_account_number STRING",
+        "subscription_name STRING",
+        "mrr DECIMAL(18,2) semi-additive",
+        "arr DECIMAL(18,2) semi-additive"
+      ],
+      "newRelationshipsFile": "prod/relationships/prod.dbml"
+    },
+    "sfdc.sfdc_account": {
+      "layer": "raw",
+      "schema": "sfdc",
+      "alias": "account",
+      "columns": [
+        "id STRING pk",
+        "name STRING",
+        "type STRING",
+        "ownerid STRING",
+        "isdeleted BOOLEAN",
+        "_uploaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
+    },
+    "sfdc.sfdc_account_source": {
+      "layer": "prep",
+      "schema": "sfdc",
+      "grain": "One row per Salesforce account",
+      "columns": [
+        "account_id STRING pk nk",
+        "account_name STRING",
+        "account_type STRING",
+        "owner_id STRING"
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
+    },
+    "zuora.zuora_account": {
+      "layer": "raw",
+      "schema": "zuora",
+      "alias": "account",
+      "columns": [
+        "id STRING pk",
+        "accountnumber STRING",
+        "crmid STRING",
+        "currency STRING",
+        "_uploaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
+    },
+    "zuora.zuora_account_source": {
+      "layer": "prep",
+      "schema": "zuora",
+      "grain": "One row per Zuora account",
+      "columns": [
+        "account_id STRING pk nk",
+        "account_number STRING",
+        "crm_id STRING",
+        "currency STRING"
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
+    },
+    "zuora.zuora_subscription": {
+      "layer": "raw",
+      "schema": "zuora",
+      "alias": "subscription",
+      "columns": [
+        "id STRING pk",
+        "accountid STRING fk",
+        "name STRING",
+        "status STRING",
+        "termstartdate DATE",
+        "termenddate DATE",
+        "_uploaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "raw/relationships/raw.dbml"
+    },
+    "zuora.zuora_subscription_source": {
+      "layer": "prep",
+      "schema": "zuora",
+      "grain": "One row per Zuora subscription version",
+      "columns": [
+        "subscription_id STRING pk nk",
+        "account_id STRING fk",
+        "subscription_name STRING",
+        "subscription_status STRING",
+        "term_start_date DATE",
+        "term_end_date DATE"
+      ],
+      "newRelationshipsFile": "prep/relationships/prep.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "prep/diagrams/source-models.dbml",
+      "name": "source-models",
+      "layer": "prep",
+      "tables": [
+        "sfdc.sfdc_account_source",
+        "zuora.zuora_account_source",
+        "zuora.zuora_subscription_source"
+      ],
+      "relationships": [
+        "zuora_subscription_source.account_id -> zuora_account_source.account_id many-to-one"
+      ]
+    },
+    {
+      "file": "prod/diagrams/arr-mart.dbml",
+      "name": "arr-mart",
+      "layer": "prod",
+      "tables": [
+        "common_mart.mart_arr"
+      ],
+      "relationships": []
+    },
+    {
+      "file": "prod/diagrams/arr.dbml",
+      "name": "arr",
+      "layer": "prod",
+      "tables": [
+        "common.dim_billing_account",
+        "common.dim_crm_account",
+        "common.dim_date",
+        "common.dim_subscription",
+        "common.fct_mrr",
+        "sfdc.sfdc_account",
+        "zuora.zuora_account_source"
+      ],
+      "relationships": [
+        "dim_billing_account.dim_crm_account_id -> dim_crm_account.dim_crm_account_id many-to-one",
+        "dim_subscription.dim_billing_account_id -> dim_billing_account.dim_billing_account_id many-to-one",
+        "fct_mrr.dim_billing_account_id -> dim_billing_account.dim_billing_account_id many-to-one",
+        "fct_mrr.dim_crm_account_id -> dim_crm_account.dim_crm_account_id many-to-one",
+        "fct_mrr.dim_date_id -> dim_date.date_id many-to-one",
+        "fct_mrr.dim_subscription_id -> dim_subscription.dim_subscription_id many-to-one"
+      ]
+    },
+    {
+      "file": "raw/diagrams/sources.dbml",
+      "name": "sources",
+      "layer": "raw",
+      "tables": [
+        "sfdc.sfdc_account",
+        "zuora.zuora_account",
+        "zuora.zuora_subscription"
+      ],
+      "relationships": [
+        "zuora_subscription.accountid -> zuora_account.id many-to-one"
+      ]
+    }
+  ]
+}

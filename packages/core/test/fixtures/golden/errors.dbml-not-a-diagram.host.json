@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "<root>/.erd-studio/silver/tables/silver/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in silver/diagrams/. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.",
+    "kind": "not-a-domain"
+  }
+}

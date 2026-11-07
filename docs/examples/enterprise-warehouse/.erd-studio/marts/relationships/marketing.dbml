@@ -1,0 +1,9 @@
+// The marketing team's relationships. A table's relationships stay together: once one of a table's is here, its next ones are saved here too.
+use { table marts.dim_campaign }          from '../tables/marts/dim_campaign.dbml'
+use { table marts.dim_customer }          from '../tables/marts/dim_customer.dbml'
+use { table marts.dim_date }              from '../tables/marts/dim_date.dbml'
+use { table marts.fct_campaign_response } from '../tables/marts/fct_campaign_response.dbml'
+
+Ref: marts.fct_campaign_response.campaign_key >? marts.dim_campaign.campaign_key
+Ref: marts.fct_campaign_response.customer_key >? marts.dim_customer.customer_key
+Ref: marts.fct_campaign_response.date_key >? marts.dim_date.date_key

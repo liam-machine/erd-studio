@@ -1,0 +1,14 @@
+Table atlas_derived.clients_daily_v6 [grain: 'One row per client per day'] {
+  Note: 'Each client\'s activity on each day, from the main pings.'
+
+  submission_date    DATE
+  client_id          STRING [foreign_key: 'true']
+  sample_id          INT
+  active_hours_sum   FLOAT  [additive_type: 'additive']
+  search_count_all   INT    [additive_type: 'additive']
+  country            STRING
+  normalized_channel STRING
+  indexes {
+    (submission_date, client_id) [pk]
+  }
+}

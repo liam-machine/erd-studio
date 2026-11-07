@@ -1,0 +1,11 @@
+Table common.dim_billing_account [
+  role: 'conformed-dim',
+  grain: 'One row per Zuora account'
+] {
+  Note: 'Customers as billing knows them, each tied to a Salesforce account.'
+
+  dim_billing_account_id STRING [pk, note: 'The Zuora account id']
+  dim_crm_account_id     STRING [foreign_key: 'true']
+  billing_account_number STRING [natural_key: 'true']
+  currency               STRING
+}

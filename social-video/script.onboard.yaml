@@ -1,5 +1,5 @@
 # LinkedIn cut: "from dbt project to diagram in a minute" (VARIANT=onboard). How the first run
-# works after the onboarding release: the Get Started walkthrough, Draw from dbt (no AI), the
+# works after the onboarding release: the Get Started walkthrough, Import from dbt (no AI), the
 # auto-laid-out canvas, Physical + Compare, enriching with an AI assistant, the Codespaces
 # sample for people without a dbt project, and teammates finding committed diagrams.
 #
@@ -59,11 +59,11 @@ scenes:
     chapter: 2
     minDur: 7
     accent: blue
-    headline: ["Click {Draw from dbt}.", "Pick a folder."]
+    headline: ["Click {Import from dbt}.", "Pick a folder."]
     lines:
       - id: o_click
         beat: click
-        caption: Click {Draw from dbt}.
+        caption: Click {Import from dbt}.
       - id: o_pick
         beat: pick
         caption: Pick a folder, | like your {marts}.

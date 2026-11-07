@@ -1,0 +1,10 @@
+Table shipping.carrier [
+  grain: 'One row per carrier',
+  owner: 'shipping-team'
+] {
+  Note: 'The carriers that deliver for us.'
+
+  carrier_code  STRING [pk, natural_key: 'true']
+  carrier_name  STRING
+  service_level STRING
+}

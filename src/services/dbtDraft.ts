@@ -1,5 +1,5 @@
 /**
- * Draw from dbt — seed a LOGICAL draft domain from what the dbt project
+ * Import from dbt — seed a LOGICAL draft domain from what the dbt project
  * already declares, so a first diagram needs no AI session and no blank canvas.
  *
  * What it builds is the same thing the canvas's "Add Existing Model" does one
@@ -22,6 +22,7 @@ import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
 import type { CatalogColumn, CatalogData } from '../types/catalog';
+import type { DbmlDraftTable } from './dbmlLibraryWrites';
 import { validateTableNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
 import { normaliseName } from './nameUtils';
@@ -95,7 +96,10 @@ export interface DbtTestIndex {
   unique: DraftUniqueInfo;
 }
 
-export type DraftSkipReason = 'invalid-name' | 'not-found' | 'disabled' | 'duplicate' | 'already-in-domain' | 'over-limit';
+export type DraftSkipReason =
+  | 'invalid-name' | 'not-found' | 'disabled' | 'duplicate' | 'already-in-domain' | 'over-limit'
+  /** A DBML diagram: the library has the table as YAML, which a `use` line cannot import (D20). */
+  | 'yaml-table';
 
 export interface DraftSkipped {
   name: string;
@@ -127,13 +131,20 @@ export interface BuildDbtDraftInput {
    * its own regardless.
    */
   skipDisabled?: boolean;
+  /**
+   * The draft is for a DBML diagram (native DBML storage, §5.7): a library
+   * table stored as YAML is skipped (`yaml-table`, D20). Each new table
+   * carries its dbt custom schema as `configuredSchema` ({@link configuredSchemaOf}),
+   * which picks its schema folder (§2.4).
+   */
+  dbml?: { tableStorage(name: string): 'yaml' | 'dbml' | undefined };
 }
 
 export interface DbtDraft {
   /** Every accepted name, in order: what the domain's `logical.models` gains. */
   modelNames: string[];
-  /** Library files to create (seeded from dbt). */
-  newModels: SemanticTable[];
+  /** Library files to create (seeded from dbt); for a DBML diagram each with its `configuredSchema`, when it has one. */
+  newModels: DbmlDraftTable[];
   /** Accepted names the library already has — only referenced. */
   reusedModels: string[];
   relationships: Relationship[];
@@ -200,9 +211,11 @@ function folderUnder(rel: string, modelPaths: readonly string[]): string | null 
  * Every model the draft can seed — the union of schema yml models and manifest
  * models (yml spelling first), minus the ones dbt has disabled. Two more are
  * left out:
- *  - a model with no columns to copy (only a `.sql` file, or a yml entry with
- *    no `columns:`), judged from the same source `seedTableFromDbt` copies —
- *    it would only draw an empty box;
+ *  - a model with no declared columns (only a `.sql` file, or a yml entry
+ *    with no `columns:`), judged from the declared list `seedTableFromDbt`
+ *    starts from (yml, else manifest) — it would only draw an empty box, or
+ *    one shaped by a catalog that may be weeks old. The catalog adds columns
+ *    to a model that is drawn; it never makes a model drawable;
  *  - a manifest model from an installed dbt package. Package files sit under
  *    `dbt_packages/`, which the yml walker skips, and their `original_file_path`
  *    is relative to the package root, so it would pass for the user's own
@@ -231,7 +244,7 @@ export function listDraftModels(input: DraftSourceInput): DraftModelEntry[] {
     const yml = ymlData?.models.get(name);
     const man = manifestByKey.get(key);
     if (!yml && man && rootProjects.size > 0 && !rootProjects.has(man.projectName)) { return; }
-    // Same source seedTableFromDbt copies: the yml when there is one, else the manifest.
+    // The declared list seedTableFromDbt starts from: the yml when there is one, else the manifest.
     const columnCount = yml ? yml.columns.length : man?.columns.length ?? 0;
     if (columnCount === 0) { return; }
 
@@ -408,6 +421,16 @@ function draftClusters(models: readonly DraftModelEntry[], tests: readonly Draft
     .sort((a, b) => b.length - a.length || a[0].name.localeCompare(b[0].name));
 }
 
+/**
+ * The picker's "Choose models…" description: how many the user may pick, and
+ * of how many — never "pick up to 15 of 9" when there are fewer than the
+ * limit (then every one of them can be picked).
+ */
+export function chooseModelsDescription(limit: number, total: number): string {
+  if (total <= limit) return `choose from ${total} ${total === 1 ? 'model' : 'models'}`;
+  return `pick up to ${limit} of ${total}`;
+}
+
 /** `scope` holding only `names` (count, description and detail recomputed). */
 export function narrowDraftScope(scope: DraftScope, names: readonly string[]): DraftScope {
   if (names.length === scope.modelNames.length && names.every((n, i) => n === scope.modelNames[i])) { return scope; }
@@ -441,10 +464,21 @@ export function customDraftScope(modelNames: readonly string[], models: readonly
  * missing description and the schema; the manifest alone when no yml declares
  * the model. Undefined when neither has it.
  *
- * Column names and order are the declared ones (yml, else manifest); the
- * catalog never adds or respells a column. Each TYPE resolves exactly as the
- * physical stage resolves it (`resolveColumnType`: catalog, then the declared
- * `data_type:`, then the manifest), and is empty when no source has one.
+ * COLUMNS are the ones the Physical tab shows for the model, so a freshly
+ * drawn table opens with nothing to compare: the declared columns first, in
+ * declared order and spelling (yml, else manifest), then every column only the
+ * catalog reports, in catalog (warehouse) order. A catalog-only name reported
+ * ALL CAPS is the warehouse folding an unquoted identifier (Snowflake's
+ * `LOADED_AT`) and is lowercased; a mixed- or lower-case name is kept as
+ * reported. Comparison keys on `normaliseName`, so the spelling and the order
+ * (the Physical tab lists catalog order first) never make a difference. Each
+ * TYPE resolves exactly as the physical stage resolves it
+ * (`resolveColumnType`: catalog, then the declared `data_type:`, then the
+ * manifest), and is empty when no source has one; a catalog-only column's
+ * description is its warehouse comment, as on the Physical tab. A model with
+ * no declared columns gets none from the catalog either (an empty table, as
+ * Add Existing Model gives it; Import from dbt does not list it at all).
+ * `seededColumnCount` counts the same columns without building the table.
  */
 export function seedTableFromDbt(
   name: string,
@@ -485,12 +519,77 @@ export function seedTableFromDbt(
       dataType: typeOf(col.name, col.data_type),
       description: col.description ?? '',
     }));
+  // Then what only the warehouse has, in its order (the Physical tab shows
+  // these too). Only for a model that declares columns: a catalog that may be
+  // weeks old never shapes a table dbt declares nothing for.
+  const declared = new Set(columns.map((c) => normaliseName(c.name)));
+  for (const [ck, cc] of columns.length === 0 ? [] : observedColumns) {
+    if (declared.has(ck) || !cc.name.trim()) { continue; }
+    columns.push({
+      name: catalogColumnName(cc.name),
+      dataType: typeOf(cc.name, undefined),
+      description: cc.comment ?? '',
+    });
+  }
 
   const model: SemanticTable = { name: yml?.name ?? man!.name };
   if (man?.schema) { model.schema = man.schema; }
   model.description = yml?.description || man?.description || '';
   model.columns = columns;
   return model;
+}
+
+/**
+ * How many columns `seedTableFromDbt` gives a model whose declared columns
+ * (yml, else manifest) are `declared`: those, plus each column only the
+ * catalog reports, and none from the catalog when nothing is declared. For
+ * the Add Existing Model dialog's column count, which is built on every
+ * refresh, so it does not build the table.
+ */
+export function seededColumnCount(
+  name: string,
+  declared: ReadonlyArray<{ name: string }>,
+  manifestModel: { uniqueId: string } | undefined,
+  catalog: CatalogData | undefined,
+): number {
+  if (declared.length === 0) { return 0; }
+  const seen = new Set(declared.map((c) => normaliseName(c.name)));
+  let count = declared.length;
+  for (const cc of catalogNodeFor(catalog, manifestModel, normaliseName(name))?.columns ?? []) {
+    const ck = normaliseName(cc.name);
+    if (seen.has(ck) || !cc.name.trim()) { continue; }
+    seen.add(ck);
+    count++;
+  }
+  return count;
+}
+
+/**
+ * A catalog-only column's name for the logical model: an ALL-CAPS name (the
+ * warehouse folding an unquoted identifier, as Snowflake does) lowercased, any
+ * other spelling kept as the warehouse reports it. `LOADED_AT` → `loaded_at`;
+ * `LoadedAt` and `loaded_at` unchanged.
+ */
+export function catalogColumnName(name: string): string {
+  return name === name.toUpperCase() && name !== name.toLowerCase() ? name.toLowerCase() : name;
+}
+
+/**
+ * The schema a dbt model's developer configured (§2.4, `configuredSchema`):
+ * the manifest node's `config.schema` (from `+schema:` or
+ * `config(schema=…)`) when the manifest lists the model, else the schema yml
+ * model's `config: schema:`, which is what dbt compiles it from. Never the schema the model is built in
+ * (`dbt_liam_finance` in dev, `finance` in prod), which differs per machine:
+ * a model with no custom schema has none, and goes in its layer's schema.
+ */
+export function configuredSchemaOf(name: string, ymlData?: YmlData, manifest?: ManifestData): string | undefined {
+  const key = normaliseName(name);
+  const man = manifest?.models.get(name)
+    ?? [...(manifest?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
+  const yml = ymlData?.models.get(name)
+    ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
+  // The manifest is dbt's own resolution (yml, dbt_project.yml and config() merged): the yml only without it.
+  return man ? man.configSchema : yml?.configSchema;
 }
 
 /**
@@ -613,9 +712,13 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     if (disabled.has(key)) { skipped.push({ name, reason: 'disabled' }); continue; }
 
     let model: SemanticTable | undefined;
-    if (!input.libraryHas(name)) {
+    const inLibrary = input.libraryHas(name);
+    if (input.dbml && inLibrary && input.dbml.tableStorage(name) === 'yaml') { skipped.push({ name, reason: 'yaml-table' }); continue; }
+    if (!inLibrary) {
       model = seed(name);
       if (!model) { skipped.push({ name, reason: 'not-found' }); continue; }
+      const configuredSchema = input.dbml ? configuredSchemaOf(name, input.ymlData, input.manifest) : undefined;
+      if (configuredSchema !== undefined) model = { ...model, configuredSchema } as DbmlDraftTable;
     }
     if (accepted.length >= limit) {
       truncated = true;

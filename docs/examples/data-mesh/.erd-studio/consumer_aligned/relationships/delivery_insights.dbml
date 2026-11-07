@@ -1,0 +1,7 @@
+// The delivery insights team's relationships, pointing at tables other domains publish.
+use { table customer.customer_profile } from '../../aggregate/tables/customer/customer_profile.dbml'
+use { table shipping.carrier }          from '../../source_aligned/tables/shipping/carrier.dbml'
+use { table delivery_insights.fct_shipment_delivery } from '../tables/delivery_insights/fct_shipment_delivery.dbml'
+
+Ref: delivery_insights.fct_shipment_delivery.carrier_code >? shipping.carrier.carrier_code
+Ref: delivery_insights.fct_shipment_delivery.account_id >? customer.customer_profile.account_id

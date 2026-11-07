@@ -1,0 +1,18 @@
+use { table silver.customers }     from '../tables/silver/customers.dbml'
+use { table silver.silver_orders } from '../tables/silver/silver_orders.dbml'
+use { table silver.order_lines }   from '../tables/silver/order_lines.dbml'
+use { table silver.payments }      from '../tables/silver/payments.dbml'
+use { table silver.products }      from '../tables/silver/products.dbml'
+use * from '../relationships/silver.dbml'
+
+Project "core-entities" {
+  Note: 'The business entities, cleaned and matched across sources.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    customers 869 311
+    order_lines 12 73
+    payments 35 345
+    products 443 12
+    silver_orders 443 234
+  '''
+}

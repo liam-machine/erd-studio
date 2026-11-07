@@ -68,7 +68,8 @@
         "fromColumn": "store_key",
         "toModel": "fct_sale",
         "toColumn": "store_key",
-        "cardinality": "one-to-many"
+        "cardinality": "one-to-many",
+        "inDiagramFile": true
       }
     ],
     "viewConfig": {
@@ -95,7 +96,7 @@
       "order": 0
     },
     "readOnly": false,
-    "positionDraggable": true
-  },
-  "welcomeDismissed": false
+    "positionDraggable": true,
+    "relationshipsInDiagramFile": true
+  }
 }

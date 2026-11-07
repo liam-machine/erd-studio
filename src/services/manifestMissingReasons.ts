@@ -16,6 +16,8 @@ export interface ManifestMissingReasonDeps {
   existsSync?: (p: string) => boolean;
   /** Number of dbt executables found (stat only). Default: `dbtExecutableCandidates(root).length`. */
   candidates?: (root: string) => number;
+  /** The workspace folder holding `root`: the default count also looks for a venv in parents up to it. */
+  venvSearchUpTo?: string;
 }
 
 /**
@@ -32,7 +34,7 @@ export function manifestMissingReasons(
   deps: ManifestMissingReasonDeps = {},
 ): ManifestMissingReason[] {
   const existsSync = deps.existsSync ?? fs.existsSync;
-  const candidates = deps.candidates ?? ((r: string) => dbtExecutableCandidates(r).length);
+  const candidates = deps.candidates ?? ((r: string) => dbtExecutableCandidates(r, { venvSearchUpTo: deps.venvSearchUpTo }).length);
   const reasons: ManifestMissingReason[] = [];
   try {
     if (!existsSync(resolveTargetDir(root, dbtConfig))) { reasons.push('noTargetDir'); }

@@ -1,8 +1,8 @@
 # Choosing the project folder
 
-ERD Studio keeps your data model in a `.erd-studio` folder inside the project it has open. Most of the time there is nothing to choose: open a folder in VS Code and ERD Studio uses it. If that folder (or one up to three folders below it) is a dbt project, ERD Studio also reads dbt for the Physical stage.
+ERD Studio keeps your data model in a `.erd-studio` folder inside the project it has open. Most of the time there is nothing to choose: open a folder in VS Code and ERD Studio uses it. If that folder, a folder below it, or the folder it sits in is a dbt project, ERD Studio also reads dbt for the Physical stage.
 
-Opening a folder without dbt writes nothing (apart from renaming a folder called `erd-studio/`, from an old release, to `.erd-studio/`). In a dbt project that has diagrams, ERD Studio also keeps the dbt `selectors.yml` up to date. ERD Studio creates `.erd-studio/` only when you ask for something that needs it, such as **New Diagram**, **Import DBML…** or **Open Example Diagram**.
+Opening a folder without dbt writes nothing (apart from renaming a folder called `erd-studio/`, from an old release, to `.erd-studio/`). In a dbt project that has diagrams, ERD Studio also keeps the dbt `selectors.yml` up to date. ERD Studio creates `.erd-studio/` only when you ask for something that needs it, such as **New Diagram**, **Import DBML…** or **Open an Example…**.
 
 ## Which folder ERD Studio opens
 
@@ -16,7 +16,7 @@ ERD Studio looks for its project in this order and uses the first it finds:
 
 So a dbt project anywhere in the workspace wins over a plain folder that holds a design. To keep the design in a folder without dbt in that case, set `erdStudio.projectPath`. With no folder open at all, ERD Studio asks you to open one.
 
-ERD Studio decides whether the folder is a dbt project when the window opens. If you add a `dbt_project.yml` to a folder it already has open, run **Developer: Reload Window** to get the Physical tab and **⊕ Diff**.
+ERD Studio decides whether the folder is a dbt project when the window opens. If you add a `dbt_project.yml` to a folder it already has open, run **Developer: Reload Window** to get the Physical tab and **Compare with dbt**.
 
 ## Keeping the data model in another folder
 

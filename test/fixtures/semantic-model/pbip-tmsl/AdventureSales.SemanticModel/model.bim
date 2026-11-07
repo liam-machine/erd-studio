@@ -1,0 +1,580 @@
+{
+  "name": "SemanticModel",
+  "compatibilityLevel": 1567,
+  "model": {
+    "culture": "en-AU",
+    "dataAccessOptions": {
+      "legacyRedirects": true,
+      "returnErrorValuesAsNull": true
+    },
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "sourceQueryCulture": "en-AU",
+    "tables": [
+      {
+        "name": "Sales",
+        "description": "One row per sales order line.",
+        "lineageTag": "6f1d2c3b-4a5e-4f60-8172-93a4b5c6d7e8",
+        "columns": [
+          {
+            "type": "rowNumber",
+            "name": "RowNumber-2662979B-1795-4F74-8F37-6A1BA8059B61",
+            "dataType": "int64",
+            "isHidden": true,
+            "isUnique": true,
+            "isKey": true,
+            "isNullable": false,
+            "attributeHierarchy": {}
+          },
+          {
+            "name": "SalesOrderLineKey",
+            "dataType": "int64",
+            "isKey": true,
+            "sourceColumn": "SalesOrderLineKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000001",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "SalesOrderNumber",
+            "dataType": "string",
+            "sourceColumn": "SalesOrderNumber",
+            "lineageTag": "00000000-0000-4000-8000-000000000002",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "isHidden": true,
+            "sourceColumn": "CustomerKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000003",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ProductKey",
+            "dataType": "int64",
+            "isHidden": true,
+            "sourceColumn": "ProductKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000004",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "OrderDateKey",
+            "dataType": "int64",
+            "sourceColumn": "OrderDateKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000005",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ShipDateKey",
+            "dataType": "int64",
+            "sourceColumn": "ShipDateKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000006",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "OrderDate",
+            "dataType": "dateTime",
+            "description": "When the order was placed (local time).",
+            "sourceColumn": "OrderDate",
+            "lineageTag": "00000000-0000-4000-8000-000000000007",
+            "summarizeBy": "none",
+            "variations": [
+              {
+                "name": "Variation",
+                "relationship": "5e6f7a8b-0005-4000-8000-000000000005",
+                "defaultHierarchy": {
+                  "table": "LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f",
+                  "hierarchy": "Date Hierarchy"
+                },
+                "isDefault": true
+              }
+            ]
+          },
+          {
+            "name": "Quantity",
+            "dataType": "int64",
+            "sourceColumn": "Quantity",
+            "lineageTag": "00000000-0000-4000-8000-000000000008",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Unit Price",
+            "dataType": "decimal",
+            "sourceColumn": "UnitPrice",
+            "lineageTag": "00000000-0000-4000-8000-000000000009",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Sales Amount",
+            "dataType": "decimal",
+            "description": "Quantity × unit price, after the line discount.",
+            "sourceColumn": "SalesAmount",
+            "lineageTag": "00000000-0000-4000-8000-000000000010",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Line Margin",
+            "dataType": "decimal",
+            "type": "calculated",
+            "description": "Margin on the line.",
+            "expression": "Sales[Sales Amount] - RELATED ( 'Product'[Standard Cost] ) * Sales[Quantity]",
+            "lineageTag": "00000000-0000-4000-8000-000000000011",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "IsReturned",
+            "dataType": "boolean",
+            "sourceColumn": "IsReturned",
+            "lineageTag": "00000000-0000-4000-8000-000000000012",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Sales",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Sql.Database(ServerName, \"AdventureWorksDW\"),",
+                "    t = Source{[Schema=\"dbo\",Item=\"FactInternetSales\"]}[Data]",
+                "in",
+                "    t"
+              ]
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Total Sales",
+            "description": "Revenue after discounts.",
+            "expression": "SUM(Sales[Sales Amount])",
+            "formatString": "\\$#,0.00;(\\$#,0.00);\\$#,0.00"
+          },
+          {
+            "name": "Sales YoY %",
+            "expression": [
+              "",
+              "VAR _cur = [Total Sales]",
+              "VAR _prev = CALCULATE ( [Total Sales], SAMEPERIODLASTYEAR ( 'Date Table'[Date] ) )",
+              "RETURN",
+              "    DIVIDE ( _cur - _prev, _prev )"
+            ],
+            "formatString": "0.0%;-0.0%;0.0%"
+          },
+          {
+            "name": "Order Count",
+            "expression": "DISTINCTCOUNT ( Sales[SalesOrderNumber] )",
+            "formatString": "0"
+          }
+        ],
+        "annotations": [
+          {
+            "name": "PBI_ResultType",
+            "value": "Table"
+          }
+        ]
+      },
+      {
+        "name": "Customer",
+        "description": "Everyone who has bought something.",
+        "columns": [
+          {
+            "type": "rowNumber",
+            "name": "RowNumber-2662979B-1795-4F74-8F37-6A1BA8059B61",
+            "dataType": "int64",
+            "isHidden": true,
+            "isUnique": true,
+            "isKey": true,
+            "isNullable": false,
+            "attributeHierarchy": {}
+          },
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "isKey": true,
+            "sourceColumn": "CustomerKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000013",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Customer Name",
+            "dataType": "string",
+            "sourceColumn": "CustomerName",
+            "lineageTag": "00000000-0000-4000-8000-000000000014",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "City",
+            "dataType": "string",
+            "sourceColumn": "City",
+            "lineageTag": "00000000-0000-4000-8000-000000000015",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Country/Region",
+            "dataType": "string",
+            "sourceColumn": "CountryRegion",
+            "lineageTag": "00000000-0000-4000-8000-000000000016",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Yearly Income",
+            "dataType": "double",
+            "sourceColumn": "YearlyIncome",
+            "lineageTag": "00000000-0000-4000-8000-000000000017",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Photo",
+            "dataType": "binary",
+            "isHidden": true,
+            "sourceColumn": "Photo",
+            "lineageTag": "00000000-0000-4000-8000-000000000018",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Note",
+            "dataType": "string",
+            "sourceColumn": "Note",
+            "lineageTag": "00000000-0000-4000-8000-000000000019",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Customer",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Sql.Database(ServerName, \"AdventureWorksDW\"),",
+                "    t = Source{[Schema=\"dbo\",Item=\"DimCustomer\"]}[Data]",
+                "in",
+                "    t"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "Product",
+        "columns": [
+          {
+            "type": "rowNumber",
+            "name": "RowNumber-2662979B-1795-4F74-8F37-6A1BA8059B61",
+            "dataType": "int64",
+            "isHidden": true,
+            "isUnique": true,
+            "isKey": true,
+            "isNullable": false,
+            "attributeHierarchy": {}
+          },
+          {
+            "name": "ProductKey",
+            "dataType": "int64",
+            "sourceColumn": "ProductKey",
+            "lineageTag": "00000000-0000-4000-8000-000000000020",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Product Name",
+            "dataType": "string",
+            "sourceColumn": "EnglishProductName",
+            "lineageTag": "00000000-0000-4000-8000-000000000021",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Category",
+            "dataType": "string",
+            "sourceColumn": "Category",
+            "lineageTag": "00000000-0000-4000-8000-000000000022",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Standard Cost",
+            "dataType": "decimal",
+            "sourceColumn": "StandardCost",
+            "lineageTag": "00000000-0000-4000-8000-000000000023",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "List Price",
+            "dataType": "decimal",
+            "sourceColumn": "ListPrice",
+            "lineageTag": "00000000-0000-4000-8000-000000000024",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Product",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Sql.Database(ServerName, \"AdventureWorksDW\"),",
+                "    t = Source{[Schema=\"dbo\",Item=\"DimProduct\"]}[Data]",
+                "in",
+                "    t"
+              ]
+            }
+          }
+        ],
+        "hierarchies": [
+          {
+            "name": "Product Hierarchy",
+            "levels": [
+              {
+                "name": "Category",
+                "ordinal": 0,
+                "column": "Category"
+              },
+              {
+                "name": "Product Name",
+                "ordinal": 1,
+                "column": "Product Name"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Date Table",
+        "description": "The calendar every date in the model uses.",
+        "dataCategory": "Time",
+        "columns": [
+          {
+            "type": "rowNumber",
+            "name": "RowNumber-2662979B-1795-4F74-8F37-6A1BA8059B61",
+            "dataType": "int64",
+            "isHidden": true,
+            "isUnique": true,
+            "isKey": true,
+            "isNullable": false,
+            "attributeHierarchy": {}
+          },
+          {
+            "name": "DateKey",
+            "dataType": "int64",
+            "type": "calculatedTableColumn",
+            "sourceColumn": "[DateKey]",
+            "lineageTag": "00000000-0000-4000-8000-000000000025",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "type": "calculatedTableColumn",
+            "isKey": true,
+            "sourceColumn": "[Date]",
+            "lineageTag": "00000000-0000-4000-8000-000000000026",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Year",
+            "dataType": "int64",
+            "type": "calculatedTableColumn",
+            "sourceColumn": "[Year]",
+            "lineageTag": "00000000-0000-4000-8000-000000000027",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Month Name",
+            "dataType": "string",
+            "type": "calculatedTableColumn",
+            "sourceColumn": "[Month Name]",
+            "lineageTag": "00000000-0000-4000-8000-000000000028",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Month Number",
+            "dataType": "int64",
+            "type": "calculatedTableColumn",
+            "isHidden": true,
+            "sourceColumn": "[Month Number]",
+            "lineageTag": "00000000-0000-4000-8000-000000000029",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Fiscal Year",
+            "dataType": "int64",
+            "type": "calculated",
+            "description": "July to June.",
+            "expression": [
+              "",
+              "VAR _y = YEAR ( 'Date Table'[Date] )",
+              "RETURN",
+              "    IF ( MONTH ( 'Date Table'[Date] ) >= 7, _y + 1, _y )"
+            ],
+            "lineageTag": "00000000-0000-4000-8000-000000000030",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Date Table",
+            "mode": "import",
+            "source": {
+              "type": "calculated",
+              "expression": [
+                "ADDCOLUMNS (",
+                "    CALENDAR ( DATE ( 2020, 1, 1 ), DATE ( 2026, 12, 31 ) ),",
+                "    \"DateKey\", YEAR ( [Date] ) * 10000 + MONTH ( [Date] ) * 100 + DAY ( [Date] )",
+                ")"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "Time Intelligence",
+        "calculationGroup": {
+          "precedence": 1,
+          "calculationItems": [
+            {
+              "name": "Current",
+              "expression": "SELECTEDMEASURE ()"
+            },
+            {
+              "name": "YTD",
+              "expression": "CALCULATE ( SELECTEDMEASURE (), DATESYTD ( 'Date Table'[Date] ) )"
+            }
+          ]
+        },
+        "columns": [
+          {
+            "name": "Time Calculation",
+            "dataType": "string",
+            "sourceColumn": "Name",
+            "lineageTag": "00000000-0000-4000-8000-000000000031",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Ordinal",
+            "dataType": "int64",
+            "isHidden": true,
+            "sourceColumn": "Ordinal",
+            "lineageTag": "00000000-0000-4000-8000-000000000032",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Partition",
+            "mode": "import",
+            "source": {
+              "type": "calculationGroup"
+            }
+          }
+        ]
+      },
+      {
+        "name": "LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f",
+        "isHidden": true,
+        "isPrivate": true,
+        "showAsVariationsOnly": true,
+        "columns": [
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "type": "calculatedTableColumn",
+            "isHidden": true,
+            "sourceColumn": "[Date]",
+            "lineageTag": "00000000-0000-4000-8000-000000000033",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Year",
+            "dataType": "int64",
+            "type": "calculated",
+            "isHidden": true,
+            "expression": "YEAR([Date])",
+            "lineageTag": "00000000-0000-4000-8000-000000000034",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f",
+            "mode": "import",
+            "source": {
+              "type": "calculated",
+              "expression": "Calendar(Date(Year(MIN('Sales'[OrderDate])), 1, 1), Date(Year(MAX('Sales'[OrderDate])), 12, 31))"
+            }
+          }
+        ],
+        "annotations": [
+          {
+            "name": "__PBI_LocalDateTable",
+            "value": "true"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "5e6f7a8b-0001-4000-8000-000000000001",
+        "fromTable": "Sales",
+        "fromColumn": "CustomerKey",
+        "toTable": "Customer",
+        "toColumn": "CustomerKey"
+      },
+      {
+        "name": "5e6f7a8b-0002-4000-8000-000000000002",
+        "fromTable": "Sales",
+        "fromColumn": "ProductKey",
+        "toTable": "Product",
+        "toColumn": "ProductKey",
+        "crossFilteringBehavior": "bothDirections"
+      },
+      {
+        "name": "5e6f7a8b-0003-4000-8000-000000000003",
+        "fromTable": "Sales",
+        "fromColumn": "OrderDateKey",
+        "toTable": "Date Table",
+        "toColumn": "DateKey"
+      },
+      {
+        "name": "5e6f7a8b-0004-4000-8000-000000000004",
+        "fromTable": "Sales",
+        "fromColumn": "ShipDateKey",
+        "toTable": "Date Table",
+        "toColumn": "DateKey",
+        "isActive": false
+      },
+      {
+        "name": "5e6f7a8b-0005-4000-8000-000000000005",
+        "fromTable": "Sales",
+        "fromColumn": "OrderDate",
+        "toTable": "LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f",
+        "toColumn": "Date",
+        "joinOnDateBehavior": "datePartOnly"
+      }
+    ],
+    "cultures": [
+      {
+        "name": "en-AU",
+        "linguisticMetadata": {
+          "content": {
+            "Version": "1.0.0",
+            "Language": "en-US"
+          },
+          "contentType": "json"
+        }
+      }
+    ],
+    "annotations": [
+      {
+        "name": "__PBI_TimeIntelligenceEnabled",
+        "value": "1"
+      },
+      {
+        "name": "PBI_ProTooling",
+        "value": "[\"DevMode\"]"
+      }
+    ]
+  }
+}

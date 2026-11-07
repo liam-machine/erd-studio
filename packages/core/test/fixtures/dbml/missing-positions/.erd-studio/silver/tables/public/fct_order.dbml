@@ -1,0 +1,13 @@
+Table public.fct_order {
+  Note: 'Order transaction fact table'
+
+  order_id     INT     [
+    pk,
+    natural_key: 'true',
+    note: 'Order id from the source system — a degenerate dimension, and this fact\'s own key'
+  ]
+  customer_key INT     [foreign_key: 'true', note: 'FK to dim_customer']
+  order_date   DATE    [note: 'Date the order was placed']
+  project_key  INT     [foreign_key: 'true', note: 'FK to dim_project']
+  amount       DECIMAL [additive_type: 'additive', note: 'Order total amount']
+}

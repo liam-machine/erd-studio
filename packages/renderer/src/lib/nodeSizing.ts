@@ -167,15 +167,23 @@ const MAX_NODE_WIDTH = 560;
  * slightly more space than the minimum estimate, preventing overlap
  * when font rendering or badge widths differ from the approximation.
  */
-export function estimateNodeWidth(data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'>): number {
-  const { modelName, label, columns, provenance } = data;
+export function estimateNodeWidth(
+  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer'>>,
+): number {
+  const { modelName, label, columns, provenance, shownSchema, alias, singleLayer } = data;
 
-  // Header: label (+ the model name beside it when they differ) + layer badge
-  // + provenance chip (physical only) + padding
+  // Header: the name as drawn + layer badge (none in a single-layer project)
+  // + provenance chip (physical only) + padding. With a schema prefix or an
+  // alias it reads `schema.name  as alias`; otherwise the label, with the
+  // model name beside it when they differ.
+  const nameWidth = shownSchema || alias
+    ? ((shownSchema ? shownSchema.length + 1 : 0) + modelName.length) * CHAR_WIDTH_BODY
+      + (alias ? ID_GAP + (alias.length + 3) * CHAR_WIDTH_ID : 0)
+    : label ? label.length * CHAR_WIDTH_BODY + ID_GAP + modelName.length * CHAR_WIDTH_ID : modelName.length * CHAR_WIDTH_BODY;
   const headerWidth =
     HEADER_PADDING
-    + (label ? label.length * CHAR_WIDTH_BODY + ID_GAP + modelName.length * CHAR_WIDTH_ID : modelName.length * CHAR_WIDTH_BODY)
-    + LAYER_BADGE_WIDTH
+    + nameWidth
+    + (singleLayer ? 0 : LAYER_BADGE_WIDTH)
     + (provenance ? SOURCE_BADGE_WIDTH : 0);
 
   // Find the widest column row

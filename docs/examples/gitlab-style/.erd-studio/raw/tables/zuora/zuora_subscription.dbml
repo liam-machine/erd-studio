@@ -1,0 +1,11 @@
+Table zuora.zuora_subscription [alias: 'subscription'] {
+  Note: 'Zuora subscriptions, as extracted.'
+
+  id            STRING [pk]
+  accountid     STRING [foreign_key: 'true']
+  name          STRING
+  status        STRING
+  termstartdate DATE
+  termenddate   DATE
+  _uploaded_at  TIMESTAMP
+}

@@ -1,0 +1,20 @@
+// The enterprise warehouse's relationships, kept by the data architecture team. A relationship lives with the table that holds the foreign key.
+use { table arrangement.account }            from '../tables/arrangement/account.dbml'
+use { table arrangement.account_party_role } from '../tables/arrangement/account_party_role.dbml'
+use { table event.interaction_event }        from '../tables/event/interaction_event.dbml'
+use { table event.transaction_event }        from '../tables/event/transaction_event.dbml'
+use { table location.branch }                from '../tables/location/branch.dbml'
+use { table party.party }                    from '../tables/party/party.dbml'
+use { table product.product }                from '../tables/product/product.dbml'
+
+Ref: arrangement.account.branch_id >? location.branch.branch_id
+Ref: arrangement.account.product_id >? product.product.product_id
+
+Ref: arrangement.account_party_role.account_id >? arrangement.account.account_id
+Ref: arrangement.account_party_role.party_id >? party.party.party_id
+
+Ref: event.interaction_event.party_id >? party.party.party_id
+
+Ref product_family: product.product.parent_product_id >? product.product.product_id
+
+Ref: event.transaction_event.account_id >? arrangement.account.account_id

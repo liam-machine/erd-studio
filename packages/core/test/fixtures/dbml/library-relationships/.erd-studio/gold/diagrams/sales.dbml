@@ -1,0 +1,16 @@
+use { table gold.fct_order }    from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.dim_date }     from '../tables/gold/dim_date.dbml'
+use { table gold.dim_product }  from '../tables/gold/dim_product.dbml'
+use * from '../relationships/gold.dbml'
+
+Project sales {
+  Note: 'Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_customer 40 40
+    dim_date 40 360
+    dim_product 760 200
+    fct_order 400 200
+  '''
+}

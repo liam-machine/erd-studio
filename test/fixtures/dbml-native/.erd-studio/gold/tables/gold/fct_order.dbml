@@ -1,0 +1,28 @@
+// Order lines from the shop. Hand-written comments like this one survive every save.
+Table gold.fct_order [
+  role: 'transaction-fact',
+  grain: 'One row per order line',
+  alias: 'orders',
+  rationale_purpose: 'Revenue reporting by day, customer and region',
+  rationale_measures: 'amount is additive',
+  meta_owner: 'sales-data',
+  meta_json: '{"pii":false,"tags":["finance"]}'
+] {
+  order_line_id BIGINT [pk, note: 'Line id from the shop']
+  customer_key INT [foreign_key: 'true']
+  order_date_key INT [foreign_key: 'true']
+  ship_date_key INT [foreign_key: 'true']
+  region_code VARCHAR [foreign_key: 'true']
+  country_code VARCHAR [foreign_key: 'true']
+  amount "DECIMAL(18,2)" [additive_type: 'additive', note: 'Line total']
+  order_number VARCHAR [natural_key: 'true'] // the business key
+  status order_status [not null]
+  loaded_at timestamp [not null, default: `now()`]   // DBML-only settings: kept, never read
+  Note: 'Order lines'
+}
+
+Enum order_status {
+  placed
+  shipped
+  returned
+}

@@ -1,9 +1,18 @@
 /**
  * Legend — collapsible panel explaining the visual language of the graph.
  *
- * Shows stage colours, relationship types, cardinality notation, the node
- * header badges (schema abbreviation and physical provenance chips) and the
- * column badges. The badge vocabulary is imported from lib/badgeLabels so the
+ * Shows stage colours, relationship types, cardinality notation (and the
+ * moving direction arrows a hovered or clicked table's lines carry), the node
+ * header badges (the layer badge, the schema prefix and physical provenance
+ * chips) and the column badges. Without a dbt project (`logicalOnly`) the
+ * Physical, ghost, provenance and comparison entries are left out, and in a
+ * single-layer project the layer badge, which the canvas does not draw. The
+ * viewer (`useIsViewer`) shows only what can appear on the one read-only stage
+ * it draws (`legendEntries`): a logical diagram has no Physical, ghost,
+ * provenance or line-colour entries, a physical one no Logical entry, and
+ * neither has the comparison entries (the viewer never compares stages). It
+ * never names dbt: a page outside VS Code cannot know whether the project
+ * uses it. The badge vocabulary is imported from lib/badgeLabels so the
  * legend cannot fall out of step with what TableNode actually renders. Positioned in the bottom-left corner, collapsible
  * to a `?` icon button.
  */
@@ -11,16 +20,70 @@
 import { useCallback } from 'react';
 import { Panel } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
+import { useIsViewer } from '../../host/canvasEnvironment';
 import {
   SOURCE_LABEL,
+  SOURCE_LABEL_NEUTRAL,
   SOURCE_LEGEND_DESC,
+  SOURCE_LEGEND_DESC_NEUTRAL,
   SOURCE_ORDER,
   SCD_BADGE,
   ADDITIVE_BADGE,
   SCD_TITLE,
   ADDITIVE_TITLE,
 } from '../../lib/badgeLabels';
+import { EdgeFlowGlyphs } from '../Graph/EdgeFlow';
+import { isSingleLayerProject } from '../../lib/layerCues';
+import type { FlowMode } from '../../lib/edgeFlow';
 import './Legend.css';
+
+/**
+ * Samples of the relationship flow, drawn with the canvas's own glyphs
+ * between the same `1` / `*` end labels the cardinality rows use.
+ */
+const FLOW_SAMPLES: { mode: FlowMode; from: '1' | '*'; to: '1' | '*'; desc: string }[] = [
+  { mode: 'forward', from: '1', to: '*', desc: 'Arrows run 1 → *' },
+  { mode: 'both', from: '*', to: '*', desc: 'Both ways: many-to-many' },
+  { mode: 'meet', from: '1', to: '1', desc: 'Dots meet: one-to-one' },
+];
+const FLOW_SAMPLE_PATH = 'M2,6 H46';
+
+/** Which optional groups of entries the legend shows. */
+export interface LegendEntries {
+  /** The Logical stage card. */
+  logicalStage: boolean;
+  /** The Physical stage card, both ghosts and the provenance chips. */
+  physical: boolean;
+  /** "Line colour follows the stage": a logical and a physical line. */
+  lineColours: boolean;
+  /** "Comparing Stages": the discrepancy colours and lines. */
+  comparison: boolean;
+}
+
+/**
+ * The legend's optional entries. The editor shows every one (without a dbt
+ * project, `logicalOnly`, none of the physical or comparison ones). The viewer
+ * draws one stage, read-only, and never a comparison, so it shows only that
+ * stage's entries.
+ */
+export function legendEntries(options: { viewer: boolean; logicalOnly: boolean; stage: string | undefined }): LegendEntries {
+  const { viewer, logicalOnly } = options;
+  const physicalStage = options.stage === 'physical';
+  return {
+    logicalStage: viewer ? !physicalStage || logicalOnly : true,
+    physical: viewer ? physicalStage && !logicalOnly : !logicalOnly,
+    lineColours: viewer ? false : !logicalOnly,
+    comparison: viewer ? false : !logicalOnly,
+  };
+}
+
+function cardinalityLabel(label: '1' | '*') {
+  return (
+    <span className={`legend__cardinality-label${label === '*' ? ' legend__cardinality-label--many' : ''}`}>
+      {label}
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -29,6 +92,16 @@ import './Legend.css';
 export function Legend() {
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
+  // No dbt project: one stage, nothing physical to explain.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly) === true;
+  // One layer in the project: the canvas draws no layer badge.
+  const singleLayer = useEditorStore((s) => (s.domain ? isSingleLayerProject(s.domain) : false));
+  // The viewer cannot know whether the project uses dbt, so it never names it.
+  const viewer = useIsViewer();
+  const stage = useEditorStore((s) => s.domain?.stage);
+  const entries = legendEntries({ viewer, logicalOnly, stage });
+  const sourceLabel = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
+  const sourceDesc = viewer ? SOURCE_LEGEND_DESC_NEUTRAL : SOURCE_LEGEND_DESC;
 
   const handleToggle = useCallback(() => {
     setLegendOpen(!legendOpen);
@@ -56,7 +129,7 @@ export function Legend() {
 
   // Expanded state: show full legend panel
   return (
-    <Panel position="bottom-left" className="legend">
+    <Panel position="bottom-left" className={viewer ? (entries.logicalStage ? 'legend' : 'legend legend--stage-physical') : 'legend'}>
       <div className="legend__header">
         <span className="legend__title">Legend</span>
         <button
@@ -74,54 +147,64 @@ export function Legend() {
         <section className="legend__section">
           <h3 className="legend__section-title">Design Stages</h3>
           <div className="legend__items">
-            <div className="legend__item">
-              <div className="legend__model-card legend__model-card--logical">
-                <div className="legend__model-header legend__model-header--logical" />
+            {entries.logicalStage && (
+              <div className="legend__item">
+                <div className="legend__model-card legend__model-card--logical">
+                  <div className="legend__model-header legend__model-header--logical" />
+                </div>
+                <div className="legend__item-text">
+                  <span className="legend__item-label">Logical</span>
+                  <span className="legend__item-desc">Your data model design</span>
+                </div>
               </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Logical</span>
-                <span className="legend__item-desc">Your data model design</span>
-              </div>
-            </div>
-            <div className="legend__item">
-              <div className="legend__model-card legend__model-card--physical">
-                <div className="legend__model-header legend__model-header--physical" />
-              </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Physical</span>
-                <span className="legend__item-desc">Declared in dbt .yml files (read-only)</span>
-              </div>
-            </div>
-            <div className="legend__item">
-              <div className="legend__model-card legend__model-card--ghost">
-                <div className="legend__model-header legend__model-header--ghost" />
-              </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Ghost</span>
-                <span className="legend__item-desc">Not found in your dbt project</span>
-              </div>
-            </div>
-            <div className="legend__item">
-              <div className="legend__model-card legend__model-card--ghost legend__model-card--ghost-disabled">
-                <div className="legend__model-header legend__model-header--ghost" />
-              </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Ghost, dotted</span>
-                <span className="legend__item-desc">Disabled in dbt &mdash; <code>ref()</code> to it will not compile</span>
-              </div>
-            </div>
+            )}
+            {entries.physical && (
+              <>
+                <div className="legend__item">
+                  <div className="legend__model-card legend__model-card--physical">
+                    <div className="legend__model-header legend__model-header--physical" />
+                  </div>
+                  <div className="legend__item-text">
+                    <span className="legend__item-label">Physical</span>
+                    <span className="legend__item-desc">{viewer ? 'Built from the project (read-only)' : 'Declared in dbt .yml files (read-only)'}</span>
+                  </div>
+                </div>
+                <div className="legend__item">
+                  <div className="legend__model-card legend__model-card--ghost">
+                    <div className="legend__model-header legend__model-header--ghost" />
+                  </div>
+                  <div className="legend__item-text">
+                    <span className="legend__item-label">Ghost</span>
+                    <span className="legend__item-desc">{viewer ? 'Not found in the project' : 'Not found in your dbt project'}</span>
+                  </div>
+                </div>
+                <div className="legend__item">
+                  <div className="legend__model-card legend__model-card--ghost legend__model-card--ghost-disabled">
+                    <div className="legend__model-header legend__model-header--ghost" />
+                  </div>
+                  <div className="legend__item-text">
+                    <span className="legend__item-label">Ghost, dotted</span>
+                    <span className="legend__item-desc">
+                      {viewer
+                        ? <>Disabled in the project &mdash; it is not built</>
+                        : <>Disabled in dbt &mdash; <code>ref()</code> to it will not compile</>}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
-        {/* Annotations Section */}
+        {/* Notes Section */}
         <section className="legend__section">
-          <h3 className="legend__section-title">Annotations</h3>
+          <h3 className="legend__section-title">Notes</h3>
           <div className="legend__items">
             <div className="legend__item">
               <div className="legend__annotation-card" />
               <div className="legend__item-text">
-                <span className="legend__item-label">Build Note</span>
-                <span className="legend__item-desc">Temporary note on canvas</span>
+                <span className="legend__item-label">Note</span>
+                <span className="legend__item-desc">A note on the canvas</span>
               </div>
             </div>
             <div className="legend__item">
@@ -178,43 +261,73 @@ export function Legend() {
               <span className="legend__item-desc">Many-to-many</span>
             </div>
           </div>
-          <h4 className="legend__subsection-title">Line colour follows the stage</h4>
-          <div className="legend__items legend__items--disc-edges">
-            <div className="legend__item">
-              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
-                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--logical" />
-              </svg>
-              <span className="legend__item-desc">Logical</span>
-            </div>
-            <div className="legend__item">
-              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
-                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--physical" />
-              </svg>
-              <span className="legend__item-desc">Physical</span>
-            </div>
+          <h4 className="legend__subsection-title">Hover or click a table</h4>
+          <div className="legend__items legend__items--flow">
+            {FLOW_SAMPLES.map(({ mode, from, to, desc }) => (
+              <div className="legend__item" key={mode}>
+                <div className="legend__cardinality">
+                  {cardinalityLabel(from)}
+                  <svg className="legend__flow-line" viewBox="0 0 48 12" aria-hidden="true">
+                    <path d={FLOW_SAMPLE_PATH} className="legend__edge legend__edge--logical" />
+                    <EdgeFlowGlyphs d={FLOW_SAMPLE_PATH} mode={mode} animate statusKey="logical" />
+                  </svg>
+                  {cardinalityLabel(to)}
+                </div>
+                <span className="legend__item-desc">{desc}</span>
+              </div>
+            ))}
           </div>
+          {entries.lineColours && (
+            <>
+              <h4 className="legend__subsection-title">Line colour follows the stage</h4>
+              <div className="legend__items legend__items--disc-edges">
+                <div className="legend__item">
+                  <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                    <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--logical" />
+                  </svg>
+                  <span className="legend__item-desc">Logical</span>
+                </div>
+                <div className="legend__item">
+                  <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                    <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--physical" />
+                  </svg>
+                  <span className="legend__item-desc">Physical</span>
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
         {/* Header Badges Section */}
         <section className="legend__section">
-          <h3 className="legend__section-title">Header Badges</h3>
-          <div className="legend__items">
+          <h3 className="legend__section-title">Table Header</h3>
+          <div className="legend__items legend__items--header">
+            {!singleLayer && (
+              <div className="legend__item">
+                <span className="legend__badge legend__badge--layer">SLV</span>
+                <span className="legend__item-desc">The layer the table lives in</span>
+              </div>
+            )}
             <div className="legend__item">
-              <span className="legend__badge legend__badge--schema">SLV</span>
-              <span className="legend__item-desc">Database schema, or the layer when dbt has not resolved one</span>
+              <span className="legend__schema-sample">sales.</span>
+              <span className="legend__item-desc">The table&apos;s schema, when it is not the layer&apos;s name</span>
             </div>
           </div>
-          <h4 className="legend__subsection-title">Where the shape came from (Physical)</h4>
-          <div className="legend__items legend__items--sources">
-            {SOURCE_ORDER.map((source) => (
-              <div className="legend__item" key={source}>
-                <span className={`legend__badge legend__badge--source legend__badge--source-${source}`}>
-                  {SOURCE_LABEL[source]}
-                </span>
-                <span className="legend__item-desc">{SOURCE_LEGEND_DESC[source]}</span>
+          {entries.physical && (
+            <>
+              <h4 className="legend__subsection-title">Where the shape came from (Physical)</h4>
+              <div className="legend__items legend__items--sources">
+                {SOURCE_ORDER.map((source) => (
+                  <div className="legend__item" key={source}>
+                    <span className={`legend__badge legend__badge--source legend__badge--source-${source}`}>
+                      {sourceLabel[source]}
+                    </span>
+                    <span className="legend__item-desc">{sourceDesc[source]}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </section>
 
         {/* Column Badges Section */}
@@ -254,52 +367,54 @@ export function Legend() {
           </div>
         </section>
 
-        {/* Comparing Stages Section */}
-        <section className="legend__section">
-          <h3 className="legend__section-title">Comparing Stages</h3>
-          <p className="legend__note legend__note--lead">
-            Shown while a comparison is open (Diff).
-          </p>
-          <div className="legend__items">
-            <div className="legend__item">
-              <span className="legend__swatch legend__swatch--extra" />
-              <span className="legend__item-desc">
-                Amber &mdash; only in the stage you are viewing (<code>only here</code>)
-              </span>
+        {/* Comparing Stages Section — Diff needs the Physical stage; the viewer never compares */}
+        {entries.comparison && (
+          <section className="legend__section">
+            <h3 className="legend__section-title">Comparing Stages</h3>
+            <p className="legend__note legend__note--lead">
+              Shown while a comparison is open (Compare with dbt or Compare with design).
+            </p>
+            <div className="legend__items">
+              <div className="legend__item">
+                <span className="legend__swatch legend__swatch--extra" />
+                <span className="legend__item-desc">
+                  Amber &mdash; only in the stage you are viewing (<code>only here</code>)
+                </span>
+              </div>
+              <div className="legend__item">
+                <span className="legend__swatch legend__swatch--mismatch" />
+                <span className="legend__item-desc">Red &mdash; declared differently in each stage</span>
+              </div>
+              <div className="legend__item">
+                <span className="legend__swatch legend__swatch--missing" />
+                <span className="legend__item-desc">
+                  Grey, struck through &mdash; only in the stage being compared against
+                </span>
+              </div>
             </div>
-            <div className="legend__item">
-              <span className="legend__swatch legend__swatch--mismatch" />
-              <span className="legend__item-desc">Red &mdash; declared differently in each stage</span>
+            <h4 className="legend__subsection-title">Relationship lines</h4>
+            <div className="legend__items legend__items--disc-edges">
+              <div className="legend__item">
+                <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                  <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-extra" />
+                </svg>
+                <span className="legend__item-desc">Only in this stage</span>
+              </div>
+              <div className="legend__item">
+                <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                  <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-missing" />
+                </svg>
+                <span className="legend__item-desc">Only in the compared stage</span>
+              </div>
+              <div className="legend__item">
+                <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                  <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-mismatch" />
+                </svg>
+                <span className="legend__item-desc">Cardinality differs (<code>!</code> at the midpoint)</span>
+              </div>
             </div>
-            <div className="legend__item">
-              <span className="legend__swatch legend__swatch--missing" />
-              <span className="legend__item-desc">
-                Grey, struck through &mdash; only in the stage being compared against
-              </span>
-            </div>
-          </div>
-          <h4 className="legend__subsection-title">Relationship lines</h4>
-          <div className="legend__items legend__items--disc-edges">
-            <div className="legend__item">
-              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
-                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-extra" />
-              </svg>
-              <span className="legend__item-desc">Only in this stage</span>
-            </div>
-            <div className="legend__item">
-              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
-                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-missing" />
-              </svg>
-              <span className="legend__item-desc">Only in the compared stage</span>
-            </div>
-            <div className="legend__item">
-              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
-                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--disc-mismatch" />
-              </svg>
-              <span className="legend__item-desc">Cardinality differs (<code>!</code> at the midpoint)</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
       </div>
     </Panel>
   );

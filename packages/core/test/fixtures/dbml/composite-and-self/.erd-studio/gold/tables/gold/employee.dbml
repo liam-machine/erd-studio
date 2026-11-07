@@ -1,0 +1,7 @@
+// Kept from logical-models/gold/employee.yml by Convert Project to DBML:
+// # Two self-references; the second is spelled in another case.
+Table gold.employee {
+  employee_id int [pk]
+  manager_id  int
+  mentor_id   int
+}

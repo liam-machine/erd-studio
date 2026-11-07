@@ -4,6 +4,7 @@
 .vscode-test/**
 src/**
 webview/**
+webview-draft/**
 out/**
 out-webview/**
 test/**
@@ -37,7 +38,8 @@ mcp-server/**
 proxy/**
 telemetry/**
 # Getting-started video pipeline (see video/README.md). Its outputs that ship
-# are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
+# are media/onboarding/getting-started.mp4 (the default cut, with its dbt beat), getting-started-logical.mp4
+# (the logical-first tour) and their -poster.jpg files.
 video/**
 # npm workspaces (@erd-studio/core, @erd-studio/renderer). The extension bundles
 # them from source into dist/, so nothing under packages/ is needed at runtime.
@@ -48,8 +50,13 @@ packages/**
 .claude/**
 data engineer plugin/**
 
-# media/ otherwise ships: the icons, media/onboarding/ (Welcome video + poster)
-# and media/walkthrough/*.svg (the Get Started walkthrough's step images).
+# syntaxes/ ships (never list it here): the DBML TextMate grammar and language
+# configuration that package.json's `languages` and `grammars` point at.
+#
+# media/ otherwise ships: the icons, media/file-icons/ (the DBML Diagram, Table
+# and Relationships language icons package.json's `languages` point at, also
+# drawn in ERD Studio's trees), media/onboarding/ (Welcome video + poster) and
+# media/walkthrough/*.svg (the Get Started walkthrough's step images).
 #
 # Media referenced only by README.md and docs/*.md (the README's relative links
 # are rewritten to absolute github.com URLs by vsce; docs/dbt.md uses an absolute

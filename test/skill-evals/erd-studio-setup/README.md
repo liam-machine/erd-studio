@@ -21,7 +21,7 @@ assistant session, so they are run by hand when the skill text changes.
 
 The skill has three routes (SKILL.md, Stage 0): **quick start** (the default — a dbt mirror on the
 canvas first, the modelling style offered afterwards), **enrich** (domains already exist, for
-example a Draw from dbt draft) and **full setup** (on request, or when the user describes their
+example an Import from dbt draft) and **full setup** (on request, or when the user describes their
 style up front). The style evals (8–19) therefore run a quick start first and answer "yes" to the
 style offer after the canvas; eval 7 states its style up front and takes the full route.
 
@@ -46,12 +46,14 @@ style offer after the canvas; eval 7 states its style up front and takes the ful
 | 17 | modelling-kimball-in-spirit | `dbt-project-modern-tests` renamed without prefixes, descriptions saying "dimension table", an `order_total` amount on orders | Kimball detected from descriptions + table shape (strong, `sources` without `names`): the confirmation says honestly the models aren't named `dim_`/`fct_` but read like Kimball, never "I couldn't see a particular modelling style" |
 | 18 | modelling-data-vault-by-structure | `dbt-project-modern-tests` with the marts replaced by an unprefixed raw vault (`customer_hub`, `order_hub`, `customer_order_link`, `customer_sat`: hash keys, hashdiff, load date, record source) | Data Vault detected from table structure alone (weak): confirmed as a guess from table shape, hubs/satellites never called dimensions/facts, closest roles only |
 | 19 | modelling-3nf-weak-guess | `dbt-project-modern-tests` with the marts replaced by seven normalised entity / association tables joined by relationship tests, no amounts | `inmon-3nf` offered only as a question ("…or should I just draw it as dbt has it?"); "not sure" mirrors dbt — no approach file, no conformance review |
-| 20 | quick-start-first-canvas | `dbt-project` minus `.erd-studio/` and `catalog.json` | The default route: Draw from dbt named once, parse only, no style question or catalog before the canvas, clean diff, then the style step and the catalog offered as next steps |
-| 21 | enrich-draw-from-dbt-draft | `dbt-project` with one domain drafted by **Draw from dbt…** | Enrich route: the draft is not rebuilt; grain / keys / roles / rationale proposed once ("Add these?"), no column or relationship touched, clean diff, style offered next |
+| 20 | quick-start-first-canvas | `dbt-project` minus `.erd-studio/` and `catalog.json` | The default route: Import from dbt named once, parse only, no style question or catalog before the canvas, clean diff, then the style step and the catalog offered as next steps |
+| 21 | enrich-draw-from-dbt-draft | `dbt-project` with one domain drafted by **Import from dbt…** | Enrich route: the draft is not rebuilt; grain / keys / roles / purpose proposed once ("Add these?"), no column or relationship touched, clean diff, style offered next |
 | 22 | full-setup-on-request | `dbt-project` minus `.erd-studio/` and `catalog.json` | "The full setup" on request: catalog offered in Stage 2, style confirmed and saved before any model file, conformance review |
-| 23 | metadata-offer-quick-start | `dbt-project` minus `.erd-studio/` and `catalog.json`, with `owner` / `pii` (and a Lightdash `dimension`) added to its schema yml `meta:` | dbt's metadata offered once before the first model file, with counts; the list saved with no Technique line; exact values copied; tool settings left out; the style step still detects the style |
-| 24 | metadata-saved-list-enrich | as 23, plus a Draw from dbt draft and a saved metadata list (`owner` from dbt, `steward` for people) | The saved list is followed without asking: `owner` copied inside the one "Add these?", `steward` never filled, a hand-written key kept, a new dbt key offered for the list once |
-| 25 | metadata-none-in-dbt | `dbt-project` minus `.erd-studio/` and `catalog.json` | No dbt metadata: never mentioned before the canvas, nothing written, one optional next step offers starting a list |
+| 23 | fields-offer-quick-start | `dbt-project` minus `.erd-studio/` and `catalog.json`, with `owner` / `pii` (and a Lightdash `dimension`) added to its schema yml `meta:` | The field list (starting set plus dbt's metadata) offered once before the first table file, with counts; saved as `.erd-studio/fields.yml` (`filled_by: dbt`, `left_out`); exact values copied as bare settings; tool settings left out; the style step still detects the style |
+| 24 | fields-old-metadata-list-enrich | as 23, plus an Import from dbt draft and an old `## Metadata` list (`owner` from dbt, `steward` for people) | The old list is followed without asking: `owner` copied inside the one "Add these?", which also offers to move the list into fields.yml; `steward` never filled, a hand-written key kept, a new dbt key offered once |
+| 25 | fields-none-in-dbt | `dbt-project` minus `.erd-studio/` and `catalog.json` | No dbt metadata and no style: fields never mentioned before the canvas, no fields.yml written, one optional next step offers adding fields |
+| 26 | fields-data-vault-style | `dbt-project` with hub/sat/link models and the automate_dv package | A Data Vault style leaves the dimensional fields out of fields.yml with a reason; vault types go in `decisions`; no retired field written |
+| 27 | fields-open-questions | `dbt-project` with a starting-set fields.yml | An undecided grain becomes an `open_questions` setting and a question to the user, then moves into `grain` / `decisions` once answered |
 
 ## Running them
 
@@ -105,7 +107,8 @@ style offer after the canvas; eval 7 states its style up front and takes the ful
      (evals 14–16) — check this before the run, so a failed setup is not graded as a skill failure;
    - every `modelRole` in the written `logical-models/*.yml` is one of the nine values in
      `ModelRole` (`src/types/semantic.ts`) (evals 7–16);
-   - no `Shift+Tab`, `accept edits` or `safety check` in a non-Claude transcript (evals 11–13);
+   - no `Shift+Tab` or `accept edits` in a non-Claude transcript (evals 11–13; the safety check
+     now covers GitHub Copilot, Codex and Gemini CLI too, so mentioning it is fine);
    - no `modelling-approach.md` and no `docs generate` / `compile --write-catalog` before the
      first canvas hand-over in a quick start (evals 20, 8–19 up to the style offer);
    - after eval 21, every column and relationship in the drafted files matches the pre-run

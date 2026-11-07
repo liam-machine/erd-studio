@@ -21,7 +21,7 @@ import { redactPaths } from '../types/feedback';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { CatalogService } from '../services/catalogService';
-import { findDbtProjectCandidates, hasDbtProjectFile } from '../services/projectDiscovery';
+import { findDbtProjectsBelow, hasDbtProjectFile } from '../services/dbtProjectSearch';
 import { readDbtProjectConfig, resolveCatalogPath, resolveManifestPath, type DbtProjectConfig } from '../services/dbtProjectConfig';
 import { SubjectAreaService } from '../services/domainService';
 import { LayerService } from '../services/layerService';
@@ -72,6 +72,8 @@ export interface ManifestInputInfo {
   /** Model count when a manifest was parsed (a stale one included), else null. */
   models: number | null;
   newestSourceChange: string | null;
+  /** Present (true) only when Parse without your credentials wrote the manifest: its schemas were left out. */
+  placeholderProfile?: true;
 }
 
 export interface CatalogInputInfo {
@@ -117,11 +119,12 @@ function holdsSemanticDir(dir: string, semanticDir: string): boolean {
  * ERD Studio folder, whichever comes first, so a design folder nested in a
  * dbt repo is its own (logical-only) root, as the extension opens it, and
  * never the dbt project above it. A design folder that is the current
- * directory still gives way to a dbt project up to three levels below it
+ * directory still gives way to a dbt project up to six levels below it
  * (any dbt project beats a plain folder, as in the extension's search).
  * With no such folder at or above it — or only one above it — a dbt
- * project up to three levels below the current directory comes next
- * (`findDbtProjectCandidates`, the extension's own search), then that
+ * project up to six levels below the current directory comes next
+ * (`findDbtProjectsBelow`, the extension's own walk: hidden folders other
+ * than tools' own, symbolic links followed), then that
  * design folder above. Null when there is none.
  */
 export function resolveProjectRoot(
@@ -141,25 +144,36 @@ export function resolveProjectRoot(
     if (path.dirname(dir) === dir) { break; }
   }
   // Below the current directory (it holds no dbt_project.yml, or the walk would have returned it).
-  const below = findDbtProjectCandidates([origin])[0];
+  const below = findDbtProjectsBelow([origin], { first: true })[0];
   return below ?? designRoot;
 }
 
-/** Like `resolveProjectRoot`, but a missing project is a `CliEnvError`. */
+/**
+ * Like `resolveProjectRoot`, but a missing project is a `CliEnvError`.
+ * Logical first: the message names only the `.erd-studio/` folder, since a
+ * folder with neither is most often a plain folder about to get its first
+ * diagram; `mentionDbt` (a command that needs dbt, such as `diff`) also names
+ * `dbt_project.yml` and where it was looked for.
+ */
 export function requireProjectRoot(
   project: string | undefined,
   cwd: string = process.cwd(),
   semanticDir: string = DEFAULT_CLI_SEMANTIC_DIR,
+  options: { mentionDbt?: boolean } = {},
 ): string {
   const root = resolveProjectRoot(project, cwd, semanticDir);
   if (!root) {
+    const where = project ? redactPaths(relPath(cwd, path.resolve(cwd, project))) : '';
     throw new CliEnvError(
       'no-project',
-      project
-        ? `No dbt_project.yml or ${semanticDir}/ folder found in ${redactPaths(relPath(cwd, path.resolve(cwd, project)))} `
-          + '(--project must be the folder that holds one).'
-        : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to three `
-          + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`,
+      options.mentionDbt
+        ? project
+          ? `No dbt_project.yml or ${semanticDir}/ folder found in ${where} (--project must be the folder that holds one).`
+          : `No dbt project or ${semanticDir}/ folder found here: looked for dbt_project.yml in this folder, above it and up to six `
+            + `folders below it, and for ${semanticDir}/ in this folder and above it. Run this from your project folder, or pass --project <dir>.`
+        : project
+          ? `No ${semanticDir}/ folder found in ${where} (--project must be the folder that holds it).`
+          : `No ${semanticDir}/ folder found here: looked in this folder and above it. Run this from your project folder, or pass --project <dir>.`,
     );
   }
   return root;
@@ -247,9 +261,9 @@ function iso(ms: number | null): string | null {
  * `LayerService` + `TableLibraryService` feed `SubjectAreaService` — with the
  * manifest parsed in-process (spec D6).
  */
-export async function buildCliContext(opts: { project?: string; semanticDir: string; cwd?: string }): Promise<CliContext> {
+export async function buildCliContext(opts: { project?: string; semanticDir: string; cwd?: string; mentionDbt?: boolean }): Promise<CliContext> {
   const semanticDir = opts.semanticDir;
-  const root = requireProjectRoot(opts.project, opts.cwd, semanticDir);
+  const root = requireProjectRoot(opts.project, opts.cwd, semanticDir, { mentionDbt: opts.mentionDbt });
   const hasDbt = hasDbtProjectFile(root);
   const dbtConfig = readDbtProjectConfig(root);
 
@@ -313,6 +327,7 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
       modifiedAt: iso(manifestMtime),
       models: manifestStatus === 'missing' || manifestStatus === 'unreadable' ? null : manifest.models.size,
       newestSourceChange,
+      ...(manifest.placeholderProfile === true ? { placeholderProfile: true as const } : {}),
     },
     ymlData,
     catalog,

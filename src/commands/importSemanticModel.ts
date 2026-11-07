@@ -1,0 +1,348 @@
+/**
+ * **Import Power BI or Fabric Semantic Model…** (`erdStudio.importSemanticModel`)
+ * — a semantic model saved as files in as a new diagram: a Power BI Project's
+ * `<Name>.SemanticModel` folder (or the older `<Name>.Dataset`), as TMDL
+ * (`definition/*.tmdl`) or as one `model.bim`, from Power BI Desktop, Fabric
+ * Git integration or Tabular Editor.
+ *
+ * Steps: a folder (an Open dialog) → every file under it, bounded →
+ * `findSemanticModels` (a quick pick when the folder holds several) → read
+ * the model's files (`workspace.fs`) → `readSemanticModel` (a model that does
+ * not read is reported with file and line and an Open File button) →
+ * `semanticModelToDbml` → the DBML goes through Import DBML's own flow
+ * (`importDbml` with `source: 'semanticModel'`): the user picks the layer,
+ * names the diagram and confirms a dry run that says what was skipped
+ * (measures, calculation groups, auto date/time tables…, counted by kind; the
+ * full list goes to the log). Cancelling any step writes nothing.
+ *
+ * **The quick path** (`quickImportSemanticModel`: the start screen's
+ * **Import your Power BI semantic model** and the start suggestion) looks in
+ * the open folder itself: one model is taken (several: the pick), Import
+ * DBML's quick layer and name, and the draft (the read-only preview,
+ * `docs/dev/draft-first.md` §5.1) is the one question; its Change options…
+ * asks the layer and name, those offered first. No model found: the
+ * step-by-step flow. With a draft, several models are not picked: the first
+ * is drawn and the draft's **Model** switcher offers the others. On the
+ * automatic draft (`draft.quiet`) nothing is asked or shown.
+ *
+ * Pure parts in `src/services/semanticModelImport.ts`; every vscode call goes
+ * through `ImportSemanticModelUi` (and Import DBML's `ImportDbmlUi`).
+ */
+
+import * as path from 'path';
+import * as vscode from 'vscode';
+
+import {
+  OPEN_FILE_BUTTON,
+  SEND_FEEDBACK_BUTTON,
+  feedbackPrefill,
+  oursMessage,
+  showErrorWithActions,
+  type ErrorActions,
+  type FeedbackPrefill,
+} from '../services/commandErrors';
+import {
+  describeImportProblems,
+  semanticModelRenameNote,
+  semanticModelSkippedSummary,
+  walkFiles,
+  type DirEntries,
+} from '../services/importSources';
+import { log } from '../services/logger';
+import {
+  findSemanticModels,
+  readSemanticModel,
+  semanticModelToDbml,
+  type SemanticModelEntry,
+  type SemanticModelFile,
+} from '../services/semanticModelImport';
+import { telemetry } from '../services/telemetryService';
+import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
+import type { TelemetryFeature } from '../services/telemetryPayload';
+import {
+  IMPORT_TITLES,
+  changeOptionsDraft,
+  importDbml,
+  suppliedDbmlUi,
+  vscodeImportDbmlUi,
+  type ImportDbmlDeps,
+  type ImportDbmlResult,
+  type ImportDbmlUi,
+} from './importDbml';
+import { openTableFileAt } from './openModelFile';
+import type { DraftScopes } from '../types/draft';
+
+export const IMPORT_SEMANTIC_MODEL_COMMAND = 'erdStudio.importSemanticModel';
+
+const TITLE = IMPORT_TITLES.semanticModel;
+
+/** At most this many files under the picked folder are listed. */
+export const MAX_SEMANTIC_MODEL_FILES = 5000;
+/** At most this much model text (characters). */
+export const MAX_SEMANTIC_MODEL_CHARS = 50 * 1024 * 1024;
+
+/** The button that picks another folder after one with no model. */
+export const CHOOSE_ANOTHER_FOLDER_BUTTON = 'Choose Another Folder';
+
+/** At most this many models in the draft's Model switcher (`DRAFT_SCOPE_LIMIT`). */
+export const MODEL_SCOPE_LIMIT = 12;
+
+/** The model quick pick's item. */
+export interface SemanticModelItem extends vscode.QuickPickItem {
+  entry: SemanticModelEntry;
+}
+
+/** Every vscode call the semantic-model half of the flow makes, injectable for tests. */
+export interface ImportSemanticModelUi {
+  /** The folder holding the model; undefined when cancelled. */
+  pickFolder(defaultFolder: string | undefined): Promise<string | undefined>;
+  readDirectory(folder: string): Promise<DirEntries>;
+  /** A file's text (`workspace.fs`). Throws when it cannot be read. */
+  readFile(filePath: string): Promise<string>;
+  pickModel(items: readonly SemanticModelItem[], options: vscode.QuickPickOptions): Promise<SemanticModelItem | undefined>;
+  /** Resolves the button picked; the flow never awaits it. */
+  showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
+  openFileAt(filePath: string, line?: number): Promise<void>;
+  sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+}
+
+export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
+  modelUi?: ImportSemanticModelUi;
+  /** The Import DBML half (layer, name, dry run, open). */
+  ui?: ImportDbmlUi;
+}
+
+/**
+ * Run the flow. Resolves Import DBML's result once a diagram is written, or
+ * undefined when the user cancels, no model reads, or something failed (each
+ * case has already said so).
+ */
+export async function importSemanticModel(
+  deps: ImportSemanticModelDeps,
+  quick?: { folder: string; model?: string },
+  scope?: { folder: string; model: string },
+): Promise<ImportDbmlResult | undefined> {
+  const quiet = deps.draft?.quiet === true;
+  const ui = quiet ? quietImportSemanticModelUi(deps.modelUi ?? vscodeImportSemanticModelUi()) : deps.modelUi ?? vscodeImportSemanticModelUi();
+  const cancelled = (): undefined => {
+    if (!quiet) telemetry.feature('importSemanticModelCancelled');
+    return undefined;
+  };
+  const showError = (message: string, actions: ErrorActions = {}): void => {
+    showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
+      log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      const doing = `while running ${choice}`;
+      showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
+    });
+  };
+  /** The model does not import: `importSemanticModelInvalid` and why (`reason`); quiet, the draft is dropped as unreadable. */
+  const invalid = (message: string, actions: ErrorActions = {}, reason?: TelemetryFeature): undefined => {
+    if (quiet) dropQuietly(deps.draft, 'unreadable');
+    else {
+      telemetry.feature('importSemanticModelInvalid');
+      if (reason) telemetry.feature(reason);
+    }
+    showError(message, actions);
+    return undefined;
+  };
+  /** The input could not be taken in (too many files, too much text, a file that does not read). */
+  const limited = (limit: ImportInputLimit): void => {
+    if (quiet) dropQuietly(deps.draft, 'unreadable');
+    else telemetry.feature(IMPORT_LIMIT_FEATURES[limit]);
+  };
+
+  // 1. The folder, and the models in it.
+  const folder = quick?.folder ?? scope?.folder ?? await ui.pickFolder(deps.workspaceRoot || undefined);
+  if (!folder) return cancelled();
+  const folderName = path.basename(folder);
+  // Only model files count toward the bound: findSemanticModels reads nothing
+  // else, and a big repo holding one model somewhere must still import from its root.
+  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
+  // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
+  if (quick && (walk.truncated || walk.files.length === 0)) {
+    if (quiet) {
+      dropQuietly(deps.draft, 'nothingFound');
+      return undefined;
+    }
+    telemetry.feature('quickImportFellBack');
+    return importSemanticModel(deps);
+  }
+  if (walk.truncated) {
+    limited('tooManyFiles');
+    showError(
+      `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
+      { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
+    );
+    return undefined;
+  }
+  // Paths under the picked folder (its own name included, so a picked X.SemanticModel is still found).
+  const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
+  const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
+  const entries = findSemanticModels([...fullOf.keys()]);
+  if (entries.length === 0 && quick) {
+    if (quiet) {
+      dropQuietly(deps.draft, 'nothingFound');
+      return undefined;
+    }
+    telemetry.feature('quickImportFellBack');
+    return importSemanticModel(deps);
+  }
+  if (entries.length === 0) {
+    return invalid(
+      `${TITLE}: no semantic model found in ${folderName}. Pick the folder that holds <Name>.SemanticModel (saved as TMDL or as model.bim), or that folder itself.`,
+      { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
+      'importSemanticModelNoModel',
+    );
+  }
+  // Several models (not the switcher's own re-entry, which names the one it wants).
+  if (entries.length > 1 && !scope && quick?.model === undefined) telemetry.feature('importSemanticModelSeveral');
+  let entry = entries[0];
+  /** With a draft and several models: the switcher, and how a choice on it re-enters. */
+  let modelScopes: { scopes: DraftScopes; onScope: (id: string) => unknown } | undefined;
+  if (deps.draft && entries.length > 1) {
+    const wanted = quick?.model ?? scope?.model;
+    const offered = entries.slice(0, MODEL_SCOPE_LIMIT);
+    entry = offered.find((e) => e.root === wanted) ?? offered[0];
+    modelScopes = {
+      scopes: {
+        label: 'Model',
+        current: entry.root,
+        options: offered.map((e) => ({
+          id: e.root,
+          label: path.posix.basename(e.root) || e.name,
+          description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim',
+        })),
+      },
+      // The user's own choice: never quiet from here on (a model that does not convert says why).
+      onScope: (id) => {
+        const loud = deps.draft?.quiet ? { ...deps, draft: { ...deps.draft, quiet: false } } : deps;
+        return quick
+          ? importSemanticModel(loud, { folder, model: id })
+          : importSemanticModel(loud, undefined, { folder, model: id });
+      },
+    };
+  } else if (entries.length > 1) {
+    const picked = await ui.pickModel(
+      entries.map((e) => ({ label: e.name, description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim', detail: e.root, entry: e })),
+      { title: TITLE, placeHolder: 'Which semantic model?', ignoreFocusOut: true },
+    );
+    if (!picked) return cancelled();
+    entry = picked.entry;
+  }
+
+  // 2. Read it.
+  const files: SemanticModelFile[] = [];
+  let chars = 0;
+  for (const file of entry.files) {
+    let text: string;
+    try {
+      text = await ui.readFile(fullOf.get(file) ?? file);
+    } catch (err) {
+      log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
+      limited('unreadable');
+      showError(`${TITLE} couldn't read ${file}. Check that the file still exists and that you can open it, then try again.`);
+      return undefined;
+    }
+    chars += text.length;
+    if (chars > MAX_SEMANTIC_MODEL_CHARS) {
+      limited('tooMuchText');
+      showError(`${TITLE}: ${entry.name} holds more than ${Math.round(MAX_SEMANTIC_MODEL_CHARS / 1024 / 1024)} MB of model files, too much to import at once.`);
+      return undefined;
+    }
+    files.push({ path: file, text });
+  }
+  let read: ReturnType<typeof readSemanticModel>;
+  let converted: ReturnType<typeof semanticModelToDbml>;
+  try {
+    read = readSemanticModel(files);
+    if (!read.ok) {
+      const first = read.problems.find((p) => fullOf.has(p.file));
+      return invalid(
+        describeImportProblems(TITLE, read.problems),
+        first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {},
+        entry.kind === 'tmdl' ? 'importSemanticModelParseTmdl' : 'importSemanticModelParseBim',
+      );
+    }
+    converted = semanticModelToDbml(read.model);
+  } catch (err) {
+    telemetry.error('importSemanticModelFailed');
+    const doing = 'while converting the semantic model';
+    log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
+    showError(oursMessage(TITLE, doing, 'nothing was changed'), {
+      [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)),
+    });
+    return undefined;
+  }
+  const warnings = [...read.warnings, ...converted.warnings];
+  for (const line of [...converted.skipped, ...warnings]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
+
+  // 3. Import DBML's flow, with the converted DBML as its file.
+  const renameNote = semanticModelRenameNote(converted.renamed);
+  const filePath = path.join(deps.workspaceRoot, `${entry.name}.dbml`);
+  const { modelUi: _modelUi, ui: importUi, ...rest } = deps;
+  const importDeps = {
+    ...rest,
+    ...(rest.draft && modelScopes ? { draft: { ...rest.draft, ...modelScopes } } : {}),
+    ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, converted.dbml),
+    source: 'semanticModel' as const,
+    origin: {
+      from: `from the semantic model ${entry.name}`,
+      notes: [...(renameNote ? [renameNote] : []), ...warnings],
+      skipped: semanticModelSkippedSummary(converted.skippedCounts),
+    },
+  };
+  if (!quick) return importDbml(importDeps, { filePath });
+  // Change options…: the same model, the layer and name asked, the quick path's offered first, ending in a draft.
+  return importDbml({
+    ...importDeps,
+    changeOptions: ({ layer, name }) => importDbml({ ...importDeps, ...changeOptionsDraft(importDeps.draft) }, { filePath, preferredLayer: layer, name }),
+  }, { filePath, quick: true });
+}
+
+/** The quick path: the semantic model in the open folder itself (the pick only when it holds several). */
+export function quickImportSemanticModel(deps: ImportSemanticModelDeps): Promise<ImportDbmlResult | undefined> {
+  return importSemanticModel(deps, { folder: deps.workspaceRoot });
+}
+
+/** The model UI of the automatic draft: it asks nothing and shows nothing (each message goes to the log). */
+export function quietImportSemanticModelUi(base: ImportSemanticModelUi): ImportSemanticModelUi {
+  return {
+    ...base,
+    pickFolder: async () => undefined,
+    pickModel: async () => undefined,
+    showErrorMessage: async (message) => {
+      log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
+      return undefined;
+    },
+  };
+}
+
+/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */
+export function isSemanticModelFile(name: string): boolean {
+  return /\.(tmdl|bim)$/i.test(name);
+}
+
+/** The real UI. */
+export function vscodeImportSemanticModelUi(): ImportSemanticModelUi {
+  return {
+    pickFolder: async (defaultFolder) => {
+      const picked = await vscode.window.showOpenDialog({
+        title: `${TITLE}: the folder that holds <Name>.SemanticModel`,
+        openLabel: 'Import',
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        ...(defaultFolder ? { defaultUri: vscode.Uri.file(defaultFolder) } : {}),
+      });
+      return picked?.[0]?.fsPath;
+    },
+    readDirectory: async (folder) =>
+      (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
+        .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
+    readFile: async (filePath) => new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
+    pickModel: async (items, options) => vscode.window.showQuickPick([...items], options),
+    showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
+    openFileAt: (filePath, line) => openTableFileAt(filePath, line),
+    sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+  };
+}

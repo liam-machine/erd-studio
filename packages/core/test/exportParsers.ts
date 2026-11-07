@@ -1,6 +1,7 @@
 /**
- * The real parsers the export tests hold every output to (devDependencies
- * only, exact versions — core's runtime dependencies stay `yaml`):
+ * The real parsers the export tests hold every output to (exact versions;
+ * the pinned `@dbml/parse` 11.0.0 is core's runtime dependency, used only
+ * behind `@erd-studio/core/dbml`, and the rest are devDependencies):
  *
  * - DBML: `@dbml/parse` (current — what dbdiagram.io runs) **and** the old
  *   PEG parser most DBML tools still embed, `@dbml/core` 3.13.4, 2.6.1 and
@@ -13,8 +14,9 @@
  *   statically, so they load while vitest collects the file, outside any
  *   test's timeout; the first read then costs only ~15 ms.
  * - Rich DBML (`toDbmlRich`, custom properties): `@dbml/parse` 9.1.1 (the
- *   first with custom properties), 10.3.1 (the extension's import parser)
- *   and 11.0.0 (aliased as `dbml-parse-v9` / `dbml-parse-v11`).
+ *   first with custom properties), 10.3.1 and 11.0.0 (the pin, which the
+ *   extension, the CLI and the MCP server bundle), the first two aliased as
+ *   `dbml-parse-v9` / `dbml-parse-v10`.
  *   `readDbmlRich` reads with all three, through each one's
  *   `DBMLDiagnosticsProvider`, so warnings and lint infos count too, into
  *   one shape (11.0 gives a custom property as `{ value, type }`, the others
@@ -40,7 +42,7 @@
 
 import { Compiler, DBMLDiagnosticsProvider, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
 import * as DbmlParseV9 from 'dbml-parse-v9';
-import * as DbmlParseV11 from 'dbml-parse-v11';
+import * as DbmlParseV10 from 'dbml-parse-v10';
 import { Parser as ParserV2 } from 'dbml-core-v2';
 import { Parser as ParserV24 } from 'dbml-core-v24';
 import { Parser as ParserV3 } from 'dbml-core-v3';
@@ -48,7 +50,7 @@ import type { DisplayColumn, DisplaySubjectArea, DisplayTable, DisplayRelationsh
 import { DIAGRAM_EXPORT_FILE_EXTENSIONS, type DiagramExportFormat } from '../src/exportDiagram';
 
 /** The parser versions the tests run, for messages and docs. */
-export const DBML_PARSERS = ['@dbml/parse 10.3.1', '@dbml/core 3.13.4', '@dbml/core 2.6.1', '@dbml/core 2.4.2'] as const;
+export const DBML_PARSERS = ['@dbml/parse 11.0.0', '@dbml/core 3.13.4', '@dbml/core 2.6.1', '@dbml/core 2.4.2'] as const;
 /** The parsers rich DBML (custom properties) is held to: every `@dbml/parse` major since custom properties arrived. */
 export const RICH_DBML_PARSERS = ['@dbml/parse 9.1.1', '@dbml/parse 10.3.1', '@dbml/parse 11.0.0'] as const;
 
@@ -196,8 +198,8 @@ export interface RichDbmlParse {
 
 const RICH_PARSER_MODULES: ReadonlyArray<readonly [(typeof RICH_DBML_PARSERS)[number], Loose]> = [
   ['@dbml/parse 9.1.1', DbmlParseV9],
-  ['@dbml/parse 10.3.1', { Compiler, DBMLDiagnosticsProvider, DEFAULT_ENTRY, MemoryProjectLayout }],
-  ['@dbml/parse 11.0.0', DbmlParseV11],
+  ['@dbml/parse 10.3.1', DbmlParseV10],
+  ['@dbml/parse 11.0.0', { Compiler, DBMLDiagnosticsProvider, DEFAULT_ENTRY, MemoryProjectLayout }],
 ];
 
 /** `text` through each of {@link RICH_DBML_PARSERS}, with every diagnostic (errors, warnings and lint infos). */

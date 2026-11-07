@@ -1,0 +1,3 @@
+Table gold.bridge_empty {
+  _erd_no_columns unknown [erd_placeholder: 'true', note: 'ERD Studio: this table has no columns yet, and DBML needs one']
+}

@@ -1,0 +1,9 @@
+// Inventory relationships, owned by the supply chain team.
+use { table conformed.dim_date }               from '../tables/conformed/dim_date.dbml'
+use { table conformed.dim_product }            from '../tables/conformed/dim_product.dbml'
+use { table conformed.dim_store }              from '../tables/conformed/dim_store.dbml'
+use { table inventory.fct_inventory_snapshot } from '../tables/inventory/fct_inventory_snapshot.dbml'
+
+Ref: inventory.fct_inventory_snapshot.date_key >? conformed.dim_date.date_key
+Ref: inventory.fct_inventory_snapshot.product_key >? conformed.dim_product.product_key
+Ref: inventory.fct_inventory_snapshot.store_key >? conformed.dim_store.store_key

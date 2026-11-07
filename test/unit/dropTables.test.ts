@@ -1,0 +1,418 @@
+/**
+ * Dragging tables onto a diagram, host side: the Table Library's drag source
+ * (`TableLibraryDragController`: which tables a row drags, what goes in the
+ * DataTransfer), the drop's helpers (`tablesOfDroppedUris`,
+ * `dropGridPositions`), the `dropTables` payload check, and
+ * `SemanticEditorProvider`'s handling of a drop — table files among the
+ * dropped URIs, else the Table Library drag of the last minute; one edit with
+ * the new tables at the drop point; tables already there selected; nothing on
+ * the physical stage. The webview side is `test/unit/libraryDrop.test.tsx`.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { pathToFileURL } from 'url';
+import * as vscode from 'vscode';
+
+import { _appliedEdits, _resetMockWorkspace, createMockTextDocument, createMockWebviewPanel } from '../__mocks__/vscode';
+import {
+  DROP_TABLES_NOTHING_MESSAGE,
+  PENDING_LIBRARY_DRAG_MS,
+  PHYSICAL_READ_ONLY_MESSAGE,
+  SemanticEditorProvider,
+} from '../../src/providers/SemanticEditorProvider';
+import { TABLE_LIBRARY_DRAG_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
+import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
+import { DROP_GRID_COLUMNS, dropGridPositions, tablesOfDroppedUris } from '../../src/services/tableDrop';
+import { validateDropTablesPayload } from '../../src/providers/payloadValidation';
+import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
+import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../../src/services/positionService';
+import { SubjectAreaService } from '../../src/services/domainService';
+import { LayerService } from '../../src/services/layerService';
+import { TableLibraryService } from '../../src/services/logicalModelService';
+import { SelectorsService } from '../../src/services/selectorsService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import type { ManifestService } from '../../src/services/manifestService';
+import type { YmlParserService } from '../../src/services/ymlParserService';
+import type { TemplateService } from '../../src/services/templateService';
+
+// ---------------------------------------------------------------------------
+// The drag source
+// ---------------------------------------------------------------------------
+
+const table = (name: string, extra: Partial<TableLibraryTableNode> = {}): TableLibraryTableNode => ({
+  type: 'model', name, filePath: `/p/.erd-studio/gold/tables/gold/${name}.dbml`, referencingDomains: [], ...extra,
+});
+const schema = (folder: string, children: TableLibraryTableNode[]): TableLibraryFolderNode => ({
+  type: 'folder', folder, layer: 'gold', filePath: `/p/.erd-studio/gold/tables/${folder}`, children,
+});
+const layer = (children: Array<TableLibraryFolderNode | TableLibraryTableNode>): TableLibraryLayerNode => ({
+  type: 'layer', layer: 'gold', filePath: '/p/.erd-studio/gold/tables', children, tableCount: 0, schemas: [],
+});
+
+describe('tablesOfDraggedRows', () => {
+  it('drags a table row, every table of a schema row and of a layer row, each once, in tree order', () => {
+    const sales = schema('sales', [table('fct_order'), table('dim_customer')]);
+    const finance = schema('finance', [table('fct_invoice')]);
+    expect(tablesOfDraggedRows([table('dim_date')]).names).toEqual(['dim_date']);
+    expect(tablesOfDraggedRows([sales]).names).toEqual(['fct_order', 'dim_customer']);
+    expect(tablesOfDraggedRows([layer([sales, finance, table('dim_region')])]).names)
+      .toEqual(['fct_order', 'dim_customer', 'fct_invoice', 'dim_region']);
+    // A row selected with its own schema row is dragged once, whatever its case.
+    expect(tablesOfDraggedRows([sales, table('FCT_ORDER')]).names).toEqual(['fct_order', 'dim_customer']);
+  });
+
+  it('never drags a duplicate that is ignored, and keeps each name with its file', () => {
+    const dup = table('fct_order', { filePath: '/p/.erd-studio/silver/tables/silver/fct_order.dbml', shadowedBy: '/p/x.dbml' });
+    const dragged = tablesOfDraggedRows([schema('sales', [dup, table('dim_customer')])]);
+    expect(dragged).toEqual({ names: ['dim_customer'], filePaths: ['/p/.erd-studio/gold/tables/gold/dim_customer.dbml'] });
+  });
+
+  it('stops at the Add Existing Tables cap', () => {
+    const many = Array.from({ length: ADD_EXISTING_TABLES_LIMIT + 5 }, (_, i) => table(`t_${i}`));
+    expect(tablesOfDraggedRows([schema('big', many)]).names).toHaveLength(ADD_EXISTING_TABLES_LIMIT);
+    expect(tablesOfDraggedRows([schema('big', many)], 3).names).toEqual(['t_0', 't_1', 't_2']);
+  });
+});
+
+describe('TableLibraryDragController', () => {
+  it('offers its tree mime type and text/uri-list, and accepts no drops', () => {
+    const controller = new TableLibraryDragController(() => {});
+    expect(controller.dragMimeTypes).toEqual([TABLE_LIBRARY_DRAG_MIME, 'text/uri-list']);
+    expect(controller.dropMimeTypes).toEqual([]);
+    expect(TABLE_LIBRARY_DRAG_MIME).toBe('application/vnd.code.tree.erdstudio.modellibrary');
+  });
+
+  it('puts the files in text/uri-list and the names under its mime type, then reports the drag', () => {
+    const started = vi.fn();
+    const transfer = new vscode.DataTransfer();
+    new TableLibraryDragController(started).handleDrag([schema('sales', [table('fct_order'), table('dim_customer')])], transfer);
+    expect(transfer.get('text/uri-list')?.value).toBe([
+      vscode.Uri.file('/p/.erd-studio/gold/tables/gold/fct_order.dbml').toString(),
+      vscode.Uri.file('/p/.erd-studio/gold/tables/gold/dim_customer.dbml').toString(),
+    ].join('\r\n'));
+    expect(transfer.get(TABLE_LIBRARY_DRAG_MIME)?.value).toEqual(['fct_order', 'dim_customer']);
+    expect(started).toHaveBeenCalledWith(['fct_order', 'dim_customer']);
+  });
+
+  it('a drag with no table (an ignored duplicate alone) sets nothing and reports nothing', () => {
+    const started = vi.fn();
+    const transfer = new vscode.DataTransfer();
+    new TableLibraryDragController(started).handleDrag([table('x', { shadowedBy: '/p/y.dbml' })], transfer);
+    expect(transfer.get('text/uri-list')).toBeUndefined();
+    expect(started).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The drop's helpers
+// ---------------------------------------------------------------------------
+
+describe('tablesOfDroppedUris', () => {
+  const files = [
+    { name: 'fct_order', filePath: '/proj/.erd-studio/gold/tables/gold/fct_order.dbml' },
+    { name: 'dim_customer', filePath: '/proj/.erd-studio/logical-models/dim_customer.yml' },
+    { name: 'dim_date', filePath: '/proj/.erd-studio/silver/tables/cal/dim_date.dbml', shadowedBy: '/proj/other.dbml' },
+  ];
+  const uri = (p: string): string => pathToFileURL(p).href;
+
+  it('names the table files among the URIs, DBML and YAML, in drop order, each once', () => {
+    expect(tablesOfDroppedUris([
+      uri('/proj/.erd-studio/logical-models/dim_customer.yml'),
+      uri('/proj/README.md'),
+      uri('/proj/.erd-studio/gold/tables/gold/fct_order.dbml'),
+      uri('/proj/.erd-studio/logical-models/dim_customer.yml'),
+    ], files, 'linux')).toEqual(['dim_customer', 'fct_order']);
+  });
+
+  it('ignores a non-file URI, junk, a folder and an ignored duplicate', () => {
+    expect(tablesOfDroppedUris([
+      'vscode-remote://ssh/proj/.erd-studio/gold/tables/gold/fct_order.dbml',
+      'https://example.com/fct_order.dbml',
+      'not a uri',
+      'file://%',
+      uri('/proj/.erd-studio/gold/tables/gold'),
+      uri('/proj/.erd-studio/silver/tables/cal/dim_date.dbml'),
+    ], files, 'linux')).toEqual([]);
+  });
+
+  it('matches without case where the file system ignores it, and with case elsewhere', () => {
+    const shouted = uri('/PROJ/.erd-studio/GOLD/tables/gold/FCT_ORDER.dbml');
+    expect(tablesOfDroppedUris([shouted], files, 'darwin')).toEqual(['fct_order']);
+    expect(tablesOfDroppedUris([shouted], files, 'linux')).toEqual([]);
+  });
+
+  it('decodes a percent-encoded path', () => {
+    const spaced = [{ name: 'fct_order', filePath: '/my proj/.erd-studio/gold/tables/gold/fct_order.dbml' }];
+    expect(tablesOfDroppedUris(['file:///my%20proj/.erd-studio/gold/tables/gold/fct_order.dbml'], spaced, 'linux')).toEqual(['fct_order']);
+  });
+});
+
+describe('dropGridPositions', () => {
+  it('puts the first table under the pointer and the rest in rows of four', () => {
+    const names = ['a', 'b', 'c', 'd', 'e'];
+    const at = dropGridPositions(names, { x: 500.4, y: 300 });
+    const left = Math.round(500.4 - NODE_WIDTH / 2);
+    expect(DROP_GRID_COLUMNS).toBe(4);
+    expect(at.a).toEqual({ x: left, y: 280 });
+    expect(at.b).toEqual({ x: left + NODE_WIDTH + PADDING, y: 280 });
+    expect(at.d).toEqual({ x: left + 3 * (NODE_WIDTH + PADDING), y: 280 });
+    expect(at.e).toEqual({ x: left, y: 280 + NODE_HEIGHT + PADDING });
+    expect(Object.keys(dropGridPositions([], { x: 0, y: 0 }))).toEqual([]);
+  });
+});
+
+describe('validateDropTablesPayload', () => {
+  it('accepts a finite point with a list of URIs, empty too', () => {
+    expect(validateDropTablesPayload({ position: { x: 1, y: -2.5 }, uris: [] })).toBeNull();
+    expect(validateDropTablesPayload({ position: { x: 0, y: 0 }, uris: ['file:///a.dbml'] })).toBeNull();
+  });
+
+  it.each([
+    [undefined],
+    [null],
+    [[]],
+    [{ uris: [] }],
+    [{ position: { x: Number.NaN, y: 0 }, uris: [] }],
+    [{ position: { x: 0, y: Number.POSITIVE_INFINITY }, uris: [] }],
+    [{ position: { x: '1', y: 0 }, uris: [] }],
+    [{ position: { x: 0, y: 0 } }],
+    [{ position: { x: 0, y: 0 }, uris: 'file:///a.dbml' }],
+    [{ position: { x: 0, y: 0 }, uris: [42] }],
+    [{ position: { x: 0, y: 0 }, uris: ['x'.repeat(DROP_TABLES_URI_MAX_LENGTH + 1)] }],
+    [{ position: { x: 0, y: 0 }, uris: Array.from({ length: DROP_TABLES_URI_LIMIT + 1 }, () => 'file:///a.dbml') }],
+  ])('refuses %j', (payload) => {
+    expect(validateDropTablesPayload(payload)).toEqual(expect.any(String));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The provider
+// ---------------------------------------------------------------------------
+
+const NATIVE = path.resolve(__dirname, '../fixtures/dbml-native');
+let root: string;
+
+function buildProvider(projectRoot: string): SemanticEditorProvider {
+  const layerService = new LayerService(projectRoot, '.erd-studio');
+  const subjectAreaService = new SubjectAreaService(layerService);
+  const tableLibraryService = new TableLibraryService(projectRoot, '.erd-studio');
+  subjectAreaService.setTableLibraryService(tableLibraryService);
+  const context = {
+    extensionUri: vscode.Uri.file(path.join(projectRoot, 'no-extension')),
+    globalStorageUri: vscode.Uri.file(path.join(projectRoot, '.global-storage')),
+    extension: { packageJSON: { version: '0.0.0-test' } },
+    globalState: { get: () => true, update: async () => {} },
+    subscriptions: [],
+  } as unknown as import('vscode').ExtensionContext;
+  const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
+  return new SemanticEditorProvider(
+    context,
+    subjectAreaService,
+    { loadManifest: async () => empty } as unknown as ManifestService,
+    { loadYmlData: async () => empty } as unknown as YmlParserService,
+    { loadTemplates: () => [] } as unknown as TemplateService,
+    layerService,
+    projectRoot,
+    new SelectorsService(subjectAreaService, projectRoot, '.erd-studio'),
+    tableLibraryService,
+    new OwnWriteTracker(),
+  );
+}
+
+const at = (rel: string): string => path.join(root, '.erd-studio', rel);
+const fileUri = (rel: string): string => pathToFileURL(at(rel)).href;
+const SALES = 'gold/diagrams/sales.dbml';
+const STAGING = 'silver/diagrams/staging.dbml';
+const DIM_CUSTOMER = 'gold/tables/gold/dim_customer.dbml';
+const DIM_REGION = 'gold/tables/gold/dim_region.dbml';
+const FCT_ORDER = 'gold/tables/gold/fct_order.dbml';
+
+async function loaded(provider: SemanticEditorProvider, rel = STAGING) {
+  const panel = createMockWebviewPanel();
+  const doc = createMockTextDocument(at(rel), fs.readFileSync(at(rel), 'utf-8'), { persist: true });
+  (vscode.workspace.textDocuments as unknown[]).push(doc);
+  await provider.resolveCustomTextEditor(
+    doc as unknown as import('vscode').TextDocument,
+    panel as unknown as import('vscode').WebviewPanel,
+    {} as import('vscode').CancellationToken,
+  );
+  await panel._simulateMessage({ type: 'ready' });
+  panel._postedMessages.length = 0;
+  _appliedEdits.length = 0;
+  return { panel, doc };
+}
+
+type Panel = ReturnType<typeof createMockWebviewPanel>;
+const posted = (panel: Panel, type: string) => panel._postedMessages.filter((m) => (m as { type: string }).type === type);
+const errors = (panel: Panel): string[] => posted(panel, 'error').map((m) => (m as { payload: { message: string } }).payload.message);
+const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }) =>
+  panel._simulateMessage({ type: 'dropTables', payload: { position, uris } });
+
+beforeEach(() => {
+  _resetMockWorkspace();
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-drop-tables-'));
+  fs.cpSync(NATIVE, root, { recursive: true });
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe('dropTables', () => {
+  it('adds the dropped table files in one edit, at the drop point, and selects the first', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    await drop(panel, [fileUri(DIM_CUSTOMER), fileUri(DIM_REGION)]);
+    expect(errors(panel)).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    const text = doc.getText();
+    expect(text).toContain('use { table gold.dim_customer }');
+    expect(text).toContain('use { table gold.dim_region }');
+    const left = 500 - NODE_WIDTH / 2;
+    expect(text).toMatch(new RegExp(`dim_customer ${left} 280\\b`));
+    expect(text).toMatch(new RegExp(`dim_region ${left + NODE_WIDTH + PADDING} 280\\b`));
+    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_customer' } }]);
+  });
+
+  it('with no table file among the URIs, adds the Table Library drag of the last minute, once', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region']);
+    await drop(panel, [pathToFileURL(path.join(root, 'README.md')).href]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    // Used up: a second drop with nothing in it adds nothing.
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, []);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(info).toHaveBeenCalledWith(DROP_TABLES_NOTHING_MESSAGE);
+  });
+
+  it('prefers the dropped files over the remembered drag, and forgets the drag', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    provider.noteLibraryDrag(['customer_profile']);
+    await drop(panel, [fileUri(DIM_CUSTOMER)]);
+    expect(doc.getText()).toContain('use { table gold.dim_customer }');
+    expect(doc.getText()).not.toContain('customer_profile');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, []);
+    expect(info).toHaveBeenCalledWith(DROP_TABLES_NOTHING_MESSAGE);
+  });
+
+  it('a drag older than a minute is not used', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.noteLibraryDrag(['dim_region']);
+    clock.mockReturnValue(now + PENDING_LIBRARY_DRAG_MS + 1);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, []);
+    expect(info).toHaveBeenCalledWith(DROP_TABLES_NOTHING_MESSAGE);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(doc.getText()).not.toContain('dim_region');
+  });
+
+  it('a table already on the diagram is selected and named, not added', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, [fileUri(FCT_ORDER)]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+    expect(info).toHaveBeenCalledWith('ERD Studio: "fct_order" is already on this diagram.');
+  });
+
+  it('adds the new ones of a mix, names the one already there, and selects the first new one', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_region' } }]);
+    expect(info.mock.calls.map((c) => c[0]).join('\n')).toContain('Already in this diagram: fct_order.');
+  });
+
+  it('keeps the existing placement for a drop on a positioned diagram: only the new table moves in', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider, SALES);
+    // Every library table is on sales; take dim_region off first, then drop it back.
+    const before = doc.getText();
+    expect(before).toMatch(/fct_order 400 200\b/);
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_region'] } });
+    _appliedEdits.length = 0;
+    await drop(panel, [fileUri(DIM_REGION)], { x: 1000, y: 1000 });
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toMatch(new RegExp(`dim_region ${1000 - NODE_WIDTH / 2} 980\\b`));
+    expect(doc.getText()).toMatch(/fct_order 400 200\b/);
+  });
+
+  it('says what to drop when nothing names a table', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await drop(panel, ['https://example.com/x']);
+    expect(info).toHaveBeenCalledWith(DROP_TABLES_NOTHING_MESSAGE);
+    expect(_appliedEdits).toHaveLength(0);
+  });
+
+  it('refuses a bad payload with a toast and writes nothing', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    await panel._simulateMessage({ type: 'dropTables', payload: { position: { x: Number.NaN, y: 0 }, uris: [] } });
+    await panel._simulateMessage({ type: 'dropTables', payload: { position: { x: 0, y: 0 }, uris: [7] } });
+    expect(errors(panel)).toEqual([
+      'Failed to add the dropped tables: Position coordinates must be finite numbers.',
+      'Failed to add the dropped tables: Each dropped URI must be text.',
+    ]);
+    expect(_appliedEdits).toHaveLength(0);
+  });
+
+  it('is refused on the physical stage (it is not on the read-only allowlist)', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    const entry = [...(provider as unknown as { openPanels: Map<string, { activeStage: string }> }).openPanels.values()][0];
+    entry.activeStage = 'physical';
+    await drop(panel, [fileUri(DIM_REGION)]);
+    expect(errors(panel)).toEqual([PHYSICAL_READ_ONLY_MESSAGE]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(doc.getText()).not.toContain('dim_region');
+  });
+});
+
+describe('noteLibraryDrag', () => {
+  it('tells each loaded canvas on the logical stage, and no other', async () => {
+    const provider = buildProvider(root);
+    const staging = await loaded(provider, STAGING);
+    const sales = await loaded(provider, SALES);
+    const opening = createMockWebviewPanel();
+    const doc = createMockTextDocument(at('gold/diagrams/other.dbml'), fs.readFileSync(at(SALES), 'utf-8'), { persist: true });
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      opening as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    const panels = (provider as unknown as { openPanels: Map<string, { activeStage: string; webview: unknown }> }).openPanels;
+    [...panels.values()].find((p) => p.webview === sales.panel.webview)!.activeStage = 'physical';
+    provider.noteLibraryDrag(['dim_customer', 'dim_region']);
+    expect(posted(staging.panel, 'libraryDragStarted')).toEqual([
+      { type: 'libraryDragStarted', payload: { tables: ['dim_customer', 'dim_region'] } },
+    ]);
+    expect(posted(sales.panel, 'libraryDragStarted')).toEqual([]);
+    expect(posted(opening, 'libraryDragStarted')).toEqual([]);
+  });
+
+  it('an empty drag tells no one', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag([]);
+    expect(posted(panel, 'libraryDragStarted')).toEqual([]);
+  });
+});

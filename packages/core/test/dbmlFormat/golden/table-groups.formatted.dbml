@@ -1,0 +1,14 @@
+Table dim_customer [
+  schema: 'gold',
+  role: 'conformed-dim'
+] {
+  customer_key int     [pk, note: 'Surrogate key']
+  customer_id  varchar [natural_key: 'true']
+
+  first_name    varchar [scd_type: '1']
+  last_name     varchar [scd_type: '1']
+  date_of_birth date
+
+  valid_from timestamp [scd_type: '2']
+  valid_to   timestamp
+}

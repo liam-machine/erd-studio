@@ -14,6 +14,7 @@ import type {
   ManifestRelationshipTest,
   ManifestWorkerResult,
 } from '../types/manifest';
+import { THROWAWAY_MARKER_KEY } from '../types/manifest';
 import { readMeta } from '@erd-studio/core';
 import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameUtils';
 
@@ -36,6 +37,7 @@ export function extractManifestData(
   // evidence in its own right, and losing it to a malformed manifest would
   // let a bare .sql file pass for a working model.
   const disabledModels = extractDisabledModels(manifest.disabled);
+  const placeholder = isPlaceholderManifest(manifest);
 
   const nodes = manifest.nodes as Record<string, unknown> | undefined;
   if (!nodes || typeof nodes !== 'object') {
@@ -47,6 +49,7 @@ export function extractManifestData(
       disabledModels,
       resourceDocs: {},
       compositeForeignKeys: [],
+      ...(placeholder ? { placeholderProfile: true } : {}),
     };
   }
 
@@ -104,7 +107,34 @@ export function extractManifestData(
   }
 
   const compositeForeignKeys = resolveForeignKeyTargets(declaredForeignKeys, models);
+  if (placeholder) {
+    // Parse without your credentials: every schema came from placeholder
+    // connection details (`erd_studio_placeholder…`). Blank them after all
+    // extraction (composite FK targets resolve by the relation's last
+    // segment, so they are unaffected), so nothing shows or writes them.
+    // `configSchema` is the user's own `config.schema` and is kept.
+    for (const info of Object.values(models)) { info.schema = ''; }
+    for (const info of Object.values(resourceDocs)) { info.schema = ''; }
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, placeholderProfile: true };
+  }
   return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys };
+}
+
+/** A plain (non-null, non-array) object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether Parse without your credentials wrote this manifest: its
+ * `metadata.env` holds `THROWAWAY_MARKER_KEY` as the string `"1"`.
+ */
+function isPlaceholderManifest(manifest: Record<string, unknown>): boolean {
+  const metadata = manifest.metadata;
+  if (!isPlainObject(metadata)) return false;
+  const env = metadata.env;
+  if (!isPlainObject(env)) return false;
+  return env[THROWAWAY_MARKER_KEY] === '1';
 }
 
 /** A list of column names, or null when it is not a list of strings. */
@@ -280,11 +310,16 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
   const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
   const hasOwnAlias = alias !== '' && alias !== name && (version === undefined || alias !== `${name}_v${version}`);
 
+  const config = node.config;
+  const configured = config && typeof config === 'object' ? (config as Record<string, unknown>).schema : undefined;
+  const configSchema = typeof configured === 'string' ? configured.trim() : '';
+
   return {
     name,
     uniqueId,
     projectName,
     schema: typeof node.schema === 'string' ? node.schema : '',
+    ...(configSchema !== '' ? { configSchema } : {}),
     ...(hasOwnAlias ? { alias } : {}),
     description: typeof node.description === 'string' ? node.description : '',
     columns,

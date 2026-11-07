@@ -1,0 +1,10 @@
+Project sales {
+  Note: 'Orders, their customers, regions and refunds'
+  erd_schema_version: '7'
+  erd_unlinked_tables: 'fct_refund'
+}
+
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table silver.dim_region } from '../../silver/tables/silver/dim_region.dbml'
+use * from '../relationships/gold.dbml'

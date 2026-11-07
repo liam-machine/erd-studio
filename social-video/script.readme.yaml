@@ -1,19 +1,34 @@
-# README cut: "How ERD Studio works" (VARIANT=readme). The pro explainer (script.yaml) re-cut
-# for the project README rather than a LinkedIn feed: same scenes, voice, music and look, with
-# the social-only material removed — the Confluence scene (not a public product), the
-# "not on dbt?" scene (the extension needs a dbt project to open), the launch-traction scene
-# and "link in the comments". The end card points at the Extensions view instead.
+# README cut: "How ERD Studio works" (VARIANT=readme), committed as docs/assets/how-it-works.mp4.
+# An argument, then a tour, for README visitors: ERD Studio is a free-to-use VS Code extension;
+# why do data teams keep the data model in a separate tool or remote database, versioned apart
+# from the code that builds it, when it could be plain DBML files (an open format) next to that
+# code, reviewed in the same pull request? Then the DBML files behind the canvas (layer-first:
+# <layer>/tables/<schema>/<table>.dbml, <layer>/relationships/<layer>.dbml,
+# <layer>/diagrams/<diagram>.dbml), editing either side, a .dbml diff in a pull request, the
+# imports that build the logical model (DBML, SQL DDL incl. DDL exported from Snowflake or
+# Databricks, a Power BI / Fabric semantic model, Import from dbt, the import guide) and the draft,
+# Set Up My AI Helper (found in the ERD Studio sidebar's Help & Feedback view; a markdown skill for
+# every assistant; in Claude Code, GitHub Copilot, Codex and Gemini CLI a pre-tool hook), if you use dbt:
+# dbt parse → manifest.json → Compare with dbt (dbt first, more physical sources to follow), and ERD Studio for Confluence reading the repo as the single
+# source of truth. Voice only: no music bed (`music: false`). Per-scene direction:
+# SCENES.readme.md. The scenes are player/scenes/readme/*.js (plus the shared endCard); the
+# example they all draw is R in player/scenes/readme/story.js.
 #
-# Format: exactly as script.yaml (see its header). Every scene module is the pro cut's
-# (player/scenes/*.js); `endCard` takes props for its tagline and link line.
+# Format: exactly as script.yaml (see its header). Wording follows docs/dev/onboarding-and-cli.md
+# → "User-facing wording": DBML is "an open format" (never an open standard), ERD Studio is free
+# to use and source available (never "open source"), "diagram", "Set Up My AI Helper", and every
+# label on screen is the product's own (src/types/startActions.ts, package.json, the webview).
+# ERD Studio for Confluence is never called free and has no price here. No competitor is named.
 
 title: How ERD Studio works
-maxDuration: 110
+maxDuration: 190
+# Voice only (Liam, 2026-11-05): music.py writes no bed for this cut and encode.sh mixes none.
+music: false
 
 voice:
   engine: kokoro        # kokoro | say
   kokoro: af_heart      # same voice as the getting-started video
-  speed: 1.06          # a touch brisker than the getting-started video: social pacing
+  speed: 1.06          # a touch brisker than the getting-started video
   say: Karen
   sayRate: 175
 
@@ -23,174 +38,233 @@ timing:
   tail: 0.45
   fade: 0.25
 
-chapters: ["WHY", "FLIP", "HOW", "DIFF", "SHIP"]
+chapters: ["WHY", "DBML", "EDIT", "IMPORT", "AI", "DBT", "SHARE"]
 
 scenes:
   - id: hook
-    module: hook
-    chapter: 0
-    minDur: 4.5
-    accent: amber
-    headline: ["We've built data models", "{backwards} for decades."]
-    lines:
-      - id: h_backwards
-        beat: backwards
-        caption: For decades, we've built | the data model {backwards}.
-      - id: h_loop
-        beat: loop
-        caption: Here's the fix, and why your {AI} needs it.
-
-  - id: problem
-    module: problem
+    module: readme/hook
     chapter: 1
-    minDur: 9
-    accent: amber
-    headline: ["Drawn for the business.", "{Invisible} to the code."]
+    minDur: 6.5
+    accent: green
+    headline: ["ERD Studio:", "{free to use} in VS Code."]
     lines:
-      - id: p_drawn
-        beat: drawn
-        caption: We draw the logical model for {business users}, in a separate tool.
-      - id: p_back
-        beat: back
-        caption: Developers work backwards from the picture,
-      - id: p_drift
-        beat: drift
-        caption: so the design {drifts} | from the warehouse, | and nobody trusts the diagram.
+      - id: h_free
+        beat: free
+        caption: "{ERD Studio} is a VS Code extension, | {free to use}, | for your logical data model."
 
-  - id: ai
-    module: ai
+  - id: why
+    module: readme/why
     chapter: 1
-    minDur: 8
-    accent: blue
-    headline: ["I wanted to vibe code", "{data engineering}."]
+    minDur: 12
+    accent: amber
+    headline: ["So why is it kept", "{away from the code}?"]
     lines:
-      - id: a_vibe
-        beat: vibe
-        caption: Then I tried to {vibe code} | data engineering.
-      - id: a_blind
-        beat: blind
-        caption: My AI could read | every line of SQL, | but it couldn't see the {design}.
-      - id: a_guess
-        beat: guess
-        caption: What's the grain? | Which keys? | It had to {guess}.
+      - id: w_ask
+        beat: ask
+        caption: "So why do data teams keep it | in a {separate tool} | or a remote database, | versioned apart | from the code that builds it?"
+      - id: w_cost
+        beat: cost
+        caption: "Every change means | {switching context}. | The design drifts from the code, | and now your {AI} can't see it either."
 
   - id: flip
-    module: flip
-    chapter: 2
-    minDur: 7
+    module: readme/flip
+    chapter: 1
+    minDur: 6
     accent: green
-    headline: ["So flip it.", "Put the model {in the repo}."]
+    headline: ["Keep it as {DBML},", "next to the code."]
     lines:
-      - id: f_flip
-        beat: flip
-        caption: So flip it. | Build the logical model | for {developers first},
       - id: f_repo
         beat: repo
-        caption: and save it {in the repo}, right next to the SQL.
+        caption: "ERD Studio keeps it | as simple {DBML} files, | right next to the code | that builds it."
 
-  - id: yaml
-    module: yaml
-    chapter: 3
+  - id: tree
+    module: readme/tree
+    chapter: 2
     minDur: 8.5
     accent: blue
-    headline: ["One table,", "{one YAML file}."]
+    headline: ["Plain {DBML} files,", "an open format."]
     lines:
-      - id: y_file
-        beat: file
-        caption: Each table is | one small {YAML} file,
-      - id: y_fields
-        beat: fields
-        caption: with its {grain}, columns, | types and {keys}.
-      - id: y_domain
-        beat: domain
-        caption: A {domain} file groups the tables | and says how they join.
+      - id: t_dbml
+        beat: dbml
+        caption: DBML is {an open format}, | so there's no lock-in.
+      - id: t_files
+        beat: files
+        caption: "Each layer has a folder: | {one file per table}, | the relationships, | and the diagrams."
+
+  - id: files
+    module: readme/files
+    chapter: 2
+    minDur: 6
+    accent: blue
+    headline: ["One table,", "{one file}."]
+    lines:
+      - id: fi_table
+        beat: table
+        caption: A table file holds | its {columns}, keys and grain.
+      - id: fi_ref
+        beat: ref
+        caption: and each relationship is | {one Ref line}.
+        say: "and each relationship is one reference line."   # Kokoro says "Ref" as "rough"
 
   - id: canvas
-    module: canvas
+    module: readme/canvas
     chapter: 3
-    minDur: 7
+    minDur: 7.6           # under 1 s of quiet after "follows" (voice only: a longer hold reads as dead air)
     accent: blue
+    props:
+      poster: { beat: sync, offset: 3.0 }   # thumb.mjs: the README poster frame (the file open, the row grown)
     headline: ["The files become", "a {diagram}."]
     lines:
       - id: c_draw
         beat: draw
-        caption: ERD Studio draws those files as a {diagram}, inside VS Code.
+        caption: ERD Studio draws the files | as a {diagram}, in VS Code.
       - id: c_sync
         beat: sync
-        caption: Edit either one, and the other {updates}.
+        caption: Edit the canvas or the file, | and the other {follows}.
 
-  - id: view
-    module: view
+  - id: pr
+    module: readme/pr
     chapter: 3
-    minDur: 9
-    accent: blue
-    headline: ["No magic.", "{It's just a file}."]
-    lines:
-      - id: v_click
-        beat: click
-        caption: Click {View File}, | and there's the JSON underneath.
-      - id: v_format
-        beat: format
-        caption: ERD Studio just {renders} that file, | in one simple, documented format.
-      - id: v_back
-        beat: back
-        pause: 0.3
-        caption: Reopen it with ERD Studio, | and it's a {diagram} again.
-
-  - id: physical
-    module: physical
-    chapter: 3
-    minDur: 6.5
+    minDur: 6.4
     accent: green
-    headline: ["Logical is what you mean.", "Physical is {what you built}."]
+    headline: ["A design change,", "a {readable diff}."]
     lines:
-      - id: ph_logical
-        beat: logical
-        caption: "{Logical} is the design: what you mean."
-      - id: ph_physical
-        beat: physical
-        caption: "{Physical} is what dbt | actually builds, | read straight from your project."
+      - id: pr_diff
+        beat: diff
+        caption: So a design change | is a small, {readable diff},
+      - id: pr_same
+        beat: same
+        caption: in the {same pull request} | as the code that builds it.
 
-  - id: diff
-    module: diff
+  - id: import
+    module: readme/import
+    chapter: 4
+    minDur: 10
+    accent: amber
+    headline: ["Already have a model?", "{Bring it in}."]
+    lines:
+      - id: im_open
+        beat: open
+        caption: "Most teams already have | a data model. | {Import…} brings it in | from what you use:"
+        say: "Most teams already have a data model. Import brings it in from what you use:"
+      - id: im_dbml
+        beat: dbml
+        caption: "a {DBML} file | from any DBML tool,"
+      - id: im_sql
+        beat: sql
+        caption: "{SQL} CREATE TABLE scripts, | like the DDL you export | from {Snowflake} or {Databricks},"
+        say: "S Q L create table scripts, like the D D L you export from Snowflake or Databricks,"
+      - id: im_pbi
+        beat: pbi
+        caption: "or a {Power BI} or {Fabric} | semantic model."
+      - id: im_dbt
+        beat: dbt
+        caption: "In a dbt project, | {Import from dbt} | builds it from your models."
+      - id: im_guide
+        beat: guide
+        caption: "Not a file yet? | The guide, | {Bring In Your Data Model…}, | shows how to export it, | tool by tool."
+        say: "Not a file yet? The guide, Bring In Your Data Model, shows how to export it, tool by tool."   # commas keep "Bring In" two words
+
+  - id: draft
+    module: readme/draft
     chapter: 4
     minDur: 9
     accent: amber
-    headline: ["Press Diff.", "Watch the {drift} light up."]
+    headline: ["A {draft} first,", "then DBML in Git."]
     lines:
-      - id: d_best
-        beat: best
-        caption: Now the best part.
-      - id: d_press
-        beat: press
-        pause: 0.15
-        caption: Press {Diff}.
-      - id: d_lights
-        beat: lights
-        pause: 0.3
-        caption: A renamed column, | a wrong type, | a missing relationship. | Every mismatch {lights up} | before it ships.
+      - id: dr_draft
+        beat: draft
+        caption: "Whichever you pick, | you see a {draft} first: | nothing is written | until you keep it."
+      - id: dr_keep
+        beat: keep
+        caption: "Then it's {DBML} in your repo, | to edit by hand | or with your AI."
 
-  - id: pr
-    module: pr
+  - id: ai
+    module: readme/ai
     chapter: 5
-    minDur: 8.5
-    accent: green
-    headline: ["Design and SQL.", "{One pull request}."]
+    minDur: 7
+    accent: blue
+    headline: ["Set Up My AI Helper,", "in the {ERD Studio} sidebar."]
     lines:
-      - id: pr_same
-        beat: same
-        caption: The design change | and the SQL change | go in the {same pull request}.
-      - id: pr_review
-        beat: review
-        caption: Reviewed together. | Tracked together. | {Shipped} together.
-      - id: pr_sense
-        beat: sense
-        pause: 0.4
-        caption: It's just common sense. | Why did this take us {decades} | to figure out?
-      - id: pr_ai
-        beat: ai
-        pause: 0.3
-        caption: And your {AI} reads the model | before it writes a single line.
+      - id: ai_setup
+        beat: setup
+        caption: "In the ERD Studio sidebar, | under {Help & Feedback}, | {Set Up My AI Helper} adds a skill | for Claude Code, GitHub Copilot, | Codex, Gemini CLI or Cursor."
+        say: "In the ERD Studio side bar, under Help and Feedback, Set Up My AI Helper adds a skill for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor."
+
+  - id: skill
+    module: readme/skill
+    chapter: 5
+    minDur: 14
+    accent: blue
+    headline: ["The skill is", "{just markdown}."]
+    lines:
+      - id: sk_md
+        beat: md
+        caption: "A skill is just a {markdown file} | the model loads. | It teaches the DBML layout, | so what your AI writes | {renders as a diagram}."
+      - id: sk_hook
+        beat: hook
+        caption: "In Claude Code, GitHub Copilot, | Codex and Gemini CLI, | a {pre-tool hook} | pauses the first edit | to the .erd-studio folder | each session, | and tells your AI | to load the skill first."
+        say: "In Claude Code, GitHub Copilot, Codex and Gemini CLI, a pre-tool hook pauses the first edit to the E R D Studio folder, each session, and tells your AI to load the skill first."
+
+  - id: aiwrite
+    module: readme/aiwrite
+    chapter: 5
+    minDur: 8             # a short hold on the new table; the new Ref keeps pulsing through it
+    accent: blue
+    headline: ["Your AI writes", "{the same files}."]
+    lines:
+      - id: ai_write
+        beat: write
+        caption: Whichever assistant you use, | it writes {DBML}, | and you see its change | on the canvas | before you commit.
+
+  - id: parse
+    module: readme/parse
+    chapter: 6
+    minDur: 9.2
+    accent: green
+    headline: ["If you use dbt,", "run {dbt parse}."]
+    lines:
+      - id: p_if
+        beat: if
+        caption: "If you use {dbt}, | ERD Studio can compare your design | with the {physical model}: | dbt first, | with {more to follow}."
+      - id: p_parse
+        beat: parse
+        pause: 0.8          # the PHYSICAL MODEL panel holds on "more to follow" before Run dbt parse
+        caption: "Run dbt parse, | and dbt writes {manifest.json}, | describing every model | your project builds."
+        say: "Run dbt parse, and dbt writes manifest dot json, describing every model your project builds."
+
+  - id: dbt
+    module: readme/dbt
+    chapter: 6
+    minDur: 10
+    accent: green
+    headline: ["Compare what dbt builds", "with {your design}."]
+    lines:
+      - id: d_open
+        beat: open
+        caption: ERD Studio reads it | into a read-only {Physical} tab.
+      - id: d_compare
+        beat: compare
+        pause: 0.8          # the read-only Physical tab holds a moment before Compare with dbt
+        caption: "{Compare with dbt} | marks every difference | between your design | and what dbt builds, | so drift is easy to spot."
+
+  - id: confluence
+    module: readme/confluence
+    chapter: 7
+    minDur: 14
+    accent: blue
+    headline: ["For the business:", "view it in {Confluence}."]
+    lines:
+      - id: cf_app
+        beat: app
+        caption: "For business users, | {ERD Studio for Confluence} | connects straight to | your team's {GitHub} repo."
+      - id: cf_db
+        beat: db
+        caption: "That repo is the {database} | of your logical model, | but it's really just | DBML files in Git, | drawn as a diagram anyone can read."
+      - id: cf_truth
+        beat: truth
+        caption: "One {source of truth}: | developers update their code, | not another SaaS product."
+        say: "One source of truth: developers update their code, not another sass product."
 
   - id: end
     module: endCard
@@ -199,12 +273,14 @@ scenes:
     accent: green
     headline: null
     props:
+      tagline: ["Design your data model ", "in Git."]
+      pills: ["Free to use in VS Code", "Source available"]
+      pillWords: ["free", "source"]         # endCard: each pill lands on its word in e_name
       link: { text: Also on Open VSX, chevron: false }
     lines:
       - id: e_name
         beat: name
-        caption: ERD Studio for VS Code. | {Free}, with the {source on GitHub}.
-        say: ERD Studio for VS Code. Free, with the source on GitHub.
-      - id: e_cta_readme
+        caption: ERD Studio is {free to use} | in VS Code, | source available on GitHub.
+      - id: e_cta
         beat: cta
         caption: Search {ERD Studio} | in the VS Code Extensions view.

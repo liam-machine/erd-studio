@@ -1,0 +1,10 @@
+Table fraud.fraud_alert [owner: 'data-engineering'] {
+  Note: 'Alerts the fraud system raised on card transactions.'
+
+  alert_id    STRING    [pk, natural_key: 'true']
+  card_txn_id STRING    [foreign_key: 'true', note: 'The card transaction it flagged']
+  rule        STRING
+  raised_at   TIMESTAMP
+  outcome     STRING
+  _loaded_at  TIMESTAMP [note: 'When the loader landed the row']
+}

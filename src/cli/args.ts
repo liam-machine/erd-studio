@@ -4,26 +4,30 @@
  *
  * Flags may appear before or after the subcommand, as `--flag value` or
  * `--flag=value`. Every flag is checked against the subcommand's allowlist:
- * an unknown or misplaced flag is a usage error (exit 2), never ignored,
+ * an unknown flag, or one given to the wrong subcommand, is a usage error (exit 2), never ignored,
  * because a silently dropped `--domain` would diff the wrong thing.
  */
 
 import { DIAGRAM_EXPORT_FORMATS, type DiagramExportFormat } from '@erd-studio/core';
 
-export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'export' | 'version' | 'help';
+export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'export' | 'changes' | 'version' | 'help';
 
-export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'export', 'version', 'help'];
+export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'export', 'changes', 'version', 'help'];
 
 /**
- * What `export --format` takes: every diagram format, plus `dbml-layout` —
- * the `.dbdiagram` layout file of a `dbml-rich` export (its table
- * positions, as dbdiagram's own CLI reads them), printed on its own.
+ * What `export --format` takes: every diagram format. (`dbml-layout`, the
+ * dbdiagram.io layout file of a `dbml-rich` export, was removed: the positions
+ * are in the rich export's own Project, `erd_layout`.)
  */
-export type CliExportFormat = DiagramExportFormat | 'dbml-layout';
+export type CliExportFormat = DiagramExportFormat;
 
-export const CLI_EXPORT_FORMATS: readonly CliExportFormat[] = [...DIAGRAM_EXPORT_FORMATS, 'dbml-layout'];
+export const CLI_EXPORT_FORMATS: readonly CliExportFormat[] = [...DIAGRAM_EXPORT_FORMATS];
 
-/** `mermaid|dbml|dbml-rich|dbml-layout` — the export formats as the usage text and its errors spell them. */
+/** The message for the removed `--format dbml-layout`. */
+export const DBML_LAYOUT_REMOVED_MESSAGE =
+  "--format dbml-layout was removed: positions are in the diagram's Project (erd_layout); use --format dbml-rich.";
+
+/** `mermaid|dbml|dbml-rich` — the export formats as the usage text and its errors spell them. */
 const FORMAT_CHOICES = CLI_EXPORT_FORMATS.join('|');
 
 export interface CliOptions {
@@ -54,7 +58,16 @@ export interface CliOptions {
   strict: boolean;
   /** export: the text format to print. */
   format?: CliExportFormat;
+  /** changes: the git ref to compare the working tree with. */
+  base?: string;
+  /** changes: `text` (the default), `markdown` or `json` (the same as `--json`). */
+  changesFormat?: CliChangesFormat;
 }
+
+/** What `changes --format` takes. */
+export type CliChangesFormat = 'text' | 'markdown' | 'json';
+
+export const CLI_CHANGES_FORMATS: readonly CliChangesFormat[] = ['text', 'markdown', 'json'];
 
 export class CliUsageError extends Error {
   constructor(message: string) {
@@ -78,10 +91,13 @@ const FLAGS: Record<string, FlagSpec> = {
   '--trust-venv': { takesValue: false, commands: ['doctor'] },
   '--summary': { takesValue: false, commands: ['inventory'] },
   '--models': { takesValue: true, commands: ['inventory'] },
+  '--diagram': { takesValue: true, commands: ['diff', 'export'] },
+  /** The older name of `--diagram`, kept working (the setup skill and scripts use it). */
   '--domain': { takesValue: true, commands: ['diff', 'export'] },
   '--all': { takesValue: false, commands: ['diff', 'export'] },
   '--strict': { takesValue: false, commands: ['diff'] },
-  '--format': { takesValue: true, commands: ['export'] },
+  '--format': { takesValue: true, commands: ['export', 'changes'] },
+  '--base': { takesValue: true, commands: ['changes'] },
 };
 
 export const DEFAULT_CLI_SEMANTIC_DIR = '.erd-studio';
@@ -137,7 +153,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     if (arg.startsWith('-') && arg !== '-') { throw new CliUsageError(`Unknown option ${arg}.`); }
     if (command !== null) { throw new CliUsageError(`Unexpected argument "${arg}".`); }
     if (!(CLI_COMMANDS as readonly string[]).includes(arg)) {
-      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, export, version.`);
+      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, export, changes, version.`);
     }
     command = arg as CliCommand;
   }
@@ -172,11 +188,35 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         opts.models = [...new Set([...(opts.models ?? []), ...names])];
         break;
       }
+      case '--diagram':
       case '--domain': opts.domains.push(value!); break;
       case '--all': opts.all = true; break;
       case '--strict': opts.strict = true; break;
+      case '--base': {
+        const ref = value!.trim();
+        // A ref is passed to git as an argument: one that starts with `-` would be read as an option.
+        if (ref.startsWith('-') || /[\s\0]/.test(ref)) {
+          throw new CliUsageError('--base must be a git branch, tag or commit, e.g. --base origin/main.');
+        }
+        opts.base = ref;
+        break;
+      }
       case '--format': {
+        if (opts.command === 'changes') {
+          const choice = value!.trim().toLowerCase();
+          if (!(CLI_CHANGES_FORMATS as readonly string[]).includes(choice)) {
+            throw new CliUsageError(`Unknown --format "${value}". Expected one of: ${CLI_CHANGES_FORMATS.join('|')}.`);
+          }
+          if (opts.changesFormat !== undefined && opts.changesFormat !== choice) {
+            throw new CliUsageError('Use --format once.');
+          }
+          opts.changesFormat = choice as CliChangesFormat;
+          break;
+        }
         const format = value!.trim().toLowerCase();
+        if (format === 'dbml-layout') {
+          throw new CliUsageError(DBML_LAYOUT_REMOVED_MESSAGE);
+        }
         if (!(CLI_EXPORT_FORMATS as readonly string[]).includes(format)) {
           throw new CliUsageError(`Unknown --format "${value}". Expected one of: ${FORMAT_CHOICES}.`);
         }
@@ -191,20 +231,30 @@ export function parseArgs(argv: readonly string[]): CliOptions {
   }
 
   if (opts.command === 'diff' && opts.domains.length === 0 && !opts.all) {
-    throw new CliUsageError('diff needs --domain <path> or --all.');
+    throw new CliUsageError('diff needs --diagram <path> or --all.');
   }
   if (opts.command === 'diff' && opts.domains.length > 0 && opts.all) {
-    throw new CliUsageError('Use either --domain or --all, not both.');
+    throw new CliUsageError('Use either --diagram or --all, not both.');
+  }
+  if (opts.command === 'changes') {
+    if (opts.base === undefined) {
+      throw new CliUsageError('changes needs --base <git-ref>, e.g. --base origin/main.');
+    }
+    if (opts.json && opts.changesFormat !== undefined && opts.changesFormat !== 'json') {
+      throw new CliUsageError(`Use either --json or --format ${opts.changesFormat}, not both.`);
+    }
+    if (opts.changesFormat === 'json') { opts.json = true; }
+    opts.changesFormat ??= opts.json ? 'json' : 'text';
   }
   if (opts.command === 'export') {
     if (opts.domains.length > 0 && opts.all) {
-      throw new CliUsageError('Use either --domain or --all, not both.');
+      throw new CliUsageError('Use either --diagram or --all, not both.');
     }
     if (opts.domains.length === 0 && !opts.all) {
-      throw new CliUsageError(`export needs --domain <path> (or --all) and --format ${FORMAT_CHOICES}.`);
+      throw new CliUsageError(`export needs --diagram <path> (or --all) and --format ${FORMAT_CHOICES}.`);
     }
     if (opts.domains.length > 1) {
-      throw new CliUsageError('export takes one --domain (it prints one diagram).');
+      throw new CliUsageError('export takes one --diagram (it prints one diagram).');
     }
     if (opts.format === undefined) {
       throw new CliUsageError(`export needs --format ${FORMAT_CHOICES}.`);
@@ -227,8 +277,9 @@ export const USAGE = `erd-studio — read-only helper for ERD Studio (used by th
 Usage:
   erd-studio doctor    [--json] [--no-dbt] [--dbt <path>] [--trust-venv]
   erd-studio inventory [--json] [--summary] [--models a,b,c]
-  erd-studio diff      [--json] (--domain <path> | --all) [--strict]
-  erd-studio export    [--json] (--domain <path> | --all) --format ${FORMAT_CHOICES}
+  erd-studio diff      [--json] (--diagram <path> | --all) [--strict]
+  erd-studio export    [--json] (--diagram <path> | --all) --format ${FORMAT_CHOICES}
+  erd-studio changes   [--json] --base <git-ref> [--format text|markdown|json]
   erd-studio version
 
 Shared options:
@@ -238,19 +289,26 @@ Shared options:
   --json                machine-readable output on stdout
   --quiet               no human-readable output (exit code only)
   --verbose             show internal diagnostics on stderr
+  --diagram <path>      a diagram file (.erd-studio/<layer>/diagrams/<name>.dbml or
+                        .erd-studio/<layer>/<name>.json); --domain <path> is the same
 
-export prints a subject area's logical (design) diagram on stdout and writes no file:
-  erd-studio export --domain .erd-studio/gold/sales.json --format dbml > sales.dbml
+export prints a diagram's logical (design) stage on stdout and writes no file:
+  erd-studio export --diagram .erd-studio/gold/diagrams/sales.dbml --format dbml > sales.dbml
   dbml         DBML any tool reads; ERD Studio's fields go in notes
-  dbml-rich    DBML for dbdiagram.io: ERD Studio's fields as properties (DBML 9.1+)
-  dbml-layout  the table positions for dbml-rich, as dbdiagram's .dbdiagram file:
-               erd-studio export --domain <path> --format dbml-layout > sales.dbdiagram
-  --all        every subject area, as a JSON list of { fileName, content }
-               (dbml-rich lists each .dbml followed by its .dbdiagram)
+  dbml-rich    rich DBML: every ERD Studio field as a property, the table positions
+               in the Project's erd_layout (DBML 9.1+, as dbdiagram.io reads)
+  --all        every diagram, as a JSON list of { fileName, content }
+
+changes lists how your ERD Studio model changed between a git ref and the files on disk:
+tables added, removed, renamed, moved and changed (columns, types, keys, alias, role,
+grain), relationships, and the tables on each diagram. It reads the ref from git and
+never checks out or writes anything:
+  erd-studio changes --base origin/main --format markdown
+  markdown     for a pull-request comment
 
 Without a dbt project (a folder holding only .erd-studio), doctor checks your ERD Studio
-files and skips the dbt checks; inventory and export read your ERD Studio files; diff
-needs a dbt project.
+files and skips the dbt checks; inventory, export and changes read your ERD Studio files;
+diff needs a dbt project.
 
-Exit codes: 0 ok · 1 diff found drift, or export --all skipped a subject area · 2 usage error · 3 project/subject area problem · 4 internal error
+Exit codes: 0 ok · 1 diff found drift, or export --all skipped a diagram · 2 usage error · 3 project/diagram/git problem · 4 internal error
 `;

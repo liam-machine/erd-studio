@@ -8,6 +8,8 @@
 //   node capture.mjs --jobs 6            parallel pages (default: min(6, cpus/2))
 //   node capture.mjs --scale 0.6667      render at 1280x720 (layout identical, deviceScaleFactor)
 //   node capture.mjs --stills 3.2,41     just write PNG stills of those times to build/stills/
+//   VARIANT=logical node capture.mjs     the cut for a folder without dbt: build-logical/ in and out
+//   (a recorded cut, timeline.recording, writes build/chrome.mkv instead; npm run composite adds the footage)
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUILD = join(HERE, 'build');
+// VARIANT picks the cut (build-timeline.mjs CUTS): unset is build/, e.g. logical is build-logical/.
+const VARIANT = process.env.VARIANT ?? '';
+const BUILD = join(HERE, VARIANT ? `build-${VARIANT}` : 'build');
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 ? dflt : argv[i + 1]; };
 const DRAFT = argv.includes('--draft');
@@ -31,7 +35,7 @@ const FPS = timeline.fps;
 const N = Math.round(timeline.total * FPS);
 
 const server = await startServer(0);
-const URL_ = `http://127.0.0.1:${server.address().port}/video/player/index.html`;
+const URL_ = `http://127.0.0.1:${server.address().port}/video/player/index.html${VARIANT ? `?variant=${VARIANT}` : ''}`;
 const browser = await chromium.launch({ args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none'] });
 
 async function openPage() {
@@ -93,10 +97,13 @@ if (STILLS) {
   await Promise.all(ranges.map(([a, b], j) => renderRange(a, b, files[j])));
   const list = join(parts, 'list.txt');
   writeFileSync(list, files.map((f) => `file '${f}'`).join('\n'));
-  await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', join(BUILD, 'master.mkv')], { stdio: 'inherit' })
+  // A recorded cut renders only its frame here (headline, chapter bar, the window's bezel, the end
+  // card) to chrome.mkv; record/composite.mjs lays the footage into it and writes master.mkv.
+  const OUT = timeline.recording ? 'chrome.mkv' : 'master.mkv';
+  await new Promise((res, rej) => spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', join(BUILD, OUT)], { stdio: 'inherit' })
     .on('close', (c) => (c === 0 ? res() : rej(new Error('concat failed')))));
   const secs = (performance.now() - t0) / 1000;
-  console.log(JSON.stringify({ frames: N, fps: FPS, jobs: ranges.length, draft: DRAFT, scale: SCALE, secs: +secs.toFixed(1), capFps: +(N / secs).toFixed(1) }));
+  console.log(JSON.stringify({ out: OUT, frames: N, fps: FPS, jobs: ranges.length, draft: DRAFT, scale: SCALE, secs: +secs.toFixed(1), capFps: +(N / secs).toFixed(1) }));
 }
 await browser.close();
 server.close();

@@ -1,0 +1,22 @@
+use { table payments.payment }        from '../tables/payments/payment.dbml'
+use { table orders.customer_order }   from '../tables/orders/customer_order.dbml'
+use { table shipping.shipment }       from '../tables/shipping/shipment.dbml'
+use { table shipping.tracking_event } from '../tables/shipping/tracking_event.dbml'
+use { table delivery_insights.fct_shipment_delivery } from '../../consumer_aligned/tables/delivery_insights/fct_shipment_delivery.dbml'
+use { table accounts.account }        from '../tables/accounts/account.dbml'
+use * from '../relationships/orders.dbml'
+use * from '../relationships/payments.dbml'
+use * from '../relationships/shipping.dbml'
+
+Project payments {
+  Note: 'The payments data product.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    account -1022 -193
+    customer_order 189 285
+    fct_shipment_delivery -1011 75
+    payment 12 12
+    shipment -627 291
+    tracking_event -588 -174
+  '''
+}

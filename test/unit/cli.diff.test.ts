@@ -6,14 +6,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
-import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
+import { conflictedSubjectAreaMessage, fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
 import { canonicalRelationship } from '@erd-studio/core';
 import { main } from '../../src/cli/index';
 import type { InventoryResult } from '../../src/cli/inventory';
 import { computeSubjectAreaDiff } from '../../src/services/stageDiff';
-import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder';
+import { allSelections, buildSyncPlan, syncPlanLibraryLookups } from '../../src/services/syncPlanBuilder';
 import type { SyncPlan } from '../../src/types/syncPlan';
-import type { Relationship } from '../../src/types/semantic';
+import type { Relationship, SemanticTable, TableRelationship } from '../../src/types/semantic';
+import { editRelationshipsDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from '@erd-studio/core/dbml';
+import { planDbmlConversion, type DbmlConversionPlan } from '../../src/services/dbmlConversion';
+import { readDbmlConversionInput } from '../../src/services/dbmlConversionFiles';
+import { DBT_FIXTURES, dbtFixtureRoot, diagramRel, tableFilePath } from './helpers/dbtFixtures';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const PROJECT = path.join(FIXTURES, 'dbt-project');
@@ -22,7 +26,7 @@ let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-cli-diff-')); });
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-async function run(argv: string[], cwd: string = PROJECT): Promise<{ code: number; out: string; err: string }> {
+async function runIn(argv: string[], cwd: string = PROJECT): Promise<{ code: number; out: string; err: string }> {
   let out = '';
   let err = '';
   const code = await main(argv, {
@@ -34,57 +38,19 @@ async function run(argv: string[], cwd: string = PROJECT): Promise<{ code: numbe
   return { code, out, err };
 }
 
+const run = (argv: string[], cwd: string = PROJECT) => runIn(argv, cwd);
+
 function copyProject(name = 'dbt-project'): string {
   const root = path.join(tmp, name);
-  fs.cpSync(path.join(FIXTURES, name), root, { recursive: true });
+  // Timestamps kept: manifest staleness compares the manifest's mtime with the model files'.
+  fs.cpSync(path.join(FIXTURES, name), root, { recursive: true, preserveTimestamps: true });
   return root;
 }
 
-describe('diff', () => {
-  it('the showcase report is exactly computeSubjectAreaDiff from logical, and the plan is buildSyncPlan(all physical)', async () => {
-    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
-    const { result, exitCode } = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'] });
-    expect(exitCode).toBe(1);
-    const d = result.domains[0];
-    const file = path.join(PROJECT, '.erd-studio/silver/showcase.json');
-    const expected = computeSubjectAreaDiff(
-      { subjectAreaService: ctx.subjectAreaService, ymlData: ctx.ymlData, manifest: ctx.manifest, catalog: ctx.catalog }, file, 'logical');
-    expect(d.report).toEqual(expected.report);
-    const plan = buildSyncPlan(expected.report, allSelections(expected.report, 'physical'), {
-      manifest: ctx.manifest, ymlData: ctx.ymlData, projectRoot: PROJECT, semanticDir: '.erd-studio', domain: 'showcase', layer: 'silver',
-    });
-    expect({ ...d.plan, generatedAt: '' }).toEqual({ ...plan, generatedAt: '' });
-
-    expect(d).toMatchObject({ file: '.erd-studio/silver/showcase.json', domain: 'showcase', layer: 'silver', clean: false });
-    expect(d.counts.blocking).toBe(d.fixes.filter((f) => f.severity === 'blocking').length);
-    expect(d.counts.advisory).toBeGreaterThan(0);
-    // Every non-phantom plan resolution is exactly one fix.
-    expect(d.fixes.length).toBe(d.plan!.columns.length + d.plan!.relationships.length);
-    // Sorted: blocking first, then model, then column.
-    const order = d.fixes.map((f) => `${f.severity === 'blocking' ? 0 : 1}|${f.model}|${f.column ?? ''}`);
-    expect(order).toEqual([...order].sort());
-
-    const setType = d.fixes.find((f) => f.kind === 'set-type' && f.severity === 'blocking')!;
-    expect(setType).toMatchObject({ model: 'fct_task_event', column: 'event_date', from: 'DATE', file: '.erd-studio/logical-models/fct_task_event.yml' });
-    const advisory = d.fixes.filter((f) => f.severity === 'advisory');
-    expect(advisory.every((f) => f.kind === 'set-type' && f.to === '')).toBe(true);
-    const removeRel = d.fixes.find((f) => f.kind === 'remove-relationship')!;
-    expect(removeRel.file).toBe('.erd-studio/silver/showcase.json');
-    expect(removeRel.relationship).toBeDefined();
-    for (const f of d.fixes) {
-      expect(f.explain.length).toBeGreaterThan(10);
-      expect(f.kind).not.toBe('remove-model');
-    }
-  });
-
-  it('collapses a phantom into one resolve-phantom question', async () => {
-    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
-    const d = runDiff(ctx, { domains: ['.erd-studio/silver/scroll-test.json'] }).result.domains[0];
-    expect(d.phantoms).toEqual([{ name: 'fct_large_table', reason: 'absent' }]);
-    expect(d.fixes).toEqual([expect.objectContaining({ kind: 'resolve-phantom', model: 'fct_large_table', severity: 'blocking' })]);
-    expect(d.clean).toBe(false);
-  });
-
+// YAML-only: these edit JSON / yml text, read a v4 file or a JSON `layer`
+// (none of which a DBML project has). The DBML equivalents are in
+// 'diff on the dbt fixture (%s storage)' and the native-DBML blocks below.
+describe('diff (YAML storage)', () => {
   it('--all marks v4 domains needsMigration with no fixes, and records per-domain errors', async () => {
     const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
     const { result, exitCode } = runDiff(ctx, { all: true });
@@ -162,6 +128,9 @@ describe('diff', () => {
     expect(d.unreadableModelFiles).toEqual([expect.objectContaining({ name: 'fct_task_event', kind: 'yamlOther', line: 2, mergeConflict: true })]);
     const fixes = d.fixes.filter((f) => f.kind === 'fix-model-yaml');
     expect(fixes).toEqual([expect.objectContaining({ line: 2 })]);
+    // Nothing else about the table is meaningful until it reads: no relationship fix touches it either.
+    expect(d.fixes.filter((f) => f.relationship !== undefined
+      && [f.relationship.fromModel, f.relationship.toModel].includes('fct_task_event'))).toEqual([]);
     // An assistant reads the fix: it shows the conflict and asks, never picks a side.
     expect(fixes[0].explain).toContain('.erd-studio/logical-models/fct_task_event.yml line 2: unresolved git merge conflict');
     expect(fixes[0].explain).toContain("ask which side to keep (don't pick a side or run git commands yourself)");
@@ -186,8 +155,92 @@ describe('diff', () => {
     expect(JSON.parse(r.out).error.code).toBe('unknown-layer');
   });
 
-  it('--all over no domains is an environment error, never a clean result', async () => {
+  it('a v4 domain gets the migration answer even when the v5 load would fail for another reason', async () => {
     const root = copyProject();
+    const v4 = JSON.parse(fs.readFileSync(path.join(root, '.erd-studio/gold/finance.json'), 'utf-8'));
+    fs.mkdirSync(path.join(root, '.erd-studio', 'platinum'));
+    fs.writeFileSync(path.join(root, '.erd-studio/platinum/odd.json'), JSON.stringify({ ...v4, domain: 'odd', layer: 'platinum' }));
+    const r = await run(['diff', '--json', '--domain', '.erd-studio/platinum/odd.json'], root);
+    expect(r.code).toBe(1);
+    expect(JSON.parse(r.out).domains[0]).toMatchObject({ domain: 'odd', layer: 'platinum', needsMigration: true, fixes: [] });
+  });
+
+});
+
+// The diff over the committed dbt fixture, on both storages: YAML/JSON
+// (dbt-project) and its native-DBML Convert (dbt-project-dbml). The report,
+// plan and fixes agree; only the files they name follow the storage.
+describe.each(DBT_FIXTURES)('diff on the dbt fixture (%s storage)', (storage, fixture) => {
+  const PROJECT = dbtFixtureRoot(fixture);
+  const SHOWCASE = `.erd-studio/${diagramRel(storage, 'silver', 'showcase')}`;
+  const tableFile = (name: string): string => path.relative(PROJECT, tableFilePath(PROJECT, storage, name)!).split(path.sep).join('/');
+  const run = (argv: string[], cwd: string = PROJECT) => runIn(argv, cwd);
+
+  it('the showcase report is exactly computeSubjectAreaDiff from logical, and the plan is buildSyncPlan(all physical)', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const { result, exitCode } = runDiff(ctx, { domains: [SHOWCASE] });
+    expect(exitCode).toBe(1);
+    const d = result.domains[0];
+    const file = path.join(PROJECT, SHOWCASE);
+    const expected = computeSubjectAreaDiff(
+      { subjectAreaService: ctx.subjectAreaService, ymlData: ctx.ymlData, manifest: ctx.manifest, catalog: ctx.catalog }, file, 'logical');
+    expect(d.report).toEqual(expected.report);
+    const plan = buildSyncPlan(expected.report, allSelections(expected.report, 'physical'), {
+      manifest: ctx.manifest, ymlData: ctx.ymlData, projectRoot: PROJECT, semanticDir: '.erd-studio', domain: 'showcase', layer: 'silver',
+      ...syncPlanLibraryLookups(ctx.tableLibraryService, {
+        diagramFile: file, layerIds: new Set(ctx.layerService.getAllLayers().map((l) => l.id)), manifest: ctx.manifest, ymlData: ctx.ymlData,
+      }),
+    });
+    expect({ ...d.plan, generatedAt: '' }).toEqual({ ...plan, generatedAt: '' });
+
+    expect(d).toMatchObject({ file: SHOWCASE, domain: 'showcase', layer: 'silver', clean: false });
+    expect(d.counts.blocking).toBe(d.fixes.filter((f) => f.severity === 'blocking').length);
+    expect(d.counts.advisory).toBeGreaterThan(0);
+    // Every non-phantom plan resolution is exactly one fix.
+    expect(d.fixes.length).toBe(d.plan!.columns.length + d.plan!.relationships.length);
+    // Sorted: blocking first, then model, then column.
+    const order = d.fixes.map((f) => `${f.severity === 'blocking' ? 0 : 1}|${f.model}|${f.column ?? ''}`);
+    expect(order).toEqual([...order].sort());
+
+    const setType = d.fixes.find((f) => f.kind === 'set-type' && f.severity === 'blocking')!;
+    expect(setType).toMatchObject({ model: 'fct_task_event', column: 'event_date', from: 'DATE', file: tableFile('fct_task_event') });
+    const advisory = d.fixes.filter((f) => f.severity === 'advisory');
+    expect(advisory.every((f) => f.kind === 'set-type' && f.to === '')).toBe(true);
+    const removeRel = d.fixes.find((f) => f.kind === 'remove-relationship')!;
+    // Where the stored entry is: the domain file on YAML, the layer's relationships file on DBML.
+    expect(removeRel.file).toBe(storage === 'yaml' ? SHOWCASE : '.erd-studio/silver/relationships/silver.dbml');
+    expect(removeRel.relationship).toBeDefined();
+    for (const f of d.fixes) {
+      expect(f.explain.length).toBeGreaterThan(10);
+      expect(f.kind).not.toBe('remove-model');
+    }
+  });
+
+  it('collapses a phantom into one resolve-phantom question', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const d = runDiff(ctx, { domains: [`.erd-studio/${diagramRel(storage, 'silver', 'scroll-test')}`] }).result.domains[0];
+    expect(d.phantoms).toEqual([{ name: 'fct_large_table', reason: 'absent' }]);
+    expect(d.fixes).toEqual([expect.objectContaining({ kind: 'resolve-phantom', model: 'fct_large_table', severity: 'blocking' })]);
+    expect(d.clean).toBe(false);
+  });
+
+  it('--all compares every diagram; finance is a v4 file to migrate on YAML and an empty, clean diagram on DBML', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const { result, exitCode } = runDiff(ctx, { all: true });
+    expect(exitCode).toBe(1);
+    expect(result.domains.map((d) => d.domain).sort()).toEqual(['bob', 'finance', 'ncr', 'scroll-test', 'sdd', 'showcase', 'ttt']);
+    expect(result.domains.every((d) => d.error === undefined)).toBe(true);
+    const finance = result.domains.find((d) => d.domain === 'finance')!;
+    if (storage === 'yaml') {
+      expect(finance).toMatchObject({ needsMigration: true, fixes: [], clean: false });
+    } else {
+      expect(finance).toMatchObject({ file: '.erd-studio/gold/diagrams/finance.dbml', fixes: [], clean: true });
+      expect(finance.needsMigration).toBeUndefined();
+    }
+  });
+
+  it('--all over no domains is an environment error, never a clean result', async () => {
+    const root = copyProject(fixture);
     // A custom data folder the CLI was not told about (it cannot read VS Code settings).
     fs.renameSync(path.join(root, '.erd-studio'), path.join(root, 'my erd'));
     const r = await run(['diff', '--all', '--json'], root);
@@ -207,18 +260,8 @@ describe('diff', () => {
     expect(JSON.parse(right.out).domains.length).toBeGreaterThan(0);
   });
 
-  it('a v4 domain gets the migration answer even when the v5 load would fail for another reason', async () => {
-    const root = copyProject();
-    const v4 = JSON.parse(fs.readFileSync(path.join(root, '.erd-studio/gold/finance.json'), 'utf-8'));
-    fs.mkdirSync(path.join(root, '.erd-studio', 'platinum'));
-    fs.writeFileSync(path.join(root, '.erd-studio/platinum/odd.json'), JSON.stringify({ ...v4, domain: 'odd', layer: 'platinum' }));
-    const r = await run(['diff', '--json', '--domain', '.erd-studio/platinum/odd.json'], root);
-    expect(r.code).toBe(1);
-    expect(JSON.parse(r.out).domains[0]).toMatchObject({ domain: 'odd', layer: 'platinum', needsMigration: true, fixes: [] });
-  });
-
   it('human output matches the spec shape', async () => {
-    const r = await run(['diff', '--domain', '.erd-studio/silver/showcase.json']);
+    const r = await run(['diff', '--domain', SHOWCASE]);
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/^showcase \(silver\) — \d+ differences to fix, \d+ advisory/);
     expect(r.out).toContain('✗ fct_task_event.event_date  type: DATE (logical) vs');
@@ -227,9 +270,99 @@ describe('diff', () => {
   });
 
   it('--quiet prints nothing but keeps the exit code', async () => {
-    const r = await run(['diff', '--quiet', '--domain', '.erd-studio/silver/showcase.json']);
+    const r = await run(['diff', '--quiet', '--domain', SHOWCASE]);
     expect(r.code).toBe(1);
     expect(r.out).toBe('');
+  });
+  it('a readable library reports no unreadable files', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const d = runDiff(ctx, { domains: [SHOWCASE] }).result.domains[0];
+    expect(d.unreadableModelFiles).toEqual([]);
+    expect(d.fixes.some((f) => f.kind === 'fix-model-yaml')).toBe(false);
+  });
+  it('every fix names a file of its own storage', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const fixes = runDiff(ctx, { all: true }).result.domains.flatMap((d) => d.fixes).filter((f) => f.kind !== 'resolve-phantom');
+    expect(fixes.length).toBeGreaterThan(0);
+    for (const f of fixes) {
+      expect(fs.existsSync(path.join(PROJECT, f.file)), `${f.kind} ${f.file}`).toBe(true);
+      expect(f.file, f.kind).toMatch(storage === 'yaml' ? /\.(yml|json)$/ : /\.dbml$/);
+    }
+  });
+});
+
+// The DBML counterparts of the YAML merge-conflict cases above (#145), on the
+// committed DBML twin: markers in a diagram's erd_layout, and in a table file.
+describe('diff (DBML storage): git merge conflicts', () => {
+  const SHOWCASE = '.erd-studio/silver/diagrams/showcase.dbml';
+
+  it('a diagram holding git merge conflicts is merge-conflict: its own error under --all, exit 3 for --domain', async () => {
+    const root = copyProject('dbt-project-dbml');
+    const file = path.join(root, SHOWCASE);
+    const lines = fs.readFileSync(file, 'utf-8').split('\n');
+    const at = lines.findIndex((l) => l.startsWith('use { table silver.dim_date }'));
+    expect(at).toBeGreaterThanOrEqual(0);
+    lines.splice(at, 1, '<<<<<<< HEAD', lines[at], '=======', "use { table silver.dim_location } from '../tables/silver/dim_location.dbml'", '>>>>>>> feature');
+    fs.writeFileSync(file, lines.join('\n'));
+    const line = at + 1;
+
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    const { result, exitCode } = runDiff(ctx, { all: true });
+    expect(exitCode).toBe(1);
+    const showcase = result.domains.find((d) => d.file === SHOWCASE)!;
+    expect(showcase.error).toEqual({ code: 'merge-conflict', message: conflictedSubjectAreaMessage(SHOWCASE, line) });
+
+    for (const argv of [
+      ['diff', '--json', '--domain', SHOWCASE],
+      ['export', '--json', '--domain', SHOWCASE, '--format', 'mermaid'],
+    ]) {
+      const r = await run(argv, root);
+      expect(r.code, argv[0]).toBe(3);
+      expect(JSON.parse(r.out).error, argv[0]).toEqual(showcase.error);
+      expect(r.out).not.toContain(root);
+    }
+  });
+
+  it('a conflict only inside erd_layout still compares: positions are not part of the diff (doctor raises it)', async () => {
+    const root = copyProject('dbt-project-dbml');
+    const file = path.join(root, SHOWCASE);
+    const clean = runDiff(await buildCliContext({ project: root, semanticDir: '.erd-studio' }), { domains: [SHOWCASE] }).result.domains[0];
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(
+      '    dim_customer 40 60\n', '<<<<<<< HEAD\n    dim_customer 40 60\n=======\n    dim_customer 80 90\n>>>>>>> feature\n'));
+    const d = runDiff(await buildCliContext({ project: root, semanticDir: '.erd-studio' }), { domains: [SHOWCASE] }).result.domains[0];
+    expect(d.error).toBeUndefined();
+    expect(d.report).toEqual(clean.report);
+    expect(d.fixes).toEqual(clean.fixes);
+  });
+
+  it('a table file holding git merge conflicts is one flagged fix-dbml-file at its first marker', async () => {
+    const root = copyProject('dbt-project-dbml');
+    const rel = '.erd-studio/silver/tables/silver/fct_task_event.dbml';
+    const file = path.join(root, rel);
+    const lines = fs.readFileSync(file, 'utf-8').split('\n');
+    const at = lines.findIndex((l) => /^\s+event_id\b/.test(l));
+    expect(at).toBeGreaterThan(0);
+    lines.splice(at, 0, '<<<<<<< HEAD', '  note_a INT', '=======', '  note_b INT', '>>>>>>> feature');
+    fs.writeFileSync(file, lines.join('\n'));
+
+    const r = await run(['diff', '--domain', SHOWCASE, '--json'], root);
+    expect(r.code).toBe(1);
+    const d = (JSON.parse(r.out) as DiffResult).domains[0];
+    expect(d.unreadableModelFiles).toEqual([expect.objectContaining({ name: 'fct_task_event', file: rel, line: at + 1, mergeConflict: true })]);
+    const forModel = d.fixes.filter((f) => f.model === 'fct_task_event');
+    expect(forModel.filter((f) => ['add-column', 'remove-column', 'set-type'].includes(f.kind))).toEqual([]);
+    const dbmlFixes = forModel.filter((f) => f.kind === 'fix-dbml-file');
+    expect(dbmlFixes).toEqual([expect.objectContaining({ severity: 'blocking', file: rel, line: at + 1 })]);
+    // An assistant reads the fix: it shows the conflict and asks, never picks a side.
+    expect(dbmlFixes[0].explain).toContain(`${rel} line ${at + 1}: unresolved git merge conflict`);
+    expect(dbmlFixes[0].explain).toContain("ask which side to keep (don't pick a side or run git commands yourself)");
+    expect(dbmlFixes[0].explain).not.toContain('git add');
+    // The relationships file's Refs to the unreadable table drop out when it is attached; diff must not read
+    // that as "add it" (silver.dbml already holds fct_task_event.task_key → dim_task), so it offers no
+    // relationship fix touching the table, as on YAML.
+    const touching = (f: { relationship?: { fromModel: string; toModel: string } }): boolean =>
+      f.relationship !== undefined && [f.relationship.fromModel, f.relationship.toModel].includes('fct_task_event');
+    expect(d.fixes.filter(touching)).toEqual([]);
   });
 });
 
@@ -265,12 +398,6 @@ describe('diff over a model file that does not parse', () => {
     expect(human.out).toContain('✗ fct_task_event.yml line 2: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes');
   });
 
-  it('a readable library reports no unreadable files', async () => {
-    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
-    const d = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'] }).result.domains[0];
-    expect(d.unreadableModelFiles).toEqual([]);
-    expect(d.fixes.some((f) => f.kind === 'fix-model-yaml')).toBe(false);
-  });
 });
 
 describe('fixesFromPlan — a new relationship is written on its many side (#133)', () => {
@@ -609,4 +736,268 @@ describe('the read winner sees dbt\'s key evidence in the CLI as on the canvas (
     expect(result.domains[0].report).toEqual(canvas.report);
     expect(result.domains[0].fixes.filter((f) => f.relationship)).toEqual([]);
   });
+});
+
+// Native DBML storage (S4): the same promise, with the logical model stored as
+// DBML — tables in tables/, relationships in tables/_relationships.dbml, the
+// diagram a .dbml naming them through `use` lines — and `--domain` a `.dbml`.
+describe('end to end on native DBML storage: inventory → DBML logical model → diff --domain x.dbml exits 0', () => {
+  it('dbt-project', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const models = ['fct_order', 'dim_customer', 'dim_project', 'dim_task', 'fct_task_event', 'fct_sale', 'dim_region', 'dim_date'];
+    const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
+    const semantic = path.join(root, '.erd-studio');
+    // The layer-first tree: silver/tables/silver/<name>.dbml, silver/relationships/silver.dbml, silver/diagrams/orders.dbml.
+    fs.mkdirSync(path.join(semantic, 'silver', 'tables', 'silver'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'relationships'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'diagrams'), { recursive: true });
+    const tablePath = (name: string): string => `silver/tables/silver/${name}.dbml`;
+
+    const tables = new Map<string, SemanticTable>();
+    for (const m of inventory.models) {
+      const pk = new Set(m.keyCandidates.unique.length > 0 ? m.keyCandidates.unique : (m.keyCandidates.compositeUnique[0] ?? []));
+      const fk = new Set(m.foreignKeys);
+      const table: SemanticTable = {
+        name: m.name,
+        schema: 'silver',
+        description: m.description || `${m.name} (draft)`,
+        columns: m.columns!.map((c) => ({
+          name: c.name,
+          dataType: c.dataType || 'STRING',
+          description: c.description || '(draft)',
+          ...(pk.has(c.name) ? { isPrimaryKey: true } : {}),
+          ...(fk.has(c.name) ? { isForeignKey: true } : {}),
+        })),
+      };
+      tables.set(m.name.toLowerCase(), table);
+      fs.writeFileSync(path.join(semantic, ...tablePath(m.name).split('/')), renderNewTableDbml(table));
+    }
+    const owners = new Map<string, { name: string; relationships: TableRelationship[] }>();
+    for (const rel of inventory.relationships.map(canonicalRelationship)) {
+      const { fromModel, ...rest } = rel;
+      const entry = owners.get(fromModel.toLowerCase()) ?? { name: fromModel, relationships: [] };
+      entry.relationships.push(rest);
+      owners.set(fromModel.toLowerCase(), entry);
+    }
+    fs.writeFileSync(path.join(semantic, 'silver', 'relationships', 'silver.dbml'), editRelationshipsDbml(null, {
+      filePath: 'silver/relationships/silver.dbml',
+      owners,
+      resolve: (name) => {
+        const table = tables.get(name.toLowerCase());
+        return table && {
+          name: table.name,
+          reference: `silver.${table.name}`,
+          columns: (c: string) => table.columns.find((col) => col.name.toLowerCase() === c.toLowerCase())?.name,
+          path: tablePath(table.name),
+          storage: 'dbml' as const,
+          primaryKey: table.columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
+        };
+      },
+    }));
+    const diagram = path.join(semantic, 'silver', 'diagrams', 'orders.dbml');
+    fs.writeFileSync(diagram, renderNewSubjectAreaDbml({
+      filePath: 'silver/diagrams/orders.dbml',
+      domain: 'orders',
+      description: 'Built from inventory',
+      members: inventory.models.map((m) => ({ name: m.name, reference: `silver.${m.name}`, path: tablePath(m.name) })),
+      relationshipsFiles: ['silver/relationships/silver.dbml'],
+    }));
+
+    const diff = await run(['diff', '--domain', path.relative(root, diagram), '--json'], root);
+    const result = JSON.parse(diff.out) as DiffResult;
+    const d = result.domains[0];
+    expect(d).toMatchObject({ file: '.erd-studio/silver/diagrams/orders.dbml', domain: 'orders', layer: 'silver' });
+    expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
+    expect(diff.code).toBe(0);
+    expect(result.clean).toBe(true);
+    expect(d.missingModelFiles).toEqual([]);
+    expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
+    expect((await run(['diff', '--all', '--json'], root)).code).toBe(0);
+
+    // The diagram stops importing the relationships file: every Ref is still there, only not drawn.
+    // The fix is the import, never a second copy of each Ref (a duplicate, error 5001).
+    const importLine = "use * from '../relationships/silver.dbml'";
+    const text = fs.readFileSync(diagram, 'utf-8');
+    expect(text).toContain(importLine);
+    fs.writeFileSync(diagram, text.replace(`${importLine}\n`, ''));
+    const unimported = JSON.parse((await run(['diff', '--domain', path.relative(root, diagram), '--json'], root)).out) as DiffResult;
+    const fixes = unimported.domains[0].fixes.filter((f) => f.severity === 'blocking');
+    expect(fixes.length).toBe(inventory.relationships.length);
+    for (const f of fixes) {
+      expect(f).toMatchObject({
+        kind: 'import-relationships-file', file: '.erd-studio/silver/diagrams/orders.dbml',
+        storedIn: '.erd-studio/silver/relationships/silver.dbml', useLine: importLine,
+      });
+    }
+    // Following the fix makes the diagram clean again.
+    fs.writeFileSync(diagram, text);
+    expect((await run(['diff', '--domain', path.relative(root, diagram), '--json'], root)).code).toBe(0);
+  });
+});
+
+describe('diff names a DBML diagram\'s errors', () => {
+  it('a .dbml that does not parse is dbml-invalid with its file and line; a table file is not-a-diagram', async () => {
+    const root = copyProject('dbt-project');
+    const semantic = path.join(root, '.erd-studio');
+    fs.mkdirSync(path.join(semantic, 'silver', 'tables', 'silver'), { recursive: true });
+    fs.mkdirSync(path.join(semantic, 'silver', 'diagrams'), { recursive: true });
+    fs.writeFileSync(path.join(semantic, 'silver', 'tables', 'silver', 'dim_x.dbml'), 'Table silver.dim_x {\n  id INT\n}\n');
+    fs.writeFileSync(path.join(semantic, 'silver', 'diagrams', 'broken.dbml'), "Project broken {\n  erd_schema_version: '7'\n");
+
+    const broken = await run(['diff', '--domain', '.erd-studio/silver/diagrams/broken.dbml', '--json'], root);
+    expect(broken.code).toBe(3);
+    const error = JSON.parse(broken.out).error;
+    expect(error.code).toBe('dbml-invalid');
+    expect(error.message).toMatch(/^\.erd-studio\/silver\/diagrams\/broken\.dbml:\d+: /);
+
+    const table = await run(['diff', '--domain', '.erd-studio/silver/tables/silver/dim_x.dbml', '--json'], root);
+    expect(table.code).toBe(3);
+    expect(JSON.parse(table.out).error.code).toBe('not-a-diagram');
+  });
+});
+
+describe('diff on native DBML storage (§7.1, S8): fix paths and kinds', () => {
+  const plan: SyncPlan = {
+    generatedAt: '', domain: 'd', layer: 'gold', sourceStage: 'logical', targetStage: 'physical',
+    models: [], requiresCompile: false,
+    modelContext: {
+      f: { modelName: 'f', logicalModelPath: '.erd-studio/gold/tables/gold/f.dbml', relationshipsPath: '.erd-studio/gold/relationships/gold.dbml', dbtSqlPath: null, dbtSchemaPath: null },
+      m: { modelName: 'm', logicalModelPath: '.erd-studio/silver/tables/silver/m.dbml', relationshipsPath: '.erd-studio/silver/relationships/silver.dbml', dbtSqlPath: null, dbtSchemaPath: null },
+    },
+    columns: [
+      { modelName: 'm', columnName: 'c', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-column-to-logical', targetDataType: 'DATE', resolvedDataType: 'DATE' },
+    ],
+    relationships: [
+      { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'many-to-one' },
+    ],
+  };
+  const library = { inLibrary: new Map<string, Relationship>(), addToLibrary: true };
+
+  it('a column fix names the .dbml table file and a new relationship the file the project places it in (relationshipsPath)', () => {
+    const fixes = fixesFromPlan(plan, '.erd-studio/gold/diagrams/d.dbml', '.erd-studio', [], [], library);
+    expect(fixes.find((f) => f.kind === 'add-column')).toMatchObject({ file: '.erd-studio/silver/tables/silver/m.dbml' });
+    expect(fixes.find((f) => f.kind === 'add-relationship')).toMatchObject({ file: '.erd-studio/gold/relationships/gold.dbml', model: 'f' });
+  });
+
+  it('a relationship to add whose Ref is already stored (storedIn) is an import of that file into the diagram, not a second Ref', () => {
+    const storedIn = '.erd-studio/silver/relationships/orders.dbml';
+    const unimported: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], storedIn }] };
+    const fixes = fixesFromPlan(unimported, '.erd-studio/gold/diagrams/d.dbml', '.erd-studio', [], [], library);
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]).toMatchObject({
+      severity: 'blocking', kind: 'import-relationships-file', file: '.erd-studio/gold/diagrams/d.dbml', storedIn,
+      useLine: "use * from '../../silver/relationships/orders.dbml'",
+      relationship: { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' },
+    });
+    expect(fixes[0].explain).toContain('Do not add the Ref again');
+  });
+
+  it('a stored Ref is fixed where it is held (storedIn): a cardinality change turns it round in place, with no movesFrom', () => {
+    const rel = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' as const };
+    const storedIn = '.erd-studio/gold/relationships/by-hand.dbml';
+    const toOneToMany: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'cardinality-mismatch', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many', storedIn }] };
+    const [fix] = fixesFromPlan(toOneToMany, 'd.dbml', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
+    expect(fix).toMatchObject({ kind: 'set-cardinality', file: storedIn, relationship: { fromModel: 'm', toModel: 'f' } });
+    expect(fix.movesFrom).toBeUndefined();
+    const removal: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'extra', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one', storedIn }] };
+    expect(fixesFromPlan(removal, 'd.dbml', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true })[0])
+      .toMatchObject({ kind: 'remove-relationship', file: storedIn });
+  });
+
+  it('a YAML entry a cardinality fix turns round still moves to its many side\'s file (movesFrom)', () => {
+    const yamlPlan: SyncPlan = {
+      ...plan, columns: [],
+      modelContext: {
+        f: { modelName: 'f', logicalModelPath: '.erd-studio/logical-models/f.yml', dbtSqlPath: null, dbtSchemaPath: null },
+        m: { modelName: 'm', logicalModelPath: '.erd-studio/logical-models/m.yml', dbtSqlPath: null, dbtSchemaPath: null },
+      },
+      relationships: [{ ...plan.relationships[0], discrepancyStatus: 'cardinality-mismatch', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' }],
+    };
+    const rel = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', cardinality: 'many-to-one' as const };
+    const [fix] = fixesFromPlan(yamlPlan, 'd.json', '.erd-studio', [], [], { inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
+    expect(fix).toMatchObject({ kind: 'set-cardinality', file: '.erd-studio/logical-models/m.yml', movesFrom: '.erd-studio/logical-models/f.yml' });
+  });
+
+  it('an unreadable .dbml table is fix-dbml-file, a .yml one fix-model-yaml', () => {
+    const unreadable = [
+      { name: 'm', file: '.erd-studio/silver/tables/silver/m.dbml', kind: 'dbmlInvalid' as const, line: 2, code: '3075', message: 'x' },
+      { name: 'y', file: '.erd-studio/logical-models/y.yml', kind: 'yamlScalar' as const, line: 3, message: 'y' },
+    ];
+    const fixes = fixesFromPlan({ ...plan, columns: [], relationships: [] }, 'd.dbml', '.erd-studio', [], unreadable);
+    expect(fixes.map((f) => [f.model, f.kind, f.line])).toEqual([['m', 'fix-dbml-file', 2], ['y', 'fix-model-yaml', 3]]);
+    expect(fixes[0].explain).toContain("quote the value, as in grain: 'One row per order line'");
+  });
+
+  it('a DBML table file that does not read gets one fix-dbml-file in a real diff', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio', 'gold', 'finance.json'));
+    const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
+    writeConversion(root, plan);
+    const target = plan.targets.find((t) => t.target.endsWith('/dim_customer.dbml'))!.target;
+    expect(target).toMatch(/^[^/]+\/tables\/[^/]+\/dim_customer\.dbml$/);
+    const file = path.join(root, '.erd-studio', ...target.split('/'));
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(/\[([^\]]*)role: '([^']*)'/, '[$1role: $2 x'));
+    const r = JSON.parse((await run(['diff', '--all', '--json'], root)).out) as DiffResult;
+    const fixes = r.domains.flatMap((d) => d.fixes).filter((f) => f.model === 'dim_customer');
+    expect(fixes.length).toBeGreaterThan(0);
+    expect(fixes.every((f) => f.kind === 'fix-dbml-file' && f.file === `.erd-studio/${target}`)).toBe(true);
+  });
+});
+
+/** Apply a Convert plan to disk, as the command's one edit would. */
+function writeConversion(root: string, plan: DbmlConversionPlan): void {
+  const erd = path.join(root, '.erd-studio');
+  for (const c of plan.creates) {
+    fs.mkdirSync(path.dirname(path.join(erd, c.path)), { recursive: true });
+    fs.writeFileSync(path.join(erd, c.path), c.text);
+  }
+  for (const r of plan.replaces) fs.writeFileSync(path.join(erd, r.path), r.text);
+  for (const d of plan.deletes) fs.rmSync(path.join(erd, d));
+  fs.rmSync(path.join(erd, 'logical-models'), { recursive: true, force: true });
+}
+
+describe('YAML/DBML twin parity: diff on the converted dbt-project copy (§9.6)', () => {
+  it('diff --all agrees before and after Convert Project to DBML, apart from file paths and the moved relationships', async () => {
+    const yaml = copyProject('dbt-project');
+    fs.rmSync(path.join(yaml, '.erd-studio', 'gold', 'finance.json'));
+    const dbml = path.join(tmp, 'converted');
+    fs.cpSync(yaml, dbml, { recursive: true });
+    const plan = await planDbmlConversion(readDbmlConversionInput(dbml, '.erd-studio'));
+    expect(plan.refusals).toEqual([]);
+    writeConversion(dbml, plan);
+
+    const before = JSON.parse((await run(['diff', '--all', '--json'], yaml)).out) as DiffResult;
+    const after = JSON.parse((await run(['diff', '--all', '--json'], dbml)).out) as DiffResult;
+    // A diagram is `<layer>/<name>` on both sides: `gold/sales.json` before, `gold/diagrams/sales.dbml` after.
+    const key = (file: string): string => file.replace(/^\.erd-studio\//, '').replace(/^([^/]+)\/diagrams\/([^/]+)$/, '$1/$2').replace(/\.(json|dbml)$/, '');
+    const moved = new Set(plan.movedRelationships.flatMap((m) => m.diagrams.map(key)));
+    const shape = (d: DiffResult['domains'][number]) => ({
+      domain: d.domain, layer: d.layer, clean: d.clean, error: d.error?.code,
+      phantoms: d.phantoms, missingModelFiles: d.missingModelFiles, modelsWithoutColumns: d.modelsWithoutColumns,
+      unreadable: d.unreadableModelFiles.map((u) => u.name),
+      fixes: d.fixes.map(({ file: _file, movesFrom: _movesFrom, explain: _explain, ...rest }) => rest),
+      counts: d.counts,
+    });
+    expect(after.domains.map((d) => key(d.file)).sort()).toEqual(before.domains.map((d) => key(d.file)).sort());
+    let compared = 0;
+    for (const b of before.domains) {
+      const a = after.domains.find((d) => key(d.file) === key(b.file))!;
+      expect(a.file).toBe(b.file.replace(/^(\.erd-studio\/[^/]+)\/([^/]+)\.json$/, '$1/diagrams/$2.dbml'));
+      // Every DBML fix names a .dbml file: a table file, or a relationships file for a relationship.
+      for (const f of a.fixes) {
+        if (f.kind === 'resolve-phantom') continue;
+        expect(f.file, `${a.file} ${f.kind}`).toMatch(/\.dbml$/);
+        if (/relationship|cardinality/.test(f.kind) && f.kind !== 'declare-composite-foreign-key') expect(f.file).toMatch(/^\.erd-studio\/[^/]+\/relationships\/[^/]+\.dbml$/);
+        else expect(f.file).toMatch(/^\.erd-studio\/[^/]+\/(tables\/[^/]+|diagrams)\/[^/]+\.dbml$/);
+      }
+      if (moved.has(key(b.file))) continue; // these gain the relationships Convert moved into the library
+      // An older (v4) file with no inline table converts straight to a DBML diagram: no migration left to ask for.
+      if (b.needsMigration) { expect(a.needsMigration, a.file).toBeUndefined(); continue; }
+      compared++;
+      expect(shape(a), b.file).toEqual(shape(b));
+    }
+    expect(compared).toBeGreaterThan(0);
+    expect(after.clean).toBe(before.clean);
+  }, 60_000);
 });

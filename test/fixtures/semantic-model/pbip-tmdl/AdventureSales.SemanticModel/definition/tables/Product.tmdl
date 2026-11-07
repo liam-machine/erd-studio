@@ -1,0 +1,66 @@
+table Product
+	lineageTag: 8b9c0d1e-0003-4000-8000-000000000000
+
+	column ProductKey
+		dataType: int64
+		formatString: 0
+		lineageTag: 4d5e6f70-0003-4000-8000-000000000001
+		summarizeBy: none
+		sourceColumn: ProductKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Product Name'
+		dataType: string
+		lineageTag: 4d5e6f70-0003-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: EnglishProductName
+
+		annotation SummarizationSetBy = Automatic
+
+	column Category
+		dataType: string
+		lineageTag: 4d5e6f70-0003-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Standard Cost'
+		dataType: decimal
+		lineageTag: 4d5e6f70-0003-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: StandardCost
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'List Price'
+		dataType: decimal
+		lineageTag: 4d5e6f70-0003-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: ListPrice
+
+		annotation SummarizationSetBy = Automatic
+
+	hierarchy 'Product Hierarchy'
+		lineageTag: 4d5e6f70-0003-4000-8000-0000000000aa
+
+		level Category
+			lineageTag: 4d5e6f70-0003-4000-8000-0000000000ab
+			column: Category
+
+		level 'Product Name'
+			lineageTag: 4d5e6f70-0003-4000-8000-0000000000ac
+			column: 'Product Name'
+
+	partition Product = m
+		mode: import
+		source =
+				let
+					Source = Sql.Database(ServerName, "AdventureWorksDW"),
+					dbo_DimProduct = Source{[Schema="dbo",Item="DimProduct"]}[Data]
+				in
+					dbo_DimProduct
+
+	annotation PBI_ResultType = Table
+
