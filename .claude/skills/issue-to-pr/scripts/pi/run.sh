@@ -13,11 +13,19 @@
 # a PR that comes out of that reviewed and green gets `ready-to-merge`. Every outcome is sent to
 # Liam on Telegram.
 #
+# Launch alerts: every tick also relays each open `launch-alert` issue in liam-machine/erd-studio
+# (opened or updated by the product manager routine's launch watch, .claude/routines/
+# product-manager.md) to Telegram once per update, with its title and link, and does nothing else
+# with it: no build, no label change. state/launch-alerts remembers "<number> <updated_at>" for each
+# one relayed. While a run is live the timer doesn't tick, so an alert waits for the run's main
+# session to end (it relays again there).
+#
 # Logs: ~/issue-bot/logs/runner.log (one line per event), ~/issue-bot/logs/<repo>-<n>-<time>.log
 # and, for the review pass, <repo>-<n>-<time>-review.log
 #
 # `run.sh --selftest` loads everything and exits before touching anything; the self-update runs
-# it on a candidate copy before installing it.
+# it on a candidate copy before installing it. `run.sh --relay-dry-run` prints the launch alerts
+# this tick would send, and what it would remember, without sending or remembering anything.
 set -uo pipefail
 
 BOT="$HOME/issue-bot"
@@ -31,14 +39,18 @@ LABEL=issue-to-pr
 WORKING=pi-working
 FAILED=pi-failed
 READY=ready-to-merge
+ALERT=launch-alert
+ALERT_MAX=5
 DISPLAY_NUM=95
 # A PR touching these changes the bot itself, which then runs with everything the Pi holds:
 # never mark one ready from the phone.
 SELF_PATHS='^(\.claude/skills/issue-to-pr/|\.claude/routines/|\.claude/issue-to-pr\.md$|\.claude/settings|\.github/workflows/)'
-SELFTEST=; [ "${1:-}" = --selftest ] && SELFTEST=1
+SELFTEST=; RELAY_DRY=
+case "${1:-}" in --selftest) SELFTEST=1 ;; --relay-dry-run) RELAY_DRY=1 ;; esac
 
 mkdir -p "$BOT/logs" "$BOT/state" "$BOT/work"
-if [ -z "$SELFTEST" ]; then
+ALERTS="$BOT/state/launch-alerts"
+if [ -z "$SELFTEST" ] && [ -z "$RELAY_DRY" ]; then
   exec 9>"$BOT/run.lock"
   flock -n 9 || exit 0
 fi
@@ -58,15 +70,52 @@ log() { echo "$(date -Is) $*" >> "$BOT/logs/runner.log"; }
 # Each message is also kept in state/notifications.log: Telegram doesn't pass the quoted text of
 # a reply on to the ERD Studio session (erd-tg.sh), so it reads what "merge it" refers to there.
 # 🤖 marks a message as automated: the session replies in the same chat and never starts with it.
-notify() {
-  NOTIFIED=1
+# tg_send returns 1 when Telegram refused the message, so a caller that must not lose it can retry.
+# notify is the run's outcome message: cleanup reads NOTIFIED to know one was sent.
+tg_send() {
   local text="🤖 $1"
   printf '%s\n%s\n\n' "$(date -Is)" "$text" >> "$BOT/state/notifications.log"
   [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] || return 0
   printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TELEGRAM_BOT_TOKEN" \
     | curl -sS --fail -m 20 -o /dev/null -K - --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
         --data-urlencode "text=$text" -d disable_web_page_preview=true 2>> "$BOT/logs/runner.log" \
-    || log "telegram: could not send"
+    || { log "telegram: could not send"; return 1; }
+}
+notify() { NOTIFIED=1; tg_send "$1"; }
+
+# The launch watch reaches Liam through here (see the top of this file): GitHub tells him nothing
+# about issues liam-machine opens. Only listing: this never edits, labels or builds anything.
+# Only a maintainer can add the label, but anyone can write a title, so a title is sent only when
+# the routine (liam-machine) opened the issue. A message Telegram refused is not remembered, so the
+# next tick tries again. At most ALERT_MAX a tick; the rest go on the next one.
+relay_launch_alerts() {
+  local rows n updated url author title kind text sent=0
+  rows=$(gh issue list -R "$OWNER/erd-studio" --label "$ALERT" --state open --limit 50 \
+    --json number,updatedAt,url,author,title \
+    --jq '.[] | [.number, .updatedAt, .url, .author.login, .title] | @tsv' 2>> "$BOT/logs/runner.log") \
+    || { log "launch-alert: could not list the $ALERT issues"; return 0; }
+  [ -n "$rows" ] || return 0
+  while IFS=$'\t' read -r n updated url author title; do
+    [[ $n =~ ^[0-9]+$ ]] && [ "$url" = "https://github.com/$OWNER/erd-studio/issues/$n" ] || continue
+    grep -qxF "$n $updated" "$ALERTS" 2> /dev/null && continue
+    if (( sent >= ALERT_MAX )); then log "launch-alert: more than $ALERT_MAX to relay; the rest go next tick"; break; fi
+    kind=new; grep -q "^$n " "$ALERTS" 2> /dev/null && kind=updated
+    if [ "$author" = "$OWNER" ]; then
+      title=$(printf '%s' "$title" | tr -d '[:cntrl:]')
+    else
+      title="an issue someone else opened (read it on GitHub)"
+    fi
+    text="🚨 Launch alert ($kind): $title
+$url"
+    sent=$((sent + 1))
+    if [ -n "$RELAY_DRY" ]; then
+      printf 'would send: 🤖 %s\nwould remember: %s %s\n' "$text" "$n" "$updated"
+      continue
+    fi
+    tg_send "$text" || return 0
+    { grep -v "^$n " "$ALERTS" 2> /dev/null; echo "$n $updated"; } > "$ALERTS.new" && mv "$ALERTS.new" "$ALERTS"
+    log "launch-alert: relayed #$n ($kind)"
+  done <<< "$rows"
 }
 
 start_xvfb() {
@@ -136,6 +185,7 @@ sync_clone() {
 }
 
 [ -n "$SELFTEST" ] && exit 0
+if [ -n "$RELAY_DRY" ]; then relay_launch_alerts; exit 0; fi
 trap cleanup EXIT
 
 # This file is a copy, because git rewrites the clone's files under a running script. Install
@@ -169,6 +219,8 @@ for name in "${REPOS[@]}"; do
       && log "$name#$s: a run died without cleaning up; swapped $WORKING for $FAILED"
   done
 done
+
+relay_launch_alerts
 
 # The labelled issue updated longest ago, across both repos. Labelling an issue updates it, so
 # this is first labelled, first served, near enough.
@@ -235,6 +287,8 @@ cd "$REPO_DIR" || exit 1
 timeout -k 60 4h claude -p "$PROMPT" --dangerously-skip-permissions < /dev/null > "$RUN_LOG" 2>&1
 rc=$?
 stop_xvfb
+# A run can take hours and the timer doesn't tick meanwhile: relay what came in during it.
+relay_launch_alerts
 
 result=$(grep -E '^RESULT:' "$RUN_LOG" | tail -1)
 log "$R#$n: claude exit $rc ${result:-no RESULT line} log=$(basename "$RUN_LOG")"

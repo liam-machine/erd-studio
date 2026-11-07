@@ -44,6 +44,13 @@ tail -n 20 ~/issue-bot/logs/runner.log            # what it did
 ls -t ~/issue-bot/logs | head                     # per-run logs: <repo>-<n>-<time>.log, -review.log
 ```
 
+A message starting `🤖 🚨 Launch alert` is the runner relaying an open `launch-alert` issue: the
+product manager routine's launch watch (`.claude/routines/product-manager.md`) found something
+in the first three weeks after 2.0.0 that it thinks needs Liam now. The runner only relays it.
+If he asks about one, read the issue (`gh issue view <n> -R liam-machine/erd-studio`) and
+summarise it; its evidence is aggregate telemetry, so never try to tie it to a person. Label it
+`issue-to-pr` only if he says to.
+
 If it's still ambiguous which PR or issue he means, ask. Don't guess on anything that changes
 GitHub.
 
