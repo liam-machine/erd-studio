@@ -69,7 +69,7 @@ describe('the toolbar line style switch', () => {
     expect(group).toBeTruthy();
     expect(option('Curved').getAttribute('aria-checked')).toBe('true');
     expect(option('Hops').getAttribute('aria-checked')).toBe('false');
-    expect(option('Curved').getAttribute('title')).toBe('Curved lines: soft curves that go around tables');
+    expect(option('Curved').getAttribute('title')).toBe('Curved: soft curved lines that go around tables');
     expect(option('Hops').getAttribute('title')).toBe(LINE_STYLE_LABELS.hops.title);
     expect(option('Curved').className).toBe('line-style-switch__option line-style-switch__option--on');
   });

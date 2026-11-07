@@ -17,8 +17,28 @@ import './LineStyleSwitch.css';
 
 /** Each option's label and hover text. */
 export const LINE_STYLE_LABELS: Record<LineStyle, { label: string; title: string }> = {
-  curved: { label: 'Curved', title: 'Curved lines: soft curves that go around tables' },
-  hops: { label: 'Hops', title: 'Square lines that go around tables, with a small hop where two lines cross' },
+  curved: { label: 'Curved', title: 'Curved: soft curved lines that go around tables' },
+  hops: { label: 'Hops', title: 'Hops: square lines that go around tables, with a small hop where two lines cross' },
+};
+
+/**
+ * Each option's glyph, drawn in the button's text colour (16 × 16): a line
+ * that turns a soft corner, and a line that hops over another. Glyphs keep
+ * the switch as narrow as the toolbar's other icon buttons; the name is the
+ * button's aria-label and hover text.
+ */
+const LINE_STYLE_ICONS: Record<LineStyle, JSX.Element> = {
+  curved: (
+    <svg className="line-style-switch__icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 13 V9 C2 5 4.5 3 8.5 3 H14" />
+    </svg>
+  ),
+  hops: (
+    <svg className="line-style-switch__icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 2 V14" />
+      <path d="M2 9 H5.5 A2.5 2.5 0 0 1 10.5 9 H14" />
+    </svg>
+  ),
 };
 
 export function LineStyleSwitch() {
@@ -46,10 +66,11 @@ export function LineStyleSwitch() {
             role="radio"
             aria-checked={on}
             className={`line-style-switch__option${on ? ' line-style-switch__option--on' : ''}`}
+            aria-label={LINE_STYLE_LABELS[style].label}
             title={LINE_STYLE_LABELS[style].title}
             onClick={() => choose(style)}
           >
-            {LINE_STYLE_LABELS[style].label}
+            {LINE_STYLE_ICONS[style]}
           </button>
         );
       })}
