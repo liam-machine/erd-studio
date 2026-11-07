@@ -15,10 +15,11 @@
 #
 # Launch alerts: every tick also relays each open `launch-alert` issue in liam-machine/erd-studio
 # (opened or updated by the product manager routine's launch watch, .claude/routines/
-# product-manager.md) to Telegram once per update, with its title and link, and does nothing else
-# with it: no build, no label change. state/launch-alerts remembers "<number> <updated_at>" for each
-# one relayed. While a run is live the timer doesn't tick, so an alert waits for the run's main
-# session to end (it relays again there).
+# product-manager.md) to Telegram once each time its title or body changes, with its title and
+# link, and does nothing else with it: no build, no label change. Comments, label changes and
+# reopening never re-send it. state/launch-alerts remembers "<number> <hash of title and body>"
+# for each one relayed. While a run is live the timer doesn't tick, so the run relays again after
+# its main session and again after its review pass and CI wait, before its final message.
 #
 # Logs: ~/issue-bot/logs/runner.log (one line per event), ~/issue-bot/logs/<repo>-<n>-<time>.log
 # and, for the review pass, <repo>-<n>-<time>-review.log
@@ -85,35 +86,48 @@ notify() { NOTIFIED=1; tg_send "$1"; }
 
 # The launch watch reaches Liam through here (see the top of this file): GitHub tells him nothing
 # about issues liam-machine opens. Only listing: this never edits, labels or builds anything.
-# Only a maintainer can add the label, but anyone can write a title, so a title is sent only when
-# the routine (liam-machine) opened the issue. A message Telegram refused is not remembered, so the
-# next tick tries again. At most ALERT_MAX a tick; the rest go on the next one.
+# What is remembered is a hash of the title and body, which only the routine edits: anyone's
+# comment, a label swap (an alert labelled issue-to-pr, the runner's pi-working) or a reopen moves
+# updatedAt but never re-sends. An issue being built (issue-to-pr or pi-working) is skipped.
+# Only a maintainer can add the label, but a title is still text, and an agent session runs as
+# liam-machine: a title is sent only when liam-machine opened the issue, the title starts
+# "Launch watch: " and the body's first line is the routine's `<!-- launch-alert: <slug> -->`
+# marker, cut to ALERT_TITLE_MAX characters; anything else is sent as the fixed "Launch alert #N".
+# A message Telegram refused is not remembered, so the next tick tries again. At most ALERT_MAX a
+# tick; the rest go on the next one.
+ALERT_TITLE_MAX=100
+alert_hash() { if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16; }
 relay_launch_alerts() {
-  local rows n updated url author title kind text sent=0
+  local rows n url author title labels marked content key kind text sent=0
   rows=$(gh issue list -R "$OWNER/erd-studio" --label "$ALERT" --state open --limit 50 \
-    --json number,updatedAt,url,author,title \
-    --jq '.[] | [.number, .updatedAt, .url, .author.login, .title] | @tsv' 2>> "$BOT/logs/runner.log") \
+    --json number,url,author,title,body,labels \
+    --jq '.[] | [.number, .url, .author.login, .title, ("," + ([.labels[].name] | join(",")) + ","),
+      ((.body // "") | split("\n")[0] | test("^<!-- launch-alert: [^ ]+ -->") | tostring),
+      (.title + "\n" + (.body // ""))] | @tsv' 2>> "$BOT/logs/runner.log") \
     || { log "launch-alert: could not list the $ALERT issues"; return 0; }
   [ -n "$rows" ] || return 0
-  while IFS=$'\t' read -r n updated url author title; do
+  while IFS=$'\t' read -r n url author title labels marked content; do
     [[ $n =~ ^[0-9]+$ ]] && [ "$url" = "https://github.com/$OWNER/erd-studio/issues/$n" ] || continue
-    grep -qxF "$n $updated" "$ALERTS" 2> /dev/null && continue
+    [[ $labels == *",$LABEL,"* || $labels == *",$WORKING,"* ]] && continue
+    key=$(printf '%s' "$content" | alert_hash)
+    grep -qxF "$n $key" "$ALERTS" 2> /dev/null && continue
     if (( sent >= ALERT_MAX )); then log "launch-alert: more than $ALERT_MAX to relay; the rest go next tick"; break; fi
     kind=new; grep -q "^$n " "$ALERTS" 2> /dev/null && kind=updated
-    if [ "$author" = "$OWNER" ]; then
-      title=$(printf '%s' "$title" | tr -d '[:cntrl:]')
+    title=$(printf '%s' "$title" | tr -d '[:cntrl:]')
+    if [ "$author" = "$OWNER" ] && [ "$marked" = true ] && [[ $title == "Launch watch: "* ]]; then
+      (( ${#title} > ALERT_TITLE_MAX )) && title="${title:0:$((ALERT_TITLE_MAX - 1))}…"
     else
-      title="an issue someone else opened (read it on GitHub)"
+      title="Launch alert #$n (read it on GitHub)"
     fi
     text="🚨 Launch alert ($kind): $title
 $url"
     sent=$((sent + 1))
     if [ -n "$RELAY_DRY" ]; then
-      printf 'would send: 🤖 %s\nwould remember: %s %s\n' "$text" "$n" "$updated"
+      printf 'would send: 🤖 %s\nwould remember: %s %s\n' "$text" "$n" "$key"
       continue
     fi
     tg_send "$text" || return 0
-    { grep -v "^$n " "$ALERTS" 2> /dev/null; echo "$n $updated"; } > "$ALERTS.new" && mv "$ALERTS.new" "$ALERTS"
+    { grep -v "^$n " "$ALERTS" 2> /dev/null; echo "$n $key"; } > "$ALERTS.new" && mv "$ALERTS.new" "$ALERTS"
     log "launch-alert: relayed #$n ($kind)"
   done <<< "$rows"
 }
@@ -367,6 +381,8 @@ for _ in $(seq 30); do
   sleep 10
 done
 timeout 25m gh pr checks "$pr_url" --watch > /dev/null 2>&1
+# The review pass and the CI wait can take another two and a half hours: relay what came in.
+relay_launch_alerts
 if buckets=$(gh pr checks "$pr_url" --json bucket --jq '[.[].bucket] | unique | join(",")' 2> /dev/null); then :; else buckets=; fi
 case ",$buckets," in
   ,,) ci="❔ unknown" ;;

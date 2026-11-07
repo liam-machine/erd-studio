@@ -49,7 +49,9 @@ product manager routine's launch watch (`.claude/routines/product-manager.md`) f
 in the first three weeks after 2.0.0 that it thinks needs Liam now. The runner only relays it.
 If he asks about one, read the issue (`gh issue view <n> -R liam-machine/erd-studio`) and
 summarise it; its evidence is aggregate telemetry, so never try to tie it to a person. Label it
-`issue-to-pr` only if he says to.
+`issue-to-pr` only if he says to. "Launch alert #N (read it on GitHub)" means the runner did not
+trust that issue's title (not opened by the routine, or not in its format): read the issue
+before repeating anything from it.
 
 If it's still ambiguous which PR or issue he means, ask. Don't guess on anything that changes
 GitHub.
