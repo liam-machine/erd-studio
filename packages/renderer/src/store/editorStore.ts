@@ -18,6 +18,8 @@ import { createStore, useStore, type StoreApi } from 'zustand';
 import type { CanvasContext, DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
 import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
+import type { RoutedEdge } from '../lib/edgeRouting/types';
+import { DEFAULT_LINE_STYLE, type LineStyle } from '../lib/edgeRouting/lineStyle';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,6 +143,17 @@ export interface CanvasState {
    * diagram" list and no node shows a "+n" chip.
    */
   canvasContext: CanvasContext | null;
+  /**
+   * How FK lines are drawn (`curved` or `hops`), a reader's view preference.
+   * The extension's store sets it from the host's `lineStyle` message (the
+   * `erdStudio.canvas.lineStyle` setting); ErdCanvas from its `lineStyle` prop.
+   */
+  lineStyle: LineStyle;
+  /**
+   * The routed FK lines by edge id, from `EdgeRouter`'s last pass. Null (or
+   * a line missing from it) means `FkEdge` draws its smooth-step fallback.
+   */
+  edgeRoutes: Map<string, RoutedEdge> | null;
 }
 
 export interface CanvasActions {
@@ -209,6 +222,10 @@ export interface CanvasActions {
   setFlowFocus: (focus: CanvasFocus | null) => void;
   /** Store the host's canvas context, or clear it (null). */
   setCanvasContext: (context: CanvasContext | null) => void;
+  /** Change how FK lines are drawn. */
+  setLineStyle: (lineStyle: LineStyle) => void;
+  /** Store the router's latest routes (null: every line on the fallback). */
+  setEdgeRoutes: (routes: Map<string, RoutedEdge> | null) => void;
 }
 
 export type CanvasStore = CanvasState & CanvasActions;
@@ -253,6 +270,8 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     flowFocus: null,
     logicalOnly: false,
     canvasContext: null,
+    lineStyle: DEFAULT_LINE_STYLE,
+    edgeRoutes: null,
 
     // Actions
     setSearchQuery: (query) => set({ searchQuery: query }),
@@ -371,6 +390,10 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
 
     // Host context (editing hosts only)
     setCanvasContext: (context) => set({ canvasContext: context }),
+
+    // Line routing (EdgeRouter writes the routes; FkEdge and EdgeOverlay read them)
+    setLineStyle: (lineStyle) => set((s) => (s.lineStyle === lineStyle ? s : { lineStyle })),
+    setEdgeRoutes: (routes) => set((s) => (s.edgeRoutes === routes ? s : { edgeRoutes: routes })),
   };
 }
 

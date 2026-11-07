@@ -1,0 +1,16 @@
+name: dim_channel
+schema: retail
+description: Sales channels
+grain: One row per sales channel
+modelRole: reference
+columns:
+  - name: channel_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: channel_name
+    dataType: VARCHAR
+    description: Store, web or app
+  - name: is_online
+    dataType: BOOLEAN
+    description: Online channel

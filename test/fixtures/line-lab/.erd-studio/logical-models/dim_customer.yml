@@ -1,0 +1,23 @@
+name: dim_customer
+schema: retail
+description: Customers who buy from us
+grain: One row per customer
+modelRole: conformed-dim
+columns:
+  - name: customer_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: customer_id
+    dataType: VARCHAR
+    description: CRM customer id
+    isNaturalKey: true
+  - name: customer_name
+    dataType: VARCHAR
+    description: Full name
+  - name: email
+    dataType: VARCHAR
+    description: Contact email
+  - name: loyalty_tier
+    dataType: VARCHAR
+    description: Bronze, Silver or Gold

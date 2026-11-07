@@ -1,0 +1,49 @@
+name: fct_inventory
+schema: retail
+description: Daily stock snapshot
+grain: One row per product per day per warehouse
+modelRole: periodic-snapshot
+columns:
+  - name: inventory_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: snapshot_date_key
+    dataType: INT
+    description: Snapshot date
+    isForeignKey: true
+  - name: product_key
+    dataType: INT
+    description: FK to dim_product
+    isForeignKey: true
+  - name: supplier_key
+    dataType: INT
+    description: FK to dim_supplier
+    isForeignKey: true
+  - name: warehouse_key
+    dataType: INT
+    description: FK to dim_warehouse
+    isForeignKey: true
+  - name: quantity_on_hand
+    dataType: INT
+    description: Units on hand
+  - name: stock_value
+    dataType: DECIMAL
+    description: At standard cost
+relationships:
+  - fromColumn: snapshot_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+  - fromColumn: product_key
+    toModel: dim_product
+    toColumn: product_key
+    cardinality: many-to-one
+  - fromColumn: supplier_key
+    toModel: dim_supplier
+    toColumn: supplier_key
+    cardinality: many-to-one
+  - fromColumn: warehouse_key
+    toModel: dim_warehouse
+    toColumn: warehouse_key
+    cardinality: many-to-one

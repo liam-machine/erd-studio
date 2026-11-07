@@ -1,0 +1,516 @@
+{
+ "big": {
+  "dim_customer": [
+   202,
+   150
+  ],
+  "dim_account": [
+   209,
+   150
+  ],
+  "dim_product": [
+   211,
+   198
+  ],
+  "dim_store": [
+   200,
+   127
+  ],
+  "dim_region": [
+   203,
+   198
+  ],
+  "dim_supplier": [
+   200,
+   198
+  ],
+  "dim_warehouse": [
+   209,
+   198
+  ],
+  "dim_employee": [
+   207,
+   198
+  ],
+  "dim_department": [
+   215,
+   198
+  ],
+  "dim_project": [
+   200,
+   150
+  ],
+  "fct_task": [
+   200,
+   198
+  ],
+  "fct_contract": [
+   215,
+   198
+  ],
+  "fct_invoice": [
+   206,
+   127
+  ],
+  "fct_payment": [
+   200,
+   198
+  ],
+  "fct_shipment": [
+   200,
+   198
+  ],
+  "dim_carrier": [
+   200,
+   127
+  ],
+  "dim_route": [
+   200,
+   150
+  ],
+  "dim_vehicle": [
+   207,
+   173
+  ],
+  "dim_driver": [
+   200,
+   198
+  ],
+  "dim_asset": [
+   200,
+   150
+  ],
+  "dim_site": [
+   200,
+   198
+  ],
+  "dim_equipment": [
+   209,
+   173
+  ],
+  "fct_work_order": [
+   216,
+   198
+  ],
+  "fct_inspection": [
+   211,
+   198
+  ],
+  "fct_defect": [
+   200,
+   127
+  ],
+  "dim_material": [
+   209,
+   173
+  ],
+  "dim_vendor": [
+   202,
+   198
+  ],
+  "fct_purchase_order": [
+   252,
+   198
+  ],
+  "fct_receipt": [
+   207,
+   198
+  ],
+  "fct_budget": [
+   200,
+   198
+  ],
+  "dim_cost_centre": [
+   220,
+   150
+  ],
+  "fct_ledger": [
+   200,
+   198
+  ],
+  "dim_currency": [
+   200,
+   198
+  ],
+  "dim_calendar": [
+   200,
+   198
+  ],
+  "dim_channel": [
+   208,
+   198
+  ],
+  "dim_campaign": [
+   222,
+   198
+  ],
+  "fct_promotion": [
+   225,
+   173
+  ],
+  "dim_segment": [
+   202,
+   173
+  ],
+  "dim_territory": [
+   200,
+   173
+  ],
+  "dim_policy": [
+   200,
+   150
+  ]
+ },
+ "fixture:star-crossings": {
+  "fct_sale": [
+   200,
+   376
+  ],
+  "dim_customer": [
+   200,
+   192
+  ],
+  "dim_product": [
+   200,
+   239
+  ],
+  "dim_store": [
+   200,
+   192
+  ],
+  "dim_promotion": [
+   200,
+   192
+  ],
+  "dim_employee": [
+   211,
+   239
+  ],
+  "dim_payment_method": [
+   230,
+   146
+  ],
+  "dim_date": [
+   200,
+   239
+  ],
+  "dim_channel": [
+   200,
+   146
+  ],
+  "fct_return": [
+   200,
+   285
+  ]
+ },
+ "fixture:tangle": {
+  "dim_date": [
+   200,
+   239
+  ],
+  "fct_inventory": [
+   237,
+   262
+  ],
+  "dim_customer": [
+   200,
+   192
+  ],
+  "fct_shipment": [
+   200,
+   262
+  ],
+  "dim_supplier": [
+   200,
+   169
+  ],
+  "fct_sale": [
+   200,
+   376
+  ],
+  "dim_warehouse": [
+   200,
+   192
+  ],
+  "dim_city": [
+   200,
+   169
+  ],
+  "fct_payment": [
+   200,
+   239
+  ],
+  "dim_store": [
+   200,
+   192
+  ],
+  "fct_order": [
+   200,
+   239
+  ],
+  "dim_product": [
+   200,
+   239
+  ],
+  "dim_employee": [
+   211,
+   239
+  ],
+  "fct_return": [
+   200,
+   285
+  ],
+  "annotation-tangle-note": [
+   354,
+   80
+  ]
+ },
+ "fixture:under-the-table": {
+  "dim_customer": [
+   200,
+   192
+  ],
+  "fct_order": [
+   200,
+   239
+  ],
+  "fct_payment": [
+   200,
+   239
+  ],
+  "dim_store": [
+   200,
+   192
+  ],
+  "dim_city": [
+   200,
+   169
+  ],
+  "dim_region": [
+   200,
+   146
+  ],
+  "fct_inventory": [
+   237,
+   262
+  ],
+  "dim_supplier": [
+   200,
+   169
+  ],
+  "dim_warehouse": [
+   200,
+   192
+  ]
+ },
+ "overlap": {
+  "dim_customer": [
+   202,
+   169
+  ],
+  "dim_customer_address": [
+   256,
+   192
+  ],
+  "fct_order": [
+   200,
+   192
+  ],
+  "fct_shipment": [
+   200,
+   262
+  ],
+  "dim_ship_mode": [
+   211,
+   127
+  ],
+  "dim_carrier": [
+   200,
+   150
+  ],
+  "dim_service_level": [
+   223,
+   127
+  ],
+  "dim_geo_country": [
+   220,
+   127
+  ],
+  "dim_geo_state": [
+   205,
+   150
+  ],
+  "dim_geo_city": [
+   200,
+   150
+  ],
+  "dim_geo_postcode": [
+   230,
+   150
+  ],
+  "dim_employee": [
+   211,
+   169
+  ]
+ },
+ "showcase": {
+  "dim_customer": [
+   202,
+   169
+  ],
+  "dim_project": [
+   200,
+   169
+  ],
+  "fct_order": [
+   200,
+   173
+  ],
+  "dim_date": [
+   200,
+   169
+  ],
+  "dim_task": [
+   200,
+   192
+  ],
+  "fct_task_event": [
+   205,
+   285
+  ]
+ },
+ "star": {
+  "fct_sale": [
+   200,
+   376
+  ],
+  "dim_customer": [
+   202,
+   192
+  ],
+  "dim_product": [
+   200,
+   239
+  ],
+  "dim_store": [
+   200,
+   169
+  ],
+  "dim_promotion": [
+   207,
+   192
+  ],
+  "dim_employee": [
+   203,
+   169
+  ],
+  "dim_payment_method": [
+   250,
+   146
+  ],
+  "dim_date": [
+   200,
+   239
+  ],
+  "dim_channel": [
+   200,
+   146
+  ],
+  "fct_return": [
+   200,
+   262
+  ]
+ },
+ "tangle": {
+  "account": [
+   200,
+   173
+  ],
+  "contact": [
+   200,
+   239
+  ],
+  "opportunity": [
+   200,
+   262
+  ],
+  "lead": [
+   200,
+   173
+  ],
+  "campaign": [
+   200,
+   150
+  ],
+  "activity": [
+   200,
+   220
+  ],
+  "quote": [
+   200,
+   173
+  ],
+  "product": [
+   200,
+   150
+  ],
+  "sales_order": [
+   200,
+   173
+  ],
+  "invoice": [
+   200,
+   173
+  ],
+  "payment": [
+   200,
+   173
+  ],
+  "app_user": [
+   200,
+   150
+  ],
+  "annotation-tangle-note": [
+   170,
+   80
+  ]
+ },
+ "under": {
+  "dim_customer": [
+   202,
+   192
+  ],
+  "fct_order": [
+   200,
+   239
+  ],
+  "fct_payment": [
+   200,
+   192
+  ],
+  "dim_store": [
+   200,
+   192
+  ],
+  "dim_city": [
+   200,
+   169
+  ],
+  "dim_region": [
+   200,
+   146
+  ],
+  "fct_inventory": [
+   237,
+   262
+  ],
+  "dim_supplier": [
+   200,
+   169
+  ],
+  "dim_warehouse": [
+   209,
+   169
+  ]
+ }
+}

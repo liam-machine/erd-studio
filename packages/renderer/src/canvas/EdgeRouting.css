@@ -1,0 +1,102 @@
+/* Line routing (EdgeRouting.tsx): the x-ray overlay and the halo casing.
+   Theme variables only. */
+
+/* ---- Overlay above the cards (x-ray tunnels) ----
+   The x-ray: a line's stretch under a card, drawn again above the cards as a
+   fine dashed ghost in the line's own colour, with a portal mark where it
+   dives under the border and where it comes back out. Faint at rest (the
+   portals say "this line goes under here"), bright for the hovered or selected
+   table's lines, nearly gone for lines a selection or hover preview fades. */
+
+.edge-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+  /* Above the cards, including a selected or dragged card, which React Flow
+     lifts to z-index 1000 (ViewportPortal renders after the node layer, so a
+     tie goes to the overlay). */
+  z-index: 1000;
+  color: var(--stage-logical);
+}
+
+.edge-overlay__tunnel {
+  color: var(--stage-logical);
+  transition: opacity 0.15s ease;
+}
+
+/* The same colour key as the line (FkEdge's `fk-edge--{key}`). */
+.edge-overlay__tunnel--physical { color: var(--stage-physical); }
+.edge-overlay__tunnel--ghost { color: var(--stage-ghost); }
+.edge-overlay__tunnel--discrepancy-extra { color: var(--discrepancy-extra); }
+.edge-overlay__tunnel--discrepancy-missing { color: var(--stage-ghost); }
+.edge-overlay__tunnel--discrepancy-cardinality-mismatch { color: var(--discrepancy-mismatch); }
+
+.edge-overlay__tunnel-line {
+  fill: none;
+  /* The line's colour pulled a little towards the text colour: a faint
+     stage blue on a white card all but vanished at fit zoom in light themes,
+     and the text colour is the one that contrasts with the card in any theme. */
+  stroke: color-mix(in srgb, currentColor 70%, var(--editor-fg));
+  stroke-width: 1.5;
+  /* Short dashes: the drafting convention for a hidden edge. (Dots read as
+     the dot leaders between a column's name and its type.) */
+  stroke-dasharray: 4 4;
+  stroke-linecap: butt;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+
+.edge-overlay__portal {
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  /* The portal is the message at rest ("this line goes under here"): it
+     must read at fit zoom on a border of the same colour. */
+  opacity: 0.9;
+  /* A via: the canvas colour cuts the card's border where the line dives under. */
+  fill: var(--editor-bg);
+  transition: opacity 0.15s ease;
+}
+
+
+/* The hovered or selected table's lines, or the selected line. */
+.edge-overlay__tunnel--lit .edge-overlay__tunnel-line {
+  opacity: 0.95;
+  stroke-width: 2;
+}
+
+.edge-overlay__tunnel--lit .edge-overlay__portal {
+  opacity: 1;
+}
+
+/* Faded with its line: a selection elsewhere, or the hover preview. */
+.edge-overlay__tunnel--dimmed {
+  opacity: 0.2;
+}
+
+.erd-flow--hover-focus .edge-overlay__tunnel {
+  opacity: 0.1;
+}
+
+.erd-flow--hover-focus .edge-overlay__tunnel.edge-overlay__tunnel--lit {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-overlay__tunnel,
+  .edge-overlay__tunnel-line,
+  .edge-overlay__portal {
+    transition: none;
+  }
+}
+
+/* ---- Halo casing under a line (crossings = halo) ---- */
+
+.fk-edge__halo {
+  fill: none;
+  stroke: var(--editor-bg);
+  stroke-width: 7;
+  stroke-linecap: butt;
+}

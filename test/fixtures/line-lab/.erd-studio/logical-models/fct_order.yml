@@ -1,0 +1,37 @@
+name: fct_order
+schema: retail
+description: Online orders
+grain: One row per order
+modelRole: transaction-fact
+columns:
+  - name: order_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: order_id
+    dataType: VARCHAR
+    description: Web order number
+    isNaturalKey: true
+  - name: customer_key
+    dataType: INT
+    description: FK to dim_customer
+    isForeignKey: true
+  - name: order_date_key
+    dataType: INT
+    description: Order date
+    isForeignKey: true
+  - name: order_status
+    dataType: VARCHAR
+    description: "Placed, packed, shipped…"
+  - name: order_total
+    dataType: DECIMAL
+    description: Order value
+relationships:
+  - fromColumn: customer_key
+    toModel: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one
+  - fromColumn: order_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
