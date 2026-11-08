@@ -57,7 +57,12 @@ export interface DbmlField {
   unique: boolean;
   notNull: boolean;
   increment: boolean;
-  /** `default:` as written; an expression keeps its backticks out (`now()`) and says so in `type`. */
+  /**
+   * `default:` as written; an expression keeps its backticks out (`now()`) and says so in `type`.
+   * A number or boolean keeps its source text (`0.0`, `10.50`, `1e3`, `TRUE`, `NULL`), read back
+   * from the field's own span in the file; the parser's value (`0`, `10.5`, `1000`, `true`) only
+   * when the text is not at hand (`normaliseRawDbml` without `text`).
+   */
   default?: { type: 'number' | 'string' | 'boolean' | 'expression'; value: string };
   checks: DbmlCheck[];
   properties: DbmlProperties;
@@ -291,7 +296,10 @@ export { ERD_STUDIO_DBML_HEADER_PREFIX };
  * parser builds no model then — and comes back as diagnostics, 1-based.
  * Warnings (a Records row a ref does not match, …) are ignored. Never throws.
  */
-export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER): ReadDbmlResult {
+export function readDbml(input: string, parser: DbmlParserModule = PINNED_PARSER): ReadDbmlResult {
+  // A byte-order mark (Notepad, Visual Studio and other Windows editors write one) is not
+  // DBML: the parser stops on it ("Unexpected token"). Lines and columns are unchanged.
+  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
   const useLine = firstUseDeclarationLine(text);
   if (useLine !== undefined) {
     return { ok: false, importsOtherFiles: true, diagnostics: [{ line: useLine, column: 1, message: IMPORT_MULTI_FILE_MESSAGE }] };
@@ -314,7 +322,7 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
   }
   return {
     ok: true,
-    model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text), erdStudioPlainExport: isErdStudioPlainExport(text) }),
+    model: normaliseRawDbml(raw, { erdStudioExport: isErdStudioExport(text), erdStudioPlainExport: isErdStudioPlainExport(text), text }),
   };
 }
 
@@ -325,7 +333,7 @@ export function readDbml(text: string, parser: DbmlParserModule = PINNED_PARSER)
  * the file has no `erd_layout`, or does not parse (`readDbml` reports that).
  */
 export function readDbmlImportLayout(text: string): DbmlImportLayout | undefined {
-  const reading = readErdLayoutDbml(text);
+  const reading = readErdLayoutDbml(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   if (!reading || reading.keyCount === 0) return undefined;
   // The reader's own messages describe the editor, which rewrites the diagram;
   // Import only reads the source. `layoutBadLine` problems are the codec's
@@ -476,16 +484,82 @@ function typeOf(value: unknown): string {
   return schema ? `${schema}.${name}` : name;
 }
 
-function defaultOf(value: unknown): DbmlField['default'] {
+function defaultOf(value: unknown, written?: string): DbmlField['default'] {
   if (!isObject(value)) return undefined;
   const type = value.type;
   if (type !== 'number' && type !== 'string' && type !== 'boolean' && type !== 'expression') return undefined;
   const v = value.value;
   if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') return undefined;
+  // The parser gives a number as a JS number (`0.0` → 0, `1e3` → 1000) and a keyword in lower case
+  // (`TRUE` → 'true'): the file's own text is kept when it reads as the same value.
+  if (written !== undefined && (type === 'number' || type === 'boolean') && sameLiteral(written, type, v)) {
+    return { type, value: written };
+  }
   return { type, value: String(v) };
 }
 
-function fieldOf(raw: Loose, fromPartial?: string): DbmlField {
+/** Whether `written` (a literal from the file) is the parser's `value`. */
+function sameLiteral(written: string, type: 'number' | 'boolean', value: string | number | boolean): boolean {
+  if (type === 'number') {
+    const n = Number(written);
+    return Number.isFinite(n) && n === Number(value);
+  }
+  return written.toLowerCase() === String(value).toLowerCase();
+}
+
+const DEFAULT_LITERAL = /^(?:[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|true|false|null)(?![\w.])/i;
+
+/**
+ * The literal after a field's `default:` setting in its source span (`price
+ * numeric [not null, default: 0.0]` → `0.0`), or undefined: quoted text,
+ * backticks and a `'''` note are skipped, and only a `default` that starts a
+ * setting (after `[` or `,`) counts, so a column named `default` or a note
+ * that says `default: 1` is not read.
+ */
+export function writtenDefaultLiteral(span: string): string | undefined {
+  let i = 0;
+  let previous = '';
+  while (i < span.length) {
+    const ch = span[i];
+    if (span.startsWith("'''", i)) {
+      const end = span.indexOf("'''", i + 3);
+      if (end === -1) return undefined;
+      i = end + 3;
+      previous = "'";
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      let j = i + 1;
+      while (j < span.length && span[j] !== ch) j += span[j] === '\\' ? 2 : 1;
+      if (j >= span.length) return undefined;
+      i = j + 1;
+      previous = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) { i++; continue; }
+    if ((previous === '[' || previous === ',') && /^default\b/i.test(span.slice(i, i + 8))) {
+      const after = /^default\s*:\s*/i.exec(span.slice(i));
+      if (after) {
+        const literal = DEFAULT_LITERAL.exec(span.slice(i + after[0].length));
+        return literal ? literal[0] : undefined;
+      }
+    }
+    previous = ch;
+    i++;
+  }
+  return undefined;
+}
+
+/** The text of an element's token span in `source`, when both are known. */
+function spanOf(raw: Loose, source: string | undefined): string | undefined {
+  if (source === undefined) return undefined;
+  const token = isObject(raw.token) ? raw.token : undefined;
+  const start = token && isObject(token.start) && typeof token.start.offset === 'number' ? token.start.offset : -1;
+  const end = token && isObject(token.end) && typeof token.end.offset === 'number' ? token.end.offset : -1;
+  return start >= 0 && end > start && end <= source.length ? source.slice(start, end) : undefined;
+}
+
+function fieldOf(raw: Loose, fromPartial?: string, source?: string): DbmlField {
   const field: DbmlField = {
     name: text(raw.name) ?? '',
     type: typeOf(raw.type),
@@ -497,7 +571,8 @@ function fieldOf(raw: Loose, fromPartial?: string): DbmlField {
     checks: checksOf(raw.checks),
     properties: dbmlProperties(raw.metadata),
   };
-  const dflt = defaultOf(raw.dbdefault);
+  const span = isObject(raw.dbdefault) && (raw.dbdefault.type === 'number' || raw.dbdefault.type === 'boolean') ? spanOf(raw, source) : undefined;
+  const dflt = defaultOf(raw.dbdefault, span === undefined ? undefined : writtenDefaultLiteral(span));
   if (dflt) field.default = dflt;
   if (fromPartial) field.fromPartial = fromPartial;
   return field;
@@ -597,7 +672,7 @@ const endKey = (schema: string | null, table: string, columns: readonly string[]
  * The raw model `rawDb` returns (any 9.x–11.x shape) as a {@link DbmlModel}.
  * Exported for tests; {@link readDbml} is the entry point.
  */
-export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolean; erdStudioPlainExport?: boolean } = {}): DbmlModel {
+export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolean; erdStudioPlainExport?: boolean; text?: string } = {}): DbmlModel {
   const partials = new Map<string, PartialDef>();
   for (const p of list(raw.tablePartials)) {
     if (typeof p.name !== 'string') continue;
@@ -618,7 +693,7 @@ export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolea
     const name = text(t.name) ?? '';
     const schema = text(t.schemaName);
     const expanded = expandFields(t, partials);
-    const fields = expanded.fields.map(({ raw: f, fromPartial }) => fieldOf(f, fromPartial));
+    const fields = expanded.fields.map(({ raw: f, fromPartial }) => fieldOf(f, fromPartial, options.text));
     let note = noteText(t.note);
     let headerColor = colorOf(t.headerColor);
     const indexes = list(t.indexes).map(indexOf);

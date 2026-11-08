@@ -39,10 +39,11 @@
  *   backticks), `checks`, `enum` (an enum type's values; `{ name, note }`
  *   for one with a note), `name` (the original name, when it had to
  *   change), `properties` (custom properties that are not ERD Studio's);
- * - table: `indexes` (every index but the primary key), `checks`,
- *   `header_color`, `alias` (the DBML alias, `Table users as U`), `name` (the
- *   original name, when it had to change and cannot be the warehouse
- *   `alias`), `properties`.
+ * - table: `indexes` (every index but the primary key), `primary_key` (the
+ *   primary key index's own `name`, `type` and `note`, when it has any:
+ *   `(a, b) [pk, name: 'x_pkey']`), `checks`, `header_color`, `alias` (the
+ *   DBML alias, `Table users as U`), `name` (the original name, when it had
+ *   to change and cannot be the warehouse `alias`), `properties`.
  *
  * Dropped, and listed in the report: Records (sample rows), a ref's
  * `delete` / `update` / `color` / `inactive`, the project's `database_type`
@@ -99,9 +100,10 @@ import type {
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
 import { normaliseName } from './nameUtils';
 import { isValidTableRole } from '../providers/payloadValidation';
-import { buildDraftSubjectAreaDocument, freeSubjectAreaSlug, serializeDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
+import { buildDraftSubjectAreaDocument, foldToAscii, freeSubjectAreaSlug, serializeDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
 import { libraryRelationshipsOf, nextCompositeKey, routeToLibrary } from './libraryRelationships';
 import type { DbmlEnum, DbmlEnumValue, DbmlField, DbmlModel, DbmlProperties, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
+import { ledgerHasLosses, ledgerLeftOut, ledgerNotes, savedOptionalNote, type LedgerEntry } from './importLedger';
 
 /** The `meta` key that holds what DBML says and ERD Studio has no field for. */
 export const DBML_META_KEY = 'dbml';
@@ -251,8 +253,16 @@ export interface DbmlImportReport {
   relationshipsAlreadyInLibrary: number;
   /** Refs that were optional (`?`): a YAML relationship does not record optionality. */
   optionalRefs: number;
-  /** Refs with no `?` on either end: a DBML project saves every relationship as optional (`>?`, D18). */
+  /**
+   * Refs that were required in the source: every foreign-key (many side)
+   * column NOT NULL (`not null`, or part of its table's primary key). Not the
+   * refs without a `?`: a `?` is often left off a nullable key, and written
+   * on a NOT NULL one. A DBML project saves every relationship as optional
+   * (`>?`, D18); the note counts these ({@link savedOptionalNote}).
+   */
   requiredRefs: number;
+  /** Refs imported (each composite once): what {@link requiredRefs} is counted of. */
+  countedRefs: number;
   /** The file is ERD Studio's own rich export (whose `?`s are its own, so not worth a word). */
   erdStudioExport: boolean;
   /** Tables placed from the layout; the rest are placed by the canvas when it opens. */
@@ -262,6 +272,13 @@ export interface DbmlImportReport {
   /** Whether the file had an `erd_layout`, and what in it could not be read. */
   layoutRead: boolean;
   layoutProblems: string[];
+  /**
+   * What the import itself changed or could not keep (`importLedger.ts`):
+   * rendered with the conversion's own ledger into the notes and the Not
+   * imported list ({@link importPlanNotes}, {@link importLeftOut}). [] when
+   * everything came across as written.
+   */
+  ledger: LedgerEntry[];
 }
 
 export interface DbmlImportPlan {
@@ -349,19 +366,57 @@ export function suggestDbmlLayer(model: DbmlModel, layerIds: readonly string[]):
  * `-3`… suffix keeps it free.
  */
 export function suggestDbmlSubjectAreaName(model: DbmlModel, fileName?: string, taken: Iterable<string> = []): string {
-  const base = toSubjectAreaSlug(splitWords(model.project?.name ?? ''))
-    || toSubjectAreaSlug(splitWords(baseNameOf(fileName ?? '')))
+  const base = toSubjectAreaSlug(nameWords(model.project?.name ?? ''))
+    || toSubjectAreaSlug(nameWords(baseNameOf(fileName ?? '')))
     || DBML_IMPORT_DEFAULT_NAME;
   return freeSubjectAreaSlug(base, taken);
 }
 
 /**
+ * A name as words for a slug: camel case split ({@link splitWords}), every
+ * separator (`_`, `-`, `.`, spaces) one word break, and accents dropped
+ * (`Café` → `Cafe`), so `SM_SalesSense` reads `sm-sales-sense`, never
+ * `sm_sales-sense`.
+ */
+function nameWords(name: string): string {
+  return splitWords(foldToAscii(name))
+    .replace(/[\s_.\-]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Mixed-case product names read as one word (`PostgreSQL` → `postgresql`,
+ * not `postgre-sql`). The general rule cannot tell `PostgreSQL` from
+ * `CustomerID`, so the ones a schema's name commonly carries are listed.
+ */
+const ONE_WORD_NAMES = [
+  'PostgreSQL', 'MySQL', 'NoSQL', 'GraphQL', 'SQLite', 'MongoDB', 'DynamoDB', 'CosmosDB', 'DuckDB', 'CockroachDB',
+  'MariaDB', 'ClickHouse', 'BigQuery', 'PowerBI', 'GitHub', 'GitLab', 'DevOps', 'OAuth',
+  'JavaScript', 'TypeScript', 'OpenAPI',
+];
+const ONE_WORD_PATTERN = new RegExp(`(${ONE_WORD_NAMES.join('|')})(?![a-z])`, 'g');
+
+/**
  * The words of a name written in camel case, for a readable file name:
  * `AdventureSales` → `Adventure Sales` (`adventure-sales`, not
- * `adventuresales`), `DBMLProject` → `DBML Project`.
+ * `adventuresales`), `DBMLProject` → `DBML Project`, `CustomerID` →
+ * `Customer ID`. A run of capitals stays one word (`OMOP`, `SQLServer` →
+ * `SQL Server`), a plural acronym too (`IDs`, `URLs`), and so does a known
+ * mixed-case name (`PostgreSQL`, `MySQL`: {@link ONE_WORD_NAMES}).
  */
 export function splitWords(name: string): string {
-  return name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  const kept: string[] = [];
+  // \u0000 and \u0001 mark the kept words below: a name's own control characters are spaces.
+  const masked = name.replace(/[\u0000-\u001f]/g, ' ').replace(ONE_WORD_PATTERN, (word) => {
+    kept.push(word);
+    return `\u0000${kept.length - 1}\u0001`;
+  });
+  return masked
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z](?!s(?![a-z]))[a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])\u0000/g, '$1 \u0000')
+    .replace(/\u0001([A-Za-z0-9])/g, '\u0001 $1')
+    .replace(/\u0000(\d+)\u0001/g, (_, i: string) => kept[Number(i)]);
 }
 
 /** `a/b/silver.dbml` → `silver`. */
@@ -456,12 +511,14 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     relationshipsAlreadyInLibrary: 0,
     optionalRefs: 0,
     requiredRefs: 0,
+    countedRefs: 0,
     erdStudioExport: model.erdStudioExport,
     positioned: 0,
     unpositioned: 0,
     stickyNotes: 0,
     layoutRead: input.layout !== undefined,
     layoutProblems: [...(input.layout?.problems ?? [])],
+    ledger: [],
   };
   const ctx: Context = { report, erdStudioExport: model.erdStudioExport, erdStudioPlainExport: model.erdStudioPlainExport === true };
 
@@ -540,12 +597,25 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     report.relationshipsInLibrary = countLinks(relationships.filter((r) => !kept.has(r) && !stored.has(r)));
   }
 
-  // An exported one-to-one marks its FK column `unique` (a composite one with a
-  // unique index), which the relationship already says: that is not kept in meta.
-  dropOneToOneUniques(planned, relationships);
+  // ERD Studio's own export marks a one-to-one's FK column `unique` (a composite one
+  // with a unique index), which the relationship already says: that is not kept in
+  // meta. Any other file declared that key itself, so it stays (a SQL conversion's
+  // `UNIQUE` on a one-to-one FK is a key of the source, not an export artefact).
+  if (model.erdStudioExport) dropOneToOneUniques(planned, relationships);
   report.keptInMeta = newTables.reduce((n, t) => n + (hasDbmlMeta(t.meta) ? 1 : 0)
     + (t.columns ?? []).filter((c) => hasDbmlMeta(c.meta)).length, 0);
   report.relationships = countLinks(relationships);
+  // A DBML diagram's Refs are all saved `>?` (D18): the required ones are counted, and the note says so.
+  if (input.diagramHoldsNoRelationships && report.requiredRefs > 0 && !model.erdStudioExport) {
+    report.ledger.push({
+      outcome: 'changed',
+      unit: 'relationship',
+      cause: 'savedOptional',
+      what: 'NOT NULL foreign key',
+      count: report.requiredRefs,
+      detail: 'saved as optional (>?)',
+    });
+  }
 
   const viewConfig = planViewConfig(model, planned, input.layout, ctx);
   const description = input.description
@@ -863,6 +933,15 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   });
   // A table without columns (an export's placeholder dropped) has none, as its file reads back.
   if (table.columns.length === 0) delete table.columns;
+  // The primary key's own name (`(a, b) [pk, name: 'x_pkey']`), type and note: kept, as other indexes' are.
+  const pkIndex = dbml.indexes.find((i) => i.pk && (i.name || i.type || i.note));
+  if (pkIndex) {
+    const out: Record<string, MetaValue> = {};
+    if (pkIndex.name) out.name = pkIndex.name;
+    if (pkIndex.type) out.type = pkIndex.type;
+    if (pkIndex.note) out.note = pkIndex.note;
+    tableExtras.primary_key = out;
+  }
   const nonPk = dbml.indexes.filter((i) => !i.pk);
   if (nonPk.length > 0) {
     tableExtras.indexes = nonPk.map((i) => {
@@ -970,6 +1049,15 @@ function applyEnums(model: DbmlModel, planned: readonly PlannedTable[], ctx: Con
       if (!column) continue;
       column.meta = withDbmlMeta(column.meta ?? {}, { enum: found.values.map(enumValue) });
       used.add(found);
+    }
+  }
+  const usedLabels = model.enums.filter((e) => used.has(e)).map((e) => (e.schema ? `${e.schema}.${e.name}` : e.name));
+  if (usedLabels.length > 0) {
+    // Kept, in another form: the values on each column of the type, never an Enum block (D19).
+    const one = usedLabels.length === 1;
+    ctx.report.notes.push(`${plural(usedLabels.length, 'enum')} (${someOf(usedLabels, 3)}) ${one ? 'is' : 'are'} kept as the values on the columns of ${one ? 'its type' : 'their types'}, not as ${one ? 'an Enum block' : 'Enum blocks'}: other DBML tools see only the type name.`);
+    for (const label of usedLabels) {
+      ctx.report.ledger.push({ outcome: 'skipped', unit: 'object', cause: 'noField', what: 'Enum block', count: 1, where: { table: label }, detail: 'its values are kept on the columns of its type' });
     }
   }
   for (const e of model.enums) {
@@ -1090,6 +1178,9 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
       }
       for (const s of earlier) {
         out.splice(out.indexOf(s.rel), 1);
+        // It was counted as a link of its own; the composite now counts it.
+        ctx.report.countedRefs--;
+        if (s.required) ctx.report.requiredRefs--;
         dropReference(s.what, `${what.replace(/^Reference/, 'the composite reference')} joins the same columns, so it was imported as part of that one.`);
       }
       const entries = entriesOf(from.table);
@@ -1102,9 +1193,15 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
 
     // A single reference, or a pair of one too wide to be a composite, may repeat an earlier one.
     const repeated = composite ? 0 : keys.filter((k) => seen.has(k)).length;
+    // The links this ref adds as the canvas counts them: a composite once, a
+    // reference too wide to be one as each pair it adds (so the D18 note's
+    // "required" and "the other" always add up to the relationships drawn).
+    // A many-to-many (`<>`) has no foreign key, so nothing in it is required.
+    const required = (columns: string[]): boolean => cardinality !== 'many-to-many' && isRequiredEnd({ table: from.table, columns });
+    const addedLinks: string[][] = composite ? [from.columns] : from.columns.filter((_, i) => !seen.has(keys[i])).map((c) => [c]);
     rels.forEach((rel, i) => {
       if (seen.has(keys[i]) && !composite) return;
-      seen.set(keys[i], { rel, what, composite });
+      seen.set(keys[i], { rel, what, composite, required: !composite && required([rel.fromColumn]) });
       out.push(rel);
     });
     if (repeated === rels.length) {
@@ -1113,7 +1210,8 @@ function planRelationships(model: DbmlModel, lookup: TableLookup, ctx: Context):
     }
     if (repeated > 0) dropReference(what, `another reference already joins ${repeated} of its column pairs; the rest were imported.`);
     if (isOptional(ref.ends[0].relation) || isOptional(ref.ends[1].relation)) ctx.report.optionalRefs++;
-    else ctx.report.requiredRefs++;
+    ctx.report.countedRefs += addedLinks.length;
+    ctx.report.requiredRefs += addedLinks.filter(required).length;
     const settings = [
       ref.onDelete ? `delete: ${ref.onDelete}` : '',
       ref.onUpdate ? `update: ${ref.onUpdate}` : '',
@@ -1165,6 +1263,8 @@ interface Seen {
   what: string;
   /** It is one pair of a composite. */
   composite: boolean;
+  /** A link of its own (not a composite's pair) counted required in the report. */
+  required: boolean;
 }
 
 const REF_SETTINGS_WHY = 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.';
@@ -1192,6 +1292,19 @@ function resolveEnd(end: DbmlRefEnd, lookup: TableLookup): ResolvedEnd | string 
     columns.push(name);
   }
   return { table, columns };
+}
+
+/**
+ * Whether a foreign-key end is required in the source: each of its columns is
+ * NOT NULL, or part of its table's primary key (which is never null). A
+ * composite with one nullable column is not.
+ */
+function isRequiredEnd(end: ResolvedEnd): boolean {
+  return end.columns.every((column) => {
+    if (end.table.primaryKey.has(normaliseName(column))) return true;
+    const field = end.table.dbml.fields.find((f) => end.table.columns.get(f.name) === column);
+    return field !== undefined && (field.notNull || field.pk);
+  });
 }
 
 /** Whether an end's columns are its table's whole primary key. */
@@ -1365,6 +1478,21 @@ function someOf(names: readonly string[], shown = 4): string {
   return names.length > shown ? `${head} and ${names.length - shown} more` : head;
 }
 
+/**
+ * What a conversion says about itself (`ImportDbmlOrigin`, `DraftImportOrigin`):
+ * the headline's `from`, its notes and skipped lines, its ledger (rendered
+ * with the plan's own into the notes and the Not imported list), and a
+ * `notice` the draft's banner carries (`3 tables could not be read; Show
+ * details lists them`).
+ */
+export interface DbmlImportOriginDescription {
+  from: string;
+  notes?: readonly string[];
+  skipped?: readonly string[];
+  ledger?: readonly LedgerEntry[];
+  notice?: string;
+}
+
 /** What {@link describeDbmlImportPlan} needs to know beyond the plan. */
 export interface DescribeDbmlImportOptions {
   /** The layer as the user sees it (default: its id). */
@@ -1386,7 +1514,7 @@ export interface DescribeDbmlImportOptions {
    * talk about a file's erd_layout, and the conversion's own `notes` and
    * `skipped` lines (counts by kind) are listed, the first few of each.
    */
-  origin?: { from: string; notes?: readonly string[]; skipped?: readonly string[] };
+  origin?: DbmlImportOriginDescription;
   /** The bundled example (Open an Example… in a folder): no note that its references are saved optional. */
   example?: boolean;
 }
@@ -1439,12 +1567,12 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
     const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
     lines.push(`• Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
+  const layerSchema = layerSchemaNote(plan, options);
+  if (layerSchema) lines.push(`• ${layerSchema}`);
   if (options.dbml) {
-    // A DBML project writes every Ref as `>?` (D18): say so when the file had required ones
-    // (not for a conversion: there was no DBML file to compare with).
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
-      lines.push(`• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
-    }
+    // A DBML project writes every Ref as `>?` (D18): say so, with how many were required in the source.
+    const optional = savedOptionalLine(plan, options);
+    if (optional) lines.push(`• ${optional}`);
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
     lines.push(`• ${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
@@ -1468,7 +1596,7 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (report.keptInMeta > 0) {
     // Plain words (onboarding story 06): where they are kept (`meta.dbml`) is the reference doc's
     // business, and no count (it mixes tables and columns, and read like a wrong table count).
-    lines.push(`• ${keptInMetaNote(options)}`);
+    lines.push(`• ${keptInMetaNote(plan, options)}`);
   }
   if (report.renamed.length > 0) {
     const renames = renameEntries(report.renamed);
@@ -1477,10 +1605,11 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   }
   for (const note of report.notes.slice(0, 3)) lines.push(`• ${note}`);
   if (report.notes.length > 3) lines.push(`• And ${plural(report.notes.length - 3, 'more note')}.`);
-  const originNotes = options.origin?.notes ?? [];
+  const ledger = importLedgerOf(plan, options);
+  const originNotes = [...(options.origin?.notes ?? []), ...ledgerNotes(withoutSavedOptional(ledger))];
   for (const note of originNotes.slice(0, ORIGIN_NOTES_SHOWN)) lines.push(`• ${note}`);
   if (originNotes.length > ORIGIN_NOTES_SHOWN) lines.push(`• And ${plural(originNotes.length - ORIGIN_NOTES_SHOWN, 'more note')}.`);
-  const skipped = options.origin?.skipped ?? [];
+  const skipped = dedupeLines([...ledgerLeftOut(ledger), ...(options.origin?.skipped ?? [])]);
   if (skipped.length > 0) {
     lines.push('Not imported:');
     for (const item of skipped.slice(0, ORIGIN_SKIPPED_SHOWN)) lines.push(`• ${item}`);
@@ -1542,10 +1671,34 @@ export function importLayoutSentence(plan: DbmlImportPlan, options: DescribeDbml
  * Where the details ERD Studio has no field for go. A DBML file keeps its
  * indexes; a conversion (SQL scripts, a semantic model) leaves plain indexes
  * out (its own note says so), so this note does not claim them too.
+ *
+ * "So they are not lost" is said only when it is true of everything the
+ * import shows: a DBML file (no conversion, whose own losses this note cannot
+ * vouch for) whose ledger holds no loss. Otherwise the note says where the
+ * details are kept and the Not imported list says what was not (Bug 9).
  */
-function keptInMetaNote(options: DescribeDbmlImportOptions): string {
+function keptInMetaNote(plan: DbmlImportPlan, options: DescribeDbmlImportOptions): string {
   const what = options.origin ? 'Not null, defaults' : 'Not null, defaults, indexes';
-  return `${what} and other details ERD Studio has no field for are kept in the table files, so they are not lost.`;
+  const notLost = !options.origin && !ledgerHasLosses(importLedgerOf(plan, options));
+  return `${what} and other details ERD Studio has no field for are kept in the table files${notLost ? ', so they are not lost' : ''}.`;
+}
+
+/** The plan's own ledger and the conversion's, together (what the notes and Not imported render). */
+export function importLedgerOf(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): LedgerEntry[] {
+  return [...(plan.report.ledger ?? []), ...(options.origin?.ledger ?? [])];
+}
+
+/** Lines without repeats: the same text (case, spacing and a final full stop aside) once, where it first comes. */
+export function dedupeLines(lines: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const key = line.toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  return out;
 }
 
 /**
@@ -1570,18 +1723,56 @@ export function importPlanNotes(plan: DbmlImportPlan, options: DescribeDbmlImpor
     const why = newFolder ? 'as another table in this file spells it (one folder per schema)' : `as the layer's existing ${to}/ folder spells it`;
     notes.push(`Schema ${key.split('\u0000')[0]} is written ${to}, ${why}: ${someOf(tables)}.`);
   }
+  const layerSchema = layerSchemaNote(plan, options);
+  if (layerSchema) notes.push(layerSchema);
   if (options.dbml) {
-    if (report.requiredRefs > 0 && !report.erdStudioExport && !options.origin && !options.example) {
-      notes.push(`Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, ${plural(report.requiredRefs, 'reference was', 'references were')} not optional.`);
-    }
+    const optional = savedOptionalLine(plan, options);
+    if (optional) notes.push(optional);
   } else if (report.optionalRefs > 0 && !report.erdStudioExport) {
     notes.push(`${plural(report.optionalRefs, 'reference is', 'references are')} optional (?). ERD Studio doesn't record that, so they are imported as plain relationships.`);
   }
   if (report.stickyNotes > 0) notes.push(`${plural(report.stickyNotes, 'sticky note')}.`);
   if (report.keptInMeta > 0) {
-    notes.push(keptInMetaNote(options));
+    notes.push(keptInMetaNote(plan, options));
   }
+  notes.push(...ledgerNotes(withoutSavedOptional(importLedgerOf(plan, options))));
   return notes;
+}
+
+/**
+ * The D18 note for a DBML project (every Ref is saved `>?`), counting the
+ * relationships the source had required ({@link DbmlImportReport.requiredRefs}:
+ * their foreign-key columns NOT NULL) — for a DBML file and a conversion
+ * alike (SQL's `NOT NULL`, a semantic model's keys). Never for ERD Studio's
+ * own export (its `>?` are its own) or the bundled example. '' when none was required.
+ */
+function savedOptionalLine(plan: DbmlImportPlan, options: DescribeDbmlImportOptions): string {
+  const { report } = plan;
+  if (!options.dbml || report.erdStudioExport || options.example) return '';
+  return savedOptionalNote(report.requiredRefs, report.countedRefs);
+}
+
+/** The ledger without the D18 entry, which {@link savedOptionalLine} says in its own words. */
+function withoutSavedOptional(entries: readonly LedgerEntry[]): LedgerEntry[] {
+  return entries.filter((e) => e.cause !== 'savedOptional');
+}
+
+/**
+ * In a DBML project a new table with no schema (DBML reads `Table public.x`
+ * as none, so `public` too) is written in the layer's schema (its folder,
+ * `<layer>/tables/<layer>/`): said once, with how many tables, so a source
+ * schema never changes without a word. '' for a YAML project, the bundled
+ * example, or when every new table names its schema.
+ */
+export function layerSchemaNote(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string {
+  if (!options.dbml || options.example) return '';
+  const unqualified = plan.newTables.filter((t) => !t.schema).map((t) => t.name);
+  if (unqualified.length === 0) return '';
+  const all = unqualified.length === plan.newTables.length;
+  const which = all
+    ? (unqualified.length === 1 ? 'the table' : `all ${plural(unqualified.length, 'table')}`)
+    : plural(unqualified.length, 'table');
+  return `Tables with no schema or schema public are written in schema ${plan.layer}, the layer's name: ${which} (${someOf(unqualified, 3)}).`;
 }
 
 /** Where the relationships are saved, as the dry run says it (`saved in gold/relationships/gold.dbml`), or ''. */
@@ -1594,12 +1785,18 @@ function relationshipsHome(plan: DbmlImportPlan, options: DescribeDbmlImportOpti
   return report.relationshipsInLibrary === report.relationships ? ` saved in ${home}` : ` (${report.relationshipsInLibrary} saved in ${home})`;
 }
 
-/** Everything the import leaves out, one line each: the conversion's skipped lines, then the DBML features it does not keep. */
+/**
+ * Everything the import leaves out, one line each, never the same line
+ * twice: what could not be read or was lost (the ledger: the conversion's
+ * and the plan's own), the conversion's skipped lines, then the DBML
+ * features it does not keep.
+ */
 export function importLeftOut(plan: DbmlImportPlan, options: DescribeDbmlImportOptions = {}): string[] {
-  const skipped = (options.origin?.skipped ?? []).map((line) => line.replace(/[.]$/, ''));
+  const ledger = ledgerLeftOut(importLedgerOf(plan, options));
+  const skipped = options.origin?.skipped ?? [];
   const dropped = droppedGroups(plan.report.dropped).map((items) =>
     items.length === 1 ? `${items[0].what}: ${items[0].why}` : `${droppedGroupLabel(items)}: ${items[0].why}`);
-  return [...skipped, ...dropped.map((line) => line.replace(/[.]$/, ''))];
+  return dedupeLines([...ledger, ...skipped, ...dropped].map((line) => line.replace(/[.]$/, '')));
 }
 
 /**

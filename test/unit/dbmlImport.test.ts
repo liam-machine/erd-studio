@@ -320,6 +320,7 @@ describe('an ERD Studio rich export, row by row', () => {
 
   it('nor the unique index it adds over a composite one-to-one\'s FK columns; other indexes stay', () => {
     const text = [
+      '// erd-studio dbml-export v2',
       'Table a {',
       '  x int',
       '  y int',
@@ -336,11 +337,28 @@ describe('an ERD Studio rich export, row by row', () => {
       '    (u, v) [pk]',
       '  }',
       '}',
-      'Ref: a.(x, y) -? b.(u, v)',
+      'Ref: b.(u, v) ?- a.(x, y)',
     ].join('\n');
     const p = plan(text);
     expect(p.relationships.map(ends)).toEqual(['a.x -> b.u one-to-one', 'a.y -> b.v one-to-one']);
     expect(tableOf(p, 'a').meta).toEqual({ dbml: { indexes: [{ columns: ['y', 'z'], unique: true }] } });
+  });
+
+  it('a file ERD Studio did not export keeps a one-to-one FK column\'s own unique, and a composite one\'s unique index', () => {
+    // A SQL conversion writes `store.manager_staff_id ... UNIQUE` as a one-to-one: the key is the source's.
+    const single = plan([
+      'Table staff {', '  staff_id int [pk]', '}',
+      'Table store {', '  store_id int [pk]', '  manager_staff_id int [unique, not null]', '}',
+      'Ref: staff.staff_id - store.manager_staff_id',
+    ].join('\n'));
+    expect(single.relationships.map(ends)).toEqual(['store.manager_staff_id -> staff.staff_id one-to-one']);
+    expect(columnOf(tableOf(single, 'store'), 'manager_staff_id').meta?.dbml).toMatchObject({ unique: true });
+    const composite = plan([
+      'Table a {', '  x int', '  y int', '  indexes {', '    (x, y) [unique]', '  }', '}',
+      'Table b {', '  u int', '  v int', '  indexes {', '    (u, v) [pk]', '  }', '}',
+      'Ref: a.(x, y) -? b.(u, v)',
+    ].join('\n'));
+    expect(tableOf(composite, 'a').meta).toEqual({ dbml: { indexes: [{ columns: ['x', 'y'], unique: true }] } });
   });
 
   it('a table written public.name matches refs and layout entries without a schema', () => {
@@ -1158,16 +1176,22 @@ describe('describeDbmlImportPlan', () => {
     ]);
   });
 
-  it('in a DBML project, says every relationship is saved as optional (?), as the Refs it writes are (onboarding story 06)', () => {
+  it('in a DBML project, says every relationship is saved as optional (?), as the Refs it writes are, counting the NOT NULL ones (onboarding story 06)', () => {
     const p = plan(fixture('foreign/ecommerce.dbml'), { layer: 'main' });
-    expect(p.report).toMatchObject({ optionalRefs: 1, requiredRefs: 5 });
+    // Required = every FK column NOT NULL: orders.user_id only. Not "no ?": users.country_code,
+    // merchants.admin_id and order_items.product_id have no ? but are nullable, and the composite
+    // fk_merchant has one NOT NULL column (merchant_id) and one nullable (country_code).
+    expect(p.report).toMatchObject({ optionalRefs: 1, requiredRefs: 1, countedRefs: 6 });
     const text = describeDbmlImportPlan(p, { dbml: { relationshipsFiles: ['main/relationships/main.dbml'] } });
     // Not "imported as plain relationships": a DBML project writes every Ref as >?.
     expect(text).not.toContain('plain relationships');
-    expect(text).toContain('• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the file, 5 references were not optional.');
+    expect(text).toContain('• Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the source, 1 relationship was not optional (its foreign key columns are NOT NULL); the other 5 may be empty.');
     expect(text).toContain('• 6 relationships.');
-    // A conversion (SQL, a semantic model) had no DBML file to compare with: nothing to say.
-    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [] }, origin: { from: 'from 1 SQL file (PostgreSQL)' } })).not.toContain('optional');
+    // A conversion (SQL, a semantic model) says it too: its NOT NULL columns are in the converted file.
+    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [] }, origin: { from: 'from 1 SQL file (PostgreSQL)' } }))
+      .toContain('In the source, 1 relationship was not optional');
+    // The bundled example: nothing to say.
+    expect(describeDbmlImportPlan(p, { dbml: { relationshipsFiles: [] }, example: true })).not.toContain('not optional');
   });
 
   it('summarises a foreign file: optional refs, meta, renames and what is left out', () => {

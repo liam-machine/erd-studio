@@ -87,6 +87,7 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
+import type { LedgerEntry } from '../services/importLedger';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
@@ -141,6 +142,14 @@ export interface ImportDbmlOrigin {
   notes?: readonly string[];
   /** What the conversion left out, counted by kind, one point each. */
   skipped?: readonly string[];
+  /**
+   * Everything the conversion did not bring across as written
+   * (`importLedger.ts`): rendered with the plan's own ledger into the draft's
+   * notes and Not imported list.
+   */
+  ledger?: readonly LedgerEntry[];
+  /** A line for the draft's banner (`3 tables could not be read; Show details lists them`). */
+  notice?: string;
 }
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
@@ -780,7 +789,7 @@ async function runImportDbml(
           hasFolder: true,
           changeOptions: changeOptions !== undefined,
           ...(draftOptions.scopes ? { scopes: draftOptions.scopes } : {}),
-          ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
+          ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : deps.origin?.notice ? { notice: deps.origin.notice } : {}),
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
