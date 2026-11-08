@@ -19,6 +19,7 @@ import { useEditorStore, useEditorStoreApi } from '../store/editorStore';
 import {
   buildRoutingInput,
   createEdgeRoutingEngine,
+  createRoutingWorker,
   draggingNodesKey,
   lineStyleOptions,
   routingInputKey,
@@ -64,9 +65,11 @@ function fkLineCount(edges: readonly Edge[]): number {
  * Routes every FK line once per frame in which a card moved, was measured or
  * the line style changed (and, for hops, when the zoom moves a quarter of a
  * doubling: hops are sized for it). The engine is this canvas's own, and
- * decides whether to route at all (see `createEdgeRoutingEngine`): a slow
- * diagram holds its routes while a card is dragged and routes again when the
- * drag ends (`dragKey` changes back to empty).
+ * decides whether and where to route (see `createEdgeRoutingEngine`): a small
+ * diagram routes here, on the main thread; a larger one in the canvas's
+ * worker, whose answer arrives later through `onUpdate`; a slow diagram holds
+ * its routes while a card is dragged and routes again when the drag ends
+ * (`dragKey` changes back to empty).
  */
 export function EdgeRouter() {
   const storeApi = useStoreApi();
@@ -79,10 +82,22 @@ export function EdgeRouter() {
   const engine = useRef<EdgeRoutingEngine | null>(null);
   const frame = useRef(0);
 
+  // The engine (and its worker) lives as long as the canvas.
+  useEffect(
+    () => () => {
+      engine.current?.dispose();
+      engine.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
-      engine.current ??= createEdgeRoutingEngine();
+      engine.current ??= createEdgeRoutingEngine({
+        worker: createRoutingWorker,
+        onUpdate: (update) => canvas.getState().setEdgeRoutes(update.routes),
+      });
       const { nodeLookup, edges } = storeApi.getState();
       const dragging = new Set<string>();
       for (const node of nodeLookup.values()) if (node.dragging && !node.hidden) dragging.add(node.id);

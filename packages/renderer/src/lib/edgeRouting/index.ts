@@ -14,84 +14,27 @@
  * fails or is too slow for the diagram (`createEdgeRoutingEngine`).
  */
 
-import type { LineRouter, LineStyleOptions, RouteResult, RoutedEdge, RoutedLine, RoutingInput } from './types';
+import type { RoutedEdge, RoutingInput } from './types';
 import { createAvoidRouter } from './routers/orthogonalAvoid';
-import { renderPaths } from './render/pathRender';
-import { computeTunnels } from './render/tunnels';
+import { routeAll, safely } from './routeAll';
 import { lineStyleOptions, type LineStyle } from './lineStyle';
+import type { RoutingWorkerFactory, RoutingWorkerHandle } from './worker/client';
+import type { WorkerRouteResult } from './worker/protocol';
 
 export * from './types';
 export { buildRoutingInput, routingInputKey, draggingNodesKey } from './input';
 export { createAvoidRouter, type AvoidRouter } from './routers/orthogonalAvoid';
 export * from './lineStyle';
-
-/** A router that throws must never take the canvas down: fall back. */
-function safely<T>(fn: () => T, fallback: T, onError: (err: unknown) => void): T {
-  try {
-    return fn();
-  } catch (err) {
-    onError(err);
-    return fallback;
-  }
-}
-
-export interface RouteAllOptions {
-  /** The router (and its memory of the last pass). Default: a fresh route-around router, so the call keeps no state. */
-  router?: LineRouter;
-  /** Clock for `millis` (default: none, `millis` is 0). */
-  now?: () => number;
-  /** The canvas zoom: hops are sized for it (`hopRadiusFor`). Default 1. */
-  zoom?: number;
-  /** Called with a router or renderer error (the pass still returns, with fewer or no routes). */
-  onError?: (err: unknown) => void;
-}
-
-/** Route and draw every line of `input` in one pass. Never throws. */
-export function routeAll(input: RoutingInput, options: LineStyleOptions, ctx: RouteAllOptions = {}): RouteResult {
-  const now = ctx.now ?? (() => 0);
-  const onError = ctx.onError ?? (() => {});
-  const router = ctx.router ?? createAvoidRouter();
-  const start = now();
-  const lines = safely(() => router.route(input).lines, new Map<string, RoutedLine>(), (err) => {
-    // A pass that failed half-way may have left the router's memory inconsistent.
-    router.reset();
-    onError(err);
-  });
-  const rendered = safely(
-    () =>
-      renderPaths(lines, {
-        crossings: options.crossings,
-        corners: options.corners,
-        obstacles: input.obstacles,
-        zoom: ctx.zoom ?? 1,
-      }),
-    new Map(),
-    onError,
-  );
-  const specs = new Map(input.edges.map((e) => [e.id, e]));
-  const edges = new Map<string, RoutedEdge>();
-  for (const [id, line] of lines) {
-    const r = rendered.get(id);
-    if (!r) continue;
-    const spec = specs.get(id);
-    const tunnels =
-      options.underTables === 'xray' && spec ? safely(() => computeTunnels(line, spec, input.obstacles), [], onError) : undefined;
-    const routed: RoutedEdge = {
-      ...line,
-      d: r.d,
-      mid: r.mid,
-      halo: r.halo,
-      tunnels: tunnels && tunnels.length ? tunnels : undefined,
-    };
-    if (r.strokeD) routed.strokeD = r.strokeD;
-    edges.set(id, routed);
-  }
-  return { edges, millis: now() - start };
-}
+export { routeAll, type RouteAllOptions } from './routeAll';
+export { createRoutingWorker, type RoutingWorkerFactory, type RoutingWorkerHandle, type RoutingWorkerEvents } from './worker/client';
+export type { WorkerRouteRequest, WorkerRouteResult } from './worker/protocol';
 
 // ---------------------------------------------------------------------------
 // The performance guard
 // ---------------------------------------------------------------------------
+//
+// Measured on a grid of generated tables (one pass, M-series Mac): 100 lines
+// ~20 ms, 150 ~40 ms, 200 ~60 ms, 300 ~140 ms, 440 ~260 ms, 570 ~400-500 ms.
 
 /**
  * A pass during a drag slower than this (ms) is too slow to run on every
@@ -103,12 +46,23 @@ export const DRAG_REROUTE_BUDGET_MS = 12;
 /**
  * A pass outside a drag slower than this (ms) holds the routes from a drag's
  * first frame: even routing only the moved card's lines would not fit a frame.
+ * With a worker, it also moves that diagram's routing into the worker.
  */
 export const DRAG_HOLD_AFTER_MS = 50;
-/** A pass slower than this (ms) turns routing off for diagrams of that size: every line draws the fallback. */
+/** A main-thread pass slower than this (ms) turns routing off for diagrams of that size: every line draws the fallback. */
 export const ROUTING_HARD_LIMIT_MS = 150;
-/** Diagrams with more lines than this are never routed (the fallback draws them). */
-export const MAX_ROUTED_LINES = 600;
+/** A worker pass slower than this (ms) turns routing off for diagrams of that size: the lines would arrive too late to help. */
+export const WORKER_HARD_LIMIT_MS = 1000;
+/**
+ * Diagrams with up to this many lines route on the main thread (a pass is
+ * ~20 ms or less), so a drag can re-route as the card moves. Larger ones
+ * route in the canvas's worker, when it has one.
+ */
+export const MAIN_THREAD_MAX_LINES = 100;
+/** With a worker: diagrams with more lines than this are never routed (a pass would take over ~150 ms). */
+export const MAX_ROUTED_LINES = 300;
+/** Without a worker: diagrams with more lines than this are never routed (the pass would pause the canvas over ~40 ms). */
+export const MAX_ROUTED_LINES_WITHOUT_WORKER = 150;
 
 /** What the engine did on one update. */
 export type RoutingPass =
@@ -116,6 +70,11 @@ export type RoutingPass =
   | 'routed'
   /** A drag on a slow diagram: the last routes kept, minus the lines of the dragged cards. */
   | 'held'
+  /**
+   * Sent to the worker: the last routes kept, minus the lines of cards that
+   * moved or changed size since, until the worker answers (`onUpdate`).
+   */
+  | 'pending'
   /** No routes: every line draws the smooth-step fallback. */
   | 'off';
 
@@ -130,7 +89,7 @@ export interface RoutingUpdate {
 export interface RoutingRequest {
   /** Builds the input: called only for a pass that routes. */
   input: () => RoutingInput;
-  /** The number of FK lines (for the hard cap, without building the input). */
+  /** The number of FK lines (for the caps, without building the input). */
   lineCount: number;
   style: LineStyle;
   /** The canvas zoom (hops are sized for it). */
@@ -141,45 +100,110 @@ export interface RoutingRequest {
 
 export interface EdgeRoutingEngine {
   update(request: RoutingRequest): RoutingUpdate;
+  /** Stops the worker. The engine answers nothing afterwards. */
+  dispose(): void;
+}
+
+export interface EdgeRoutingEngineOptions {
+  /** Clock for pass timings (default `performance.now`). */
+  now?: () => number;
+  /**
+   * Starts this canvas's routing worker (`createRoutingWorker`), called the
+   * first time a diagram is large enough to need it. Omitted, or returning
+   * null: every pass runs on the main thread, under the lower cap.
+   */
+  worker?: RoutingWorkerFactory;
+  /** Receives the routes a worker pass produced, after `update` returned 'pending'. */
+  onUpdate?: (update: RoutingUpdate) => void;
+}
+
+/** A pass sent to the worker, with what is needed to use its answer. */
+interface WorkerJob {
+  seq: number;
+  input: RoutingInput;
+  style: LineStyle;
+  zoom: number;
+  lineCount: number;
+}
+
+/** Each card's box, as a comparable key: a route is still right while both its cards' keys are unchanged. */
+function rectKeysOf(input: RoutingInput): Map<string, string> {
+  const keys = new Map<string, string>();
+  for (const r of input.obstacles) keys.set(r.id, `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`);
+  return keys;
+}
+
+function endsOf(input: RoutingInput): Map<string, [string, string]> {
+  return new Map(input.edges.map((e) => [e.id, [e.source, e.target]]));
 }
 
 /**
  * One canvas's routing: its own router (so two canvases on a page never share
- * the router's memory of the last pass) and the performance guard.
+ * the router's memory of the last pass), its own worker, and the performance
+ * guard.
  *
- * - A diagram with more than `MAX_ROUTED_LINES` lines is never routed.
- * - During a drag the router re-routes only what the move touches, which is
- *   usually far cheaper than a full pass (40 tables / 60 lines: about 16 ms
- *   cold, 6 ms a drag frame). When one drag frame takes more than
- *   `DRAG_REROUTE_BUDGET_MS`, or the last pass outside a drag took more than
- *   `DRAG_HOLD_AFTER_MS`, the drag stops routing: the routes stay as they
- *   were, minus the lines touching a dragged card (they draw the fallback,
- *   which follows the card), and the first update after the drag routes
- *   everything again.
- * - A pass that takes more than `ROUTING_HARD_LIMIT_MS` turns routing off for
- *   this canvas while the diagram has at least that many lines.
- * - A router or renderer error is reported once (`console.warn`), never per
- *   frame, and leaves those lines on the fallback. Nothing else is logged.
+ * - Up to `MAIN_THREAD_MAX_LINES` lines, a pass runs on the main thread, and
+ *   a drag re-routes only what the move touches, which is usually far cheaper
+ *   than a full pass (40 tables / 60 lines: about 16 ms cold, 6 ms a drag
+ *   frame). When one drag frame takes more than `DRAG_REROUTE_BUDGET_MS`, or
+ *   the last pass outside a drag took more than `DRAG_HOLD_AFTER_MS`, the
+ *   drag stops routing: the routes stay as they were, minus the lines
+ *   touching a dragged card (they draw the fallback, which follows the card),
+ *   and the first update after the drag routes everything again.
+ * - Larger diagrams (and a smaller one whose pass took more than
+ *   `DRAG_HOLD_AFTER_MS`) route in the worker, so the canvas never pauses:
+ *   `update` returns 'pending' with the last routes still right (lines on a
+ *   moved card fall back), and `onUpdate` delivers the new ones. A drag holds
+ *   the routes; an answer to a request that has since been superseded is
+ *   dropped, and only the latest waiting request is sent next.
+ * - More than `MAX_ROUTED_LINES` lines (`MAX_ROUTED_LINES_WITHOUT_WORKER`
+ *   when the worker cannot start or has failed) are never routed. A
+ *   main-thread pass over `ROUTING_HARD_LIMIT_MS`, or a worker pass over
+ *   `WORKER_HARD_LIMIT_MS`, turns routing off for this canvas while the
+ *   diagram has at least that many lines.
+ * - A worker that fails is stopped for good; the canvas carries on on the
+ *   main thread under the lower cap.
+ * - A router, renderer or worker error is reported once (`console.warn`),
+ *   never per frame, and leaves those lines on the fallback. Nothing else is
+ *   logged.
  */
-export function createEdgeRoutingEngine(now: () => number = defaultNow): EdgeRoutingEngine {
+export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() => number) = {}): EdgeRoutingEngine {
+  const opts: EdgeRoutingEngineOptions = typeof options === 'function' ? { now: options } : options;
+  const now = opts.now ?? defaultNow;
   const router = createAvoidRouter();
-  /** The last pass outside a drag. */
+  /** The last full pass (main thread or worker). */
   let fullMillis = 0;
   /** A frame of the drag in progress blew the budget: hold until it ends. */
   let dragSlow = false;
-  /** Line count at which a pass blew the hard limit (routing off at or above it). */
+  /** Line count at which a pass blew a hard limit (routing off at or above it). */
   let slowAt: number | null = null;
-  /** The last routed pass: its routes and each line's two cards. */
+  /** Line count at which a main-thread pass was slow enough to move to the worker. */
+  let workerFromLines: number | null = null;
+  /** The last routes, the two cards of each line, and the card boxes they were routed for. */
   let last: Map<string, RoutedEdge> | null = null;
   let lastEnds = new Map<string, [string, string]>();
+  let lastRects = new Map<string, string>();
   /** The held routes and the drag they were made for, so one drag hands back one map. */
   let held: { key: string; routes: Map<string, RoutedEdge> } | null = null;
+  /** The worker: undefined until first needed, null when it cannot start or failed. */
+  let worker: RoutingWorkerHandle | null | undefined;
+  /** The newest request's sequence number: only its answer is used. */
+  let seq = 0;
+  /** The pass the worker is computing, and the newest one waiting behind it. */
+  let inFlight: WorkerJob | null = null;
+  let queued: WorkerJob | null = null;
+  /** The newest request (a worker answer lands into its drag state; a worker failure re-runs it). */
+  let latest: RoutingRequest | null = null;
+  let disposed = false;
   let warned = false;
   const onError = (err: unknown) => {
     if (warned) return;
     warned = true;
     // eslint-disable-next-line no-console
     console.warn('[edge-routing] Line routing failed; the affected lines use the simple path.', err);
+  };
+  const emit = (update: RoutingUpdate) => {
+    if (!disposed) opts.onUpdate?.(update);
   };
 
   const hold = (dragging: ReadonlySet<string>, routes: Map<string, RoutedEdge>): RoutingUpdate => {
@@ -196,23 +220,118 @@ export function createEdgeRoutingEngine(now: () => number = defaultNow): EdgeRou
     return { routes: held.routes, pass: 'held', millis: 0 };
   };
 
-  return {
+  /** The last routes still right for `rects`: a line keeps its route while neither of its cards moved or resized. */
+  const stillRight = (rects: Map<string, string>): Map<string, RoutedEdge> | null => {
+    if (!last) return null;
+    const kept = new Map<string, RoutedEdge>();
+    for (const [id, route] of last) {
+      const ends = lastEnds.get(id);
+      if (!ends) continue;
+      const [a, b] = ends;
+      if (rects.get(a) === undefined || rects.get(a) !== lastRects.get(a)) continue;
+      if (rects.get(b) === undefined || rects.get(b) !== lastRects.get(b)) continue;
+      kept.set(id, route);
+    }
+    return kept.size === last.size ? last : kept;
+  };
+
+  const remember = (routes: Map<string, RoutedEdge>, input: RoutingInput) => {
+    last = routes;
+    lastEnds = endsOf(input);
+    lastRects = rectKeysOf(input);
+  };
+
+  const off = (millis = 0): RoutingUpdate => {
+    held = null;
+    last = null;
+    seq++; // an answer still on its way is stale now
+    queued = null;
+    return { routes: null, pass: 'off', millis };
+  };
+
+  const workerHandle = (): RoutingWorkerHandle | null => {
+    if (worker !== undefined || disposed) return worker ?? null;
+    worker = null;
+    try {
+      worker = opts.worker?.({ onResult, onFailure }) ?? null;
+    } catch (err) {
+      onError(err);
+      worker = null;
+    }
+    return worker;
+  };
+
+  const post = (job: WorkerJob) => {
+    inFlight = job;
+    worker?.post({ type: 'route', seq: job.seq, input: job.input, style: job.style, zoom: job.zoom });
+  };
+
+  function onResult(result: WorkerRouteResult) {
+    if (disposed) return;
+    const job = inFlight;
+    inFlight = null;
+    if (queued) {
+      const next = queued;
+      queued = null;
+      post(next);
+    }
+    if (!job || result.seq !== job.seq || job.seq !== seq) return; // superseded
+    if (result.error) onError(new Error(result.error));
+    if (result.millis > WORKER_HARD_LIMIT_MS) {
+      slowAt = job.lineCount;
+      emit(off(result.millis));
+      return;
+    }
+    fullMillis = result.millis;
+    remember(result.edges, job.input);
+    held = null;
+    const dragging = latest?.dragging;
+    emit(dragging && dragging.size > 0 ? hold(dragging, result.edges) : { routes: result.edges, pass: 'routed', millis: result.millis });
+  }
+
+  function onFailure(err: unknown) {
+    if (disposed) return;
+    onError(err);
+    worker = null;
+    inFlight = null;
+    queued = null;
+    // Carry on without it: route the newest request again, on the main thread.
+    if (latest) emit(engine.update(latest));
+  }
+
+  const engine: EdgeRoutingEngine = {
     update(request) {
+      latest = request;
+      const n = request.lineCount;
       const dragging = request.dragging ?? EMPTY_SET;
       const inDrag = dragging.size > 0;
-      if (request.lineCount > MAX_ROUTED_LINES || (slowAt !== null && request.lineCount >= slowAt)) {
+      const wantsWorker = n > MAIN_THREAD_MAX_LINES || (workerFromLines !== null && n >= workerFromLines);
+      const w = wantsWorker ? workerHandle() : null;
+      const cap = w ? MAX_ROUTED_LINES : MAX_ROUTED_LINES_WITHOUT_WORKER;
+      if (disposed || n > cap || (slowAt !== null && n >= slowAt)) return off();
+
+      if (w) {
+        if (inDrag) {
+          queued = null;
+          seq++; // a pass from before the drag would land on moved cards
+          return last ? hold(dragging, last) : { routes: null, pass: 'held', millis: 0 };
+        }
         held = null;
-        last = null;
-        return { routes: null, pass: 'off', millis: 0 };
+        const input = safely(request.input, null, onError);
+        if (!input) return off();
+        const job: WorkerJob = { seq: ++seq, input, style: request.style, zoom: request.zoom ?? 1, lineCount: n };
+        if (inFlight) queued = job;
+        else post(job);
+        return { routes: stillRight(rectKeysOf(input)), pass: 'pending', millis: 0 };
       }
+
+      seq++; // a worker answer still on its way is stale now
+      queued = null;
       if (inDrag && last && (dragSlow || fullMillis > DRAG_HOLD_AFTER_MS)) return hold(dragging, last);
       if (!inDrag) dragSlow = false;
       held = null;
       const input = safely(request.input, null, onError);
-      if (!input) {
-        last = null;
-        return { routes: null, pass: 'off', millis: 0 };
-      }
+      if (!input) return off();
       const result = routeAll(input, lineStyleOptions(request.style), {
         router,
         now,
@@ -220,20 +339,28 @@ export function createEdgeRoutingEngine(now: () => number = defaultNow): EdgeRou
         onError,
       });
       if (result.millis > ROUTING_HARD_LIMIT_MS) {
-        slowAt = request.lineCount;
-        last = null;
-        return { routes: null, pass: 'off', millis: result.millis };
+        slowAt = n;
+        return off(result.millis);
       }
       if (inDrag) {
         if (result.millis > DRAG_REROUTE_BUDGET_MS) dragSlow = true;
       } else {
         fullMillis = result.millis;
+        // Slow enough to pause the canvas: the next passes at this size go to the worker, if there is one.
+        if (result.millis > DRAG_HOLD_AFTER_MS && opts.worker && worker !== null) workerFromLines = n;
       }
-      last = result.edges;
-      lastEnds = new Map(input.edges.map((e) => [e.id, [e.source, e.target]]));
+      remember(result.edges, input);
       return { routes: result.edges, pass: 'routed', millis: result.millis };
     },
+    dispose() {
+      disposed = true;
+      worker?.terminate();
+      worker = null;
+      inFlight = null;
+      queued = null;
+    },
   };
+  return engine;
 }
 
 const EMPTY_SET: ReadonlySet<string> = new Set();

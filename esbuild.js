@@ -8,6 +8,7 @@ const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
 const { exampleBundleDefine } = require('./scripts/exampleBundle.cjs');
+const { edgeRoutingWorkerDefine } = require('./packages/renderer/scripts/edgeRoutingWorker.cjs');
 
 const args = process.argv.slice(2);
 const isWatch = args.includes('--watch');
@@ -45,6 +46,11 @@ const elkWorkerCode = fs.readFileSync(
   path.resolve(__dirname, 'node_modules/elkjs/lib/elk-worker.min.js'),
   'utf-8',
 );
+
+// The line-routing worker (packages/renderer/scripts/edgeRoutingWorker.cjs),
+// inlined the same way for the canvas in the webview and the draft page.
+// Built once per run: restart `npm run watch` after changing the router.
+const edgeRoutingWorker = edgeRoutingWorkerDefine({ minify: isProduction });
 
 // Extension host build — Node.js, CJS, externalize vscode
 const extensionConfig = {
@@ -166,6 +172,7 @@ const webviewConfig = {
   define: {
     'process.env.NODE_ENV': isProduction ? '"production"' : '"development"',
     '__ELK_WORKER_CODE__': JSON.stringify(elkWorkerCode),
+    ...edgeRoutingWorker,
   },
   plugins: [problemMatcherPlugin],
 };
@@ -182,6 +189,7 @@ const draftConfig = {
   define: {
     'process.env.NODE_ENV': isProduction ? '"production"' : '"development"',
     '__ELK_WORKER_CODE__': JSON.stringify(elkWorkerCode),
+    ...edgeRoutingWorker,
   },
 };
 

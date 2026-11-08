@@ -13,8 +13,11 @@ import {
   DRAG_REROUTE_BUDGET_MS,
   LINE_STYLES,
   LINE_STYLE_OPTIONS,
+  MAIN_THREAD_MAX_LINES,
   MAX_ROUTED_LINES,
+  MAX_ROUTED_LINES_WITHOUT_WORKER,
   ROUTING_HARD_LIMIT_MS,
+  WORKER_HARD_LIMIT_MS,
   createAvoidRouter,
   createEdgeRoutingEngine,
   isLineStyle,
@@ -22,6 +25,10 @@ import {
   routeAll,
   type RoutingInput,
   type RoutingRequest,
+  type RoutingUpdate,
+  type RoutingWorkerEvents,
+  type RoutingWorkerFactory,
+  type WorkerRouteRequest,
 } from '../../src/lib/edgeRouting';
 import { scenarioRoutingInput } from '../fixtures/edgeRouting/scenarios';
 
@@ -194,12 +201,13 @@ describe('the routing engine — performance guard', () => {
     expect(engine.update(requestFor(smaller)).pass).toBe('routed');
   });
 
-  it(`a diagram with more than ${MAX_ROUTED_LINES} lines is never routed`, () => {
+  it(`without a worker, a diagram with more than ${MAX_ROUTED_LINES_WITHOUT_WORKER} lines is never routed`, () => {
     const engine = createEdgeRoutingEngine(fakeClock().now);
     const input = scenarioRoutingInput('star');
-    const request = requestFor(input, { lineCount: MAX_ROUTED_LINES + 1 });
+    const request = requestFor(input, { lineCount: MAX_ROUTED_LINES_WITHOUT_WORKER + 1 });
     expect(engine.update(request)).toMatchObject({ routes: null, pass: 'off' });
     expect(request.built()).toBe(0);
+    expect(engine.update(requestFor(input, { lineCount: MAX_ROUTED_LINES_WITHOUT_WORKER })).pass).toBe('routed');
   });
 
   it('logs nothing on a normal pass, and a failure once however many frames fail', () => {
@@ -272,5 +280,199 @@ describe('router isolation (one router per canvas)', () => {
     shared.update(requestFor(first));
     neighbour.update(requestFor(other));
     expect(shared.update(requestFor(nudge)).routes).toEqual(expected);
+  });
+});
+
+/**
+ * A worker that answers only when told to, routing on the spot with its own
+ * router (as the real one does), so every ordering is deterministic.
+ */
+function fakeWorker() {
+  const posted: WorkerRouteRequest[] = [];
+  let events: RoutingWorkerEvents | null = null;
+  const router = createAvoidRouter();
+  const state = { starts: 0, terminated: false };
+  const factory: RoutingWorkerFactory = (e) => {
+    state.starts++;
+    events = e;
+    return {
+      post: (request) => posted.push(request),
+      terminate: () => {
+        state.terminated = true;
+      },
+    };
+  };
+  /** Answers the request at `index` (default: the last one posted). */
+  const answer = (index = posted.length - 1, millis = 5) => {
+    const request = posted[index];
+    const result = routeAll(request.input, lineStyleOptions(request.style), { router, zoom: request.zoom });
+    events!.onResult({ seq: request.seq, edges: result.edges, millis });
+  };
+  const fail = (err: unknown) => events!.onFailure(err);
+  return { factory, posted, answer, fail, state };
+}
+
+/** An engine with a fake worker, collecting what `onUpdate` delivers. */
+function workerEngine(clockMs = 1) {
+  const worker = fakeWorker();
+  const delivered: RoutingUpdate[] = [];
+  const engine = createEdgeRoutingEngine({ now: fakeClock(clockMs).now, worker: worker.factory, onUpdate: (u) => delivered.push(u) });
+  return { engine, worker, delivered };
+}
+
+/** A request the engine treats as a large diagram (the line count decides; the input stays small). */
+const large = (input: RoutingInput, extra: Partial<RoutingRequest> = {}) => requestFor(input, { lineCount: MAIN_THREAD_MAX_LINES + 1, ...extra });
+
+describe('the routing engine — the worker', () => {
+  it(`routes a diagram of up to ${MAIN_THREAD_MAX_LINES} lines on the main thread, without starting the worker`, () => {
+    const { engine, worker } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    expect(engine.update(requestFor(input, { lineCount: MAIN_THREAD_MAX_LINES })).pass).toBe('routed');
+    expect(worker.state.starts).toBe(0);
+  });
+
+  it('routes a larger diagram in the worker: nothing to draw until it answers, then every line, through onUpdate', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    const first = engine.update(large(input, { style: 'hops', zoom: 2 }));
+    expect(first).toMatchObject({ routes: null, pass: 'pending' });
+    expect(worker.state.starts).toBe(1);
+    expect(worker.posted).toHaveLength(1);
+    expect(worker.posted[0]).toMatchObject({ type: 'route', style: 'hops', zoom: 2 });
+    expect(delivered).toHaveLength(0);
+
+    worker.answer();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].pass).toBe('routed');
+    expect(delivered[0].routes!.size).toBe(input.edges.filter((e) => !e.isSelfLoop).length);
+    // One worker for the canvas's life.
+    engine.update(large(input));
+    expect(worker.state.starts).toBe(1);
+  });
+
+  it('while the worker works, keeps the routes still right: lines on a moved card fall back, the rest stay', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    const { card, lines } = busiestCard(input);
+    engine.update(large(input));
+    worker.answer();
+    const before = delivered[0].routes!;
+
+    const pending = engine.update(large(moved(input, card, 40, 0)));
+    expect(pending.pass).toBe('pending');
+    for (const [id, route] of before) {
+      if (lines.has(id)) expect(pending.routes!.has(id), id).toBe(false);
+      else expect(pending.routes!.get(id), id).toBe(route);
+    }
+    // Nothing moved (say the zoom stepped): the same map, so no line re-renders.
+    worker.answer();
+    const again = engine.update(large(moved(input, card, 40, 0)));
+    expect(again.routes).toBe(delivered[1].routes);
+  });
+
+  it('sends one pass at a time: the newest waiting request goes next, and a superseded answer is dropped', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    const { card } = busiestCard(input);
+    engine.update(large(input));
+    engine.update(large(moved(input, card, 10, 0)));
+    engine.update(large(moved(input, card, 20, 0)));
+    expect(worker.posted).toHaveLength(1); // the other two wait; only the newest is kept
+
+    worker.answer(0); // the answer to the first request: superseded
+    expect(delivered).toHaveLength(0);
+    expect(worker.posted).toHaveLength(2);
+    const newest = worker.posted[1].input.obstacles.find((o) => o.id === card)!;
+    expect(newest.x).toBe(input.obstacles.find((o) => o.id === card)!.x + 20);
+
+    worker.answer(1);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].pass).toBe('routed');
+  });
+
+  it('holds the routes during a drag, drops an answer from before it, and routes once when the drag ends', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    const { card, lines } = busiestCard(input);
+    engine.update(large(input));
+    worker.answer();
+    const routes = delivered[0].routes!;
+
+    engine.update(large(moved(input, card, 5, 0))); // posted, then the drag starts
+    const dragging = new Set([card]);
+    const frame = large(moved(input, card, 10, 0), { dragging });
+    const held = engine.update(frame);
+    expect(held.pass).toBe('held');
+    expect(frame.built()).toBe(0);
+    for (const id of lines) expect(held.routes!.has(id)).toBe(false);
+    expect(held.routes!.size).toBe(routes.size - [...lines].filter((id) => routes.has(id)).length);
+
+    worker.answer(); // routed for the card's old place: dropped
+    expect(delivered).toHaveLength(1);
+
+    const end = engine.update(large(moved(input, card, 10, 0)));
+    expect(end.pass).toBe('pending');
+    worker.answer();
+    expect(delivered.at(-1)!.pass).toBe('routed');
+    for (const id of lines) expect(delivered.at(-1)!.routes!.has(id)).toBe(true);
+  });
+
+  it(`with a worker, routes up to ${MAX_ROUTED_LINES} lines and never more`, () => {
+    const { engine, worker } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    expect(engine.update(requestFor(input, { lineCount: MAX_ROUTED_LINES })).pass).toBe('pending');
+    const over = requestFor(input, { lineCount: MAX_ROUTED_LINES + 1 });
+    expect(engine.update(over)).toMatchObject({ routes: null, pass: 'off' });
+    expect(over.built()).toBe(0);
+    expect(worker.posted).toHaveLength(1);
+  });
+
+  it('a worker pass over its hard limit turns routing off for diagrams that size', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    engine.update(large(input));
+    worker.answer(0, WORKER_HARD_LIMIT_MS + 1);
+    expect(delivered[0]).toMatchObject({ routes: null, pass: 'off' });
+    const again = large(input);
+    expect(engine.update(again).pass).toBe('off');
+    expect(again.built()).toBe(0);
+  });
+
+  it(`a worker that cannot start leaves the main thread and the ${MAX_ROUTED_LINES_WITHOUT_WORKER}-line cap`, () => {
+    const engine = createEdgeRoutingEngine({ now: fakeClock().now, worker: () => null });
+    const input = scenarioRoutingInput('star');
+    expect(engine.update(large(input)).pass).toBe('routed');
+    expect(engine.update(requestFor(input, { lineCount: MAX_ROUTED_LINES_WITHOUT_WORKER + 1 })).pass).toBe('off');
+  });
+
+  it('a worker that crashes is dropped for good: the newest request is routed again on the main thread, the failure logged once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    engine.update(large(input));
+    worker.fail(new Error('worker died'));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].pass).toBe('routed');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(engine.update(large(input)).pass).toBe('routed');
+    expect(worker.state.starts).toBe(1);
+  });
+
+  it('a slow main-thread pass moves that diagram to the worker', () => {
+    const { engine, worker } = workerEngine(DRAG_HOLD_AFTER_MS + 1);
+    const input = scenarioRoutingInput('star');
+    expect(engine.update(requestFor(input)).pass).toBe('routed');
+    expect(engine.update(requestFor(input)).pass).toBe('pending');
+    expect(worker.state.starts).toBe(1);
+  });
+
+  it('dispose stops the worker, and a late answer delivers nothing', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    engine.update(large(input));
+    engine.dispose();
+    expect(worker.state.terminated).toBe(true);
+    worker.answer();
+    expect(delivered).toHaveLength(0);
   });
 });
