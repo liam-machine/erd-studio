@@ -33,8 +33,12 @@ export type { WorkerRouteRequest, WorkerRouteResult } from './worker/protocol';
 // The performance guard
 // ---------------------------------------------------------------------------
 //
-// Measured on a grid of generated tables (one pass, M-series Mac): 100 lines
-// ~20 ms, 150 ~40 ms, 200 ~60 ms, 300 ~140 ms, 440 ~260 ms, 570 ~400-500 ms.
+// One pass on generated layered diagrams like the auto-layout's (M-series
+// Mac, opening / one card moved): 300 cards ~110 / 20 ms, 500 ~190 / 40 ms,
+// 1,000 ~460 / 100 ms, 2,000 (2,700 lines) ~1.4 s / 230 ms. Up to 150 cards
+// one routing grid covers the diagram; past that each line gets its own local
+// grid (routers/orthogonal/router.ts), which keeps both time and memory near
+// linear in the diagram's size.
 
 /**
  * A pass during a drag slower than this (ms) is too slow to run on every
@@ -51,16 +55,19 @@ export const DRAG_REROUTE_BUDGET_MS = 12;
 export const DRAG_HOLD_AFTER_MS = 50;
 /** A main-thread pass slower than this (ms) turns routing off for diagrams of that size: every line draws the fallback. */
 export const ROUTING_HARD_LIMIT_MS = 150;
-/** A worker pass slower than this (ms) turns routing off for diagrams of that size: the lines would arrive too late to help. */
-export const WORKER_HARD_LIMIT_MS = 1000;
+/**
+ * A worker pass slower than this (ms) turns routing off for diagrams of that
+ * size. A safety net only: a 2,000-card diagram takes ~1.5 s.
+ */
+export const WORKER_HARD_LIMIT_MS = 20000;
 /**
  * Diagrams with up to this many lines route on the main thread (a pass is
  * ~20 ms or less), so a drag can re-route as the card moves. Larger ones
  * route in the canvas's worker, when it has one.
  */
 export const MAIN_THREAD_MAX_LINES = 100;
-/** With a worker: diagrams with more lines than this are never routed (a pass would take over ~150 ms). */
-export const MAX_ROUTED_LINES = 300;
+/** With a worker: no limit on the number of lines (the worker never pauses the canvas). */
+export const MAX_ROUTED_LINES = Infinity;
 /** Without a worker: diagrams with more lines than this are never routed (the pass would pause the canvas over ~40 ms). */
 export const MAX_ROUTED_LINES_WITHOUT_WORKER = 150;
 
@@ -156,11 +163,11 @@ function endsOf(input: RoutingInput): Map<string, [string, string]> {
  *   moved card fall back), and `onUpdate` delivers the new ones. A drag holds
  *   the routes; an answer to a request that has since been superseded is
  *   dropped, and only the latest waiting request is sent next.
- * - More than `MAX_ROUTED_LINES` lines (`MAX_ROUTED_LINES_WITHOUT_WORKER`
- *   when the worker cannot start or has failed) are never routed. A
- *   main-thread pass over `ROUTING_HARD_LIMIT_MS`, or a worker pass over
- *   `WORKER_HARD_LIMIT_MS`, turns routing off for this canvas while the
- *   diagram has at least that many lines.
+ * - With the worker, every diagram is routed, whatever its size. Without it
+ *   (it cannot start, or failed), more than `MAX_ROUTED_LINES_WITHOUT_WORKER`
+ *   lines are not. A main-thread pass over `ROUTING_HARD_LIMIT_MS`, or a
+ *   worker pass over `WORKER_HARD_LIMIT_MS`, turns routing off for this
+ *   canvas while the diagram has at least that many lines.
  * - A worker that fails is stopped for good; the canvas carries on on the
  *   main thread under the lower cap.
  * - A router, renderer or worker error is reported once (`console.warn`),
@@ -283,10 +290,11 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
       return;
     }
     fullMillis = result.millis;
-    remember(result.edges, job.input);
+    const routes = keepUnchanged(last, result.edges);
+    remember(routes, job.input);
     held = null;
     const dragging = latest?.dragging;
-    emit(dragging && dragging.size > 0 ? hold(dragging, result.edges) : { routes: result.edges, pass: 'routed', millis: result.millis });
+    emit(dragging && dragging.size > 0 ? hold(dragging, routes) : { routes, pass: 'routed', millis: result.millis });
   }
 
   function onFailure(err: unknown) {
@@ -338,7 +346,9 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
         zoom: request.zoom,
         onError,
       });
-      if (result.millis > ROUTING_HARD_LIMIT_MS) {
+      // A worker may still be had (not tried yet, or running): a slow pass moves this size there.
+      const canUseWorker = opts.worker !== undefined && worker !== null && !disposed;
+      if (result.millis > ROUTING_HARD_LIMIT_MS && !canUseWorker) {
         slowAt = n;
         return off(result.millis);
       }
@@ -346,9 +356,9 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
         if (result.millis > DRAG_REROUTE_BUDGET_MS) dragSlow = true;
       } else {
         fullMillis = result.millis;
-        // Slow enough to pause the canvas: the next passes at this size go to the worker, if there is one.
-        if (result.millis > DRAG_HOLD_AFTER_MS && opts.worker && worker !== null) workerFromLines = n;
       }
+      // Slow enough to pause the canvas: the next passes at this size go to the worker.
+      if (result.millis > DRAG_HOLD_AFTER_MS && canUseWorker) workerFromLines = Math.min(workerFromLines ?? n, n);
       remember(result.edges, input);
       return { routes: result.edges, pass: 'routed', millis: result.millis };
     },
@@ -361,6 +371,44 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
     },
   };
   return engine;
+}
+
+/** Does a route draw exactly what another does (path, crossings, x-ray, labels)? */
+function sameRoute(a: RoutedEdge, b: RoutedEdge): boolean {
+  return (
+    a.d === b.d &&
+    a.strokeD === b.strokeD &&
+    a.halo === b.halo &&
+    a.mid.x === b.mid.x &&
+    a.mid.y === b.mid.y &&
+    a.sourceAnchor.x === b.sourceAnchor.x &&
+    a.sourceAnchor.y === b.sourceAnchor.y &&
+    a.sourceAnchor.side === b.sourceAnchor.side &&
+    a.targetAnchor.x === b.targetAnchor.x &&
+    a.targetAnchor.y === b.targetAnchor.y &&
+    a.targetAnchor.side === b.targetAnchor.side &&
+    (a.tunnels === b.tunnels || JSON.stringify(a.tunnels) === JSON.stringify(b.tunnels))
+  );
+}
+
+/**
+ * A worker's routes arrive as new objects (copied between threads), so every
+ * line would re-render. Keep the previous object for each route that draws
+ * the same: after a card is dropped, only the lines that changed re-render.
+ */
+function keepUnchanged(prev: Map<string, RoutedEdge> | null, next: Map<string, RoutedEdge>): Map<string, RoutedEdge> {
+  if (!prev) return next;
+  const out = new Map<string, RoutedEdge>();
+  let changed = next.size !== prev.size;
+  for (const [id, route] of next) {
+    const before = prev.get(id);
+    if (before && sameRoute(before, route)) out.set(id, before);
+    else {
+      out.set(id, route);
+      changed = true;
+    }
+  }
+  return changed ? out : prev;
 }
 
 const EMPTY_SET: ReadonlySet<string> = new Set();

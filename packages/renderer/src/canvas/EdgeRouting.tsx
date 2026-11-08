@@ -25,6 +25,7 @@ import {
   routingInputKey,
   type EdgeRoutingEngine,
   type Point,
+  type RoutingUpdate,
   type Rect,
 } from '../lib/edgeRouting';
 import { rectOfNode } from '../lib/edgeRouting/input';
@@ -94,10 +95,13 @@ export function EdgeRouter() {
   useEffect(() => {
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
-      engine.current ??= createEdgeRoutingEngine({
-        worker: createRoutingWorker,
-        onUpdate: (update) => canvas.getState().setEdgeRoutes(update.routes),
-      });
+      const apply = (update: RoutingUpdate) => {
+        canvas.getState().setEdgeRoutes(update.routes);
+        // What the last pass did, for tests and for debugging in the field (no styling hangs off it).
+        const root = storeApi.getState().domNode;
+        if (root) root.dataset.edgeRouting = `${update.pass} ${Math.round(update.millis)}ms ${update.routes?.size ?? 0}`;
+      };
+      engine.current ??= createEdgeRoutingEngine({ worker: createRoutingWorker, onUpdate: apply });
       const { nodeLookup, edges } = storeApi.getState();
       const dragging = new Set<string>();
       for (const node of nodeLookup.values()) if (node.dragging && !node.hidden) dragging.add(node.id);
@@ -108,7 +112,7 @@ export function EdgeRouter() {
         zoom: 2 ** zoomStep,
         dragging,
       });
-      canvas.getState().setEdgeRoutes(update.routes);
+      apply(update);
     });
     return () => cancelAnimationFrame(frame.current);
   }, [key, dragKey, lineStyle, zoomStep, storeApi, canvas]);

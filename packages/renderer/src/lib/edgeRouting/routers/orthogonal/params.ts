@@ -122,3 +122,36 @@ export const LONG_EXTRA = 0.3;
 export const LONG_CROSS_CUT = 0.7;
 /** A* gives up (and the line falls back) after this many expansions. */
 export const MAX_POPS = 40000;
+
+/**
+ * Diagrams with more cards (and self-loops) than this route each line on its
+ * own local grid (router.ts, `localGrid`): one grid over the whole diagram
+ * grows with the square of its size (every card's edges cross every other
+ * card's), to millions of nodes on an uneven 1,000-card layout.
+ */
+export const LOCAL_FROM_CARDS = 150;
+/** A local grid starts this far (px) round its line's two cards: about one card and a gap. */
+export const LOCAL_MARGIN = 400;
+/** …and its margin grows by this factor each time the route runs along its edge. */
+export const LOCAL_GROWTH = 2.5;
+/** A local grid larger than this (nodes) is not built: the line keeps what it found, or falls back. */
+export const LOCAL_MAX_NODES = 1_500_000;
+/**
+ * On local grids (large diagrams), long lines are greedier still: from
+ * LOCAL_LONG_FROM px they get up to LOCAL_LONG_EXTRA more heuristic weight
+ * and crossings up to LOCAL_LONG_CROSS_CUT cheaper. A line across a 2,000-card
+ * layered diagram otherwise runs out of MAX_POPS among the other lines and
+ * falls back (161 of 2,732 did); with these none do, for ~2.5% more crossings.
+ */
+export const LOCAL_LONG_FROM = 1200;
+export const LOCAL_LONG_EXTRA = 0.9;
+export const LOCAL_LONG_CROSS_CUT = 0.85;
+/**
+ * On local grids, a line whose search runs out of MAX_POPS gets one greedy
+ * retry before it falls back: this heuristic weight, and crossings at this
+ * fraction of CROSS. A few more crossings beat a line drawn through every card
+ * between its two ends (lines between neighbouring columns 5,000 px apart).
+ */
+export const RESCUE_WEIGHT = 3;
+export const RESCUE_CROSS = 0.1;
+

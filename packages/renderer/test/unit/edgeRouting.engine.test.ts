@@ -417,13 +417,11 @@ describe('the routing engine — the worker', () => {
     for (const id of lines) expect(delivered.at(-1)!.routes!.has(id)).toBe(true);
   });
 
-  it(`with a worker, routes up to ${MAX_ROUTED_LINES} lines and never more`, () => {
+  it('with a worker, routes a diagram of any size', () => {
     const { engine, worker } = workerEngine();
     const input = scenarioRoutingInput('star');
-    expect(engine.update(requestFor(input, { lineCount: MAX_ROUTED_LINES })).pass).toBe('pending');
-    const over = requestFor(input, { lineCount: MAX_ROUTED_LINES + 1 });
-    expect(engine.update(over)).toMatchObject({ routes: null, pass: 'off' });
-    expect(over.built()).toBe(0);
+    expect(MAX_ROUTED_LINES).toBe(Infinity);
+    expect(engine.update(requestFor(input, { lineCount: 50_000 })).pass).toBe('pending');
     expect(worker.posted).toHaveLength(1);
   });
 
@@ -458,12 +456,54 @@ describe('the routing engine — the worker', () => {
     expect(worker.state.starts).toBe(1);
   });
 
+  it('a main-thread pass over the hard limit moves that size to the worker rather than turning routing off', () => {
+    const { engine, worker } = workerEngine(ROUTING_HARD_LIMIT_MS + 1);
+    const input = scenarioRoutingInput('star');
+    const first = engine.update(requestFor(input));
+    expect(first.pass).toBe('routed'); // its routes are used, not thrown away
+    expect(engine.update(requestFor(input)).pass).toBe('pending');
+    // …and so is a larger diagram (more lines than the slow pass had).
+    expect(engine.update(requestFor(input, { lineCount: input.edges.length + 5 })).pass).toBe('pending');
+    expect(worker.state.starts).toBe(1);
+  });
+
   it('a slow main-thread pass moves that diagram to the worker', () => {
     const { engine, worker } = workerEngine(DRAG_HOLD_AFTER_MS + 1);
     const input = scenarioRoutingInput('star');
     expect(engine.update(requestFor(input)).pass).toBe('routed');
     expect(engine.update(requestFor(input)).pass).toBe('pending');
     expect(worker.state.starts).toBe(1);
+  });
+
+  it('keeps the previous object for every route the worker drew the same, so only changed lines re-render', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    const { card, lines } = busiestCard(input);
+    engine.update(large(input));
+    worker.answer();
+    const first = delivered[0].routes!;
+    // The same input again (the zoom stepped): nothing changed, the very same map.
+    engine.update(large(input));
+    worker.answer();
+    expect(delivered[1].routes).toBe(first);
+    // A card moved: its lines are new objects; lines far from it keep theirs.
+    engine.update(large(moved(input, card, 60, 0)));
+    worker.answer();
+    const after = delivered[2].routes!;
+    let kept = 0;
+    let renewed = 0;
+    for (const [id, route] of after) {
+      const before = first.get(id)!;
+      if (route === before) kept++;
+      // A new object only where the drawing changed (a line that stays straight keeps its object).
+      else {
+        renewed++;
+        expect(route.d !== before.d || route.mid.x !== before.mid.x || route.sourceAnchor.x !== before.sourceAnchor.x || route.targetAnchor.x !== before.targetAnchor.x, id).toBe(true);
+      }
+    }
+    expect(kept).toBeGreaterThan(0);
+    expect(renewed).toBeGreaterThan(0);
+    expect([...lines].some((id) => after.get(id) !== first.get(id))).toBe(true);
   });
 
   it('dispose stops the worker, and a late answer delivers nothing', () => {

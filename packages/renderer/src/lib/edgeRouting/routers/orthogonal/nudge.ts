@@ -263,6 +263,7 @@ function tryMove(
   const saved0 = pts[m];
   const saved1 = pts[m + 1];
   setAcross(pts, m, vert, target);
+  moved(paths, pi, m);
   if (crossingsAround(paths, pi, m) > crossBefore) {
     pts[m] = saved0;
     pts[m + 1] = saved1;
@@ -291,6 +292,95 @@ function crosses(a: Point, b: Point, c: Point, d: Point): boolean {
   );
 }
 
+/**
+ * Which lines run near where: every cell a line's segments have ever passed
+ * through (lines move during nudging; `moved` adds their new cells, nothing is
+ * removed), so a query returns a superset of the lines near a box and the
+ * exact test below does the counting. One per `paths` array (one per pass).
+ */
+class SegmentIndex {
+  private readonly cells = new Map<number, number[]>();
+  private seen = new Uint32Array(0);
+  private stamp = 0;
+  private static readonly CELL = 200;
+  private static readonly LIMIT = 0x7000;
+
+  constructor(paths: readonly NudgePath[]) {
+    this.seen = new Uint32Array(paths.length);
+    paths.forEach((path, p) => {
+      for (let k = 1; k < path.pts.length; k++) this.add(p, path.pts[k - 1], path.pts[k]);
+    });
+  }
+
+  private static cellOf(v: number): number {
+    const c = Math.floor(v / SegmentIndex.CELL);
+    return Math.max(-SegmentIndex.LIMIT, Math.min(SegmentIndex.LIMIT, Number.isFinite(c) ? c : 0));
+  }
+
+  private static key(c: number, r: number): number {
+    return (c + 0x8000) * 0x10000 + (r + 0x8000);
+  }
+
+  add(p: number, a: Point, b: Point): void {
+    const c0 = SegmentIndex.cellOf(Math.min(a.x, b.x));
+    const c1 = SegmentIndex.cellOf(Math.max(a.x, b.x));
+    const r0 = SegmentIndex.cellOf(Math.min(a.y, b.y));
+    const r1 = SegmentIndex.cellOf(Math.max(a.y, b.y));
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) {
+        const key = SegmentIndex.key(c, r);
+        const list = this.cells.get(key);
+        if (!list) this.cells.set(key, [p]);
+        else if (!list.includes(p)) list.push(p);
+      }
+  }
+
+  /** Lines that may have a segment in the box. */
+  near(x0: number, y0: number, x1: number, y1: number, out: number[]): number[] {
+    out.length = 0;
+    if (++this.stamp === 0xffffffff) {
+      this.seen.fill(0);
+      this.stamp = 1;
+    }
+    const c0 = SegmentIndex.cellOf(x0);
+    const c1 = SegmentIndex.cellOf(x1);
+    const r0 = SegmentIndex.cellOf(y0);
+    const r1 = SegmentIndex.cellOf(y1);
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++) {
+        const list = this.cells.get(SegmentIndex.key(c, r));
+        if (!list) continue;
+        for (const p of list) {
+          if (this.seen[p] === this.stamp) continue;
+          this.seen[p] = this.stamp;
+          out.push(p);
+        }
+      }
+    return out;
+  }
+}
+
+const segmentIndexes = new WeakMap<readonly NudgePath[], SegmentIndex>();
+
+function indexOf(paths: readonly NudgePath[]): SegmentIndex {
+  let index = segmentIndexes.get(paths);
+  if (!index) {
+    index = new SegmentIndex(paths);
+    segmentIndexes.set(paths, index);
+  }
+  return index;
+}
+
+/** Segment k of path p (and its two neighbours) moved: record where they are now. */
+function moved(paths: readonly NudgePath[], p: number, k: number): void {
+  const index = segmentIndexes.get(paths);
+  if (!index) return; // built later, from the current points
+  const pts = paths[p].pts;
+  for (let i = Math.max(1, k); i <= Math.min(pts.length - 1, k + 2); i++) index.add(p, pts[i - 1], pts[i]);
+}
+
+const nearBuf: number[] = [];
+
 /** How many times segments k-1..k+1 of path `p` cross the other lines. */
 function crossingsAround(paths: NudgePath[], p: number, k: number): number {
   const pts = paths[p].pts;
@@ -307,7 +397,7 @@ function crossingsAround(paths: NudgePath[], p: number, k: number): number {
     x1 = Math.max(x1, pts[i].x);
     y1 = Math.max(y1, pts[i].y);
   }
-  for (let q = 0; q < paths.length; q++) {
+  for (const q of indexOf(paths).near(x0, y0, x1, y1, nearBuf)) {
     if (q === p) continue;
     const other = paths[q].pts;
     for (let j = 1; j < other.length; j++) {
@@ -362,6 +452,7 @@ export function centrePass(
       // Only where it does not make the line cross more of the others.
       const before = crossingsAround(paths, pi, k);
       setAcross(pts, k, vert, target);
+      moved(paths, pi, k);
       if (crossingsAround(paths, pi, k) > before) setAcross(pts, k, vert, cur);
     }
   }
@@ -533,12 +624,28 @@ export function nudgePass(
   const pos = new Float64Array(n);
   for (let i = 0; i < n; i++)
     pos[i] = Math.min(Math.max(segs[i].c, segs[i].lb), segs[i].ub);
-  const solveGroup = (root: number) => {
-    const members: number[] = [];
-    for (let i = 0; i < n; i++) if (find(i) === root) members.push(i);
+  /** Each group's members (ascending) and relations (in the order made), for the given roots. */
+  const groupsOf = (roots: ReadonlySet<number>) => {
+    const members = new Map<number, number[]>();
+    for (let i = 0; i < n; i++) {
+      const r = find(i);
+      if (!roots.has(r)) continue;
+      const list = members.get(r);
+      if (list) list.push(i);
+      else members.set(r, [i]);
+    }
+    const groupRels = new Map<number, Rel[]>();
+    for (const rel of rels) {
+      const r = find(rel.a);
+      if (!roots.has(r)) continue;
+      const list = groupRels.get(r);
+      if (list) list.push(rel);
+      else groupRels.set(r, [rel]);
+    }
+    return { members, groupRels };
+  };
+  const solveGroup = (members: number[], groupRels: Rel[]) => {
     if (members.length < 2) return;
-    const inGroup = new Set(members);
-    const groupRels = rels.filter((r) => inGroup.has(r.a));
     let order = topoOrder(members, groupRels, segs, paths);
     const rank = new Map<number, number>();
     const orient = () => {
@@ -582,7 +689,10 @@ export function nudgePass(
   };
   const roots = new Set<number>();
   for (let i = 0; i < n; i++) roots.add(find(i));
-  for (const r of roots) solveGroup(r);
+  {
+    const { members, groupRels } = groupsOf(roots);
+    for (const r of roots) solveGroup(members.get(r) ?? [], groupRels.get(r) ?? []);
+  }
 
   for (let round = 0; round < 8; round++) {
     const touched = new Set<number>();
@@ -604,36 +714,48 @@ export function nudgePass(
         touched.add(find(i));
       }
     }
-    // Pairs that swapped sides (a group pushed one past the other).
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
+    // Pairs that swapped sides (a group pushed one past the other). Only
+    // pairs that started within RELATE_WINDOW of each other count, so a sweep
+    // over the segments sorted by where they started finds them all; they
+    // are then related in index order, as a scan of every pair would.
+    const swapped: number[] = [];
+    for (let x = 0; x < n; x++) {
+      const a = byC[x];
+      for (let y = x + 1; y < n; y++) {
+        const b = byC[y];
+        if (segs[b].c - segs[a].c > RELATE_WINDOW) break;
+        const i = a < b ? a : b;
+        const j = a < b ? b : a;
         if (find(i) === find(j) || segs[i].p === segs[j].p) continue;
         const was = segs[i].c - segs[j].c;
         const now = pos[i] - pos[j];
-        if (
-          Math.abs(was) > RELATE_WINDOW ||
-          was * now >= 0 ||
-          !overlaps(segs[i], segs[j])
-        )
-          continue;
-        relate(i, j, false);
-        touched.add(find(i));
+        if (was * now >= 0 || !overlaps(segs[i], segs[j])) continue;
+        swapped.push(i, j);
       }
     }
-    if (!touched.size) break;
-    const solved = new Set<number>();
-    for (const r of touched) {
-      const root = find(r);
-      if (solved.has(root)) continue;
-      solved.add(root);
-      solveGroup(root);
+    const pairOrder = Array.from({ length: swapped.length / 2 }, (_, q) => q).sort(
+      (p, q) => swapped[2 * p] - swapped[2 * q] || swapped[2 * p + 1] - swapped[2 * q + 1],
+    );
+    for (const q of pairOrder) {
+      const i = swapped[2 * q];
+      const j = swapped[2 * q + 1];
+      if (find(i) === find(j)) continue;
+      relate(i, j, false);
+      touched.add(find(i));
     }
+    if (!touched.size) break;
+    const solveRoots = new Set<number>();
+    for (const r of touched) solveRoots.add(find(r));
+    const { members, groupRels } = groupsOf(solveRoots);
+    for (const root of solveRoots) solveGroup(members.get(root) ?? [], groupRels.get(root) ?? []);
   }
 
   for (let i = 0; i < n; i++) {
     const sg = segs[i];
-    if (Math.abs(pos[i] - across(vert, paths[sg.p].pts[sg.k])) > 1e-6)
+    if (Math.abs(pos[i] - across(vert, paths[sg.p].pts[sg.k])) > 1e-6) {
       setAcross(paths[sg.p].pts, sg.k, vert, pos[i]);
+      moved(paths, sg.p, sg.k);
+    }
   }
 }
 

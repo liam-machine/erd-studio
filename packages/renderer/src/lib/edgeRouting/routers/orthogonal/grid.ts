@@ -283,29 +283,47 @@ function markOpenBox(
   }
 }
 
+/** The index of the value within `eps` of `v` (the nearest one), or -1. */
+export function nearIndex(arr: Float64Array, v: number, eps: number): number {
+  const j = floorIndex(arr, v);
+  let best = -1;
+  let bestD = eps;
+  for (const k of [j, j + 1]) {
+    if (k < 0 || k >= arr.length) continue;
+    const d = Math.abs(arr[k] - v);
+    if (d <= bestD) {
+      best = k;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 /**
  * Count a polyline's grid edges as used, from its geometry (a route kept from
- * an earlier pass, whose grid has changed since). Segments not on a grid line
- * are skipped: usage is only a hint to the lines routed after it.
+ * an earlier pass, whose grid has changed since, or one routed on another
+ * line's local grid). Segments not within `eps` of a grid line are skipped:
+ * usage is only a hint to the lines routed after it.
  */
 export function markPathUse(
   g: Grid,
   pts: readonly { x: number; y: number }[],
+  eps = 0.01,
 ): void {
   const { xs, ys, nx, hUse, vUse } = g;
   for (let k = 1; k < pts.length; k++) {
     const a = pts[k - 1];
     const b = pts[k];
     if (Math.abs(a.y - b.y) < 0.01) {
-      const j = floorIndex(ys, a.y);
-      if (j < 0 || Math.abs(ys[j] - a.y) > 0.01) continue;
+      const j = nearIndex(ys, a.y, eps);
+      if (j < 0) continue;
       const lo = Math.max(0, floorIndex(xs, Math.min(a.x, b.x)));
       const hi = Math.min(nx - 1, ceilIndex(xs, Math.max(a.x, b.x)));
       for (let e = lo; e < hi; e++)
         if (hUse[j * nx + e] < 255) hUse[j * nx + e]++;
     } else if (Math.abs(a.x - b.x) < 0.01) {
-      const i = floorIndex(xs, a.x);
-      if (i < 0 || Math.abs(xs[i] - a.x) > 0.01) continue;
+      const i = nearIndex(xs, a.x, eps);
+      if (i < 0) continue;
       const lo = Math.max(0, floorIndex(ys, Math.min(a.y, b.y)));
       const hi = Math.min(g.ny - 1, ceilIndex(ys, Math.max(a.y, b.y)));
       for (let e = lo; e < hi; e++)
