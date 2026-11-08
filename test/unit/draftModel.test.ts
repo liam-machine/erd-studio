@@ -316,7 +316,8 @@ describe('a dbt draft', () => {
     expect(draft.title).toBe('Draft: gold');
     expect(draft.scopes?.current).toBe('folder:gold');
     expect(draft.banner.headline).toMatch(/^Draft from your dbt models in gold · \d+ tables?, (no|\d+) relationships? · not saved$/);
-    expect(draft.banner.detail).toBe('Keep saves it as gold in the Gold layer (.erd-studio/gold/diagrams/gold.dbml).');
+    // Keep also regenerates the dbt project's selectors.yml (I1): the banner says so.
+    expect(draft.banner.detail).toBe("Keep saves it as gold in the Gold layer (.erd-studio/gold/diagrams/gold.dbml). Keep also adds a selector for it to selectors.yml at your dbt project's root.");
     expect(draft.otherStarts.map((s) => s.id)).toEqual(['blank', 'import', 'example']);
     expect(draft.keep).toMatchObject({ writer: 'drawFromDbt', scopeId: 'folder:gold' });
     expect(draft.summary.available).toBeUndefined();
@@ -330,7 +331,10 @@ describe('a dbt draft', () => {
     expect(draft.summary.tables).toBe(2);
     expect(draft.summary.available).toBe(silver.count);
     expect(draft.banner.detail).toContain(`Drew the 2 best-connected of ${silver.count} models; add the rest from the canvas.`);
-    expect(draft.details.find((s) => s.id === 'leftOut')?.items).toHaveLength(silver.count - 2);
+    // One line per model over the cap, and one per relationship test from a drawn model to one of them (B2).
+    const items = draft.details.find((s) => s.id === 'leftOut')?.items ?? [];
+    expect(items.filter((i) => i.tag === 'left out')).toHaveLength(silver.count - 2);
+    expect(items.filter((i) => i.tag !== 'left out').every((i) => i.tag === 'relationship' && /^Drawn when you add /.test(i.text))).toBe(true);
   });
 
   it('ranks folders and caps the switcher at the limit', () => {
