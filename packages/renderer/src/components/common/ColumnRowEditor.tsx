@@ -626,7 +626,8 @@ export function ColumnRowEditor({
           <span
             className="column-row-editor__type"
             onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('dataType'); }}
-            title={mode !== 'readonly' ? 'Double-click to edit' : undefined}
+            // The whole type, since a long one is cut with an ellipsis.
+            title={mode !== 'readonly' ? `${localColumn.dataType} — double-click to edit` : localColumn.dataType}
           >
             {localColumn.dataType}
           </span>

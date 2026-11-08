@@ -223,13 +223,6 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
     [send, modelName],
   );
 
-  // Compute whether model has multiple PKs (for warning display)
-  const pkColumnNames = useMemo(
-    () => columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
-    [columns],
-  );
-  const hasMultiplePKs = pkColumnNames.length > 1;
-
   // Check expansion state for UI
   const allExpanded = columns.length > 0 && expandedColumns.size === columns.length;
   const anyExpanded = expandedColumns.size > 0;
@@ -319,7 +312,8 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
             onTogglePK={viewer ? undefined : () => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
             onToggleFK={viewer ? undefined : () => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={viewer ? undefined : () => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
-            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            // Several PK columns are one composite key, never a fault: no "multiple primary keys" warning.
+            showMultiplePKWarning={false}
             modelRole={modelRole}
             fieldVisibility={viewer ? valueOnlyFieldVisibility(col) : (isEditable ? columnFieldVisibility(col, fieldsTable, fieldList) : valueOnlyFieldVisibility(col))}
             expanded={expandedColumns.has(col.name)}
