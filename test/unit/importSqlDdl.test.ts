@@ -35,6 +35,7 @@ import { TableLibraryService } from '../../src/services/logicalModelService';
 import { sqlDialectOfImportArg, type SqlDialect } from '../../src/services/sqlDdlImport';
 import * as engine from '../../src/services/sqlImportEngine';
 import { telemetry } from '../../src/services/telemetryService';
+import { SHOW_LOGS_BUTTON } from '../../src/services/showLogs';
 import packageJson from '../../package.json';
 import { decodeText } from '../../src/services/readFileStart';
 
@@ -49,20 +50,29 @@ const erd = (...parts: string[]) => path.join(tmp, '.erd-studio', ...parts);
 
 interface SqlRecorder extends ImportSqlDdlUi {
   dialectPicks: SqlDialectItem[][];
+  /** The options each dialect pick was shown with (its placeholder says why when no dialect reads a table). */
+  pickOptions: vscode.QuickPickOptions[];
   errors: Array<{ message: string; items: string[] }>;
   infos: string[];
   opened: Array<{ filePath: string; line?: number }>;
+  logsShown: number;
 }
+
+/** A script no dialect reads a table of: an empty column definition (two commas) is a syntax error in every one. */
+const UNREADABLE_SQL = '-- broken\n\nCREATE TABLE t (\n  id int,,\n  x int\n);\n';
+/** A script only MySQL reads: `#` starts a comment there, and the comment's parenthesis never closes elsewhere. */
+const MYSQL_ONLY_SQL = 'CREATE TABLE t (\n  id int, # the key (see the docs\n  name varchar(10)\n);\n';
 
 /** The SQL half: answers `sources` and `dialect` (undefined = closes the pick), reads from disk. */
 function sqlUi(sources: SqlSources | undefined, dialect?: SqlDialect | ((items: SqlDialectItem[]) => SqlDialect | undefined), button?: string): SqlRecorder {
   const ui: SqlRecorder = {
-    dialectPicks: [], errors: [], infos: [], opened: [],
+    dialectPicks: [], pickOptions: [], errors: [], infos: [], opened: [], logsShown: 0,
     pickSources: async () => sources,
     readDirectory: async (folder) => fs.readdirSync(folder, { withFileTypes: true }).map((d) => [d.name, d.isDirectory()] as const),
     readFile: async (filePath) => fs.readFileSync(filePath, 'utf-8'),
-    pickDialect: async (items) => {
+    pickDialect: async (items, options) => {
       ui.dialectPicks.push([...items]);
+      ui.pickOptions.push(options);
       const want = typeof dialect === 'function' ? dialect([...items]) : dialect;
       return items.find((i) => i.dialect === want);
     },
@@ -70,6 +80,7 @@ function sqlUi(sources: SqlSources | undefined, dialect?: SqlDialect | ((items: 
     showErrorMessage: async (message, ...items) => { ui.errors.push({ message, items }); return button && items.includes(button) ? button : undefined; },
     openFileAt: async (filePath, line) => { ui.opened.push({ filePath, line }); },
     sendFeedback: async () => {},
+    showLogs: async () => { ui.logsShown++; },
   };
   return ui;
 }
@@ -166,7 +177,8 @@ describe('Import SQL DDL…', () => {
 
     // The detected dialect is offered first, marked; all five are offered.
     expect(sql.dialectPicks).toHaveLength(1);
-    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected' });
+    // Every dialect is labelled by how many of the tables it reads, the detected one marked first.
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected · reads all 4 tables' });
     expect(sql.dialectPicks[0].map((i) => i.dialect).sort()).toEqual(['databricks', 'mysql', 'postgres', 'snowflake', 'sqlserver']);
     // The name comes from the folder; the headline says what the tables came from.
     expect(ui.inputs).toEqual(['postgres']);
@@ -206,9 +218,10 @@ describe('Import SQL DDL…', () => {
     const sql = sqlUi({ files: [path.join(FIXTURES, file)] }, dialect);
     const ui = importUi();
     const result = await importSqlDdl(deps(sql, ui));
-    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect, description: 'detected' });
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect, description: 'detected · reads all 4 tables' });
     expect(result?.plan.newTables).toHaveLength(4);
-    expect(result?.plan.report.dropped).toEqual([]);
+    // FK actions travel on the Ref, so Import's reference-settings report lists them; nothing else is dropped.
+    expect(result?.plan.report.dropped.filter((d) => d.kind !== 'reference-settings')).toEqual([]);
     expect(result?.plan.report.relationships).toBe(3);
     // A single file names the diagram.
     expect(ui.inputs).toEqual([path.basename(file, '.sql')]);
@@ -217,29 +230,64 @@ describe('Import SQL DDL…', () => {
     expect(SQL_DIALECT_FEATURES[dialect]).toBe(key);
   });
 
-  it('scripts that do not read: the problem with file and line, Open File there, nothing written, counted as invalid', async () => {
+  it('one table that does not read never stops the rest: the others import, the problem is logged, listed and counted as invalid', async () => {
     const broken = path.join(FIXTURES, 'broken', 'stray_words.sql');
-    const sql = sqlUi({ files: [broken] }, 'postgres', 'Open File');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sql = sqlUi({ files: [broken] }, 'postgres');
+    const ui = importUi();
+    const result = await importSqlDdl(deps(sql, ui));
+    expect(sql.errors).toEqual([]);
+    expect(result?.plan.newTables.map((t) => t.name)).toEqual(['dim_customer']);
+    // The dry run says what was not imported, with the table and its line.
+    expect(ui.confirms[0].detail).toMatch(/Not imported:[\s\S]*1 table: CREATE TABLE could not be read: a syntax error \(Show Logs has each line\) \(fct_order\)/);
+    // Every problem is in the log with its file and line.
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringMatching(/Import SQL DDL \(PostgreSQL\): stray_words\.sql line 6: CREATE TABLE fct_order could not be read: unexpected "oops"/));
+    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse', 'importSqlRejectedCreateTable', 'importSqlFailPostgres', 'importSqlDdl']);
+  });
+
+  it('scripts no dialect reads: the problem with file and line, Open File there and Show Logs, no Try Another Dialect, nothing written', async () => {
+    const file = path.join(tmp, 'broken.sql');
+    fs.writeFileSync(file, UNREADABLE_SQL);
+    const sql = sqlUi({ files: [file] }, 'postgres', 'Open File');
     const ui = importUi();
     expect(await importSqlDdl(deps(sql, ui))).toBeUndefined();
+    // The pick said why before asking: no dialect reads a table, and the first problem.
+    expect(sql.pickOptions[0].placeHolder).toMatch(/^No dialect reads a table in the script \(broken\.sql line 4: CREATE TABLE t could not be read: an empty column definition/);
+    expect(sql.dialectPicks[0].every((i) => /^reads none|^does not read/.test(String(i.description)))).toBe(true);
+    expect(sql.dialectPicks[0].some((i) => /detected/.test(String(i.description)))).toBe(false);
     expect(sql.errors).toHaveLength(1);
-    expect(sql.errors[0].message).toMatch(/^Import SQL DDL: nothing was imported\. stray_words\.sql line 6: /);
+    expect(sql.errors[0].message).toMatch(/^Import SQL DDL: nothing was imported\. broken\.sql line 4: /);
     expect(sql.errors[0].message).toContain('They were read as PostgreSQL.');
-    expect(sql.errors[0].items).toEqual(['Open File', TRY_ANOTHER_DIALECT_BUTTON]);
-    await vi.waitFor(() => expect(sql.opened).toEqual([{ filePath: broken, line: 6 }]));
+    // No dialect reads more, so there is no Try Another Dialect.
+    expect(sql.errors[0].items).toEqual(['Open File', SHOW_LOGS_BUTTON]);
+    await vi.waitFor(() => expect(sql.opened).toEqual([{ filePath: file, line: 4 }]));
     expect(erdFiles()).toEqual([]);
     // Why, as fixed keys: the problem kind, the clause the parser rejected, the dialect it was read as.
     expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse', 'importSqlRejectedCreateTable', 'importSqlFailPostgres']);
     expect(errors()).toEqual([]);
   });
 
-  it('Try Another Dialect reads the same files again, at the dialect pick', async () => {
+  it('Show Logs on a failed import opens the log', async () => {
+    const file = path.join(tmp, 'broken.sql');
+    fs.writeFileSync(file, UNREADABLE_SQL);
+    const sql = sqlUi({ files: [file] }, 'postgres', SHOW_LOGS_BUTTON);
+    await importSqlDdl(deps(sql, importUi()));
+    await vi.waitFor(() => expect(sql.logsShown).toBe(1));
+  });
+
+  it('the pick labels every dialect by the tables it reads; Try Another Dialect only when another reads more, and reads the same files again', async () => {
+    const file = path.join(tmp, 'notes.sql');
+    fs.writeFileSync(file, MYSQL_ONLY_SQL);
     let round = 0;
-    const sql = sqlUi({ files: [path.join(FIXTURES, 'broken', 'stray_words.sql')] }, () => (round++ === 0 ? 'postgres' : undefined), TRY_ANOTHER_DIALECT_BUTTON);
+    const sql = sqlUi({ files: [file] }, () => (round++ === 0 ? 'postgres' : undefined), TRY_ANOTHER_DIALECT_BUTTON);
     let reads = 0;
     const read = sql.readFile;
     sql.readFile = async (p) => { reads++; return read(p); };
     await importSqlDdl(deps(sql, importUi()));
+    // MySQL reads the table, so it is offered first; PostgreSQL reads none.
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'mysql', description: 'reads the table' });
+    expect(sql.dialectPicks[0].find((i) => i.dialect === 'postgres')?.description).toBe('does not read the table');
+    expect(sql.errors[0].items).toContain(TRY_ANOTHER_DIALECT_BUTTON);
     await vi.waitFor(() => expect(sql.dialectPicks).toHaveLength(2));
     expect(reads).toBe(1);
     await vi.waitFor(() => expect(features()).toContain('importSqlDdlCancelled'));
@@ -293,6 +341,24 @@ describe('Import SQL DDL…', () => {
 
 describe('gatherSqlFiles', () => {
   const ui = sqlUi(undefined);
+
+  it('one labelling rule for every entry point: a file under the open folder is named by its path under it (picked files, a folder, the quick path)', async () => {
+    fs.mkdirSync(path.join(tmp, 'project', 'scripts'), { recursive: true });
+    const file = path.join(tmp, 'project', 'scripts', '02_schema.sql');
+    fs.writeFileSync(file, 'CREATE TABLE a (id int);');
+    const root = path.join(tmp, 'project');
+    const picked = await gatherSqlFiles({ files: [file] }, ui, root);
+    const folder = await gatherSqlFiles({ folder: path.join(root, 'scripts') }, ui, root);
+    const quick = await gatherSqlFiles({ files: [file], root }, ui, root);
+    for (const read of [picked, folder, quick]) {
+      if ('message' in read) throw new Error(read.message);
+      expect(read.files.map((f) => f.name)).toEqual(['scripts/02_schema.sql']);
+      expect(read.fullPaths.get('scripts/02_schema.sql')).toBe(file);
+    }
+    // Outside the open folder, the old names: the base name of a picked file.
+    const outside = await gatherSqlFiles({ files: [file] }, ui, path.join(tmp, 'elsewhere'));
+    expect('message' in outside ? [] : outside.files.map((f) => f.name)).toEqual(['02_schema.sql']);
+  });
 
   it('reads every .sql under a folder in name order, named by path under it, skipping tool folders', async () => {
     const root = path.join(tmp, 'ddl');
@@ -394,11 +460,16 @@ describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide
   });
 
   it('scripts that do not read as the chosen dialect: the problem, and Try Another Dialect asks which', async () => {
-    const files = [path.join(FIXTURES, 'fabric-warehouse/warehouse.sql')];
-    const sql = sqlUi({ files }, 'sqlserver', TRY_ANOTHER_DIALECT_BUTTON);
+    const file = path.join(tmp, 'notes.sql');
+    fs.writeFileSync(file, MYSQL_ONLY_SQL);
+    const files = [file];
+    const sql = sqlUi({ files }, 'mysql', TRY_ANOTHER_DIALECT_BUTTON);
     const ui = importUi();
     await importSqlDdl(deps(sql, ui), undefined, { dialect: 'postgres', dialectChosen: true });
     await vi.waitFor(() => expect(sql.dialectPicks).toHaveLength(1));
+    // Asked, the dialect that reads the table leads the pick, and the import goes on as it.
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'mysql', description: 'reads the table' });
+    await vi.waitFor(() => expect(ui.confirms).toHaveLength(1));
     expect(sql.errors[0].message).toContain('They were read as PostgreSQL.');
     expect(sql.errors[0].items).toContain(TRY_ANOTHER_DIALECT_BUTTON);
   });
@@ -412,18 +483,20 @@ describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide
 });
 
 describe('Import SQL DDL… — why it did not import (telemetry, fixed keys only)', () => {
-  it('a COMMENT ON run into the CREATE TABLE before it (no semicolon) records importSqlRejectedCommentOn', async () => {
+  it('a COMMENT ON run into the CREATE TABLE before it (no semicolon) is a statement of its own: imported whole, the comment kept', async () => {
     const file = path.join(tmp, 'glued.sql');
     fs.writeFileSync(file, "CREATE TABLE a (id int)\nCOMMENT ON TABLE a IS 'the a table';\n");
-    await importSqlDdl(deps(sqlUi({ files: [file] }, 'postgres'), importUi()));
-    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse', 'importSqlRejectedCommentOn', 'importSqlFailPostgres']);
+    const result = await importSqlDdl(deps(sqlUi({ files: [file] }, 'postgres'), importUi()));
+    expect(result?.plan.newTables[0]).toMatchObject({ name: 'a', description: 'the a table' });
+    expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdl']);
   });
 
-  it('a table defined twice records its kind (no clause: nothing was rejected by the grammar)', async () => {
+  it('a table defined twice records its kind (no clause: nothing was rejected by the grammar); the first definition imports', async () => {
     const file = path.join(tmp, 'twice.sql');
     fs.writeFileSync(file, 'CREATE TABLE a (id int);\nCREATE TABLE a (id int);\n');
-    await importSqlDdl(deps(sqlUi({ files: [file] }, 'mysql'), importUi()));
-    expect(features()).toEqual(['importSqlDialectMysql', 'importSqlDdlInvalid', 'importSqlInvalidDuplicateTable', 'importSqlFailMysql']);
+    const result = await importSqlDdl(deps(sqlUi({ files: [file] }, 'mysql'), importUi()));
+    expect(result?.plan.newTables.map((t) => t.name)).toEqual(['a']);
+    expect(features()).toEqual(['importSqlDialectMysql', 'importSqlDdlInvalid', 'importSqlInvalidDuplicateTable', 'importSqlFailMysql', 'importSqlDdl']);
   });
 
   it('a file too big to read records importLimitFileTooBig beside the message', async () => {

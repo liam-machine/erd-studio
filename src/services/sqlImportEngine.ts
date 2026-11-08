@@ -22,6 +22,7 @@ import {
   SQL_DIALECTS,
   SQL_DIALECT_LABELS,
   type RawSqlDatabase,
+  type SqlDdlConvertOptions,
   type SqlDdlToDbmlInput,
   type SqlDdlToDbmlResult,
   type SqlParseEngine,
@@ -33,19 +34,30 @@ export type { SqlDdlFile, SqlDdlProblem, SqlDdlToDbmlInput, SqlDdlToDbmlResult, 
 
 /** `@dbml/core` 11.0.0's statement parsers, by grammar. Oracle is not offered (and not bundled). */
 export const dbmlCoreSqlEngine: SqlParseEngine = (sql: string, format: SqlParseFormat): RawSqlDatabase => {
-  switch (format) {
-    case 'postgres': return Parser.parsePostgresToJSONv2(sql) as unknown as RawSqlDatabase;
-    case 'mysql': return Parser.parseMySQLToJSONv2(sql) as unknown as RawSqlDatabase;
-    case 'mssql': return Parser.parseMSSQLToJSONv2(sql) as unknown as RawSqlDatabase;
-    case 'snowflake': return Parser.parseSnowflakeToJSON(sql) as unknown as RawSqlDatabase;
-    default: throw new Error(`Unsupported SQL grammar: ${String(format)}`);
+  // ANTLR's default listener prints every token error (`line 16:13 token recognition error`) with
+  // console.error; the parse throws its own diagnostics, so the print is only noise in the host's log
+  // (the repair ladder and the dialect ranking parse a statement several ways).
+  const print = console.error;
+  console.error = () => {};
+  try {
+    switch (format) {
+      case 'postgres': return Parser.parsePostgresToJSONv2(sql) as unknown as RawSqlDatabase;
+      case 'mysql': return Parser.parseMySQLToJSONv2(sql) as unknown as RawSqlDatabase;
+      case 'mssql': return Parser.parseMSSQLToJSONv2(sql) as unknown as RawSqlDatabase;
+      case 'snowflake': return Parser.parseSnowflakeToJSON(sql) as unknown as RawSqlDatabase;
+      default: throw new Error(`Unsupported SQL grammar: ${String(format)}`);
+    }
+  } finally {
+    console.error = print;
   }
 };
 
 /**
  * SQL DDL files → one DBML file for the Import DBML flow. See
- * `convertSqlDdl` in `sqlDdlImport.ts` for what is read and what is skipped.
+ * `convertSqlDdl` in `sqlDdlImport.ts` for what is read and what is skipped
+ * (a table that does not read never stops the rest; `options` can turn the
+ * repair ladder and salvage off).
  */
-export function sqlDdlToDbml(input: SqlDdlToDbmlInput): SqlDdlToDbmlResult {
+export function sqlDdlToDbml(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }): SqlDdlToDbmlResult {
   return convertSqlDdl(input, dbmlCoreSqlEngine);
 }
