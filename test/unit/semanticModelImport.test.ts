@@ -197,7 +197,7 @@ describe('readSemanticModel: TMDL', () => {
     expect(sales.columns[2]).toMatchObject({ name: 'CustomerKey', isHidden: true });
     expect(sales.columns[6]).toMatchObject({ name: 'OrderDate', dataType: 'dateTime', description: 'When the order was placed (local time).' });
     expect(sales.columns[10]).toMatchObject({ name: 'Line Margin', kind: 'calculated', dataType: 'decimal', description: 'Margin on the line.' });
-    expect(sales.measures).toEqual([
+    expect(sales.measures.map(({ line: _line, ...m }) => m)).toEqual([
       { name: 'Total Sales', description: 'Revenue after discounts.' },
       { name: 'Sales YoY %' },
       { name: 'Order Count' },
@@ -269,12 +269,16 @@ describe('readSemanticModel: TMDL', () => {
         showAsVariationsOnly: false,
         kind: 'table',
         columns: [
-          { name: 'OrderKey', dataType: 'int64', isKey: true, isHidden: false, kind: 'data' },
-          { name: "It's odd", dataType: 'string', isKey: false, isHidden: false, kind: 'data' },
+          { name: 'OrderKey', dataType: 'int64', isKey: true, isHidden: false, kind: 'data', line: 9 },
+          { name: "It's odd", dataType: 'string', isKey: false, isHidden: false, kind: 'data', line: 12 },
         ],
-        measures: [{ name: 'M' }],
+        measures: [{ name: 'M', line: 14 }],
+        file: 'script.tmdl',
+        line: 4,
       },
     ]);
+    // Unknown objects are not features: nothing to report.
+    expect(result.model.features).toEqual([]);
     expect(result.model.relationships).toEqual([]);
     expect(result.warnings).toEqual([expect.stringContaining('Relationship r1')]);
   });
@@ -328,7 +332,11 @@ describe('readSemanticModel: TMSL', () => {
 
   it('turns the TMDL and the TMSL copy of one model into the same DBML', () => {
     const fromTmdl = semanticModelToDbml(readOk(tmdlFiles()).model);
-    const fromTmsl = semanticModelToDbml(model);
+    // The TMDL copy formats Date Table[Date] as Long Date (so it is read as a date); the TMSL copy gains the same format.
+    const [bim] = filesOf([path.relative(FIXTURES, TMSL_BIM)]);
+    const json = JSON.parse(bim.text) as { model: { tables: Array<{ name: string; columns: Array<Record<string, unknown>> }> } };
+    json.model.tables.find((x) => x.name === 'Date Table')!.columns.find((c) => c.name === 'Date')!.formatString = 'Long Date';
+    const fromTmsl = semanticModelToDbml(readOk([{ path: bim.path, text: JSON.stringify(json) }]).model);
     expect(fromTmsl.dbml.replace('(TMSL)', '(TMDL)')).toBe(fromTmdl.dbml);
     expect(fromTmsl.skipped).toEqual(fromTmdl.skipped);
   });
@@ -462,13 +470,18 @@ describe('semanticModelToDbml: the fixture through Import DBML', () => {
     ]);
   });
 
-  it('keeps keys: isKey as the primary key, else the one column relationships point at (with a warning)', () => {
+  it('keeps keys: isKey as the primary key, else the one column relationships point at (in the ledger); a joined column that is not the key is unique', () => {
     const pk = (name: string): string[] => planned(plan, name).columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
     expect(pk('sales')).toEqual(['sales_order_line_key']);
     expect(pk('customer')).toEqual(['customer_key']);
     expect(pk('product')).toEqual(['product_key']);
-    expect(pk('date_table')).toEqual(['date']);
-    expect(result.warnings).toContain('Product: product_key is marked as the primary key, because relationships point at it.');
+    // Date Table is marked as a date table, which flags Date isKey; every relationship joins DateKey,
+    // so DateKey is the key and Date stays unique.
+    expect(pk('date_table')).toEqual(['date_key']);
+    expect(planned(plan, 'date_table').columns.find((c) => c.name === 'date')?.meta).toMatchObject({ dbml: { unique: true } });
+    expect(result.warnings).toContain('Date Table: every relationship joins date_key, so it is the key; date, which Mark as date table flags isKey, is marked unique.');
+    expect(result.ledger).toContainEqual(expect.objectContaining({ outcome: 'changed', unit: 'primaryKey', cause: 'inferred', where: expect.objectContaining({ table: 'Product', column: 'ProductKey' }) }));
+    expect(result.ledger).toContainEqual(expect.objectContaining({ outcome: 'changed', unit: 'primaryKey', what: 'date table key', where: expect.objectContaining({ table: 'Date Table', column: 'DateKey' }) }));
     const fks = planned(plan, 'sales').columns.filter((c) => c.isForeignKey).map((c) => c.name);
     expect(fks).toEqual(['customer_key', 'product_key', 'order_date_key', 'ship_date_key']);
   });
@@ -501,7 +514,8 @@ describe('semanticModelToDbml: the fixture through Import DBML', () => {
     expect(margin?.meta).toMatchObject({ [SEMANTIC_MODEL_META.calculated]: 'true', [SEMANTIC_MODEL_META.name]: 'Line Margin' });
     expect(result.renamed).toContainEqual({ kind: 'table', table: 'date_table', from: 'Date Table', to: 'date_table' });
     expect(result.renamed).toContainEqual({ kind: 'column', table: 'sales', from: 'Sales Amount', to: 'sales_amount' });
-    expect(plan.report.keptInMeta).toBe(0);
+    // date_table.date_key's unique (relationships join it) is the one detail kept in the table files.
+    expect(plan.report.keptInMeta).toBe(1);
   });
 
   it('names the diagram after the model and describes it', () => {
@@ -609,8 +623,9 @@ describe('semanticModelToDbml: relationships and names', () => {
     const description = "It's a \\path\\ and\nsecond line";
     const model = minimal([t('Notes', [['Text', 'string', { description }]], { description })]);
     const plan = importDbml(semanticModelToDbml(model).dbml);
-    expect(planned(plan, 'notes').description).toBe(`${description}.`);
-    expect(planned(plan, 'notes').columns[0].description).toBe(`${description}.`);
+    // Kept exactly as written: no full stop added to the user's own text.
+    expect(planned(plan, 'notes').description).toBe(description);
+    expect(planned(plan, 'notes').columns[0].description).toBe(description);
   });
 
   it('does not infer a key on a table that flags one, or that relationships reach through two columns', () => {
