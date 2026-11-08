@@ -24,7 +24,6 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
   getSmoothStepPath,
-  EdgeLabelRenderer,
   Position,
   useStore,
   useStoreApi,
@@ -38,6 +37,7 @@ import { useEditorStoreOr } from '../../store/editorStore';
 import { edgeFocusRole } from '../../lib/canvasFocus';
 import { flowModeFor } from '../../lib/edgeFlow';
 import { EdgeFlow } from './EdgeFlow';
+import { EdgeLabels } from './EdgeLabels';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import { edgeHoverText } from '../../lib/badgeLabels';
 import {
@@ -383,7 +383,7 @@ function FkEdgeComponent({
       >
         <title>{edgeTitle}</title>
       </path>
-      <EdgeLabelRenderer>
+      <EdgeLabels>
         <span
           className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}${adornClass}`}
           style={{
@@ -482,7 +482,7 @@ function FkEdgeComponent({
             )}
           </span>
         )}
-      </EdgeLabelRenderer>
+      </EdgeLabels>
     </>
   );
 }
