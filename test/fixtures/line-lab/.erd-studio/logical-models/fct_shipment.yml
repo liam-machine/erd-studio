@@ -1,0 +1,49 @@
+name: fct_shipment
+schema: retail
+description: Parcels sent to customers
+grain: One row per shipment
+modelRole: transaction-fact
+columns:
+  - name: shipment_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: order_key
+    dataType: INT
+    description: FK to fct_order
+    isForeignKey: true
+  - name: warehouse_key
+    dataType: INT
+    description: Shipped from
+    isForeignKey: true
+  - name: customer_key
+    dataType: INT
+    description: Shipped to
+    isForeignKey: true
+  - name: ship_date_key
+    dataType: INT
+    description: Ship date
+    isForeignKey: true
+  - name: carrier_name
+    dataType: VARCHAR
+    description: Courier
+  - name: weight_kg
+    dataType: DECIMAL
+    description: Parcel weight
+relationships:
+  - fromColumn: order_key
+    toModel: fct_order
+    toColumn: order_key
+    cardinality: many-to-one
+  - fromColumn: warehouse_key
+    toModel: dim_warehouse
+    toColumn: warehouse_key
+    cardinality: many-to-one
+  - fromColumn: customer_key
+    toModel: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one

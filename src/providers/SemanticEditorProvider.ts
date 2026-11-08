@@ -149,6 +149,7 @@ import type {
   OpenModelFileMessage,
   ViewFileMessage,
   SetFeedbackProviderMessage,
+  SetLineStyleMessage,
   OpenFeedbackMessage,
   RelationshipKey,
   RequestFeedbackContextMessage,
@@ -580,10 +581,12 @@ import {
   validateOpenFeedbackLinkPayload,
   validateRequestFeedbackContextPayload,
   validateSetFeedbackProviderPayload,
+  validateSetLineStylePayload,
   validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
+import { affectsLineStyle, readLineStyle, writeLineStyle } from './lineStyleSetting';
 import { dropGridPositions, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
@@ -1067,6 +1070,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * returned promise so a rejection can never surface as an unhandled
    * rejection from a fire-and-forget call site.
    */
+  /** Tell a canvas how to draw its lines (`erdStudio.canvas.lineStyle`). */
+  private postLineStyle(webview: vscode.Webview): void {
+    this.post(webview, { type: 'lineStyle', payload: { lineStyle: readLineStyle() } });
+  }
+
   private post(webview: vscode.Webview, message: unknown): void {
     if (this.disposedWebviews.has(webview)) {
       return;
@@ -1705,6 +1713,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'webviewError',
           // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
           'crashFallback',
+          // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
+          // mutation; it writes no project file, and the physical stage draws lines too.
+          'setLineStyle',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           telemetry.error('physicalEditDropped');
@@ -1740,6 +1751,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               // "Canvas disconnected" timer stops, and it says how many
               // tables are loading while a large diagram is read.
               await this.postLoading(document, webviewPanel.webview);
+              // How to draw the lines, before the diagram: the first routing pass uses the reader's style.
+              this.postLineStyle(webviewPanel.webview);
               // The initial load is the one refresh path allowed to persist
               // auto-computed positions for models that lack them.
               const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
@@ -2253,6 +2266,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'setLineStyle': {
+            const payload = (message as SetLineStyleMessage).payload;
+            const validationError = validateSetLineStylePayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to change the line style: ${validationError}` },
+              });
+              break;
+            }
+            // The webview has already switched. Once the write lands, the
+            // configuration listener below tells every open canvas the
+            // effective value (a workspace value wins over the user's, and
+            // puts this toolbar back); a failed write puts it back here.
+            try {
+              await writeLineStyle(payload.lineStyle);
+            } catch (err) {
+              hostErrorLog.record('setLineStyle', err);
+              this.postLineStyle(webviewPanel.webview);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: 'ERD Studio could not save the line style in your settings.' },
+              });
+            }
+            break;
+          }
           case 'setFeedbackProvider': {
             const payload = (message as SetFeedbackProviderMessage).payload;
             const validationError = validateSetFeedbackProviderPayload(payload);
@@ -2609,10 +2648,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.lastActivePanelKey = panelKey;
       }
     });
+    // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
+    const lineStyleSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (affectsLineStyle(e)) this.postLineStyle(webviewPanel.webview);
+    });
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
       viewStateSubscription.dispose();
+      lineStyleSubscription.dispose();
       readyWatch.dispose();
       telemetry.canvasClosed(panelKey);
       this.forgetPanel(panelKey, webviewPanel.webview);

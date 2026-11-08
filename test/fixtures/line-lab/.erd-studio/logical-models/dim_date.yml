@@ -1,0 +1,26 @@
+name: dim_date
+schema: retail
+description: Calendar dimension, one row per day
+grain: One row per calendar date
+modelRole: conformed-dim
+columns:
+  - name: date_key
+    dataType: INT
+    description: Surrogate key, yyyymmdd
+    isPrimaryKey: true
+  - name: calendar_date
+    dataType: DATE
+    description: The date
+    isNaturalKey: true
+  - name: day_of_week
+    dataType: VARCHAR
+    description: Monday to Sunday
+  - name: fiscal_week
+    dataType: INT
+    description: Fiscal week number
+  - name: fiscal_quarter
+    dataType: VARCHAR
+    description: Fiscal quarter, e.g. FY26-Q2
+  - name: fiscal_year
+    dataType: INT
+    description: Fiscal year

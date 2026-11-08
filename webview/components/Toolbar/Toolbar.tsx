@@ -5,6 +5,7 @@
  * - Domain info (name + layer badge)
  * - Zoom controls (in/out/level/fit)
  * - Auto Layout button
+ * - Line style (Curved / Hops), on every stage
  * - New Model button (Phase 2)
  *
  * Stage tabs sit above the controls in a stacked two-row layout, all within
@@ -37,6 +38,7 @@ import {
 } from '../../lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
+import { LineStyleSwitch } from './LineStyleSwitch';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
@@ -934,6 +936,11 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           >
             {allExpanded ? '⊟' : '⊞'}
           </button>
+        </div>
+
+        {/* Line style — a view preference, so on every stage and read-only diagram too */}
+        <div className="toolbar__section">
+          <LineStyleSwitch />
         </div>
 
         {/* Canvas mode — select vs pan */}

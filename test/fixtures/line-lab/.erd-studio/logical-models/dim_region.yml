@@ -1,0 +1,16 @@
+name: dim_region
+schema: retail
+description: Sales regions
+grain: One row per region
+modelRole: domain-dim
+columns:
+  - name: region_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: region_name
+    dataType: VARCHAR
+    description: Region name
+  - name: country_code
+    dataType: VARCHAR
+    description: ISO country code

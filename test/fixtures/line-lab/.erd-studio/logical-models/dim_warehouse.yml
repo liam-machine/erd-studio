@@ -1,0 +1,29 @@
+name: dim_warehouse
+schema: retail
+description: Distribution centres
+grain: One row per warehouse
+modelRole: domain-dim
+columns:
+  - name: warehouse_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: warehouse_code
+    dataType: VARCHAR
+    description: Site code
+    isNaturalKey: true
+  - name: warehouse_name
+    dataType: VARCHAR
+    description: Site name
+  - name: city_key
+    dataType: INT
+    description: FK to dim_city
+    isForeignKey: true
+  - name: capacity_m3
+    dataType: DECIMAL
+    description: Storage capacity
+relationships:
+  - fromColumn: city_key
+    toModel: dim_city
+    toColumn: city_key
+    cardinality: many-to-one

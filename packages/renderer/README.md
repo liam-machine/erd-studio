@@ -44,11 +44,14 @@ function Diagram({ domain }: { domain: DisplaySubjectArea }) {
 | `onLayoutModifiedChange(modified)` | Called when the layout starts or stops differing from the domain's positions (a node moved; `resetLayout()`, a new domain, or a node moved back). |
 | `onReady()` | Called once, after the first nodes are measured and fitted into view (straight away for an empty domain). |
 | `logicalOnly` | Draw the diagram of a project with no dbt project (default `false`): tables, lines and the selection ring take neutral theme colours instead of the logical stage's blue, so the layer badge carries the colour, and the legend leaves out the Physical stage, ghosts, provenance chips and comparison colours. |
+| `lineStyle` | How relationship lines are drawn (default `'curved'`; `LINE_STYLES` lists both, `LineStyle` is the type). Both route every line around the tables in its way. `'curved'`: soft curves, a halo where two lines cross (the line underneath is cut), and a faint dashed "x-ray" where a line has no way round a table. `'hops'`: square corners and a small hop where two lines cross. Any other value reads as `'curved'`. A view preference: readers cannot change it, and nothing is posted. Diagrams over 100 lines are routed in a Web Worker started from a blob URL, so allow `worker-src blob:` in the page's CSP: with it any size is routed (2,000 tables in about 1.5 s) without pausing the page; without it, diagrams up to 150 lines route on the main thread and larger ones keep simple lines. |
 | `className`, `style` | Applied to the canvas's wrapper element, which fills its parent. |
 
 The ref exposes `resetLayout()`, which puts every node back at its position in the domain with its original edge sides.
 
 Each `ErdCanvas` has its own store, so several can share a page.
+
+**Line routing.** Every FK line is routed in one pass over the whole diagram, on the frame after a node moves or is measured; each canvas has its own router, so diagrams on one page never share its state. A self-loop, a line the router cannot place and every line on a diagram too large or too slow to route draw the smooth-step path older versions drew. While a node is dragged on a slow diagram, its lines take that path until the drag ends. On a `logicalOnly` canvas the lines are neutral grey at rest, and the lines of the hovered or selected table (with their end labels, role labels, flow arrows and x-ray) take the diagram's layer colour (`layerConfig.color`, else the grey). Nothing here reads a new field: a `DisplaySubjectArea` from an older core routes the same way.
 
 ## Exporting a diagram
 

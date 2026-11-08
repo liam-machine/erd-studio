@@ -118,6 +118,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   requestFeedbackContext: 'other',
   analyzeFeedback: 'other',
   setFeedbackProvider: 'other',
+  setLineStyle: 'other',
   submitFeedback: 'other',
   copyFeedbackReport: 'other',
   openFeedbackLink: 'other',

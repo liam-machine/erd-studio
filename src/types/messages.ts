@@ -38,6 +38,7 @@ import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
 import type { CrashFallbackPayload, LayoutFailure, WebviewErrorPayload } from './webviewError';
+import type { CanvasLineStyle } from './lineStyle';
 import type {
   FeedbackAiProviderChoice,
   FeedbackAnalysis,
@@ -434,8 +435,22 @@ export interface GuideStartMessage {
   payload: CanvasGuideStart;
 }
 
+/**
+ * How the canvas draws relationship lines: the `erdStudio.canvas.lineStyle`
+ * setting (`src/types/lineStyle.ts`). Posted when the webview says `ready`
+ * (before the diagram is read) and to every open canvas whenever the setting
+ * changes, so a switch in one editor reaches them all.
+ */
+export interface LineStyleMessage {
+  type: 'lineStyle';
+  payload: {
+    lineStyle: CanvasLineStyle;
+  };
+}
+
 export type ExtensionMessage =
   | GuideStartMessage
+  | LineStyleMessage
   | LoadingMessage
   | ExistingTablesMessage
   | NewRelationshipFilesMessage
@@ -1064,9 +1079,24 @@ export interface GuideMessage {
   payload: GuideActionPayload;
 }
 
+/**
+ * The toolbar's Curved / Hops switch: write `erdStudio.canvas.lineStyle` at
+ * user (Global) scope. The webview has already switched (optimistically); the
+ * host's `lineStyle` broadcast that follows the setting change keeps every
+ * open canvas in step. A view preference that writes no project file, so it
+ * is on the physical-stage allowlist (`NON_MUTATION_TYPES`).
+ */
+export interface SetLineStyleMessage {
+  type: 'setLineStyle';
+  payload: {
+    lineStyle: CanvasLineStyle;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
+  | SetLineStyleMessage
   | GuideMessage
   | RequestExistingTablesMessage
   | RequestNewRelationshipFilesMessage

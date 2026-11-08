@@ -1,0 +1,34 @@
+name: dim_store
+schema: retail
+description: Retail stores
+grain: One row per store
+modelRole: domain-dim
+columns:
+  - name: store_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: store_code
+    dataType: VARCHAR
+    description: Store code
+    isNaturalKey: true
+  - name: store_name
+    dataType: VARCHAR
+    description: Trading name
+  - name: city_key
+    dataType: INT
+    description: FK to dim_city
+    isForeignKey: true
+  - name: region_key
+    dataType: INT
+    description: FK to dim_region
+    isForeignKey: true
+relationships:
+  - fromColumn: city_key
+    toModel: dim_city
+    toColumn: city_key
+    cardinality: many-to-one
+  - fromColumn: region_key
+    toModel: dim_region
+    toColumn: region_key
+    cardinality: many-to-one
