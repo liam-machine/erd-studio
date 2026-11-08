@@ -1,0 +1,38 @@
+name: dim_employee
+schema: retail
+description: Store staff
+grain: One row per employee
+modelRole: domain-dim
+columns:
+  - name: employee_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: employee_id
+    dataType: VARCHAR
+    description: HR employee id
+    isNaturalKey: true
+  - name: full_name
+    dataType: VARCHAR
+    description: Full name
+  - name: role_title
+    dataType: VARCHAR
+    description: Job title
+  - name: store_key
+    dataType: INT
+    description: Home store
+    isForeignKey: true
+  - name: manager_employee_key
+    dataType: INT
+    description: Line manager
+    isForeignKey: true
+relationships:
+  - fromColumn: store_key
+    toModel: dim_store
+    toColumn: store_key
+    cardinality: many-to-one
+  - fromColumn: manager_employee_key
+    toModel: dim_employee
+    toColumn: employee_key
+    cardinality: many-to-one
+    role: manager

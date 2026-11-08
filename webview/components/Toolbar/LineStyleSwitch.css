@@ -1,0 +1,66 @@
+/* LineStyleSwitch — Curved / Hops, a compact segmented control in the toolbar.
+   Theme variables only. */
+
+.line-style-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+
+.line-style-switch__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.1s ease, color 0.1s ease, opacity 0.1s ease;
+}
+
+.line-style-switch__option:hover:not(.line-style-switch__option--on) {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.line-style-switch__option:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.line-style-switch__option--on {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+  cursor: default;
+}
+
+/* The glyph: a stroke in the button's own text colour. */
+.line-style-switch__icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-style-switch__option {
+    transition: none;
+  }
+}

@@ -1,0 +1,91 @@
+name: fct_sale
+schema: retail
+description: Point-of-sale lines
+grain: One row per sale line
+modelRole: transaction-fact
+columns:
+  - name: sale_line_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: order_date_key
+    dataType: INT
+    description: Order date
+    isForeignKey: true
+  - name: ship_date_key
+    dataType: INT
+    description: Ship date
+    isForeignKey: true
+  - name: customer_key
+    dataType: INT
+    description: FK to dim_customer
+    isForeignKey: true
+  - name: product_key
+    dataType: INT
+    description: FK to dim_product
+    isForeignKey: true
+  - name: store_key
+    dataType: INT
+    description: FK to dim_store
+    isForeignKey: true
+  - name: promotion_key
+    dataType: INT
+    description: FK to dim_promotion
+    isForeignKey: true
+  - name: employee_key
+    dataType: INT
+    description: Served by
+    isForeignKey: true
+  - name: payment_method_key
+    dataType: INT
+    description: Paid with
+    isForeignKey: true
+  - name: channel_key
+    dataType: INT
+    description: Sold through
+    isForeignKey: true
+  - name: quantity
+    dataType: INT
+    description: Units sold
+  - name: net_amount
+    dataType: DECIMAL
+    description: Net of discount
+relationships:
+  - fromColumn: order_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: order date
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: ship date
+  - fromColumn: customer_key
+    toModel: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one
+  - fromColumn: product_key
+    toModel: dim_product
+    toColumn: product_key
+    cardinality: many-to-one
+  - fromColumn: store_key
+    toModel: dim_store
+    toColumn: store_key
+    cardinality: many-to-one
+  - fromColumn: promotion_key
+    toModel: dim_promotion
+    toColumn: promotion_key
+    cardinality: many-to-one
+  - fromColumn: employee_key
+    toModel: dim_employee
+    toColumn: employee_key
+    cardinality: many-to-one
+  - fromColumn: payment_method_key
+    toModel: dim_payment_method
+    toColumn: payment_method_key
+    cardinality: many-to-one
+  - fromColumn: channel_key
+    toModel: dim_channel
+    toColumn: channel_key
+    cardinality: many-to-one

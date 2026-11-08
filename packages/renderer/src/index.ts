@@ -5,6 +5,7 @@
 //   import '@erd-studio/renderer/styles.css';
 
 export { ErdCanvas, type ErdCanvasProps, type ErdCanvasHandle } from './ErdCanvas';
+export { LINE_STYLES, DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
 
 export {
   transformSubjectArea,

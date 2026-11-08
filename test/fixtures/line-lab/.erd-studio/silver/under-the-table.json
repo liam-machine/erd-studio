@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 5,
+  "domain": "under-the-table",
+  "layer": "silver",
+  "description": "Lines that run under a table between their two ends",
+  "logical": {
+    "models": [
+      "dim_customer",
+      "fct_order",
+      "fct_payment",
+      "dim_store",
+      "dim_city",
+      "dim_region",
+      "fct_inventory",
+      "dim_supplier",
+      "dim_warehouse"
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_customer": {
+        "x": 0,
+        "y": 40
+      },
+      "fct_order": {
+        "x": 320,
+        "y": 40
+      },
+      "fct_payment": {
+        "x": 640,
+        "y": 40
+      },
+      "dim_store": {
+        "x": 1000,
+        "y": 0
+      },
+      "dim_city": {
+        "x": 1000,
+        "y": 290
+      },
+      "dim_region": {
+        "x": 1000,
+        "y": 560
+      },
+      "fct_inventory": {
+        "x": 0,
+        "y": 420
+      },
+      "dim_supplier": {
+        "x": 380,
+        "y": 470
+      },
+      "dim_warehouse": {
+        "x": 700,
+        "y": 640
+      }
+    },
+    "annotations": []
+  }
+}

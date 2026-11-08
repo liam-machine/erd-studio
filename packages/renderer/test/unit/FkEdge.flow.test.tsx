@@ -15,9 +15,12 @@ const xy = vi.hoisted(() => ({
   dragging: new Set<string>(),
 }));
 
+// Labels render in place (the real component portals into the canvas's label layer).
+vi.mock('../../src/components/Graph/EdgeLabels', () => ({
+  EdgeLabels: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
 vi.mock('@xyflow/react', () => ({
   getSmoothStepPath: () => ['M 0,0 L 100,100'],
-  EdgeLabelRenderer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Position: { Top: 'top', Right: 'right', Bottom: 'bottom', Left: 'left' },
   useStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ edges: [], nodeLookup: new Map(), ...(xy.transform ? { transform: xy.transform } : {}) }),

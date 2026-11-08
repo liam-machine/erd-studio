@@ -68,6 +68,7 @@ import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
 import { CanvasGuide } from './components/Guide/CanvasGuide';
 import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
 import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
+import { isCanvasLineStyle } from '../src/types/lineStyle';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -322,6 +323,10 @@ function EditorCanvas() {
           useEditorStore
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
+          break;
+        case 'lineStyle':
+          // The reader's erdStudio.canvas.lineStyle, on ready and whenever it changes.
+          if (isCanvasLineStyle(msg.payload?.lineStyle)) useEditorStore.getState().setLineStyle(msg.payload.lineStyle);
           break;
         case 'guideStart':
           if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });

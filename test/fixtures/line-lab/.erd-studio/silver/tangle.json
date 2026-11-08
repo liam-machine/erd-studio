@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 5,
+  "domain": "tangle",
+  "layer": "silver",
+  "description": "Every fact at once, in a messy layout",
+  "logical": {
+    "models": [
+      "dim_date",
+      "fct_inventory",
+      "dim_customer",
+      "fct_shipment",
+      "dim_supplier",
+      "fct_sale",
+      "dim_warehouse",
+      "dim_city",
+      "fct_payment",
+      "dim_store",
+      "fct_order",
+      "dim_product",
+      "dim_employee",
+      "fct_return"
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_date": {
+        "x": 0,
+        "y": 0
+      },
+      "fct_inventory": {
+        "x": 300,
+        "y": 40
+      },
+      "dim_customer": {
+        "x": 590,
+        "y": -10
+      },
+      "fct_shipment": {
+        "x": 890,
+        "y": 30
+      },
+      "dim_supplier": {
+        "x": 40,
+        "y": 380
+      },
+      "fct_sale": {
+        "x": 330,
+        "y": 330
+      },
+      "dim_warehouse": {
+        "x": 620,
+        "y": 340
+      },
+      "dim_city": {
+        "x": 900,
+        "y": 420
+      },
+      "fct_payment": {
+        "x": -20,
+        "y": 700
+      },
+      "dim_store": {
+        "x": 620,
+        "y": 536
+      },
+      "fct_order": {
+        "x": 900,
+        "y": 700
+      },
+      "dim_product": {
+        "x": 329,
+        "y": 780
+      },
+      "dim_employee": {
+        "x": 60,
+        "y": 1010
+      },
+      "fct_return": {
+        "x": 620,
+        "y": 820
+      }
+    },
+    "annotations": [
+      {
+        "id": "tangle-note",
+        "text": "Which warehouse ships web orders? Check with logistics.",
+        "x": 900,
+        "y": 1010,
+        "color": "yellow"
+      }
+    ]
+  }
+}
