@@ -1,0 +1,10 @@
+{
+  "name": "Forecast YTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Forecast YTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\iv. YTD",
+  "lineageTag": "1a4e0d88-e751-4350-bf75-3cb5aab8e7c1"
+}

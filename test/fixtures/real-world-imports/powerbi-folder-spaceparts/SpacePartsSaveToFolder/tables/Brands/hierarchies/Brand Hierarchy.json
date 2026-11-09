@@ -1,0 +1,31 @@
+{
+  "name": "Brand Hierarchy",
+  "displayFolder": "1. Brand Hierarchy",
+  "lineageTag": "084d70b4-6315-42f4-9fa3-84fac3f33e6b",
+  "levels": [
+    {
+      "name": "Class",
+      "ordinal": 0,
+      "column": "Class",
+      "lineageTag": "5457edb0-3439-4d56-baf9-e14078ae42d6"
+    },
+    {
+      "name": "Flagship",
+      "ordinal": 1,
+      "column": "Flagship",
+      "lineageTag": "63f540d1-6f1a-4224-b13d-e5e8cf74727c"
+    },
+    {
+      "name": "Brand",
+      "ordinal": 2,
+      "column": "Brand",
+      "lineageTag": "47d9b70c-0dbe-4719-9c28-498808e9fe1b"
+    },
+    {
+      "name": "Sub Brand",
+      "ordinal": 3,
+      "column": "Sub Brand",
+      "lineageTag": "4cf48791-4d41-4f0d-988b-385822b676aa"
+    }
+  ]
+}

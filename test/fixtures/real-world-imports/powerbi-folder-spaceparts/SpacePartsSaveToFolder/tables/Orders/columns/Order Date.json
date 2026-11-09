@@ -1,0 +1,21 @@
+{
+  "name": "Order Date",
+  "dataType": "dateTime",
+  "description": "There is a bug with the \"Order Date\" field where it is blank. This will take me a bit of time to resolve. - Kurt",
+  "isHidden": true,
+  "sourceColumn": "order_date",
+  "formatString": "Long Date",
+  "displayFolder": "Columns\\3. Keys\\Dates",
+  "lineageTag": "cca4d6f0-d0b7-47ed-a7c9-8f5aa2a98962",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

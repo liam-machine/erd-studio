@@ -1,0 +1,15 @@
+{
+  "name": "Sales Order Document Line Item Number",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "sales_order_document_line_item_number",
+  "displayFolder": "Columns\\2. Document Fields",
+  "lineageTag": "3160dd83-6600-4ee8-9352-1f63bf72df1e",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

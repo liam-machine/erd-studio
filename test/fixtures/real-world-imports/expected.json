@@ -23930,6 +23930,4568 @@
     }
    ],
    "uniqueKeys": []
+  },
+  "powerbi-folder-spaceparts": {
+   "importer": "semanticModel",
+   "input": {
+    "folder": "powerbi-folder-spaceparts"
+   },
+   "counts": {
+    "tables": 30,
+    "columns": 186,
+    "primaryKeys": 1,
+    "relationships": 22
+   },
+   "notes": "Tabular Editor Save to Folder (TabularEditor_SerializeOptions with LocalRelationships): every relationship is in its from-table's TabularEditor_Relationships annotation. Auto date/time tables (5 LocalDateTable_ and 1 DateTableTemplate_) and the 5 relationships into them are not counted, nor RowNumber columns. Primary keys are the isKey columns (1: Date[Date]). 8 calculated tables (field parameters, the DAX Date table, measure tables) and 7 calculation groups. dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail).",
+   "tables": [
+    {
+     "name": "1) Selected Metric",
+     "description": "It lets you select a Metric.",
+     "pk": [],
+     "columns": [
+      [
+       "Order",
+       "int64",
+       ""
+      ],
+      [
+       "Select a Measure",
+       "string",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "2) Selected Unit",
+     "description": "This is a disconnected table for Measure Selection.\nIt lets you select a Unit.",
+     "pk": [],
+     "columns": [
+      [
+       "Order",
+       "int64",
+       ""
+      ],
+      [
+       "Select a Unit",
+       "string",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "3) Selected Target",
+     "description": "This is a disconnected table for Measure Selection.\nIt lets you select a Target.",
+     "pk": [],
+     "columns": [
+      [
+       "MTD Slicer",
+       "string",
+       ""
+      ],
+      [
+       "Order",
+       "int64",
+       ""
+      ],
+      [
+       "Select a Target",
+       "string",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "4) Selected Period",
+     "description": "This is a disconnected table for Measure Selection.\nIt lets you select a Period",
+     "pk": [],
+     "columns": [
+      [
+       "MTD",
+       "string",
+       ""
+      ],
+      [
+       "Order",
+       "int64",
+       ""
+      ],
+      [
+       "Period",
+       "string",
+       ""
+      ],
+      [
+       "QTD",
+       "string",
+       ""
+      ],
+      [
+       "YTD",
+       "string",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Brands",
+     "pk": [],
+     "columns": [
+      [
+       "Brand",
+       "string",
+       ""
+      ],
+      [
+       "Class",
+       "string",
+       ""
+      ],
+      [
+       "Flagship",
+       "string",
+       ""
+      ],
+      [
+       "Product Brand VP",
+       "string",
+       ""
+      ],
+      [
+       "Sub Brand",
+       "string",
+       ""
+      ],
+      [
+       "Type",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Budget",
+     "pk": [],
+     "columns": [
+      [
+       "Budget (EUR)",
+       "double",
+       ""
+      ],
+      [
+       "Customer Key",
+       "string",
+       ""
+      ],
+      [
+       "Month",
+       "dateTime",
+       ""
+      ],
+      [
+       "Product Key",
+       "int64",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Budget Rate",
+     "pk": [],
+     "columns": [
+      [
+       "Currency System",
+       "string",
+       ""
+      ],
+      [
+       "From Currency",
+       "string",
+       ""
+      ],
+      [
+       "Rate",
+       "decimal",
+       ""
+      ],
+      [
+       "To Currency",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Customers",
+     "pk": [],
+     "columns": [
+      [
+       "Account Manager",
+       "string",
+       ""
+      ],
+      [
+       "Account Name",
+       "string",
+       ""
+      ],
+      [
+       "Account Type",
+       "string",
+       ""
+      ],
+      [
+       "Customer Key",
+       "string",
+       ""
+      ],
+      [
+       "Customer Sold-To Name",
+       "string",
+       ""
+      ],
+      [
+       "Key Account Manager",
+       "string",
+       ""
+      ],
+      [
+       "Key Account Name",
+       "string",
+       ""
+      ],
+      [
+       "Station",
+       "string",
+       ""
+      ],
+      [
+       "Transaction Type",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Date",
+     "pk": [
+      "Date"
+     ],
+     "columns": [
+      [
+       "Calendar Month # (ie 1)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Month (ie Jan)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Month Day (i.e. 0105)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Month Day (i.e. Jan 05)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Month Year (ie Jan 21)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Quarter (ie Q1)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Quarter Year (ie Q1 2021)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Week EU (ie WK25)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Week ISO (ie WK25)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Week Number EU (ie 25)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Week Number ISO (ie 25)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Week Number US (ie 25)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Week US (ie WK25)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Year (ie 2021)",
+       "string",
+       ""
+      ],
+      [
+       "Calendar Year Month (ie 202101)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Year Number (ie 2021)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Year Quarter (ie 202101)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Year Week Number EU (ie 202125)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Year Week Number ISO (ie 202125)",
+       "int64",
+       ""
+      ],
+      [
+       "Calendar Year Week Number US (ie 202125)",
+       "int64",
+       ""
+      ],
+      [
+       "Date",
+       "dateTime",
+       "P"
+      ],
+      [
+       "IsActualToday",
+       "boolean",
+       ""
+      ],
+      [
+       "IsBeforeThisMonth",
+       "boolean",
+       ""
+      ],
+      [
+       "IsDateInScope",
+       "boolean",
+       ""
+      ],
+      [
+       "IsHoliday",
+       "boolean",
+       ""
+      ],
+      [
+       "IsLastMonth",
+       "boolean",
+       ""
+      ],
+      [
+       "IsRefDate",
+       "boolean",
+       ""
+      ],
+      [
+       "IsThisMonth",
+       "boolean",
+       ""
+      ],
+      [
+       "IsThisQuarter",
+       "boolean",
+       ""
+      ],
+      [
+       "IsThisWeek",
+       "boolean",
+       ""
+      ],
+      [
+       "IsThisYear",
+       "boolean",
+       ""
+      ],
+      [
+       "IsWeekday",
+       "boolean",
+       ""
+      ],
+      [
+       "IsYTD",
+       "boolean",
+       ""
+      ],
+      [
+       "Weekday Name (i.e. Monday)",
+       "string",
+       ""
+      ],
+      [
+       "Weekday Number EU (i.e. 1)",
+       "int64",
+       ""
+      ],
+      [
+       "Weekday Short (i.e. Mon)",
+       "string",
+       ""
+      ],
+      [
+       "Workdays MTD %",
+       "double",
+       "C"
+      ],
+      [
+       "Workdays MTD",
+       "int64",
+       "C"
+      ],
+      [
+       "Workdays QTD",
+       "int64",
+       "C"
+      ],
+      [
+       "Workdays YTD",
+       "int64",
+       "C"
+      ],
+      [
+       "YYYYMMDD",
+       "int64",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Employees",
+     "pk": [],
+     "columns": [
+      [
+       "Data Security Rule",
+       "string",
+       ""
+      ],
+      [
+       "Employee Email",
+       "string",
+       ""
+      ],
+      [
+       "Employee Name",
+       "string",
+       ""
+      ],
+      [
+       "Role",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Exchange Rate",
+     "pk": [],
+     "columns": [
+      [
+       "Currency System",
+       "string",
+       ""
+      ],
+      [
+       "Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Exchange Rate Composite Key",
+       "string",
+       ""
+      ],
+      [
+       "From Currency",
+       "string",
+       ""
+      ],
+      [
+       "Month",
+       "string",
+       ""
+      ],
+      [
+       "Rate Type",
+       "string",
+       ""
+      ],
+      [
+       "Rate",
+       "decimal",
+       ""
+      ],
+      [
+       "To Currency",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Forecast",
+     "pk": [],
+     "columns": [
+      [
+       "Forecast (EUR)",
+       "decimal",
+       ""
+      ],
+      [
+       "Forecast Month",
+       "dateTime",
+       ""
+      ],
+      [
+       "Product Type",
+       "string",
+       ""
+      ],
+      [
+       "Region Territory",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Invoice Document Type",
+     "pk": [],
+     "columns": [
+      [
+       "Billing Document Type Code",
+       "string",
+       ""
+      ],
+      [
+       "Doc. Type Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Group Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Group",
+       "string",
+       ""
+      ],
+      [
+       "Text",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Invoices",
+     "pk": [],
+     "columns": [
+      [
+       "Billing Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Billing Document Line Item Number",
+       "int64",
+       ""
+      ],
+      [
+       "Billing Document Number",
+       "int64",
+       ""
+      ],
+      [
+       "Billing Document Type Code",
+       "string",
+       ""
+      ],
+      [
+       "Customer Key",
+       "string",
+       ""
+      ],
+      [
+       "Delivery Cost",
+       "double",
+       ""
+      ],
+      [
+       "Freight",
+       "double",
+       ""
+      ],
+      [
+       "Late Delivery Penalties",
+       "double",
+       ""
+      ],
+      [
+       "Local Currency",
+       "string",
+       ""
+      ],
+      [
+       "Net Invoice COGS",
+       "double",
+       ""
+      ],
+      [
+       "Net Invoice Quantity",
+       "int64",
+       ""
+      ],
+      [
+       "Net Invoice Value",
+       "double",
+       ""
+      ],
+      [
+       "OTD Indicator",
+       "boolean",
+       ""
+      ],
+      [
+       "Overdue Payment Penalties",
+       "double",
+       ""
+      ],
+      [
+       "Product Key",
+       "int64",
+       ""
+      ],
+      [
+       "Ship Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Taxes & Commercial Fees",
+       "double",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Last Refresh",
+     "pk": [],
+     "columns": [
+      [
+       "Last Refresh",
+       "dateTime",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "On-Time Delivery",
+     "pk": [],
+     "columns": [
+      [
+       "OTD Indicator",
+       "boolean",
+       ""
+      ],
+      [
+       "OTD Sort Order",
+       "int64",
+       ""
+      ],
+      [
+       "OTD Status",
+       "string",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Order Document Type",
+     "pk": [],
+     "columns": [
+      [
+       "Doc. Type Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Group Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Group",
+       "string",
+       ""
+      ],
+      [
+       "Sales Order Document Type Code",
+       "string",
+       ""
+      ],
+      [
+       "Text",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Order Status",
+     "pk": [],
+     "columns": [
+      [
+       "Order Status Code",
+       "string",
+       ""
+      ],
+      [
+       "Order Status Group",
+       "string",
+       ""
+      ],
+      [
+       "Order Status Grouping Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Order Status Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Order Status Text",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Orders",
+     "pk": [],
+     "columns": [
+      [
+       "Billing Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Confirm Goods Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Customer Key",
+       "string",
+       ""
+      ],
+      [
+       "Local Currency",
+       "string",
+       ""
+      ],
+      [
+       "Net Order Quantity",
+       "int64",
+       ""
+      ],
+      [
+       "Net Order Value",
+       "double",
+       ""
+      ],
+      [
+       "Order Date",
+       "dateTime",
+       "",
+       "There is a bug with the \"Order Date\" field where it is blank. This will take me a bit of time to resolve. - Kurt"
+      ],
+      [
+       "Product Key",
+       "int64",
+       ""
+      ],
+      [
+       "Request Goods Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Sales Order Document Line Item Number",
+       "int64",
+       ""
+      ],
+      [
+       "Sales Order Document Line Item Status",
+       "string",
+       ""
+      ],
+      [
+       "Sales Order Document Number",
+       "int64",
+       ""
+      ],
+      [
+       "Sales Order Document Type Code",
+       "string",
+       ""
+      ],
+      [
+       "Ship Date",
+       "dateTime",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Products",
+     "pk": [],
+     "columns": [
+      [
+       "Color",
+       "string",
+       ""
+      ],
+      [
+       "MK",
+       "string",
+       ""
+      ],
+      [
+       "Material",
+       "string",
+       ""
+      ],
+      [
+       "Maximum Temperature (K)",
+       "int64",
+       ""
+      ],
+      [
+       "Nameplate",
+       "string",
+       ""
+      ],
+      [
+       "Part Fit Grading",
+       "string",
+       ""
+      ],
+      [
+       "Product Business Line Leader",
+       "string",
+       ""
+      ],
+      [
+       "Product Key",
+       "int64",
+       ""
+      ],
+      [
+       "Product Name",
+       "string",
+       ""
+      ],
+      [
+       "Production Series",
+       "string",
+       ""
+      ],
+      [
+       "Ship Class for Part",
+       "string",
+       ""
+      ],
+      [
+       "Sub Brand Name",
+       "string",
+       ""
+      ],
+      [
+       "Subtype",
+       "string",
+       ""
+      ],
+      [
+       "Tolerance (g)",
+       "int64",
+       ""
+      ],
+      [
+       "Type",
+       "string",
+       ""
+      ],
+      [
+       "Velocity Tolerance (Meters / Second)",
+       "int64",
+       ""
+      ],
+      [
+       "Weight (Tonnes)",
+       "decimal",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Regions",
+     "pk": [],
+     "columns": [
+      [
+       "All",
+       "string",
+       ""
+      ],
+      [
+       "Interplanetary Region",
+       "string",
+       ""
+      ],
+      [
+       "Station Sales Managers",
+       "string",
+       ""
+      ],
+      [
+       "Station Type",
+       "string",
+       ""
+      ],
+      [
+       "Station",
+       "string",
+       ""
+      ],
+      [
+       "System Regional Managers",
+       "string",
+       ""
+      ],
+      [
+       "System Sales Directors",
+       "string",
+       ""
+      ],
+      [
+       "System",
+       "string",
+       ""
+      ],
+      [
+       "Tax Rate",
+       "decimal",
+       ""
+      ],
+      [
+       "Territory Directors",
+       "string",
+       ""
+      ],
+      [
+       "Territory",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Z01CG1 - Quantity",
+     "pk": [],
+     "columns": [
+      [
+       "Measure",
+       "string",
+       ""
+      ],
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z01CG2 - Value (Budget Rate)",
+     "pk": [],
+     "columns": [
+      [
+       "Measure",
+       "string",
+       ""
+      ],
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z01CG4 - Lines",
+     "pk": [],
+     "columns": [
+      [
+       "Measure",
+       "string",
+       ""
+      ],
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z02CG1 - Unit",
+     "pk": [],
+     "columns": [
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Unit",
+       "string",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z03CG1 - Sales Target",
+     "pk": [],
+     "columns": [
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Target",
+       "string",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z03CG2 - Orders Target",
+     "pk": [],
+     "columns": [
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ],
+      [
+       "Target",
+       "string",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "Z04CG1 - Time Intelligence",
+     "pk": [],
+     "columns": [
+      [
+       "Aggregation",
+       "string",
+       ""
+      ],
+      [
+       "Ordinal",
+       "int64",
+       ""
+      ]
+     ],
+     "calculationGroup": true
+    },
+    {
+     "name": "__Demo Measures",
+     "description": "5 measures usable without any selection; quick-start",
+     "pk": [],
+     "columns": [
+      [
+       "__Measures",
+       "int64",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "__Measures",
+     "description": "Everything in this Table Requires Measure Selection\n1. Select a Metric\n2. Select a Unit\n3. Select a Target\n4. Select a Period\n5. Select a Currency (from 'Exchange Rate')\n6. Select a Year and/or Month from 'Date'\n",
+     "pk": [],
+     "columns": [
+      [
+       "__Measures",
+       "int64",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    }
+   ],
+   "relationships": [
+    {
+     "from": "Budget",
+     "fromColumn": "Customer Key",
+     "to": "Customers",
+     "toColumn": "Customer Key"
+    },
+    {
+     "from": "Budget",
+     "fromColumn": "Month",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Budget",
+     "fromColumn": "Product Key",
+     "to": "Products",
+     "toColumn": "Product Key"
+    },
+    {
+     "from": "Customers",
+     "fromColumn": "Station",
+     "to": "Regions",
+     "toColumn": "Station"
+    },
+    {
+     "from": "Exchange Rate",
+     "fromColumn": "Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Forecast",
+     "fromColumn": "Forecast Month",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Forecast",
+     "fromColumn": "Product Type",
+     "to": "Products",
+     "toColumn": "Type"
+    },
+    {
+     "from": "Forecast",
+     "fromColumn": "Region Territory",
+     "to": "Regions",
+     "toColumn": "Territory"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "Billing Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "Billing Document Type Code",
+     "to": "Invoice Document Type",
+     "toColumn": "Billing Document Type Code"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "Customer Key",
+     "to": "Customers",
+     "toColumn": "Customer Key"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "Local Currency",
+     "to": "Budget Rate",
+     "toColumn": "From Currency"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "OTD Indicator",
+     "to": "On-Time Delivery",
+     "toColumn": "OTD Indicator"
+    },
+    {
+     "from": "Invoices",
+     "fromColumn": "Product Key",
+     "to": "Products",
+     "toColumn": "Product Key"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Customer Key",
+     "to": "Customers",
+     "toColumn": "Customer Key"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Local Currency",
+     "to": "Budget Rate",
+     "toColumn": "From Currency"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Order Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Product Key",
+     "to": "Products",
+     "toColumn": "Product Key"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Request Goods Receipt Date",
+     "to": "Date",
+     "toColumn": "Date",
+     "inactive": true
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Sales Order Document Line Item Status",
+     "to": "Order Status",
+     "toColumn": "Order Status Code"
+    },
+    {
+     "from": "Orders",
+     "fromColumn": "Sales Order Document Type Code",
+     "to": "Order Document Type",
+     "toColumn": "Sales Order Document Type Code"
+    },
+    {
+     "from": "Products",
+     "fromColumn": "Sub Brand Name",
+     "to": "Brands",
+     "toColumn": "Sub Brand"
+    }
+   ],
+   "uniqueKeys": [],
+   "typeDetail": [
+    {
+     "table": "Budget",
+     "column": "Month",
+     "expect": "^date$"
+    },
+    {
+     "table": "Forecast",
+     "column": "Forecast Month",
+     "expect": "^date$"
+    },
+    {
+     "table": "Invoices",
+     "column": "Billing Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Invoices",
+     "column": "Ship Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Orders",
+     "column": "Billing Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Orders",
+     "column": "Confirm Goods Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Orders",
+     "column": "Order Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Orders",
+     "column": "Request Goods Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Orders",
+     "column": "Ship Date",
+     "expect": "^date$"
+    }
+   ]
+  },
+  "powerbi-tmdl-bc-purchase": {
+   "importer": "semanticModel",
+   "input": {
+    "folder": "powerbi-tmdl-bc-purchase"
+   },
+   "counts": {
+    "tables": 34,
+    "columns": 511,
+    "primaryKeys": 8,
+    "relationships": 55
+   },
+   "notes": "Business Central Purchase app, TMDL with LF line ends and tab indents. A table is a `table` block in tables/ (34; G/L Accounts is in `G%2FL Accounts.tmdl`), a column a `column` line at one tab (7 calculated). Primary keys are the isKey columns (8). 5 calculated tables (DAX Date tables and label tables), no calculation group. 55 relationships, all many-to-one with TMDL defaults, none inactive. Power Query merges and appends: Type appends Item, Resources and G/L Accounts (Table.Combine); Documents appends; Purchase Value Entries merges the shared query Capacity Ledger Entries (Table.NestedJoin). dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail).",
+   "tables": [
+    {
+     "name": "COMPANY",
+     "pk": [],
+     "columns": [
+      [
+       "COMPANY",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Company Encoding",
+     "pk": [],
+     "columns": [
+      [
+       "ParameterValue",
+       "string",
+       ""
+      ],
+      [
+       "Encoded Company Name",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Date Ref",
+     "pk": [],
+     "columns": [
+      [
+       "Date",
+       "",
+       ""
+      ],
+      [
+       "DateKey",
+       "",
+       ""
+      ],
+      [
+       "Day of Month",
+       "",
+       ""
+      ],
+      [
+       "WeekDayNumber",
+       "",
+       ""
+      ],
+      [
+       "Week Day",
+       "",
+       ""
+      ],
+      [
+       "Sequential365DayNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Quarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Month",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Month Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Week",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Week Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar WeekYearOrder",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "Calendar MonthDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Quarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthInQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Month",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Month Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Week",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Week Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal WeekYearOrder",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "FW YearNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Year",
+       "",
+       ""
+      ],
+      [
+       "FW QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Quarter",
+       "",
+       ""
+      ],
+      [
+       "FW YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "FW MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Month",
+       "",
+       ""
+      ],
+      [
+       "FW YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Month Year",
+       "",
+       ""
+      ],
+      [
+       "FW WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Week",
+       "",
+       ""
+      ],
+      [
+       "FW PeriodNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Period",
+       "",
+       ""
+      ],
+      [
+       "FW YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Week Year",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfWeek",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfWeek",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "FW MonthDays",
+       "",
+       ""
+      ],
+      [
+       "FW QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "FW YearDays",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "Holiday Name",
+       "",
+       ""
+      ],
+      [
+       "IsWorkingDay",
+       "",
+       ""
+      ],
+      [
+       "Day Type",
+       "",
+       ""
+      ],
+      [
+       "Relative Day",
+       "",
+       ""
+      ],
+      [
+       "DateWithPurchases",
+       "",
+       "C"
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Date Table Setup",
+     "pk": [],
+     "columns": [
+      [
+       "fiscalCalendarFirstMonth",
+       "int64",
+       ""
+      ],
+      [
+       "firstDayOfWeek",
+       "string",
+       ""
+      ],
+      [
+       "isoCountryHolidays",
+       "string",
+       ""
+      ],
+      [
+       "weeklyType",
+       "string",
+       ""
+      ],
+      [
+       "quarterWeekType",
+       "string",
+       ""
+      ],
+      [
+       "calendarRange",
+       "string",
+       ""
+      ],
+      [
+       "calendarPrefix",
+       "string",
+       ""
+      ],
+      [
+       "fiscalGregorianPrefix",
+       "string",
+       ""
+      ],
+      [
+       "fiscalWeeklyPrefix",
+       "string",
+       ""
+      ],
+      [
+       "useCustomFisclPeriods",
+       "boolean",
+       ""
+      ],
+      [
+       "ignoreWeeklyPeriods",
+       "boolean",
+       ""
+      ],
+      [
+       "dateTblStart",
+       "dateTime",
+       ""
+      ],
+      [
+       "dateTblEnd",
+       "dateTime",
+       ""
+      ],
+      [
+       "First Day of Week",
+       "int64",
+       ""
+      ],
+      [
+       "Today",
+       "dateTime",
+       ""
+      ],
+      [
+       "timeZone",
+       "string",
+       ""
+      ],
+      [
+       "timeZoneDisplayName",
+       "string",
+       ""
+      ],
+      [
+       "entryNo",
+       "string",
+       ""
+      ],
+      [
+       "id",
+       "string",
+       ""
+      ],
+      [
+       "Last Refresh Time",
+       "dateTime",
+       ""
+      ],
+      [
+       "tenantID",
+       "string",
+       ""
+      ],
+      [
+       "UTC Hours",
+       "int64",
+       ""
+      ],
+      [
+       "UTC Minutes",
+       "int64",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Date",
+     "pk": [
+      "Date"
+     ],
+     "columns": [
+      [
+       "Date",
+       "",
+       "P"
+      ],
+      [
+       "DateKey",
+       "",
+       ""
+      ],
+      [
+       "Day of Month",
+       "",
+       ""
+      ],
+      [
+       "WeekDayNumber",
+       "",
+       ""
+      ],
+      [
+       "Week Day",
+       "",
+       ""
+      ],
+      [
+       "Sequential365DayNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Quarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Month",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Month Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Week",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar Week Year",
+       "",
+       ""
+      ],
+      [
+       "Calendar WeekYearOrder",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "Calendar EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "Calendar MonthDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar YearDays",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "Calendar DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Quarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthInQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Month",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Month Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Week",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal Week Year",
+       "",
+       ""
+      ],
+      [
+       "Fiscal WeekYearOrder",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "Fiscal MonthDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal YearDays",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "Fiscal DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "FW YearNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Year",
+       "",
+       ""
+      ],
+      [
+       "FW QuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Quarter",
+       "",
+       ""
+      ],
+      [
+       "FW YearQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Quarter Year",
+       "",
+       ""
+      ],
+      [
+       "FW MonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Month",
+       "",
+       ""
+      ],
+      [
+       "FW YearMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Month Year",
+       "",
+       ""
+      ],
+      [
+       "FW WeekNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Week",
+       "",
+       ""
+      ],
+      [
+       "FW PeriodNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Period",
+       "",
+       ""
+      ],
+      [
+       "FW YearWeekNumber",
+       "",
+       ""
+      ],
+      [
+       "FW Week Year",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfWeek",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfWeek",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeWeekPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeMonthPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeQuarterPos",
+       "",
+       ""
+      ],
+      [
+       "FW RelativeYearPos",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfMonth",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfMonth",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW StartOfYear",
+       "",
+       ""
+      ],
+      [
+       "FW EndOfYear",
+       "",
+       ""
+      ],
+      [
+       "FW MonthDays",
+       "",
+       ""
+      ],
+      [
+       "FW QuarterDays",
+       "",
+       ""
+      ],
+      [
+       "FW YearDays",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfMonthNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfQuarterNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DayOfYearNumber",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousWeek",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousMonth",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousQuarter",
+       "",
+       ""
+      ],
+      [
+       "FW DatePreviousYear",
+       "",
+       ""
+      ],
+      [
+       "Holiday Name",
+       "",
+       ""
+      ],
+      [
+       "IsWorkingDay",
+       "",
+       ""
+      ],
+      [
+       "Day Type",
+       "",
+       ""
+      ],
+      [
+       "Relative Day",
+       "",
+       ""
+      ],
+      [
+       "DateWithPurchases",
+       "",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Dimension Sets",
+     "pk": [
+      "dimensionSetID"
+     ],
+     "columns": [
+      [
+       "dimensionSetID",
+       "int64",
+       "P"
+      ],
+      [
+       "valueCount",
+       "int64",
+       ""
+      ],
+      [
+       "Global Dimension 1",
+       "string",
+       ""
+      ],
+      [
+       "dimension1ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Global Dimension 2",
+       "string",
+       ""
+      ],
+      [
+       "dimension2ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 3",
+       "string",
+       ""
+      ],
+      [
+       "dimension3ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 4",
+       "string",
+       ""
+      ],
+      [
+       "dimension4ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 5",
+       "string",
+       ""
+      ],
+      [
+       "dimension5ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 6",
+       "string",
+       ""
+      ],
+      [
+       "dimension6ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 7",
+       "string",
+       ""
+      ],
+      [
+       "dimension7ValueName",
+       "string",
+       ""
+      ],
+      [
+       "Shortcut Dimension 8",
+       "string",
+       ""
+      ],
+      [
+       "dimension8ValueName",
+       "string",
+       ""
+      ],
+      [
+       "id",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Documents",
+     "pk": [],
+     "columns": [
+      [
+       "Document No.",
+       "string",
+       ""
+      ],
+      [
+       "Document Type",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Key",
+       "string",
+       ""
+      ],
+      [
+       "Source Table",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "ENVIRONMENT",
+     "pk": [],
+     "columns": [
+      [
+       "ENVIRONMENT",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Fiscal Calendar Time Intelligence",
+     "pk": [],
+     "columns": [
+      [
+       "Column1",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "G/L Accounts",
+     "pk": [],
+     "columns": [
+      [
+       "G/L Account No.",
+       "string",
+       ""
+      ],
+      [
+       "G/L Account Name",
+       "string",
+       ""
+      ],
+      [
+       "G/L Account Type",
+       "string",
+       ""
+      ],
+      [
+       "G/L Account Income/Balance",
+       "string",
+       ""
+      ],
+      [
+       "G/L Account No. and Name",
+       "string",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Item Category",
+     "pk": [
+      "Item Category Code"
+     ],
+     "columns": [
+      [
+       "Item Category Code",
+       "string",
+       "P"
+      ],
+      [
+       "Item Category Description",
+       "string",
+       ""
+      ],
+      [
+       "Item Category Parent Category",
+       "string",
+       ""
+      ],
+      [
+       "Entity Path",
+       "",
+       "C"
+      ],
+      [
+       "Depth",
+       "",
+       "C"
+      ],
+      [
+       "EntityRowDepth",
+       "",
+       "C"
+      ],
+      [
+       "Item Category Code Level 1",
+       "",
+       "C"
+      ],
+      [
+       "Item Category Code Level 2",
+       "",
+       "C"
+      ],
+      [
+       "Item Category Code Level 3",
+       "",
+       "C"
+      ]
+     ]
+    },
+    {
+     "name": "Item Ledger Document Type",
+     "pk": [],
+     "columns": [
+      [
+       "Value",
+       "int64",
+       ""
+      ],
+      [
+       "Caption",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Item",
+     "pk": [
+      "Item No."
+     ],
+     "columns": [
+      [
+       "Item No. & Description",
+       "string",
+       ""
+      ],
+      [
+       "Item No.",
+       "string",
+       "P"
+      ],
+      [
+       "Item Description",
+       "string",
+       ""
+      ],
+      [
+       "Item Base Unit of Measure",
+       "string",
+       ""
+      ],
+      [
+       "Item Unit Cost (LCY)",
+       "decimal",
+       ""
+      ],
+      [
+       "Item Inventory Posting Group",
+       "string",
+       ""
+      ],
+      [
+       "Item Category Code",
+       "string",
+       ""
+      ],
+      [
+       "Item Category Description",
+       "string",
+       ""
+      ],
+      [
+       "Item Routing No.",
+       "string",
+       ""
+      ],
+      [
+       "Item Production BOM No.",
+       "string",
+       ""
+      ],
+      [
+       "Item Replenishment System",
+       "string",
+       ""
+      ],
+      [
+       "Item Single-Level Cap. Ovhd Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Single-Level Capacity Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Single-Level Material Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Single-Level Mfg. Ovhd Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Single-Level Subcontrd. Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Single-Lvl Mat. Non-Invt. Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Cap. Overhead Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Capacity Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Mat. Non-Invt. Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Material Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Mfg. Ovhd Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Rolled-up Subcontracted Cost",
+       "double",
+       ""
+      ],
+      [
+       "Item Scrap %",
+       "double",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Localized Labels",
+     "pk": [],
+     "columns": [
+      [
+       "unused",
+       "",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Location",
+     "pk": [
+      "Location Code"
+     ],
+     "columns": [
+      [
+       "Location Code",
+       "string",
+       "P"
+      ],
+      [
+       "Location Name",
+       "string",
+       ""
+      ],
+      [
+       "Location Adjustment Bin Code",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Pareto Scale",
+     "pk": [],
+     "columns": [
+      [
+       "Value",
+       "",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Project",
+     "pk": [],
+     "columns": [
+      [
+       "Project No.",
+       "string",
+       ""
+      ],
+      [
+       "Project Description",
+       "string",
+       ""
+      ],
+      [
+       "Project Bill to Customer No.",
+       "string",
+       ""
+      ],
+      [
+       "Project Creation Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Project Starting Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Project Ending Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Project Status",
+       "string",
+       ""
+      ],
+      [
+       "Project Posting Group",
+       "string",
+       ""
+      ],
+      [
+       "Project Blocked",
+       "string",
+       ""
+      ],
+      [
+       "Project Project Manager",
+       "string",
+       ""
+      ],
+      [
+       "Project Complete",
+       "boolean",
+       ""
+      ],
+      [
+       "Project No. & Description",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Budget Name",
+     "pk": [],
+     "columns": [
+      [
+       "Purchase Budget Name",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Budget Description",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Budget",
+     "pk": [
+      "Entry No."
+     ],
+     "columns": [
+      [
+       "Vendor No.",
+       "string",
+       ""
+      ],
+      [
+       "Entry No.",
+       "int64",
+       "P"
+      ],
+      [
+       "Budget Name",
+       "string",
+       ""
+      ],
+      [
+       "Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Item No.",
+       "string",
+       ""
+      ],
+      [
+       "Location Code",
+       "string",
+       ""
+      ],
+      [
+       "Quantity",
+       "double",
+       ""
+      ],
+      [
+       "Cost Amount",
+       "decimal",
+       ""
+      ],
+      [
+       "Dimension Set ID",
+       "int64",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Credit Lines",
+     "pk": [],
+     "columns": [
+      [
+       "postingDate",
+       "dateTime",
+       ""
+      ],
+      [
+       "type",
+       "string",
+       ""
+      ],
+      [
+       "Description",
+       "string",
+       ""
+      ],
+      [
+       "Document No.",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Credit Line No.",
+       "int64",
+       ""
+      ],
+      [
+       "no",
+       "string",
+       ""
+      ],
+      [
+       "locationCode",
+       "string",
+       ""
+      ],
+      [
+       "quantityBase",
+       "double",
+       ""
+      ],
+      [
+       "amount",
+       "double",
+       ""
+      ],
+      [
+       "unitCostLCY",
+       "double",
+       ""
+      ],
+      [
+       "returnReasonCode",
+       "string",
+       ""
+      ],
+      [
+       "Exprected Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "dimensionSetID",
+       "int64",
+       ""
+      ],
+      [
+       "projectNo",
+       "string",
+       ""
+      ],
+      [
+       "payToVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "buyFromVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "purchaseCreditMemoDocumentNo",
+       "string",
+       ""
+      ],
+      [
+       "campaignNo",
+       "string",
+       ""
+      ],
+      [
+       "purchaserCode",
+       "string",
+       ""
+      ],
+      [
+       "ETag",
+       "string",
+       ""
+      ],
+      [
+       "Source Table",
+       "string",
+       ""
+      ],
+      [
+       "Document Type",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Key",
+       "string",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Document Type",
+     "pk": [],
+     "columns": [
+      [
+       "Value",
+       "int64",
+       ""
+      ],
+      [
+       "Caption",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Invoice Lines",
+     "pk": [],
+     "columns": [
+      [
+       "postingDate",
+       "dateTime",
+       ""
+      ],
+      [
+       "type",
+       "string",
+       ""
+      ],
+      [
+       "Description",
+       "string",
+       ""
+      ],
+      [
+       "Document No.",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Invoice Line No.",
+       "int64",
+       ""
+      ],
+      [
+       "no",
+       "string",
+       ""
+      ],
+      [
+       "locationCode",
+       "string",
+       ""
+      ],
+      [
+       "quantityBase",
+       "double",
+       ""
+      ],
+      [
+       "amount",
+       "double",
+       ""
+      ],
+      [
+       "unitCostLCY",
+       "double",
+       ""
+      ],
+      [
+       "returnReasonCode",
+       "string",
+       ""
+      ],
+      [
+       "Expected Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "dimensionSetID",
+       "int64",
+       ""
+      ],
+      [
+       "projectNo",
+       "string",
+       ""
+      ],
+      [
+       "payToVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "buyFromVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "purchaseInvoiceDocumentNo",
+       "string",
+       ""
+      ],
+      [
+       "campaignNo",
+       "string",
+       ""
+      ],
+      [
+       "purchaserCode",
+       "string",
+       ""
+      ],
+      [
+       "quoteNo",
+       "string",
+       ""
+      ],
+      [
+       "ETag",
+       "string",
+       ""
+      ],
+      [
+       "Source Table",
+       "string",
+       ""
+      ],
+      [
+       "Document Type",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Key",
+       "string",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Line Type",
+     "pk": [],
+     "columns": [
+      [
+       "Value",
+       "int64",
+       ""
+      ],
+      [
+       "Caption",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Lines",
+     "pk": [],
+     "columns": [
+      [
+       "Document No.",
+       "string",
+       ""
+      ],
+      [
+       "Document Type",
+       "string",
+       ""
+      ],
+      [
+       "payToVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "buyFromVendorNo",
+       "string",
+       ""
+      ],
+      [
+       "purchaserCode",
+       "string",
+       ""
+      ],
+      [
+       "quoteNo",
+       "string",
+       ""
+      ],
+      [
+       "Order Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Document Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Due Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "campaignNo",
+       "string",
+       ""
+      ],
+      [
+       "documentNo",
+       "string",
+       ""
+      ],
+      [
+       "Type",
+       "string",
+       ""
+      ],
+      [
+       "Description",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Line No.",
+       "int64",
+       ""
+      ],
+      [
+       "itemNo",
+       "string",
+       ""
+      ],
+      [
+       "locationCode",
+       "string",
+       ""
+      ],
+      [
+       "quantityBase",
+       "double",
+       ""
+      ],
+      [
+       "outstandingQtyBase",
+       "double",
+       ""
+      ],
+      [
+       "outstandingAmountLCY",
+       "double",
+       ""
+      ],
+      [
+       "amount",
+       "double",
+       ""
+      ],
+      [
+       "unitCostLCY",
+       "double",
+       ""
+      ],
+      [
+       "outstandingQuantity",
+       "double",
+       ""
+      ],
+      [
+       "returnReasonCode",
+       "string",
+       ""
+      ],
+      [
+       "Planned Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Expected Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Promised Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "Requested Receipt Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "dimensionSetID",
+       "int64",
+       ""
+      ],
+      [
+       "qtyRcdNotInvd",
+       "double",
+       ""
+      ],
+      [
+       "qtyRcdNotInvdBase",
+       "double",
+       ""
+      ],
+      [
+       "qtyToReceive",
+       "double",
+       ""
+      ],
+      [
+       "qtyToReceiveBase",
+       "double",
+       ""
+      ],
+      [
+       "amtRcdNotInvdExVATLCY",
+       "double",
+       ""
+      ],
+      [
+       "amtRcdNotInvd",
+       "double",
+       ""
+      ],
+      [
+       "amtRcdNotInvdLCY",
+       "double",
+       ""
+      ],
+      [
+       "qtyReceived",
+       "double",
+       ""
+      ],
+      [
+       "qtyReceivedBase",
+       "double",
+       ""
+      ],
+      [
+       "quantityInvoiced",
+       "double",
+       ""
+      ],
+      [
+       "Purchase Key",
+       "string",
+       ""
+      ],
+      [
+       "purchaseLineDocumentType",
+       "string",
+       ""
+      ],
+      [
+       "Source Table",
+       "string",
+       ""
+      ],
+      [
+       "projectNo",
+       "string",
+       ""
+      ],
+      [
+       "prepmtAmountInvLCY",
+       "double",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchase Value Entries",
+     "pk": [],
+     "columns": [
+      [
+       "Item Ledger Entry No.",
+       "int64",
+       ""
+      ],
+      [
+       "Value Entry No.",
+       "int64",
+       ""
+      ],
+      [
+       "Value Entry Type",
+       "string",
+       ""
+      ],
+      [
+       "Document No.",
+       "string",
+       ""
+      ],
+      [
+       "Document Type",
+       "string",
+       ""
+      ],
+      [
+       "Vendor No.",
+       "string",
+       ""
+      ],
+      [
+       "Date",
+       "dateTime",
+       ""
+      ],
+      [
+       "locationCode",
+       "string",
+       ""
+      ],
+      [
+       "dimensionSetID",
+       "int64",
+       ""
+      ],
+      [
+       "Invoiced Quantity",
+       "double",
+       ""
+      ],
+      [
+       "Cost Amount Actual",
+       "decimal",
+       ""
+      ],
+      [
+       "salespersonPurchaserCode",
+       "string",
+       ""
+      ],
+      [
+       "Purchase Key",
+       "string",
+       ""
+      ],
+      [
+       "Source Table",
+       "string",
+       ""
+      ],
+      [
+       "returnReasonCode",
+       "string",
+       ""
+      ],
+      [
+       "Item Ledger Entry Type",
+       "string",
+       ""
+      ],
+      [
+       "projectNo",
+       "string",
+       ""
+      ],
+      [
+       "type",
+       "string",
+       ""
+      ],
+      [
+       "Adjustment",
+       "boolean",
+       ""
+      ],
+      [
+       "Capacity Ledger Entry No.",
+       "int64",
+       ""
+      ],
+      [
+       "itemNo",
+       "string",
+       ""
+      ],
+      [
+       "discountAmount",
+       "double",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Purchaser",
+     "pk": [
+      "Purchaser Code"
+     ],
+     "columns": [
+      [
+       "Purchaser Code",
+       "string",
+       "P"
+      ],
+      [
+       "Purchaser Name",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Reason Codes",
+     "pk": [],
+     "columns": [
+      [
+       "Return Reason Code",
+       "string",
+       ""
+      ],
+      [
+       "Return Reason Description",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Resources",
+     "pk": [],
+     "columns": [
+      [
+       "Resource No.",
+       "string",
+       ""
+      ],
+      [
+       "Resource Name",
+       "string",
+       ""
+      ],
+      [
+       "Resource Base Unit of Measure",
+       "string",
+       ""
+      ],
+      [
+       "Resource Unit Cost",
+       "double",
+       ""
+      ],
+      [
+       "Resource Unit Price",
+       "double",
+       ""
+      ],
+      [
+       "Resource No. and Name",
+       "string",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Standard Calendar Time Intelligence",
+     "pk": [],
+     "columns": [
+      [
+       "Column1",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Translated Localized Labels",
+     "pk": [],
+     "columns": [
+      [
+       "unused",
+       "",
+       ""
+      ]
+     ],
+     "calculatedTable": true
+    },
+    {
+     "name": "Type",
+     "pk": [],
+     "columns": [
+      [
+       "Type",
+       "string",
+       ""
+      ],
+      [
+       "Type Key",
+       "string",
+       ""
+      ],
+      [
+       "No.",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Vendor",
+     "pk": [
+      "Vendor No."
+     ],
+     "columns": [
+      [
+       "Vendor No. & Name",
+       "string",
+       ""
+      ],
+      [
+       "Vendor No.",
+       "string",
+       "P"
+      ],
+      [
+       "Vendor Name",
+       "string",
+       ""
+      ],
+      [
+       "Vendor Address",
+       "string",
+       ""
+      ],
+      [
+       "Vendor Address 2",
+       "string",
+       ""
+      ],
+      [
+       "Vendor City",
+       "string",
+       ""
+      ],
+      [
+       "Vendor Post Code",
+       "string",
+       ""
+      ],
+      [
+       "Vendor State",
+       "string",
+       ""
+      ],
+      [
+       "Vendor Country/Region Code",
+       "string",
+       ""
+      ],
+      [
+       "Vendor Posting Group",
+       "string",
+       ""
+      ],
+      [
+       "ETag",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Weekly Calendar Time Intelligence",
+     "pk": [],
+     "columns": [
+      [
+       "Column1",
+       "string",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Working Days",
+     "pk": [],
+     "columns": [
+      [
+       "FSG_PBI_Day_Number",
+       "int64",
+       ""
+      ],
+      [
+       "id",
+       "string",
+       ""
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Location Code",
+     "to": "Location",
+     "toColumn": "Location Code"
+    },
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Vendor No.",
+     "to": "Vendor",
+     "toColumn": "Vendor No."
+    },
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Dimension Set ID",
+     "to": "Dimension Sets",
+     "toColumn": "dimensionSetID"
+    },
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Item No.",
+     "to": "Item",
+     "toColumn": "Item No."
+    },
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Budget Name",
+     "to": "Purchase Budget Name",
+     "toColumn": "Purchase Budget Name"
+    },
+    {
+     "from": "Item",
+     "fromColumn": "Item Category Code",
+     "to": "Item Category",
+     "toColumn": "Item Category Code"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Vendor No.",
+     "to": "Vendor",
+     "toColumn": "Vendor No."
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "dimensionSetID",
+     "to": "Dimension Sets",
+     "toColumn": "dimensionSetID"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "salespersonPurchaserCode",
+     "to": "Purchaser",
+     "toColumn": "Purchaser Code"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "locationCode",
+     "to": "Location",
+     "toColumn": "Location Code"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "purchaserCode",
+     "to": "Purchaser",
+     "toColumn": "Purchaser Code"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Purchase Key",
+     "to": "Documents",
+     "toColumn": "Purchase Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "payToVendorNo",
+     "to": "Vendor",
+     "toColumn": "Vendor No."
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Purchase Key",
+     "to": "Documents",
+     "toColumn": "Purchase Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "locationCode",
+     "to": "Location",
+     "toColumn": "Location Code"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "payToVendorNo",
+     "to": "Vendor",
+     "toColumn": "Vendor No."
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "dimensionSetID",
+     "to": "Dimension Sets",
+     "toColumn": "dimensionSetID"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "purchaserCode",
+     "to": "Purchaser",
+     "toColumn": "Purchaser Code"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "locationCode",
+     "to": "Location",
+     "toColumn": "Location Code"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "Purchase Key",
+     "to": "Documents",
+     "toColumn": "Purchase Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "Purchase Key",
+     "to": "Documents",
+     "toColumn": "Purchase Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "payToVendorNo",
+     "to": "Vendor",
+     "toColumn": "Vendor No."
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "purchaserCode",
+     "to": "Purchaser",
+     "toColumn": "Purchaser Code"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "locationCode",
+     "to": "Location",
+     "toColumn": "Location Code"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "dimensionSetID",
+     "to": "Dimension Sets",
+     "toColumn": "dimensionSetID"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "projectNo",
+     "to": "Project",
+     "toColumn": "Project No."
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "projectNo",
+     "to": "Project",
+     "toColumn": "Project No."
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "projectNo",
+     "to": "Project",
+     "toColumn": "Project No."
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "projectNo",
+     "to": "Project",
+     "toColumn": "Project No."
+    },
+    {
+     "from": "Purchase Budget",
+     "fromColumn": "Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Document Date",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "postingDate",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "postingDate",
+     "to": "Date",
+     "toColumn": "Date"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "dimensionSetID",
+     "to": "Dimension Sets",
+     "toColumn": "dimensionSetID"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "returnReasonCode",
+     "to": "Reason Codes",
+     "toColumn": "Return Reason Code"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "returnReasonCode",
+     "to": "Reason Codes",
+     "toColumn": "Return Reason Code"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "returnReasonCode",
+     "to": "Reason Codes",
+     "toColumn": "Return Reason Code"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "returnReasonCode",
+     "to": "Reason Codes",
+     "toColumn": "Return Reason Code"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Type Key",
+     "to": "Type",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Type Key",
+     "to": "Type",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "Type Key",
+     "to": "Type",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "Type Key",
+     "to": "Type",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Type Key",
+     "to": "Item",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Type Key",
+     "to": "Item",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Type Key",
+     "to": "G/L Accounts",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Lines",
+     "fromColumn": "Type Key",
+     "to": "Resources",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Type Key",
+     "to": "G/L Accounts",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Value Entries",
+     "fromColumn": "Type Key",
+     "to": "Resources",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "Type Key",
+     "to": "G/L Accounts",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "Type Key",
+     "to": "Resources",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Invoice Lines",
+     "fromColumn": "Type Key",
+     "to": "Item",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "Type Key",
+     "to": "G/L Accounts",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "Type Key",
+     "to": "Resources",
+     "toColumn": "Type Key"
+    },
+    {
+     "from": "Purchase Credit Lines",
+     "fromColumn": "Type Key",
+     "to": "Item",
+     "toColumn": "Type Key"
+    }
+   ],
+   "uniqueKeys": [],
+   "typeDetail": [
+    {
+     "table": "Date Table Setup",
+     "column": "dateTblStart",
+     "expect": "^date$"
+    },
+    {
+     "table": "Date Table Setup",
+     "column": "dateTblEnd",
+     "expect": "^date$"
+    },
+    {
+     "table": "Date Table Setup",
+     "column": "Today",
+     "expect": "^date$"
+    },
+    {
+     "table": "Date Table Setup",
+     "column": "Last Refresh Time",
+     "expect": "^time(?!stamp)"
+    },
+    {
+     "table": "Project",
+     "column": "Project Creation Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Project",
+     "column": "Project Starting Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Project",
+     "column": "Project Ending Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Budget",
+     "column": "Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Credit Lines",
+     "column": "postingDate",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Credit Lines",
+     "column": "Exprected Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Invoice Lines",
+     "column": "postingDate",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Invoice Lines",
+     "column": "Expected Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Order Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Document Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Due Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Planned Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Expected Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Promised Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Lines",
+     "column": "Requested Receipt Date",
+     "expect": "^date$"
+    },
+    {
+     "table": "Purchase Value Entries",
+     "column": "Date",
+     "expect": "^date$"
+    }
+   ]
   }
  }
 }

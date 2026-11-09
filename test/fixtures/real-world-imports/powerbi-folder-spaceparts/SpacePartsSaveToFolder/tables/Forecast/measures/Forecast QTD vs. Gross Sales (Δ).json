@@ -1,0 +1,10 @@
+{
+  "name": "Forecast QTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Forecast QTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\iii. QTD",
+  "lineageTag": "86a370f9-61ff-46d1-a054-614a604cf185"
+}

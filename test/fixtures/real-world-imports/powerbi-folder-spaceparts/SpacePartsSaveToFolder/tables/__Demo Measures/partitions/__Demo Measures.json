@@ -1,0 +1,14 @@
+{
+  "name": "__Demo Measures",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "SELECTCOLUMNS (",
+      "    { 1 },",
+      "    \"__Measures\", ''[Value]",
+      ")"
+    ]
+  }
+}

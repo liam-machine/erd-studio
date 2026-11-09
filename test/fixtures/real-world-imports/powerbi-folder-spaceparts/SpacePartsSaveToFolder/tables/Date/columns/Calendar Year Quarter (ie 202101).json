@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Year Quarter (ie 202101)",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Year Quarter (ie 202101)]",
+  "displayFolder": "2. Quarter",
+  "lineageTag": "6303b430-6995-46b7-82b1-4cd3102b9d6d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

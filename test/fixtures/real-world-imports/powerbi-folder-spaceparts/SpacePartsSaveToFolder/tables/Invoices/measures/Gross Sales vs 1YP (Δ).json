@@ -1,0 +1,10 @@
+{
+  "name": "Gross Sales vs 1YP (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Gross Sales 1YP]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\II. 1YP\\Daily",
+  "lineageTag": "8f2720aa-6d1b-43d8-a43c-58e1293ab7bf"
+}

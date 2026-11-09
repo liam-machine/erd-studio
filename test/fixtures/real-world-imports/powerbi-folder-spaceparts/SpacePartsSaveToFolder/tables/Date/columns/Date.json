@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Date",
+  "dataType": "dateTime",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isKey": true,
+  "sourceColumn": "[Date]",
+  "displayFolder": "6. Calendar Date",
+  "lineageTag": "09572bf6-eb54-4fb5-8ad1-1dee0c198ec0",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

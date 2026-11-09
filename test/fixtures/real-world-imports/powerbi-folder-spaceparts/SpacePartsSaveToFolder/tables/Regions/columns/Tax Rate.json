@@ -1,0 +1,16 @@
+{
+  "name": "Tax Rate",
+  "dataType": "decimal",
+  "isHidden": true,
+  "sourceColumn": "tax_rate",
+  "formatString": "#,##0.000",
+  "displayFolder": "2. Region Attributes",
+  "lineageTag": "39630edd-0932-46c0-9e86-5db2c308b51a",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

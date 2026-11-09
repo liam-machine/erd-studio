@@ -1,0 +1,14 @@
+{
+  "name": "Flagship",
+  "dataType": "string",
+  "sourceColumn": "flagship",
+  "displayFolder": "1. Brand Hierarchy",
+  "lineageTag": "16be3840-ea52-4cb5-bbc1-f866be4193aa",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

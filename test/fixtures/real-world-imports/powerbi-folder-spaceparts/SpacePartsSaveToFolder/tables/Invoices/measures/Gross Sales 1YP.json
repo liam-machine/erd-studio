@@ -1,0 +1,13 @@
+{
+  "name": "Gross Sales 1YP",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Gross Sales],",
+    "    DATEADD ('Date'[Date], -1, YEAR)",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\II. 1YP\\Daily",
+  "lineageTag": "16f7ed63-9149-4aa0-a7b0-fb57300ee516"
+}

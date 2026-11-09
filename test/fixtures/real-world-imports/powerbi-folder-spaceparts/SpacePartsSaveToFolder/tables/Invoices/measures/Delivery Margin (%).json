@@ -1,0 +1,18 @@
+{
+  "name": "Delivery Margin (%)",
+  "description": "The delivery margin only considers the revenue and costs associated with freights, delivery and shipments.",
+  "expression": [
+    "",
+    "VAR _TOTAL =",
+    "    CALCULATE (",
+    "        [Total Freight Surcharge],",
+    "        'Invoice Document Type'[Billing Document Type Code] IN {\"invoice\", \"express\"}",
+    "    )",
+    "VAR _MARGIN = [Delivery Margin (Value)]",
+    "RETURN",
+    "    DIVIDE (_MARGIN, _TOTAL)"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "1. Value\\d. Margins\\III. Delivery Margin\\%",
+  "lineageTag": "4d723c79-cfbc-4e96-b733-149429093b95"
+}

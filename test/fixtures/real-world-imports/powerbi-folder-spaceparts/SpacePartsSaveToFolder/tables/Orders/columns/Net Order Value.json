@@ -1,0 +1,15 @@
+{
+  "name": "Net Order Value",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "net_order_value",
+  "displayFolder": "Columns\\1. Facts",
+  "lineageTag": "ce7d5f32-b1d9-4c34-b778-963c65d7931d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "% Workdays YTD",
+  "expression": [
+    "IF (",
+    "    HASONEVALUE ('Date'[Calendar Year (ie 2021)]),",
+    "    MROUND (",
+    "        DIVIDE ([# Workdays YTD], [# Workdays in Selected Year]),",
+    "        0.01",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0%",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "74c83d7c-2d91-4dc3-87f3-d129a2b220ae"
+}

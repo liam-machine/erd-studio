@@ -1,0 +1,15 @@
+{
+  "name": "Customer Key",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "customer_key",
+  "displayFolder": "Columns\\3. Keys",
+  "lineageTag": "9496ba22-b180-436d-bcdc-9a1a74722321",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

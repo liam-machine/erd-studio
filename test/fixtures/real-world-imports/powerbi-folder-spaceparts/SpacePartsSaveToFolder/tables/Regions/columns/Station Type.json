@@ -1,0 +1,14 @@
+{
+  "name": "Station Type",
+  "dataType": "string",
+  "sourceColumn": "station_type",
+  "displayFolder": "2. Region Attributes",
+  "lineageTag": "143c4d29-e3be-4b74-9cc2-f2f5b2e31c5c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

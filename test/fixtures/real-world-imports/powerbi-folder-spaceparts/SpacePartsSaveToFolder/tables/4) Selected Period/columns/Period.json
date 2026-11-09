@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Period",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Period]",
+  "sortByColumn": "Order",
+  "lineageTag": "1f98320e-9b80-4c14-abbd-50b713f55446",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

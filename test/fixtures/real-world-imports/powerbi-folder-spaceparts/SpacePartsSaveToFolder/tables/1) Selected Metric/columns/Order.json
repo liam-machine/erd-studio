@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Order",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[Order]",
+  "lineageTag": "734455ee-3587-4f7b-bdd9-34f849747e7d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

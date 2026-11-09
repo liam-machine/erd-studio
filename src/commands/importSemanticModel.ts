@@ -3,7 +3,8 @@
  * — a semantic model saved as files in as a new diagram: a Power BI Project's
  * `<Name>.SemanticModel` folder (or the older `<Name>.Dataset`), as TMDL
  * (`definition/*.tmdl`) or as one `model.bim`, from Power BI Desktop, Fabric
- * Git integration or Tabular Editor.
+ * Git integration or Tabular Editor, or a Tabular Editor Save to Folder model
+ * (`database.json` and a JSON file per table, column, relationship…).
  *
  * Steps: a folder (an Open dialog) → every file under it, bounded →
  * `findSemanticModels` (a quick pick when the folder holds several) → read
@@ -57,6 +58,7 @@ import {
   semanticModelToDbml,
   type SemanticModelEntry,
   type SemanticModelFile,
+  type SemanticModelKind,
 } from '../services/semanticModelImport';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
@@ -163,7 +165,7 @@ export async function importSemanticModel(
   // Only model files count toward the bound: findSemanticModels reads nothing
   // else, and a big repo holding one model somewhere must still import from its root.
   // Model files, and the files of formats this import does not read (only to say so by name when no model is found).
-  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: (f) => isSemanticModelFile(f) || isUnreadModelFile(f), limit: MAX_SEMANTIC_MODEL_FILES });
+  const walk = await walkSemanticModelFiles(folder, (f) => ui.readDirectory(f), { alsoUnread: true });
   // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
   if (quick && (walk.truncated || walk.files.length === 0)) {
     if (quiet) {
@@ -217,7 +219,7 @@ export async function importSemanticModel(
         options: offered.map((e) => ({
           id: e.root,
           label: path.posix.basename(e.root) || e.name,
-          description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim',
+          description: SEMANTIC_MODEL_FORMAT_LABELS[e.kind],
         })),
       },
       // The user's own choice: never quiet from here on (a model that does not convert says why).
@@ -230,7 +232,7 @@ export async function importSemanticModel(
     };
   } else if (entries.length > 1) {
     const picked = await ui.pickModel(
-      entries.map((e) => ({ label: e.name, description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim', detail: e.root, entry: e })),
+      entries.map((e) => ({ label: e.name, description: SEMANTIC_MODEL_FORMAT_LABELS[e.kind], detail: e.root, entry: e })),
       { title: TITLE, placeHolder: 'Which semantic model?', ignoreFocusOut: true },
     );
     if (!picked) return cancelled();
@@ -284,6 +286,8 @@ export async function importSemanticModel(
     return undefined;
   }
   const warnings = [...read.warnings, ...converted.warnings];
+  // What did not read was left out (each named in the ledger, so in the draft's Not imported list): every message to the log.
+  for (const p of read.problems ?? []) log.info(`[ERD Studio] ${TITLE}: ${p.file}${p.line !== undefined ? ` line ${p.line}` : ''}: ${p.message}`);
   for (const line of [...converted.skipped, ...warnings]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
   for (const line of ledgerLogLines(converted.ledger ?? [], TITLE)) log.info(`[ERD Studio] ${line}`);
 
@@ -362,9 +366,9 @@ export function quietImportSemanticModelUi(base: ImportSemanticModelUi): ImportS
   };
 }
 
-/** A file of a model format this import does not read: a `.pbix` / `.pbit` (a zip), Tabular Editor 2's folder `database.json`. */
+/** A file of a model format this import does not read: a `.pbix` / `.pbit` (a zip). */
 export function isUnreadModelFile(name: string): boolean {
-  return /\.(pbix|pbit)$/i.test(name) || /(^|[\\/])database\.json$/i.test(name);
+  return /\.(pbix|pbit)$/i.test(name);
 }
 
 /**
@@ -380,14 +384,57 @@ export function unreadModelFormat(paths: readonly string[]): string | undefined 
   }
   const folderModel = paths.find((p) => base(p).toLowerCase() === 'database.json');
   if (folderModel) {
-    return `${folderModel} is a model saved by Tabular Editor's Save to Folder (JSON files), which this import does not read: open it in Tabular Editor and save it as TMDL or as one model.bim, then import that.`;
+    return `${folderModel} has no tables/ folder of JSON files beside it, so it is not a model saved by Tabular Editor's Save to Folder: pick the folder Tabular Editor saved the whole model to.`;
   }
   return undefined;
 }
 
-/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */
+/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`), or that starts a Save to Folder model (`database.json`). */
 export function isSemanticModelFile(name: string): boolean {
-  return /\.(tmdl|bim)$/i.test(name);
+  return /\.(tmdl|bim)$/i.test(name) || /(^|[\\/])database\.json$/i.test(name);
+}
+
+/** How the model pick and the draft's Model list name each format. */
+export const SEMANTIC_MODEL_FORMAT_LABELS: Readonly<Record<SemanticModelKind, string>> = {
+  tmdl: 'TMDL',
+  tmsl: 'model.bim',
+  folder: 'Tabular Editor folder',
+};
+
+/**
+ * Every model file under `folder`, bounded by {@link MAX_SEMANTIC_MODEL_FILES}:
+ * `.tmdl`, `.bim` and `database.json` (`alsoUnread`: `.pbix` / `.pbit` too,
+ * only to name them), then, under each `database.json`'s folder that has a
+ * `tables/` folder beside it, every `.json` (a Save to Folder model's files). Only model files count toward the
+ * bound, so a big repo holding one model somewhere still imports from its root.
+ */
+export async function walkSemanticModelFiles(
+  folder: string,
+  readDirectory: (folder: string) => Promise<DirEntries>,
+  opts: { alsoUnread?: boolean } = {},
+): Promise<{ files: string[]; truncated: boolean }> {
+  const walk = await walkFiles(folder, readDirectory, {
+    include: (f) => isSemanticModelFile(f) || (!!opts.alsoUnread && isUnreadModelFile(f)),
+    limit: MAX_SEMANTIC_MODEL_FILES,
+  });
+  if (walk.truncated) return walk;
+  const files = new Set(walk.files);
+  const roots = walk.files.filter((f) => path.basename(f).toLowerCase() === 'database.json').map((f) => path.dirname(f));
+  for (const root of roots) {
+    // Only a Save to Folder model's folder (a tables/ folder beside its database.json) is walked: a database.json
+    // of another tool (db-migrate's, at a repo's root) must not pull in every JSON file of the repo.
+    let entries: DirEntries;
+    try {
+      entries = await readDirectory(root);
+    } catch {
+      continue;
+    }
+    if (!entries.some(([name, isDirectory]) => isDirectory && name.toLowerCase() === 'tables')) continue;
+    const inner = await walkFiles(root, readDirectory, { include: (f) => /\.json$/i.test(f), limit: MAX_SEMANTIC_MODEL_FILES - files.size + 1 });
+    for (const f of inner.files) files.add(f);
+    if (inner.truncated || files.size > MAX_SEMANTIC_MODEL_FILES) return { files: [...files], truncated: true };
+  }
+  return { files: [...files].sort(), truncated: false };
 }
 
 /** The real UI. */

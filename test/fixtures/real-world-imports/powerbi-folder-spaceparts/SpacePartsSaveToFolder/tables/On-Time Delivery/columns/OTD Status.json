@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "OTD Status",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[OTD Status]",
+  "sortByColumn": "OTD Sort Order",
+  "displayFolder": "Columns\\1. OTD",
+  "lineageTag": "7f04b315-56ac-43ca-ad33-ff6229fe4e8c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

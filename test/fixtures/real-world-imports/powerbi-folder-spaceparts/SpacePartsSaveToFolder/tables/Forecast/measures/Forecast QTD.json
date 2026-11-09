@@ -1,0 +1,19 @@
+{
+  "name": "Forecast QTD",
+  "expression": [
+    "",
+    "VAR _DATES_QTD =",
+    "    CALCULATETABLE (",
+    "        DATESQTD ('Date'[Date]),",
+    "        'Date'[IsThisMonth] = FALSE",
+    "    )",
+    "VAR _CURRENT_MONTH_Forecast = [Forecast MTD]",
+    "VAR _QTD_Forecast_BEFORE_THIS_MONTH = CALCULATE ([Forecast], _DATES_QTD)",
+    "VAR _RESULT = _CURRENT_MONTH_Forecast + _QTD_Forecast_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\iii. QTD",
+  "lineageTag": "b016de82-c11c-4231-a206-c2d02568aa7f"
+}

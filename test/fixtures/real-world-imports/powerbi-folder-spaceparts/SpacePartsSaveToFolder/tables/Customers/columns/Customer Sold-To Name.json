@@ -1,0 +1,14 @@
+{
+  "name": "Customer Sold-To Name",
+  "dataType": "string",
+  "sourceColumn": "customer_soldto_name",
+  "displayFolder": "1. Customer Hierarchy",
+  "lineageTag": "57a55013-2487-4f85-9924-ba95d30adf0c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

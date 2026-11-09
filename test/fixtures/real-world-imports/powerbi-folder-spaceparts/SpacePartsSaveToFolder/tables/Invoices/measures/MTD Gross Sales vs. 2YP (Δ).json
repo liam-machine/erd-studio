@@ -1,0 +1,10 @@
+{
+  "name": "MTD Gross Sales vs. 2YP (Δ)",
+  "expression": [
+    "",
+    "[MTD Gross Sales] - [MTD Gross Sales 1YP]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\III. 2YP\\MTD",
+  "lineageTag": "556ddb49-2de6-4d05-bda4-197a7ed5d320"
+}

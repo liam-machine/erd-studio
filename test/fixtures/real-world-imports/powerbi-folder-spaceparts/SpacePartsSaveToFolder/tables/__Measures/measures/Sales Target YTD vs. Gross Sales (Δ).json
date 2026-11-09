@@ -1,0 +1,10 @@
+{
+  "name": "Sales Target YTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Actuals YTD] - [Sales Target YTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "4. YTD",
+  "lineageTag": "60e7cc65-3801-4cf5-b186-7216e43c7086"
+}

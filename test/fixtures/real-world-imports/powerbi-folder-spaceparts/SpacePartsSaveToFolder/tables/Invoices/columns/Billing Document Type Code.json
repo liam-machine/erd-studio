@@ -1,0 +1,16 @@
+{
+  "name": "Billing Document Type Code",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "billing_document_type_code",
+  "sourceProviderType": "nvarchar(max)",
+  "displayFolder": "Columns",
+  "lineageTag": "705c6e4f-d7d8-4230-b26e-499b1e09188a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

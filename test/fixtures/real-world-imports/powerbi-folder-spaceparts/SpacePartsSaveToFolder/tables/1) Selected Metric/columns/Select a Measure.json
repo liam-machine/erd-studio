@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Select a Measure",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Select a Measure]",
+  "sortByColumn": "Order",
+  "lineageTag": "16dc4342-12d1-4da6-89d8-63ba7be01ddf",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

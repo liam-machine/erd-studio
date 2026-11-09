@@ -1,0 +1,14 @@
+{
+  "name": "Type",
+  "dataType": "string",
+  "sourceColumn": "type",
+  "displayFolder": "2. Brand Attributes",
+  "lineageTag": "f1c1b582-1730-4828-a57c-9e4148579d68",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

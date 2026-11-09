@@ -1,0 +1,20 @@
+{
+  "name": "Freight",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "freight",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "e9872e0c-ba0f-4ba7-9de5-4ed3f4dc3429",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

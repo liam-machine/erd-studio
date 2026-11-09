@@ -1,0 +1,15 @@
+{
+  "name": "Forecast (EUR)",
+  "dataType": "decimal",
+  "isHidden": true,
+  "sourceColumn": "forecast_eur",
+  "displayFolder": "1. Facts",
+  "lineageTag": "68c093b8-8ce0-44cc-ab2c-213dcc900077",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

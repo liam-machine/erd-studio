@@ -1,0 +1,14 @@
+{
+  "name": "Forecast YTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Forecast YTD]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\iv. YTD",
+  "lineageTag": "8d1f9942-e438-4edf-99fb-a244511fb73f"
+}

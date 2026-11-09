@@ -1,0 +1,17 @@
+{
+  "name": "Database",
+  "kind": "m",
+  "expression": "\"Curated\" meta [IsParameterQuery=true, Type=\"Text\", IsParameterQueryRequired=true]",
+  "queryGroup": "Parameters",
+  "lineageTag": "423d49f9-2077-4e20-b035-c615e286df5e",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Text"
+    }
+  ]
+}

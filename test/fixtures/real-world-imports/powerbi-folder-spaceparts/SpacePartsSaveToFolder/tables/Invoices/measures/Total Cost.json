@@ -1,0 +1,30 @@
+{
+  "name": "Total Cost",
+  "description": "The cost of the product sold and the shipment / delivery",
+  "expression": [
+    "",
+    "VAR _RATE = MAX ('Exchange Rate'[Rate])",
+    "RETURN",
+    "    CALCULATE (",
+    "",
+    "        -- Convert to common currency (WAT)",
+    "        SUMX (",
+    "            'Invoices',",
+    "",
+    "            -- COGS",
+    "            ('Invoices'[Net Invoice COGS] + 'Invoices'[Delivery Cost])",
+    "                / RELATED ('Budget Rate'[Rate])",
+    "        )",
+    "",
+    "            -- Convert to selected currency",
+    "            * _RATE,",
+    "",
+    "        -- Limit to dates in scope",
+    "        'Date'[IsDateInScope] = TRUE",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\I. Cost",
+  "lineageTag": "cf432eee-c4e8-4a90-b256-81261849e567"
+}

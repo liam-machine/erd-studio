@@ -1,0 +1,19 @@
+{
+  "name": "Budget Rate",
+  "isHidden": true,
+  "lineageTag": "68dde8df-0ca5-4974-9afa-a3d1fc7dcf1f",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Table"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

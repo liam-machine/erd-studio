@@ -1,0 +1,20 @@
+{
+  "name": "OTD (Lines)",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Invoice Lines],",
+    "    'On-Time Delivery'[OTD Indicator] = TRUE,",
+    "    'Invoice Document Type'[Group] = \"Invoice\"",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "3. Lines",
+  "lineageTag": "e117a7f4-cf4b-4ec6-80bb-a1cc7970da51",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

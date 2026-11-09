@@ -1,0 +1,15 @@
+{
+  "name": "Data Security Rule",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "data_security_rule",
+  "displayFolder": "Columns",
+  "lineageTag": "b08c9506-5704-406c-a5f5-5ea65d6623b8",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

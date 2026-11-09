@@ -1,0 +1,15 @@
+{
+  "name": "Sub Brand Name",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "sub_brand_name",
+  "displayFolder": "5. Keys",
+  "lineageTag": "46b52e9b-f065-4a4b-a860-cbd239180893",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

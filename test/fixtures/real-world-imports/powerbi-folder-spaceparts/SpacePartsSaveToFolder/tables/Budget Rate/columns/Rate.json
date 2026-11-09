@@ -1,0 +1,19 @@
+{
+  "name": "Rate",
+  "dataType": "decimal",
+  "isHidden": true,
+  "sourceColumn": "rate",
+  "displayFolder": "1. Facts",
+  "lineageTag": "46c64843-a8c8-49af-9770-8144db4c3640",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

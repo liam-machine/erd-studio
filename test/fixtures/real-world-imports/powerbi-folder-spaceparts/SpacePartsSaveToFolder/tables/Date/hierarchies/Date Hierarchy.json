@@ -1,0 +1,42 @@
+{
+  "name": "Date Hierarchy",
+  "lineageTag": "1748d90b-b004-4b0d-afa9-77214627ce0f",
+  "levels": [
+    {
+      "name": "Calendar Year (ie 2021)",
+      "ordinal": 0,
+      "column": "Calendar Year (ie 2021)",
+      "lineageTag": "ec183b08-c5d1-42ca-a087-e4dbfbcc9349"
+    },
+    {
+      "name": "Calendar Quarter (ie Q1)",
+      "ordinal": 1,
+      "column": "Calendar Quarter (ie Q1)",
+      "lineageTag": "54cf79cd-0493-4918-9750-c334dcfe4eb5"
+    },
+    {
+      "name": "Calendar Month (ie Jan)",
+      "ordinal": 2,
+      "column": "Calendar Month (ie Jan)",
+      "lineageTag": "7ab92588-0b9b-4b03-a4ee-a556e9b8cc1e"
+    },
+    {
+      "name": "Calendar Week EU (ie WK25)",
+      "ordinal": 3,
+      "column": "Calendar Week EU (ie WK25)",
+      "lineageTag": "51e5883b-9124-4ff7-9600-954ef91e6f80"
+    },
+    {
+      "name": "Weekday Short (i.e. Mon)",
+      "ordinal": 4,
+      "column": "Weekday Short (i.e. Mon)",
+      "lineageTag": "5aef54bd-34f0-47c9-b70c-21e5cf59e625"
+    },
+    {
+      "name": "Date",
+      "ordinal": 5,
+      "column": "Date",
+      "lineageTag": "cb95b6f4-85ff-4121-bb82-3e18125ac0db"
+    }
+  ]
+}

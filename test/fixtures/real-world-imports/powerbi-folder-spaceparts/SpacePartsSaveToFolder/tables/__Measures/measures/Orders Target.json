@@ -1,0 +1,14 @@
+{
+  "name": "Orders Target",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT ( '3) Selected Target'[Select a Target] ), 'Z03CG2 - Orders Target'[Target] )",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Total\\Orders Target",
+  "lineageTag": "4eed64a0-d832-4f27-ae28-91d1dc31cb89"
+}

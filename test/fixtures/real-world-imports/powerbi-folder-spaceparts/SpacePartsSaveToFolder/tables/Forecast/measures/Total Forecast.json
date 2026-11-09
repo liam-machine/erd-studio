@@ -1,0 +1,12 @@
+{
+  "name": "Total Forecast",
+  "expression": [
+    "",
+    "    VAR _SelectedRate = MAX ( 'Exchange Rate'[Rate] )",
+    "RETURN",
+    "    SUM ( 'Forecast'[Forecast (EUR)] ) * _SelectedRate"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "66dd4eca-8cd0-492a-b93a-0bb91c4f6b04"
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Total Fees & Penalties",
+  "expression": [
+    "",
+    "VAR _RATE = MAX ('Exchange Rate'[Rate])",
+    "RETURN",
+    "    CALCULATE (",
+    "",
+    "        -- Convert to common currency (WAT)",
+    "        SUMX (",
+    "            'Invoices',",
+    "",
+    "            -- Total fees & penalties",
+    "            ('Invoices'[Late Delivery Penalties]",
+    "                + 'Invoices'[Overdue Payment Penalties]",
+    "                - 'Invoices'[Taxes & Commercial Fees])",
+    "",
+    "                / RELATED ('Budget Rate'[Rate])",
+    "        )",
+    "",
+    "            -- Convert to selected currency",
+    "            * _RATE,",
+    "",
+    "        -- Limit to dates in scope",
+    "        'Date'[IsDateInScope] = TRUE",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\II. Penalties and Adjustments",
+  "lineageTag": "a2c8e893-19e4-4e9f-bd27-b30a74db5210"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Tolerance (g)",
+  "dataType": "int64",
+  "sourceColumn": "tolerance_g",
+  "displayFolder": "4. Product Facts",
+  "lineageTag": "5b9d9f23-63fd-4aca-99c3-8c2952190f4c",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

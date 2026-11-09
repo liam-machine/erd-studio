@@ -1,0 +1,16 @@
+{
+  "name": "Total Net Invoice COGS",
+  "description": "All costs associated with the sold product",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Net Invoice COGS]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\I. Cost",
+  "lineageTag": "4ee93bec-8319-45b6-92b9-d4c906841912"
+}

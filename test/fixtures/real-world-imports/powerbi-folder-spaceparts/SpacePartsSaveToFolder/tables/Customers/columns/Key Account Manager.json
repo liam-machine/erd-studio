@@ -1,0 +1,14 @@
+{
+  "name": "Key Account Manager",
+  "dataType": "string",
+  "sourceColumn": "key_account_manager",
+  "displayFolder": "3. Managers",
+  "lineageTag": "72fc9786-6102-4514-a9f0-35cfc60809b4",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}
