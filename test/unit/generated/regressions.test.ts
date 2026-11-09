@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { sqlDdlToDbml } from '../../../src/services/sqlImportEngine';
 import { ledgerLeftOut } from '../../../src/services/importLedger';
 import { readSemanticModel, semanticModelToDbml } from '../../../src/services/semanticModelImport';
-import { roundTripDbml } from './dbmlRoundTrip';
+import { importDbmlText, roundTripDbml } from './dbmlRoundTrip';
 
 const tablesOf = (dbml: string): string[] => [...dbml.matchAll(/^Table (?:"[^"]+"\.)?"([^"]+)"/gm)].map((m) => m[1]);
 
@@ -123,6 +123,22 @@ describe('DBML round trip: a key the source declared survives export → import'
     const trip = roundTripDbml(text);
     expect(trip.first.tables.find((t) => t.name === 'b')!.uniqueKeys).toEqual(['f1,f2']);
     expect(trip.second).toEqual(trip.first);
+  });
+
+  // dbmlImport.ts withExportIndexes: an export's `indexes` block adds to the indexes its meta_json
+  // carries, never replaces them. Found by the round trip on the import corpus (GitLab's p_ci_workloads).
+  it('a composite one-to-one keeps the source\'s other indexes and its unique index\'s column order', () => {
+    const text = [
+      'Table a {', '  x int', '  y int', '  indexes {', '    (x, y) [pk]', '  }', '}',
+      'Table b {', '  id int [pk]', '  ax int', '  ay int', '  note text', '  indexes {', "    note [name: 'ix_note']", '    (ay, ax) [unique]', '  }', '}',
+      'Ref: a.(x, y) - b.(ax, ay)', '',
+    ].join('\n');
+    const trip = roundTripDbml(text);
+    const indexes = (plan: typeof trip.plan): unknown => ((plan.newTables.find((t) => t.name === 'b')!.meta as Record<string, Record<string, unknown>>).dbml.indexes);
+    expect(trip.first.tables.find((t) => t.name === 'b')!.uniqueKeys).toEqual(['ay,ax']);
+    expect(trip.second).toEqual(trip.first);
+    expect(indexes(importDbmlText(trip.exported))).toEqual([{ columns: ['note'], name: 'ix_note' }, { columns: ['ay', 'ax'], unique: true }]);
+    expect(indexes(importDbmlText(trip.exported))).toEqual(indexes(trip.plan));
   });
 
   it('an export\'s own unique on a one-to-one is still not kept as a key', () => {

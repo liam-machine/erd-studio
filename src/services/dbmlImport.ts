@@ -730,6 +730,22 @@ function declaredUniqueIndexKeys(meta: Meta): Set<string> {
   return out;
 }
 
+/**
+ * The indexes an export's `meta_json` declares (`meta`), in their own order
+ * and spelling, then each index of the table's `indexes` block that is not
+ * one of them (the same columns in any order, both unique or both not).
+ */
+function withExportIndexes(meta: Meta, block: MetaValue[]): MetaValue[] {
+  const declared = dbmlMetaOf(meta)?.indexes;
+  if (!Array.isArray(declared) || declared.length === 0) return block;
+  const keyOf = (i: MetaValue): string | undefined => {
+    if (!i || typeof i !== 'object' || Array.isArray(i) || !Array.isArray(i.columns)) return undefined;
+    return `${i.unique === true ? 'unique' : ''}\u0001${i.columns.map((c) => normaliseName(String(c))).sort().join('\u0000')}`;
+  };
+  const have = new Set(declared.map(keyOf).filter((k): k is string => k !== undefined));
+  return [...declared, ...block.filter((i) => { const k = keyOf(i); return k === undefined || !have.has(k); })];
+}
+
 /** `meta.dbml` when it is a map. */
 function dbmlMetaOf(meta: Meta | undefined): Record<string, MetaValue> | undefined {
   const value = meta?.[DBML_META_KEY];
@@ -997,6 +1013,11 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   if (Object.keys(rationale).length > 0) table.rationale = rationale;
   const declared = declaredUniqueIndexKeys(meta);
   if (declared.size > 0) ctx.declaredUniqueIndexes.set(table, declared);
+  // A rich export carries the source's indexes in meta_json and writes in its `indexes`
+  // block only the unique index it adds for a composite one-to-one: that block adds to
+  // the source's list, never replaces it (an index it does not name would be lost, and a
+  // declared one would come back in the Ref's column order).
+  if (ctx.erdStudioExport && Array.isArray(tableExtras.indexes)) tableExtras.indexes = withExportIndexes(meta, tableExtras.indexes);
   meta = withDbmlMeta(meta, tableExtras);
   if (Object.keys(meta).length > 0) table.meta = meta;
   return { dbml, name, table, reused: false, columns, primaryKey };
