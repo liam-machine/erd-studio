@@ -29,7 +29,10 @@ export type LedgerUnit =
 export type LedgerCause =
   | 'parseError' | 'grammarGap' | 'templatePlaceholder' | 'unknownType' | 'reservedWord' | 'trailingOption'
   | 'unsupportedModifier' | 'proceduralBlock' | 'notInFiles' | 'droppedLater' | 'noField' | 'notDesign'
-  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate' | 'other';
+  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate'
+  // Not read because the import stopped first: the user cancelled it, or its time limit was reached.
+  | 'cancelled' | 'timeLimit'
+  | 'other';
 
 export interface LedgerWhere {
   file?: string;
@@ -180,6 +183,8 @@ const CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = {
   capped: 'over the limit',
   savedOptional: 'saved as optional',
   duplicate: 'defined twice',
+  cancelled: 'the import was cancelled before it was read',
+  timeLimit: 'the time limit was reached before it was read',
   other: '',
 };
 
