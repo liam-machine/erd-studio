@@ -160,6 +160,21 @@ describe('column names that are keywords, unquoted or quoted', () => {
 // Rung: unknown column modifiers
 // ---------------------------------------------------------------------------
 
+describe('SQL Server inline indexes in the column list (WideWorldImporters)', () => {
+  it.each([
+    ['INDEX name CLUSTERED COLUMNSTORE (no column list)', 'INDEX CCX_Application_Logs CLUSTERED COLUMNSTORE'],
+    ['INDEX [name] NONCLUSTERED ([col])', 'INDEX [IX_Sensor] NONCLUSTERED ([Level])'],
+    ['INDEX name HASH (col) WITH (BUCKET_COUNT = n)', 'INDEX IX_Hash HASH ([Level]) WITH (BUCKET_COUNT = 1024)'],
+    ['INDEX name UNIQUE NONCLUSTERED (col)', 'INDEX IX_U UNIQUE NONCLUSTERED ([Level] DESC)'],
+  ])('%s', (label, index) => {
+    const result = convert('sqlserver', `CREATE TABLE [Application].[Logs](\n\t[Message] NVARCHAR(4000) NOT NULL,\n\t[Level] VARCHAR(16) NOT NULL,\n\t${index}\n)\nGO\n`);
+    const f = fields(result.dbml, 'Logs');
+    expect([...f.keys()]).toEqual(['Message', 'Level']);
+    // A UNIQUE one is a unique key, not an index to leave out.
+    expect(f.get('Level')!.includes('unique')).toBe(label.includes('UNIQUE'));
+  });
+});
+
 describe('column modifiers the grammar does not know are set aside, the column kept', () => {
   it.each([
     ['postgres', 'h numeric(4,2) GENERATED ALWAYS AS (round(len / 60.0, 2)) VIRTUAL', 'VIRTUAL generated column'],

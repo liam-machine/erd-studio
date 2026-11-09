@@ -124,12 +124,19 @@ export function endsType(t: readonly Token[], k: number): boolean {
 }
 
 /** Whether the item `[from, to)` of a column list is a table constraint or index, not a column. */
+/** What follows a SQL Server inline index's name (`INDEX ix NONCLUSTERED (…)`). */
+const SQLSERVER_INDEX_WORDS = new Set(['CLUSTERED', 'NONCLUSTERED', 'COLUMNSTORE', 'HASH', 'UNIQUE']);
+
 export function isConstraintItem(t: readonly Token[], from: number, to: number): boolean {
   const head = upper(t[from]);
   if (!CONSTRAINT_HEADS.has(head) || t[from].kind !== 'word') return false;
   // `key varchar(10)`, `index int`: a column named like the word.
   // `KEY idx (a, b)` is an index; `key varchar(20)` (a number in the parentheses) a column.
-  if (head === 'KEY' || head === 'INDEX') return isPunct(t[from + 1], '(') || (isName(t[from + 1]) && isPunct(t[from + 2], '(') && t[from + 3]?.kind !== 'number' && upper(t[from + 3]) !== 'MAX');
+  if (head === 'KEY' || head === 'INDEX') {
+    // SQL Server's inline `INDEX ix [UNIQUE] CLUSTERED COLUMNSTORE | NONCLUSTERED (…) | HASH (…)`: no type is spelled so.
+    if (head === 'INDEX' && isName(t[from + 1]) && SQLSERVER_INDEX_WORDS.has(upper(t[from + 2]))) return true;
+    return isPunct(t[from + 1], '(') || (isName(t[from + 1]) && isPunct(t[from + 2], '(') && t[from + 3]?.kind !== 'number' && upper(t[from + 3]) !== 'MAX');
+  }
   if (head === 'LIKE') return from + 1 < to && isName(t[from + 1]) && !isPunct(t[from + 2], '(');
   if (head === 'PERIOD') return upper(t[from + 1]) === 'FOR';
   // `fulltext tsvector`, `spatial geometry`: columns; `FULLTEXT [KEY | INDEX] [name] (…)`: an index.
@@ -552,7 +559,10 @@ export function rewriteCreateTable(input: RewriteInput): Rewrite {
     const head = upper(t[from]);
     const indexHead = head === 'INDEX' || head === 'KEY' || head === 'FULLTEXT' || head === 'SPATIAL';
     if (rungs.has('modifiers')) {
-      if (head === 'PERIOD' || head === 'EXCLUDE' || head === 'LIKE' || (indexHead && target !== 'mysql')) {
+      // SQL Server's `INDEX ix UNIQUE [NON]CLUSTERED (cols)` is a unique key: `UNIQUE [NON]CLUSTERED (cols)`.
+      const uniqueIndex = head === 'INDEX' && isName(t[from + 1]) && upper(t[from + 2]) === 'UNIQUE';
+      if (uniqueIndex) blank(from, from + 1);
+      else if (head === 'PERIOD' || head === 'EXCLUDE' || head === 'LIKE' || (indexHead && target !== 'mysql')) {
         dropped.add(index);
         if (indexHead) droppedIndexes++;
         else note(undefined, `${head === 'PERIOD' ? 'PERIOD FOR' : head} in the column list`, from);
