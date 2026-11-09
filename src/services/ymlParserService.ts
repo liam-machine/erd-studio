@@ -311,6 +311,17 @@ export class YmlParserService {
       return; // cheap pre-check: most model schema files have neither key
     }
     const doc = parseDocument(raw);
+    // A `description: *anchor` here resolves in this file, never in the last one read.
+    const before = this.aliasDoc;
+    this.aliasDoc = doc;
+    try {
+      this.readResourceDocs(doc, filePath, resourceDocs);
+    } finally {
+      this.aliasDoc = before;
+    }
+  }
+
+  private readResourceDocs(doc: Document, filePath: string, resourceDocs: Map<string, YmlResourceDoc>): void {
     for (const [key, resourceType] of [['seeds', 'seed'], ['snapshots', 'snapshot']] as const) {
       const seq = doc.get(key);
       if (!isSeq(seq)) {
@@ -1298,14 +1309,20 @@ export class YmlParserService {
 
   /** Get a string value from a YAML map, defaulting to ''. */
   private getString(node: YAMLMap, key: string): string {
-    const val = node.get(key);
-    return typeof val === 'string' ? val : '';
+    return this.stringValue(node.get(key)) ?? '';
   }
 
   /** Get a string value from a YAML map, or null if missing/non-string. */
   private getStringOrNull(node: YAMLMap, key: string): string | null {
-    const val = node.get(key);
-    return typeof val === 'string' ? val : null;
+    return this.stringValue(node.get(key)) ?? null;
+  }
+
+  /** A value as a string: `description: *shared_desc` is the string its anchor names, as dbt reads it. */
+  private stringValue(val: unknown): string | undefined {
+    if (typeof val === 'string') return val;
+    if (!isAlias(val)) return undefined;
+    const resolved = this.deref(val);
+    return isScalar(resolved) && typeof resolved.value === 'string' ? resolved.value : undefined;
   }
 
   /**

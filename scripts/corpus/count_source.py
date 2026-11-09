@@ -1046,6 +1046,18 @@ def count_dbt(entry, base):
                 if isinstance(desc, str) and desc.strip() and '{{' not in desc:
                     col.append(desc)
                 out_cols.append(col)
+            # A column listed twice in one model is one column, as dbt's parser keeps it: its tests from
+            # both listings, its description and data_type from the last (ParserRef.add overwrites).
+            merged = {}
+            for col in out_cols:
+                k = col[0].lower()
+                if k in merged:
+                    flags = ''.join(f for f in 'PNUC' if f in merged[k][2] + col[2])
+                    merged[k] = [merged[k][0], col[1], flags] + col[3:]
+                else:
+                    merged[k] = col
+            out_cols = list(merged.values())
+            pk = list({c.lower(): c for c in pk}.values())
             if len(pk) > 1:
                 pk = []  # several single-column unique keys, not one composite key
             for col in out_cols:

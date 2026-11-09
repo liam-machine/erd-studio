@@ -411,6 +411,35 @@ models:
   });
 });
 
+describe('YAML aliases on descriptions and data types', () => {
+  it('description: *anchor and data_type: *anchor read as the string the anchor names (model, column, seed)', async () => {
+    const data = await load(`version: 2
+models:
+  - name: dim
+    description: &model_desc Trips, one row each.
+    columns:
+      - name: start_time
+        data_type: &time_type STRING
+        description: &start_desc |
+          The trip's start time,
+          as the feed writes it.
+  - name: fct
+    description: *model_desc
+    columns:
+      - name: vp_start_time
+        data_type: *time_type
+        description: *start_desc
+seeds:
+  - name: lookup
+    description: *model_desc
+`);
+    const fct = data.models.get('fct')!;
+    expect(fct.description).toBe('Trips, one row each.');
+    expect(fct.columns[0]).toMatchObject({ name: 'vp_start_time', dataType: 'STRING', description: "The trip's start time,\nas the feed writes it.\n" });
+    expect(data.resourceDocs.get('lookup')?.description).toBe('Trips, one row each.');
+  });
+});
+
 describe('dbt relationship tests that leave the draft are never dropped without a word', () => {
   it('a relationships test to a source() is named in Not drawn', async () => {
     const data = await load(`version: 2

@@ -514,7 +514,8 @@ export interface SampleScore {
   /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source neither declares nor implies (e.g. dropped later). */
   uniqueKeys: { source: number; kept: number; lost: number; extra: string[] };
   types: { checked: number; verbatim: number; detailSource: number; detailKept: number; detailLost: string[] };
-  descriptions: { source: number; imported: number; exact: number; changed: number; missing: number };
+  /** `notExact`: the first few descriptions missing or changed (`table.column`), for diagnosis. */
+  descriptions: { source: number; imported: number; exact: number; changed: number; missing: number; notExact?: string[] };
   schemas: { source: string[]; imported: string[]; kept: number; lostSilently: string[] };
   /** Blocking problems (failed imports): how many name a cause and a file + line, how many the message shows (3) or hides. */
   problems: { warnings: number; count: number; withCause: number; withLocation: number; shown: number; hidden: number; longest: number; messages: string[] };
@@ -617,20 +618,22 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
   const detailLost: string[] = [];
   let descSource = 0; let descImported = 0; let descExact = 0; let descChanged = 0; let descMissing = 0;
   const descNorm = (s: string | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
-  const checkDesc = (src: string | undefined, got: string | undefined): void => {
+  const descNotExact: string[] = [];
+  const checkDesc = (src: string | undefined, got: string | undefined, label = ''): void => {
     if (!descNorm(src)) return;
     descSource++;
     if (descNorm(got)) descImported++;
-    if (descNorm(src) === descNorm(got)) descExact++;
-    else if (descNorm(got)) descChanged++;
+    if (descNorm(src) === descNorm(got)) { descExact++; return; }
+    if (descNorm(got)) descChanged++;
     else descMissing++;
+    if (descNotExact.length < 20) descNotExact.push(`${label}: ${descNorm(got) ? 'changed' : 'missing'}`);
   };
   const typeDetailWanted = new Map((truth.typeDetail ?? []).map((d) => [`${canon(d.table)}.${canon(d.column)}`, new RegExp(d.expect, 'i')]));
   for (const t of truth.tables) {
     colSource += t.columns.length;
     const got = importedByCanon.get(canon(t.name));
     if (!got) continue;
-    checkDesc(t.description, got.description);
+    checkDesc(t.description, got.description, t.name);
     const gotCols = new Map((got.columns ?? []).map((c) => [canon(c.name), c]));
     // The same name first: `name` and `_name` (Django) are one name by letters and digits.
     const gotExact = new Map((got.columns ?? []).map((c) => [c.name.toLowerCase(), c]));
@@ -642,7 +645,7 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
         continue;
       }
       colMatched++;
-      checkDesc(c[3], gc.description);
+      checkDesc(c[3], gc.description, `${t.name}.${c[0]}`);
       const wanted = typeDetailWanted.get(`${canon(t.name)}.${canon(c[0])}`);
       if (truth.importer === 'semanticModel') {
         if (wanted) {
@@ -888,7 +891,7 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
     },
     uniqueKeys: { source: uniqueSource, kept: uniqueKept, lost: uniqueSource - uniqueKept, extra: uniqueExtra },
     types: { checked: typesChecked, verbatim: typesVerbatim, detailSource, detailKept, detailLost },
-    descriptions: { source: descSource, imported: descImported, exact: descExact, changed: descChanged, missing: descMissing },
+    descriptions: { source: descSource, imported: descImported, exact: descExact, changed: descChanged, missing: descMissing, notExact: descNotExact },
     schemas: { source: sourceSchemas, imported: importedSchemas, kept: schemaKept, lostSilently: schemasLostSilently },
     problems,
     notes: run.notes,
