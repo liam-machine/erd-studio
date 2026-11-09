@@ -474,9 +474,9 @@ describe('file encodings', () => {
 
 describe('hostile input never throws', () => {
   it('cultures nested 30 000 deep (TMSL) and a TMDL translation block indented 12 000 deep', () => {
-    let deep: unknown = { translatedCaption: 'x' };
-    for (let i = 0; i < 30000; i++) deep = [deep];
-    const viaTmsl = readSemanticModel([{ path: 'X/model.bim', text: JSON.stringify({ model: { tables: [{ name: 'T', columns: [{ name: 'a' }] }], cultures: [{ name: 'fr', translations: deep }] } }) }]);
+    // Built as text: JSON.stringify of a 30 000-deep value overflows the stack on Node 20 (CI) before the reader runs.
+    const deep = `${'['.repeat(30000)}{"translatedCaption":"x"}${']'.repeat(30000)}`;
+    const viaTmsl = readSemanticModel([{ path: 'X/model.bim', text: `{"model":{"tables":[{"name":"T","columns":[{"name":"a"}]}],"cultures":[{"name":"fr","translations":${deep}}]}}` }]);
     expect(viaTmsl.ok).toBe(true);
     if (viaTmsl.ok) expect(viaTmsl.model.features?.find((f) => f.kind === 'translation')?.count).toBe(1);
     const lines = ['cultureInfo fr', `${T}translations`];
