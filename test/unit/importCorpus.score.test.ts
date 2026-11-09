@@ -20,7 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import { canon, runSample, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
+import { canon, dbtTruthInScope, runSample, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 import { SQL_DIALECTS, type SqlDialect } from '../../src/services/sqlDdlImport';
 import { DEFAULT_SQL_TIME_LIMIT_MS } from '../../src/commands/importSqlDdl';
 import { roundTripDbml, type CanonicalImport } from './generated/dbmlRoundTrip';
@@ -136,14 +136,14 @@ describe.skipIf(!enabled)('import corpus', () => {
       }
       const ms = Math.round(performance.now() - started);
       // dbt draws one folder of the project (the default scope); the rest are other scopes, not losses.
-      // The truth is cut to that folder's models, as the real-world scorecard's dbt sample is.
+      // The truth is cut to that folder's models, as the real-world scorecard's dbt sample is: by the
+      // folder count_source.py read for each model (dbt's own: its .sql file's), never by the importer's
+      // list, so a model in the folder that the import leaves out still counts as missing.
       let scored = sample;
       if (s.importer === 'dbt' && run.scope) {
-        const inScope = new Set(run.scope.models.map((m) => m.toLowerCase()));
-        const tables = sample.tables.filter((t) => inScope.has(t.name.toLowerCase()));
-        const relationships = sample.relationships.filter((r) => inScope.has(r.from.toLowerCase()));
-        scored = { ...sample, tables, relationships };
-        record.dbtScope = { id: run.scope.id, models: run.scope.models.length, projectModelsWithColumns: sample.tables.length };
+        const cut = dbtTruthInScope(sample, run.scope.id);
+        scored = { ...sample, tables: cut.tables, relationships: cut.relationships };
+        record.dbtScope = { id: run.scope.id, models: run.scope.models.length, truthModelsInScope: cut.tables.length, projectModelsWithColumns: sample.tables.length };
       }
       const score = scoreSample(s.name, scored, run);
       const messages = [...run.shown, ...run.problems.map((p) => p.message), ...run.notes, ...run.leftOut, ...run.warnings];

@@ -23,8 +23,12 @@ grammars):
   from sp_addextendedproperty MS_Description; MySQL from COMMENT; BigQuery
   from OPTIONS(description=...).
 - dbt: the models' yml (columns, unique + not_null tests as the key,
-  relationships and relationships_where tests).
+  relationships and relationships_where tests); each model's folder is its
+  .sql file's under models/ (else its yml's), which the scorer cuts the
+  truth to (dbt's default scope is one folder).
 - Power BI: TMDL (table / column / relationship blocks) or model.bim JSON.
+  A relationship's "one" end must be unique, which the model implies but
+  does not declare: `impliedUniqueKeys`, apart from `uniqueKeys`.
 - Rails schema.rb: create_table / t.<type> / add_foreign_key, by regex.
 
 The files are untrusted data: this only reads them as text. Run it with
@@ -219,6 +223,9 @@ class Model:
         self.comments = []  # (table, column or None, text)
 
     def table(self, name, schema=None, create=True):
+        # A table another schema also has (sales.customer, crm.customer) is kept under schema.name.
+        if schema and f'{schema}.{name}'.lower() in self.tables:
+            return self.tables[f'{schema}.{name}'.lower()]
         k = name.lower()
         if k not in self.tables:
             if not create:
@@ -226,6 +233,26 @@ class Model:
             self.tables[k] = {'name': name, 'schema': schema, 'columns': [], 'pk': [], 'description': None}
             self.order.append(k)
         return self.tables[k]
+
+    def create(self, name, schema, where):
+        """A CREATE TABLE: the table, new, and its key. Created again in the same schema (a dump's
+        DROP/CREATE, a migration), the later one counts; a table of the same name in another schema
+        is another table, kept beside it under schema.name."""
+        k = name.lower()
+        old = self.tables.get(k)
+        if old is not None and schema and old.get('schema') and old['schema'].lower() != schema.lower():
+            k = f'{schema}.{name}'.lower()
+            self.approx.append(f"{where}: {name} is in schemas {old['schema']} and {schema}: both counted; keys, references and comments naming it without a schema are read as the first one's")
+        if k in self.tables:
+            self.order.remove(k)
+            del self.tables[k]
+        self.tables[k] = {'name': name, 'schema': schema, 'columns': [], 'pk': [], 'description': None}
+        self.order.append(k)
+        return self.tables[k], k
+
+    def drop(self, key):
+        self.order.remove(key)
+        del self.tables[key]
 
 
 def ident(e):
@@ -373,10 +400,7 @@ def on_create_table(m, e, dialect, where):
                 return
             if isinstance(p, exp.SchemaCommentProperty):
                 pass
-    if name.lower() in m.tables:  # created again (a dump's DROP/CREATE, a migration): the later one counts
-        m.order.remove(name.lower())
-        del m.tables[name.lower()]
-    t = m.table(name, schema_of(tbl))
+    t, key = m.create(name, schema_of(tbl), where)
     if not isinstance(target, exp.Schema):
         q = e.args.get('expression')
         if isinstance(q, exp.Select):
@@ -388,8 +412,7 @@ def on_create_table(m, e, dialect, where):
             m.approx.append(f'{where}: {name} is CREATE TABLE ... AS SELECT: columns read from its select list')
         else:
             # No column list to count (CREATE TABLE ... AS a query, LIKE, CLONE): left out of the truth, and said so.
-            m.order.remove(name.lower())
-            del m.tables[name.lower()]
+            m.drop(key)
             m.approx.append(f'{where}: {name} has no column list (CREATE TABLE ... AS / LIKE / CLONE): not counted')
         return
     for item in target.expressions:
@@ -530,13 +553,9 @@ def structural_create(m, sql, where):
         if pm:
             m.parent[name.lower()] = idents(pm.group(1))[-1]
         return True
-    if name.lower() in m.tables:
-        m.order.remove(name.lower())
-        del m.tables[name.lower()]
-    t = m.table(name, parts[-2] if len(parts) > 1 else None)
+    t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where)
     if mm.group(2) != '(':
-        m.order.remove(name.lower())
-        del m.tables[name.lower()]
+        m.drop(key)
         m.approx.append(f'{where}: {name} has no column list (CREATE TABLE ... AS / LIKE): not counted')
         return True
     start = mm.end() - 1
@@ -889,9 +908,16 @@ def count_dbt(entry, base):
     order = []
     rels = []
     approx = []
+    # Where each model lives, as dbt places it: its .sql file's folder under models/ (a model's name is its file's).
+    sql_folder = {}
+    for f in entry['files']:
+        m = re.match(r'models/(?:(.*)/)?([^/]+)\.sql$', f['path'])
+        if m:
+            sql_folder.setdefault(m.group(2).lower(), m.group(1) or '')
     for f in sorted(entry['files'], key=lambda f: f['path']):
         if not re.match(r'models/.*\.ya?ml$', f['path']):
             continue
+        yml_folder = os.path.dirname(f['path'])[len('models/'):] if '/' in f['path'][len('models/'):] else ''
         try:
             with open(os.path.join(base, f['path']), encoding='utf-8') as fh:
                 doc = yaml.safe_load(fh)
@@ -949,7 +975,8 @@ def count_dbt(entry, base):
             for col in out_cols:
                 if col[0] in pk and 'P' not in col[2]:
                     col[2] = 'P' + col[2]
-            t = {'name': name, 'pk': pk, 'columns': out_cols}
+            # The folder the scorer cuts the truth to (dbt's default scope is one folder): the .sql's, else the yml's.
+            t = {'name': name, 'pk': pk, 'columns': out_cols, 'folder': sql_folder.get(name.lower(), yml_folder)}
             d = mdl.get('description')
             if isinstance(d, str) and d.strip() and '{{' not in d:
                 t['description'] = d
@@ -964,7 +991,7 @@ def count_dbt(entry, base):
             continue
         seen.add(k)
         out_rels.append(r)
-    method = f'PyYAML {getattr(yaml, "__version__", "?")}: models/**.yml models with columns; key = a column tested unique and not_null; relationships(_where) tests'
+    method = f'PyYAML {getattr(yaml, "__version__", "?")}: models/**.yml models with columns; key = a column tested unique and not_null; relationships(_where) tests; folder = the model .sql file\'s (else its yml\'s) under models/'
     approx.append('descriptions using {{ doc() }} are left out of the truth (resolving them needs Jinja)')
     return [models[k] for k in order], out_rels, [], method, approx, []
 
@@ -984,12 +1011,14 @@ def tmdl_name(s):
 
 def one_side_uniques(ft, fc, from_card, tt, tc, to_card):
     """Power BI requires a relationship's "one" end to be unique: the to end unless
-    toCardinality is many, the from end when fromCardinality is one."""
+    toCardinality is many, the from end when fromCardinality is one. Implied, not
+    declared: the truth keeps them apart (impliedUniqueKeys), so an import that
+    adds them is not extra, and gets no credit for them either."""
     out = []
     if (to_card or 'one').strip().lower() != 'many':
-        out.append({'table': tt, 'columns': [tc], 'index': False})
+        out.append({'table': tt, 'columns': [tc], 'implied': True})
     if (from_card or 'many').strip().lower() == 'one':
-        out.append({'table': ft, 'columns': [fc], 'index': False})
+        out.append({'table': ft, 'columns': [fc], 'implied': True})
     return out
 
 
@@ -1171,6 +1200,20 @@ def count_schema_rb(entry, base):
 
 # ---------------------------------------------------------------------------
 
+def implied_keys(uniques):
+    """The implied unique keys (a Power BI relationship's one end), once each, without the flag."""
+    out, seen = [], set()
+    for u in uniques:
+        if not u.get('implied'):
+            continue
+        k = (u['table'].lower(), tuple(c.lower() for c in u['columns']))
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append({'table': u['table'], 'columns': u['columns']})
+    return out
+
+
 def count(entry, base):
     imp = entry['importer']
     if imp == 'sql':
@@ -1222,7 +1265,8 @@ def main():
             },
             'tables': tables,
             'relationships': rels,
-            'uniqueKeys': uniques,
+            'uniqueKeys': [u for u in uniques if not u.get('implied')],
+            'impliedUniqueKeys': implied_keys(uniques),
             'method': method,
             'approximate': approx[:200],
             'approximateCount': len(approx),

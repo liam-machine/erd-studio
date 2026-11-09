@@ -49,7 +49,7 @@
 
 import { applyEdits, isName, isPunct, matchParen, splitTopLevel, upper, type Statement } from './sqlDdlLexer';
 import type { PreparedSql, SqlDialect } from './sqlDdlModel';
-import { cleanTypeText, columnTypeSpan, isConstraintItem, placeholderType } from './sqlDdlRepair';
+import { cleanTypeText, columnTypeSpan, isConstraintItem, placeholderType, typeRunsIntoNextColumn } from './sqlDdlRepair';
 
 /** The dialects read with the PostgreSQL grammar after their own pre-steps. */
 export type PreSteppedDialect = 'oracle' | 'bigquery' | 'redshift' | 'sqlite';
@@ -112,6 +112,21 @@ export function needsPlaceholder(dialect: PreSteppedDialect, raw: string): boole
     case 'sqlite':
       return /[[\]`"]/.test(raw) || (s.includes(' ') && !POSTGRES_MULTIWORD.test(s));
   }
+}
+
+/**
+ * Whether `t[from, to]` holds a one-line quoted token (`'…'`, `"…"`, `` `…` ``,
+ * not a triple-quoted or prefixed string) that runs over a line break: a quote
+ * left open, which took what follows on the next lines into it.
+ */
+function brokenQuoteIn(text: string, t: Statement['tokens'], from: number, to: number): boolean {
+  for (let k = from; k <= to; k++) {
+    const tok = t[k];
+    if (tok.kind !== 'string' && tok.kind !== 'ident') continue;
+    const raw = text.slice(tok.start, tok.end);
+    if (raw.includes('\n') && /^['"`]/.test(raw) && !/^(?:'{3}|"{3})/.test(raw)) return true;
+  }
+  return false;
 }
 
 /** A name for the PostgreSQL grammar: double-quoted, so a name like a keyword (`timestamp`, `order`) still reads as a name. */
@@ -242,7 +257,9 @@ export function rewriteDialectTable(
       }
       if (bigquery && w === 'OPTIONS' && isPunct(t[k + 1], '(')) {
         const m = matchParen(t, k + 1);
-        if (m < 0 || m >= to) { blank(k, to - 1); return; }
+        // A quote lost inside it (`description=x"),⏎ next …`) pairs it with a later column's parenthesis, the
+        // columns between inside one quoted token: left for the grammar to reject (and report), never set aside.
+        if (m < 0 || m >= to || brokenQuoteIn(text, t, k + 1, m)) continue;
         blank(k, m);
         k = m;
         continue;
@@ -294,9 +311,15 @@ export function rewriteDialectTable(
     const column = t[from].value;
     replace(from, from, quoted(column));
     const span = columnTypeSpan(t, from, to);
-    if (span.end > span.start) {
-      const raw = text.slice(t[span.start].start, t[span.end - 1].end);
-      if (needsPlaceholder(dialect, raw)) replace(span.start, span.end - 1, placeholder(cleanTypeText(raw)));
+    // A type that runs on into the next column (a comma missing after it) is read only up to there: a placeholder over the
+    // rest would hide that column. What is left fails the grammar, and the missing comma is put in and recorded.
+    const runsOn = span.end > span.start ? typeRunsIntoNextColumn(t, from, span.start, span.end) : -1;
+    const typeEnd = runsOn >= 0 ? runsOn : span.end;
+    if (runsOn === span.start) {
+      // The next column's name on the line after this one's: no type of this column's to set aside.
+    } else if (typeEnd > span.start) {
+      const raw = text.slice(t[span.start].start, t[typeEnd - 1].end);
+      if (needsPlaceholder(dialect, raw)) replace(span.start, typeEnd - 1, placeholder(cleanTypeText(raw)));
     } else if (sqlite || (oracle && (upper(t[from + 1]) === 'AS' || upper(t[from + 1]) === 'GENERATED'))) {
       // No type: SQLite's loosely typed columns (the model types them unknown), or an Oracle virtual column
       // (`total AS (a + b)`: the model's computed column). Either way, one the grammar reads.

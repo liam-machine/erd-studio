@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { loadTruth } from './realWorldScorecard';
 import {
   ENGINE_PAIRS,
+  NOT_ENGINE_VERIFIED,
   allEngineDiffs,
   loadErrorText,
   canonType,
@@ -33,8 +34,16 @@ describe('database truth (engine read-back) against expected.json', () => {
   const diffs = allEngineDiffs(truth.samples);
   const documented = loadDocumented();
 
-  it('has an engine read-back for every SQL sample', () => {
+  it('has an engine read-back for every SQL sample, or says why it has none', () => {
     for (const p of ENGINE_PAIRS) expect(loadReadback(p.engine), p.engine).not.toBeNull();
+    // Every SQL sample in expected.json, not only the ones listed: a new sample needs a read-back or a reason.
+    const sql = Object.entries(truth.samples).filter(([, s]) => s.importer === 'sql').map(([slug]) => slug).sort();
+    const checked = new Set(ENGINE_PAIRS.map((p) => p.truth));
+    for (const slug of sql) {
+      expect(checked.has(slug) || slug in NOT_ENGINE_VERIFIED, `${slug}: an ENGINE_PAIRS entry or a NOT_ENGINE_VERIFIED reason`).toBe(true);
+      expect(checked.has(slug) && slug in NOT_ENGINE_VERIFIED, `${slug}: engine-verified and listed as not`).toBe(false);
+    }
+    for (const slug of Object.keys(NOT_ENGINE_VERIFIED)) expect(sql, `${slug} in NOT_ENGINE_VERIFIED is a SQL sample`).toContain(slug);
   });
 
   it('explains every statement an engine refused (loadErrors), by pattern and count', () => {

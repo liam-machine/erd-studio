@@ -95,6 +95,13 @@ export interface TruthSample {
   tables: TruthTable[];
   relationships: TruthRelationship[];
   uniqueKeys: Array<{ table: string; columns: string[]; index?: boolean }>;
+  /**
+   * Unique keys the source implies but does not declare (a Power BI
+   * relationship's "one" end, which the model requires to be unique): an
+   * import that adds one is not adding a key the source does not have, and
+   * gets no credit for it either (they are not counted in `uniqueKeys`).
+   */
+  impliedUniqueKeys?: Array<{ table: string; columns: string[] }>;
   /** Columns whose type carries a detail the import must keep: the imported type must match `expect` (a regex). */
   typeDetail?: Array<{ table: string; column: string; expect: string }>;
   /** Schemas the tables live in when the source does not qualify them (`schemasImplied`). */
@@ -362,6 +369,24 @@ async function runDbt(sample: TruthSample, root: string): Promise<ImportRun> {
   };
 }
 
+/**
+ * A dbt project's truth cut to the scope the import drew: for a folder scope
+ * (`folder:<path>`, the default), the models count_source.py places in that
+ * folder (each table's `folder`), and the relationships from them. Any other
+ * scope is not cut. Throws when the truth has no folders (an old count: run
+ * count_source.py again), so the importer's own list never sets what it is
+ * scored against.
+ */
+export function dbtTruthInScope(truth: Pick<TruthSample, 'tables' | 'relationships'>, scopeId: string): Pick<TruthSample, 'tables' | 'relationships'> {
+  if (!scopeId.startsWith('folder:')) return truth;
+  const folder = scopeId.slice('folder:'.length).toLowerCase();
+  const tables = truth.tables as Array<TruthSample['tables'][number] & { folder?: string }>;
+  if (tables.some((t) => typeof t.folder !== 'string')) throw new Error('the dbt truth has no model folders: run scripts/corpus/count_source.py again');
+  const kept = tables.filter((t) => t.folder!.toLowerCase() === folder);
+  const names = new Set(kept.map((t) => t.name.toLowerCase()));
+  return { tables: kept, relationships: truth.relationships.filter((r) => names.has(r.from.toLowerCase())) };
+}
+
 /** One sample through its import's pipeline; `root` is the folder its `input` paths are under (the import corpus passes its cache). */
 export async function runSample(sample: TruthSample, root: string = SAMPLES_ROOT): Promise<ImportRun> {
   switch (sample.importer) {
@@ -482,7 +507,7 @@ export interface SampleScore {
    * required references it claims (null when it gives none).
    */
   requiredFks: { source: number; keptNotNull: number; toldOptional: boolean; optionalNote?: string; noteClaims: number | null };
-  /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source does not have (e.g. dropped later). */
+  /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source neither declares nor implies (e.g. dropped later). */
   uniqueKeys: { source: number; kept: number; lost: number; extra: string[] };
   types: { checked: number; verbatim: number; detailSource: number; detailKept: number; detailLost: string[] };
   descriptions: { source: number; imported: number; exact: number; changed: number; missing: number };
@@ -745,7 +770,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
 
   const uniqueExtra: string[] = [];
   {
-    const truthSets = new Set(truth.uniqueKeys.map((u) => `${canon(u.table)}:${u.columns.map(canon).sort().join(',')}`));
+    const truthSets = new Set([...truth.uniqueKeys, ...(truth.impliedUniqueKeys ?? [])].map((u) => `${canon(u.table)}:${u.columns.map(canon).sort().join(',')}`));
     for (const t of truth.tables) {
       const pk = t.pk.map(canon).sort().join(',');
       if (pk) truthSets.add(`${canon(t.name)}:${pk}`);

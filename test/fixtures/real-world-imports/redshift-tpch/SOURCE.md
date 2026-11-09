@@ -15,7 +15,7 @@ not read, and the problem pointed into the generated DBML instead of `ddl.sql`.
 ## Where it came from
 
 - Project: https://github.com/awslabs/amazon-redshift-utils
-- Pin: commit `f208c1100370eebca8b38d3e7d0654fb337e3463` (`master`), as pinned by the import corpus (`scripts/corpus/manifest.json` on `wip/b-corpus`, 2026-11-09).
+- Pin: commit `f208c1100370eebca8b38d3e7d0654fb337e3463` (`master`), as pinned by the import corpus (`scripts/corpus/manifest.json` in this repository, pinned 2026-11-09).
 - Files (`src/CloudDataWarehouseBenchmark/Cloud-DWB-Derived-from-TPCH/3TB/` upstream, `3TB/` here):
   - https://raw.githubusercontent.com/awslabs/amazon-redshift-utils/f208c1100370eebca8b38d3e7d0654fb337e3463/src/CloudDataWarehouseBenchmark/Cloud-DWB-Derived-from-TPCH/3TB/ddl.sql
 - SHA-256:

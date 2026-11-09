@@ -14,7 +14,7 @@ import type { TruthSample } from './realWorldScorecard';
 
 export const TRUTH_DIR = path.join(__dirname, '../real-world-truth');
 
-export type Dialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks';
+export type Dialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks' | 'sqlite';
 
 export interface EngineColumn {
   name: string;
@@ -66,7 +66,20 @@ export const ENGINE_PAIRS: ReadonlyArray<{ truth: string; engine: string; dialec
   { truth: 'snowflake-grid-reliability', engine: 'snowflake-grid-reliability', dialect: 'snowflake' },
   { truth: 'databricks-open-retail-data-model', engine: 'databricks-open-retail-data-model', dialect: 'databricks' },
   { truth: 'migrations-harbor', engine: 'migrations-harbor', dialect: 'postgres' },
+  { truth: 'sqlite-chinook', engine: 'sqlite-chinook', dialect: 'sqlite' },
 ];
+
+/**
+ * SQL samples with no engine read-back, and why: their counts come from
+ * scripts/corpus/count_source.py (sqlglot) and the hand checks in SOURCE.md
+ * only. `realWorldEngineTruth.test.ts` holds every SQL sample in
+ * expected.json to an ENGINE_PAIRS entry or one of these.
+ */
+export const NOT_ENGINE_VERIFIED: Readonly<Record<string, string>> = {
+  'oracle-hr': 'needs an Oracle Database container (gvenzl/oracle-free, several GB); not captured yet',
+  'bigquery-cloud-learning-platform': 'BigQuery has no local engine (its DDL needs the cloud service)',
+  'redshift-tpch': 'Amazon Redshift has no local engine (its DDL needs a cluster)',
+};
 
 export function loadReadback(sample: string): EngineReadback | null {
   const file = path.join(TRUTH_DIR, 'engine', `${sample}.json`);
@@ -134,6 +147,9 @@ export function canonType(dialect: Dialect, raw: string): string {
       t = t.replace(/^(double|double precision|real|float4|float8)$/, 'float').replace(/^(timestamp|datetime)$/, 'timestamp_ntz');
       return t.replace(/^vector\((float|double)/, 'vector(float');
     }
+    case 'sqlite':
+      // SQLite keeps a column's declared type as written (its affinity is not the type).
+      return t;
     case 'databricks': {
       t = t.replace(/^long$/, 'bigint').replace(/^integer$/, 'int').replace(/^short$/, 'smallint').replace(/^byte$/, 'tinyint')
         .replace(/^real$/, 'float').replace(/^dec\b|^numeric\b/, 'decimal').replace(/^timestamp_ltz$/, 'timestamp').replace(/^bool$/, 'boolean');
@@ -191,13 +207,25 @@ const keySet = (cols: readonly string[]): string => [...cols].map(keyItem).sort(
 export function compareWithEngine(sample: string, truth: TruthSample, rb: EngineReadback, dialect: Dialect): EngineDiff[] {
   const out: EngineDiff[] = [];
   const push = (kind: DiffKind, item: string, t: string, e: string): void => { out.push({ sample, kind, item, truth: t, engine: e }); };
-  const engineTables = new Map(rb.tables.map((t) => [ident(t.name), t]));
-  const truthTables = new Map(truth.tables.map((t) => [ident(t.name), t]));
+  // Tables by name, each name's tables in every schema (sales.customer and crm.customer are two tables): a truth
+  // table takes the one in its schema, else the only one of its name. Keys and references below name a table
+  // without its schema, as expected.json does.
+  const byName = new Map<string, EngineTable[]>();
+  for (const t of rb.tables) byName.set(ident(t.name), [...(byName.get(ident(t.name)) ?? []), t]);
+  const engineTables = new Map(rb.tables.map((t) => [ident(t.name), byName.get(ident(t.name))![0]]));
+  const truthSchemaOf = (t: TruthSample['tables'][number]): string | undefined => (truth.schemas && truth.schemas.length === 1 && !t.schema ? truth.schemas[0] : t.schema);
+  const matched = new Set<EngineTable>();
+  const engineTableOf = (t: TruthSample['tables'][number]): EngineTable | undefined => {
+    const all = (byName.get(ident(t.name)) ?? []).filter((e) => !matched.has(e));
+    const schema = truthSchemaOf(t);
+    return (schema !== undefined ? all.find((e) => ident(e.schema) === ident(schema)) : undefined) ?? (all.length === 1 ? all[0] : undefined) ?? all[0];
+  };
 
   for (const t of truth.tables) {
-    const e = engineTables.get(ident(t.name));
+    const e = engineTableOf(t);
     if (!e) { push('table', t.name, 'table', '(none)'); continue; }
-    const schema = truth.schemas && truth.schemas.length === 1 && !t.schema ? truth.schemas[0] : t.schema;
+    matched.add(e);
+    const schema = truthSchemaOf(t);
     if (schema !== undefined && ident(schema) !== ident(e.schema)) push('schema', t.name, schema ?? '(none)', e.schema ?? '(none)');
     if (ws(t.description) !== ws(e.comment)) push('description', t.name, ws(t.description) || '(none)', ws(e.comment) || '(none)');
     const truthPk = setOf(t.pk);
@@ -217,7 +245,7 @@ export function compareWithEngine(sample: string, truth: TruthSample, rb: Engine
     }
     for (const ec of e.columns) if (!t.columns.some((c) => ident(c[0]) === ident(ec.name))) push('column', `${t.name}.${ec.name}`, '(none)', `column ${ec.type}`);
   }
-  for (const e of rb.tables) if (!truthTables.has(ident(e.name))) push('table', e.schema ? `${e.schema}.${e.name}` : e.name, '(none)', `table, ${e.columns.length} columns`);
+  for (const e of rb.tables) if (!matched.has(e)) push('table', e.schema ? `${e.schema}.${e.name}` : e.name, '(none)', `table, ${e.columns.length} columns`);
 
   // Unique keys: expected.json's uniqueKeys plus the U flag on a column; the engine's unique constraints and indexes on tables.
   const truthUnique = new Map<string, string>();

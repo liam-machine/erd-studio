@@ -13,7 +13,8 @@
  *   - conservation: tables found = imported + reported (the ledger);
  *   - nothing swallowed: every table the break left untouched is found, and
  *     imported (a failure stays in its own statement); when names are plain,
- *     by name;
+ *     by name, with every column; a column missing from the table the break
+ *     hit is named in the ledger (or the table is reported as a whole);
  *   - every problem has its file and a line in it, in the result and in the
  *     ledger;
  *   - no message, note, ledger line or draft string echoes more than a short
@@ -26,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SQL_DIALECTS, type SqlDdlFile, type SqlDdlToDbmlResult, type SqlDialect } from '../../../src/services/sqlDdlImport';
 import { sqlDdlToDbml } from '../../../src/services/sqlImportEngine';
-import { runSqlImport, type SqlRun } from './sqlRun';
+import { columnLossViolations, runSqlImport, type SqlRun } from './sqlRun';
 import { applyBreak, breakArb, headersIn, type Broken } from './breaks';
 import {
   echoViolations,
@@ -134,6 +135,8 @@ describe('SQL import (generated): broken input is imported or reported', () => {
             schema.tables.forEach((t, i) => {
               if (broken.intact[i] && !got.has(t.name.toLowerCase())) violations.push(`untouched table ${t.name} not imported`);
             });
+            // Columns too: an imported table has every column, or the ledger names the one it lost.
+            violations.push(...columnLossViolations(schema, broken, brk.kind, run));
           }
         }
         violations.push(

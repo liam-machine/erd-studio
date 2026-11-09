@@ -1,6 +1,6 @@
 # Database truth for the real-world import samples
 
-The scorecard (`test/unit/realWorldImports.scorecard.test.ts`) compares each import with `test/fixtures/real-world-imports/expected.json`, a truth counted by hand from the upstream files. For the six SQL samples that truth is also checked against the real database engines: each sample is loaded into its engine, the schema is read back from the engine's catalog, and the read-back is compared with `expected.json` item by item.
+The scorecard (`test/unit/realWorldImports.scorecard.test.ts`) compares each import with `test/fixtures/real-world-imports/expected.json`, a truth counted by hand from the upstream files. For eight of the eleven SQL samples (Pagila counts twice: partitions folded and kept) that truth is also checked against the real database engines: each sample is loaded into its engine, the schema is read back from the engine's catalog, and the read-back is compared with `expected.json` item by item. Three have no read-back, for want of a local engine (`NOT_ENGINE_VERIFIED` in `test/unit/realWorldEngineTruth.ts` says why for each): `oracle-hr` (Oracle Database runs only as a multi-gigabyte container, not captured yet), `bigquery-cloud-learning-platform` (BigQuery) and `redshift-tpch` (Amazon Redshift), which run only as cloud services. Their truth is `scripts/corpus/count_source.py`'s count (sqlglot) checked by hand in each `SOURCE.md`. The test fails when a SQL sample in `expected.json` is in neither list.
 
 | Path | What it is |
 |---|---|
@@ -21,6 +21,7 @@ The scorecard (`test/unit/realWorldImports.scorecard.test.ts`) compares each imp
 | `mysql-sakila` | MySQL 8.0 | Homebrew `mysql@8.0` on a scratch data directory, `mysql --force` so one failing statement does not stop the rest. |
 | `sqlserver-adventureworks` | SQL Server 2025 | Docker only (`mcr.microsoft.com/mssql/server:2025-latest`, `linux/amd64`): the script targets SQL Server 2025 (`OPTIMIZED_LOCKING`). Run with `sqlcmd -i` in SQLCMD mode, as the script asks. The sample has no data files, so its 68 `BULK INSERT`s fail; the schema does not depend on them. |
 | `snowflake-grid-reliability` | fakesnow 0.12 (an emulator on DuckDB) | Statements split by the Snowflake connector's own splitter. DuckDB cannot reference a table in another schema and has no `VECTOR`, so a `CREATE TABLE` that fails on either is run again without it, and that part is read from sqlglot's Snowflake parse (fakesnow's own parser), marked `"via": "sqlglot"` and listed in `workarounds`: 4 foreign keys to `RAW.ASSET_MASTER` and 2 `VECTOR(FLOAT, 768)` columns. |
+| `sqlite-chinook` | SQLite 3 (Python's `sqlite3`) | The standard library's `sqlite3` in memory: each statement as `sqlite3.complete_statement` splits them (the 15,000 `INSERT`s too), then `pragma_table_info`, `pragma_index_list` / `pragma_index_info` and `pragma_foreign_key_list`. SQLite keeps each column's declared type as written. Nothing to install. |
 | `databricks-open-retail-data-model` | Apache Spark 4.3 SQL parser | Open-source Spark's catalog cannot hold primary or foreign keys (they are Unity Catalog's), so this is Spark's parser, not a catalog: each statement goes through `sqlParser.parsePlan` after Spark's own `${var}` substitution (each variable set to its own name, so `${store_schema}` is the schema `store_schema`), and the parsed `CREATE TABLE` and `ADD CONSTRAINT` plans are replayed. Spark's parser marks a primary key column NOT NULL, as Databricks does. |
 
 The PostgreSQL and MySQL read-backs were also run with `RWT_DOCKER=1` (official `postgres:18` and `mysql:8.0` images, and `pgvector/pgvector:pg18` for Pagila); the catalogs were identical to the Homebrew ones.
@@ -38,7 +39,7 @@ RWT_SNOWFLAKE_PYTHON=/tmp/rwt-snow/bin/python RWT_SPARK_PYTHON=/tmp/rwt-spark/bi
   python3 -I test/real-world-truth/readback.py all
 
 # Or some samples
-python3 -I test/real-world-truth/readback.py postgres-pagila migrations-harbor
+python3 -I test/real-world-truth/readback.py postgres-pagila migrations-harbor sqlite-chinook
 
 # Then compare
 npx vitest run test/unit/realWorldEngineTruth.test.ts

@@ -23,6 +23,7 @@ Engines (each overridable with an environment variable):
   SQL Server     Docker only    (mcr.microsoft.com/mssql/server:2022-latest; see the doc)
   Snowflake      RWT_SNOWFLAKE_PYTHON: a Python with fakesnow installed (an emulator on DuckDB)
   Databricks     RWT_SPARK_PYTHON: a Python with pyspark installed (Spark's own SQL parser)
+  SQLite         the standard library's sqlite3, in memory (nothing to install)
 """
 from __future__ import annotations
 
@@ -537,6 +538,61 @@ def sqlserver() -> dict:
             'errors': errors, **cat}
 
 
+# ---------------------------------------------------------------------------
+# SQLite (the standard library's sqlite3, in memory)
+# ---------------------------------------------------------------------------
+
+def sqlite_statements(text: str):
+    """The script's statements with their first line, split where sqlite3 says a statement is complete."""
+    import sqlite3
+    buf, start = '', 1
+    for n, line in enumerate(text.splitlines(keepends=True), 1):
+        if not buf.strip():
+            buf, start = '', n
+        buf += line
+        if sqlite3.complete_statement(buf):
+            yield start, buf
+            buf = ''
+    if buf.strip():
+        yield start, buf
+
+
+def chinook() -> dict:
+    import sqlite3
+    f = SAMPLES / 'sqlite-chinook' / 'DataSources' / 'Chinook_Sqlite.sql'
+    db = sqlite3.connect(':memory:')
+    errors = []
+    try:
+        for line, stmt in sqlite_statements(f.read_text(encoding='utf-8-sig')):
+            try:
+                db.execute(stmt)
+            except sqlite3.Error as e:
+                errors.append({'file': rel(f), 'line': line, 'error': short(str(e))})
+        q = lambda sql, *a: db.execute(sql, a).fetchall()
+        tables, uniques, fks = [], [], []
+        for (name,) in q("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name"):
+            info = q('select cid, name, type, "notnull", pk from pragma_table_info(?) order by cid', name)
+            pk = [c[1] for c in sorted((c for c in info if c[4]), key=lambda c: c[4])]
+            tables.append({'schema': None, 'name': name, 'comment': None, 'pk': pk or None,
+                           'columns': [{'name': c[1], 'type': c[2], 'notNull': bool(c[3])} for c in info]})
+            for _seq, iname, unique, origin, partial in q('select seq, name, "unique", origin, partial from pragma_index_list(?)', name):
+                if not unique or origin == 'pk':
+                    continue
+                cols = [r[0] for r in q('select name from pragma_index_info(?) order by seqno', iname)]
+                uniques.append({'schema': None, 'table': name, 'name': iname, 'kind': 'constraint' if origin == 'u' else 'index',
+                                'partial': bool(partial), 'columns': cols})
+            by_id = {}
+            for fid, seq, ref, frm, to in q('select id, seq, "table", "from", "to" from pragma_foreign_key_list(?) order by id, seq', name):
+                by_id.setdefault(fid, {'schema': None, 'table': name, 'name': None, 'columns': [], 'refSchema': None, 'refTable': ref, 'refColumns': []})
+                by_id[fid]['columns'].append(frm)
+                by_id[fid]['refColumns'].append(to)
+            fks.extend(by_id.values())
+        version = 'SQLite ' + q('select sqlite_version()')[0][0] + ' (Python sqlite3)'
+    finally:
+        db.close()
+    return {'engine': version, 'loaded': [rel(f)], 'errors': errors, 'tables': tables, 'uniqueKeys': uniques, 'foreignKeys': fks}
+
+
 # Read back, but not compared: left out of the files.
 DROPPED = {'default', 'extra'}
 
@@ -547,6 +603,7 @@ READERS = {
     'snowflake-grid-reliability': snowflake,
     'databricks-open-retail-data-model': databricks,
     'sqlserver-adventureworks': sqlserver,
+    'sqlite-chinook': chinook,
 }
 
 

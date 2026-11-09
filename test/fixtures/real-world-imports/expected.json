@@ -4,7 +4,8 @@
   "Counted from the upstream files only, never through ERD Studio: SQL by a replaying statement reader (comments, strings, $$ bodies, DELIMITER and GO handled; CREATE/ALTER/DROP TABLE, ADD/DROP/RENAME/ALTER COLUMN, ADD/DROP CONSTRAINT incl. PostgreSQL default constraint names, RENAME TO, CREATE UNIQUE INDEX, COMMENT ON, MS_Description, USE SCHEMA, ALTER TABLE inside DO blocks), DBML/TMDL by line readers, model.bim as JSON, dbt by parsing models/**/*.yml.",
   "Every count was checked against the independently counted numbers in each sample's SOURCE.md (the \"counts\" object). Columns are [name, type, flags, description?] with flags P primary key, N not null, U unique, C calculated.",
   "Relationships are one entry per column pair from the FK (many) side; a composite FK shares \"composite\". \"notes\" says where a sample's truth needs a reading.",
-  "SQL samples are checked against the real engines (test/real-world-truth/, docs/dev/real-world-truth.md): every difference between this file and the engines' catalogs is explained in test/real-world-truth/differences.json."
+  "SQL samples are checked against the real engines (test/real-world-truth/, docs/dev/real-world-truth.md), except oracle-hr, bigquery-cloud-learning-platform and redshift-tpch (no local engine; NOT_ENGINE_VERIFIED in test/unit/realWorldEngineTruth.ts): every difference between this file and the engines' catalogs is explained in test/real-world-truth/differences.json.",
+  "impliedUniqueKeys (Power BI): a relationship's \"one\" end, which the model requires to be unique but does not declare. An import that marks one unique is not adding a key; it gets no credit for it either (uniqueKeys are only the declared ones)."
  ],
  "samples": {
   "dbml-qut-workbench": {
@@ -22260,7 +22261,7 @@
     "primaryKeys": 3,
     "relationships": 5
    },
-   "notes": "Primary keys are the isKey columns (3). Field Parameter is a calculated table; Smart Calcs and Time Intelligence are calculation groups. dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail).",
+   "notes": "Primary keys are the isKey columns (3). Field Parameter is a calculated table; Smart Calcs and Time Intelligence are calculation groups. dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail). Implied unique keys (impliedUniqueKeys): the \"one\" end of every relationship, which Power BI requires to be unique but the model does not declare (scripts/corpus/count_source.py one_side_uniques); an import may mark them unique, and they are not counted as kept.",
    "tables": [
     {
      "name": "About",
@@ -22814,6 +22815,32 @@
     }
    ],
    "uniqueKeys": [],
+   "impliedUniqueKeys": [
+    {
+     "table": "Customer",
+     "columns": [
+      "CustomerKey"
+     ]
+    },
+    {
+     "table": "Product",
+     "columns": [
+      "ProductKey"
+     ]
+    },
+    {
+     "table": "Store",
+     "columns": [
+      "StoreKey"
+     ]
+    },
+    {
+     "table": "Calendar",
+     "columns": [
+      "Date"
+     ]
+    }
+   ],
    "typeDetail": [
     {
      "table": "Calendar",
@@ -22883,7 +22910,7 @@
     "primaryKeys": 7,
     "relationships": 13
    },
-   "notes": "model.bim has no keys but Date[Date] isKey; a table's key is the column all relationships into it join (Date: DateKey, as all 6 Date relationships join it). Fact tables have none.",
+   "notes": "model.bim has no keys but Date[Date] isKey; a table's key is the column all relationships into it join (Date: DateKey, as all 6 Date relationships join it). Fact tables have none. Implied unique keys (impliedUniqueKeys): the \"one\" end of every relationship, which Power BI requires to be unique but the model does not declare (scripts/corpus/count_source.py one_side_uniques); an import may mark them unique, and they are not counted as kept.",
    "tables": [
     {
      "name": "Internet Sales",
@@ -23908,7 +23935,51 @@
      "toColumn": "DateKey"
     }
    ],
-   "uniqueKeys": []
+   "uniqueKeys": [],
+   "impliedUniqueKeys": [
+    {
+     "table": "Customer",
+     "columns": [
+      "CustomerKey"
+     ]
+    },
+    {
+     "table": "Product",
+     "columns": [
+      "ProductKey"
+     ]
+    },
+    {
+     "table": "Geography",
+     "columns": [
+      "GeographyKey"
+     ]
+    },
+    {
+     "table": "Product Subcategory",
+     "columns": [
+      "ProductSubcategoryKey"
+     ]
+    },
+    {
+     "table": "Product Category",
+     "columns": [
+      "ProductCategoryKey"
+     ]
+    },
+    {
+     "table": "Employee",
+     "columns": [
+      "EmployeeKey"
+     ]
+    },
+    {
+     "table": "Date",
+     "columns": [
+      "DateKey"
+     ]
+    }
+   ]
   },
   "dbt-synthea-omop": {
    "importer": "dbt",
@@ -29090,7 +29161,7 @@
     "primaryKeys": 8,
     "relationships": 55
    },
-   "notes": "Business Central Purchase app, TMDL with LF line ends and tab indents. A table is a `table` block in tables/ (34; G/L Accounts is in `G%2FL Accounts.tmdl`), a column a `column` line at one tab (7 calculated). Primary keys are the isKey columns (8). 5 calculated tables (DAX Date tables and label tables), no calculation group. 55 relationships, all many-to-one with TMDL defaults, none inactive. Power Query merges and appends: Type appends Item, Resources and G/L Accounts (Table.Combine); Documents appends; Purchase Value Entries merges the shared query Capacity Ledger Entries (Table.NestedJoin). dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail).",
+   "notes": "Business Central Purchase app, TMDL with LF line ends and tab indents. A table is a `table` block in tables/ (34; G/L Accounts is in `G%2FL Accounts.tmdl`), a column a `column` line at one tab (7 calculated). Primary keys are the isKey columns (8). 5 calculated tables (DAX Date tables and label tables), no calculation group. 55 relationships, all many-to-one with TMDL defaults, none inactive. Power Query merges and appends: Type appends Item, Resources and G/L Accounts (Table.Combine); Documents appends; Purchase Value Entries merges the shared query Capacity Ledger Entries (Table.NestedJoin). dateTime columns marked UnderlyingDateTimeDataType = Date or Time are date-only or time-only (typeDetail). Implied unique keys (impliedUniqueKeys): the \"one\" end of every relationship, which Power BI requires to be unique but the model does not declare (scripts/corpus/count_source.py one_side_uniques); an import may mark them unique, and they are not counted as kept.",
    "tables": [
     {
      "name": "COMPANY",
@@ -32206,6 +32277,98 @@
     }
    ],
    "uniqueKeys": [],
+   "impliedUniqueKeys": [
+    {
+     "table": "Location",
+     "columns": [
+      "Location Code"
+     ]
+    },
+    {
+     "table": "Vendor",
+     "columns": [
+      "Vendor No."
+     ]
+    },
+    {
+     "table": "Dimension Sets",
+     "columns": [
+      "dimensionSetID"
+     ]
+    },
+    {
+     "table": "Item",
+     "columns": [
+      "Item No."
+     ]
+    },
+    {
+     "table": "Purchase Budget Name",
+     "columns": [
+      "Purchase Budget Name"
+     ]
+    },
+    {
+     "table": "Item Category",
+     "columns": [
+      "Item Category Code"
+     ]
+    },
+    {
+     "table": "Purchaser",
+     "columns": [
+      "Purchaser Code"
+     ]
+    },
+    {
+     "table": "Documents",
+     "columns": [
+      "Purchase Key"
+     ]
+    },
+    {
+     "table": "Project",
+     "columns": [
+      "Project No."
+     ]
+    },
+    {
+     "table": "Date",
+     "columns": [
+      "Date"
+     ]
+    },
+    {
+     "table": "Reason Codes",
+     "columns": [
+      "Return Reason Code"
+     ]
+    },
+    {
+     "table": "Type",
+     "columns": [
+      "Type Key"
+     ]
+    },
+    {
+     "table": "Item",
+     "columns": [
+      "Type Key"
+     ]
+    },
+    {
+     "table": "G/L Accounts",
+     "columns": [
+      "Type Key"
+     ]
+    },
+    {
+     "table": "Resources",
+     "columns": [
+      "Type Key"
+     ]
+    }
+   ],
    "typeDetail": [
     {
      "table": "Date Table Setup",
@@ -32323,7 +32486,7 @@
     "primaryKeys": 7,
     "relationships": 10
    },
-   "notes": "Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally), types re-read as written. Primary and foreign keys are the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists; emp_dept_fk and emp_manager_fk reference their table's primary key (REFERENCES with no column list). The 7 unique keys are the CREATE UNIQUE INDEX statements on the key columns. Descriptions are the COMMENT ON TABLE / COLUMN statements.",
+   "notes": "Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally), types re-read as written. Primary and foreign keys are the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists; emp_dept_fk and emp_manager_fk reference their table's primary key (REFERENCES with no column list). Its one unique key is employees(email), the inline CONSTRAINT emp_email_uk UNIQUE. The 6 CREATE UNIQUE INDEX statements are each on exactly its table's primary key columns: the index the primary key added after them uses, not a key of its own (a unique key on exactly the primary key adds nothing, as the engine comparison also counts it), so they are not unique keys here. Descriptions are the COMMENT ON TABLE / COLUMN statements.",
    "tables": [
     {
      "name": "regions",
@@ -32664,53 +32827,10 @@
    ],
    "uniqueKeys": [
     {
-     "table": "regions",
-     "columns": [
-      "region_id"
-     ],
-     "index": true
-    },
-    {
-     "table": "locations",
-     "columns": [
-      "location_id"
-     ],
-     "index": true
-    },
-    {
-     "table": "departments",
-     "columns": [
-      "department_id"
-     ],
-     "index": true
-    },
-    {
-     "table": "jobs",
-     "columns": [
-      "job_id"
-     ],
-     "index": true
-    },
-    {
      "table": "employees",
      "columns": [
       "email"
      ]
-    },
-    {
-     "table": "employees",
-     "columns": [
-      "employee_id"
-     ],
-     "index": true
-    },
-    {
-     "table": "job_history",
-     "columns": [
-      "employee_id",
-      "start_date"
-     ],
-     "index": true
     }
    ]
   },

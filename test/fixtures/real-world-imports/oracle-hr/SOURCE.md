@@ -17,7 +17,7 @@ word (the `ADD ( … )` list was skipped as "other statement").
 ## Where it came from
 
 - Project: https://github.com/oracle-samples/db-sample-schemas
-- Pin: commit `e3325a83e56c516815844025418a96ecaf219751` (tag `v23.3`), as pinned by the import corpus (`scripts/corpus/manifest.json` on `wip/b-corpus`, 2026-11-09).
+- Pin: commit `e3325a83e56c516815844025418a96ecaf219751` (tag `v23.3`), as pinned by the import corpus (`scripts/corpus/manifest.json` in this repository, pinned 2026-11-09).
 - Files (`human_resources/` upstream, `human_resources/` here):
   - https://raw.githubusercontent.com/oracle-samples/db-sample-schemas/e3325a83e56c516815844025418a96ecaf219751/human_resources/hr_create.sql
 - SHA-256:
@@ -36,12 +36,13 @@ notice heads the script). Copied to `UPSTREAM-LICENSE.txt`; the script is unchan
 
 ## Expected counts
 
-Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally), types re-read as written. Primary and foreign keys are the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists; emp_dept_fk and emp_manager_fk reference their table's primary key (REFERENCES with no column list). The 7 unique keys are the CREATE UNIQUE INDEX statements on the key columns. Descriptions are the COMMENT ON TABLE / COLUMN statements.
+Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally), types re-read as written. Primary and foreign keys are the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists; emp_dept_fk and emp_manager_fk reference their table's primary key (REFERENCES with no column list). Its one unique key is employees(email), the inline `CONSTRAINT emp_email_uk UNIQUE`; the 6 `CREATE UNIQUE INDEX` statements are each on exactly its table's primary key columns (the index that primary key uses), so they are not unique keys of their own. Descriptions are the COMMENT ON TABLE / COLUMN statements.
 
 - Tables: **7**
 - Columns: **35**
 - Primary keys: **7**
 - Foreign keys / relationships: **10**
+- Unique keys: **1**
 - Descriptions: **42**
 
 | Table | Columns | Primary key | Foreign keys (column → target) |

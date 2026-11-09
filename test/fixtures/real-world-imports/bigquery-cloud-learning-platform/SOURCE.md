@@ -16,7 +16,7 @@ Before the BigQuery dialect it was detected as Databricks and nothing imported: 
 ## Where it came from
 
 - Project: https://github.com/GoogleCloudPlatform/cloud-learning-platform
-- Pin: commit `5da5e36798114b103480f494157cfaaf44530409` (`main`), as pinned by the import corpus (`scripts/corpus/manifest.json` on `wip/b-corpus`, 2026-11-09).
+- Pin: commit `5da5e36798114b103480f494157cfaaf44530409` (`main`), as pinned by the import corpus (`scripts/corpus/manifest.json` in this repository, pinned 2026-11-09).
 - Files (`utils/tables_sql/` upstream, `tables_sql/` here):
   - https://raw.githubusercontent.com/GoogleCloudPlatform/cloud-learning-platform/5da5e36798114b103480f494157cfaaf44530409/utils/tables_sql/lms_analytics/cohort.sql
   - https://raw.githubusercontent.com/GoogleCloudPlatform/cloud-learning-platform/5da5e36798114b103480f494157cfaaf44530409/utils/tables_sql/lms_analytics/courseTemplate.sql

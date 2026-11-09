@@ -13,7 +13,7 @@ Before the SQLite dialect it was detected as SQL Server (the brackets) and read 
 ## Where it came from
 
 - Project: https://github.com/lerocha/chinook-database
-- Pin: commit `4a944a942426e1f3263fe539155fb7ef92b04b4a` (tag `v1.4.5`), as pinned by the import corpus (`scripts/corpus/manifest.json` on `wip/b-corpus`, 2026-11-09).
+- Pin: commit `4a944a942426e1f3263fe539155fb7ef92b04b4a` (tag `v1.4.5`), as pinned by the import corpus (`scripts/corpus/manifest.json` in this repository, pinned 2026-11-09).
 - Files (`ChinookDatabase/DataSources/` upstream, `DataSources/` here):
   - https://raw.githubusercontent.com/lerocha/chinook-database/4a944a942426e1f3263fe539155fb7ef92b04b4a/ChinookDatabase/DataSources/Chinook_Sqlite.sql
 - SHA-256:

@@ -410,12 +410,14 @@ export const SQL_PARSE_FORMAT: Readonly<Record<SqlDialect, SqlParseFormat>> = Ob
 // ---------------------------------------------------------------------------
 
 /**
- * Signals per dialect: [pattern, weight, reads strings?]. Strong signals weigh
- * 3, hints 1. Patterns test the text without its comments and without what its
- * '…' strings hold (a row of data that says `Number` or `bool` is no type),
- * unless the third element says the signal is a string (`FROM 's3://…'`).
+ * Signals per dialect: [pattern, weight, flag?]. Strong signals weigh 3, hints
+ * 1. Patterns test the text without its comments and without what its '…'
+ * strings hold (a row of data that says `Number` or `bool` is no type), unless
+ * the flag is `strings` (the signal is a string: `FROM 's3://…'`). `beside`:
+ * the signal counts only beside another of the same dialect's (a syntax two
+ * dialects share, which alone points to the one that had it first).
  */
-const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, boolean?]> = [
+const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | 'beside')?]> = [
   ['sqlserver', /^[ \t]*GO[ \t]*$/im, 3],
   ['sqlserver', /\[\w+\]\s*\.\s*\[\w+\]/, 3],
   ['sqlserver', /\bsp_addextendedproperty\b/i, 3],
@@ -425,7 +427,8 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, boolean?]> = [
   ['databricks', /\bTBLPROPERTIES\b/i, 3],
   ['databricks', /\b(ARRAY|MAP|STRUCT)\s*</i, 3],
   ['databricks', /\bPARTITIONED\s+BY\b|\bZORDER\b/i, 1],
-  ['databricks', /`[^`\n]+`\s+STRING\b/i, 2],
+  // STRING as a type, in a script that backquotes a name (one part each: a whole `a.b.c` path is BigQuery's).
+  ['databricks', /^(?=[\s\S]*`[^`\n.]+`)[\s\S]*?[\w`][ \t]+STRING\b/i, 2],
   ['mysql', /\bENGINE\s*=/i, 3],
   ['mysql', /\bAUTO_INCREMENT\b/i, 3],
   // Backquoted names: MySQL's (or Databricks', whose other signals then decide); never SQL Server's.
@@ -451,8 +454,8 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, boolean?]> = [
   ['bigquery', /\bPARTITION\s+BY\s+(?:DATE|DATE_TRUNC|TIMESTAMP_TRUNC|DATETIME_TRUNC|RANGE_BUCKET|_PARTITIONDATE)\b|@@(?:dataset_id|project_id)\b/i, 3],
   // A whole path in one pair of backticks (`my-project.dataset.table`): Databricks and MySQL quote each part.
   ['bigquery', /`[A-Za-z_][\w-]*(?:\.[\w-]+){1,2}`/, 3],
-  // BigQuery nests types as Databricks does (ARRAY<STRUCT<…>>).
-  ['bigquery', /\b(?:ARRAY|STRUCT)\s*</i, 3],
+  // BigQuery nests types as Databricks does (ARRAY<STRUCT<…>>): alone, the Databricks it was read as before.
+  ['bigquery', /\b(?:ARRAY|STRUCT)\s*</i, 3, 'beside'],
   // A type after a column's name. (GEOGRAPHY and BOOL are PostgreSQL's too, PostGIS and an alias.)
   ['bigquery', /[\w"\]`][ \t]+BYTES\b/i, 1],
   // DISTKEY and SORTKEY as a clause (`DISTKEY (a)`, `COMPOUND SORTKEY`) or after a column's type (`a int DISTKEY`),
@@ -460,7 +463,7 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, boolean?]> = [
   ['redshift', /\bDISTSTYLE\s+(?:KEY|ALL|EVEN|AUTO)\b|\b(?:DISTKEY|SORTKEY)\s*\(|\b(?:COMPOUND|INTERLEAVED)\s+SORTKEY\b|\bSORTKEY\s+AUTO\b|(?<=[\w)])(?<!\b(?:BY|AS|ON|SET|TABLE|COLUMN|SELECT|DISTINCT))[ \t]+(?:DISTKEY|SORTKEY)\b(?=[ \t]*(?:[,)\r\n]|(?:NOT|NULL|PRIMARY|UNIQUE|REFERENCES|DEFAULT|ENCODE|DISTKEY|SORTKEY|IDENTITY|CONSTRAINT|COLLATE)\b))/i, 3],
   ['redshift', /\bENCODE\s+(?:RAW|AZ64|BYTEDICT|DELTA|DELTA32K|LZO|MOSTLY8|MOSTLY16|MOSTLY32|RUNLENGTH|TEXT255|TEXT32K|ZSTD|AUTO)\b/i, 3],
   ['redshift', /\bBACKUP\s+(?:YES|NO)\b/i, 2],
-  ['redshift', /\bFROM\s+'s3:\/\//i, 2, true],
+  ['redshift', /\bFROM\s+'s3:\/\//i, 2, 'strings'],
   ['sqlite', /\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/i, 3],
   ['sqlite', /\bWITHOUT\s+ROWID\b|\bCREATE\s+VIRTUAL\s+TABLE\b|\bPRAGMA\b|\bsqlite_\w+|\)\s*STRICT\s*[;,]/i, 3],
   // Square brackets without SQL Server's batches, schemas or types: `[AlbumId] INTEGER` (SQLite's affinity name).
@@ -474,7 +477,8 @@ const ONE_LINE_STRING = /'(?:[^'\\\n]|\\.|'')*'/g;
  * Each dialect's score from the text's signals (comments and what strings hold
  * ignored). A hint (weight 1) counts for Oracle, BigQuery, Redshift or SQLite
  * only beside a stronger signal of the same dialect: a hint alone never makes
- * one of them, read with another dialect's grammar, the pick. Never parses.
+ * one of them, read with another dialect's grammar, the pick. So does a
+ * `beside` signal, in any dialect. Never parses.
  */
 function dialectScores(text: string): Map<SqlDialect, number> {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
@@ -482,9 +486,9 @@ function dialectScores(text: string): Map<SqlDialect, number> {
   const bare = code.replace(ONE_LINE_STRING, "''");
   const scores = new Map<SqlDialect, number>();
   const hints = new Map<SqlDialect, number>();
-  for (const [dialect, pattern, weight, strings] of DIALECT_SIGNALS) {
-    if (!pattern.test(strings ? code : bare)) continue;
-    const into = weight === 1 && isPreStepped(dialect) ? hints : scores;
+  for (const [dialect, pattern, weight, flag] of DIALECT_SIGNALS) {
+    if (!pattern.test(flag === 'strings' ? code : bare)) continue;
+    const into = flag === 'beside' || (weight === 1 && isPreStepped(dialect)) ? hints : scores;
     into.set(dialect, (into.get(dialect) ?? 0) + weight);
   }
   for (const [dialect, weight] of hints) {
@@ -736,26 +740,48 @@ function typedSelectColumns(t: Token[], text: string | undefined, at: number): {
 
 /** Words that make a CREATE TABLE one without a column list of its own (or one read elsewhere): never a stray before one. */
 const NO_COLUMN_LIST_WORDS = new Set(['AS', 'LIKE', 'CLONE', 'PARTITION', 'OF', 'INHERITS', 'SELECT', 'COPY', 'USING', 'LOCATION']);
+const NO_COLUMN_LIST_TEXT = new RegExp(`\\b(?:${[...NO_COLUMN_LIST_WORDS].join('|')})\\b`, 'i');
 
 /**
  * Whether the tokens from `next` (just after a CREATE TABLE's name) are a
  * column list with a stray token before it: one or two tokens that are not
  * words of their own (a quoted name or string a lost quote left, a stray
  * punctuation mark) then `(`, or a quote left open that took the `(` to the
- * end of its line; and nothing anywhere that makes the statement a CTAS,
- * `LIKE`, `CLONE` or partition (`NO_COLUMN_LIST_WORDS`).
+ * end of its line. Never when what stands before the list makes the
+ * statement a CTAS, `LIKE`, `CLONE` or partition (`NO_COLUMN_LIST_WORDS`, in
+ * the stray text too), when the list is a lone `LIKE t`, or when an `AS
+ * SELECT` follows it. Words inside the column list are the columns' own (a
+ * column named `location`, a generated column's `AS (…)`).
  */
 function strayBeforeColumnList(t: Token[], next: number): boolean {
-  if (t.some((tok) => tok.kind === 'word' && NO_COLUMN_LIST_WORDS.has(tok.value.toUpperCase()))) return false;
-  // A quote opened just before the `(` ran to the end of the line and took the `(` with it (`a" (`).
   const stray = t[next];
+  let open: number;
+  let close: number;
   if (stray && (stray.kind === 'ident' || stray.kind === 'string') && /\(\s*$/.test(stray.value)) {
-    return t.slice(next + 1).some((tok) => isPunct(tok, ')')) && next + 2 < t.length;
+    // A quote opened just before the `(` ran to the end of the line and took the `(` with it (`a" (`).
+    if (NO_COLUMN_LIST_TEXT.test(stray.value.replace(/\(\s*$/, ''))) return false;
+    open = next;
+    close = -1;
+    for (let k = next + 1, depth = 1; k < t.length; k++) {
+      if (isPunct(t[k], '(')) depth++;
+      else if (isPunct(t[k], ')') && --depth === 0) { close = k; break; }
+    }
+    if (close < 0 || close < next + 2) return false;
+  } else {
+    const at = [next + 1, next + 2].find((k) => isPunct(t[k], '('));
+    if (at === undefined) return false;
+    for (let k = next; k < at; k++) if (t[k].kind === 'word' || isPunct(t[k], ';') || isPunct(t[k], '.')) return false;
+    for (let k = next; k < at; k++) if ((t[k].kind === 'ident' || t[k].kind === 'string') && NO_COLUMN_LIST_TEXT.test(t[k].value)) return false;
+    open = at;
+    close = matchParen(t, open);
+    if (close <= open + 1) return false;
   }
-  const open = [next + 1, next + 2].find((k) => isPunct(t[k], '('));
-  if (open === undefined) return false;
-  for (let k = next; k < open; k++) if (t[k].kind === 'word' || isPunct(t[k], ';') || isPunct(t[k], '.')) return false;
-  return matchParen(t, open) > open + 1;
+  // `(LIKE y INCLUDING ALL)`: a copy of another table's columns.
+  if (upper(t[open + 1]) === 'LIKE' && splitTopLevel(t, open + 1, close).length === 1) return false;
+  for (let k = close + 1; k < t.length; k++) {
+    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
+  }
+  return true;
 }
 
 /** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
@@ -989,6 +1015,8 @@ class Converter implements ConverterContext {
   private commaRepairs: MissingComma[] | undefined;
   /** How the files' tables were read. */
   readonly readWith: SqlReadWith = { grammar: 0, repaired: 0, salvaged: 0 };
+  /** How each table counted in {@link readWith} was read: one the DBML read-back leaves out is taken off again. */
+  readonly readHow = new Map<ModelTable, keyof SqlReadWith>();
   /** The statement being read (a skipped one is named in the log from it). */
   private currentStatement: Statement | undefined;
   /** Tables that went through the repair ladder, and when the first did (its budget). */
@@ -1358,6 +1386,7 @@ class Converter implements ConverterContext {
         return;
       }
       this.readWith[read.how]++;
+      this.readHow.set(table, read.how);
       for (const c of this.commaRepairs ?? []) {
         this.ledger.repaired('column', 'parseError', 'missing comma', { file, line: c.line, table: label, column: c.after },
           `a comma added between ${shortName(c.after)} and ${shortName(c.before)}`);
@@ -1492,20 +1521,35 @@ class Converter implements ConverterContext {
         }
       }
     }
-    // Salvage: the column list read without a grammar.
-    const salvaged = repairOn ? salvageCreateTable(text, st, name, open, close) : undefined;
+    // Salvage: the column list read without a grammar. A pre-stepped dialect's from what its pre-step made of the
+    // statement (Oracle's `NOT NULL ENABLE`, BigQuery's `OPTIONS(…)` set aside), else from the file as written.
+    const steppedFrom = preStepped ? (ladderFrom ?? restatement(strict.sql, st.line)) : undefined;
+    let salvaged = repairOn && steppedFrom
+      ? salvageCreateTable(steppedFrom.text, steppedFrom.st, steppedFrom.name, steppedFrom.open, steppedFrom.close)
+      : undefined;
+    let salvagedStepped = !!salvaged?.ok;
+    if (repairOn && !salvaged?.ok) {
+      const plain = salvageCreateTable(text, st, name, open, close);
+      if (plain.ok || !salvaged) { salvaged = plain; salvagedStepped = false; }
+    }
     if (salvaged?.ok) {
       const rawTable = salvaged.raw.tables![0];
       const repairs: Repair[] = [tooDeep
         ? { rung: 'allTypes', unit: 'table', cause: 'grammarGap', what: 'column list', detail: `read without the SQL grammar (names, types, keys, references): parentheses nested more than ${MAX_GRAMMAR_PAREN_DEPTH} deep`, line: st.line }
         : { rung: 'allTypes', unit: 'table', cause: 'grammarGap', what: 'column list', detail: 'read without the SQL grammar (names, types, keys, references)', line: st.line }];
-      return { raw: salvaged.raw, prepared: { sql: '', types: new Map(), comments: new Map(), identity: new Set() }, rawTable, repairs, how: 'salvaged', droppedIndexes: 0 };
+      const prepared: PreparedSql = salvagedStepped && preStepped
+        ? { sql: '', types: preStepped.types, comments: preStepped.comments, identity: preStepped.identity }
+        : { sql: '', types: new Map(), comments: new Map(), identity: new Set() };
+      return { raw: salvaged.raw, prepared, rawTable, repairs, how: 'salvaged', droppedIndexes: 0, ...(salvagedStepped ? { typeless: preStepped?.typeless } : {}) };
     }
     // A problem: the hint the scan found on the failing line, else the reason salvage gave, else the grammar's.
     const diagnostic = firstDiagnostic(strictError);
     const diagnosticLine = diagnostic.line ? st.line + diagnostic.line - 1 : undefined;
     const failLine = salvaged && !salvaged.ok ? salvaged.line : undefined;
-    const hints = repairHints(text, st, open, close);
+    // The hints from what the pre-step left (a type it reads behind a placeholder is not the cause), at the file's lines.
+    const hints = steppedFrom
+      ? repairHints(steppedFrom.text, steppedFrom.st, steppedFrom.open, steppedFrom.close)
+      : repairHints(text, st, open, close);
     const hint = hints.find((h) => h.line === failLine || h.line === diagnosticLine) ?? (failLine === undefined && diagnosticLine === undefined ? hints[0] : undefined);
     const reason = hint?.phrase ?? (salvaged && !salvaged.ok ? salvaged.reason : diagnostic.message);
     const cause: LedgerCause = hint?.cause ?? (salvaged && !salvaged.ok ? salvaged.cause : diagnostic.crash ? 'grammarGap' : 'parseError');
@@ -2236,9 +2280,21 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
       if (owner?.ref && !badRefs.has(owner.ref)) badRefs.set(owner.ref, d.message);
       else if (owner?.table && !owner.ref && !tables.has(owner.table)) tables.set(owner.table, d.message);
     }
+    // Two references between the same columns (`a.x → b.y` and `b.y → a.x`): DBML rejects every one of them, though
+    // the first alone reads. It is kept, the others left out (a reference rejected for anything else is read again).
+    const sameEnds = new Map<string, ResolvedRef[]>();
+    for (const r of refs) {
+      if (!SAME_ENDPOINTS.test(badRefs.get(r) ?? '')) continue;
+      const key = refEndpointsKey(r);
+      sameEnds.set(key, [...(sameEnds.get(key) ?? []), r]);
+    }
+    for (const group of sameEnds.values()) if (group.length > 1) badRefs.delete(group[0]);
     if (tables.size === 0 && badRefs.size === 0) break;
     for (const [table, message] of tables) {
       converter.tables.splice(converter.tables.indexOf(table), 1);
+      // A table left out was not read, whichever way it first read (the dialect ranking compares these counts).
+      const how = converter.readHow.get(table);
+      if (how) { converter.readWith[how]--; converter.readHow.delete(table); }
       converter.problems.push({
         file: table.origin.file, line: table.origin.line, kind: 'structure', table: tableLabel(table),
         message: `Table ${tableLabel(table)} could not be written as DBML (${ledgerText(cleanDiagnostic(message), 120, true)}), so it is left out.`,
@@ -2280,6 +2336,15 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     ...stopped,
     ...(partitions && (partitions.folded || partitions.kept) ? { partitions: { ...partitions } } : {}),
   };
+}
+
+/** DBML's message for two references between the same columns (`dbmlFileCompile.ts`'s SAME_ENDPOINTS_MESSAGE). */
+const SAME_ENDPOINTS = /References with same endpoints exist/i;
+
+/** A reference's two ends, in either direction: two references with the same key join the same columns. */
+function refEndpointsKey(r: ResolvedRef): string {
+  const end = (table: ModelTable, columns: string[]): string => `${(table.schema ?? '').toLowerCase()}.${table.name.toLowerCase()}(${columns.map((c) => c.toLowerCase()).join(',')})`;
+  return [end(r.from, r.fromColumns), end(r.to, r.toColumns)].sort().join('|');
 }
 
 /** `0.5 s`, `90 s`, `2 min`, `2 min 30 s`: a time limit as the ledger and the messages say it. */
