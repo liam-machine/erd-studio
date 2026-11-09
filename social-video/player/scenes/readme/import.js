@@ -4,8 +4,8 @@
 //
 // The top is ERD Studio's Import… picker (src/commands/importModel.ts: title Import, its
 // placeholder, IMPORT_SOURCE_ITEMS' labels and details in IMPORT_MODEL_SOURCES order, then the
-// import guide's item), the SQL row carrying the five dialects its detail names
-// (src/services/sqlDdlImport.ts). Under it, one panel at a time shows what each source takes in:
+// import guide's item), the SQL row carrying the nine dialects its detail names, in two rows
+// (src/services/sqlDdlImport.ts SQL_DIALECTS). Under it, one panel at a time shows what each source takes in:
 //   open   the sources as logos (what you use)
 //   dbml   a .dbml file from any DBML tool
 //   sql    CREATE TABLE .sql files — including the DDL exported from Snowflake or Databricks
@@ -15,8 +15,7 @@
 //          yet. This folder is a dbt project.", Import from dbt, "Or: More ways to start…" — the
 //          picker dims, because Import from dbt is its own start, not an Import… source
 //   guide  Bring In Your Data Model… (src/services/importGuide.ts): its card titles
-// MySQL has no logo (Oracle allows its mark only under a written agreement) and DBML has none of
-// its own: LOGOS.md. draft.js picks up with the draft preview.
+// DBML has no mark of its own: LOGOS.md. draft.js picks up with the draft preview.
 import { appear, appearFade, easeOut, ICON, lerp, seg } from '../../lib.js';
 import { dbmlLine, quickPick, wordAt } from './story.js';
 
@@ -34,25 +33,28 @@ const folderIcon = (col, size = 26) => `<span style="color:${col};display:flex">
 const fileIcon = (col, size = 24) => `<span style="color:${col};display:flex">${ICON.file({ size })}</span>`;
 
 // The CREATE TABLE dialects the SQL import reads, in its detail's order (no file: no logo).
-const DIALECTS = [['postgresql.svg', 'PostgreSQL'], [null, 'MySQL'], ['sql-server.svg', 'SQL Server'], ['snowflake.svg', 'Snowflake'], ['databricks.svg', 'Databricks']];
+const DIALECTS = [['postgresql.svg', 'PostgreSQL'], ['mysql.svg', 'MySQL'], ['sql-server.svg', 'SQL Server'], ['snowflake.svg', 'Snowflake'], ['databricks.svg', 'Databricks'],
+  ['oracle.svg', 'Oracle'], ['bigquery.svg', 'BigQuery'], ['redshift.svg', 'Redshift'], ['sqlite.svg', 'SQLite']];
+const DIALECT_ROW = 5;   // chips per row: two rows, as nine do not fit one
 // Import…'s rows: IMPORT_SOURCE_ITEMS in IMPORT_MODEL_SOURCES order (nothing found here), then the guide.
 const SOURCES = [
   { label: 'DBML file', detail: 'A .dbml file from dbdiagram.io or any DBML tool (an open format)', beat: 'dbml', icon: dbmlBadge() },
-  { label: 'SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake or Databricks', beat: 'sql', icon: dbGlyph(), sql: true },
-  { label: 'Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder, saved as TMDL or as model.bim', beat: 'pbi', icon: logo('power-bi.svg', 44) },
+  { label: 'SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite', beat: 'sql', icon: dbGlyph(), sql: true },
+  { label: 'Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder (TMDL or model.bim), or a Tabular Editor Save to Folder model', beat: 'pbi', icon: logo('power-bi.svg', 44) },
   { label: 'Bring In Your Data Model…', detail: 'How to export from Databricks, Snowflake, Power BI, Fabric and more', beat: 'guide', icon: guideIcon },
 ];
 const BEATS = ['open', 'dbml', 'sql', 'pbi', 'dbt', 'guide'];
 
-/** The SQL row's dialect chips: dimmed, PostgreSQL/MySQL/SQL Server light as the row is picked, Snowflake and Databricks on their words. */
+/** The SQL row's dialect chips: dimmed, the engines light as the row is picked, Snowflake and Databricks on their words. */
 function dialectStrip(t, ats) {
   const chips = DIALECTS.map(([f, name], k) => {
     const p = easeOut(seg(t, ats[k], ats[k] + 0.3));
     const pop = Math.sin(Math.PI * p) * 0.08;
-    const mark = f ? `<img src="${LOGO(f)}" width="28" height="28" style="display:block;width:28px;height:28px">` : '';
-    return `<span style="display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 ${f ? 8 : 14}px;border-radius:20px;background:#f4f5f7;color:#22262e;font-size:19px;font-weight:600;opacity:${lerp(0.45, 1, p).toFixed(3)};transform:scale(${(1 + pop).toFixed(3)})">${mark}${name}</span>`;
-  }).join('');
-  return `<div style="margin-top:12px;margin-left:${INDENT}px;display:flex;gap:10px">${chips}</div>`;
+    const mark = f ? `<img src="${LOGO(f)}" width="24" height="24" style="display:block;width:24px;height:24px">` : '';
+    return `<span style="display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px 0 ${f ? 7 : 13}px;border-radius:18px;background:#f4f5f7;color:#22262e;font-size:18px;font-weight:600;opacity:${lerp(0.45, 1, p).toFixed(3)};transform:scale(${(1 + pop).toFixed(3)})">${mark}${name}</span>`;
+  });
+  const row = (cs) => `<div style="display:flex;gap:8px">${cs.join('')}</div>`;
+  return `<div style="margin-top:10px;margin-left:${INDENT}px;display:flex;flex-direction:column;gap:6px">${row(chips.slice(0, DIALECT_ROW))}${row(chips.slice(DIALECT_ROW))}</div>`;
 }
 
 // ---------- the panel under the picker: what each source takes in ----------
@@ -139,13 +141,13 @@ export default {
     if (t >= pickerAt) {
       const sel = SOURCES.findIndex((s) => s.beat === BEATS[cur]);
       // Dialect chips: the three engines as the SQL row is picked, Snowflake and Databricks on their words.
-      const chipAt = [at.sql + 0.5, at.sql + 0.65, at.sql + 0.8, wordAt(scene, 'sql', 'Snowflake'), wordAt(scene, 'sql', 'Databricks')];
+      const chipAt = [at.sql + 0.5, at.sql + 0.6, at.sql + 0.7, wordAt(scene, 'sql', 'Snowflake'), wordAt(scene, 'sql', 'Databricks'), at.sql + 0.8, at.sql + 0.9, at.sql + 1.0, at.sql + 1.1];
       html += quickPick({
         x: X, y: 300, w: W, title: 'Import', placeholder: 'What would you like to start your data model from?',
         items: SOURCES.map((s) => ({
           label: s.label, detail: s.detail, icon: s.icon, indent: INDENT,
-          ...(s.sql ? { h: 134, extra: dialectStrip(t, chipAt) } : {}),
-        })), sel, rowH: 84,
+          ...(s.sql ? { h: 172, extra: dialectStrip(t, chipAt) } : {}),
+        })), sel, rowH: 78,
         style: `${appear(t, pickerAt, { dy: -12 })}${dbtDim > 0 ? `filter:brightness(${lerp(1, 0.5, dbtDim).toFixed(3)});` : ''}`,
       });
     }

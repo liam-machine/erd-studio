@@ -4,7 +4,9 @@
 // ERD Studio for Confluence macro draws it, rendered from this repo's own packages (no Confluence
 // app code) with a light theme, 880x555 at 2x.
 //
-//   node confluence-shot.mjs        (needs the repo root's npm install for esbuild and React)
+//   node confluence-shot.mjs           (needs the repo root's npm install for esbuild and React)
+//   node confluence-shot.mjs --launch  the launch cut's page instead: confluence-launch.display.json
+//                                      (the six-table sales schema it imports) -> confluence-launch.png
 //
 // The diagram is player/assets/confluence-sales.display.json: the story's `sales` diagram
 // (scenes/readme/story.js, R): dim_customer and fct_order in the gold layer, fct_order with the
@@ -21,11 +23,14 @@ const ROOT = join(HERE, '..');
 const OUT = join(HERE, 'build-confluence');
 const ASSETS = join(HERE, 'player/assets');
 mkdirSync(OUT, { recursive: true });
+const LAUNCH = process.argv.includes('--launch');
+const DISPLAY = LAUNCH ? 'confluence-launch.display.json' : 'confluence-sales.display.json';
+const SHOTS = LAUNCH ? [['', 'confluence-launch.png']] : [['', 'confluence-sales.png'], ['#before', 'confluence-sales-before.png']];
 
 writeFileSync(join(OUT, 'entry.tsx'), `import { createRoot } from 'react-dom/client';
 import { ErdCanvas } from '@erd-studio/renderer';
 import '@erd-studio/renderer/styles.css';
-import domain from ${JSON.stringify(join(ASSETS, 'confluence-sales.display.json'))};
+import domain from ${JSON.stringify(join(ASSETS, DISPLAY))};
 // #before: the diagram before the commit that adds fct_order's status column.
 const before = location.hash === '#before';
 const shown = before
@@ -68,7 +73,7 @@ await build({
 });
 
 const browser = await chromium.launch();
-for (const [hash, file] of [['', 'confluence-sales.png'], ['#before', 'confluence-sales-before.png']]) {
+for (const [hash, file] of SHOTS) {
   const page = await browser.newPage({ viewport: { width: 880, height: 555 }, deviceScaleFactor: 2 });
   page.on('pageerror', (e) => { console.error(e); process.exitCode = 1; });
   await page.goto('file://' + join(OUT, 'index.html') + hash);
