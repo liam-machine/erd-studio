@@ -90,14 +90,18 @@ describe('CREATE TABLE … AS SELECT', () => {
     expect(r.skipped).toContain('a.sql: not imported, made from a query or another table with no column list of its own: t (line 2)');
   });
 
-  it('names at most 20 per file, then counts the rest', () => {
-    const text = ['CREATE TABLE keep (id INT);', ...Array.from({ length: 23 }, (_, k) => `CREATE TABLE c${k} AS SELECT * FROM keep;`)].join('\n');
+  it('names at most 20 per file, then counts the rest, in lines of at most 300 characters', () => {
+    const text = ['CREATE TABLE keep (id INT);', ...Array.from({ length: 23 }, (_, k) => `CREATE TABLE a_long_schema_name.c${k}_with_a_long_table_name AS SELECT * FROM keep;`)].join('\n');
     const r = read('snowflake', text);
-    const line = r.skipped.find((l) => l.includes('not imported, made from a query'))!;
-    expect(line).toContain('c0 (line 2)');
-    expect(line).toContain('c19 (line 21)');
-    expect(line).not.toContain('c20 ');
-    expect(line.endsWith(' and 3 more')).toBe(true);
+    const lines = r.skipped.filter((l) => l.includes('not imported'));
+    expect(lines.length).toBeGreaterThan(1);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(300);
+    const all = lines.join('\n');
+    expect(all).toContain('a_long_schema_name.c0_with_a_long_table_name (line 2)');
+    expect(all).toContain('a_long_schema_name.c19_with_a_long_table_name (line 21)');
+    expect(all).not.toContain('c20_');
+    expect(lines[lines.length - 1].endsWith(' and 3 more')).toBe(true);
+    expect(lines.slice(1).every((l) => l.startsWith('a.sql: also not imported (made from a query or another table): '))).toBe(true);
   });
 });
 

@@ -1106,7 +1106,17 @@ class Converter implements ConverterContext {
       if (named.length) {
         const shown = named.slice(0, MAX_NAMED_CTAS).map((item) => (item.line !== undefined ? `${item.name} (line ${item.line})` : item.name!));
         const more = named.length - shown.length;
-        lines.push(`${file}: not imported, made from a query or another table with no column list of its own: ${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`);
+        // As the counts: lines of at most SKIPPED_LINE_MAX characters, the rest on `… also not imported …` lines.
+        let named0 = `${file}: not imported, made from a query or another table with no column list of its own: ${shown[0]}`;
+        for (const part of shown.slice(1)) {
+          if (named0.length + 2 + part.length > SKIPPED_LINE_MAX) {
+            lines.push(named0);
+            named0 = `${file}: also not imported (made from a query or another table): ${part}`;
+          } else {
+            named0 += `, ${part}`;
+          }
+        }
+        lines.push(more > 0 ? `${named0} and ${more} more` : named0);
       }
     }
     return lines;
