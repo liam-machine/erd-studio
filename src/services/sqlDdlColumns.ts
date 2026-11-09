@@ -55,6 +55,8 @@ export function toField(rf: RawSqlField, prepared: PreparedSql, text: string, so
     // SQL Server: `name AS <expr> [PERSISTED]` has no type of its own.
     field.computed = { expression: expressionText(text.slice(source.computed.start, source.computed.end)), persisted: source.computed.persisted };
     field.type = 'computed';
+    // SQL Server makes `ISNULL(expr, <constant>)` NOT NULL (its documented way to a non-nullable computed column).
+    if (isNullWithConstant(field.computed.expression)) field.notNull = true;
   } else if (source?.generated) {
     field.generated = {
       expression: expressionText(text.slice(source.generated.start, source.generated.end)),
@@ -93,6 +95,62 @@ export function typeAsWritten(raw: string): string {
  */
 function grammarTypeWins(asWritten: string, parsed: string): boolean {
   return /^enum\s*\(/i.test(asWritten) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(parsed) && !/^enum$/i.test(parsed);
+}
+
+/**
+ * `ISNULL(expr, <constant>)` (in brackets or not): SQL Server reads a
+ * computed column of it as NOT NULL (sys.columns.is_nullable = 0) when the
+ * constant is a number, or a string and `expr` is a string too (it starts
+ * with a string literal: `ISNULL('AW' + …, '')`). A string constant for a
+ * number (`ISNULL(n, 'x')`) is nullable, so it is not read as NOT NULL;
+ * neither is anything else, which SQL Server mostly reads as nullable.
+ * Checked on SQL Server 2025 (docs/dev/real-world-truth.md).
+ */
+export function isNullWithConstant(expression: string): boolean {
+  let e = expression.trim();
+  const wraps = (x: string): boolean => {
+    if (!x.startsWith('(') || !x.endsWith(')')) return false;
+    return closingOf(x, 0) === x.length - 1;
+  };
+  while (wraps(e)) e = e.slice(1, -1).trim();
+  const head = /^ISNULL\s*\(/i.exec(e);
+  if (!head) return false;
+  const open = head[0].length - 1;
+  if (closingOf(e, open) !== e.length - 1) return false;
+  const args = topLevelArgs(e.slice(open + 1, -1));
+  if (args.length !== 2) return false;
+  let constant = args[1].trim();
+  while (wraps(constant)) constant = constant.slice(1, -1).trim();
+  if (/^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i.test(constant)) return true;
+  return /^N?'(?:[^']|'')*'$/i.test(constant) && /^\(*\s*N?'/i.test(args[0].trim());
+}
+
+/** The index of the bracket closing the one at `open` (quotes skipped), or -1. */
+function closingOf(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (c === "'") { i++; while (i < s.length && !(s[i] === "'" && s[i + 1] !== "'")) i += s[i] === "'" ? 2 : 1; continue; }
+    if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** `s` split on its top-level commas (quotes and brackets respected). */
+function topLevelArgs(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "'") { i++; while (i < s.length && !(s[i] === "'" && s[i + 1] !== "'")) i += s[i] === "'" ? 2 : 1; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ',' && depth === 0) { out.push(s.slice(start, i)); start = i + 1; }
+  }
+  out.push(s.slice(start));
+  return out;
 }
 
 /** An expression's text, one line. */
