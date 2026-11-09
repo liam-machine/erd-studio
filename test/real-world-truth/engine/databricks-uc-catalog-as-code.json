@@ -1,0 +1,1432 @@
+{
+ "sample": "databricks-uc-catalog-as-code",
+ "engine": "Apache Spark 4.3.0 SQL parser (no catalog)",
+ "loaded": [
+  "databricks-uc-catalog-as-code/atlas_demo/src/core/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/core/tables/customers.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/core/tables/order_lines.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/core/tables/orders.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/core/tables/refunds.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/exports/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/exports/views/finance_ledger.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/exports/views/partner_feed.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/finance/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/finance/tables/monthly_close.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/finance/tables/recognized_revenue.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/marketing/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/marketing/tables/campaign_attribution.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/marketing/tables/customer_list.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/marketing/views/customer_360.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_crm/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_crm/tables/contacts.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_pos/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_pos/tables/refunds.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_pos/tables/transaction_lines.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_pos/tables/transactions.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/tables/accounts.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/tables/order_items.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/tables/orders.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/tables/sessions.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/ref/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/ref/tables/calendar.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/ref/tables/products.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/ref/tables/stores.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/sales/schema.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/sales/tables/customer_monthly.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/sales/tables/daily_sales.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/sales/tables/order_facts.sql",
+  "databricks-uc-catalog-as-code/atlas_demo/src/sales/views/top_products.sql"
+ ],
+ "statementsParsed": 35,
+ "setAside": {
+  "CreateNamespace": 9,
+  "CreateView": 4
+ },
+ "errors": [
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/core/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA core",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 22)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/core/tables/customers.sql",
+   "line": 11,
+   "statement": "ALTER TABLE core.customers",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 31)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/exports/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA exports",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 25)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/finance/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA finance",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 25)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/finance/tables/recognized_revenue.sql",
+   "line": 12,
+   "statement": "ALTER TABLE finance.recognized_revenue",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 43)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/marketing/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA marketing",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 27)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/marketing/tables/customer_list.sql",
+   "line": 9,
+   "statement": "ALTER TABLE marketing.customer_list",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 64)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_crm/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA raw_crm",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 25)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_crm/tables/contacts.sql",
+   "line": 12,
+   "statement": "ALTER TABLE raw_crm.contacts",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 56)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_crm/tables/contacts.sql",
+   "line": 13,
+   "statement": "ALTER TABLE raw_crm.contacts",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 57)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_pos/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA raw_pos",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 25)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA raw_web",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 25)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/raw_web/tables/accounts.sql",
+   "line": 9,
+   "statement": "ALTER TABLE raw_web.accounts",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 57)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/ref/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA ref",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 21)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/sales/schema.sql",
+   "line": 2,
+   "statement": "ALTER SCHEMA sales",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 23)"
+  },
+  {
+   "file": "databricks-uc-catalog-as-code/atlas_demo/src/sales/tables/order_facts.sql",
+   "line": 19,
+   "statement": "ALTER TABLE sales.order_facts",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 34)"
+  }
+ ],
+ "tables": [
+  {
+   "catalog": null,
+   "schema": "core",
+   "name": "customers",
+   "comment": "One row per customer, across channels",
+   "pk": [
+    "customer_id"
+   ],
+   "columns": [
+    {
+     "name": "customer_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "One id per person, from the CRM"
+    },
+    {
+     "name": "contact_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "CRM contact"
+    },
+    {
+     "name": "web_account_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Web account, if linked"
+    },
+    {
+     "name": "loyalty_no",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Loyalty card, if issued"
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Home region"
+    },
+    {
+     "name": "first_seen",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Earliest of CRM creation and web signup"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "core",
+   "name": "order_lines",
+   "comment": "One row per item on an order",
+   "pk": [
+    "order_key",
+    "line_no"
+   ],
+   "columns": [
+    {
+     "name": "order_key",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "The order"
+    },
+    {
+     "name": "line_no",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Position on the order"
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product"
+    },
+    {
+     "name": "quantity",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units"
+    },
+    {
+     "name": "unit_price",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit price, before tax"
+    },
+    {
+     "name": "discount",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Discount on the line"
+    },
+    {
+     "name": "tax",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Tax on the line; 0 for web orders"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "core",
+   "name": "orders",
+   "comment": "One row per order, web and store",
+   "pk": [
+    "order_key"
+   ],
+   "columns": [
+    {
+     "name": "order_key",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "web-<order id> or pos-<transaction id>"
+    },
+    {
+     "name": "channel",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "web or store"
+    },
+    {
+     "name": "source_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "The id in the source system"
+    },
+    {
+     "name": "customer_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Customer, when known"
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Store; 0 for the web store"
+    },
+    {
+     "name": "ordered_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When it was placed or rung up"
+    },
+    {
+     "name": "currency",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "ISO currency code"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "core",
+   "name": "refunds",
+   "comment": "One row per refund",
+   "pk": [
+    "refund_id"
+   ],
+   "columns": [
+    {
+     "name": "refund_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Refund number"
+    },
+    {
+     "name": "order_key",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The order refunded"
+    },
+    {
+     "name": "refunded_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the money went back"
+    },
+    {
+     "name": "amount",
+     "type": "decimal(12,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Amount refunded, tax included"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "finance",
+   "name": "monthly_close",
+   "comment": "One row per month and channel, as closed",
+   "pk": [
+    "month_start",
+    "channel"
+   ],
+   "columns": [
+    {
+     "name": "month_start",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "First day of the month"
+    },
+    {
+     "name": "channel",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "web or store"
+    },
+    {
+     "name": "net_revenue",
+     "type": "decimal(16,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Recognized revenue"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "finance",
+   "name": "recognized_revenue",
+   "comment": "One row per paid order",
+   "pk": [
+    "order_ref"
+   ],
+   "columns": [
+    {
+     "name": "order_ref",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Order number as finance writes it: W<id> or P<id>"
+    },
+    {
+     "name": "channel",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "web or store"
+    },
+    {
+     "name": "recognized_on",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Day the revenue is booked"
+    },
+    {
+     "name": "gross",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Amount charged"
+    },
+    {
+     "name": "tax",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Tax collected"
+    },
+    {
+     "name": "refunded",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Refunds against the order"
+    },
+    {
+     "name": "net_revenue",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Gross less tax and refunds"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "marketing",
+   "name": "campaign_attribution",
+   "comment": "One row per campaign and order it is credited with",
+   "pk": [
+    "campaign_code",
+    "order_key"
+   ],
+   "columns": [
+    {
+     "name": "campaign_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Campaign credited"
+    },
+    {
+     "name": "order_key",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Order credited to it"
+    },
+    {
+     "name": "attributed_revenue",
+     "type": "decimal(12,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Net amount of the order"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "marketing",
+   "name": "customer_list",
+   "comment": "Customers, for building audiences",
+   "pk": null,
+   "columns": [
+    {
+     "name": "customer_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Customer"
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Home region"
+    },
+    {
+     "name": "first_seen",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the contact was created"
+    },
+    {
+     "name": "loyalty_no",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Loyalty card, if issued"
+    },
+    {
+     "name": "email_hash",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "SHA-256 of the lower-cased email"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_crm",
+   "name": "contacts",
+   "comment": "One row per CRM contact",
+   "pk": [
+    "contact_id"
+   ],
+   "columns": [
+    {
+     "name": "contact_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "CRM contact number"
+    },
+    {
+     "name": "loyalty_no",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Loyalty card, if issued"
+    },
+    {
+     "name": "web_account_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Linked web account, if any"
+    },
+    {
+     "name": "full_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Name as entered"
+    },
+    {
+     "name": "email_hash",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "SHA-256 of the lower-cased email"
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Home region"
+    },
+    {
+     "name": "created_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the contact was created"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_pos",
+   "name": "refunds",
+   "comment": "One row per refund given at a register",
+   "pk": [
+    "refund_id"
+   ],
+   "columns": [
+    {
+     "name": "refund_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Refund number"
+    },
+    {
+     "name": "txn_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Transaction refunded"
+    },
+    {
+     "name": "refunded_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the money went back"
+    },
+    {
+     "name": "amount",
+     "type": "decimal(12,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Amount refunded, tax included"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_pos",
+   "name": "transaction_lines",
+   "comment": "One row per item on a register receipt",
+   "pk": [
+    "txn_id",
+    "line_no"
+   ],
+   "columns": [
+    {
+     "name": "txn_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Register transaction number"
+    },
+    {
+     "name": "line_no",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Position on the receipt"
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product sold"
+    },
+    {
+     "name": "qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units sold"
+    },
+    {
+     "name": "unit_price",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Shelf price, before tax"
+    },
+    {
+     "name": "tax",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Tax on the line"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_pos",
+   "name": "transactions",
+   "comment": "One row per register transaction",
+   "pk": [
+    "txn_id"
+   ],
+   "columns": [
+    {
+     "name": "txn_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Register transaction number"
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Store the register is in"
+    },
+    {
+     "name": "txn_ts",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When it was rung up"
+    },
+    {
+     "name": "loyalty_no",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Loyalty card scanned, if any"
+    },
+    {
+     "name": "tender",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "cash, card or voucher"
+    },
+    {
+     "name": "total_gross",
+     "type": "decimal(12,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Amount paid, tax included"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_web",
+   "name": "accounts",
+   "comment": "One row per web account",
+   "pk": [
+    "account_id"
+   ],
+   "columns": [
+    {
+     "name": "account_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Web account number"
+    },
+    {
+     "name": "email_hash",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "SHA-256 of the lower-cased email"
+    },
+    {
+     "name": "signup_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the account was opened"
+    },
+    {
+     "name": "country",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Country given at signup"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_web",
+   "name": "order_items",
+   "comment": "One row per item on a web order",
+   "pk": [
+    "order_id",
+    "item_no"
+   ],
+   "columns": [
+    {
+     "name": "order_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Web order number"
+    },
+    {
+     "name": "item_no",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Position on the order"
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product ordered"
+    },
+    {
+     "name": "qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units ordered"
+    },
+    {
+     "name": "price",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit price charged"
+    },
+    {
+     "name": "discount",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Discount on the whole line"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_web",
+   "name": "orders",
+   "comment": "One row per web order, as received",
+   "pk": [
+    "order_id"
+   ],
+   "columns": [
+    {
+     "name": "order_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Web order number"
+    },
+    {
+     "name": "account_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Web account that placed it"
+    },
+    {
+     "name": "placed_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the order was placed"
+    },
+    {
+     "name": "currency",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "ISO currency code"
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "placed, paid, shipped or canceled"
+    },
+    {
+     "name": "payload",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The order as the storefront sent it, JSON"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "raw_web",
+   "name": "sessions",
+   "comment": "One row per browsing session",
+   "pk": [
+    "session_id"
+   ],
+   "columns": [
+    {
+     "name": "session_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Browser session"
+    },
+    {
+     "name": "account_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Signed-in account, if any"
+    },
+    {
+     "name": "started_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "First page view"
+    },
+    {
+     "name": "campaign_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "utm_campaign of the landing page"
+    },
+    {
+     "name": "landing_page",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Path of the first page"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "ref",
+   "name": "calendar",
+   "comment": "One row per calendar day",
+   "pk": [
+    "day"
+   ],
+   "columns": [
+    {
+     "name": "day",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "The day"
+    },
+    {
+     "name": "week_start",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Monday of its week"
+    },
+    {
+     "name": "month_start",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "First day of its month"
+    },
+    {
+     "name": "fiscal_quarter",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Such as FY27-Q2"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "ref",
+   "name": "products",
+   "comment": "One row per product",
+   "pk": [
+    "sku"
+   ],
+   "columns": [
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Stock keeping unit"
+    },
+    {
+     "name": "product_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Name on the label"
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Merchandising category"
+    },
+    {
+     "name": "list_price",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Price before any discount"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "ref",
+   "name": "stores",
+   "comment": "One row per store",
+   "pk": [
+    "store_id"
+   ],
+   "columns": [
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Store number; 0 is the web store"
+    },
+    {
+     "name": "store_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Store name as signed"
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sales region"
+    },
+    {
+     "name": "opened_on",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "First day open"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "sales",
+   "name": "customer_monthly",
+   "comment": "One row per customer and month",
+   "pk": [
+    "customer_id",
+    "month_start"
+   ],
+   "columns": [
+    {
+     "name": "customer_id",
+     "type": "long",
+     "notNull": true,
+     "identity": false,
+     "comment": "Customer"
+    },
+    {
+     "name": "month_start",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "First day of the month"
+    },
+    {
+     "name": "orders",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Orders placed"
+    },
+    {
+     "name": "revenue",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Net amount of those orders"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "sales",
+   "name": "daily_sales",
+   "comment": "One row per store, product and day",
+   "pk": [
+    "sale_date",
+    "store_id",
+    "sku"
+   ],
+   "columns": [
+    {
+     "name": "sale_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business day"
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Store"
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product"
+    },
+    {
+     "name": "units",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units sold"
+    },
+    {
+     "name": "revenue",
+     "type": "decimal(14,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sales, tax included"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "sales",
+   "name": "order_facts",
+   "comment": "One row per item on an order, with its product and channel",
+   "pk": [
+    "order_key",
+    "line_no"
+   ],
+   "columns": [
+    {
+     "name": "order_key",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "The order"
+    },
+    {
+     "name": "line_no",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Position on the order"
+    },
+    {
+     "name": "ordered_at",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When it was placed or rung up"
+    },
+    {
+     "name": "order_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Day of ordered_at"
+    },
+    {
+     "name": "channel",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "web or store"
+    },
+    {
+     "name": "customer_id",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Customer, when known"
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Store; 0 for the web store"
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product"
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product category"
+    },
+    {
+     "name": "quantity",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units"
+    },
+    {
+     "name": "net_amount",
+     "type": "decimal(12,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Quantity times price, less discount"
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": "core",
+   "table": "order_lines",
+   "name": "core_lines_order_fk",
+   "columns": [
+    "order_key"
+   ],
+   "refSchema": "core",
+   "refTable": "orders",
+   "refColumns": [
+    "order_key"
+   ]
+  },
+  {
+   "schema": "core",
+   "table": "order_lines",
+   "name": "core_lines_sku_fk",
+   "columns": [
+    "sku"
+   ],
+   "refSchema": "ref",
+   "refTable": "products",
+   "refColumns": [
+    "sku"
+   ]
+  },
+  {
+   "schema": "core",
+   "table": "orders",
+   "name": "core_orders_customer_fk",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "core",
+   "refTable": "customers",
+   "refColumns": [
+    "customer_id"
+   ]
+  },
+  {
+   "schema": "core",
+   "table": "orders",
+   "name": "core_orders_store_fk",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "ref",
+   "refTable": "stores",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "schema": "core",
+   "table": "refunds",
+   "name": "core_refunds_order_fk",
+   "columns": [
+    "order_key"
+   ],
+   "refSchema": "core",
+   "refTable": "orders",
+   "refColumns": [
+    "order_key"
+   ]
+  },
+  {
+   "schema": "raw_pos",
+   "table": "refunds",
+   "name": "refunds_txn_fk",
+   "columns": [
+    "txn_id"
+   ],
+   "refSchema": "raw_pos",
+   "refTable": "transactions",
+   "refColumns": [
+    "txn_id"
+   ]
+  },
+  {
+   "schema": "raw_pos",
+   "table": "transaction_lines",
+   "name": "txn_lines_sku_fk",
+   "columns": [
+    "sku"
+   ],
+   "refSchema": "ref",
+   "refTable": "products",
+   "refColumns": [
+    "sku"
+   ]
+  },
+  {
+   "schema": "raw_pos",
+   "table": "transaction_lines",
+   "name": "txn_lines_txn_fk",
+   "columns": [
+    "txn_id"
+   ],
+   "refSchema": "raw_pos",
+   "refTable": "transactions",
+   "refColumns": [
+    "txn_id"
+   ]
+  },
+  {
+   "schema": "raw_pos",
+   "table": "transactions",
+   "name": "txn_store_fk",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "ref",
+   "refTable": "stores",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "schema": "raw_web",
+   "table": "order_items",
+   "name": "web_items_order_fk",
+   "columns": [
+    "order_id"
+   ],
+   "refSchema": "raw_web",
+   "refTable": "orders",
+   "refColumns": [
+    "order_id"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "customer_monthly",
+   "name": "customer_monthly_customer_fk",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "core",
+   "refTable": "customers",
+   "refColumns": [
+    "customer_id"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "daily_sales",
+   "name": "daily_sales_sku_fk",
+   "columns": [
+    "sku"
+   ],
+   "refSchema": "ref",
+   "refTable": "products",
+   "refColumns": [
+    "sku"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "daily_sales",
+   "name": "daily_sales_store_fk",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "ref",
+   "refTable": "stores",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "order_facts",
+   "name": "order_facts_customer_fk",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "core",
+   "refTable": "customers",
+   "refColumns": [
+    "customer_id"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "order_facts",
+   "name": "order_facts_sku_fk",
+   "columns": [
+    "sku"
+   ],
+   "refSchema": "ref",
+   "refTable": "products",
+   "refColumns": [
+    "sku"
+   ]
+  },
+  {
+   "schema": "sales",
+   "table": "order_facts",
+   "name": "order_facts_store_fk",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "ref",
+   "refTable": "stores",
+   "refColumns": [
+    "store_id"
+   ]
+  }
+ ]
+}

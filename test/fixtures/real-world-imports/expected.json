@@ -34503,6 +34503,4492 @@
     }
    ],
    "uniqueKeys": []
+  },
+  "snowflake-realtime-datavault": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "snowflake-realtime-datavault/environment_setup.sql",
+     "snowflake-realtime-datavault/staging.sql",
+     "snowflake-realtime-datavault/raw_data_vault.sql",
+     "snowflake-realtime-datavault/business_data_vault.sql",
+     "snowflake-realtime-datavault/information_delivery.sql"
+    ],
+    "dialect": "snowflake"
+   },
+   "counts": {
+    "tables": 12,
+    "columns": 87,
+    "primaryKeys": 8,
+    "relationships": 6
+   },
+   "notes": "Read back from fakesnow (test/real-world-truth/engine/snowflake-realtime-datavault.json), the files run in the Data Vault's own order (environment, staging, raw vault, business vault, delivery), with the SNOWFLAKE_SAMPLE_DATA share's NATION and REGION created first. Schemas come from USE SCHEMA (L00_STG, L10_RDV, L20_BDV; unquoted, so upper case). Names and types as the files write them. Five tables are CREATE TABLE ... AS SELECT: ref_region, ref_nation and sat_order_bv give a column list (with their primary and foreign keys), which sets the columns; stg_nation and stg_region give none (SELECT src.*, ...), so their columns are the share's NATION / REGION plus LDTS and RSCR, typed as fakesnow reads the copy (TEXT for the share's VARCHARs, TIMESTAMP_TZ for CURRENT_TIMESTAMP()). Every FOREIGN KEY names its table but no column (REFERENCES hub_customer): Snowflake reads that as the primary key. Views, streams, stages, pipes and tasks are not tables.",
+   "tables": [
+    {
+     "name": "stg_customer",
+     "schema": "L00_STG",
+     "pk": [],
+     "columns": [
+      [
+       "raw_json",
+       "VARIANT",
+       ""
+      ],
+      [
+       "filename",
+       "STRING",
+       "N"
+      ],
+      [
+       "file_row_seq",
+       "NUMBER",
+       "N"
+      ],
+      [
+       "ldts",
+       "STRING",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "stg_nation",
+     "schema": "L00_STG",
+     "pk": [],
+     "columns": [
+      [
+       "N_NATIONKEY",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "N_NAME",
+       "TEXT",
+       ""
+      ],
+      [
+       "N_REGIONKEY",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "N_COMMENT",
+       "TEXT",
+       ""
+      ],
+      [
+       "LDTS",
+       "TIMESTAMP_TZ",
+       ""
+      ],
+      [
+       "RSCR",
+       "TEXT",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "stg_orders",
+     "schema": "L00_STG",
+     "pk": [],
+     "columns": [
+      [
+       "o_orderkey",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_custkey",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_orderstatus",
+       "STRING",
+       ""
+      ],
+      [
+       "o_totalprice",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_orderdate",
+       "DATE",
+       ""
+      ],
+      [
+       "o_orderpriority",
+       "STRING",
+       ""
+      ],
+      [
+       "o_clerk",
+       "STRING",
+       ""
+      ],
+      [
+       "o_shippriority",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_comment",
+       "STRING",
+       ""
+      ],
+      [
+       "filename",
+       "STRING",
+       "N"
+      ],
+      [
+       "file_row_seq",
+       "NUMBER",
+       "N"
+      ],
+      [
+       "ldts",
+       "STRING",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "stg_region",
+     "schema": "L00_STG",
+     "pk": [],
+     "columns": [
+      [
+       "R_REGIONKEY",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "R_NAME",
+       "TEXT",
+       ""
+      ],
+      [
+       "R_COMMENT",
+       "TEXT",
+       ""
+      ],
+      [
+       "LDTS",
+       "TIMESTAMP_TZ",
+       ""
+      ],
+      [
+       "RSCR",
+       "TEXT",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "hub_customer",
+     "schema": "L10_RDV",
+     "pk": [
+      "sha1_hub_customer"
+     ],
+     "columns": [
+      [
+       "sha1_hub_customer",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "c_custkey",
+       "NUMBER",
+       "N"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "hub_order",
+     "schema": "L10_RDV",
+     "pk": [
+      "sha1_hub_order"
+     ],
+     "columns": [
+      [
+       "sha1_hub_order",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "o_orderkey",
+       "NUMBER",
+       "N"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "lnk_customer_order",
+     "schema": "L10_RDV",
+     "pk": [
+      "sha1_lnk_customer_order"
+     ],
+     "columns": [
+      [
+       "sha1_lnk_customer_order",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "sha1_hub_customer",
+       "BINARY",
+       ""
+      ],
+      [
+       "sha1_hub_order",
+       "BINARY",
+       ""
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "ref_nation",
+     "schema": "L10_RDV",
+     "pk": [
+      "nationcode"
+     ],
+     "columns": [
+      [
+       "nationcode",
+       "NUMBER",
+       "PN"
+      ],
+      [
+       "regioncode",
+       "NUMBER",
+       ""
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ],
+      [
+       "n_name",
+       "STRING",
+       ""
+      ],
+      [
+       "n_comment",
+       "STRING",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "ref_region",
+     "schema": "L10_RDV",
+     "pk": [
+      "regioncode"
+     ],
+     "columns": [
+      [
+       "regioncode",
+       "NUMBER",
+       "PN"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ],
+      [
+       "r_name",
+       "STRING",
+       ""
+      ],
+      [
+       "r_comment",
+       "STRING",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "sat_customer",
+     "schema": "L10_RDV",
+     "pk": [
+      "sha1_hub_customer",
+      "ldts"
+     ],
+     "columns": [
+      [
+       "sha1_hub_customer",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "PN"
+      ],
+      [
+       "c_name",
+       "STRING",
+       ""
+      ],
+      [
+       "c_address",
+       "STRING",
+       ""
+      ],
+      [
+       "c_phone",
+       "STRING",
+       ""
+      ],
+      [
+       "c_acctbal",
+       "NUMBER",
+       ""
+      ],
+      [
+       "c_mktsegment",
+       "STRING",
+       ""
+      ],
+      [
+       "c_comment",
+       "STRING",
+       ""
+      ],
+      [
+       "nationcode",
+       "NUMBER",
+       ""
+      ],
+      [
+       "hash_diff",
+       "BINARY",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "sat_order",
+     "schema": "L10_RDV",
+     "pk": [
+      "sha1_hub_order",
+      "ldts"
+     ],
+     "columns": [
+      [
+       "sha1_hub_order",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "PN"
+      ],
+      [
+       "o_orderstatus",
+       "STRING",
+       ""
+      ],
+      [
+       "o_totalprice",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_orderdate",
+       "DATE",
+       ""
+      ],
+      [
+       "o_orderpriority",
+       "STRING",
+       ""
+      ],
+      [
+       "o_clerk",
+       "STRING",
+       ""
+      ],
+      [
+       "o_shippriority",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_comment",
+       "STRING",
+       ""
+      ],
+      [
+       "hash_diff",
+       "BINARY",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "sat_order_bv",
+     "schema": "L20_BDV",
+     "pk": [
+      "sha1_hub_order",
+      "ldts"
+     ],
+     "columns": [
+      [
+       "sha1_hub_order",
+       "BINARY",
+       "PN"
+      ],
+      [
+       "ldts",
+       "TIMESTAMP",
+       "PN"
+      ],
+      [
+       "o_orderstatus",
+       "STRING",
+       ""
+      ],
+      [
+       "o_totalprice",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_orderdate",
+       "DATE",
+       ""
+      ],
+      [
+       "o_orderpriority",
+       "STRING",
+       ""
+      ],
+      [
+       "o_clerk",
+       "STRING",
+       ""
+      ],
+      [
+       "o_shippriority",
+       "NUMBER",
+       ""
+      ],
+      [
+       "o_comment",
+       "STRING",
+       ""
+      ],
+      [
+       "hash_diff",
+       "BINARY",
+       "N"
+      ],
+      [
+       "rscr",
+       "STRING",
+       "N"
+      ],
+      [
+       "order_priority_bucket",
+       "STRING",
+       ""
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "lnk_customer_order",
+     "fromColumn": "sha1_hub_customer",
+     "to": "hub_customer",
+     "toColumn": "sha1_hub_customer"
+    },
+    {
+     "from": "lnk_customer_order",
+     "fromColumn": "sha1_hub_order",
+     "to": "hub_order",
+     "toColumn": "sha1_hub_order"
+    },
+    {
+     "from": "ref_nation",
+     "fromColumn": "regioncode",
+     "to": "ref_region",
+     "toColumn": "regioncode"
+    },
+    {
+     "from": "sat_customer",
+     "fromColumn": "sha1_hub_customer",
+     "to": "hub_customer",
+     "toColumn": "sha1_hub_customer"
+    },
+    {
+     "from": "sat_order",
+     "fromColumn": "sha1_hub_order",
+     "to": "hub_order",
+     "toColumn": "sha1_hub_order"
+    },
+    {
+     "from": "sat_order_bv",
+     "fromColumn": "sha1_hub_order",
+     "to": "hub_order",
+     "toColumn": "sha1_hub_order"
+    }
+   ],
+   "uniqueKeys": []
+  },
+  "snowflake-sqldbm-adventureworksdw": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "snowflake-sqldbm-adventureworksdw/assets/sample_schema.sql"
+    ],
+    "dialect": "snowflake"
+   },
+   "counts": {
+    "tables": 23,
+    "columns": 284,
+    "primaryKeys": 15,
+    "relationships": 36
+   },
+   "notes": "Read back from fakesnow (test/real-world-truth/engine/snowflake-sqldbm-adventureworksdw.json) after creating the ADVENTUREWORKSDW database the script expects. Every table and column name is quoted, so it keeps its case (EDW.\"DimCustomer\".\"GeographyKey\"). Each FOREIGN KEY names the referenced column unquoted (references ADVENTUREWORKSDW.EDW.\"DimGeography\"(GeographyKey)), which Snowflake folds to GEOGRAPHYKEY: a name that matches the quoted \"GeographyKey\" only without regard to case. The truth draws each to the column it means (DimGeography.GeographyKey); the engine comparison, like ERD Studio, matches names case-insensitively. 4 of the 36 foreign keys reference a table created later in the file (DimCustomer before DimGeography): Snowflake does not check that, so they are kept. AUTOINCREMENT is the column's identity, not its type.",
+   "tables": [
+    {
+     "name": "DimAccount",
+     "schema": "EDW",
+     "description": "Holds all Account information",
+     "pk": [
+      "AccountKey"
+     ],
+     "columns": [
+      [
+       "AccountKey",
+       "NUMBER(38,0)",
+       "PN",
+       "Unique Identifier of the Account data"
+      ],
+      [
+       "ParentAccountKey",
+       "NUMBER(38,0)",
+       "",
+       "Identifier of parent Account"
+      ],
+      [
+       "AccountCodeAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ParentAccountCodeAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "AccountDescription",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "AccountType",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "Operator",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "CustomMembers",
+       "VARCHAR(300)",
+       ""
+      ],
+      [
+       "ValueType",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "CustomMemberOptions",
+       "VARCHAR(200)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimCurrency",
+     "schema": "EDW",
+     "description": "Dimension for Currency Data",
+     "pk": [
+      "CurrencyKey"
+     ],
+     "columns": [
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       "PN",
+       "Currency Identifier"
+      ],
+      [
+       "CurrencyAlternateKey",
+       "VARCHAR(3)",
+       "N",
+       "Alternate Currency Identifier"
+      ],
+      [
+       "CurrencyName",
+       "VARCHAR(50)",
+       "N",
+       "Name of the Currency"
+      ]
+     ]
+    },
+    {
+     "name": "DimCustomer",
+     "schema": "EDW",
+     "description": "Dimension for Customer Data",
+     "pk": [
+      "CustomerKey"
+     ],
+     "columns": [
+      [
+       "CustomerKey",
+       "NUMBER(38,0)",
+       "PN",
+       "Customer Identifier"
+      ],
+      [
+       "GeographyKey",
+       "NUMBER(38,0)",
+       "",
+       "Geographic informatio"
+      ],
+      [
+       "CustomerAlternateKey",
+       "VARCHAR(15)",
+       "N",
+       "Alternate Key"
+      ],
+      [
+       "Title",
+       "VARCHAR(8)",
+       "",
+       "Title of the Customer"
+      ],
+      [
+       "FirstName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "MiddleName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "LastName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "NameStyle",
+       "VARCHAR(5)",
+       ""
+      ],
+      [
+       "BirthDate",
+       "DATE",
+       ""
+      ],
+      [
+       "MaritalStatus",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "Suffix",
+       "VARCHAR(10)",
+       ""
+      ],
+      [
+       "Gender",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "EmailAddress",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "YearlyIncome",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "TotalChildren",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "NumberChildrenAtHome",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "EnglishEducation",
+       "VARCHAR(40)",
+       ""
+      ],
+      [
+       "SpanishEducation",
+       "VARCHAR(40)",
+       ""
+      ],
+      [
+       "FrenchEducation",
+       "VARCHAR(40)",
+       ""
+      ],
+      [
+       "EnglishOccupation",
+       "VARCHAR(100)",
+       ""
+      ],
+      [
+       "SpanishOccupation",
+       "VARCHAR(100)",
+       ""
+      ],
+      [
+       "FrenchOccupation",
+       "VARCHAR(100)",
+       ""
+      ],
+      [
+       "HouseOwnerFlag",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "NumberCarsOwned",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "AddressLine",
+       "VARCHAR(120)",
+       ""
+      ],
+      [
+       "AddressLine2",
+       "VARCHAR(120)",
+       ""
+      ],
+      [
+       "Phone",
+       "VARCHAR(20)",
+       ""
+      ],
+      [
+       "DateFirstPurchase",
+       "DATE",
+       ""
+      ],
+      [
+       "CommuteDistance",
+       "VARCHAR(15)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimDate",
+     "schema": "EDW",
+     "description": "Dimension for Date time",
+     "pk": [
+      "DateKey"
+     ],
+     "columns": [
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "FullDateAlternateKey",
+       "DATE",
+       "N"
+      ],
+      [
+       "DayNumberOfWeek",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EnglishDayNameOfWeek",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "SpanishDayNameOfWeek",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "FrenchDayNameOfWeek",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "DayNumberOfMonth",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DayNumberOfYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "WeekNumberOfYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EnglishMonthName",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "SpanishMonthName",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "FrenchMonthName",
+       "VARCHAR(10)",
+       "N"
+      ],
+      [
+       "MonthNumberOfYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CalendarQuarter",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CalendarYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CalendarSemester",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "FiscalQuarter",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "FiscalYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "FiscalSemester",
+       "NUMBER(38,0)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "DimDepartmentGroup",
+     "schema": "EDW",
+     "description": "Dimension for Department groups",
+     "pk": [
+      "DepartmentGroupKey"
+     ],
+     "columns": [
+      [
+       "DepartmentGroupKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ParentDepartmentGroupKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "DepartmentGroupName",
+       "VARCHAR(50)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimEmployee",
+     "schema": "EDW",
+     "description": "This table holds all Employee Information",
+     "pk": [
+      "EmployeeKey"
+     ],
+     "columns": [
+      [
+       "EmployeeKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ParentEmployeeKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "EmployeeNationalIDAlternateKey",
+       "VARCHAR(15)",
+       ""
+      ],
+      [
+       "ParentEmployeeNationalIDAlternateKey",
+       "VARCHAR(15)",
+       ""
+      ],
+      [
+       "SalesTerritoryKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "FirstName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "LastName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "MiddleName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "NameStyle",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "Title",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "HireDate",
+       "DATE",
+       ""
+      ],
+      [
+       "BirthDate",
+       "DATE",
+       ""
+      ],
+      [
+       "LoginID",
+       "VARCHAR(256)",
+       ""
+      ],
+      [
+       "EmailAddress",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "Phone",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "MaritalStatus",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "EmergencyContactName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "EmergencyContactPhone",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "SalariedFlag",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "Gender",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "PayFrequency",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "BaseRate",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "VacationHours",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "SickLeaveHours",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "CurrentFlag",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesPersonFlag",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DepartmentName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "StartDate",
+       "DATE",
+       ""
+      ],
+      [
+       "EndDate",
+       "DATE",
+       ""
+      ],
+      [
+       "Status",
+       "VARCHAR(50)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimGeography",
+     "schema": "EDW",
+     "pk": [
+      "GeographyKey"
+     ],
+     "columns": [
+      [
+       "GeographyKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "City",
+       "VARCHAR(30)",
+       ""
+      ],
+      [
+       "StateProvinceCode",
+       "VARCHAR(3)",
+       ""
+      ],
+      [
+       "StateProvinceName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "CountryRegionCode",
+       "VARCHAR(3)",
+       ""
+      ],
+      [
+       "EnglishCountryRegionName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "SpanishCountryRegionName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "FrenchCountryRegionName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "PostalCode",
+       "VARCHAR(15)",
+       ""
+      ],
+      [
+       "SalesTerritoryKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "IpAddressLocator",
+       "VARCHAR(15)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimOrganization",
+     "schema": "EDW",
+     "description": "Dimension for Organizational Data",
+     "pk": [
+      "OrganizationKey"
+     ],
+     "columns": [
+      [
+       "OrganizationKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ParentOrganizationKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "PercentageOfOwnership",
+       "VARCHAR(16)",
+       ""
+      ],
+      [
+       "OrganizationName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimProduct",
+     "schema": "EDW",
+     "pk": [
+      "ProductKey"
+     ],
+     "columns": [
+      [
+       "ProductKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ProductAlternateKey",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "ProductSubcategoryKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "WeightUnitMeasureCode",
+       "VARCHAR(3)",
+       ""
+      ],
+      [
+       "SizeUnitMeasureCode",
+       "VARCHAR(3)",
+       ""
+      ],
+      [
+       "EnglishProductName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "SpanishProductName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "FrenchProductName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "StandardCost",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "FinishedGoodsFlag",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "Color",
+       "VARCHAR(15)",
+       "N"
+      ],
+      [
+       "SafetyStockLevel",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ReorderPoint",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ListPrice",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "Size",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "SizeRange",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "Weight",
+       "FLOAT",
+       ""
+      ],
+      [
+       "DaysToManufacture",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ProductLine",
+       "VARCHAR(2)",
+       ""
+      ],
+      [
+       "DealerPrice",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "Class",
+       "VARCHAR(2)",
+       ""
+      ],
+      [
+       "Style",
+       "VARCHAR(2)",
+       ""
+      ],
+      [
+       "ModelName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "EnglishDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "FrenchDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "ChineseDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "ArabicDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "HebrewDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "ThaiDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "GermanDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "JapaneseDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "TurkishDescription",
+       "VARCHAR(400)",
+       ""
+      ],
+      [
+       "Status",
+       "VARCHAR(7)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimProductCategory",
+     "schema": "EDW",
+     "pk": [
+      "ProductCategoryKey"
+     ],
+     "columns": [
+      [
+       "ProductCategoryKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ProductCategoryAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "EnglishProductCategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "SpanishProductCategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "FrenchProductCategoryName",
+       "VARCHAR(50)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "DimProductSubcategory",
+     "schema": "EDW",
+     "pk": [
+      "ProductSubcategoryKey"
+     ],
+     "columns": [
+      [
+       "ProductSubcategoryKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "ProductSubcategoryAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "EnglishProductSubcategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "SpanishProductSubcategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "FrenchProductSubcategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "ProductCategoryKey",
+       "NUMBER(38,0)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimPromotion",
+     "schema": "EDW",
+     "pk": [
+      "PromotionKey"
+     ],
+     "columns": [
+      [
+       "PromotionKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "PromotionAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "EnglishPromotionName",
+       "VARCHAR(255)",
+       ""
+      ],
+      [
+       "SpanishPromotionName",
+       "VARCHAR(255)",
+       ""
+      ],
+      [
+       "FrenchPromotionName",
+       "VARCHAR(255)",
+       ""
+      ],
+      [
+       "DiscountPct",
+       "FLOAT",
+       ""
+      ],
+      [
+       "EnglishPromotionType",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "SpanishPromotionType",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "FrenchPromotionType",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "EnglishPromotionCategory",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "SpanishPromotionCategory",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "FrenchPromotionCategory",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "MinQty",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "MaxQty",
+       "NUMBER(38,0)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimReseller",
+     "schema": "EDW",
+     "pk": [
+      "ResellerKey"
+     ],
+     "columns": [
+      [
+       "ResellerKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "GeographyKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ResellerAlternateKey",
+       "VARCHAR(15)",
+       ""
+      ],
+      [
+       "Phone",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "BusinessType",
+       "VARCHAR(20)",
+       "N"
+      ],
+      [
+       "ResellerName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "NumberEmployees",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "OrderFrequency",
+       "VARCHAR(1)",
+       ""
+      ],
+      [
+       "OrderMonth",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "FirstOrderYear",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "LastOrderYear",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ProductLine",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "AddressLine1",
+       "VARCHAR(60)",
+       ""
+      ],
+      [
+       "AddressLine2",
+       "VARCHAR(60)",
+       ""
+      ],
+      [
+       "AnnualSales",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "BankName",
+       "VARCHAR(50)",
+       ""
+      ],
+      [
+       "MinPaymentType",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "MinPaymentAmount",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "AnnualRevenue",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "YearOpened",
+       "NUMBER(38,0)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimSalesTerritory",
+     "schema": "EDW",
+     "description": "Sales Territory data",
+     "pk": [
+      "SalesTerritoryKey"
+     ],
+     "columns": [
+      [
+       "SalesTerritoryKey",
+       "NUMBER(38,0)",
+       "PN"
+      ],
+      [
+       "SalesTerritoryAlternateKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "SalesTerritoryRegion",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "SalesTerritoryCountry",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "SalesTerritoryGroup",
+       "VARCHAR(50)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "DimScenario",
+     "schema": "EDW",
+     "description": "Dimension Scenario",
+     "pk": [
+      "ScenarioKey"
+     ],
+     "columns": [
+      [
+       "ScenarioKey",
+       "NUMBER(38,0)",
+       "PN",
+       "Scenario Identifier"
+      ],
+      [
+       "ScenarioName",
+       "VARCHAR(50)",
+       "",
+       "Name of the Scenario"
+      ],
+      [
+       "CreatedBy",
+       "VARCHAR(50)",
+       "N",
+       "Who Created this Scenario"
+      ],
+      [
+       "CreatedDate",
+       "TIMESTAMP_NTZ(9)",
+       "N",
+       "Scenario Creation Date"
+      ],
+      [
+       "UpdatedDate",
+       "TIMESTAMP_NTZ(9)",
+       "N"
+      ],
+      [
+       "UpdatedBy",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "TestCol",
+       "VARCHAR(50)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "FactCurrencyRate",
+     "schema": "EDW",
+     "pk": [],
+     "columns": [
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "AverageRate",
+       "FLOAT",
+       "N"
+      ],
+      [
+       "EndOfDayRate",
+       "FLOAT",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "FactFinance",
+     "schema": "EDW",
+     "description": "Facts for Finance",
+     "pk": [],
+     "columns": [
+      [
+       "FinanceKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "OrganizationKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DepartmentGroupKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ScenarioKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "AccountKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "Amount",
+       "FLOAT",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "FactInternetSales",
+     "schema": "EDW",
+     "description": "Fact table to hold Currency Data",
+     "pk": [],
+     "columns": [
+      [
+       "ProductKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "OrderDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DueDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ShipDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CustomerKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "PromotionKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesTerritoryKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesOrderNumber",
+       "VARCHAR(20)",
+       "N"
+      ],
+      [
+       "SalesOrderLineNumber",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "RevisionNumber",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "OrderQuantity",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "UnitPrice",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ExtendedAmount",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "UnitPriceDiscountPct",
+       "FLOAT",
+       "N"
+      ],
+      [
+       "DiscountAmount",
+       "FLOAT",
+       "N"
+      ],
+      [
+       "ProductStandardCost",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "TotalProductCost",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesAmount",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "TaxAmt",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "Freight",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CarrierTrackingNumber",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "CustomerPONumber",
+       "VARCHAR(25)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "FactProductInventory",
+     "schema": "EDW",
+     "pk": [],
+     "columns": [
+      [
+       "ProductKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "MovementDate",
+       "DATE",
+       "N"
+      ],
+      [
+       "UnitCost",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "UnitsIn",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "UnitsOut",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "UnitsBalance",
+       "NUMBER(38,0)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "FactResellerSales",
+     "schema": "EDW",
+     "description": "Fact data of Reseller Sales",
+     "pk": [],
+     "columns": [
+      [
+       "ProductKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "OrderDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DueDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ShipDateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ResellerKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EmployeeKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "PromotionKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesTerritoryKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesOrderNumber",
+       "VARCHAR(20)",
+       "N"
+      ],
+      [
+       "SalesOrderLineNumber",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "RevisionNumber",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "OrderQuantity",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "UnitPrice",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "ExtendedAmount",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "UnitPriceDiscountPct",
+       "FLOAT",
+       ""
+      ],
+      [
+       "DiscountAmount",
+       "FLOAT",
+       ""
+      ],
+      [
+       "ProductStandardCost",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "TotalProductCost",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "SalesAmount",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "TaxAmt",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "Freight",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "CarrierTrackingNumber",
+       "VARCHAR(25)",
+       ""
+      ],
+      [
+       "CustomerPONumber",
+       "VARCHAR(25)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "FactSalesQuota",
+     "schema": "EDW",
+     "pk": [],
+     "columns": [
+      [
+       "SalesQuotaKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EmployeeKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CalendarYear",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CalendarQuarter",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "SalesAmountQuota",
+       "NUMBER(38,0)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "FactSurveyResponse",
+     "schema": "EDW",
+     "pk": [],
+     "columns": [
+      [
+       "SurveyResponseKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "CustomerKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "ProductCategoryKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EnglishProductCategoryName",
+       "VARCHAR(50)",
+       "N"
+      ],
+      [
+       "ProductSubcategoryKey",
+       "NUMBER(38,0)",
+       "N"
+      ],
+      [
+       "EnglishProductSubcategoryName",
+       "VARCHAR(50)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "NewFactCurrencyRate",
+     "schema": "EDW",
+     "pk": [],
+     "columns": [
+      [
+       "AverageRate",
+       "FLOAT",
+       ""
+      ],
+      [
+       "CurrencyID",
+       "VARCHAR(3)",
+       ""
+      ],
+      [
+       "CurrencyDate",
+       "DATE",
+       ""
+      ],
+      [
+       "EndOfDayRate",
+       "FLOAT",
+       ""
+      ],
+      [
+       "CurrencyKey",
+       "NUMBER(38,0)",
+       ""
+      ],
+      [
+       "DateKey",
+       "NUMBER(38,0)",
+       ""
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "DimCustomer",
+     "fromColumn": "GeographyKey",
+     "to": "DimGeography",
+     "toColumn": "GeographyKey"
+    },
+    {
+     "from": "DimEmployee",
+     "fromColumn": "ParentEmployeeKey",
+     "to": "DimEmployee",
+     "toColumn": "EmployeeKey"
+    },
+    {
+     "from": "DimEmployee",
+     "fromColumn": "SalesTerritoryKey",
+     "to": "DimSalesTerritory",
+     "toColumn": "SalesTerritoryKey"
+    },
+    {
+     "from": "DimProduct",
+     "fromColumn": "ProductSubcategoryKey",
+     "to": "DimProductSubcategory",
+     "toColumn": "ProductSubcategoryKey"
+    },
+    {
+     "from": "DimProductSubcategory",
+     "fromColumn": "ProductCategoryKey",
+     "to": "DimProductCategory",
+     "toColumn": "ProductCategoryKey"
+    },
+    {
+     "from": "DimReseller",
+     "fromColumn": "GeographyKey",
+     "to": "DimGeography",
+     "toColumn": "GeographyKey"
+    },
+    {
+     "from": "FactCurrencyRate",
+     "fromColumn": "CurrencyKey",
+     "to": "DimCurrency",
+     "toColumn": "CurrencyKey"
+    },
+    {
+     "from": "FactCurrencyRate",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactFinance",
+     "fromColumn": "AccountKey",
+     "to": "DimAccount",
+     "toColumn": "AccountKey"
+    },
+    {
+     "from": "FactFinance",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactFinance",
+     "fromColumn": "DepartmentGroupKey",
+     "to": "DimDepartmentGroup",
+     "toColumn": "DepartmentGroupKey"
+    },
+    {
+     "from": "FactFinance",
+     "fromColumn": "OrganizationKey",
+     "to": "DimOrganization",
+     "toColumn": "OrganizationKey"
+    },
+    {
+     "from": "FactFinance",
+     "fromColumn": "ScenarioKey",
+     "to": "DimScenario",
+     "toColumn": "ScenarioKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "CurrencyKey",
+     "to": "DimCurrency",
+     "toColumn": "CurrencyKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "CustomerKey",
+     "to": "DimCustomer",
+     "toColumn": "CustomerKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "DueDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "OrderDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "ProductKey",
+     "to": "DimProduct",
+     "toColumn": "ProductKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "PromotionKey",
+     "to": "DimPromotion",
+     "toColumn": "PromotionKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "SalesTerritoryKey",
+     "to": "DimSalesTerritory",
+     "toColumn": "SalesTerritoryKey"
+    },
+    {
+     "from": "FactInternetSales",
+     "fromColumn": "ShipDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactProductInventory",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "CurrencyKey",
+     "to": "DimCurrency",
+     "toColumn": "CurrencyKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "DueDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "EmployeeKey",
+     "to": "DimEmployee",
+     "toColumn": "EmployeeKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "OrderDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "ProductKey",
+     "to": "DimProduct",
+     "toColumn": "ProductKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "PromotionKey",
+     "to": "DimPromotion",
+     "toColumn": "PromotionKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "ResellerKey",
+     "to": "DimReseller",
+     "toColumn": "ResellerKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "SalesTerritoryKey",
+     "to": "DimSalesTerritory",
+     "toColumn": "SalesTerritoryKey"
+    },
+    {
+     "from": "FactResellerSales",
+     "fromColumn": "ShipDateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactSalesQuota",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactSurveyResponse",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    },
+    {
+     "from": "FactSurveyResponse",
+     "fromColumn": "ProductCategoryKey",
+     "to": "DimProductCategory",
+     "toColumn": "ProductCategoryKey"
+    },
+    {
+     "from": "NewFactCurrencyRate",
+     "fromColumn": "CurrencyKey",
+     "to": "DimCurrency",
+     "toColumn": "CurrencyKey"
+    },
+    {
+     "from": "NewFactCurrencyRate",
+     "fromColumn": "DateKey",
+     "to": "DimDate",
+     "toColumn": "DateKey"
+    }
+   ],
+   "uniqueKeys": []
+  },
+  "databricks-uc-catalog-as-code": {
+   "importer": "sql",
+   "input": {
+    "folder": "databricks-uc-catalog-as-code/atlas_demo/src",
+    "dialect": "databricks"
+   },
+   "counts": {
+    "tables": 22,
+    "columns": 118,
+    "primaryKeys": 21,
+    "relationships": 16
+   },
+   "notes": "Read back with Apache Spark 4.3's SQL parser (test/real-world-truth/engine/databricks-uc-catalog-as-code.json): every .sql under atlas_demo/src, one object per file. Two-part names (schema.table) over 9 schemas; 21 named primary keys (Spark marks their columns NOT NULL, as Databricks does) and 16 foreign keys, most to a table in another schema and another file (core.orders -> ref.stores). orders is in core and raw_web, refunds in core and raw_pos: two tables each, so a relationship end on one of them names its schema (toSchema / fromSchema), and the scorecard compares them as core_orders, raw_web_orders, core_refunds and raw_pos_refunds, the names the import gives them. The 4 views are not tables; ALTER SCHEMA / TABLE ... SET TAGS is Databricks SQL that open-source Spark does not parse (differences.json loadErrors).",
+   "tables": [
+    {
+     "name": "customers",
+     "schema": "core",
+     "description": "One row per customer, across channels",
+     "pk": [
+      "customer_id"
+     ],
+     "columns": [
+      [
+       "customer_id",
+       "BIGINT",
+       "PN",
+       "One id per person, from the CRM"
+      ],
+      [
+       "contact_id",
+       "BIGINT",
+       "",
+       "CRM contact"
+      ],
+      [
+       "web_account_id",
+       "BIGINT",
+       "",
+       "Web account, if linked"
+      ],
+      [
+       "loyalty_no",
+       "STRING",
+       "",
+       "Loyalty card, if issued"
+      ],
+      [
+       "region",
+       "STRING",
+       "",
+       "Home region"
+      ],
+      [
+       "first_seen",
+       "TIMESTAMP",
+       "",
+       "Earliest of CRM creation and web signup"
+      ]
+     ]
+    },
+    {
+     "name": "order_lines",
+     "schema": "core",
+     "description": "One row per item on an order",
+     "pk": [
+      "order_key",
+      "line_no"
+     ],
+     "columns": [
+      [
+       "order_key",
+       "STRING",
+       "PN",
+       "The order"
+      ],
+      [
+       "line_no",
+       "INT",
+       "PN",
+       "Position on the order"
+      ],
+      [
+       "sku",
+       "STRING",
+       "",
+       "Product"
+      ],
+      [
+       "quantity",
+       "INT",
+       "",
+       "Units"
+      ],
+      [
+       "unit_price",
+       "DECIMAL(10,2)",
+       "",
+       "Unit price, before tax"
+      ],
+      [
+       "discount",
+       "DECIMAL(10,2)",
+       "",
+       "Discount on the line"
+      ],
+      [
+       "tax",
+       "DECIMAL(10,2)",
+       "",
+       "Tax on the line; 0 for web orders"
+      ]
+     ]
+    },
+    {
+     "name": "orders",
+     "schema": "core",
+     "description": "One row per order, web and store",
+     "pk": [
+      "order_key"
+     ],
+     "columns": [
+      [
+       "order_key",
+       "STRING",
+       "PN",
+       "web-<order id> or pos-<transaction id>"
+      ],
+      [
+       "channel",
+       "STRING",
+       "",
+       "web or store"
+      ],
+      [
+       "source_id",
+       "BIGINT",
+       "",
+       "The id in the source system"
+      ],
+      [
+       "customer_id",
+       "BIGINT",
+       "",
+       "Customer, when known"
+      ],
+      [
+       "store_id",
+       "INT",
+       "",
+       "Store; 0 for the web store"
+      ],
+      [
+       "ordered_at",
+       "TIMESTAMP",
+       "",
+       "When it was placed or rung up"
+      ],
+      [
+       "currency",
+       "STRING",
+       "",
+       "ISO currency code"
+      ]
+     ]
+    },
+    {
+     "name": "refunds",
+     "schema": "core",
+     "description": "One row per refund",
+     "pk": [
+      "refund_id"
+     ],
+     "columns": [
+      [
+       "refund_id",
+       "BIGINT",
+       "PN",
+       "Refund number"
+      ],
+      [
+       "order_key",
+       "STRING",
+       "",
+       "The order refunded"
+      ],
+      [
+       "refunded_at",
+       "TIMESTAMP",
+       "",
+       "When the money went back"
+      ],
+      [
+       "amount",
+       "DECIMAL(12,2)",
+       "",
+       "Amount refunded, tax included"
+      ]
+     ]
+    },
+    {
+     "name": "monthly_close",
+     "schema": "finance",
+     "description": "One row per month and channel, as closed",
+     "pk": [
+      "month_start",
+      "channel"
+     ],
+     "columns": [
+      [
+       "month_start",
+       "DATE",
+       "PN",
+       "First day of the month"
+      ],
+      [
+       "channel",
+       "STRING",
+       "PN",
+       "web or store"
+      ],
+      [
+       "net_revenue",
+       "DECIMAL(16,2)",
+       "",
+       "Recognized revenue"
+      ]
+     ]
+    },
+    {
+     "name": "recognized_revenue",
+     "schema": "finance",
+     "description": "One row per paid order",
+     "pk": [
+      "order_ref"
+     ],
+     "columns": [
+      [
+       "order_ref",
+       "STRING",
+       "PN",
+       "Order number as finance writes it: W<id> or P<id>"
+      ],
+      [
+       "channel",
+       "STRING",
+       "",
+       "web or store"
+      ],
+      [
+       "recognized_on",
+       "DATE",
+       "",
+       "Day the revenue is booked"
+      ],
+      [
+       "gross",
+       "DECIMAL(14,2)",
+       "",
+       "Amount charged"
+      ],
+      [
+       "tax",
+       "DECIMAL(14,2)",
+       "",
+       "Tax collected"
+      ],
+      [
+       "refunded",
+       "DECIMAL(14,2)",
+       "",
+       "Refunds against the order"
+      ],
+      [
+       "net_revenue",
+       "DECIMAL(14,2)",
+       "",
+       "Gross less tax and refunds"
+      ]
+     ]
+    },
+    {
+     "name": "campaign_attribution",
+     "schema": "marketing",
+     "description": "One row per campaign and order it is credited with",
+     "pk": [
+      "campaign_code",
+      "order_key"
+     ],
+     "columns": [
+      [
+       "campaign_code",
+       "STRING",
+       "PN",
+       "Campaign credited"
+      ],
+      [
+       "order_key",
+       "STRING",
+       "PN",
+       "Order credited to it"
+      ],
+      [
+       "attributed_revenue",
+       "DECIMAL(12,2)",
+       "",
+       "Net amount of the order"
+      ]
+     ]
+    },
+    {
+     "name": "customer_list",
+     "schema": "marketing",
+     "description": "Customers, for building audiences",
+     "pk": [],
+     "columns": [
+      [
+       "customer_id",
+       "BIGINT",
+       "",
+       "Customer"
+      ],
+      [
+       "region",
+       "STRING",
+       "",
+       "Home region"
+      ],
+      [
+       "first_seen",
+       "TIMESTAMP",
+       "",
+       "When the contact was created"
+      ],
+      [
+       "loyalty_no",
+       "STRING",
+       "",
+       "Loyalty card, if issued"
+      ],
+      [
+       "email_hash",
+       "STRING",
+       "",
+       "SHA-256 of the lower-cased email"
+      ]
+     ]
+    },
+    {
+     "name": "contacts",
+     "schema": "raw_crm",
+     "description": "One row per CRM contact",
+     "pk": [
+      "contact_id"
+     ],
+     "columns": [
+      [
+       "contact_id",
+       "BIGINT",
+       "PN",
+       "CRM contact number"
+      ],
+      [
+       "loyalty_no",
+       "STRING",
+       "",
+       "Loyalty card, if issued"
+      ],
+      [
+       "web_account_id",
+       "BIGINT",
+       "",
+       "Linked web account, if any"
+      ],
+      [
+       "full_name",
+       "STRING",
+       "",
+       "Name as entered"
+      ],
+      [
+       "email_hash",
+       "STRING",
+       "",
+       "SHA-256 of the lower-cased email"
+      ],
+      [
+       "region",
+       "STRING",
+       "",
+       "Home region"
+      ],
+      [
+       "created_at",
+       "TIMESTAMP",
+       "",
+       "When the contact was created"
+      ]
+     ]
+    },
+    {
+     "name": "refunds",
+     "schema": "raw_pos",
+     "description": "One row per refund given at a register",
+     "pk": [
+      "refund_id"
+     ],
+     "columns": [
+      [
+       "refund_id",
+       "BIGINT",
+       "PN",
+       "Refund number"
+      ],
+      [
+       "txn_id",
+       "BIGINT",
+       "",
+       "Transaction refunded"
+      ],
+      [
+       "refunded_at",
+       "TIMESTAMP",
+       "",
+       "When the money went back"
+      ],
+      [
+       "amount",
+       "DECIMAL(12,2)",
+       "",
+       "Amount refunded, tax included"
+      ]
+     ]
+    },
+    {
+     "name": "transaction_lines",
+     "schema": "raw_pos",
+     "description": "One row per item on a register receipt",
+     "pk": [
+      "txn_id",
+      "line_no"
+     ],
+     "columns": [
+      [
+       "txn_id",
+       "BIGINT",
+       "PN",
+       "Register transaction number"
+      ],
+      [
+       "line_no",
+       "INT",
+       "PN",
+       "Position on the receipt"
+      ],
+      [
+       "sku",
+       "STRING",
+       "",
+       "Product sold"
+      ],
+      [
+       "qty",
+       "INT",
+       "",
+       "Units sold"
+      ],
+      [
+       "unit_price",
+       "DECIMAL(10,2)",
+       "",
+       "Shelf price, before tax"
+      ],
+      [
+       "tax",
+       "DECIMAL(10,2)",
+       "",
+       "Tax on the line"
+      ]
+     ]
+    },
+    {
+     "name": "transactions",
+     "schema": "raw_pos",
+     "description": "One row per register transaction",
+     "pk": [
+      "txn_id"
+     ],
+     "columns": [
+      [
+       "txn_id",
+       "BIGINT",
+       "PN",
+       "Register transaction number"
+      ],
+      [
+       "store_id",
+       "INT",
+       "",
+       "Store the register is in"
+      ],
+      [
+       "txn_ts",
+       "TIMESTAMP",
+       "",
+       "When it was rung up"
+      ],
+      [
+       "loyalty_no",
+       "STRING",
+       "",
+       "Loyalty card scanned, if any"
+      ],
+      [
+       "tender",
+       "STRING",
+       "",
+       "cash, card or voucher"
+      ],
+      [
+       "total_gross",
+       "DECIMAL(12,2)",
+       "",
+       "Amount paid, tax included"
+      ]
+     ]
+    },
+    {
+     "name": "accounts",
+     "schema": "raw_web",
+     "description": "One row per web account",
+     "pk": [
+      "account_id"
+     ],
+     "columns": [
+      [
+       "account_id",
+       "BIGINT",
+       "PN",
+       "Web account number"
+      ],
+      [
+       "email_hash",
+       "STRING",
+       "",
+       "SHA-256 of the lower-cased email"
+      ],
+      [
+       "signup_at",
+       "TIMESTAMP",
+       "",
+       "When the account was opened"
+      ],
+      [
+       "country",
+       "STRING",
+       "",
+       "Country given at signup"
+      ]
+     ]
+    },
+    {
+     "name": "order_items",
+     "schema": "raw_web",
+     "description": "One row per item on a web order",
+     "pk": [
+      "order_id",
+      "item_no"
+     ],
+     "columns": [
+      [
+       "order_id",
+       "BIGINT",
+       "PN",
+       "Web order number"
+      ],
+      [
+       "item_no",
+       "INT",
+       "PN",
+       "Position on the order"
+      ],
+      [
+       "sku",
+       "STRING",
+       "",
+       "Product ordered"
+      ],
+      [
+       "qty",
+       "INT",
+       "",
+       "Units ordered"
+      ],
+      [
+       "price",
+       "DECIMAL(10,2)",
+       "",
+       "Unit price charged"
+      ],
+      [
+       "discount",
+       "DECIMAL(10,2)",
+       "",
+       "Discount on the whole line"
+      ]
+     ]
+    },
+    {
+     "name": "orders",
+     "schema": "raw_web",
+     "description": "One row per web order, as received",
+     "pk": [
+      "order_id"
+     ],
+     "columns": [
+      [
+       "order_id",
+       "BIGINT",
+       "PN",
+       "Web order number"
+      ],
+      [
+       "account_id",
+       "BIGINT",
+       "",
+       "Web account that placed it"
+      ],
+      [
+       "placed_at",
+       "TIMESTAMP",
+       "",
+       "When the order was placed"
+      ],
+      [
+       "currency",
+       "STRING",
+       "",
+       "ISO currency code"
+      ],
+      [
+       "status",
+       "STRING",
+       "",
+       "placed, paid, shipped or canceled"
+      ],
+      [
+       "payload",
+       "STRING",
+       "",
+       "The order as the storefront sent it, JSON"
+      ]
+     ]
+    },
+    {
+     "name": "sessions",
+     "schema": "raw_web",
+     "description": "One row per browsing session",
+     "pk": [
+      "session_id"
+     ],
+     "columns": [
+      [
+       "session_id",
+       "STRING",
+       "PN",
+       "Browser session"
+      ],
+      [
+       "account_id",
+       "BIGINT",
+       "",
+       "Signed-in account, if any"
+      ],
+      [
+       "started_at",
+       "TIMESTAMP",
+       "",
+       "First page view"
+      ],
+      [
+       "campaign_code",
+       "STRING",
+       "",
+       "utm_campaign of the landing page"
+      ],
+      [
+       "landing_page",
+       "STRING",
+       "",
+       "Path of the first page"
+      ]
+     ]
+    },
+    {
+     "name": "calendar",
+     "schema": "ref",
+     "description": "One row per calendar day",
+     "pk": [
+      "day"
+     ],
+     "columns": [
+      [
+       "day",
+       "DATE",
+       "PN",
+       "The day"
+      ],
+      [
+       "week_start",
+       "DATE",
+       "",
+       "Monday of its week"
+      ],
+      [
+       "month_start",
+       "DATE",
+       "",
+       "First day of its month"
+      ],
+      [
+       "fiscal_quarter",
+       "STRING",
+       "",
+       "Such as FY27-Q2"
+      ]
+     ]
+    },
+    {
+     "name": "products",
+     "schema": "ref",
+     "description": "One row per product",
+     "pk": [
+      "sku"
+     ],
+     "columns": [
+      [
+       "sku",
+       "STRING",
+       "PN",
+       "Stock keeping unit"
+      ],
+      [
+       "product_name",
+       "STRING",
+       "",
+       "Name on the label"
+      ],
+      [
+       "category",
+       "STRING",
+       "",
+       "Merchandising category"
+      ],
+      [
+       "list_price",
+       "DECIMAL(10,2)",
+       "",
+       "Price before any discount"
+      ]
+     ]
+    },
+    {
+     "name": "stores",
+     "schema": "ref",
+     "description": "One row per store",
+     "pk": [
+      "store_id"
+     ],
+     "columns": [
+      [
+       "store_id",
+       "INT",
+       "PN",
+       "Store number; 0 is the web store"
+      ],
+      [
+       "store_name",
+       "STRING",
+       "",
+       "Store name as signed"
+      ],
+      [
+       "region",
+       "STRING",
+       "",
+       "Sales region"
+      ],
+      [
+       "opened_on",
+       "DATE",
+       "",
+       "First day open"
+      ]
+     ]
+    },
+    {
+     "name": "customer_monthly",
+     "schema": "sales",
+     "description": "One row per customer and month",
+     "pk": [
+      "customer_id",
+      "month_start"
+     ],
+     "columns": [
+      [
+       "customer_id",
+       "BIGINT",
+       "PN",
+       "Customer"
+      ],
+      [
+       "month_start",
+       "DATE",
+       "PN",
+       "First day of the month"
+      ],
+      [
+       "orders",
+       "BIGINT",
+       "",
+       "Orders placed"
+      ],
+      [
+       "revenue",
+       "DECIMAL(14,2)",
+       "",
+       "Net amount of those orders"
+      ]
+     ]
+    },
+    {
+     "name": "daily_sales",
+     "schema": "sales",
+     "description": "One row per store, product and day",
+     "pk": [
+      "sale_date",
+      "store_id",
+      "sku"
+     ],
+     "columns": [
+      [
+       "sale_date",
+       "DATE",
+       "PN",
+       "Business day"
+      ],
+      [
+       "store_id",
+       "INT",
+       "PN",
+       "Store"
+      ],
+      [
+       "sku",
+       "STRING",
+       "PN",
+       "Product"
+      ],
+      [
+       "units",
+       "BIGINT",
+       "",
+       "Units sold"
+      ],
+      [
+       "revenue",
+       "DECIMAL(14,2)",
+       "",
+       "Sales, tax included"
+      ]
+     ]
+    },
+    {
+     "name": "order_facts",
+     "schema": "sales",
+     "description": "One row per item on an order, with its product and channel",
+     "pk": [
+      "order_key",
+      "line_no"
+     ],
+     "columns": [
+      [
+       "order_key",
+       "STRING",
+       "PN",
+       "The order"
+      ],
+      [
+       "line_no",
+       "INT",
+       "PN",
+       "Position on the order"
+      ],
+      [
+       "ordered_at",
+       "TIMESTAMP",
+       "",
+       "When it was placed or rung up"
+      ],
+      [
+       "order_date",
+       "DATE",
+       "",
+       "Day of ordered_at"
+      ],
+      [
+       "channel",
+       "STRING",
+       "",
+       "web or store"
+      ],
+      [
+       "customer_id",
+       "BIGINT",
+       "",
+       "Customer, when known"
+      ],
+      [
+       "store_id",
+       "INT",
+       "",
+       "Store; 0 for the web store"
+      ],
+      [
+       "sku",
+       "STRING",
+       "",
+       "Product"
+      ],
+      [
+       "category",
+       "STRING",
+       "",
+       "Product category"
+      ],
+      [
+       "quantity",
+       "INT",
+       "",
+       "Units"
+      ],
+      [
+       "net_amount",
+       "DECIMAL(12,2)",
+       "",
+       "Quantity times price, less discount"
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "order_lines",
+     "fromColumn": "order_key",
+     "to": "orders",
+     "toColumn": "order_key",
+     "toSchema": "core"
+    },
+    {
+     "from": "order_lines",
+     "fromColumn": "sku",
+     "to": "products",
+     "toColumn": "sku"
+    },
+    {
+     "from": "orders",
+     "fromColumn": "customer_id",
+     "to": "customers",
+     "toColumn": "customer_id",
+     "fromSchema": "core"
+    },
+    {
+     "from": "orders",
+     "fromColumn": "store_id",
+     "to": "stores",
+     "toColumn": "store_id",
+     "fromSchema": "core"
+    },
+    {
+     "from": "refunds",
+     "fromColumn": "order_key",
+     "to": "orders",
+     "toColumn": "order_key",
+     "fromSchema": "core",
+     "toSchema": "core"
+    },
+    {
+     "from": "refunds",
+     "fromColumn": "txn_id",
+     "to": "transactions",
+     "toColumn": "txn_id",
+     "fromSchema": "raw_pos"
+    },
+    {
+     "from": "transaction_lines",
+     "fromColumn": "sku",
+     "to": "products",
+     "toColumn": "sku"
+    },
+    {
+     "from": "transaction_lines",
+     "fromColumn": "txn_id",
+     "to": "transactions",
+     "toColumn": "txn_id"
+    },
+    {
+     "from": "transactions",
+     "fromColumn": "store_id",
+     "to": "stores",
+     "toColumn": "store_id"
+    },
+    {
+     "from": "order_items",
+     "fromColumn": "order_id",
+     "to": "orders",
+     "toColumn": "order_id",
+     "toSchema": "raw_web"
+    },
+    {
+     "from": "customer_monthly",
+     "fromColumn": "customer_id",
+     "to": "customers",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "daily_sales",
+     "fromColumn": "sku",
+     "to": "products",
+     "toColumn": "sku"
+    },
+    {
+     "from": "daily_sales",
+     "fromColumn": "store_id",
+     "to": "stores",
+     "toColumn": "store_id"
+    },
+    {
+     "from": "order_facts",
+     "fromColumn": "customer_id",
+     "to": "customers",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "order_facts",
+     "fromColumn": "sku",
+     "to": "products",
+     "toColumn": "sku"
+    },
+    {
+     "from": "order_facts",
+     "fromColumn": "store_id",
+     "to": "stores",
+     "toColumn": "store_id"
+    }
+   ],
+   "uniqueKeys": []
+  },
+  "databricks-adidas-table-manager": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "databricks-adidas-table-manager/table/test_table_complex_default_scenario.sql",
+     "databricks-adidas-table-manager/table/test_table_simple_split_scenario.sql"
+    ],
+    "dialect": "databricks"
+   },
+   "counts": {
+    "tables": 3,
+    "columns": 24,
+    "primaryKeys": 0,
+    "relationships": 0
+   },
+   "notes": "Read back with Apache Spark 4.3's SQL parser (test/real-world-truth/engine/databricks-adidas-table-manager.json). Two files written to test a statement splitter: COMMENT strings hold ;, brackets, <>, /*, */ and --, in single and double quotes, with \\\" escapes; a block comment sits between the statements and neither file ends its last statement with a semicolon. Spark reads a backslash escape in a string, so 'col2 with () special character \\\" and ;' is the description col2 with () special character \" and ;. Three tables, 24 columns; the key in TBLPROPERTIES('lakehouse.primary_key'=...) is the tool's own property, not a declared key.",
+   "tables": [
+    {
+     "name": "DummyTableBronzeComplexDefaultScenario1",
+     "schema": "test_db",
+     "pk": [],
+     "columns": [
+      [
+       "id",
+       "INT",
+       "",
+       "id with special (< characters ;"
+      ],
+      [
+       "col1",
+       "STRING",
+       "",
+       "col1 with >) special character \" and ;"
+      ],
+      [
+       "col2",
+       "INT",
+       "",
+       "col2 with () special character \" and ;"
+      ],
+      [
+       "col3",
+       "BOOLEAN",
+       "",
+       "col3 with special <> character \" and ;"
+      ],
+      [
+       "col4",
+       "STRING",
+       "",
+       "col4 with special /* character ;"
+      ],
+      [
+       "year",
+       "integer",
+       "",
+       "year with */ special character ;"
+      ],
+      [
+       "month",
+       "INT",
+       "",
+       "month with special -- character ;"
+      ],
+      [
+       "day",
+       "integer",
+       "",
+       "day with special \" character ;"
+      ]
+     ]
+    },
+    {
+     "name": "DummyTableBronzeComplexDefaultScenario2",
+     "schema": "test_db",
+     "pk": [],
+     "columns": [
+      [
+       "id",
+       "INT",
+       "",
+       "id with special (< characters ;"
+      ],
+      [
+       "col1",
+       "STRING",
+       "",
+       "col1 with >) special character \" and ;"
+      ],
+      [
+       "col2",
+       "INT",
+       "",
+       "col2 with () special character \" and ;"
+      ],
+      [
+       "col3",
+       "BOOLEAN",
+       "",
+       "col3 with special <> character \" and ;"
+      ],
+      [
+       "col4",
+       "STRING",
+       "",
+       "col4 with special /* character ;"
+      ],
+      [
+       "year",
+       "integer",
+       "",
+       "year with */ special character ;"
+      ],
+      [
+       "month",
+       "INT",
+       "",
+       "month with special -- character ;"
+      ],
+      [
+       "day",
+       "integer",
+       "",
+       "day with special \" character ;"
+      ]
+     ]
+    },
+    {
+     "name": "DummyTableBronzeSimpleSplitScenario",
+     "schema": "test_db",
+     "pk": [],
+     "columns": [
+      [
+       "id",
+       "INT",
+       ""
+      ],
+      [
+       "col1",
+       "STRING",
+       ""
+      ],
+      [
+       "col2",
+       "INT",
+       ""
+      ],
+      [
+       "col3",
+       "BOOLEAN",
+       ""
+      ],
+      [
+       "col4",
+       "STRING",
+       ""
+      ],
+      [
+       "year",
+       "INT",
+       ""
+      ],
+      [
+       "month",
+       "INT",
+       ""
+      ],
+      [
+       "day",
+       "INT",
+       ""
+      ]
+     ]
+    }
+   ],
+   "relationships": [],
+   "uniqueKeys": []
+  },
+  "bigquery-shibarium": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "bigquery-shibarium/shibarium/create_tables.sql"
+    ],
+    "dialect": "bigquery"
+   },
+   "counts": {
+    "tables": 8,
+    "columns": 87,
+    "primaryKeys": 8,
+    "relationships": 23
+   },
+   "notes": "Counted by scripts/corpus/count_source.py (sqlglot 27.29, BigQuery dialect; checked by hand in SOURCE.md), never through ERD Studio, types as written: BigQuery has no local engine (NOT_ENGINE_VERIFIED). Names are quoted whole (`knine-1.shibarium.blocks`): project knine-1, dataset (schema) shibarium. The 8 primary keys and 23 foreign keys are added afterwards, ALTER TABLE ... ADD PRIMARY KEY (...) NOT ENFORCED and ADD FOREIGN KEY ... REFERENCES ... NOT ENFORCED, several ADDs to one ALTER; logs and decoded_events have two-column keys. transactions, receipts and function_calls reference each other both ways on transaction_hash (one row each per transaction). Views, the query and the INSERTs are not design.",
+   "tables": [
+    {
+     "name": "blocks",
+     "pk": [
+      "block_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "PN",
+       "Hash of the block."
+      ],
+      [
+       "block_number",
+       "INT64",
+       "",
+       "Number of the block."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Timestamp when the block was added to the blockchain."
+      ],
+      [
+       "parent_hash",
+       "STRING",
+       "",
+       "Hash of the parent block."
+      ],
+      [
+       "size",
+       "INT64",
+       "",
+       "Size of the block in bytes."
+      ],
+      [
+       "extra_data",
+       "STRING",
+       "",
+       "Extra data of this block."
+      ],
+      [
+       "gas_limit",
+       "INT64",
+       "",
+       "Maximum gas allowed in this block."
+      ],
+      [
+       "gas_used",
+       "INT64",
+       "",
+       "Total gas used by all transactions in this block."
+      ],
+      [
+       "base_fee_per_gas",
+       "INT64",
+       "",
+       "Base fee per gas for this block."
+      ],
+      [
+       "mix_hash",
+       "STRING",
+       "",
+       "Mix hash for the proof of work."
+      ],
+      [
+       "nonce",
+       "BIGNUMERIC",
+       "",
+       "Nonce of the block."
+      ],
+      [
+       "difficulty",
+       "STRUCT<string_value STRING OPTIONS (description='Difficulty for this block (string representation).'), bignumeric_value BIGNUMERIC OPTIONS (description='Difficulty for this block (bignumeric representation).')>",
+       "",
+       "Difficulty for this block."
+      ],
+      [
+       "total_difficulty",
+       "STRUCT<string_value STRING OPTIONS (description='Accumulated difficulty of the chain until this block (string representation).'), bignumeric_value BIGNUMERIC OPTIONS (description='Accumulated difficulty of the chain until this block (bignumeric representation).')>",
+       "",
+       "Accumulated difficulty of the chain until this block."
+      ],
+      [
+       "miner",
+       "STRING",
+       "",
+       "Address of the miner."
+      ],
+      [
+       "uncles_sha3",
+       "STRING",
+       "",
+       "SHA3 of the uncles data in the block."
+      ],
+      [
+       "uncles",
+       "ARRAY<STRING>",
+       "",
+       "List of uncle block hashes."
+      ],
+      [
+       "transactions_root",
+       "STRING",
+       "",
+       "Root of the transaction trie of the block."
+      ],
+      [
+       "receipts_root",
+       "STRING",
+       "",
+       "Root of the receipts trie of the block."
+      ],
+      [
+       "state_root",
+       "STRING",
+       "",
+       "Root of the final state trie of the block."
+      ],
+      [
+       "logs_bloom",
+       "STRING",
+       "",
+       "Bloom filter for the logs of the block."
+      ],
+      [
+       "transaction_count",
+       "INT64",
+       "",
+       "Number of transactions in the block."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing 'block' data for the Shibarium blockchain."
+    },
+    {
+     "name": "transactions",
+     "pk": [
+      "transaction_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "",
+       "Hash of the block in which this transaction was located."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the transaction was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "PN",
+       "Hash of the transaction."
+      ],
+      [
+       "transaction_index",
+       "INT64",
+       "",
+       "The transaction's index position in the block."
+      ],
+      [
+       "nonce",
+       "BIGNUMERIC",
+       "",
+       "Number of transactions made by the sender prior to this one."
+      ],
+      [
+       "from_address",
+       "STRING",
+       "",
+       "Address of the sender."
+      ],
+      [
+       "to_address",
+       "STRING",
+       "",
+       "Address of the receiver."
+      ],
+      [
+       "value",
+       "STRUCT<string_value STRING OPTIONS (description='Value transferred in Wei as a string.'), bignumeric_value BIGNUMERIC OPTIONS (description='Value transferred in Wei as a bignumeric.')>",
+       "",
+       "Value transferred in Wei."
+      ],
+      [
+       "input",
+       "STRING",
+       "",
+       "Data sent along with the transaction, with a maximum size of 32 bytes."
+      ],
+      [
+       "gas",
+       "INT64",
+       "",
+       "Quantity of gas units provided by the sender."
+      ],
+      [
+       "gas_price",
+       "STRUCT<string_value STRING OPTIONS (description='Price per gas unit provided by the sender in Wei as a string.'), bignumeric_value BIGNUMERIC OPTIONS (description='Price per gas unit provided by the sender in Wei as a bignumeric.')>",
+       "",
+       "Price per gas unit provided by the sender in Wei."
+      ],
+      [
+       "max_fee_per_gas",
+       "INT64",
+       "",
+       "Maximum fee per unit of gas for this transaction."
+      ],
+      [
+       "max_priority_fee_per_gas",
+       "INT64",
+       "",
+       "Maximum priority fee per unit of gas for this transaction."
+      ],
+      [
+       "transaction_type",
+       "INT64",
+       "",
+       "Type of the transaction."
+      ],
+      [
+       "r",
+       "STRUCT<string_value STRING OPTIONS (description='ECDSA signature r value as a string.'), bignumeric_value BIGNUMERIC OPTIONS (description='ECDSA signature r value as a bignumeric.')>",
+       "",
+       "ECDSA signature r."
+      ],
+      [
+       "s",
+       "STRUCT<string_value STRING OPTIONS (description='ECDSA signature s value as a string.'), bignumeric_value BIGNUMERIC OPTIONS (description='ECDSA signature s value as a bignumeric.')>",
+       "",
+       "ECDSA signature s."
+      ],
+      [
+       "v",
+       "STRUCT<string_value STRING OPTIONS (description='ECDSA signature v value as a string.'), bignumeric_value BIGNUMERIC OPTIONS (description='ECDSA signature v value as a bignumeric.')>",
+       "",
+       "ECDSA signature v."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing transactions from the Shibarium blockchain."
+    },
+    {
+     "name": "receipts",
+     "pk": [
+      "transaction_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "",
+       "Hash of the block in which this transaction was located."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the transaction was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "PN",
+       "Hash of the transaction."
+      ],
+      [
+       "transaction_index",
+       "INT64",
+       "",
+       "The transaction's index position in the block."
+      ],
+      [
+       "from_address",
+       "STRING",
+       "",
+       "Address of the sender."
+      ],
+      [
+       "to_address",
+       "STRING",
+       "",
+       "Address of the receiver."
+      ],
+      [
+       "contract_address",
+       "STRING",
+       "",
+       "Hexadecimal-encoded address of new contract or absent if no contract was created."
+      ],
+      [
+       "cumulative_gas_used",
+       "INT64",
+       "",
+       "Gas used by this and all preceding transactions in the block."
+      ],
+      [
+       "gas_used",
+       "INT64",
+       "",
+       "Gas used by this transaction alone."
+      ],
+      [
+       "effective_gas_price",
+       "INT64",
+       "",
+       "Actual value per gas deducted from the sender's account."
+      ],
+      [
+       "root",
+       "STRING",
+       "",
+       "Post-transaction state root."
+      ],
+      [
+       "status",
+       "INT64",
+       "",
+       "Either 1 (success) or 0 (failure)."
+      ],
+      [
+       "log_count",
+       "INT64",
+       "",
+       "Number of logs in the transaction."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing transaction receipts from Shibarium transactions."
+    },
+    {
+     "name": "function_calls",
+     "pk": [
+      "transaction_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "",
+       "Hash of the block in which this transaction was located."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the transaction was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "PN",
+       "Hash of the transaction."
+      ],
+      [
+       "function_name",
+       "STRING",
+       "",
+       "Function/method name, decoded from function selector."
+      ],
+      [
+       "function_selector",
+       "STRING",
+       "",
+       "The 4-byte function selector. (First 8 hex characters of transaction input.)"
+      ],
+      [
+       "function_signature",
+       "STRING",
+       "",
+       "The 4-byte decoded function selector with method name and parameters types."
+      ],
+      [
+       "function_args",
+       "STRING",
+       "",
+       "Decoded function arguments serialized as a JSON array."
+      ],
+      [
+       "function_args_full",
+       "STRING",
+       "",
+       "Serialized JSON object defining the name, type, and value of arguments passed to a function call, as a string."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing decoded function calls from Shibarium transactions. For transactions calling smart contract functions, the transaction input data is parsed to give a 4-byte function selector. For known function selectors, decoded function/method names, and decoded arguments are provided. Decoding was done using custom data, and the etherface.io and 4byte.directory APIs."
+    },
+    {
+     "name": "logs",
+     "pk": [
+      "block_hash",
+      "log_index"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "PN",
+       "Hash of the block this log was created from."
+      ],
+      [
+       "block_number",
+       "INT64",
+       "",
+       "Number of the block this log was created from."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the log was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "",
+       "Hash of the transaction this log was created from."
+      ],
+      [
+       "transaction_index",
+       "INT64",
+       "",
+       "The transaction's index position in the block."
+      ],
+      [
+       "log_index",
+       "INT64",
+       "PN",
+       "The log's index position in the block."
+      ],
+      [
+       "address",
+       "STRING",
+       "",
+       "Address from which this log originated."
+      ],
+      [
+       "data",
+       "STRING",
+       "",
+       "Contains one or more 32-byte non-indexed arguments of the log."
+      ],
+      [
+       "topics",
+       "ARRAY<STRING>",
+       "",
+       "Array of 0 to 4 32-byte hex of indexed log arguments."
+      ],
+      [
+       "removed",
+       "BOOL",
+       "",
+       "Whether or not the log was orphaned off the main chain."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing logs from Shibarium transactions."
+    },
+    {
+     "name": "decoded_events",
+     "pk": [
+      "block_hash",
+      "log_index"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "PN",
+       "Hash of the block this event was emitted on."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the block was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "",
+       "Hash of the transaction this event was emitted on."
+      ],
+      [
+       "log_index",
+       "INT64",
+       "PN",
+       "The event's index position in the transaction."
+      ],
+      [
+       "address",
+       "STRING",
+       "",
+       "Address from which this event originated."
+      ],
+      [
+       "event_name",
+       "STRING",
+       "",
+       "Name of a custom event, decoded from topic0."
+      ],
+      [
+       "event_signature",
+       "STRING",
+       "",
+       "Decoded event signature, including name and parameter types."
+      ],
+      [
+       "event_hash",
+       "STRING",
+       "",
+       "Keccak hash of the event signature."
+      ],
+      [
+       "args",
+       "STRING",
+       "",
+       "Decoded event arguments serialized as a JSON array."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing decoded events from Shibarium transaction logs. Decoded using custom data, and the etherface.io and 4byte.directory APIs."
+    },
+    {
+     "name": "errors",
+     "pk": [
+      "transaction_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "",
+       "Hash of the block in which this transaction was located."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the transaction was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "PN",
+       "Hash of the failed transaction."
+      ],
+      [
+       "error",
+       "STRING",
+       "",
+       "Decoded revert string or custom error."
+      ],
+      [
+       "error_hash",
+       "STRING",
+       "",
+       "The error hash."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing decoded errors and revert messages, for failed Shibarium transactions. Decoded using the etherface.io API."
+    },
+    {
+     "name": "transaction_access_lists",
+     "pk": [
+      "transaction_hash"
+     ],
+     "columns": [
+      [
+       "block_hash",
+       "STRING",
+       "",
+       "Hash of the block in which this transaction was located."
+      ],
+      [
+       "block_timestamp",
+       "TIMESTAMP",
+       "",
+       "Unix timestamp when the transaction was added to the blockchain."
+      ],
+      [
+       "transaction_hash",
+       "STRING",
+       "PN",
+       "Hash of the transaction."
+      ],
+      [
+       "access_list",
+       "ARRAY<STRUCT<address STRING OPTIONS (description='Address that a particular transaction will access.'), storage_keys ARRAY<STRING> OPTIONS (description='List of storage keys a particular transaction will access.')>>",
+       "",
+       "List of addresses and storage keys that the transaction plans to access and has pre-paid gas for."
+      ]
+     ],
+     "schema": "shibarium",
+     "description": "Table containing transaction access list update data for Shibarium transactions."
+    }
+   ],
+   "relationships": [
+    {
+     "from": "transactions",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "transactions",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "transactions",
+     "fromColumn": "transaction_hash",
+     "to": "function_calls",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "receipts",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "receipts",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "receipts",
+     "fromColumn": "transaction_hash",
+     "to": "function_calls",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "function_calls",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "function_calls",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "function_calls",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "transaction_access_lists",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "transaction_access_lists",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "transaction_access_lists",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "errors",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "errors",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "errors",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "logs",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "logs",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "logs",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "logs",
+     "fromColumn": "block_hash",
+     "to": "decoded_events",
+     "toColumn": "block_hash",
+     "composite": "fk18"
+    },
+    {
+     "from": "logs",
+     "fromColumn": "log_index",
+     "to": "decoded_events",
+     "toColumn": "log_index",
+     "composite": "fk18"
+    },
+    {
+     "from": "decoded_events",
+     "fromColumn": "block_hash",
+     "to": "blocks",
+     "toColumn": "block_hash"
+    },
+    {
+     "from": "decoded_events",
+     "fromColumn": "transaction_hash",
+     "to": "transactions",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "decoded_events",
+     "fromColumn": "transaction_hash",
+     "to": "receipts",
+     "toColumn": "transaction_hash"
+    },
+    {
+     "from": "decoded_events",
+     "fromColumn": "block_hash",
+     "to": "logs",
+     "toColumn": "block_hash",
+     "composite": "fk22"
+    },
+    {
+     "from": "decoded_events",
+     "fromColumn": "log_index",
+     "to": "logs",
+     "toColumn": "log_index",
+     "composite": "fk22"
+    }
+   ],
+   "uniqueKeys": []
   }
  }
 }

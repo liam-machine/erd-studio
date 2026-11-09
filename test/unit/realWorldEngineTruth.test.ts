@@ -98,6 +98,8 @@ describe('engine truth rules', () => {
     expect(canonType('mysql', 'BOOLEAN')).toBe('tinyint(1)');
     expect(canonType('sqlserver', '[nvarchar](60)')).toBe('nvarchar(60)');
     expect(canonType('sqlserver', '[datetime2]')).toBe('datetime2(7)');
+    expect(canonType('snowflake', 'TIMESTAMP_NTZ(9)')).toBe(canonType('snowflake', 'TIMESTAMP_NTZ'));
+    expect(canonType('snowflake', 'TIMESTAMP_LTZ(6)')).not.toBe(canonType('snowflake', 'TIMESTAMP_LTZ'));
     expect(canonType('snowflake', 'NUMBER(12)')).toBe('number(12,0)');
     expect(canonType('snowflake', 'STRING')).toBe('varchar(16777216)');
     expect(canonType('databricks', 'long')).toBe(canonType('databricks', 'BIGINT'));

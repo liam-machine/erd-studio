@@ -81,6 +81,9 @@ export interface TruthRelationship {
   toColumn: string;
   /** Pairs of one composite FK share this. */
   composite?: string;
+  /** The end's schema, given when another schema has a table of the same name (see qualifySameNames). */
+  fromSchema?: string;
+  toSchema?: string;
   /** Written one-to-one in the source (a DBML `-`). */
   oneToOne?: boolean;
   inactive?: boolean;
@@ -567,7 +570,27 @@ export function withSourceNames(run: ImportRun): ImportRun {
   return { ...run, tables, relationships };
 }
 
-export function scoreSample(slug: string, truth: TruthSample, given: ImportRun): SampleScore {
+/**
+ * Tables of one name in two schemas (core.orders and raw_web.orders) are two tables. The import keeps
+ * both and names each `{schema}_{name}` (as Import DBML's table naming does, with the rename in the
+ * ledger), so the truth is compared under those names: the same tables spelled the way a diagram can
+ * hold them. A relationship end on such a table names its schema (`fromSchema` / `toSchema`).
+ */
+export function qualifySameNames(truth: TruthSample): TruthSample {
+  const count = new Map<string, number>();
+  for (const t of truth.tables) count.set(canon(t.name), (count.get(canon(t.name)) ?? 0) + 1);
+  const shared = (name: string): boolean => (count.get(canon(name)) ?? 0) > 1;
+  if (![...count.values()].some((n) => n > 1)) return truth;
+  const qualified = (schema: string | undefined, name: string): string => (schema && shared(name) ? `${schema}_${name}` : name);
+  return {
+    ...truth,
+    tables: truth.tables.map((t) => (shared(t.name) && t.schema ? { ...t, name: qualified(t.schema, t.name) } : t)),
+    relationships: truth.relationships.map((r) => ({ ...r, from: qualified(r.fromSchema, r.from), to: qualified(r.toSchema, r.to) })),
+  };
+}
+
+export function scoreSample(slug: string, sourceTruth: TruthSample, given: ImportRun): SampleScore {
+  const truth = qualifySameNames(sourceTruth);
   const run = truth.importer === 'semanticModel' ? withSourceNames(given) : given;
   const shown = run.shown;
   const failed = !run.ok || run.tables.length === 0;
