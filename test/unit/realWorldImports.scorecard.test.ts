@@ -38,6 +38,8 @@ interface Floor {
   descriptionsExact: number;
   maxSilentLosses: number;
   verdictAtLeast: SampleScore['verdict'];
+  /** Filtered links (dbt `relationships_where`) whose condition the draft shows. */
+  conditionsShown?: number;
 }
 const FLOORS: Record<string, Floor> = {
   'dbml-qut-workbench': { tablesMatched: 49, columnsMatched: 466, primaryKeysMatched: 45, relationshipsMatched: 96, uniqueKeysKept: 27, typeDetailsKept: 39, descriptionsExact: 32, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
@@ -49,7 +51,7 @@ const FLOORS: Record<string, Floor> = {
   'migrations-harbor': { tablesMatched: 48, columnsMatched: 397, primaryKeysMatched: 47, relationshipsMatched: 14, uniqueKeysKept: 44, typeDetailsKept: 136, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'powerbi-tmdl-salessense': { tablesMatched: 8, columnsMatched: 84, primaryKeysMatched: 3, relationshipsMatched: 5, uniqueKeysKept: 0, typeDetailsKept: 11, descriptionsExact: 7, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
   'powerbi-bim-adventureworks': { tablesMatched: 9, columnsMatched: 174, primaryKeysMatched: 7, relationshipsMatched: 13, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
-  'dbt-synthea-omop': { tablesMatched: 15, columnsMatched: 247, primaryKeysMatched: 15, relationshipsMatched: 113, uniqueKeysKept: 0, typeDetailsKept: 57, descriptionsExact: 223, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  'dbt-synthea-omop': { tablesMatched: 15, columnsMatched: 247, primaryKeysMatched: 15, relationshipsMatched: 113, uniqueKeysKept: 0, typeDetailsKept: 57, descriptionsExact: 223, maxSilentLosses: 0, verdictAtLeast: 'With gaps', conditionsShown: 32 },
 };
 const RANK: Record<SampleScore['verdict'], number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
 
@@ -85,6 +87,7 @@ describe('real-world import scorecard', () => {
         expect(score.descriptions.exact, `${slug} descriptions`).toBeGreaterThanOrEqual(floor.descriptionsExact);
         expect(score.silentLosses.total, `${slug} silent losses ${JSON.stringify(score.silentLosses)}`).toBeLessThanOrEqual(floor.maxSilentLosses);
         expect(RANK[score.verdict], `${slug} verdict ${score.verdict}: ${score.reasons.join('; ')}`).toBeGreaterThanOrEqual(RANK[floor.verdictAtLeast]);
+        if (floor.conditionsShown !== undefined) expect(score.conditions.shown, `${slug} conditions shown`).toBeGreaterThanOrEqual(floor.conditionsShown);
       }
     }, 120_000);
   }

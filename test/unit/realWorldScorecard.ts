@@ -163,7 +163,8 @@ function draftStrings(draft: Draft): string[] {
     view.banner.from ?? '',
     view.banner.detail,
     view.banner.notice ?? '',
-    ...view.details.flatMap((s) => [s.title, s.hint ?? '', ...s.items.flatMap((i) => [i.path ?? '', i.text, i.tag ?? ''])]),
+    // An item reads as one row (`person.gender_concept_id → concept.concept_id: dbt tests it only where …`), so it is also one string.
+    ...view.details.flatMap((s) => [s.title, s.hint ?? '', ...s.items.flatMap((i) => [i.path ?? '', i.text, i.tag ?? '', i.path && i.text ? `${i.path}: ${i.text}` : ''])]),
   ].filter((s) => s !== '');
 }
 
@@ -453,6 +454,14 @@ export interface SampleScore {
   };
   oneToOne: { source: number; imported: number; drawnAsMany: string[] };
   /**
+   * Links the source tests only for some rows (`filtered` in the truth: dbt's
+   * `relationships_where`, a `where:` config) among the matched ones; `shown`:
+   * the draft shows the condition (a string names the link's table and column
+   * with "where"); `reported`: not shown, but a line names the link with
+   * "relationships_where"; `silent`: neither.
+   */
+  conditions: { source: number; shown: number; reported: number; silent: string[] };
+  /**
    * FKs whose columns are all NOT NULL (dbt: not_null) among the matched links; how many keep NOT NULL
    * in the table files; whether a note says relationships are saved optional (D18), and the number of
    * required references it claims (null when it gives none).
@@ -471,7 +480,10 @@ export interface SampleScore {
   falseNotLostNote: boolean;
   silentLosses: {
     tables: number; columns: number; primaryKeys: number; relationships: number; oneToOne: number;
-    requiredFks: number; uniqueKeys: number; typeDetail: number; descriptions: number; schemas: number; total: number;
+    requiredFks: number; uniqueKeys: number; typeDetail: number; descriptions: number; schemas: number;
+    /** Filtered links drawn with no word of their condition. */
+    conditions: number;
+    total: number;
   };
 }
 
@@ -645,6 +657,15 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
     .filter((l) => importedLinks.some((il) => il.pairs.every((p) => l.pairs.includes(p)) && il.cardinality !== 'one-to-one'))
     .map((l) => `${l.from}.${l.fromColumns.join('+')} → ${l.to}`);
 
+  // Conditions (filtered links: relationships_where) ----------------------------
+  const filtered = new Set(truth.relationships.filter((r) => r.filtered).map((r) => pairKey(r.from, r.fromColumn, r.to, r.toColumn)));
+  const filteredLinks = matchedLinks.filter((l) => l.pairs.some((p) => filtered.has(p)));
+  const conditionShown = (l: Link): boolean => l.fromColumns.some((c) => mentioned(shown, l.from, c, l.to, 'where'));
+  const conditionReported = (l: Link): boolean => l.fromColumns.some((c) => mentioned(shown, l.from, c, 'relationships_where'));
+  const conditionsShown = filteredLinks.filter(conditionShown);
+  const conditionsReported = filteredLinks.filter((l) => !conditionShown(l) && conditionReported(l));
+  const conditionsSilent = filteredLinks.filter((l) => !conditionShown(l) && !conditionReported(l)).map((l) => `${l.from}.${l.fromColumns.join('+')} → ${l.to}`);
+
   // Required FKs (NOT NULL / not_null) -----------------------------------------
   const allNotes = [...run.notes, ...run.leftOut];
   const optionalNote = allNotes.find((n) => /optional/i.test(n));
@@ -720,7 +741,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
   };
 
   const silent = failed
-    ? { tables: 0, columns: 0, primaryKeys: 0, relationships: 0, oneToOne: 0, requiredFks: 0, uniqueKeys: 0, typeDetail: 0, descriptions: 0, schemas: 0 }
+    ? { tables: 0, columns: 0, primaryKeys: 0, relationships: 0, oneToOne: 0, requiredFks: 0, uniqueKeys: 0, typeDetail: 0, descriptions: 0, schemas: 0, conditions: 0 }
     : {
       tables: missingTables.length - missingTablesReported.length,
       columns: colMissing - colMissingReported,
@@ -732,9 +753,10 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
       typeDetail: detailLostSilent,
       descriptions: descChanged + descMissing,
       schemas: schemasLostSilently.length,
+      conditions: conditionsSilent.length,
     };
   const total = Object.values(silent).reduce((a, b) => a + b, 0);
-  const detailSilent = silent.typeDetail + silent.descriptions + silent.uniqueKeys + silent.requiredFks + silent.schemas;
+  const detailSilent = silent.typeDetail + silent.descriptions + silent.uniqueKeys + silent.requiredFks + silent.schemas + silent.conditions;
   const falseNotLostNote = !failed && detailSilent + silent.columns > 0 && allNotes.some((n) => /not lost/i.test(n));
 
   const score: SampleScore = {
@@ -753,6 +775,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
       extra: extraLinks.map((l) => l.label), wrongDirection,
     },
     oneToOne: { source: truthOneToOne.length, imported: importedOneToOne, drawnAsMany },
+    conditions: { source: filteredLinks.length, shown: conditionsShown.length, reported: conditionsReported.length, silent: conditionsSilent },
     requiredFks: {
       source: requiredSource, keptNotNull: requiredKept, toldOptional: !!optionalNote, ...(optionalNote ? { optionalNote } : {}),
       noteClaims: optionalNote ? Number(optionalNote.match(/(\d+) (?:references?|relationships?)[^.]*not optional|(\d+) required/i)?.slice(1).find(Boolean) ?? NaN) : null,
@@ -779,7 +802,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
  *   many-to-one.
  * - With gaps: the structure is right, but something is left out (and said),
  *   or a detail is lost silently (type detail, description, unique key,
- *   NOT NULL, schema), or the draft says nothing was lost when it was, or
+ *   NOT NULL, schema, a relationship's condition), or the draft says nothing was lost when it was, or
  *   required relationships are saved optional (D18) with no note.
  * - Clean: none of these.
  */
@@ -806,6 +829,7 @@ export function verdictOf(s: SampleScore, failed: boolean, reasons: string[]): V
   if (L.uniqueKeys) gap.push(`${L.uniqueKeys} unique key(s) lost`);
   if (L.requiredFks) gap.push(`${L.requiredFks} required FK(s) lost`);
   if (L.schemas) gap.push(`schema(s) ${s.schemas.lostSilently.join(', ')} lost`);
+  if (L.conditions) gap.push(`${L.conditions} relationship condition(s) lost silently`);
   if (s.falseNotLostNote) gap.push('a note says details are not lost');
   if (s.requiredFks.source > 0 && !s.requiredFks.toldOptional) gap.push(`${s.requiredFks.source} required relationship(s) saved optional with no note`);
   const claims = s.requiredFks.noteClaims;
