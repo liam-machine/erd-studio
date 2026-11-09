@@ -254,6 +254,8 @@ export async function driver() {
     async wheel(p, deltaY) { await w.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: p.x, y: p.y, deltaX: 0, deltaY }); },
     /** Moves only the real mouse (not the drawn pointer) to p: off a row whose hover tooltip would cover something. */
     async parkMouse(p) { await w.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); },
+    /** A PNG of the window as it is now (base64; the compositor's, webviews included): dry-run checks only (REC_SHOTS). */
+    async screenshot() { return (await w.send('Page.captureScreenshot', { format: 'png' })).data; },
     async selectAll() { await d.key('a', { code: 'KeyA', keyCode: 65, modifiers: 4 }); },
     close: () => { for (const s of sessions.values()) s.close(); w.close(); },
   };

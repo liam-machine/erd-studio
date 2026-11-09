@@ -19,13 +19,13 @@ export const TITLE = 'Add a dim_customer table, linked to fct_order';
 export const DESIGN = [
   { path: CHANGE.table.path, badge: 'new file', lines: CHANGE.table.lines },
   { path: CHANGE.ref.path, badge: '+2', lines: [CHANGE.ref.use, CHANGE.ref.line] },
-  { path: '.erd-studio/main/tables/main/fct_order.dbml', badge: '+1', lines: null },
-  { path: '.erd-studio/main/diagrams/sales.dbml', badge: '+2', lines: null },
+  { path: '.erd-studio/main/tables/sales/fct_order.dbml', badge: '+1', lines: null },
+  { path: '.erd-studio/main/diagrams/shop-analytics.dbml', badge: '+2', lines: null },
 ];
 /** The code side: the SQL that builds the new table, beside the code the project already has. */
 export const CODE = {
   path: 'pipelines/dim_customer.sql',
-  lines: ['create or replace table dim_customer as', 'select', '    customer_id,', '    customer_name,', '    email,', '    city,', '    region', 'from raw.customers;'],
+  lines: ['create table sales.dim_customer as', 'select', '    customer_id,', '    customer_name,', '    email,', '    city,', '    region', 'from staging.customers;'],
 };
 /** The code that already loads fct_order (record/fixtures.mjs PLAIN), one line changed to fill its new customer_id: shown collapsed. */
 export const CODE_ALSO = { path: 'pipelines/load_orders.py', badge: '+1', lines: null };

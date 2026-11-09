@@ -1,22 +1,24 @@
 # Getting-started video, the LOGICAL cut (VARIANT=logical): the default cut's story for a folder
 # without dbt. The Welcome panel plays it where there is no dbt_project.yml (its 'logical' and
-# 'nofolder' pages). It is the same recording of the real VS Code, in its light theme: bring in the
-# model you have (Import…, a project folder's exported SQL DDL, its draft, Keep as Diagram), the
-# DBML files that saves next to the code, an edit by hand, the same kind of edit by Claude Code (Set
-# Up My AI Helper's skill, its pre-tool hook, the diagram updating), what it changed (held: the lines
-# it wrote, the new table on the canvas), that change and the code that builds it in one pull
-# request, and ERD Studio for Confluence showing the diagram from the repo. script.yaml is the same
-# tour with one more beat, about what a dbt project adds, before Confluence.
+# 'nofolder' pages). It is the same recording of the real VS Code, in its light theme: where a model
+# lives today (every source the import reads, one wall of logos), getting its DDL out in one step
+# (pg_dump, for real; Snowflake's GET_DDL beside it), bringing that in (Import SQL DDL…, its draft,
+# Keep as Diagram), the DBML files that saves next to the code, a 2,000-table diagram, an edit by
+# hand, the same kind of edit by Claude Code (Set Up My AI Helper's skill, its pre-tool hook, the
+# diagram updating), what it changed (held: the lines it wrote, the new table on the canvas), that
+# change and the code that builds it in one pull request, and ERD Studio for Confluence showing the
+# diagram from the repo. script.yaml is the same tour with one more beat, about what a dbt project
+# adds, before Confluence.
 #
 # Format: exactly as script.yaml (see its header), with one addition: `recording.footage` names the
 # cut whose takes this one plays. The plain take script.yaml's footage was filmed in (record/,
-# record/takes.json) is a folder without dbt_project.yml, so this cut films nothing of its own:
-# record/composite.mjs lays that take's footage on this cut's clock, and refuses it unless each
-# recorded scene here has the default cut's length and beats (the clicks were timed to them). So
-# every recorded scene below is script.yaml's, word for word, but for `bring`: its first line names
-# no dbt (and its logo row has no dbt mark), and the next line's `pause` puts the `open` beat back
-# where the default cut has it. Change a recorded scene here and in script.yaml together, then
-# record the default cut again (`npm test` checks the two match).
+# record/takes.json) is a folder without dbt_project.yml (and the scale take a project without
+# one), so this cut films nothing of its own: record/composite.mjs lays those takes' footage on this
+# cut's clock, and refuses it unless each recorded scene here has the default cut's length and beats
+# (the clicks were timed to them). So every recorded scene below is script.yaml's, word for word.
+# Only `bring` (HTML: the wall of sources) differs: its first line and its wall name no dbt. Change
+# a recorded scene here and in script.yaml together, then record the default cut again (`npm test`
+# checks the two match).
 #
 # Words to keep OUT of this file and everything this cut shows (narration, captions, headlines,
 # chapter labels, props, the recorded screen and terminal): dbt, Physical, Diff, manifest, sample project.
@@ -24,22 +26,27 @@
 # "DBML", "Git", "repo", "AI" and "table" are fine. Never "No AI needed": the tour shows both ways,
 # by hand and with an AI assistant.
 #
-# Length: 80–140 s (maxDuration 140). The walkthrough's watchLogical step and the Help & Feedback
+# Length: 80–200 s (maxDuration 200). The walkthrough's watchLogical step and the Help & Feedback
 # view call it "Watch the Tour", with no length in the name.
 
 title: ERD Studio — getting started, logical cut
-maxDuration: 140
+maxDuration: 200
 
+# The recorded window's place in the 1920x1080 frame (frame px). The isolated VS Code window is
+# 1440x600 CSS px (record/vscode.mjs WINDOW) rendered at 2x (DPR), filmed scaled down to fill this rect exactly.
 recording:
   inset: { x: 96, y: 240, w: 1728, h: 720 }
   # the default cut's takes (build/rec/, record/takes.json): this cut is never recorded on its own
   footage: default
+  # the default cut's punch-in on the terminal, while pg_dump is typed (its other one is not in this cut)
+  zoom:
+    - { scene: export, beat: pg, offset: 0.5, dur: 0.4, scale: 1.6, focus: [1230, 150], until: [pg, 3.9] }
 
 voice:
-  engine: kokoro        # same voice and speed as script.yaml
-  kokoro: af_heart
+  engine: kokoro        # kokoro | say
+  kokoro: af_heart      # Kokoro v1.0 voice id (Apache-2.0)
   speed: 1.04
-  say: Karen
+  say: Karen            # macOS fallback voice (en-AU)
   sayRate: 175
 
 timing:
@@ -48,7 +55,7 @@ timing:
   tail: 0.45
   fade: 0.25
 
-chapters: ["1 · IMPORT", "2 · SAVE", "3 · EDIT", "4 · SHARE"]
+chapters: ["1 · IMPORT", "2 · SAVE", "3 · SCALE", "4 · EDIT", "5 · SHARE"]
 
 scenes:
   - id: hook
@@ -57,6 +64,7 @@ scenes:
     minDur: 6
     accent: blue
     headline: ["Your data model,", "in {your repo}."]
+    # the finished diagram beside its files; the claims sit right of the headline (beat, seconds after it)
     props:
       claims: [['DBML files in Git', model, 2.6], ['By hand or with AI', ai, 0.6]]
     lines:
@@ -68,38 +76,64 @@ scenes:
         caption: Edit it by hand, or with your AI assistant, through a built-in skill it uses by itself.
 
   - id: bring
-    module: rec/window
+    module: sources/wall
     chapter: 1
-    minDur: 9.2
+    minDur: 9
     accent: blue
     headline: ["Already have a model?", "{Bring it in}."]
-    # the tools this cut's audience brings a model in from: SQL DDL (Snowflake, Databricks), Power BI / Fabric
+    # every source this cut's audience brings a model in from (script.yaml's wall without its first
+    # tile), all at once, held still from the moment they land (player/scenes/sources/wall.js SOURCES)
     props:
-      logos: [[snowflake, have, 1.6], [databricks, have, 2.4], [powerBiFabric, have, 3.1], [sql, have, 4.4]]
+      sources: [databricks, snowflake, powerBi, fabric, postgresql, sqlServer, mysql, oracle, bigquery, redshift, mariadb, sqlite, dbml]
     lines:
       - id: b_have
         beat: have
-        caption: Most teams already have one, in Snowflake, Databricks, Power BI, Fabric or SQL.
-      - id: b_open
-        beat: open
-        # b_have is 0.749 s shorter than script.yaml's (5.265 s against 6.014 s): the longer pause puts
-        # `open` at the default cut's 6.564 s, where the take's clicks were timed
-        pause: 0.949
-        caption: Open your project, and click Import.
+        caption: Most teams already have a model, in Databricks, Snowflake, Power BI, Fabric,
+      - id: b_more
+        beat: more
+        caption: PostgreSQL, SQL Server, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, or DBML.
+        say: Postgres Q L, SQL Server, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, or DBML.
+      - id: b_all
+        beat: all
+        caption: ERD Studio brings in every one.
 
-  - id: importSql
+  - id: export
     module: rec/window
     chapter: 1
     minDur: 9
     accent: blue
-    headline: ["Snowflake or Databricks?", "Import the {DDL}."]
+    headline: ["Getting the DDL out?", "{One step}."]
+    # pg_dump in the terminal, for real (record/fixtures.mjs: a local PostgreSQL database, the whole
+    # database in one file); Snowflake's one query is a card right of the headline (props.query), not filmed
+    props:
+      query: { beat: sf, offset: 0.3, logo: snowflake, name: Snowflake, sql: "SELECT GET_DDL('SCHEMA', 'SHOP.SALES');", note: saved as a .sql file }
     lines:
-      - id: s_sources
-        beat: sources
-        caption: Import reads DBML, SQL scripts, or a Power BI or Fabric model.
-      - id: s_ddl
-        beat: ddl
-        caption: From Snowflake or Databricks, import the exported DDL. It works out the dialect.
+      - id: x_one
+        beat: one
+        caption: Getting the DDL out is one step, for a whole schema or database.
+      - id: x_pg
+        beat: pg
+        caption: From PostgreSQL, pg_dump writes it to a file.
+        say: From Postgres Q L, P G dump writes it to a file.
+      - id: x_sf
+        beat: sf
+        caption: From Snowflake, it's one query, GET_DDL, saved as a .sql file.
+        say: From Snowflake, it's one query, get D D L, saved as a dot S Q L file.
+
+  - id: importSql
+    module: rec/window
+    chapter: 1
+    minDur: 8
+    accent: blue
+    headline: ["Import the {DDL}.", "Nine SQL dialects."]
+    lines:
+      - id: s_import
+        beat: import
+        caption: Then click New, Import SQL DDL, and import the folder.
+      - id: s_dialect
+        beat: dialect
+        caption: "It works out the dialect: PostgreSQL, one of the nine it reads."
+        say: "It works out the dialect: Postgres Q L, one of the nine it reads."
 
   - id: draft
     module: rec/window
@@ -119,7 +153,7 @@ scenes:
   - id: files
     module: rec/window
     chapter: 2
-    minDur: 9.276   # the length the take was filmed for (f_review was reworded shorter after it; record/takes.json)
+    minDur: 6
     accent: blue
     headline: ["Saved as {DBML},", "next to your code."]
     lines:
@@ -130,9 +164,32 @@ scenes:
         beat: review
         caption: Change it, and Git shows exactly what changed.
 
-  - id: byHand
+  - id: scale
     module: rec/window
     chapter: 3
+    minDur: 21.5   # the zoom and the hover take their time with 2,000 cards on screen; the arrows held about 3 s
+    accent: blue
+    headline: ["Big models?", "{2,000 tables}."]
+    # its own take, in a 2,000-table project (record/bigProject.mjs): opened from the side bar, its
+    # lines settling as the routing worker finishes (timed on the take, kept in record/takes.json
+    # scale.notes.routing, but never claimed: the time depends on the machine), fitted, a zoom into
+    # one area, a table hovered. The figures sit right of the headline.
+    props:
+      stats: [['2,000 tables', big, 1.4], ['2,700 relationships', big, 2.2], ['Lines routed in the background', route, 0.6]]
+    lines:
+      - id: z_big
+        beat: big
+        caption: "Big models stay readable: this one has 2,000 tables and 2,700 relationships."
+      - id: z_route
+        beat: route
+        caption: Every line finds its way around the tables in the background, in seconds.
+      - id: z_hover
+        beat: hover
+        caption: "Zoom in, and hover a table: arrows flow along its relationships."
+
+  - id: byHand
+    module: rec/window
+    chapter: 4
     minDur: 7
     accent: blue
     headline: ["Edit it {by hand},", "on the canvas."]
@@ -146,7 +203,7 @@ scenes:
 
   - id: aiSetup
     module: rec/window
-    chapter: 3
+    chapter: 4
     minDur: 7
     accent: blue
     headline: ["Or ask your", "{AI assistant}."]
@@ -165,10 +222,13 @@ scenes:
 
   - id: aiRun
     module: rec/window
-    chapter: 3
+    chapter: 4
     minDur: 15.5   # the new table holds on screen, in the open, for about 2 s after its line
     accent: blue
     headline: ["Ask for a change.", "{Watch it appear}."]
+    # The wait for Claude Code is sped up (record/scenes.mjs marks it; composite.mjs shows a "sped up"
+    # badge over the footage while it is): `fastForward.until` is where, in this scene's time, the
+    # footage is back to real time.
     props:
       fastForward: { until: [live, 0.8] }
     lines:
@@ -185,7 +245,7 @@ scenes:
 
   - id: aiShow
     module: tour/aiChange
-    chapter: 3
+    chapter: 4
     minDur: 9.6    # the change held: what it wrote, then the canvas punched in on the new table, about 1.9 s in silence after its last line
     accent: blue
     headline: ["See what it {changed}:", "in the {files}, on the {canvas}."]
@@ -204,7 +264,7 @@ scenes:
 
   - id: pr
     module: tour/pullRequest
-    chapter: 3
+    chapter: 4
     minDur: 8.6    # the review held after its last line
     accent: blue
     headline: ["One pull request:", "the {design} and the {code}."]
@@ -220,7 +280,7 @@ scenes:
 
   - id: confluence
     module: tour/confluence
-    chapter: 4
+    chapter: 5
     minDur: 13.3   # about 1.3 s after its last line: the page and its pills hold before the end card
     accent: blue
     headline: ["One source of truth:", "{your repo}."]

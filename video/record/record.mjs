@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Records the default cut's footage in the real VS Code (see README.md, "Recording"):
 //
-//   node record/record.mjs                 every take (plain, then dbt)
+//   node record/record.mjs                 every take (plain, big, then dbt)
 //   node record/record.mjs --take dbt      one take
 //   node record/record.mjs --dry           drive the scenes without filming (selectors, timing)
 //   node record/record.mjs --dry --take plain --skip aiRun   the same, leaving scenes out (aiRun runs Claude Code)
@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { driver, sleep } from './driver.mjs';
-import { makeDbt, makePlain } from './fixtures.mjs';
+import { makeBig, makeDbt, makePlain } from './fixtures.mjs';
 import { SCENES, TAKES } from './scenes.mjs';
 import { startScreencast } from './screencast.mjs';
 import { takeClock } from './composite.mjs';
@@ -45,7 +45,7 @@ const takes = existsSync(takesFile) ? JSON.parse(readFileSync(takesFile, 'utf8')
 
 for (const [name, take] of Object.entries(TAKES)) {
   if (only && only !== name) continue;
-  const folder = take.folder === 'plain' ? makePlain() : makeDbt();
+  const folder = { plain: makePlain, big: makeBig, dbt: makeDbt }[take.folder]();
   await launch(folder);
   const d = await driver();
   await take.prep?.(d);
@@ -102,7 +102,14 @@ for (const [name, take] of Object.entries(TAKES)) {
         try { for (const x of await d.screenText()) text.add(x); } catch {}
         try { for (const x of await d.terminalText()) term.add(x.trim()); } catch {}
         await sleep(600); } })();
-      await spec.run(d, { at, beats: scene.beats, dur: scene.dur, scene, ff: fastForward });
+      // what a scene measured on camera (the scale scene's routing time), kept in record/takes.json
+      const notes = {};
+      const note = (o) => Object.assign(notes, o);
+      // REC_SHOTS=<dir>: a dry run's look at the window mid-scene (no-op otherwise)
+      const shot = async (label) => { if (!process.env.REC_SHOTS || !DRY) return; mkdirSync(process.env.REC_SHOTS, { recursive: true }); writeFileSync(join(process.env.REC_SHOTS, `${name}-${id}-${label}.png`), Buffer.from(await d.screenshot(), 'base64')); };
+      /** Wait until s seconds into the scene unless it is already past (no lateness counted: the step it waits for has no fixed time). */
+      const notBefore = async (s) => { if (!ff || ff !== 'running') { const target = clock(s); const wait = (t0 + target) * 1000 - Date.now(); if (wait > 0) await sleep(wait); } };
+      await spec.run(d, { at, notBefore, beats: scene.beats, dur: scene.dur, scene, ff: fastForward, note, shot });
       if (ff === 'running') throw new Error(`${id}: ff.start() without ff.end()`);
       const busyTake = now();
       // the clicks' end, in the video's time
@@ -113,9 +120,11 @@ for (const [name, take] of Object.entries(TAKES)) {
       await at(scene.dur);
       const over = Math.max(0, busyUntil - scene.dur);
       const speed = ff ? (ff.b - ff.a) / (ff.o - ff.a) : 1;
-      console.log(`${id.padEnd(11)} ${scene.dur.toFixed(2)}s  actions done at ${busyUntil.toFixed(2)}s${ff ? `  (sped up ${speed.toFixed(1)}x from ${ff.a}s)` : ''}${late ? `  (a click ran ${late.toFixed(2)}s late)` : ''}${over ? '  OVER' : ''}`);
-      filmed.push({ id, t0, dur: scene.dur, filmed: +clock(scene.dur).toFixed(3), ...(ff ? { ff } : {}), busy: +busyUntil.toFixed(2), late: +late.toFixed(2), text: [...text].sort(), term: [...term] });
+      console.log(`${id.padEnd(11)} ${scene.dur.toFixed(2)}s  actions done at ${busyUntil.toFixed(2)}s${ff ? `  (sped up ${speed.toFixed(1)}x from ${ff.a}s)` : ''}${late ? `  (a click ran ${late.toFixed(2)}s late)` : ''}${over ? '  OVER' : ''}${Object.keys(notes).length ? `  ${JSON.stringify(notes)}` : ''}`);
+      filmed.push({ id, t0, dur: scene.dur, filmed: +clock(scene.dur).toFixed(3), ...(ff ? { ff } : {}), busy: +busyUntil.toFixed(2), late: +late.toFixed(2), notes, text: [...text].sort(), term: [...term] });
       await cast?.poke();
+      // REC_SHOTS=<dir> (a dry run's check): the window at the end of each scene
+      if (process.env.REC_SHOTS && DRY) { mkdirSync(process.env.REC_SHOTS, { recursive: true }); writeFileSync(join(process.env.REC_SHOTS, `${name}-${id}.png`), Buffer.from(await d.screenshot(), 'base64')); }
     }
   } finally {
     const n = await cast?.stop();
@@ -125,10 +134,10 @@ for (const [name, take] of Object.entries(TAKES)) {
   }
   if (DRY) continue;
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'scenes.json'), JSON.stringify(filmed.map(({ text, term, ...s }) => s), null, 1));
+  writeFileSync(join(dir, 'scenes.json'), JSON.stringify(filmed.map(({ text, term, notes, ...s }) => s), null, 1));
   // the pointer's path (composite.mjs draws the pointer from it)
   writeFileSync(join(dir, 'pointer.json'), JSON.stringify(d.trail));
-  for (const s of filmed) takes[s.id] = { take: name, dur: s.dur, busy: s.busy, late: s.late, ...(s.ff ? { ff: s.ff } : {}), screenText: s.text, ...(s.term.length ? { terminalText: s.term } : {}) };
+  for (const s of filmed) takes[s.id] = { take: name, dur: s.dur, busy: s.busy, late: s.late, ...(s.ff ? { ff: s.ff } : {}), ...(Object.keys(s.notes).length ? { notes: s.notes } : {}), screenText: s.text, ...(s.term.length ? { terminalText: s.term } : {}) };
 }
 if (!DRY) {
   // only this timeline's recorded scenes (a scene the script no longer has is dropped)

@@ -20,24 +20,32 @@ import { bezel, insetOf } from '../rec/window.js';
 /** What Claude Code wrote (its edits in the take): the new table's file, whole, and the two lines it added to the relationships file (the `use` line its Ref needs, then the Ref). */
 export const CHANGE = {
   table: {
-    path: '.erd-studio/main/tables/main/dim_customer.dbml',
-    lines: ['Table main.dim_customer {', '  customer_id   "NUMBER(38,0)" [pk]', '  customer_name "VARCHAR(100)"', '  email         "VARCHAR(150)"', '  city          "VARCHAR(60)"', '  region        "VARCHAR(30)"', '}'],
+    path: '.erd-studio/main/tables/sales/dim_customer.dbml',
+    lines: [
+      "Table sales.dim_customer [role: 'domain-dim', grain: 'One row per customer'] {",
+      '  customer_id   integer                    [pk]',
+      '  customer_name "character varying(100)"',
+      '  email         "character varying(120)"',
+      '  city          "character varying(60)"',
+      '  region        "character varying(30)"',
+      '}',
+    ],
   },
   ref: {
     path: '.erd-studio/main/relationships/main.dbml',
-    use: "use { table main.dim_customer } from '../tables/main/dim_customer.dbml'",
-    line: 'Ref: main.fct_order.customer_id >? main.dim_customer.customer_id',
+    use: "use { table sales.dim_customer } from '../tables/sales/dim_customer.dbml'",
+    line: 'Ref: sales.fct_order.customer_id >? sales.dim_customer.customer_id',
   },
   /** The two smaller edits that go with them: the key column on the fact table, the table on the diagram. */
-  also: [['fct_order.dbml', '+ customer_id'], ['sales.dbml', '+ dim_customer']],
+  also: [['fct_order.dbml', '+ customer_id'], ['shop-analytics.dbml', '+ dim_customer']],
 };
 
 /** On the still (inset px): the new table's card, the relationship's line from fct_order to it, and fct_order's new key column's row. */
-export const NEW_TABLE = { x: 783, y: 337, w: 149, h: 112 };
-export const LINK = [[428, 416], [605, 416], [605, 392], [783, 392]];
-export const FK_ROW = { x: 281, y: 364, w: 145, h: 14 };
+export const NEW_TABLE = { x: 790, y: 334, w: 190, h: 122 };
+export const LINK = [[409, 378], [788, 378]];
+export const FK_ROW = { x: 280, y: 365, w: 124, h: 14 };
 /** The punch-in: about this point (inset px), to this scale, the point ending at the inset's centre-left. */
-const ZOOM = { focus: [606, 380], scale: 1.5, to: [850, 372] };
+const ZOOM = { focus: [600, 380], scale: 1.5, to: [820, 372] };
 
 // The pointer composite drew on the footage's last frame, so the still shows it too, then moves it
 // off the window's right edge (absent in the pipeline test, which renders without a server).
@@ -100,8 +108,8 @@ export default {
     // the card: what it wrote (over the terminal), leaving as the canvas punches in
     const cardOp = Math.min(easeOut(seg(t, scene.beats.files.t - 0.05, scene.beats.files.t + 0.35)), fadeOut(t, canvasAt, 0.35));
     if (cardOp > 0) {
-      const CX = 962, CY = 34, CW = 746;   // left of the terminal's edge enough for the `use` line; clear of the new table (x ≤ 938)
-      const row = (sign, text, lit, extra = '') => `<div style="display:flex;height:27px;align-items:center;white-space:pre;background:${lit ? `rgba(171,242,188,${lit.toFixed(3)})` : ADD.bg};${extra}">
+      const CX = 996, CY = 30, CW = 714;   // over the terminal, clear of the new table (x ≤ 980); wide enough for the table's first line at 14 px
+      const row = (sign, text, lit, extra = '') => `<div style="display:flex;height:25px;align-items:center;white-space:pre;background:${lit ? `rgba(171,242,188,${lit.toFixed(3)})` : ADD.bg};${extra}">
           <span style="width:30px;flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;background:${ADD.gutter};color:${ADD.sign}">${sign}</span><span style="padding-left:10px">${esc(text)}</span></div>`;
       const head = (path, badge, lit) => `<div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;background:#f6f8fa;border-bottom:1px solid #d0d7de;font-size:17px;color:#1f2328;white-space:nowrap">
           <span style="color:#57606a;display:flex">${ICON.file({ size: 18 })}</span><span class="mono" style="font-size:16px;font-weight:600">${path}</span><span style="flex:1"></span>
@@ -113,11 +121,11 @@ export default {
         <div style="display:flex;align-items:center;gap:10px;height:50px;padding:0 16px;border-bottom:1px solid #d0d7de;font-size:20px;font-weight:700;color:#1f2328">
           <span style="color:${GREEN};display:flex">${ICON.sparkle({ size: 22 })}</span>What Claude Code changed</div>
         <div style="margin:12px;border:1.5px solid ${litTable > 0 ? `rgba(22,163,74,${(0.4 + 0.6 * litTable).toFixed(3)})` : '#d0d7de'};border-radius:8px;overflow:hidden">
-          ${head(CHANGE.table.path, 'new file · +7', litTable)}
-          <div class="mono" style="font-size:16px;color:#1f2328;padding:4px 0">${CHANGE.table.lines.map((l) => row('+', l, pulse(tableAt))).join('')}</div></div>
+          ${head(CHANGE.table.path, `new file · +${CHANGE.table.lines.length}`, litTable)}
+          <div class="mono" style="font-size:14px;color:#1f2328;padding:4px 0">${CHANGE.table.lines.map((l) => row('+', l, pulse(tableAt))).join('')}</div></div>
         <div style="margin:0 12px 12px;border:1.5px solid ${litRef > 0 ? `rgba(22,163,74,${(0.4 + 0.6 * litRef).toFixed(3)})` : '#d0d7de'};border-radius:8px;overflow:hidden">
           ${head(CHANGE.ref.path, '+2', litRef)}
-          <div class="mono" style="font-size:15px;color:#1f2328;padding:4px 0">${row('+', CHANGE.ref.use, pulse(refAt))}${row('+', CHANGE.ref.line, pulse(refAt), 'font-weight:600')}</div></div>
+          <div class="mono" style="font-size:14px;color:#1f2328;padding:4px 0">${row('+', CHANGE.ref.use, pulse(refAt))}${row('+', CHANGE.ref.line, pulse(refAt), 'font-weight:600')}</div></div>
         <div style="display:flex;gap:10px;padding:0 14px 14px;font-size:16px;color:#57606a;white-space:nowrap;${appear(t, refAt + 0.4, { dy: 4 })}">
           ${CHANGE.also.map(([f, what]) => `<span class="pill" style="font-size:15px;padding:4px 12px;gap:8px;background:#f6f8fa;border:1px solid #d0d7de;color:#57606a"><span class="mono">${f}</span><span style="color:${ADD.sign};font-weight:700">${what}</span></span>`).join('')}</div>
       </div>`;

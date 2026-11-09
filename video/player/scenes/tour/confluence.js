@@ -24,13 +24,13 @@ export const REPO = {
   name: 'shop-analytics',
   /** Under .erd-studio/main/. */
   files: [
-    ['diagrams/', 'sales.dbml'],
-    ['tables/main/', 'fct_order.dbml'],
-    ['tables/main/', 'dim_customer.dbml'],
-    ['tables/main/', 'dim_store.dbml'],
+    ['diagrams/', 'shop-analytics.dbml'],
+    ['tables/sales/', 'fct_order.dbml'],
+    ['tables/sales/', 'dim_customer.dbml'],
+    ['tables/sales/', 'dim_store.dbml'],
     ['relationships/', 'main.dbml'],
   ],
-  code: ['pipelines/', 'sales.sql'],
+  code: ['pipelines/', 'load_orders.py'],
 };
 
 // The Confluence page's own light tokens (Atlassian's), not the frame's.
@@ -102,7 +102,7 @@ export default {
       const gh = Math.sin(Math.PI * seg(t, ghAt, ghAt + 0.6));
       html += `<div class="abs" style="left:${MX}px;top:${MY + MH + 12}px;display:flex;align-items:center;gap:10px;font-size:19px;color:${L.text3};white-space:nowrap;${appear(t, a0 + 0.6, { dy: 4 })}">
         <img src="${LOGO('github.svg')}" width="22" height="22" style="display:block;width:22px;height:22px;transform:scale(${(1 + 0.3 * gh).toFixed(3)})">
-        <span>${REPO.name} · main ·</span><span class="mono" style="font-size:17px">.erd-studio/main/diagrams/sales.dbml</span></div>`;
+        <span>${REPO.name} · main ·</span><span class="mono" style="font-size:17px">.erd-studio/main/diagrams/shop-analytics.dbml</span></div>`;
       if (t >= bizAt) {
         const p = easeOut(seg(t, bizAt, bizAt + 0.4));
         html += `<div class="abs" style="right:${1920 - (PX + PW) + 28}px;top:${PY + BAR + 22}px;opacity:${p.toFixed(3)};transform:scale(${lerp(0.9, 1, p).toFixed(3)});transform-origin:100% 50%">

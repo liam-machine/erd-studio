@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Renders the README's hero GIF, media/demo.gif, from player/hero.html: ERD Studio in a plain
 // folder (no stage tabs), the Explorer's layer-first .erd-studio tree beside the orders diagram,
-// and one beat of Import DBML…'s draft. Deterministic: hero.js's render(t) is pure, so every run
-// gives the same frames. Laid out at 1440x900 and scaled to 800 px wide (the README shows it at
-// width="800"), 12 fps, a 12 s seamless loop, one palette for the whole loop.
+// one beat of Import DBML…'s draft, then the pointer hovering fct_order and dim_customer with the
+// moving arrows on their lines. Deterministic: hero.js's render(t) is pure, so every run gives the
+// same frames. Laid out at 1440x900 and scaled to 800 px wide (the README shows it at width="800"),
+// 12 fps, the loop's length (HERO.loop, 16 s) seamless, one palette for the whole loop.
 //
 //   node hero-gif.mjs                 (npm run gif)
 //   node hero-gif.mjs --frames 0,8    only PNG stills of those times, into build/hero/

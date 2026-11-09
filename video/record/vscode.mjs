@@ -11,7 +11,8 @@
 // The window gets its own HOME (/tmp/erdrec/home) and PATH (/tmp/erdrec/bin first, then the system
 // folders), and VSCODE_CLI=1 so VS Code keeps that environment rather than reading your login
 // shell's: nothing ERD Studio writes to a home folder (the CLI launcher) lands in yours, and the dbt
-// it finds is the recording's own (bin/dbt, real dbt Core through uvx), never one on your PATH. The
+// it finds is the recording's own (bin/dbt, real dbt Core through uvx), never one on your PATH;
+// bin/ also links PostgreSQL's pg_dump and psql (the export scene dumps the local shop database). The
 // integrated terminal is a bare zsh (no rc files of yours, prompt `$ `) whose HOME is your real one,
 // so Claude Code uses the login you already have, and whose `claude` runs with project and local
 // settings only (none of your user settings, hooks, plugins or MCP servers; see terminalEnv()).
@@ -112,7 +113,7 @@ export const CLAUDE_FLAGS = ['--setting-sources', 'project,local', '--strict-mcp
   '--permission-mode', 'acceptEdits', '--disallowedTools', 'Bash', '--model', 'sonnet',
   '--append-system-prompt', 'Shell commands are off in this session by design. Do not run or mention erd-studio doctor, a check, or that files are unchecked. End with two short sentences on what you changed.'];
 
-/** The bare shell config: prompt `$ `, no history, no rc file of yours; `claude` with CLAUDE_FLAGS and IS_DEMO (Claude Code hides the account it is signed in with). */
+/** The bare shell config: prompt `$ `, no history, no rc file of yours; `claude` with CLAUDE_FLAGS, IS_DEMO (Claude Code hides the account it is signed in with) and no prompt suggestions. */
 const ZSHRC = `# The tour's terminal (video/record/vscode.mjs): none of your own shell config.
 PS1='$ '
 RPROMPT=''
@@ -120,6 +121,8 @@ unsetopt PROMPT_SP
 HISTFILE=/dev/null
 export PATH='${BIN}:${SYSTEM_PATH}'
 export IS_DEMO=1
+# no prompt suggestions: a greyed-out next request under the reply would read as one the viewer typed
+export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false
 claude() { command claude ${CLAUDE_FLAGS.map((f) => `'${f}'`).join(' ')} "$@"; }
 `;
 
@@ -135,13 +138,16 @@ ${Object.entries(DBT_ENV).map(([k, v]) => `export ${k}='${v}'`).join('\n')}
 exec '${uvx}' ${DBT_UVX_ARGS.map((a) => `'${a}'`).join(' ')} "$@"
 `;
 
+/** PostgreSQL's client tools on the window's PATH (the export scene runs pg_dump; fixtures.mjs runs psql). */
+export const PG_TOOLS = ['pg_dump', 'psql'];
+
 /** Runs `dbt --version` the way bin/dbt does, so the first Run dbt parse on camera finds uvx's cache warm. */
 export function warmDbt() {
   execFileSync(which('uvx'), [...DBT_UVX_ARGS, '--version'], { stdio: 'ignore', env: { ...process.env, ...DBT_ENV } });
 }
 
-/** The real file a tool on your PATH runs (CLAUDE_BIN / UVX_BIN override; terminal-app shims skipped), or throws. */
-function which(tool) {
+/** The real file a tool on your PATH runs (CLAUDE_BIN / UVX_BIN / PG_DUMP_BIN / PSQL_BIN override; terminal-app shims skipped; then Homebrew's bin), or throws. */
+export function which(tool) {
   const override = process.env[`${tool.toUpperCase()}_BIN`];
   if (override) return realpathSync(override);
   for (const dir of (process.env.PATH ?? '').split(':')) {
@@ -149,6 +155,8 @@ function which(tool) {
     const f = join(dir, tool);
     if (existsSync(f)) return realpathSync(f);
   }
+  // Homebrew's folder, when the shell running this has not put it on PATH (PostgreSQL's tools live there)
+  if (existsSync(join('/opt/homebrew/bin', tool))) return realpathSync(join('/opt/homebrew/bin', tool));
   throw new Error(`${tool} is not on your PATH`);
 }
 
@@ -161,6 +169,8 @@ function writeEnvironment() {
   const uvx = which('uvx');
   symlinkSync(which('claude'), join(BIN, 'claude'));
   symlinkSync(uvx, join(BIN, 'uvx'));
+  // PostgreSQL's own client tools, for the export scene's pg_dump (the shop database record/fixtures.mjs makes)
+  for (const tool of PG_TOOLS) symlinkSync(which(tool), join(BIN, tool));
   writeFileSync(join(BIN, 'dbt'), DBT_SHIM(uvx));
   chmodSync(join(BIN, 'dbt'), 0o755);
   writeFileSync(join(ZDOT, '.zshrc'), ZSHRC);

@@ -19,7 +19,7 @@ VARIANT="${VARIANT:-}"
 if [[ -z "$VARIANT" ]]; then B=build; NAME=getting-started; else B="build-$VARIANT"; NAME="getting-started-$VARIANT"; fi
 MP4="$OUT/$NAME.mp4"
 POSTER="$OUT/$NAME-poster.jpg"
-MAX_BYTES=$((9 * 1024 * 1024))
+MAX_BYTES=$((12 * 1024 * 1024))
 mkdir -p "$OUT" "$B"
 export B
 
@@ -60,7 +60,7 @@ probe() { ffprobe -v error -select_streams "$1" -show_entries "stream=$2" -of de
 [[ "$(probe a:0 sample_rate "$MP4")" == 44100 ]] || fail "audio is not 44.1 kHz"
 [[ "$(probe a:0 channels "$MP4")" == 1 ]] || fail "audio is not mono"
 SIZE=$(stat -f %z "$MP4" 2>/dev/null || stat -c %s "$MP4")
-(( SIZE <= MAX_BYTES )) || fail "mp4 is $SIZE bytes, over the 9 MiB ceiling even at crf 26"
+(( SIZE <= MAX_BYTES )) || fail "mp4 is $SIZE bytes, over the 12 MiB ceiling even at crf 26"
 DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$MP4")
 node -e "process.exit(Math.abs($DUR - $EXPECT_DUR) <= 0.25 ? 0 : 1)" || fail "duration $DUR s, expected $EXPECT_DUR s"
 # faststart: the moov atom must precede mdat so the webview can start playing before the end loads
