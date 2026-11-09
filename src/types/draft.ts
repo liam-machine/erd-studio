@@ -188,6 +188,12 @@ export interface DraftBanner {
   shownStarts: DraftOtherStart[];
   /** A one-off line under the detail (`Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.`). */
   notice?: string;
+  /**
+   * Show the **Show Import Report** link: the draft of an import (SQL DDL, a
+   * semantic model, a DBML file, dbt), whose report the host holds
+   * (`importReportStore.ts`). Absent (an example, an older host): no link.
+   */
+  importReport?: boolean;
 }
 
 /** Everything the page needs: what the host posts (`toDraftView`). Holds no absolute path and nothing to write with. */
@@ -281,6 +287,12 @@ export type DraftToHost =
   | { type: 'scope'; scopeId: string }
   /** Passive: the schema panel or details drawer was opened (telemetry only). */
   | { type: 'detailsOpened' }
+  /**
+   * Passive: the banner's **Show Import Report** link (only when the banner
+   * offers it, `banner.importReport`). The wiring runs the fixed command
+   * `erdStudio.showImportReport`; it never closes the page or answers the flow.
+   */
+  | { type: 'importReport' }
   /** Passive: ELK failed, the fallback placement is drawn (telemetry only). */
   | { type: 'layoutFailed' }
   /**
@@ -312,12 +324,12 @@ export type DraftToHost =
 
 export const DRAFT_TO_HOST_TYPES = [
   'ready', 'keep', 'changeOptions', 'discard', 'otherStart', 'scope', 'detailsOpened', 'layoutFailed', 'guide',
-  'layoutFinished', 'pageError', 'laidOut', 'crashFallback',
+  'layoutFinished', 'pageError', 'laidOut', 'crashFallback', 'importReport',
 ] as const satisfies readonly DraftToHost['type'][];
 
 /** Messages that are not a choice: they never close the page or answer the flow. */
 export const DRAFT_PASSIVE_TYPES: ReadonlySet<DraftToHost['type']> = new Set([
-  'ready', 'detailsOpened', 'layoutFailed', 'guide', 'layoutFinished', 'pageError', 'laidOut', 'crashFallback',
+  'ready', 'detailsOpened', 'layoutFailed', 'guide', 'layoutFinished', 'pageError', 'laidOut', 'crashFallback', 'importReport',
 ]);
 
 /** What the draft on show allows: a message for anything else is dropped. */
@@ -326,6 +338,8 @@ export interface DraftMessageAllowance {
   changeOptions: boolean;
   scopeIds: ReadonlySet<string>;
   otherStarts: ReadonlySet<DraftOtherStart>;
+  /** The banner offers Show Import Report. */
+  importReport: boolean;
 }
 
 export function draftAllowance(view: DraftView): DraftMessageAllowance {
@@ -334,6 +348,7 @@ export function draftAllowance(view: DraftView): DraftMessageAllowance {
     changeOptions: view.banner.changeOptions,
     scopeIds: new Set((view.scopes?.options ?? []).map((o) => o.id)),
     otherStarts: new Set(view.otherStarts.map((s) => s.id)),
+    importReport: view.banner.importReport === true,
   };
 }
 
@@ -359,6 +374,8 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
       return allowed.keepable ? { type: 'keep' } : undefined;
     case 'changeOptions':
       return allowed.changeOptions ? { type: 'changeOptions' } : undefined;
+    case 'importReport':
+      return allowed.importReport ? { type: 'importReport' } : undefined;
     case 'otherStart': {
       const start = raw.start;
       return typeof start === 'string' && (DRAFT_OTHER_STARTS as readonly string[]).includes(start)
@@ -502,6 +519,8 @@ export interface DraftGuideStart {
 export interface DraftPreviewEvents {
   detailsOpened(source: DraftSource): void;
   layoutFailed(source: DraftSource): void;
+  /** The banner's Show Import Report link (optional: older wiring has none). */
+  importReport?(source: DraftSource): void;
   /** The page said ready (`slow`: more than 10 s after it was shown; optional, 2.0 B13). */
   pageReady?(source: DraftSource, slow: boolean): void;
   /** The page stayed visible 30 s without saying ready (optional, 2.0 B13). */

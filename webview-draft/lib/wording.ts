@@ -30,6 +30,8 @@ export const OTHER_WAYS_TO_START = 'More ways to start';
 export const DISCARD = 'Discard';
 export const CHANGE_OPTIONS = 'Change options…';
 export const SHOW_DETAILS = 'Show details';
+/** The banner's link to the import's report (the host's `SHOW_IMPORT_REPORT_LABEL`, one label per action). */
+export const SHOW_IMPORT_REPORT = 'Show Import Report';
 
 /** The schema panel's line when one schema is on show: `Showing sales: 80 of 257 tables`. */
 export function showingLine(schema: string, shown: number, total: number): string {

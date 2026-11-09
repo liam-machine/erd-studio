@@ -411,6 +411,8 @@ export interface ImportPlanDraftInput {
   changeOptions: boolean;
   scopes?: DraftScopes;
   notice?: string;
+  /** Offer Show Import Report (the import recorded its report). Never on an example. */
+  importReport?: boolean;
 }
 
 const IMPORT_SOURCE_DRAFT: Readonly<Record<ImportPlanDraftInput['importSource'], DraftSource>> = {
@@ -493,6 +495,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
         changeOptions: input.changeOptions,
         shownStarts: [],
         ...(notice ? { notice } : {}),
+        ...(input.importReport ? { importReport: true } : {}),
       },
       otherStarts: otherStartItems(FIND_STARTS),
     };
@@ -564,6 +567,8 @@ export interface DbtDraftInput {
   /** Offer Change options… (Import from dbt's picker). Default true. */
   changeOptions?: boolean;
   notice?: string;
+  /** Offer Show Import Report (Import from dbt recorded its report). */
+  importReport?: boolean;
   /**
    * The project's models dbt declares no columns for (`modelsWithoutColumns`):
    * no folder offers them, and Not drawn says why in one line.
@@ -717,6 +722,7 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
       changeOptions: input.changeOptions ?? true,
       shownStarts: [],
       ...(input.notice ? { notice: input.notice } : {}),
+      ...(input.importReport ? { importReport: true } : {}),
     },
     otherStarts: otherStartItems(DBT_STARTS),
     ...(scopes ? { scopes } : {}),

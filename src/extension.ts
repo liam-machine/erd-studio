@@ -1360,6 +1360,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       () => draftDetailsOpened(),
       // The crash screen's Send Feedback: the canvas-less flow (a draft tab is no canvas).
       (prefill) => vscode.commands.executeCommand('erdStudio.reportBug', prefill),
+      // The banner's Show Import Report: the import's report (in memory, read-only).
+      () => vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND),
     )),
     {
       // The first draft's quality flags, counted off the onboarding trail.
