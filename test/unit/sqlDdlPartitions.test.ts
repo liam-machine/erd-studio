@@ -1,0 +1,376 @@
+/**
+ * Partitions and inheritance in SQL DDL (`sqlDdlPartitions.ts`): a child
+ * with no columns of its own (`PARTITION OF`, an `ATTACH PARTITION`ed copy of
+ * its parent, `() INHERITS`) folds into its parent by default, one ledger
+ * note per child at its line; `partitions: 'tables'` keeps each as a table.
+ * Beyond Pagila's 55 ATTACHed monthly partitions: range, list, hash and
+ * default partitions, several levels, ATTACH before the parent or the child
+ * (and in another file), quoted and schema-qualified names, a child with
+ * columns or constraints of its own, several parents, a parent never
+ * declared, DETACH, and what each child's foreign keys, keys and comments
+ * become. Every result is read by Import DBML, and every child is accounted
+ * for: a table, a folded note or a reported loss.
+ */
+import { describe, expect, it } from 'vitest';
+import { convertSqlDdl, type SqlDdlFile, type SqlDdlToDbmlResult, type SqlPartitionMode } from '../../src/services/sqlDdlImport';
+import { dbmlCoreSqlEngine } from '../../src/services/sqlImportEngine';
+import { readDbml } from '../../src/services/dbmlImportParse';
+import { planDbmlImport } from '../../src/services/dbmlImport';
+import { ledgerLeftOut, ledgerNotes, type LedgerEntry } from '../../src/services/importLedger';
+
+type Converted = Extract<SqlDdlToDbmlResult, { ok: true }>;
+
+function convert(input: string | SqlDdlFile[], partitions?: SqlPartitionMode): Converted {
+  const files = typeof input === 'string' ? [{ name: 'schema.sql', text: input }] : input;
+  const result = convertSqlDdl({ files, dialect: 'postgres', ...(partitions ? { options: { partitions } } : {}) }, dbmlCoreSqlEngine);
+  if (!result.ok) throw new Error(`expected ok, got ${JSON.stringify(result.problems)}`);
+  expect(result.problems).toEqual([]);
+  // Import DBML reads every result.
+  const read = readDbml(result.dbml);
+  if (!read.ok) throw new Error(`Import DBML rejected the output: ${JSON.stringify(read.diagnostics)}\n${result.dbml}`);
+  return result;
+}
+
+/** Table names as Import DBML plans them (`schema.name` when the DBML gives a schema). */
+function tables(r: Converted): string[] {
+  const read = readDbml(r.dbml);
+  if (!read.ok) throw new Error('unreadable');
+  return read.model.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)).sort();
+}
+
+/** Each relationship Import plans, `from.col>to.col`. */
+function links(r: Converted): string[] {
+  const read = readDbml(r.dbml);
+  if (!read.ok) throw new Error('unreadable');
+  const plan = planDbmlImport({
+    model: read.model, layer: 'gold', subjectAreaName: 'p', fileName: 'schema.sql',
+    library: { findTableName: () => null, getTable: () => null }, libraryRelationships: true,
+  });
+  return plan.relationships.map((x) => `${x.fromModel}.${x.fromColumn}>${x.toModel}.${x.toColumn}`).sort();
+}
+
+/** Column lines of one DBML table block. */
+function columnsOf(r: Converted, table: string): string[] {
+  const m = new RegExp(`Table ${table.split('.').map((p) => `"${p}"`).join('\\.')} \\{\\n([\\s\\S]*?)\\n\\}`).exec(r.dbml);
+  if (!m) throw new Error(`no table ${table} in\n${r.dbml}`);
+  return m[1].split('\n').map((l) => l.trim()).filter((l) => l.startsWith('"')).map((l) => l.split(' ')[0].replace(/"/g, ''));
+}
+
+const folded = (ledger: readonly LedgerEntry[]): LedgerEntry[] =>
+  ledger.filter((e) => e.unit === 'table' && e.outcome === 'changed' && /^folded into /.test(e.detail ?? ''));
+const tableLosses = (ledger: readonly LedgerEntry[]): LedgerEntry[] => ledger.filter((e) => e.unit === 'table' && e.outcome === 'lost');
+
+/** Every CREATE TABLE is a table, a folded child or a reported loss: nothing goes without a word. */
+function expectConserved(r: Converted, text: string): void {
+  const creates = (text.match(/\bCREATE\s+TABLE\b/gi) ?? []).length;
+  expect(r.tableCount + folded(r.ledger).length + tableLosses(r.ledger).length).toBe(creates);
+}
+
+describe('partitions fold into their parent by default', () => {
+  const RANGE = [
+    'CREATE TABLE measurement (city_id int NOT NULL, logdate date NOT NULL, peaktemp int, PRIMARY KEY (city_id, logdate)) PARTITION BY RANGE (logdate);',
+    "CREATE TABLE measurement_y2024 PARTITION OF measurement FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+    "CREATE TABLE measurement_y2025 PARTITION OF measurement FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+    'CREATE TABLE measurement_old PARTITION OF measurement DEFAULT;',
+  ].join('\n');
+
+  it('range partitions and a DEFAULT partition: one table, one note per child at its line', () => {
+    const r = convert(RANGE);
+    expect(tables(r)).toEqual(['measurement']);
+    expect(r.partitions).toEqual({ folded: 3, kept: 0 });
+    expect(folded(r.ledger).map((e) => [e.where?.table, e.where?.line])).toEqual([
+      ['measurement_y2024', 2], ['measurement_y2025', 3], ['measurement_old', 4],
+    ]);
+    expect(folded(r.ledger).every((e) => e.where?.file === 'schema.sql')).toBe(true);
+    expect(ledgerNotes(r.ledger).join('\n')).toMatch(/3 tables: partitions of measurement folded into measurement \(PARTITION OF: the parent's rows\) \(measurement_y2024, measurement_y2025, measurement_old\)/);
+    expect(ledgerLeftOut(r.ledger)).toEqual([]);
+    expectConserved(r, RANGE);
+  });
+
+  it('list and hash partitions fold the same way', () => {
+    const text = [
+      'CREATE TABLE orders (id bigint, region text, PRIMARY KEY (id, region)) PARTITION BY LIST (region);',
+      "CREATE TABLE orders_eu PARTITION OF orders FOR VALUES IN ('de', 'fr');",
+      "CREATE TABLE orders_us PARTITION OF orders FOR VALUES IN ('us');",
+      'CREATE TABLE events (id bigint PRIMARY KEY, payload jsonb) PARTITION BY HASH (id);',
+      'CREATE TABLE events_0 PARTITION OF events FOR VALUES WITH (MODULUS 2, REMAINDER 0);',
+      'CREATE TABLE events_1 PARTITION OF events FOR VALUES WITH (MODULUS 2, REMAINDER 1);',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['events', 'orders']);
+    expect(folded(r.ledger)).toHaveLength(4);
+    expectConserved(r, text);
+  });
+
+  it('pg_dump style: CREATE TABLE copies of the parent, ATTACHed later, with FKs only on some partitions (Pagila)', () => {
+    const text = [
+      'CREATE TABLE public.customer (customer_id integer NOT NULL);',
+      'CREATE TABLE public.payment (payment_id integer NOT NULL, customer_id integer NOT NULL, payment_date timestamp with time zone NOT NULL, PRIMARY KEY (payment_date, payment_id)) PARTITION BY RANGE (payment_date);',
+      'CREATE TABLE public.payment_p2022_01 (payment_id integer NOT NULL, customer_id integer NOT NULL, payment_date timestamp with time zone NOT NULL);',
+      'CREATE TABLE public.payment_p2022_02 (payment_id integer NOT NULL, customer_id integer NOT NULL, payment_date timestamp with time zone NOT NULL);',
+      "ALTER TABLE ONLY public.payment ATTACH PARTITION public.payment_p2022_01 FOR VALUES FROM ('2022-01-01') TO ('2022-02-01');",
+      "ALTER TABLE ONLY public.payment ATTACH PARTITION public.payment_p2022_02 FOR VALUES FROM ('2022-02-01') TO ('2022-03-01');",
+      'ALTER TABLE ONLY public.customer ADD CONSTRAINT customer_pkey PRIMARY KEY (customer_id);',
+      'ALTER TABLE ONLY public.payment_p2022_01 ADD CONSTRAINT payment_p2022_01_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(customer_id);',
+      'ALTER TABLE ONLY public.payment_p2022_02 ADD CONSTRAINT payment_p2022_02_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(customer_id);',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['customer', 'payment']);
+    // The two partitions' FKs are one relationship, drawn from payment.
+    expect(links(r)).toEqual(['payment.customer_id>customer.customer_id']);
+    expect(folded(r.ledger).map((e) => [e.where?.table, e.where?.line])).toEqual([['public.payment_p2022_01', 3], ['public.payment_p2022_02', 4]]);
+    // Copies of the parent's columns lose nothing.
+    expect(ledgerLeftOut(r.ledger)).toEqual([]);
+    expectConserved(r, text);
+  });
+
+  it('several levels: sub-partitions fold into the root, by PARTITION OF and by ATTACH', () => {
+    const text = [
+      'CREATE TABLE sales (id int, sold date, region text, PRIMARY KEY (id, sold, region)) PARTITION BY RANGE (sold);',
+      "CREATE TABLE sales_2024 PARTITION OF sales FOR VALUES FROM ('2024-01-01') TO ('2025-01-01') PARTITION BY LIST (region);",
+      "CREATE TABLE sales_2024_eu PARTITION OF sales_2024 FOR VALUES IN ('eu');",
+      "CREATE TABLE sales_2024_us PARTITION OF sales_2024 FOR VALUES IN ('us') PARTITION BY HASH (id);",
+      'CREATE TABLE sales_2024_us_0 PARTITION OF sales_2024_us FOR VALUES WITH (MODULUS 2, REMAINDER 0);',
+      'CREATE TABLE sales_2025 (id int, sold date, region text) PARTITION BY LIST (region);',
+      'CREATE TABLE sales_2025_eu (id int, sold date, region text);',
+      "ALTER TABLE ONLY sales_2025 ATTACH PARTITION sales_2025_eu FOR VALUES IN ('eu');",
+      "ALTER TABLE ONLY sales ATTACH PARTITION sales_2025 FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+      'CREATE TABLE ref (id int PRIMARY KEY);',
+      'ALTER TABLE sales_2024_us_0 ADD FOREIGN KEY (id) REFERENCES ref (id);',
+      'ALTER TABLE sales_2025_eu ADD FOREIGN KEY (id) REFERENCES ref (id);',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['ref', 'sales']);
+    expect(links(r)).toEqual(['sales.id>ref.id']);
+    expect(folded(r.ledger).map((e) => e.detail)).toEqual(new Array(6).fill("folded into sales (PARTITION OF: the parent's rows)").map((d, i) => (i >= 4 ? d.replace('PARTITION OF', 'ATTACH PARTITION') : d)));
+    expectConserved(r, text);
+  });
+
+  it('ATTACH before the parent and the child, and from another file read first', () => {
+    const attachFirst = [
+      "ALTER TABLE ONLY t_parent ATTACH PARTITION t_child FOR VALUES IN (1);",
+      'CREATE TABLE t_child (id int, kind int);',
+      'CREATE TABLE t_parent (id int PRIMARY KEY, kind int) PARTITION BY LIST (kind);',
+    ].join('\n');
+    expect(tables(convert(attachFirst))).toEqual(['t_parent']);
+    const r = convert([
+      { name: 'a_constraints.sql', text: "ALTER TABLE ONLY p ATTACH PARTITION p_1 FOR VALUES IN (1);\nALTER TABLE p_1 ADD CONSTRAINT p_1_fk FOREIGN KEY (o) REFERENCES o (id);" },
+      { name: 'b_tables.sql', text: 'CREATE TABLE o (id int PRIMARY KEY);\nCREATE TABLE p (id int, o int) PARTITION BY LIST (id);\nCREATE TABLE p_1 (id int, o int);' },
+    ]);
+    expect(tables(r)).toEqual(['o', 'p']);
+    expect(links(r)).toEqual(['p.o>o.id']);
+    expect(folded(r.ledger)[0].where).toEqual({ file: 'b_tables.sql', line: 3, table: 'p_1' });
+  });
+
+  it('quoted and schema-qualified names, and the search_path', () => {
+    const text = [
+      'CREATE SCHEMA "Sales";',
+      'CREATE TABLE "Sales"."Order Lines" (id int, "Line No" int, at date) PARTITION BY RANGE (at);',
+      'CREATE TABLE "Sales"."Order Lines 2024" PARTITION OF "Sales"."Order Lines" FOR VALUES FROM (\'2024-01-01\') TO (\'2025-01-01\');',
+      'CREATE TABLE "Sales"."Order Lines 2025" ("id" int, "Line No" int, "at" date);',
+      'ALTER TABLE ONLY "Sales"."Order Lines" ATTACH PARTITION "Sales"."Order Lines 2025" FOR VALUES FROM (\'2025-01-01\') TO (\'2026-01-01\');',
+      'SET search_path = audit;',
+      'CREATE TABLE log (id int, at date) PARTITION BY RANGE (at);',
+      "CREATE TABLE log_2024 PARTITION OF log FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      "CREATE TABLE public.log_x PARTITION OF audit.log FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['Sales.Order_Lines', 'audit.log']);
+    expect(folded(r.ledger).map((e) => e.where?.table)).toEqual(['Sales.Order Lines 2024', 'Sales.Order Lines 2025', 'audit.log_2024', 'public.log_x']);
+    expectConserved(r, text);
+  });
+});
+
+describe('a child with something of its own', () => {
+  it('extra columns: kept as a table, and said why', () => {
+    const text = 'CREATE TABLE p (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE p_1 (id int, at date, note text);\nALTER TABLE p ATTACH PARTITION p_1 FOR VALUES FROM (\'2024-01-01\') TO (\'2025-01-01\');';
+    const r = convert(text);
+    expect(tables(r)).toEqual(['p', 'p_1']);
+    expect(r.partitions).toEqual({ folded: 0, kept: 1 });
+    expect(r.ledger).toContainEqual(expect.objectContaining({
+      outcome: 'changed', unit: 'table', what: 'partitions of p kept', where: { file: 'schema.sql', line: 2, table: 'p_1' },
+      detail: 'as a table of its own: it has columns p does not (note)',
+    }));
+  });
+
+  it('its own keys, checks, descriptions and column details: folded, each one the parent lacks reported at its line', () => {
+    const text = [
+      'CREATE TABLE p (id int NOT NULL, code text, at date, PRIMARY KEY (id, at)) PARTITION BY RANGE (at);',
+      "COMMENT ON TABLE p IS 'All rows';",
+      'CREATE TABLE p_1 (id int NOT NULL, code varchar(3) NOT NULL, at date, PRIMARY KEY (id, at), UNIQUE (code), CHECK (id > 0));',
+      "ALTER TABLE p ATTACH PARTITION p_1 FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      "COMMENT ON TABLE p_1 IS '2024 only';",
+      "COMMENT ON TABLE p_1 IS 'All rows';",
+      'CREATE UNIQUE INDEX p_1_code_at ON p_1 (code, at);',
+      'ALTER TABLE p_1 ADD CONSTRAINT p_1_chk CHECK (at > \'2000-01-01\');',
+      "COMMENT ON COLUMN p_1.code IS 'partition code';",
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['p']);
+    const losses = r.ledger.filter((e) => e.outcome === 'lost').map((e) => `${e.unit} ${e.what} line ${e.where?.line}${e.where?.column ? ` ${e.where.column}` : ''}`);
+    expect(losses.sort()).toEqual([
+      'column partition column line 3 code',
+      'constraint partition check line 3',
+      'constraint partition check line 8',
+      'description partition description line 9 code',
+      'uniqueKey partition unique key line 3 code',
+      'uniqueKey partition unique key line 7 code+at',
+    ].sort());
+    // The partition's own primary key is the parent's: nothing lost. The comment the parent shares is not a loss either.
+    expect(r.dbml).toContain("Note: 'All rows'");
+    expect(ledgerLeftOut(r.ledger).join('\n')).toMatch(/partition unique key not kept: a key of the partition, not of p/);
+  });
+
+  it('a PARTITION OF list: its foreign key is the parent\'s, its options and other constraints are said', () => {
+    const text = [
+      'CREATE TABLE o (id int PRIMARY KEY);',
+      'CREATE TABLE p (id int, o int, at date) PARTITION BY RANGE (at);',
+      'CREATE TABLE p_1 PARTITION OF p (',
+      '  o WITH OPTIONS NOT NULL DEFAULT 0,',
+      '  CONSTRAINT p_1_o FOREIGN KEY (o) REFERENCES o (id),',
+      '  CONSTRAINT p_1_pos CHECK (id > 0)',
+      ") FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['o', 'p']);
+    expect(links(r)).toEqual(['p.o>o.id']);
+    const losses = r.ledger.filter((e) => e.outcome === 'lost').map((e) => `${e.what} line ${e.where?.line}`);
+    expect(losses.sort()).toEqual(['partition NOT NULL line 4', 'partition check line 6', 'partition column option line 4'].sort());
+    // Kept as a table, the same list applies to it.
+    const kept = convert(text, 'tables');
+    expect(tables(kept)).toEqual(['o', 'p', 'p_1']);
+    expect(kept.dbml).toMatch(/Table "p_1" \{\n\s+"id" int\n\s+"o" int \[not null\]/);
+    expect(kept.dbml).toMatch(/`id > 0` \[name: 'p_1_pos'\]/);
+    expect(links(kept)).toEqual(['p_1.o>o.id']);
+  });
+
+  it('a foreign key to a partition points at its parent', () => {
+    const r = convert([
+      'CREATE TABLE p (id int PRIMARY KEY, at date) PARTITION BY RANGE (at);',
+      "CREATE TABLE p_1 PARTITION OF p FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      'CREATE TABLE c (id int, p_id int REFERENCES p_1 (id));',
+    ].join('\n'));
+    expect(links(r)).toEqual(['c.p_id>p.id']);
+  });
+});
+
+describe('INHERITS', () => {
+  it('a child with no columns of its own folds; one with columns is kept with what it inherits; several parents keep it', () => {
+    const text = [
+      'CREATE TABLE cities (name text PRIMARY KEY, population int);',
+      'CREATE TABLE capitals () INHERITS (cities);',
+      'CREATE TABLE towns (name text, population int) INHERITS (cities);',
+      'CREATE TABLE states (state char(2)) INHERITS (cities);',
+      'CREATE TABLE audited (changed_at timestamp);',
+      'CREATE TABLE audited_cities () INHERITS (cities, audited);',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['audited', 'audited_cities', 'cities', 'states']);
+    expect(folded(r.ledger).map((e) => e.where?.table)).toEqual(['capitals', 'towns']);
+    expect(folded(r.ledger)[0].detail).toBe("folded into cities (INHERITS: the parent's rows)");
+    // Inherited columns come first, as PostgreSQL lists them; a key is not inherited.
+    expect(columnsOf(r, 'states')).toEqual(['name', 'population', 'state']);
+    expect(r.dbml).toMatch(/Table "states" \{\n\s+"name" text\n/);
+    expect(columnsOf(r, 'audited_cities')).toEqual(['name', 'population', 'changed_at']);
+    const notes = ledgerNotes(r.ledger).join('\n');
+    expect(notes).toMatch(/tables inheriting from cities kept as a table of its own: it has columns cities does not \(state\); 2 inherited columns added \(states\)/);
+    expect(notes).toMatch(/tables inheriting from cities, audited kept as a table of its own, with the columns of cities, audited \(it inherits from 2 tables\) \(audited_cities\)/);
+    expectConserved(r, text);
+  });
+
+  it('ALTER TABLE … INHERIT and NO INHERIT, in file order', () => {
+    const r = convert('CREATE TABLE base (id int);\nCREATE TABLE a (id int);\nCREATE TABLE b (id int);\nALTER TABLE a INHERIT base;\nALTER TABLE b INHERIT base;\nALTER TABLE b NO INHERIT base;');
+    expect(tables(r)).toEqual(['b', 'base']);
+    expect(r.skipped.join('\n')).not.toMatch(/ALTER TABLE action/);
+  });
+});
+
+describe('a parent the files never declare', () => {
+  it('PARTITION OF a missing parent is reported lost at its line; ATTACHed or INHERITing tables are kept and said', () => {
+    const text = [
+      'CREATE TABLE p_1 PARTITION OF missing FOR VALUES IN (1);',
+      'CREATE TABLE q (id int);',
+      'ALTER TABLE ONLY nowhere ATTACH PARTITION q FOR VALUES IN (2);',
+      'CREATE TABLE r (id int) INHERITS (gone);',
+      'CREATE TABLE s () INHERITS (gone);',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['q', 'r']);
+    expect(tableLosses(r.ledger).map((e) => [e.where?.table, e.where?.line, e.detail])).toEqual([
+      ['p_1', 1, 'not kept: PARTITION OF missing, which is not in the files'],
+      ['s', 5, 'not kept: INHERITS gone, which is not in the files'],
+    ]);
+    expect(ledgerLeftOut(r.ledger).join('\n')).toMatch(/1 table: partition not kept: PARTITION OF missing, which is not in the files \(p_1\)/);
+    expect(r.ledger).toContainEqual(expect.objectContaining({ what: 'partitions of nowhere kept', detail: 'as a table of its own: ATTACH PARTITION nowhere, which is not in the files' }));
+    expect(r.ledger).toContainEqual(expect.objectContaining({ what: 'tables inheriting from gone kept', detail: 'as a table of its own: INHERITS gone, which is not in the files' }));
+    expectConserved(r, text);
+  });
+
+  it('ATTACH of a table the files never create is said, not applied', () => {
+    const r = convert('CREATE TABLE p (id int) PARTITION BY LIST (id);\nALTER TABLE p ATTACH PARTITION nobody FOR VALUES IN (1);');
+    expect(tables(r)).toEqual(['p']);
+    expect(r.skipped.join('\n')).toMatch(/schema\.sql line 2: nobody attached as a partition of p, which is not in the files \(not applied\)/);
+  });
+});
+
+describe('DETACH, renames and drops, in file order', () => {
+  it('a detached partition is a table of its own again (with its parent\'s columns when it had none)', () => {
+    const r = convert([
+      'CREATE TABLE p (id int, at date) PARTITION BY RANGE (at);',
+      "CREATE TABLE p_1 PARTITION OF p FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      "CREATE TABLE p_2 PARTITION OF p FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+      'ALTER TABLE p DETACH PARTITION p_2 CONCURRENTLY;',
+    ].join('\n'));
+    expect(tables(r)).toEqual(['p', 'p_2']);
+    expect(columnsOf(r, 'p_2')).toEqual(['id', 'at']);
+    expect(r.ledger).toContainEqual(expect.objectContaining({ what: 'detached partitions kept', where: { file: 'schema.sql', line: 3, table: 'p_2' } }));
+  });
+
+  it('a renamed partition and a renamed parent keep their link; a dropped parent takes its partitions', () => {
+    const r = convert([
+      'CREATE TABLE p (id int PRIMARY KEY, at date) PARTITION BY RANGE (at);',
+      "CREATE TABLE p_1 PARTITION OF p FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      'ALTER TABLE p_1 RENAME TO p_2024;',
+      'ALTER TABLE p RENAME TO facts;',
+      'CREATE TABLE gone (id int) PARTITION BY RANGE (id);',
+      'CREATE TABLE gone_1 PARTITION OF gone FOR VALUES FROM (0) TO (10);',
+      'DROP TABLE gone;',
+    ].join('\n'));
+    expect(tables(r)).toEqual(['facts']);
+    expect(folded(r.ledger).map((e) => e.where?.table)).toEqual(['p_2024']);
+    expect(tableLosses(r.ledger)).toEqual([]);
+  });
+});
+
+describe("partitions: 'tables' keeps each partition as a table", () => {
+  it('PARTITION OF children get their parent\'s columns and key; ATTACHed ones stay as written; each is said', () => {
+    const text = [
+      'CREATE TABLE p (id int NOT NULL, at date NOT NULL, PRIMARY KEY (id, at)) PARTITION BY RANGE (at);',
+      "CREATE TABLE p_1 PARTITION OF p FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      'CREATE TABLE p_2 (id int NOT NULL, at date NOT NULL);',
+      "ALTER TABLE p ATTACH PARTITION p_2 FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+      'ALTER TABLE p ADD COLUMN amount numeric(10,2);',
+    ].join('\n');
+    const r = convert(text, 'tables');
+    expect(tables(r)).toEqual(['p', 'p_1', 'p_2']);
+    expect(r.partitions).toEqual({ folded: 0, kept: 2 });
+    // A column the parent gains later is the partition's too.
+    expect(columnsOf(r, 'p_1')).toEqual(['id', 'at', 'amount']);
+    expect(r.dbml).toMatch(/Table "p_1" \{[\s\S]*?\("id", "at"\) \[pk\]/);
+    const notes = ledgerNotes(r.ledger).join('\n');
+    expect(notes).toMatch(/2 tables: partitions of p kept as tables of their own, as asked \(p_1, p_2\)/);
+    expectConserved(r, text);
+  });
+
+  it('several levels kept: each child has its own parent\'s columns, its foreign keys its own', () => {
+    const r = convert([
+      'CREATE TABLE o (id int PRIMARY KEY);',
+      'CREATE TABLE s (id int, o int, region text) PARTITION BY LIST (region);',
+      "CREATE TABLE s_eu PARTITION OF s FOR VALUES IN ('eu') PARTITION BY HASH (id);",
+      'CREATE TABLE s_eu_0 PARTITION OF s_eu FOR VALUES WITH (MODULUS 2, REMAINDER 0);',
+      'ALTER TABLE s_eu_0 ADD FOREIGN KEY (o) REFERENCES o (id);',
+    ].join('\n'), 'tables');
+    expect(tables(r)).toEqual(['o', 's', 's_eu', 's_eu_0']);
+    expect(links(r)).toEqual(['s_eu_0.o>o.id']);
+  });
+});

@@ -41,8 +41,10 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
   // postgres-pagila: Pagila (PostgreSQL)
   'postgres-pagila': {
     importer: 'sql',
-    counts: { tables: 71, columns: 479, primaryKeys: 16, relationships: 37, descriptions: 0 },
-    provenance: "Counted with a regex script over every top-level 'CREATE TABLE public.<name> (...)' block (one column per line, skipping the inline PRIMARY KEY line; Source: https://raw.githubusercontent.com/devrimgunduz/pagila/6ea53f812254c91a602f61c0ef62beca3fa676b1/pagila-schema.sql @ 6ea53f812254c91a602f61c0ef62beca3fa676b1 (master, 2026-11-01); file last changed in 85bf46a5 (2026-08-01); sha256 071ee940a73c8f4fad2997185788065291607e2c55559e3747959e8275391536.",
+    // The logical model: payment's 55 ATTACHed partitions (same 7 columns, no columns of their own) folded into payment,
+    // as SOURCE.md's "If an importer folds the partitions" counts it (71 / 479 / 16 / 37 with each partition a table).
+    counts: { tables: 16, columns: 94, primaryKeys: 16, relationships: 22, descriptions: 0 },
+    provenance: "Counted with a regex script over every top-level 'CREATE TABLE public.<name> (...)' block (one column per line, skipping the inline PRIMARY KEY line; the 55 payment_pYYYY_MM partitions folded into payment: 16 base tables, 94 columns, 19 base FKs + payment to customer, rental and staff, declared only on partitions 2022_01..06; Source: https://raw.githubusercontent.com/devrimgunduz/pagila/6ea53f812254c91a602f61c0ef62beca3fa676b1/pagila-schema.sql @ 6ea53f812254c91a602f61c0ef62beca3fa676b1 (master, 2026-11-01); file last changed in 85bf46a5 (2026-08-01); sha256 071ee940a73c8f4fad2997185788065291607e2c55559e3747959e8275391536.",
   },
   // mysql-sakila: Sakila (MySQL)
   'mysql-sakila': {

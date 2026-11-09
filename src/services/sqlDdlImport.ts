@@ -107,10 +107,12 @@ import {
   type SqlDialect,
   type SqlParseEngine,
   type SqlParseFormat,
+  type SqlPartitionMode,
 } from './sqlDdlModel';
 import { ambiguousPlaceholderNames, neutralisePlaceholders } from './sqlDdlPlaceholders';
 import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingCommas, repairHints, rewriteCreateTable, type MissingComma, type Repair, type RepairRung } from './sqlDdlRepair';
 import { salvageCreateTable } from './sqlDdlSalvage';
+import { resolvePartitions } from './sqlDdlPartitions';
 import { readStatement } from './sqlDdlStatements';
 import { quoteIdent, resolveRefs, writeDbml } from './sqlDdlWriter';
 
@@ -129,6 +131,7 @@ export type {
   SqlDialect,
   SqlParseEngine,
   SqlParseFormat,
+  SqlPartitionMode,
   SqlProblemKind,
 } from './sqlDdlModel';
 
@@ -226,6 +229,11 @@ export type SqlDdlToDbmlResult =
       tablesFound: number;
       /** How the tables were read: as written, rewritten by the repair ladder, or salvaged without a grammar. */
       readWith?: SqlReadWith;
+      /**
+       * Partition and inheritance children (`PARTITION OF`, `ATTACH PARTITION`, `INHERITS`): how many were
+       * folded into their parent and how many kept as tables. Absent when the scripts have none.
+       */
+      partitions?: { folded: number; kept: number };
     }
   | { ok: false; problems: SqlDdlProblem[]; ledger?: LedgerEntry[]; tablesFound?: number; readWith?: SqlReadWith };
 
@@ -247,6 +255,11 @@ export interface SqlDdlConvertOptions {
   ladderTables?: number;
   /** After this many milliseconds of repairs, the rest go straight to salvage (default {@link REPAIR_LADDER_MAX_MS}). */
   ladderMs?: number;
+  /**
+   * Partition and inheritance children with no columns of their own: `fold` (default) reads each as its
+   * parent's rows (one ledger note per child); `tables` keeps each as a table with its parent's columns.
+   */
+  partitions?: SqlPartitionMode;
 }
 
 /** The repair ladder's budget: tables beyond it go straight to salvage, so a huge file of failing tables stays fast. */
@@ -695,6 +708,10 @@ class Converter implements ConverterContext {
   placeholderNames?: ReadonlySet<string>;
 
   constructor(readonly dialect: SqlDialect, readonly engine: SqlParseEngine, private readonly options: SqlDdlConvertOptions = {}) {}
+
+  get partitionMode(): SqlPartitionMode {
+    return this.options.partitions === 'tables' ? 'tables' : 'fold';
+  }
 
   qualify(parts: readonly string[]): string[] {
     if (this.currentSchema === null || parts.length !== 1) return [...parts];
@@ -1284,6 +1301,8 @@ class Converter implements ConverterContext {
   }
 
   applyDeferred(): void {
+    // Partition children folded into their parents (or kept as tables) first: what the files say about one is then about its table.
+    resolvePartitions(this);
     for (const key of this.keys) {
       const table = this.findTable(key.table);
       if (!table) { this.skippedLines.push(`${key.origin.file} line ${key.origin.line}: a key on ${key.table.join('.')}, which is not in the files`); continue; }
@@ -1615,6 +1634,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     })),
   );
   const unusedEnums = converter.enums.length - usedEnums.length;
+  const partitions = readerState(converter).partitionsResolved;
   const skipped = [
     ...unused.map((name) => `${name}: no tables, keys or comments in it`),
     ...converter.skippedSummary(fileOrder),
@@ -1632,5 +1652,6 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     ledger: converter.ledgerEntries(fileOrder),
     tablesFound: converter.tablesFound,
     readWith: converter.readWith,
+    ...(partitions && (partitions.folded || partitions.kept) ? { partitions: { ...partitions } } : {}),
   };
 }

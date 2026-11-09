@@ -273,7 +273,9 @@ describe('ALTER TABLE action lists: every item', () => {
     expect(skipped).toMatch(/1 ALTER TABLE … OWNER TO/);
     expect(skipped).toMatch(/a\.sql: .*2 ALTER TABLE settings/);
     expect(skipped).toMatch(/b\.sql: skipped 1 ALTER TABLE setting \(/);
-    expect(skipped).toMatch(/1 ATTACH \/ DETACH PARTITION/);
+    // ATTACH and DETACH PARTITION are read in file order: payment_p1 is a table of its own again.
+    expect(skipped).not.toMatch(/ATTACH \/ DETACH PARTITION/);
+    expect(r.tableCount).toBe(2);
     expect(skipped).not.toMatch(/other than a key/);
   });
 
@@ -538,14 +540,18 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
     expect(r.skipped.join('\n')).not.toMatch(/other statement/);
   });
 
-  it('partitions: PARTITION OF folds into the parent (its FKs re-pointed); ATTACHed tables are kept and said (pagila payment)', () => {
+  it('partitions: PARTITION OF and ATTACHed copies of the parent fold into it (FKs re-pointed); kept as tables only when asked (pagila payment)', () => {
     const folded = convert('postgres', 'CREATE TABLE customer (id int PRIMARY KEY);\nCREATE TABLE payment (id int, customer_id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE payment_2022 PARTITION OF payment FOR VALUES FROM (\'2022-01-01\') TO (\'2023-01-01\');\nCREATE TABLE payment_2023 PARTITION OF payment FOR VALUES FROM (\'2023-01-01\') TO (\'2024-01-01\');\nALTER TABLE payment_2022 ADD CONSTRAINT p22_fk FOREIGN KEY (customer_id) REFERENCES customer (id);\nALTER TABLE payment_2023 ADD CONSTRAINT p23_fk FOREIGN KEY (customer_id) REFERENCES customer (id);');
     expect(folded.tableCount).toBe(2);
     expect(links(folded.dbml)).toEqual(['payment(customer_id)>customer many-to-one']);
     expect(ledgerNotes(folded.ledger).join('\n')).toMatch(/2 tables: partitions of payment folded into payment/);
     const attached = convert('postgres', 'CREATE TABLE payment (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE payment_p1 (id int, at date);\nCREATE TABLE payment_p2 (id int, at date);\nALTER TABLE ONLY payment ATTACH PARTITION payment_p1 FOR VALUES FROM (\'2022-01-01\') TO (\'2022-02-01\');\nALTER TABLE ONLY payment ATTACH PARTITION payment_p2 FOR VALUES FROM (\'2022-02-01\') TO (\'2022-03-01\');');
-    expect(attached.tableCount).toBe(3);
-    expect(ledgerNotes(attached.ledger).join('\n')).toMatch(/2 tables: partitions of payment kept as tables of their own \(ATTACH PARTITION payment\) \(payment_p1, payment_p2\)/);
+    expect(attached.tableCount).toBe(1);
+    expect(ledgerNotes(attached.ledger).join('\n')).toMatch(/2 tables: partitions of payment folded into payment \(ATTACH PARTITION: the parent's rows\) \(payment_p1, payment_p2\)/);
+    const kept = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'schema.sql', text: 'CREATE TABLE payment (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE payment_p1 (id int, at date);\nCREATE TABLE payment_p2 (id int, at date);\nALTER TABLE ONLY payment ATTACH PARTITION payment_p1 FOR VALUES FROM (\'2022-01-01\') TO (\'2022-02-01\');\nALTER TABLE ONLY payment ATTACH PARTITION payment_p2 FOR VALUES FROM (\'2022-02-01\') TO (\'2022-03-01\');' }], options: { partitions: 'tables' } }, dbmlCoreSqlEngine);
+    if (!kept.ok) throw new Error('not ok');
+    expect(kept.tableCount).toBe(3);
+    expect(ledgerNotes(kept.ledger).join('\n')).toMatch(/2 tables: partitions of payment kept as tables of their own, as asked \(payment_p1, payment_p2\)/);
   });
 
   it('every item the ledger names is a plain name: never file text beyond a name', () => {

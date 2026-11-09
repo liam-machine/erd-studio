@@ -31,6 +31,14 @@ export interface SqlDdlToDbmlInput {
 }
 
 /**
+ * What a partition or inheritance child with no columns of its own becomes
+ * (`PARTITION OF`, `ATTACH PARTITION`, `INHERITS`): `fold` (the default) reads
+ * it as its parent's rows, so it is no table of its own (one ledger note per
+ * child); `tables` keeps each as a table with its parent's columns.
+ */
+export type SqlPartitionMode = 'fold' | 'tables';
+
+/**
  * The kinds of {@link SqlDdlProblem}: a statement the grammar could not read
  * (`parse`), one it read but that cannot be a table (`structure`: no closing
  * parenthesis, no columns, a column twice, an enum with no values), a table
@@ -301,6 +309,8 @@ export interface ColumnSource {
 export interface ConverterContext {
   readonly dialect: SqlDialect;
   readonly engine: SqlParseEngine;
+  /** What a partition or inheritance child with no columns of its own becomes ({@link SqlPartitionMode}). */
+  readonly partitionMode: SqlPartitionMode;
   /** Everything not brought across as written: renders the draft's notes, its Not imported lines and the log. */
   readonly ledger: ImportLedger;
   readonly tables: ModelTable[];
@@ -399,6 +409,12 @@ export interface ReaderPartition {
   parent: string[];
   how: 'PARTITION OF' | 'ATTACH PARTITION' | 'INHERITS';
   origin: Origin;
+  /** The child has no column list of its own (`PARTITION OF`, `INHERITS` with `()`): no table was read for it. */
+  noColumns?: boolean;
+  /** `DETACH PARTITION` later in the files: a table of its own from then on. */
+  detached?: boolean;
+  /** Column options in a `PARTITION OF parent (…)` list (`col WITH OPTIONS NOT NULL`): what each says beyond its parent's column. */
+  columnOptions?: Array<{ column: string; notNull: boolean; other: string[]; origin: Origin }>;
 }
 
 /**
@@ -417,6 +433,8 @@ export interface ReaderState {
   checks: Array<{ table: string[]; expression: string; name?: string; origin: Origin }>;
   /** Inside `CREATE SCHEMA s CREATE TABLE …` (no `;` yet): the schema its elements are created in. */
   schemaElements?: string;
+  /** Once partitions are resolved (`sqlDdlPartitions.ts`): how many children were folded into a parent, and how many kept as tables. */
+  partitionsResolved?: { folded: number; kept: number };
 }
 
 const READER_STATE = new WeakMap<object, ReaderState>();
