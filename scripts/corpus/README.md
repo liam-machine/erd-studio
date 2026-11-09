@@ -14,6 +14,7 @@ The committed [real-world samples](../../test/fixtures/real-world-imports/README
 | `../../test/unit/importCorpus.score.test.ts` | Imports one schema the way the extension does and scores it (skipped unless `IMPORT_CORPUS_DIR` is set). |
 | `score.mjs` | The whole loop: fetch, count, score each schema in its own process, report. |
 | `report.mjs` | The score table and the failure classes, from `<cache>/results/`. |
+| `../../.github/workflows/import-corpus.yml` | The same loop on GitHub, run by hand (**Import corpus**, `gh workflow run import-corpus.yml [-f only=a,b]`); the report is the run's artifact. |
 
 ## Run it
 
@@ -32,5 +33,7 @@ The downloaded files are untrusted data. `fetch.mjs` only downloads and hashes: 
 ## How it scores
 
 Each schema goes through `runSample` and `scoreSample` from `test/unit/realWorldScorecard.ts`, the same pipeline and metrics as the committed scorecard: the SQL import with the dialect detection picks (else the source's dialect, else `importAs` for a dialect the import does not offer) and the extension's default time limit; dbt's default scope; the first semantic model in the folder. The truth comes from `count_source.py`, never from the importer. Where sqlglot cannot read a statement the counter reads it structurally and says so (the table's **Truth** column: `exact`, or `~N` statements read the approximate way). On the committed real-world SQL samples the counter matches the hand counts exactly for Pagila, Sakila, AdventureWorks, Snowflake and Databricks; it does not replay migrations (no DROP or RENAME), so it is not used on migration folders.
+
+**Round trip.** For every SQL and Power BI schema that imports, the scorer also runs the DBML round trip of the generated tests (`test/unit/generated/dbmlRoundTrip.ts`: the converted DBML through Import DBML, exported with the rich export, imported again) and records what came back different, with the same allowances (see `docs/dev/generated-tests.md`). The table's **Round trip** column says `same`, how many items differ, or `threw`; `IMPORT_CORPUS_ROUND_TRIP=0` skips it.
 
 Adding a schema: add it to `sources.json`, run `node scripts/corpus/pin.mjs --only <name>`, then `node scripts/corpus/score.mjs --only <name>`.

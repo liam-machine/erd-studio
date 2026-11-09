@@ -87,7 +87,9 @@ DBML, on the DBML the SQL and Power BI imports convert to (generated, and
 each real-world sample), on every committed DBML file
 (`test/fixtures/real-world-imports/dbml-qut-workbench`, `test/fixtures/dbml/`),
 and on DBML other tools wrote (`test/fixtures/dbml-other-tools/`, with their
-sources and licences in its README).
+sources and licences in its README). The import corpus runs the same round
+trip on every SQL and Power BI schema of its large set and reports it in the
+score table's **Round trip** column (`scripts/corpus/README.md`).
 
 **Compared exactly** (`canonicalImport`): each table's name, schema and
 unique indexes; each column's name, type, primary-key, NOT NULL and unique

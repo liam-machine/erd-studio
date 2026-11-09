@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { canon, runSample, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 import { SQL_DIALECTS, type SqlDialect } from '../../src/services/sqlDdlImport';
 import { DEFAULT_SQL_TIME_LIMIT_MS } from '../../src/commands/importSqlDdl';
+import { roundTripDbml, type CanonicalImport } from './generated/dbmlRoundTrip';
 
 interface CorpusFile { path: string; url: string; bytes: number; sha256: string }
 interface CorpusSchema {
@@ -55,6 +56,45 @@ function sampleOf(s: CorpusSchema, truth: Partial<TruthSample> | undefined): Tru
   }
   if (s.importer === 'dbt') return { ...base, importer: 'dbt', input: { project: s.name } };
   return { ...base, importer: 'semanticModel', input: { folder: s.name } };
+}
+
+/**
+ * The DBML round trip on the import's converted DBML (Import DBML → Export
+ * Diagram → Import DBML, `generated/dbmlRoundTrip.ts`): what came back
+ * different, with the same allowances as the generated tests. Skipped with
+ * IMPORT_CORPUS_ROUND_TRIP=0.
+ */
+function roundTripOf(dbml: string | undefined): Record<string, unknown> | null {
+  if (!dbml || process.env.IMPORT_CORPUS_ROUND_TRIP === '0') return null;
+  const started = performance.now();
+  try {
+    const trip = roundTripDbml(dbml);
+    const diff = (a: CanonicalImport, b: CanonicalImport): string[] => {
+      const out: string[] = [];
+      const tablesB = new Map(b.tables.map((t) => [`${t.schema}.${t.name}`, t]));
+      for (const t of a.tables) {
+        const other = tablesB.get(`${t.schema}.${t.name}`);
+        if (!other) { out.push(`table ${t.schema ? `${t.schema}.` : ''}${t.name} missing`); continue; }
+        if (JSON.stringify(t) !== JSON.stringify(other)) out.push(`table ${t.name} changed: ${JSON.stringify(t).slice(0, 200)} → ${JSON.stringify(other).slice(0, 200)}`);
+      }
+      if (b.tables.length !== a.tables.length) out.push(`tables ${a.tables.length} → ${b.tables.length}`);
+      const relsB = new Set(b.relationships);
+      for (const r of a.relationships) if (!relsB.has(r)) out.push(`relationship ${r} missing`);
+      for (const r of b.relationships) if (!a.relationships.includes(r)) out.push(`relationship ${r} added`);
+      return out;
+    };
+    const differences = diff(trip.first, trip.second);
+    return {
+      ok: differences.length === 0,
+      tables: trip.first.tables.length,
+      relationships: trip.first.relationships.length,
+      differences: differences.length,
+      sample: differences.slice(0, 10),
+      ms: Math.round(performance.now() - started),
+    };
+  } catch (err) {
+    return { ok: false, threw: (err instanceof Error ? err.message : String(err)).slice(0, 300), ms: Math.round(performance.now() - started) };
+  }
 }
 
 function ledgerSummary(run: ImportRun, importer: string) {
@@ -138,6 +178,7 @@ describe.skipIf(!enabled)('import corpus', () => {
         columnsImported: run.tables.reduce((n, t) => n + (t.columns?.length ?? 0), 0),
         relationshipsImported: run.relationships.length,
         ledger: ledgerSummary(run, s.importer),
+        roundTrip: run.ok ? roundTripOf(run.convertedDbml) : null,
         longMessages: { count: long.length, longest: long.reduce((n, m) => Math.max(n, m.length), 0), sample: long.slice(0, 2).map((m) => `${m.slice(0, 120)}…`) },
         echoedSource: { count: echoed.length, sample: echoed.slice(0, 2).map((m) => `${m.slice(0, 160)}…`) },
         missingTables: missingTables.slice(0, 30),

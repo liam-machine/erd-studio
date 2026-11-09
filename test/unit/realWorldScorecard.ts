@@ -148,6 +148,8 @@ export interface ImportRun {
   ledger?: LedgerEntry[];
   /** dbt: the scope the draft drew (the default, top-ranked folder) and its models. */
   scope?: { id: string; models: string[] };
+  /** SQL and Power BI: the DBML the import converted to, before Import DBML's flow read it (for the round trip). */
+  convertedDbml?: string;
 }
 
 const MAIN_LAYER: LayerConfig = { id: 'main', label: 'Main', abbreviation: 'MN', color: '#888888', creatable: true, order: 1 } as LayerConfig;
@@ -268,7 +270,7 @@ async function runSql(sample: TruthSample, root: string): Promise<ImportRun> {
     skipped: result.skipped,
     ledger: result.ledger,
   });
-  return { ...run, dialect, detectedDialect: detected };
+  return { ...run, dialect, detectedDialect: detected, convertedDbml: result.dbml };
 }
 
 async function runDbmlFile(sample: TruthSample, root: string): Promise<ImportRun> {
@@ -304,7 +306,7 @@ async function runSemanticModel(sample: TruthSample, root: string): Promise<Impo
     skipped: semanticModelSkippedSummary(converted.skippedCounts),
     ledger: converted.ledger,
   });
-  return { ...run, warnings };
+  return { ...run, warnings, convertedDbml: converted.dbml };
 }
 
 async function runDbt(sample: TruthSample, root: string): Promise<ImportRun> {

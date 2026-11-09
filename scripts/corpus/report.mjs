@@ -9,7 +9,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SUPPORTED = new Set(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks']);
+const SUPPORTED = new Set(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite']);
+
+/** The DBML round trip's cell: `same`, the number of differences, `threw`, or – (not run: no converted DBML). */
+const tripCell = (t) => (!t ? '–' : t.threw ? 'threw' : t.ok ? 'same' : `${t.differences} differ`);
 
 const frac = (a, b) => `${a}/${b}`;
 const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
@@ -51,6 +54,8 @@ export function classesOf(r) {
   if (r.echoedSource?.count) out.add('message quotes source text (a 40-character run of a source line)');
   if (r.longMessages?.count) out.add('message over 300 characters (mostly long skip summaries)');
   if (r.ledger?.unlocated) out.add('ledger entry without file:line');
+  if (r.roundTrip?.threw) out.add('DBML round trip: the export does not read back');
+  else if (r.roundTrip && !r.roundTrip.ok) out.add('DBML round trip: something came back different');
   for (const [key, n] of Object.entries(r.ledger?.byKey ?? {})) {
     const [outcome, unit, cause, what] = key.split('/');
     if (outcome === 'problem' || outcome === 'lost') out.add(`ledger ${outcome}: ${unit} (${cause}${what ? `: ${what}` : ''})`);
@@ -64,13 +69,13 @@ function row(r) {
   const truth = r.truth ? `${r.truth.approximate ? `~${r.truth.approximate}` : 'exact'}` : 'none';
   if (!r.score) {
     const c = r.truth?.counts;
-    return `| ${r.name} | ${r.kind ?? ''} | ${r.dialect ?? ''} | – | **${r.status}** | ${c ? `0/${c.tables}` : '–'} | ${c ? `0/${c.columns}` : '–'} | ${c ? `0/${c.primaryKeys}` : '–'} | ${c ? `0/${c.relationships}` : '–'} | – | – | – | ${r.ms !== undefined ? (r.ms / 1000).toFixed(1) : '–'} | ${truth} |`;
+    return `| ${r.name} | ${r.kind ?? ''} | ${r.dialect ?? ''} | – | **${r.status}** | ${c ? `0/${c.tables}` : '–'} | ${c ? `0/${c.columns}` : '–'} | ${c ? `0/${c.primaryKeys}` : '–'} | ${c ? `0/${c.relationships}` : '–'} | – | – | – | ${r.ms !== undefined ? (r.ms / 1000).toFixed(1) : '–'} | – | ${truth} |`;
   }
   const s = r.score;
   const readAs = r.importer === 'sql' ? `${r.dialect} → ${r.importedAs}${r.detectedDialect && r.detectedDialect !== r.importedAs ? ` (detected ${r.detectedDialect})` : r.detectedDialect ? ' (detected)' : ''}` : r.dialect;
   const led = r.ledger?.byKey ?? {};
   const sum = (o) => Object.entries(led).filter(([k]) => k.startsWith(`${o}/`)).reduce((n, [, v]) => n + v, 0);
-  return `| ${r.name} | ${r.kind} | ${readAs} | ${s.verdict} | ${frac(s.tables.matched, s.tables.source)}${s.tables.extra.length ? ` +${s.tables.extra.length}` : ''} | ${frac(s.columns.matched, s.columns.source)} | ${frac(s.primaryKeys.matched, s.primaryKeys.source)} | ${frac(s.relationships.matched, s.relationships.source)}${s.relationships.extra.length ? ` +${s.relationships.extra.length}` : ''} | ${s.problems.count} | ${s.silentLosses.total} | ${sum('problem')}/${sum('lost')}/${sum('repaired')} | ${(r.ms / 1000).toFixed(1)} | ${truth} |`;
+  return `| ${r.name} | ${r.kind} | ${readAs} | ${s.verdict} | ${frac(s.tables.matched, s.tables.source)}${s.tables.extra.length ? ` +${s.tables.extra.length}` : ''} | ${frac(s.columns.matched, s.columns.source)} | ${frac(s.primaryKeys.matched, s.primaryKeys.source)} | ${frac(s.relationships.matched, s.relationships.source)}${s.relationships.extra.length ? ` +${s.relationships.extra.length}` : ''} | ${s.problems.count} | ${s.silentLosses.total} | ${sum('problem')}/${sum('lost')}/${sum('repaired')} | ${(r.ms / 1000).toFixed(1)} | ${tripCell(r.roundTrip)} | ${truth} |`;
 }
 
 export function buildReport({ manifest, cache, names }) {
@@ -81,8 +86,8 @@ export function buildReport({ manifest, cache, names }) {
   const byName = new Map(manifest.schemas.map((s) => [s.name, s]));
   for (const r of results) { const m = byName.get(r.name); if (m) { r.kind ??= m.kind; r.dialect ??= m.dialect; r.importer ??= m.importer; } }
 
-  const head = '| Schema | Kind | Dialect (source → read as) | Verdict | Tables | Columns | PKs | Relationships | Problems | Silent losses | Ledger problem/lost/repaired | Time (s) | Truth |';
-  const sep = '|---|---|---|---|---|---|---|---|---|---|---|---|---|';
+  const head = '| Schema | Kind | Dialect (source → read as) | Verdict | Tables | Columns | PKs | Relationships | Problems | Silent losses | Ledger problem/lost/repaired | Time (s) | Round trip | Truth |';
+  const sep = '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|';
   const scored = results.filter((r) => r.score);
   const verdicts = {};
   for (const r of results) { const v = r.score?.verdict ?? r.status; verdicts[v] = (verdicts[v] ?? 0) + 1; }
@@ -96,8 +101,9 @@ export function buildReport({ manifest, cache, names }) {
     relationships: [tot((s) => (s.verdict === 'Failed' ? 0 : s.relationships.matched)), tot((s) => s.relationships.source)],
     silentLosses: tot((s) => s.silentLosses.total),
     seconds: Math.round(results.reduce((n, r) => n + (r.ms ?? 0), 0) / 1000),
+    roundTrip: [results.filter((r) => r.roundTrip?.ok).length, results.filter((r) => r.roundTrip).length],
   };
-  const totalRow = `| **All ${results.length}** | | | ${Object.entries(verdicts).map(([k, v]) => `${v} ${k}`).join(', ')} | ${totals.tables[0]}/${totals.tables[1]} (${pct(...totals.tables)}) | ${totals.columns[0]}/${totals.columns[1]} (${pct(...totals.columns)}) | ${totals.primaryKeys[0]}/${totals.primaryKeys[1]} (${pct(...totals.primaryKeys)}) | ${totals.relationships[0]}/${totals.relationships[1]} (${pct(...totals.relationships)}) | | ${totals.silentLosses} | | ${totals.seconds} | |`;
+  const totalRow = `| **All ${results.length}** | | | ${Object.entries(verdicts).map(([k, v]) => `${v} ${k}`).join(', ')} | ${totals.tables[0]}/${totals.tables[1]} (${pct(...totals.tables)}) | ${totals.columns[0]}/${totals.columns[1]} (${pct(...totals.columns)}) | ${totals.primaryKeys[0]}/${totals.primaryKeys[1]} (${pct(...totals.primaryKeys)}) | ${totals.relationships[0]}/${totals.relationships[1]} (${pct(...totals.relationships)}) | | ${totals.silentLosses} | | ${totals.seconds} | ${totals.roundTrip[0]}/${totals.roundTrip[1]} same | |`;
   const table = [head, sep, ...results.map(row), totalRow].join('\n');
 
   const classes = new Map();
