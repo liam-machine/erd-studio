@@ -381,6 +381,22 @@ describe('constraint replay, in file order', () => {
 });
 
 describe('the schema context', () => {
+  it('a key or reference on schema.t, when no CREATE TABLE is in that schema, is on the one table t with none (TPC-H dbgen: TPCD.REGION)', () => {
+    const sql = 'CREATE TABLE REGION (R_REGIONKEY INTEGER NOT NULL, R_NAME CHAR(25));\nCREATE TABLE NATION (N_NATIONKEY INTEGER NOT NULL, N_REGIONKEY INTEGER NOT NULL);\n'
+      + 'ALTER TABLE TPCD.REGION ADD PRIMARY KEY (R_REGIONKEY);\nALTER TABLE TPCD.NATION ADD PRIMARY KEY (N_NATIONKEY);\n'
+      + 'ALTER TABLE TPCD.NATION ADD FOREIGN KEY (N_REGIONKEY) REFERENCES TPCD.REGION (R_REGIONKEY);\nCOMMENT ON TABLE TPCD.REGION IS \'Regions\';';
+    const r = convert('postgres', sql);
+    expect(r.dbml).toContain('"R_REGIONKEY" INTEGER [pk]');
+    expect(r.dbml).toContain('"N_NATIONKEY" INTEGER [pk]');
+    expect(links(r.dbml)).toEqual(['NATION(N_REGIONKEY)>REGION many-to-one']);
+    expect(r.dbml).toContain("Note: 'Regions'");
+    // Said once per table, in the ledger.
+    expect(entries(r, 'schema qualifier').map((e) => [e.where?.table, e.count])).toEqual([['TPCD.REGION', 1], ['TPCD.NATION', 1]]);
+    // A schema some CREATE TABLE uses is a schema: a key on a table not in it is still not in the files.
+    const other = convert('postgres', 'CREATE TABLE s.a (id int);\nCREATE TABLE b (id int);\nALTER TABLE s.b ADD PRIMARY KEY (id);');
+    expect(other.dbml).not.toContain('[pk]');
+  });
+
   it('MySQL USE db: unqualified tables and references are in it (sakila)', () => {
     const r = convert('mysql', 'CREATE DATABASE sakila;\nUSE sakila;\nCREATE TABLE a (id int PRIMARY KEY);\nCREATE TABLE b (id int PRIMARY KEY, a_id int, FOREIGN KEY (a_id) REFERENCES a (id));');
     expect(r.dbml).toContain('Table "sakila"."a"');

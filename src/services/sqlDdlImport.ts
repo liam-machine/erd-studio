@@ -811,6 +811,8 @@ class Converter implements ConverterContext {
   readonly skippedItems: SkippedItem[] = [];
   readonly ledger: ImportLedger = createLedger();
   private readonly skippedByFile = new Map<string, Map<SkipKind, number>>();
+  /** `schema.table` names read as the table of that name with no schema ({@link findTable}), each said once. */
+  private readonly qualifierNoted = new Set<string>();
   private placeholderCount = 0;
   /** Schema changes applied in file order (ALTER TABLE column changes, renames, DROP TABLE). */
   appliedChanges = 0;
@@ -1558,7 +1560,21 @@ class Converter implements ConverterContext {
     const name = parts[parts.length - 1];
     const schema = parts.length >= 2 ? parts[parts.length - 2] : null;
     const candidates = this.tables.filter((tb) => sameIdent(tb.name, name));
-    if (schema !== null) return candidates.find((tb) => sameSchema(tb.schema, schema, this.dialect));
+    if (schema !== null) {
+      const found = candidates.find((tb) => sameSchema(tb.schema, schema, this.dialect));
+      if (found) return found;
+      // `ALTER TABLE TPCD.REGION` in a script whose CREATE TABLEs name no schema (run with TPCD as the
+      // default): when no table at all is in that schema, the one table of that name with none.
+      const bare = candidates.filter((tb) => sameSchema(tb.schema, null, this.dialect));
+      if (bare.length !== 1 || this.tables.some((tb) => tb.schema !== null && sameIdent(tb.schema, schema))) return undefined;
+      const label = `${schema}.${name}`;
+      if (!this.qualifierNoted.has(label.toLowerCase())) {
+        this.qualifierNoted.add(label.toLowerCase());
+        this.ledger.changed('table', 'inferred', 'schema qualifier', { table: label },
+          `read as ${shortName(bare[0].name)}: no CREATE TABLE in the files is in schema ${shortName(schema)}`);
+      }
+      return bare[0];
+    }
     if (candidates.length === 1) return candidates[0];
     return candidates.find((tb) => sameSchema(tb.schema, null, this.dialect));
   }
