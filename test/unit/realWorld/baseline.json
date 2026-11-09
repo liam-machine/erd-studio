@@ -288,6 +288,7 @@
           "constraint": 8
         },
         "repaired": {
+          "statement": 5,
           "table": 9,
           "column": 8
         },
@@ -837,7 +838,7 @@
     },
     {
       "slug": "snowflake-realtime-datavault",
-      "verdict": "With problems",
+      "verdict": "With gaps",
       "expected": {
         "tables": 12,
         "columns": 87,
@@ -846,21 +847,21 @@
         "descriptions": 0
       },
       "imported": {
-        "tables": 7,
-        "columns": 53,
-        "primaryKeys": 5,
-        "relationships": 4,
+        "tables": 10,
+        "columns": 76,
+        "primaryKeys": 8,
+        "relationships": 6,
         "descriptions": 0
       },
       "reported": {
-        "tables": 0,
+        "tables": 2,
         "columns": 0,
         "primaryKeys": 0,
         "relationships": 0,
         "descriptions": 0
       },
       "silentLoss": {
-        "tables": 5,
+        "tables": 0,
         "columns": 0,
         "primaryKeys": 0,
         "relationships": 0,
@@ -869,20 +870,21 @@
       "ledger": {
         "lost": {},
         "changed": {
-          "relationship": 2,
-          "constraint": 4
+          "relationship": 3,
+          "table": 3,
+          "constraint": 6
         },
         "repaired": {
-          "table": 3
+          "table": 4
         },
         "skipped": {
-          "statement": 76
+          "statement": 73
         },
         "problem": {}
       },
       "problems": 0,
       "reasons": [
-        "5 table(s) lost silently"
+        "2 item(s) left out and reported"
       ]
     },
     {
@@ -1011,9 +1013,7 @@
       "ledger": {
         "lost": {},
         "changed": {},
-        "repaired": {
-          "table": 6
-        },
+        "repaired": {},
         "skipped": {
           "statement": 12
         },

@@ -16,8 +16,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { LineCounter, parseDocument, isAlias, isScalar, isSeq, isMap, isNode, YAMLMap } from 'yaml';
-import type { Document, Pair, YAMLSeq } from 'yaml';
+import { LineCounter, parseDocument, isAlias, isScalar, isSeq, isMap, isNode, visit, YAMLMap } from 'yaml';
+import type { Alias, Document, Pair, YAMLSeq } from 'yaml';
 
 import type {
   YmlColumn,
@@ -954,14 +954,39 @@ export class YmlParserService {
   private deref(node: unknown, depth = 0): unknown {
     let resolved: unknown = node;
     if (isAlias(node)) {
-      try {
-        resolved = this.aliasDoc ? node.resolve(this.aliasDoc) : undefined;
-      } catch {
-        return undefined;
-      }
+      resolved = this.aliasTarget(node);
     }
     return isMap(resolved) ? this.withMerges(resolved as YAMLMap, depth) : resolved;
   }
+
+  /**
+   * The node an alias names in {@link aliasDoc}: the last node anchored with its
+   * name before it, as YAML reads it (yaml's `Alias.resolve`). Every alias's
+   * target is found in one walk of the document, built the first time one is
+   * asked for: `Alias.resolve` without a cache walks the whole document per
+   * alias, so a file sharing descriptions through anchors cost aliases x nodes.
+   */
+  private aliasTarget(alias: Alias): unknown {
+    const doc = this.aliasDoc;
+    if (!doc) return undefined;
+    let targets = this.aliasTargets.get(doc);
+    if (!targets) {
+      targets = new Map();
+      const last = new Map<string, unknown>();
+      const found = targets;
+      visit(doc, {
+        Node: (_key, node) => {
+          if (isAlias(node)) found.set(node, last.get(node.source));
+          else if (node.anchor) last.set(node.anchor, node);
+        },
+      });
+      this.aliasTargets.set(doc, targets);
+    }
+    return targets.get(alias);
+  }
+
+  /** Each document's aliases with the node each names ({@link aliasTarget}). */
+  private aliasTargets = new WeakMap<Document, Map<Alias, unknown>>();
 
   /**
    * A map with its YAML 1.1 merge keys applied (`<<: *defaults`,

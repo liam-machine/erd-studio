@@ -12,7 +12,8 @@
  *   of its own was only counted: the summary now names it.
  */
 import { describe, expect, it } from 'vitest';
-import { detectSqlDialect, type SqlDdlToDbmlResult, type SqlDialect } from '../../src/services/sqlDdlImport';
+import { countCreateTablesWithColumns, detectSqlDialect, sqlDialectReading, sqlDialectReadingLabel, type SqlDdlToDbmlResult, type SqlDialect } from '../../src/services/sqlDdlImport';
+import { looksLikeSqlDdl } from '../../src/services/importSources';
 import { tokenize } from '../../src/services/sqlDdlLexer';
 import { neutralisePlaceholders } from '../../src/services/sqlDdlPlaceholders';
 import { sqlDdlToDbml } from '../../src/services/sqlImportEngine';
@@ -123,6 +124,21 @@ describe('a table comment before the column list', () => {
     // What the column list says beyond the model is still recorded, with its line.
     const gen = (r.ledger ?? []).find((e) => e.what === 'generated column expression');
     expect(gen?.where).toMatchObject({ table: 's.factory', column: 'GEN', line: 4 });
+  });
+
+  it('is counted as a table with a column list (the folder look, the start suggestion, an unread table when the reading stops)', () => {
+    const one = "CREATE TABLE t COMMENT = 'hello' (id INT, x INT);";
+    expect(countCreateTablesWithColumns(one, 'snowflake')).toBe(1);
+    expect(looksLikeSqlDdl(one)).toBe(true);
+    // A reading stopped after 4 of 10 statements: the 6 unread are tables, as without the comment.
+    const ten = Array.from({ length: 10 }, (_, k) => `CREATE TABLE t${k} COMMENT = 'c${k}' (id INT);`).join('\n');
+    let calls = 0;
+    const r = sqlDdlToDbml({ dialect: 'snowflake', files: [{ name: 'a.sql', text: ten }], options: { shouldStop: () => (++calls > 4 ? 'cancelled' : undefined) } }) as Converted;
+    expect(r.ok).toBe(true);
+    const read = tableNames(r.dbml).length;
+    expect(r.stopped?.tablesUnread).toBe(10 - read);
+    expect(r.tablesFound).toBe(10);
+    expect((r.ledger ?? []).filter((e) => e.outcome === 'problem' && e.unit === 'statement')).toEqual([]);
   });
 });
 
@@ -273,6 +289,14 @@ describe('CREATE OR REPLACE of a table already read', () => {
     ]);
   });
 
+  it('counts the replaced table once in the tables found and read (the dialect pick says what the import yields)', () => {
+    const r = read('snowflake', 'CREATE TABLE a (id INT PRIMARY KEY, x INT);\nCREATE OR REPLACE TABLE a (id INT PRIMARY KEY, y INT);');
+    expect(r.tableCount).toBe(1);
+    expect(r.tablesFound).toBe(1);
+    expect(r.readWith?.grammar).toBe(1);
+    expect(sqlDialectReadingLabel(sqlDialectReading('snowflake', r))).toBe(sqlDialectReadingLabel({ tablesRead: 1, tablesFound: 1, salvaged: 0 }));
+  });
+
   it('a plain CREATE TABLE of a table already read is still refused (the first stays) and reported', () => {
     const r = read('postgres', 'CREATE TABLE t (a INT, b INT);\nCREATE TABLE t (a INT);');
     expect(r.dbml).toContain('"b" INT');
@@ -308,6 +332,18 @@ describe('a session\'s temporary table is not part of the design', () => {
     expect(skipped.map((e) => [e.where?.line, e.where?.table])).toEqual([[2, 'TABLE_NAME'], [3, 'scratch'], [4, 'scratch2'], [5, 'scratch3']]);
   });
 
+  it('Databricks: a Lakeflow (DLT) TEMPORARY LIVE / STREAMING TABLE is a pipeline dataset, not a session\'s: imported', () => {
+    const r = read('databricks', [
+      'CREATE TEMPORARY LIVE TABLE stg (id INT);',
+      'CREATE LIVE TABLE f (id INT);',
+      'CREATE OR REFRESH TEMPORARY STREAMING TABLE s2 (id INT);',
+      'CREATE TEMPORARY TABLE scratch (a INT);',
+    ].join('\n'));
+    expect(tableNames(r.dbml)).toEqual(['stg', 'f', 's2']);
+    const skipped = (r.ledger ?? []).filter((e) => e.outcome === 'skipped' && /temporary table/.test(e.what));
+    expect(skipped.map((e) => e.where?.table)).toEqual(['scratch']);
+  });
+
   it('Oracle\'s GLOBAL TEMPORARY TABLE is a lasting definition: imported', () => {
     const r = read('oracle', 'CREATE GLOBAL TEMPORARY TABLE gtt (a NUMBER(10)) ON COMMIT DELETE ROWS;');
     expect(tableNames(r.dbml)).toEqual(['gtt']);
@@ -324,6 +360,13 @@ describe('a reference the grammar does not read is read from the file, never dro
     expect(r.dbml).toMatch(/Ref[^\n]*"T3"\."C3"[^\n]*"T2"\."C2"/);
     const read2 = (r.ledger ?? []).filter((e) => e.unit === 'relationship' && e.outcome === 'repaired');
     expect(read2.map((e) => [e.where?.line, e.where?.table, e.where?.column])).toEqual([[2, 'T3', 'C3']]);
+  });
+
+  it('a REFERENCES t with no column list to a table with no primary key is a lost relationship, never a repaired one', () => {
+    const r = read('snowflake', 'CREATE TABLE c (id INT);\nCREATE TABLE o (id INT, c_id INT REFERENCES c);');
+    expect(r.refCount).toBe(0);
+    const rel = (r.ledger ?? []).filter((e) => e.unit === 'relationship');
+    expect(rel.map((e) => [e.outcome, e.where?.line, e.where?.table, e.where?.column])).toEqual([['lost', 2, 'o', 'c_id']]);
   });
 
   it('a table constraint\'s REFERENCES t MATCH FULL (read by the repair ladder) keeps its reference and action', () => {

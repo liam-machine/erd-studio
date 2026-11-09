@@ -52,8 +52,10 @@ own order (the README gives none): environment, staging, raw vault, business vau
 as the share defines them. fakesnow cannot take a column list with `AS SELECT` (the three tables are created from
 their column list, which is what sets their columns) or a foreign key to another schema (`sat_order_bv` → `l10_rdv.hub_order`,
 read from sqlglot's parse); both are listed under `workarounds` in the read-back. Names and types are as the files write
-them. Cross-checked against `scripts/corpus/count_source.py`, which agrees on the 12 tables and their keys and reads the two
-`SELECT src.*` tables' columns approximately.
+them. Cross-checked against `scripts/corpus/count_source.py` (sqlglot 27.29.0), which reads 10 tables, 76 columns, 8 keys and
+6 relationships and agrees with the read-back on those tables' column names and primary keys. It does not count the two `SELECT src.*`
+tables, `stg_nation` and `stg_region` (11 columns: "no column list … not counted"): their columns come only from the
+read-back, from the share's `NATION` and `REGION` as `test/real-world-truth/readback.py` defines them (TPC-H's columns, by hand), plus the two the query adds.
 
 - Tables: **12**
 - Columns: **87**

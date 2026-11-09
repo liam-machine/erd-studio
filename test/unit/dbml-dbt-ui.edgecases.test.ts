@@ -439,6 +439,37 @@ seeds:
     expect(data.resourceDocs.get('lookup')?.description).toBe('Trips, one row each.');
   });
 
+  it('aliases resolve in time linear in the file: 600 models x 10 columns, every description and data_type an alias', async () => {
+    // Each alias used to walk the whole document again (yaml's Alias.resolve without a
+    // cache), so 6,000 aliases cost aliases x nodes: about 70 s here.
+    const lines = ['version: 2', 'models:', '  - name: m0', '    description: &d Shared.', '    columns:', '      - name: c0', '        data_type: &t VARCHAR'];
+    for (let m = 1; m <= 600; m++) {
+      lines.push(`  - name: m${m}`, '    description: *d', '    columns:');
+      for (let c = 0; c < 10; c++) lines.push(`      - name: c${c}`, '        description: *d', '        data_type: *t');
+    }
+    const started = Date.now();
+    const data = await load(lines.join('\n') + '\n');
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(data.models.size).toBe(601);
+    expect(data.models.get('m600')!.columns[9]).toMatchObject({ name: 'c9', description: 'Shared.', dataType: 'VARCHAR' });
+  });
+
+  it('an alias names the last anchor of that name before it, as YAML reads it', async () => {
+    const data = await load(`version: 2
+models:
+  - name: a
+    description: &d First.
+  - name: b
+    description: *d
+  - name: c
+    description: &d Second.
+  - name: e
+    description: *d
+`);
+    expect(data.models.get('b')!.description).toBe('First.');
+    expect(data.models.get('e')!.description).toBe('Second.');
+  });
+
   it('seeds and snapshots read YAML 1.1 merges and aliased lists as models do (`<<: *defaults`, `columns: *cols`)', async () => {
     const data = await load(`version: 2
 x-defaults: &col_defaults

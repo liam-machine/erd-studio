@@ -769,9 +769,11 @@ def count_sql(entry, base):
                 return
             kind = None
             # A temporary table (in a procedure body) is not part of the schema; Oracle's GLOBAL TEMPORARY
-            # TABLE is (a lasting definition whose rows are the session's).
-            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up) \
-                    and not (dialect == 'oracle' and re.match(r'CREATE\s+GLOBAL\s+TEMPORARY\s', up)):
+            # TABLE is (a lasting definition whose rows are the session's), and so is Lakeflow's TEMPORARY
+            # LIVE / STREAMING TABLE (a pipeline's dataset that is not published).
+            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up) \
+                    and not (dialect == 'oracle' and re.match(r'CREATE\s+GLOBAL\s+TEMPORARY\s', up)) \
+                    and not re.match(r'CREATE\s+(OR\s+\w+\s+)?(\w+\s+)*?(LIVE|STREAMING)\s+TABLE\b', up):
                 return
             # Snowflake's HYBRID and ICEBERG tables, CREATE OR ALTER TABLE and Lakeflow's CREATE OR REFRESH STREAMING TABLE are tables too.
             if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\b', up):

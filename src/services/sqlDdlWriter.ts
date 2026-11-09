@@ -39,25 +39,33 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
   const seen = new Map<string, ResolvedRef>();
   for (const ref of c.refs) {
     const where = `${ref.origin.file} line ${ref.origin.line}`;
+    // A reference read from the file's own words is in the ledger as what became of it: kept (repaired) or lost.
+    const said = ref.readFromFile;
+    const skip = (line: string, why: string): void => {
+      c.skippedLines.push(line);
+      if (said) c.ledger.lost('relationship', 'grammarGap', 'foreign key', said.where, `not kept: ${why}`);
+    };
     const from = ref.fromTable ?? c.findTable(ref.from.parts);
     // The FK table as the files leave it (a later RENAME TO), so what is said names a table the diagram has.
     const fkLabel = `${from ? tableLabel(from) : ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
     const to = c.findTable(ref.to.parts);
-    if (!from) { c.skippedLines.push(`${where}: foreign key ${fkLabel}: ${ref.from.parts.slice(-2).join('.')} is not in the files`); continue; }
-    if (!to) { c.skippedLines.push(`${where}: foreign key ${fkLabel} → ${ref.to.parts.slice(-2).join('.')}: that table is not in the files`); continue; }
+    if (!from) { skip(`${where}: foreign key ${fkLabel}: ${ref.from.parts.slice(-2).join('.')} is not in the files`, 'its table is not in the files'); continue; }
+    if (!to) { skip(`${where}: foreign key ${fkLabel} → ${ref.to.parts.slice(-2).join('.')}: that table is not in the files`, `${ref.to.parts.slice(-2).join('.')} is not in the files`); continue; }
     const fromColumns = ref.from.columns.map((col) => from.fields.find((f) => sameIdent(f.name, col))?.name);
     let targetColumns = ref.to.columns;
     if (targetColumns.length === 0) targetColumns = primaryKeyOf(to);
     const toColumns = targetColumns.map((col) => to.fields.find((f) => sameIdent(f.name, col))?.name);
     if (fromColumns.length === 0 || fromColumns.some((col) => !col) || toColumns.some((col) => !col)) {
-      c.skippedLines.push(`${where}: foreign key ${fkLabel} → ${tableLabel(to)}: a column it names is not in the table`);
+      skip(`${where}: foreign key ${fkLabel} → ${tableLabel(to)}: a column it names is not in the table`, 'a column it names is not in the table');
       continue;
     }
     if (fromColumns.length !== toColumns.length) {
-      c.skippedLines.push(`${where}: foreign key ${fkLabel} → ${tableLabel(to)}: ${fromColumns.length} column(s) reference ${toColumns.length}`);
+      skip(`${where}: foreign key ${fkLabel} → ${tableLabel(to)}: ${fromColumns.length} column(s) reference ${toColumns.length}`,
+        toColumns.length === 0 ? `${tableLabel(to)} has no primary key for it to reference` : `${fromColumns.length} column(s) reference ${toColumns.length}`);
       continue;
     }
     const key = [tableKey(from, c.dialect), ...fromColumns.map((col) => (col as string).toLowerCase()), '>', tableKey(to, c.dialect), ...toColumns.map((col) => (col as string).toLowerCase())].join('\u0000');
+    if (said) c.ledger.repaired('relationship', 'grammarGap', 'foreign key', said.where, said.detail);
     const kept = seen.get(key);
     if (kept) {
       // The same link written twice (a partition's copy, folded into its parent): one is kept; a different action is said.

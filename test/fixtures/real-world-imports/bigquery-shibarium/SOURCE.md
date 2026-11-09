@@ -47,13 +47,15 @@ It is `NOT_ENGINE_VERIFIED` in `test/unit/realWorldEngineTruth.ts`.
 - Foreign keys / relationships: **23**
 - Descriptions (tables and columns): **95**
 
+Each foreign key is one entry, in the file's order (lines 329–364); two keys on one column to two tables are two entries.
+
 | Schema | Table | Columns | Primary key | Foreign keys (column → target) |
 |---|---|---|---|---|
 | shibarium | blocks | 21 | block_hash | – |
-| shibarium | transactions | 17 | transaction_hash | block_hash → blocks; transaction_hash, transaction_hash → receipts |
-| shibarium | receipts | 13 | transaction_hash | block_hash → blocks; transaction_hash, transaction_hash → transactions |
-| shibarium | function_calls | 8 | transaction_hash | block_hash → blocks; transaction_hash, transaction_hash → transactions |
-| shibarium | logs | 10 | block_hash, log_index | block_hash → blocks; transaction_hash, transaction_hash → transactions; block_hash, log_index → decoded_events |
-| shibarium | decoded_events | 9 | block_hash, log_index | block_hash → blocks; transaction_hash, transaction_hash → transactions; block_hash, log_index → logs |
-| shibarium | errors | 5 | transaction_hash | block_hash → blocks; transaction_hash, transaction_hash → transactions |
-| shibarium | transaction_access_lists | 4 | transaction_hash | block_hash → blocks; transaction_hash, transaction_hash → transactions |
+| shibarium | transactions | 17 | transaction_hash | block_hash → blocks; transaction_hash → receipts; transaction_hash → function_calls |
+| shibarium | receipts | 13 | transaction_hash | block_hash → blocks; transaction_hash → transactions; transaction_hash → function_calls |
+| shibarium | function_calls | 8 | transaction_hash | block_hash → blocks; transaction_hash → transactions; transaction_hash → receipts |
+| shibarium | logs | 10 | block_hash, log_index | block_hash → blocks; transaction_hash → transactions; transaction_hash → receipts; block_hash, log_index → decoded_events |
+| shibarium | decoded_events | 9 | block_hash, log_index | block_hash → blocks; transaction_hash → transactions; transaction_hash → receipts; block_hash, log_index → logs |
+| shibarium | errors | 5 | transaction_hash | block_hash → blocks; transaction_hash → transactions; transaction_hash → receipts |
+| shibarium | transaction_access_lists | 4 | transaction_hash | block_hash → blocks; transaction_hash → transactions; transaction_hash → receipts |

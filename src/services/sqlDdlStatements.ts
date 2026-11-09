@@ -388,8 +388,9 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
  * A foreign key the grammar read no reference for (Snowflake's grammar drops
  * `REFERENCES t` with no column list, and `MATCH …` after one): read from the
  * file's own words — the table after REFERENCES, its column list or else its
- * primary key — and recorded as read that way. One the words do not name is
- * recorded as lost. Never dropped without a word.
+ * primary key — and recorded as read that way once it resolves (as lost, with
+ * the reason, when it does not). One the words do not name is recorded as
+ * lost. Never dropped without a word.
  */
 function unreadReference(cx: ConverterContext, file: string, t: Token[], from: number, to: number, table: ModelTable, columns: string[], name: string | undefined): void {
   const where = { file, line: t[from].line, table: tableLabel(table), ...(columns.length === 1 ? { column: columns[0] } : {}) };
@@ -411,9 +412,9 @@ function unreadReference(cx: ConverterContext, file: string, t: Token[], from: n
     ...(name ? { name } : {}),
     ...(actions.onDelete ? { onDelete: actions.onDelete } : {}),
     ...(actions.onUpdate ? { onUpdate: actions.onUpdate } : {}),
+    // Recorded once it resolves (`resolveRefs`): a target with no primary key, or a column it does not have, is a lost one.
+    readFromFile: { where, detail: toColumns.length ? 'read from the file: the grammar did not read it' : 'read from the file: no column list, so the referenced table\'s primary key' },
   });
-  cx.ledger.repaired('relationship', 'grammarGap', 'foreign key', where,
-    toColumns.length ? 'read from the file: the grammar did not read it' : 'read from the file: no column list, so the referenced table\'s primary key');
 }
 
 /**

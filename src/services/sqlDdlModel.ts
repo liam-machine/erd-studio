@@ -9,7 +9,7 @@
  * `dist/sqlImport.js`.
  */
 
-import type { ImportLedger, LedgerCause } from './importLedger';
+import type { ImportLedger, LedgerCause, LedgerWhere } from './importLedger';
 import type { Statement, Token } from './sqlDdlLexer';
 
 // ---------------------------------------------------------------------------
@@ -197,6 +197,11 @@ export interface PendingRef {
   /** `ON DELETE` / `ON UPDATE` actions, as written (`CASCADE`, `SET NULL`…). */
   onDelete?: string;
   onUpdate?: string;
+  /**
+   * Read from the file's own words, not the grammar (`unreadReference`): recorded in the
+   * ledger once it resolves (repaired), or as lost with the reason it did not (`resolveRefs`).
+   */
+  readFromFile?: { where: LedgerWhere; detail: string };
 }
 
 export interface PendingComment {

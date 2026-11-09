@@ -5,8 +5,8 @@
  * import command's own pure pipeline (`scorecardHarness.ts`) and is held to
  * conservation: source = imported + reported + silent loss. The test fails
  * when any sample imports less, or loses more without a word, than
- * `baseline.json` records; an improvement passes (refresh the baseline in
- * the same change so it ratchets).
+ * `baseline.json` records, and when it does better than the baseline records
+ * (refresh the baseline in the same change, so it ratchets).
  *
  *   npx vitest run test/unit/realWorldScorecard.test.ts                      # check, print before/after
  *   ERD_SCORECARD_OUT=/tmp/after.json npx vitest run test/unit/realWorldScorecard.test.ts
@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED, SAMPLE_SLUGS } from './realWorld/expected';
-import { COUNT_KEYS, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
+import { COUNT_KEYS, improvements, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
 import { SAMPLES_ROOT, loadTruth, qualifySameNames, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 
 const BASELINE = path.join(__dirname, 'realWorld', 'baseline.json');
@@ -77,6 +77,20 @@ describe('real-world scorecard against its baseline', () => {
       return;
     }
     expect(regressions(baseline.samples, ordered)).toEqual([]);
+    // The ratchet holds only at the level the baseline records: an improvement left out of it
+    // would let a later change fall back to the old numbers unnoticed.
+    expect(improvements(baseline.samples, ordered), 'improved: refresh the baseline with UPDATE_BASELINE=1').toEqual([]);
+  });
+
+  it('finds an improvement the baseline does not record (the mirror of a regression)', () => {
+    const b = baseline.samples[0];
+    const better: SampleScore = { ...b, imported: { ...b.imported, tables: b.imported.tables + 1 }, silentLoss: { ...b.silentLoss, tables: b.silentLoss.tables + 0 } };
+    expect(improvements([b], [b])).toEqual([]);
+    expect(improvements([b], [better])).toEqual([`${b.slug}: tables imported ${b.imported.tables} → ${b.imported.tables + 1}`]);
+    const quieter: SampleScore = { ...b, silentLoss: { ...b.silentLoss, columns: b.silentLoss.columns + 2 } };
+    expect(improvements([quieter], [b])).toEqual([`${b.slug}: columns lost silently ${b.silentLoss.columns + 2} → ${b.silentLoss.columns}`]);
+    const upgraded: SampleScore = { ...b, verdict: 'Failed' };
+    expect(improvements([upgraded], [b])).toEqual(b.verdict === 'Failed' ? [] : [`${b.slug}: verdict Failed → ${b.verdict}`]);
   });
 });
 

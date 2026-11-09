@@ -238,7 +238,7 @@ export type SqlDdlToDbmlResult =
       problems: SqlDdlProblem[];
       /** Everything not brought across as written (`importLedger.ts`): plain data, it crosses the bundle. */
       ledger: LedgerEntry[];
-      /** CREATE TABLE statements with a column list found in the files (read or not). */
+      /** CREATE TABLE statements with a column list found in the files (read or not); a table a later CREATE OR REPLACE replaces is counted once. */
       tablesFound: number;
       /** How the tables were read: as written, rewritten by the repair ladder, or salvaged without a grammar. */
       readWith?: SqlReadWith;
@@ -819,6 +819,9 @@ function isCreateTableWithColumns(t: Token[]): boolean {
   const head = createTableName(t);
   if (!head) return false;
   const name = readName(t, head.at);
+  // `CREATE TABLE x COMMENT = '…' (columns)`: read as the table without the clause, as readCreateTable reads it.
+  const leading = name ? leadingTableComment(t, name.next) : undefined;
+  if (leading) return isCreateTableWithColumns([...t.slice(0, leading.from), ...t.slice(leading.to + 1)]);
   if (name && !isPunct(t[name.next], '(') && typedSelectColumns(t, undefined, name.next)) return true;
   if (name && !isPunct(t[name.next], '(') && strayBeforeColumnList(t, name.next)) return true;
   if (!name || !isPunct(t[name.next], '(')) return false;
@@ -1287,7 +1290,8 @@ class Converter implements ConverterContext {
       const parts = this.qualify(name.parts);
       const same = (other: readonly string[]): boolean => sameIdent(other[other.length - 1], parts[parts.length - 1])
         && sameSchema(other.length >= 2 ? other[other.length - 2] : null, parts.length >= 2 ? parts[parts.length - 2] : null, this.dialect);
-      if (head.ifNotExists && (this.findTable(parts) || this.unreadTableNames.some(same))) continue;
+      // An IF NOT EXISTS of a table defined before does nothing; a CREATE OR REPLACE of one replaces it (one table, counted once).
+      if ((head.ifNotExists || replacesTable(t)) && (this.findTable(parts) || this.unreadTableNames.some(same))) continue;
       this.unreadTableNames.push(parts);
       count++;
     }
@@ -1451,6 +1455,9 @@ class Converter implements ConverterContext {
       const first = this.findTable(qualified);
       if (first && sameIdent(first.name, tableName) && sameSchema(first.schema, schema, this.dialect) && replacesTable(t)) {
         replaceTable(this, first, upper(t[2]) === 'ALTER' ? table : undefined);
+        // One table, read once: the definition replaced is no longer found or read (the dialect pick counts what the import yields).
+        const how = this.readHow.get(first);
+        if (how) { this.readWith[how]--; this.readHow.delete(first); this.tablesFound--; }
         this.appliedChanges++;
         this.ledger.changed('table', 'duplicate', 'CREATE OR REPLACE', { file, line: st.line, table: label }, upper(t[2]) === 'ALTER'
           ? `changes the definition at ${first.origin.file}, line ${first.origin.line}, to this column list; its foreign keys stay, as the database does`
@@ -2183,16 +2190,22 @@ function shortName(name: string): string {
   return name.length > 32 ? `${name.slice(0, 31)}…` : name;
 }
 
-/** Whether the words between CREATE and the table's name (`t[1..at)`) make it a session's temporary table. */
+/**
+ * Whether the words between CREATE and the table's name (`t[1..at)`) make it a session's temporary table.
+ * Never a Lakeflow (Delta Live Tables) `TEMPORARY LIVE` / `TEMPORARY STREAMING` table: a pipeline's dataset,
+ * kept for the pipeline and read downstream as `LIVE.x` (TEMPORARY there means only that it is not published).
+ */
 function isSessionTable(t: readonly Token[], at: number, dialect: SqlDialect): boolean {
   let temporary = false;
   let global = false;
+  let pipeline = false;
   for (let k = 1; k < at && k < 12; k++) {
     const w = upper(t[k]);
     if (w === 'TEMP' || w === 'TEMPORARY' || w === 'VOLATILE') temporary = true;
     if (w === 'GLOBAL') global = true;
+    if (w === 'LIVE' || w === 'STREAMING') pipeline = true;
   }
-  return temporary && !(global && dialect === 'oracle');
+  return temporary && !pipeline && !(global && dialect === 'oracle');
 }
 
 /** Whether a CREATE TABLE replaces a table of its name: `CREATE OR REPLACE | OR ALTER | OR REFRESH`. */
