@@ -150,6 +150,27 @@ export const SQL_DIALECT_FEATURES: Readonly<Partial<Record<SqlDialect, Telemetry
 /** The dialect quick pick's item. */
 export interface SqlDialectItem extends vscode.QuickPickItem {
   dialect: SqlDialect;
+  /** The dialect the scripts were detected as (and it reads at least one of their tables). */
+  detected?: true;
+}
+
+/** A row of the dialect pick as shown: a dialect, or a separator heading. */
+export type SqlDialectPickRow = SqlDialectItem | (vscode.QuickPickItem & { kind: vscode.QuickPickItemKind.Separator });
+
+/**
+ * The dialect pick as shown. A quick pick label is plain text (no bold, no colour), so the
+ * detected dialect stands out the ways it can: a check icon, and, when it is the first
+ * choice, a heading of its own above the others (the first item is the one Enter takes).
+ */
+export function dialectPickRows(items: readonly SqlDialectItem[]): SqlDialectPickRow[] {
+  const shown = items.map((i): SqlDialectItem => (i.detected ? { ...i, label: `$(pass-filled) ${i.label}` } : i));
+  if (!items[0]?.detected) return shown;
+  const separator = (label: string): SqlDialectPickRow => ({ label, kind: vscode.QuickPickItemKind.Separator });
+  return [
+    separator('Detected from your SQL'),
+    shown[0],
+    ...(shown.length > 1 ? [separator('Other dialects'), ...shown.slice(1)] : []),
+  ];
 }
 
 /** The partitions quick pick's item: fold them into their parents, or keep each as a table. */
@@ -796,11 +817,15 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
       const whole = readings && withoutStoppedReadings(readings);
       const why = readings ? noDialectReason(whole && whole.size ? whole : readings, detected) : undefined;
       if (why) log.info(`[ERD Studio] ${TITLE}: no dialect reads a table in the scripts: ${why}`);
+      // Never "detected" for a dialect that reads none of the tables.
+      const isDetected = (d: SqlDialect): boolean => {
+        const reading = readings?.get(d);
+        return d === detected && (!reading || reading.tablesRead > 0);
+      };
       const describe = (d: SqlDialect): string | undefined => {
         const reading = readings?.get(d);
         const parts: string[] = [];
-        // Never "detected" for a dialect that reads none of the tables.
-        if (d === detected && (!reading || reading.tablesRead > 0)) parts.push('detected');
+        if (isDetected(d)) parts.push('detected');
         if (d === preset.dialect) parts.push('read as this before');
         if (reading) parts.push(sqlDialectReadingLabel(reading));
         if (reading?.result.stopped) parts.push(reading.result.stopped.reason === 'cancelled' ? 'stopped when cancelled' : 'stopped at the time limit');
@@ -810,7 +835,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
       const choice = await ui.pickDialect(
         ordered.map((d) => {
           const description = describe(d);
-          return { label: SQL_DIALECT_LABELS[d], ...(description ? { description } : {}), dialect: d };
+          return { label: SQL_DIALECT_LABELS[d], ...(description ? { description } : {}), dialect: d, ...(isDetected(d) ? { detected: true as const } : {}) };
         }),
         {
           title: TITLE,
@@ -1286,7 +1311,11 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
       (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
         .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
     readFile: async (filePath) => decodeText(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
-    pickDialect: async (items, options) => vscode.window.showQuickPick([...items], options),
+    pickDialect: async (items, options) => {
+      const picked = await vscode.window.showQuickPick(dialectPickRows(items), options);
+      // A separator cannot be picked; map the shown row back to the item it was made from.
+      return picked && 'dialect' in picked ? items.find((i) => i.dialect === picked.dialect) : undefined;
+    },
     pickFiles: async (items, options) => vscode.window.showQuickPick([...items], { ...options, canPickMany: true }),
     pickPartitions: async (items, options) => vscode.window.showQuickPick([...items], options),
     readFileStart: (filePath, chars) => readTextStart(filePath, chars),
