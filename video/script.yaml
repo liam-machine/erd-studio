@@ -94,24 +94,18 @@ scenes:
   - id: bring
     module: sources/wall
     chapter: 1
-    minDur: 9
+    minDur: 11.4   # about a second after the line, then on
     accent: blue
     headline: ["Already have a model?", "{Bring it in}."]
-    # every source the import reads, all at once, each mark beside its name, held still from the
-    # moment they land so a viewer can pause on it (player/scenes/sources/wall.js SOURCES, assets/logos/)
+    # every source the import reads, each mark beside its name, landing as the line plays and then
+    # still, the scene ending about a second after the line (a viewer can pause on it); the line
+    # names the best-known tools and sums up the rest (player/scenes/sources/wall.js SOURCES)
     props:
       sources: [dbt, databricks, snowflake, powerBi, fabric, postgresql, sqlServer, mysql, oracle, bigquery, redshift, mariadb, sqlite, dbml]
     lines:
       - id: b_have
         beat: have
-        caption: Most teams already have a model, in dbt, Databricks, Snowflake, Power BI, Fabric,
-      - id: b_more
-        beat: more
-        caption: PostgreSQL, SQL Server, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, or DBML.
-        say: Postgres Q L, SQL Server, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, or DBML.
-      - id: b_all
-        beat: all
-        caption: ERD Studio brings in every one.
+        caption: "Already have a model? Bring it in from the tools most teams use: dbt, Databricks, Snowflake and Power BI, and the most popular SQL databases."
 
   - id: export
     module: rec/window
@@ -130,9 +124,10 @@ scenes:
       - id: x_pg
         beat: pg
         caption: From PostgreSQL, pg_dump writes it to a file.
-        say: From Postgres Q L, P G dump writes it to a file.
+        say: From Postgress Q L, P G dump writes it to a file.
       - id: x_sf
         beat: sf
+        pause: 0.149   # the take was filmed for this scene's length: Postgress Q L is a little longer than the voice's first reading
         caption: From Snowflake, it's one query, GET_DDL, saved as a .sql file.
         say: From Snowflake, it's one query, get D D L, saved as a dot S Q L file.
 
@@ -148,8 +143,9 @@ scenes:
         caption: Then click New, Import SQL DDL, and import the folder.
       - id: s_dialect
         beat: dialect
+        pause: 0.149   # as x_sf: the scene keeps the length its take was filmed for
         caption: "It works out the dialect: PostgreSQL, one of the nine it reads."
-        say: "It works out the dialect: Postgres Q L, one of the nine it reads."
+        say: "It works out the dialect: Postgress Q L, one of the nine it reads."
 
   - id: draft
     module: rec/window
@@ -183,7 +179,7 @@ scenes:
   - id: scale
     module: rec/window
     chapter: 3
-    minDur: 21.5   # the zoom and the hover take their time with 2,000 cards on screen; the arrows held about 3 s
+    minDur: 17.2   # the hovered table's arrows flow for about 2.5 s, then the pointer moves on to a dimension
     accent: blue
     headline: ["Big models?", "{2,000 tables}."]
     # its own take, in a 2,000-table project (record/bigProject.mjs): opened from the side bar, its

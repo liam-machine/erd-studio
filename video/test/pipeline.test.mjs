@@ -565,45 +565,167 @@ test('the README GIF\'s hover preview uses the product\'s numbers: arrows, delay
 });
 
 test('the README GIF\'s hover beat: arrows run from the 1 end to the * end, only on the hovered table\'s lines, and the loop is seamless', async () => {
-  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, flowGlyphs, CHEVRON_D } = await import('../player/hero.js');
+  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, DRAWN, flowGlyphs, CHEVRON_D } = await import('../player/hero.js');
   // the pointer rests on fct_order, then dim_customer, then leaves
   assert.deepEqual(FOCUS_CHANGES.map((c) => c.id), ['fct_order', 'dim_customer', null]);
   const [onFact, onCustomer, off] = FOCUS_CHANGES.map((c) => c.t);
   assert.ok(onCustomer - onFact >= 1.5 && off - onCustomer >= 1.5, 'each hover held long enough to read');
-  for (const line of LINES) {
-    // each path starts at fct_order (the FK, `*` end) and ends at the dimension's key (`1` end)
-    assert.equal(line.from, 'fct_order');
+  for (const [i, line] of LINES.entries()) {
+    // each path starts at the FK's table (`*` end) and ends at the key's table (`1` end)
     assert.equal(line.cardinality, 'many-to-one');
-    assert.ok(Math.hypot(line.many[0] - line.pts[0][0], line.many[1] - line.pts[0][1]) < 40, `${line.id}: * at the path's start`);
-    assert.ok(Math.hypot(line.one[0] - line.pts.at(-1)[0], line.one[1] - line.pts.at(-1)[1]) < 40, `${line.id}: 1 at the path's end`);
-    // so every chevron moves towards the path's start, and points that way
-    const a = flowGlyphs(line, 12), b = flowGlyphs(line, 12.05);
+    assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12, `${line.id}: * at the path's start`);
+    assert.ok(Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, `${line.id}: 1 at the path's end`);
+    // so every chevron moves towards the path's start (the `*` end), and points that way
+    const drawn = DRAWN.curved[i];
+    const a = flowGlyphs(drawn, line, 12), b = flowGlyphs(drawn, line, 12.05);
     assert.ok(a.length >= 2 && a.length <= 4);
-    for (const [i, g] of a.entries()) {
+    for (const [k, g] of a.entries()) {
       assert.ok(g.reverse);
-      if (g.at > 0.05 && b[i].at < g.at) continue;
-      assert.ok(g.at <= 0.05, `${line.id}: glyph ${i} moves from the 1 end to the * end`);
+      if (g.at <= 0.05) continue;   // just wrapped round
+      assert.ok(b[k].at < g.at, `${line.id}: glyph ${k} moves from the 1 end to the * end`);
     }
   }
   const html = (t) => render(t);
   const chevrons = (h) => h.split(CHEVRON_D).length - 1;
   const faded = (h) => (h.match(new RegExp(`opacity:${HOVER.tableOpacity.toFixed(3)};`, 'g')) ?? []).length;
-  // fct_order: all three lines flow in the layer colour; every table is related, so none fades
+  // fct_order: its four lines flow in the layer colour; every table is one line away, so none fades
+  const factLines = LINES.filter((l) => l.from === 'fct_order' || l.to === 'fct_order').length;
+  assert.equal(factLines, 4);
   const fact = html((onFact + onCustomer) / 2);
-  assert.ok(chevrons(fact) >= 6 && fact.includes(HOVER.layerColour));
+  assert.ok(chevrons(fact) >= 2 * factLines && fact.includes(HOVER.layerColour));
   assert.equal(faded(fact), 0);
-  // dim_customer: one line flows; dim_date and dim_product fade
+  // dim_customer: one line flows; the three tables it does not touch fade
   const cust = html(onCustomer + 0.6);
   assert.ok(chevrons(cust) >= 2 && chevrons(cust) <= 4);
-  assert.equal(faded(cust), 2);
+  assert.equal(faded(cust), 3);
   // no arrows, no layer colour and no pointer outside the hover; the first and last frames match
-  for (const t of [0, 2, 5, 8, off + HOVER.fade + 0.01]) {
+  for (const t of [0, 2, 5, 8, off + HOVER.fade + 0.01, 17.5]) {
     const h = html(t);
     assert.equal(chevrons(h), 0, `+${t}s`);
     assert.ok(!h.includes(HOVER.layerColour), `+${t}s`);
   }
   for (const t of [0, 2, 5, 8, HOVER_PATH.at(-1).t + 0.01]) assert.ok(!html(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
   assert.equal(html(HERO.loop - 1 / HERO.fps), html(0));
+});
+
+// The README GIF's line styles are drawn as packages/renderer draws them. When the router's corners,
+// crossings, the switch or its glyphs change, these fail so the mock follows.
+test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, halo, the switch', async () => {
+  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, styleAt, HERO } = await import('../player/hero.js');
+  const routing = (...p) => read('packages', 'renderer', 'src', 'lib', 'edgeRouting', ...p);
+  const corners = routing('render', 'corners.ts');
+  const paths = routing('render', 'pathRender.ts');
+  const types = routing('types.ts');
+  const constIn = (src, name) => Number(src.match(new RegExp(`(?:export )?const ${name} = ([\\d.]+);`))?.[1]);
+  assert.equal(ROUTE.roundedRadius, constIn(corners, 'ROUNDED_RADIUS'));
+  assert.equal(ROUTE.curveRadius, constIn(corners, 'CURVE_RADIUS'));
+  assert.equal(ROUTE.curveRatio, constIn(corners, 'CURVE_RATIO'));
+  assert.equal(ROUTE.curveEndKeep, constIn(corners, 'CURVE_END_KEEP'));
+  assert.equal(ROUTE.curveClearance, constIn(corners, 'CURVE_CLEARANCE'));
+  assert.equal(ROUTE.kappa, constIn(corners, 'KAPPA'));
+  assert.equal(ROUTE.haloCutHalf, constIn(paths, 'HALO_CUT_HALF'));
+  assert.equal(ROUTE.cornerClear, constIn(paths, 'CORNER_CLEAR'));
+  assert.equal(ROUTE.stubClear, constIn(paths, 'STUB_CLEAR'));
+  assert.equal(ROUTE.mergeSlack, constIn(paths, 'MERGE_SLACK'));
+  assert.equal(ROUTE.pathGap, constIn(types, 'PATH_GAP'));
+  assert.equal(ROUTE.labelOffset, constIn(types, 'LABEL_OFFSET'));
+  // hops sized as hopRadiusFor(0.5): HOP_SCREEN_RADIUS / zoom, between HOP_RADIUS and HOP_MAX_RADIUS
+  const zoom = 0.5;
+  assert.equal(ROUTE.hopRadius, Math.min(constIn(paths, 'HOP_MAX_RADIUS'), Math.max(constIn(paths, 'HOP_RADIUS'), constIn(paths, 'HOP_SCREEN_RADIUS') / zoom)));
+  assert.ok(paths.includes('return Math.min(HOP_MAX_RADIUS, Math.max(HOP_RADIUS, HOP_SCREEN_RADIUS / z));'));
+  // ...and the arrows as glyphScaleForZoom(0.5)
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'EdgeFlow.tsx').includes('const scale = Math.ceil((1 / zoom) * 4 - 1e-9) / 4;'));
+  assert.match(readFileSync(join(HERE, '..', 'player', 'hero.js'), 'utf8'), new RegExp(`const GLYPH_SCALE = ${Math.ceil((1 / zoom) * 4 - 1e-9) / 4};`));
+  assert.ok(read('packages', 'renderer', 'src', 'canvas', 'EdgeRouting.css').includes(`.fk-edge__halo {\n  fill: none;\n  stroke: var(--editor-bg);\n  stroke-width: ${ROUTE.haloWidth};`));
+  // the two styles, in the toolbar's order, the default first
+  const style = routing('lineStyle.ts');
+  assert.ok(style.includes(`export const LINE_STYLES: readonly LineStyle[] = [${LINE_STYLES.map((x) => `'${x}'`).join(', ')}];`));
+  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${styleAt(0)}';`));
+  for (const [name, o] of Object.entries(LINE_STYLE_OPTIONS)) assert.ok(style.includes(`${name}: { crossings: '${o.crossings}', underTables: `) && style.includes(`corners: '${o.corners}' }`), name);
+  // the switch's glyphs are the product's own paths
+  const sw = read('webview', 'components', 'Toolbar', 'LineStyleSwitch.tsx');
+  for (const [name, ds] of Object.entries(lib.LINE_STYLE_GLYPHS)) for (const d of ds) assert.ok(sw.includes(`<path d="${d}" />`), `${name}: ${d}`);
+  assert.ok(sw.includes("curved: { label: 'Curved',") && sw.includes("hops: { label: 'Hops',"));
+  assert.ok(HERO.loop > 0);
+});
+
+test('the README GIF\'s line style beat: the pointer clicks Hops, the lines hop, then Curved again', async () => {
+  const { render, DRAWN, LINES, styleAt, HOVER_PATH, SWITCH_AT, FOCUS_CHANGES, HERO } = await import('../player/hero.js');
+  // Curved at the seam, Hops for a while after the hover, then Curved again before the pointer leaves
+  const hops = [];
+  for (let t = 0; t < HERO.loop; t += 0.05) if (styleAt(t) === 'hops') hops.push(t);
+  assert.ok(hops.length, 'Hops is shown');
+  assert.ok(hops[0] > FOCUS_CHANGES.at(-1).t, 'after the hover');
+  assert.ok(hops.at(-1) - hops[0] >= 2.4, 'Hops held long enough to see');
+  assert.ok(hops.at(-1) < HOVER_PATH.at(-1).t && styleAt(HERO.loop - 0.01) === 'curved');
+  // each switch happens with the pointer on that option (its click)
+  const { path } = lib;
+  for (const t of [hops[0], hops.at(-1) + 0.05]) {
+    const p = path(t, HOVER_PATH), want = styleAt(t);
+    assert.ok(Math.abs(p.x - SWITCH_AT[want].x) <= 20 && Math.abs(p.y - SWITCH_AT[want].y) <= 17, `+${t}s: the pointer is on ${want}`);
+  }
+  // the switch shows the style in use
+  const chosen = (h) => h.match(/data-line-style="(\w+)" style="[^"]*background:#0e639c/)?.[1];
+  assert.equal(chosen(render(0)), 'curved');
+  assert.equal(chosen(render(hops[1])), 'hops');
+  // Curved: cubic corners and a halo casing; the line passing under another is cut there
+  const curved = DRAWN.curved, hopsDrawn = DRAWN.hops;
+  assert.ok(curved.some((l) => l.strokeD), 'a cut under a crossing');
+  assert.ok(curved.filter((l, i) => LINES[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
+  assert.match(render(0), /stroke="var\(--card\)" stroke-width="8.75"/);
+  // Hops: quadratic (rounded) corners, a hop (two cubic quarters) on the more horizontal line, no casing
+  assert.ok(hopsDrawn.filter((l, i) => LINES[i].pts.length > 2).every((l) => / Q /.test(l.d)));
+  const hopped = hopsDrawn.filter((l) => / C /.test(l.d));
+  assert.ok(hopped.length >= 2, 'at least two hops');
+  assert.doesNotMatch(render(hops[1]), /stroke-width="8.75"/);
+});
+
+test('the README GIF\'s draft page draws Curved lines too: the product\'s draft canvas is the same renderer', async () => {
+  const { DRAFT_LINES, DRAFT_DRAWN, render } = await import('../player/hero.js');
+  const { SALES_DRAFT: sales } = editor;
+  assert.equal(DRAFT_LINES.length, sales.rels.length, 'one line per relationship the headline counts');
+  for (const [i, [a, , b]] of sales.rels.entries()) {
+    assert.equal(DRAFT_LINES[i].from, sales.tables[a].name);
+    assert.equal(DRAFT_LINES[i].to, sales.tables[b].name);
+    assert.match(DRAFT_DRAWN[i].d, / C /, 'curved corners');
+    assert.doesNotMatch(DRAFT_DRAWN[i].d, / Q /);
+  }
+  const draft = render(8.2);
+  for (const l of DRAFT_DRAWN) assert.ok(draft.includes(`d="${l.d}"`), 'drawn on the draft page');
+});
+
+test('the README GIF\'s captions: one per beat, five words at most, big, in a band above the window', async () => {
+  const { CAPTIONS, render, HERO, HOVER_PATH, FOCUS_CHANGES } = await import('../player/hero.js');
+  for (const c of CAPTIONS) {
+    assert.ok(c.text.split(/\s+/).length <= 5, c.text);
+    assert.ok(c.text.includes(c.em), c.text);
+    assert.doesNotMatch(c.text, NO_DBT_ON_SCREEN);
+  }
+  // the loop opens and closes on the same caption
+  assert.equal(CAPTIONS[0].text, CAPTIONS.at(-1).text);
+  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at > CAPTIONS[i - 1].at));
+  const shown = (t) => { let i = 0; while (i + 1 < CAPTIONS.length && CAPTIONS[i + 1].at <= t) i++; return CAPTIONS[i].text; };
+  assert.equal(shown(2), 'Your model, as DBML files');
+  assert.equal(shown(8), 'Import what you have');
+  assert.equal(shown((FOCUS_CHANGES[0].t + FOCUS_CHANGES[1].t) / 2), 'Hover to trace relationships');
+  assert.equal(shown(17), 'Lines: Curved or Hops');
+  // 58 px at 1440 is 32 px at the README's 800; the band sits above the window, never over the canvas
+  const h = render(2);
+  assert.match(h, /font-size:58px;font-weight:800/);
+  const band = Number(h.match(/^<div class="abs" style="left:0;top:0;width:\d+px;height:(\d+)px">/)[1]);
+  const winTop = Number(h.match(/<div class="card" style="left:\d+px;top:(\d+)px/)[1]);
+  assert.ok(winTop >= band, 'the window starts below the caption band');
+  assert.ok(HERO.w === 1440 && HOVER_PATH.length > 0);
+});
+
+// The loop and its beats, in order (re-time the README GIF section of video/README.md with these).
+test('the README GIF\'s loop: 22 s at 12 fps, files → text → draft → hover → line styles', async () => {
+  const { HERO, CAPTIONS, FOCUS_CHANGES, styleAt } = await import('../player/hero.js');
+  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [22, 12, 1440, 1010]);
+  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 6.2, 10.4, 14.9, 21.2]);
+  assert.ok(FOCUS_CHANGES[0].t > 10.4 && FOCUS_CHANGES.at(-1).t < 15.5);
+  assert.equal(styleAt(16.5), 'hops');
+  assert.equal(styleAt(19.5), 'curved');
 });
 
 // ---- the default cut is a recording of the real VS Code (record/) ----------------------------
@@ -739,11 +861,12 @@ test('the logical cut plays the default cut\'s takes without dbt: its recorded s
     assert.deepEqual(sc, byId[sc.id], `${sc.id} is script.yaml's scene`);
   }
   // the wall of sources: its own lines (no dbt), the rest as script.yaml's
-  const { lines, props, ...rest } = logical.scenes.find((s) => s.id === 'bring');
-  const { lines: dl, props: dp, ...drest } = byId.bring;
+  // (its length is its own: about a second after its shorter line)
+  const { lines, props, minDur, ...rest } = logical.scenes.find((s) => s.id === 'bring');
+  const { lines: dl, props: dp, minDur: _m, ...drest } = byId.bring;
   assert.deepEqual(rest, drest);
   for (const l of lines) assert.doesNotMatch(l.caption, NO_DBT);
-  assert.deepEqual(lines.slice(1), dl.slice(1));
+  assert.equal(lines.length, dl.length);
   assert.deepEqual(props.sources, dp.sources.filter((id) => id !== 'dbt'));
   // the other HTML scenes are the default cut's, but for the chapter number
   for (const id of ['aiShow', 'pr', 'confluence', 'end']) {
@@ -886,16 +1009,17 @@ test('the wall of sources: every source the import reads, in order, each mark be
     assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'logos', src.file)), src.file);
     assert.ok(notes.includes(`\`${src.file}\``), `${src.file} in LOGOS.md`);
   }
-  // the narration names every tile, in the wall's order (Microsoft Fabric is said as Fabric)
+  // the narration is short: it names the best-known tools, in the wall's order, and sums up the rest
   for (const sc of [script, logical]) {
     const said = bring(sc).lines.map((l) => l.caption).join(' ');
+    assert.equal(bring(sc).lines.length, 1, 'one line');
     let from = 0;
-    for (const id of bring(sc).props.sources) {
-      const name = SOURCES[id].name.replace(/^Microsoft /, '');
-      const i = said.indexOf(name, from);
-      assert.ok(i >= from, `${name} is said, in order`);
-      from = i + name.length;
+    for (const id of ['dbt', 'databricks', 'snowflake', 'powerBi'].filter((x) => bring(sc).props.sources.includes(x))) {
+      const i = said.indexOf(SOURCES[id].name, from);
+      assert.ok(i >= from, `${SOURCES[id].name} is said, in order`);
+      from = i + SOURCES[id].name.length;
     }
+    assert.match(said, /the most popular SQL databases/);
   }
   // all land within the first second, then the wall holds still: every later frame is the same
   for (const sc of [script, logical]) {
@@ -903,8 +1027,16 @@ test('the wall of sources: every source the import reads, in order, each mark be
     const b = buildTimeline(sc, durations).scenes.find((s) => s.id === 'bring');
     const still = mod.render(1.2, { beats: b.beats, dur: b.dur, scene: b });
     for (let lt = 1.2; lt < b.dur; lt += 0.5) assert.equal(mod.render(lt, { beats: b.beats, dur: b.dur, scene: b }), still, `the wall moved at +${lt}s`);
-    assert.ok(b.dur - 1.2 >= 4, 'held still for at least 4 s');
+    assert.ok(b.dur - 1.2 >= 4, 'still long enough to read');
     for (const id of b.props.sources) assert.ok(still.includes(SOURCES[id].name), SOURCES[id].name);
+  }
+  // on the real timeline, the scene ends about a second after its line: a viewer can pause, nobody waits
+  for (const [sc, dir] of [[script, 'build'], [logical, 'build-logical']]) {
+    const built = join(HERE, '..', dir, 'timeline.json');
+    if (!existsSync(built)) continue;
+    const b = JSON.parse(readFileSync(built, 'utf8')).scenes.find((s) => s.id === 'bring');
+    const after = b.dur - b.beats.have.end;
+    assert.ok(after >= 0.8 && after <= 1.3, `${dir}: the wall holds ${after.toFixed(2)} s after its line`);
   }
   // same-size tiles, big enough to read at 1920x1080, in rows that fit the window's place
   assert.ok(WALL.mark >= 72 && WALL.perRow * WALL.tileW + (WALL.perRow - 1) * WALL.gap <= script.recording.inset.w - 80);

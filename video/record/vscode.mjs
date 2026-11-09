@@ -218,8 +218,8 @@ function windowEnv() {
   return env;
 }
 
-/** Resets the profile to a first run (settings, window size, no workspace history, fresh extension state) and opens `folder`. */
-export async function launch(folder) {
+/** Resets the profile to a first run (settings, window size, no workspace history, fresh extension state) and opens `folder`, with a take's extra Chromium `flags` (TAKES[…].chromiumFlags). */
+export async function launch(folder, flags = []) {
   await quit();
   if (!existsSync(join(EXT, 'extensions.json'))) throw new Error('no ERD Studio in the isolated profile: run `node record/vscode.mjs setup` first');
   mkdirSync(join(UD, 'User', 'globalStorage'), { recursive: true });
@@ -245,6 +245,7 @@ export async function launch(folder) {
   }
   const child = spawn(CODE, [`--user-data-dir=${UD}`, `--extensions-dir=${EXT}`, '--use-mock-keychain', `--remote-debugging-port=${PORT}`, `--force-device-scale-factor=${DPR}`,
     '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
+    ...flags,
     '--new-window', folder], { detached: true, stdio: 'ignore', env: windowEnv() });
   child.unref();
   for (let i = 0; i < 80; i++) {

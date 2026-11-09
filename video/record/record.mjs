@@ -46,7 +46,7 @@ const takes = existsSync(takesFile) ? JSON.parse(readFileSync(takesFile, 'utf8')
 for (const [name, take] of Object.entries(TAKES)) {
   if (only && only !== name) continue;
   const folder = { plain: makePlain, big: makeBig, dbt: makeDbt }[take.folder]();
-  await launch(folder);
+  await launch(folder, take.chromiumFlags ?? []);
   const d = await driver();
   await take.prep?.(d);
   const dir = join(BUILD, 'rec', name);

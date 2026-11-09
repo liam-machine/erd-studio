@@ -44,8 +44,10 @@ export const BIG_DIAGRAM = 'enterprise_warehouse';
 
 /** The table the scale scene hovers, and how far it zooms in on it (wheel steps and their size). */
 export const HOVER_TABLE = 'fct_site_search';
-const ZOOM_STEPS = 5;
-const ZOOM_DELTA = 358;
+const ZOOM_STEPS = 4;
+const ZOOM_DELTA = 448;
+/** Where the pointer moves on to after the hover: one of HOVER_TABLE's dimensions, beside it. */
+export const SECOND_TABLE = 'dim_marketplace';
 
 /** What Claude Code is asked, typed into its prompt. */
 export const CLAUDE_REQUEST = 'Add a dim_customer table, linked to fct_order';
@@ -223,6 +225,15 @@ export const TAKES = {
   },
   big: {
     folder: 'big',
+    /**
+     * A larger GPU memory budget for the compositor. With Chromium's default, the hover preview on
+     * 2,000 cards (an opacity fade on every table and line) runs past the tile memory budget: about
+     * half a second after the hover, the compositor drops tiles and redraws them, and for 2–3 frames
+     * the hovered card shows as a bare header and the canvas half blank (every one of 6 takes; the
+     * DOM never changes). With this budget the redraw fits. A product issue, reported; not hidden in
+     * the product.
+     */
+    chromiumFlags: ['--force-gpu-mem-available-mb=8192'],
     async prep(d) {
       await d.click(ERD_ICON, { ms: 1 });
       await d.waitFor(sideRow(BIG_DIAGRAM), 20000);
@@ -381,25 +392,26 @@ export const SCENES = {
       note({ routing: r });
       await shot('routed');
       // the whole diagram, 2,000 tables, once the settled lines have been seen for a moment (no
-      // fixed beat: how long routing takes is what is being shown)
-      await sleep(400);
+      // fixed beat: how long routing takes depends on the machine)
+      await sleep(300);
       await d.click(button('Fit'), { ms: 550 });
       await d.parkMouse(TAB_BAR);   // the real mouse off the canvas: no table or column tooltip
-      await sleep(800);
       await shot('fitted');
-      // zoom into one area, a wheel step at a time (each takes a while to draw: 2,000 cards), about
-      // the table the pointer will hover: on "Zoom in", or as soon as the overview has been seen
-      await notBefore(beats.hover.t - 0.2);
+      // zoom into one area about the table the pointer will hover, a few wheel steps (each takes a
+      // while to draw with 2,000 cards on screen): just before "Zoom in", or as soon as the overview has been seen
+      await notBefore(beats.hover.t - 1.0);
       const focus = await cardAt(d, HOVER_TABLE, 0.5, 0.5);
-      await d.moveTo({ x: focus.x + 40, y: focus.y + 50 }, { ms: 450, hover: false });
+      await d.moveTo({ x: focus.x + 40, y: focus.y + 50 }, { ms: 400, hover: false });
       for (let i = 0; i < ZOOM_STEPS; i++) { await d.wheel({ x: focus.x, y: focus.y }, -ZOOM_DELTA); await sleep(30); }
-      await sleep(450);
+      await sleep(300);
       await shot('zoomed');
       // the table hovered with the real mouse, on its card's footer (clear of its name's tooltip): its
-      // lines' arrows flow (renderer edgeFlow.ts), the rest of the diagram dims
-      await d.moveTo(await cardAt(d, HOVER_TABLE, 0.5, 0.96), { ms: 700 });
-      await sleep(1200);
+      // lines' arrows flow (renderer edgeFlow.ts) and the rest dims, while "hover a table" plays; then
+      // the pointer moves on to one of its dimensions, whose own line lights in turn
+      await d.moveTo(await cardAt(d, HOVER_TABLE, 0.5, 0.96), { ms: 600 });
+      await sleep(2200);
       await shot('hover');
+      await d.moveTo(await cardAt(d, SECOND_TABLE, 0.5, 0.96), { ms: 650 });
     },
   },
   // "Edit it by hand, on the canvas. Add a table, with starter columns if you like, and lay it out.
