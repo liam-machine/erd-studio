@@ -30,6 +30,10 @@
  * again. `cancelled` and `timedOut` come from the import worker's outcome,
  * through {@link importOutcomeFeatures} like every other.
  *
+ * One import is one outcome: each run counts through one {@link importOutcomeOnce}
+ * counter, and a redraw of a draft already counted counts nothing, whatever
+ * then happens to it.
+ *
  * vscode-free and pure: the commands call {@link recordImportOutcome} with
  * `telemetry.featureQuiet` (off the onboarding trail, like the draft quality
  * flags), so a failure to work the keys out never reaches the import.
@@ -43,7 +47,7 @@
 
 import type { LedgerCause, LedgerEntry } from './importLedger';
 import type { SqlDialect } from './sqlDdlModel';
-import type { TelemetryFeature } from './telemetryPayload';
+import { FEATURES, type TelemetryFeature } from './telemetryPayload';
 
 /** The importers counted: SQL DDL, a Power BI / Fabric semantic model, a DBML file, a dbt project. */
 export type ImportOutcomeImporter = 'sql' | 'powerbi' | 'dbml' | 'dbt';
@@ -194,14 +198,14 @@ export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFea
   const ledger = report.ledger ?? [];
   const outcome = report.outcome ?? ledgerImportOutcome(ledger);
   const keys: TelemetryFeature[] = [];
-  const byImporter = IMPORT_OUTCOME_FEATURES[report.importer]?.[outcome];
-  if (!byImporter) return keys;
+  const byImporter = keyIn(keyIn(IMPORT_OUTCOME_FEATURES, report.importer), outcome);
+  if (!isFeature(byImporter)) return keys;
   keys.push(byImporter);
   if (report.importer === 'sql' && report.dialect) {
-    const byDialect = SQL_DIALECT_OUTCOME_FEATURES[report.dialect]?.[outcome];
-    if (byDialect) keys.push(byDialect);
+    const byDialect = keyIn(keyIn(SQL_DIALECT_OUTCOME_FEATURES, report.dialect), outcome);
+    if (isFeature(byDialect)) keys.push(byDialect);
   }
-  const met = new Set<LedgerCause>();
+  const met = new Set<unknown>();
   for (const e of ledger) if (e.count > 0) met.add(e.cause);
   for (const [cause, key] of Object.entries(LEDGER_CAUSE_FEATURES) as Array<[LedgerCause, TelemetryFeature]>) {
     if (met.has(cause)) keys.push(key);
@@ -209,9 +213,45 @@ export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFea
   return keys;
 }
 
+const KNOWN_FEATURES: ReadonlySet<string> = new Set(FEATURES);
+
+/** A table's own entry only: an inherited name (`toString`, `__proto__`) is never a key. */
+function keyIn<T>(table: Readonly<Record<string, T>> | undefined, key: unknown): T | undefined {
+  return table && typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+/** Only a key FEATURES lists leaves this module. */
+function isFeature(key: unknown): key is TelemetryFeature {
+  return typeof key === 'string' && KNOWN_FEATURES.has(key);
+}
+
 /** Records {@link importOutcomeFeatures} through `record`. Never throws: telemetry never breaks an import. */
 export function recordImportOutcome(record: (key: TelemetryFeature) => void, report: ImportOutcomeReport): void {
   try {
     for (const key of importOutcomeFeatures(report)) record(key);
   } catch { /* never reaches the import */ }
+}
+
+/** {@link importOutcomeOnce}'s counter: call it with each way the import ended; only the first is counted. */
+export interface ImportOutcomeCounter {
+  (report: ImportOutcomeReport): void;
+  /** Whether the import's outcome is already counted. */
+  counted(): boolean;
+}
+
+/**
+ * One import's outcome, counted once: the first report wins, and every later
+ * one (a second cancel, a cancel after the time limit, a throw after the
+ * draft was counted) is dropped. The import worker's cancel and time-limit
+ * stops report through one of these per import. Never throws.
+ */
+export function importOutcomeOnce(record: (key: TelemetryFeature) => void): ImportOutcomeCounter {
+  let done = false;
+  const count = ((report: ImportOutcomeReport): void => {
+    if (done) return;
+    done = true;
+    recordImportOutcome(record, report);
+  }) as ImportOutcomeCounter;
+  count.counted = () => done;
+  return count;
 }

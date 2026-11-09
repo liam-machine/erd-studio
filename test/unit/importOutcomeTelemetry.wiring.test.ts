@@ -192,6 +192,16 @@ describe('Import DBML… — its outcome', () => {
     expect(outcomes()).toEqual([]);
   });
 
+  it('a redraw that then fails (the file emptied or broke after the draft was counted) adds no second outcome', async () => {
+    const redraw = { fingerprint: 'another plan', settle: () => {}, draft: {} as Draft };
+    const empty = writeFile('emptied.dbml', '// nothing here\n');
+    const broken = writeFile('broke.dbml', 'Table customer {\n  id int [pk\n');
+    await importDbml(dbmlDeps(empty, { draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), { filePath: empty, redraw });
+    await importDbml(dbmlDeps(broken, { draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), { filePath: broken, redraw });
+    await importDbml(dbmlDeps(undefined, { draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), { filePath: path.join(tmp, 'gone.dbml'), redraw });
+    expect(outcomes()).toEqual([]);
+  });
+
   it('the bundled example is ERD Studio\'s own: no outcome', async () => {
     await importDbml(dbmlDeps(writeFile('example.dbml', DBML), { source: 'example' }));
     expect(outcomes()).toEqual([]);

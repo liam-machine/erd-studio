@@ -110,6 +110,22 @@ describe('Import from dbt — its outcome', () => {
     expect(outcomes()).toEqual([]);
   });
 
+  it('a redraw that then finds nothing, or throws, adds no second outcome (the draft was counted)', async () => {
+    const resume = () => ({
+      pick: state.pick as never, layer: 'silver', name: 'sales',
+      redraw: { fingerprint: 'another plan', settle: () => {}, draft: {} as Draft },
+    });
+    state.models = [];
+    await drawFromDbt(deps({ draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), resume());
+    state.models = [{ name: 'dim_customer' }];
+    state.drawn = { ...drawnWithLedger(), modelNames: [] };
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    await drawFromDbt(deps({ draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), resume());
+    const boom = new Error('boom');
+    await expect(drawFromDbt(deps({ loadDbt: async () => { throw boom; }, draft: { preview: fakeDraftPreview(['discard']), trigger: 'palette' } }), resume())).rejects.toBe(boom);
+    expect(outcomes()).toEqual([]);
+  });
+
   it('no models, or none drawable: failed (with the ledger it had)', async () => {
     state.models = [];
     await drawFromDbt(deps());

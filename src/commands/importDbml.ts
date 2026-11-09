@@ -352,7 +352,7 @@ interface ImportRunProgress {
   loud: boolean;
   /** The draft's Keep, not settled yet. */
   settle?: (outcome: DraftKeepOutcome) => void;
-  /** The run's import outcome is counted (`importOutcomeTelemetry.ts`): at most one per run. */
+  /** The run's import outcome is counted (`importOutcomeTelemetry.ts`): at most one per run, none on a redraw. */
   outcomeCounted?: boolean;
 }
 
@@ -392,7 +392,8 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
   const base = deps.ui ?? vscodeImportDbmlUi();
   const source = deps.source ?? 'file';
   const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[source]) : base;
-  const progress: ImportRunProgress = { loud: !deps.draft?.quiet };
+  // A redraw re-plans a draft whose outcome is already counted: nothing it meets is counted again.
+  const progress: ImportRunProgress = { loud: !deps.draft?.quiet, outcomeCounted: resume?.redraw !== undefined };
   try {
     return await runImportDbml(deps, ui, base, resume, progress);
   } catch (err) {
@@ -762,7 +763,7 @@ async function runImportDbml(
   }
   // The import has its result (the plan, about to show): how the reading went and the
   // ledger's cause classes, the conversion's and the plan's. Never again on a redraw of it.
-  if (!resume?.redraw) countImportOutcome(deps, progress, { ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])] });
+  countImportOutcome(deps, progress, { ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])] });
 
   // 5. The draft: the plan as a read-only diagram, what it creates, reuses and
   // leaves out, before any write (or, with no preview, the dry run's modal).

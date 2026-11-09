@@ -175,7 +175,8 @@ export interface DrawFromDbtResult {
  */
 export async function drawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume): Promise<DrawFromDbtResult | undefined> {
   telemetry.feature('drawStarted');
-  const run: DrawRun = { outcomeCounted: false };
+  // A redraw re-plans a draft whose outcome is already counted: nothing it meets is counted again.
+  const run: DrawRun = { outcomeCounted: resume?.redraw !== undefined };
   try {
     return await runDrawFromDbt(deps, resume, run);
   } catch (err) {
@@ -443,7 +444,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
   }
   // The import has its result (the draft, about to show): how the reading went and the
   // ledger's cause classes. Never again on a redraw of it.
-  if (!resume?.redraw) countDbtOutcome(run, { ledger: draft.ledger });
+  countDbtOutcome(run, { ledger: draft.ledger });
 
   // The draft (§5.2): the diagram as Keep writes it, read-only, before any write.
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
