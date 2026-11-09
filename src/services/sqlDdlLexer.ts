@@ -276,7 +276,22 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
       push({ kind: 'word', value: text.slice(start, i), start, end: i, line: startLine });
       continue;
     }
-    if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(text[i + 1] ?? ''))) {
+    // A name that starts with a digit (`cat.340b_silver.t`, a column `3RD_PARTY_VENDOR`: Spark, MySQL
+    // and Hive accept it unquoted): a word, never the number 340 and a word b_silver. Only a name
+    // with an underscore, or a part of a dotted name: `10L`, `1e5` and `8K` stay numbers.
+    if (/[0-9]/.test(c)) {
+      const run = /^[0-9]+[A-Za-z_][A-Za-z0-9_$]*/.exec(text.slice(i, i + 256));
+      if (run && !/^[0-9]+(e[0-9]+|[LSYDF]|BD)$/i.test(run[0])
+        && (run[0].includes('_') || afterNamePart(tokens, start) || /^\.[A-Za-z_`"[]/.test(text.slice(i + run[0].length, i + run[0].length + 2)))) {
+        i += run[0].length;
+        push({ kind: 'word', value: run[0], start, end: i, line: startLine });
+        continue;
+      }
+    }
+    // `.5` is a number, but the dot in `cat.340b_x` joins two name parts.
+    const nameDot = c === '.' && /^\.[0-9]+[A-Za-z_]/.test(text.slice(i, i + 64)) && tokens.length > 0
+      && (tokens[tokens.length - 1].kind === 'word' || tokens[tokens.length - 1].kind === 'ident') && tokens[tokens.length - 1].end === i;
+    if (/[0-9]/.test(c) || (c === '.' && !nameDot && /[0-9]/.test(text[i + 1] ?? ''))) {
       while (i < n && /[0-9.eE]/.test(text[i])) i++;
       push({ kind: 'number', value: text.slice(start, i), start, end: i, line: startLine });
       continue;
@@ -591,6 +606,14 @@ function startsDefinition(tokens: readonly Token[], i: number): boolean {
     if (CREATE_OBJECT_WORDS.has(upper(tokens[k]))) return true;
   }
   return false;
+}
+
+/** Whether a token starting at `offset` follows a name and a dot with no space between (`a.` before `340b`). */
+function afterNamePart(tokens: readonly Token[], offset: number): boolean {
+  const dot = tokens[tokens.length - 1];
+  const before = tokens[tokens.length - 2];
+  return !!dot && dot.kind === 'punct' && dot.value === '.' && dot.end === offset
+    && !!before && (before.kind === 'word' || before.kind === 'ident') && before.end === dot.start;
 }
 
 /** Whether only spaces precede `offset` on its line. */

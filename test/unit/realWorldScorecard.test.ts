@@ -17,7 +17,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED, SAMPLE_SLUGS } from './realWorld/expected';
 import { COUNT_KEYS, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
-import { SAMPLES_ROOT, loadTruth } from './realWorldScorecard';
+import { SAMPLES_ROOT, loadTruth, qualifySameNames, type TruthSample } from './realWorldScorecard';
 
 const BASELINE = path.join(__dirname, 'realWorld', 'baseline.json');
 
@@ -77,6 +77,21 @@ describe('real-world scorecard against its baseline', () => {
       return;
     }
     expect(regressions(baseline.samples, ordered)).toEqual([]);
+  });
+});
+
+describe('same-name tables in two schemas', () => {
+  it('are scored as Import DBML names them: schema_name, with t_ before a name that starts with a digit', () => {
+    const table = (schema: string, name: string) => ({ schema, name, pk: [], columns: [['id', 'INT', '']] });
+    const truth = {
+      importer: 'sql', input: {}, counts: { tables: 3, columns: 3, primaryKeys: 0, relationships: 1 },
+      tables: [table('sales', 'customer'), table('340b_slvr', 'customer'), table('sales', 'orders')],
+      relationships: [{ from: 'orders', fromSchema: 'sales', fromColumn: 'id', to: 'customer', toSchema: '340b_slvr', toColumn: 'id' }],
+      uniqueKeys: [],
+    } as unknown as TruthSample;
+    const q = qualifySameNames(truth);
+    expect(q.tables.map((t) => t.name)).toEqual(['sales_customer', 't_340b_slvr_customer', 'orders']);
+    expect(q.relationships[0].to).toBe('t_340b_slvr_customer');
   });
 });
 

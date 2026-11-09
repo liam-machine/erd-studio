@@ -581,7 +581,9 @@ export function qualifySameNames(truth: TruthSample): TruthSample {
   for (const t of truth.tables) count.set(canon(t.name), (count.get(canon(t.name)) ?? 0) + 1);
   const shared = (name: string): boolean => (count.get(canon(name)) ?? 0) > 1;
   if (![...count.values()].some((n) => n > 1)) return truth;
-  const qualified = (schema: string | undefined, name: string): string => (schema && shared(name) ? `${schema}_${name}` : name);
+  // A model name starts with a letter: Import DBML puts `t_` before one that does not (`340b_x_t` → `t_340b_x_t`).
+  const asModelName = (name: string): string => (/^[A-Za-z]/.test(name) ? name : `t_${name}`);
+  const qualified = (schema: string | undefined, name: string): string => (schema && shared(name) ? asModelName(`${schema}_${name}`) : name);
   return {
     ...truth,
     tables: truth.tables.map((t) => (shared(t.name) && t.schema ? { ...t, name: qualified(t.schema, t.name) } : t)),

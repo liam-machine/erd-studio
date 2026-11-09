@@ -20,7 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import { canon, dbtTruthInScope, runSample, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
+import { canon, dbtTruthInScope, qualifySameNames, runSample, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 import { SQL_DIALECTS, type SqlDialect } from '../../src/services/sqlDdlImport';
 import { DEFAULT_SQL_TIME_LIMIT_MS } from '../../src/commands/importSqlDdl';
 import { roundTripDbml, type CanonicalImport } from './generated/dbmlRoundTrip';
@@ -158,7 +158,7 @@ describe.skipIf(!enabled)('import corpus', () => {
         return false;
       };
       const echoed = source ? [...new Set(messages)].filter(echoes) : [];
-      const truthTables = scored.tables;
+      const truthTables = qualifySameNames(scored).tables;
       const gotTables = new Map(run.tables.map((t) => [canon(t.name), t]));
       const missingTables = truthTables.filter((t) => !gotTables.has(canon(t.name))).map((t) => t.name);
       const missingColumns = truthTables.flatMap((t) => {

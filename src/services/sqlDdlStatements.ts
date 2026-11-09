@@ -465,6 +465,8 @@ function recordTableOptions(cx: ConverterContext, t: Token[], close: number, tab
     if (isPunct(tok, ',') || isPunct(tok, '=')) { expectWord = isPunct(tok, ','); continue; }
     if (tok.kind !== 'word') { expectWord = true; continue; }
     const w = upper(tok);
+    // `… AS SELECT` (a typed column list filled by a query): the query is not a table option.
+    if (w === 'AS' && (upper(t[k + 1]) === 'SELECT' || upper(t[k + 1]) === 'WITH' || isPunct(t[k + 1], '('))) break;
     if (w === 'COMMENT') { expectWord = false; continue; }
     if (w === 'DEFAULT') continue;
     if (w === 'INHERITS' && isPunct(t[k + 1], '(')) {

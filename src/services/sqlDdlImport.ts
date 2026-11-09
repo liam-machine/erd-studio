@@ -779,7 +779,7 @@ function strayBeforeColumnList(t: Token[], next: number): boolean {
   // `(LIKE y INCLUDING ALL)`: a copy of another table's columns.
   if (upper(t[open + 1]) === 'LIKE' && splitTopLevel(t, open + 1, close).length === 1) return false;
   for (let k = close + 1; k < t.length; k++) {
-    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
+    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return typedColumnList(t, name.next, close);
   }
   return true;
 }
@@ -795,7 +795,7 @@ function isCreateTableWithColumns(t: Token[]): boolean {
   const close = matchParen(t, name.next);
   if (close < 0 || close === name.next + 1) return false;
   for (let k = close + 1; k < t.length; k++) {
-    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
+    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return typedColumnList(t, name.next, close);
   }
   return true;
 }
@@ -1086,6 +1086,13 @@ class Converter implements ConverterContext {
         }
       }
       lines.push(line);
+      // A table made from a query or another table is still a table the user may look for: named.
+      const named = this.skippedItems.filter((item) => item.file === file && item.kind === 'ctas' && item.name);
+      if (named.length) {
+        const shown = named.slice(0, MAX_NAMED_CTAS).map((item) => (item.line !== undefined ? `${item.name} (line ${item.line})` : item.name!));
+        const more = named.length - shown.length;
+        lines.push(`${file}: not imported, made from a query or another table with no column list of its own: ${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`);
+      }
     }
     return lines;
   }
@@ -1266,9 +1273,14 @@ class Converter implements ConverterContext {
     }
     // `CREATE TABLE x (LIKE y [INCLUDING …])` (PostgreSQL, Redshift): a copy of another table's columns, no list of its own.
     if (upper(t[open + 1]) === 'LIKE' && splitTopLevel(t, open + 1, close).length === 1) { this.skip(file, 'ctas'); return; }
-    // `CREATE TABLE x (a, b) AS SELECT` names columns without types.
+    // `CREATE TABLE x (a, b) AS SELECT` names columns without types. `CREATE TABLE x (a INT, b STRING) AS SELECT`
+    // (Snowflake, Databricks) types every one: the column list is the table, the query only fills it.
     for (let k = close + 1; k < t.length; k++) {
-      if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) { this.skip(file, 'ctas'); return; }
+      if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) {
+        if (!this.readingTypedSelect && typedColumnList(t, open, close)) { this.readColumnListOfQuery(file, text, st, at, k); return; }
+        this.skip(file, 'ctas');
+        return;
+      }
     }
     if (this.readingColumns === 0) this.tablesFound++;
     const qualified = this.qualify(name.parts);
@@ -1607,6 +1619,26 @@ class Converter implements ConverterContext {
     for (const c of cols) {
       if (c.inner) this.ledger.changed('type', 'inferred', 'type from an expression', { file, line: c.line, table: label, column: c.name }, 'the type of the CAST inside it');
     }
+  }
+
+  /**
+   * `CREATE TABLE x (a INT, …) AS SELECT …` read as `CREATE TABLE x (a INT, …)`:
+   * the statement ends before its `AS` (index `as`), so the query is never
+   * given to a grammar. The reading is in the ledger.
+   */
+  private readColumnListOfQuery(file: string, text: string, st: Statement, at: number, as: number): void {
+    const tokens = st.tokens.slice(0, as);
+    const tablesBefore = this.tables.length;
+    this.readingTypedSelect = true;
+    try {
+      this.readCreateTable(file, text, { ...st, tokens, end: tokens[tokens.length - 1].end }, at);
+    } finally {
+      this.readingTypedSelect = false;
+    }
+    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    if (!table || this.readingColumns > 0) return;
+    this.ledger.changed('table', 'inferred', 'CREATE TABLE … AS SELECT', { file, line: st.line, table: tableLabel(table) },
+      'its columns read from the typed column list; the query that fills it is not imported');
   }
 
   private withMissingCommas(text: string, st: Statement, open: number): { text: string; st: Statement; commas: MissingComma[] } | undefined {
@@ -2043,6 +2075,21 @@ function shortName(name: string): string {
   return name.length > 32 ? `${name.slice(0, 31)}…` : name;
 }
 
+/**
+ * Whether the column list `t(open, close)` declares a type for every column
+ * (`(a INT, b STRING COMMENT 'x', PRIMARY KEY (a))`), not only names
+ * (`(a, b)`, `(a COMMENT 'x')`): a CREATE TABLE … AS SELECT's own table.
+ */
+function typedColumnList(t: readonly Token[], open: number, close: number): boolean {
+  let columns = 0;
+  for (const [from, to] of splitTopLevel(t as Token[], open + 1, close, true)) {
+    if (from >= to || isConstraintItem(t, from, to)) continue;
+    if (!isName(t[from]) || to - from < 2 || t[from + 1].kind !== 'word' || /^(COMMENT|NOT|NULL|DEFAULT|PRIMARY|UNIQUE|REFERENCES|MASK|WITH)$/i.test(t[from + 1].value)) return false;
+    columns++;
+  }
+  return columns > 0;
+}
+
 /** The deepest parenthesis nesting inside a column list `t(open, close)`. */
 function parenDepth(t: readonly Token[], open: number, close: number): number {
   let depth = 0;
@@ -2058,6 +2105,8 @@ const OTHER_GRAMMARS: readonly SqlParseFormat[] = ['postgres', 'mssql', 'mysql',
 
 /** Skipped statements named in the log, one each (data, session and permission statements are only counted). */
 const NAMED_SKIPS: ReadonlySet<SkipKind> = new Set<SkipKind>(['view', 'index', 'routine', 'sequence', 'type', 'ctas', 'internalTable', 'existing', 'alter', 'comment', 'schema', 'other']);
+/** At most this many tables made from a query are named in a file's skipped lines (the log names them all). */
+const MAX_NAMED_CTAS = 20;
 /** At most this many skipped statements are named (a dump of thousands is counted). */
 const MAX_NAMED_SKIPS = 2000;
 

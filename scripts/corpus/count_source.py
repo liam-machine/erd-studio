@@ -255,6 +255,16 @@ class Model:
         self.order.append(k)
         return self.tables[k], k
 
+    def defined(self, name, schema):
+        """Whether a table of this name is already in the same schema (or either has none): what a
+        CREATE TABLE IF NOT EXISTS of it finds, so the statement does nothing."""
+        if schema and f'{schema}.{name}'.lower() in self.tables:
+            return True
+        old = self.tables.get(name.lower())
+        if old is None:
+            return False
+        return not (schema and old.get('schema') and old['schema'].lower() != schema.lower())
+
     def drop(self, key):
         self.order.remove(key)
         del self.tables[key]
@@ -434,6 +444,9 @@ def on_create_table(m, e, dialect, where, written=None):
                 return
             if isinstance(p, exp.SchemaCommentProperty):
                 pass
+    # CREATE TABLE IF NOT EXISTS of a table already defined does nothing: the first definition stays.
+    if e.args.get('exists') and m.defined(name, schema_of(tbl)):
+        return
     t, key = m.create(name, schema_of(tbl), where)
     if not isinstance(target, exp.Schema):
         q = e.args.get('expression')
@@ -588,6 +601,8 @@ def structural_create(m, sql, where):
         pm = re.search(r'PARTITION\s+OF\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')', s, re.I)
         if pm:
             m.parent[name.lower()] = idents(pm.group(1))[-1]
+        return True
+    if re.search(r'\bTABLE\s+IF\s+NOT\s+EXISTS\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
         return True
     t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where)
     if mm.group(2) != '(':
