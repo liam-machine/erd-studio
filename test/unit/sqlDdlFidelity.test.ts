@@ -139,6 +139,21 @@ describe('verbatim type text', () => {
 });
 
 describe('uniqueness from every source', () => {
+  it('a key names its columns in any case, as unquoted names are (TPC-H: Primary Key(L_ORDERKEY, …) on l_orderkey)', () => {
+    const sql = 'CREATE TABLE orders (o_orderkey int NOT NULL, o_custkey int, Primary Key(O_ORDERKEY));\n'
+      + 'CREATE TABLE lineitem (l_orderkey int NOT NULL, l_linenumber int NOT NULL, l_tag int, Primary Key(L_ORDERKEY, L_LINENUMBER), UNIQUE (L_TAG, L_LINENUMBER));\n'
+      + 'ALTER TABLE lineitem ADD FOREIGN KEY (L_ORDERKEY) REFERENCES orders (O_ORDERKEY);';
+    for (const dialect of ['postgres', 'mysql', 'snowflake'] as const) {
+      const r = convert(dialect, sql);
+      const p = plan(r.dbml);
+      const line = p.newTables.find((t) => t.name === 'lineitem')!;
+      expect(line.columns!.filter((c) => c.isPrimaryKey).map((c) => c.name)).toEqual(['l_orderkey', 'l_linenumber']);
+      expect(p.newTables.find((t) => t.name === 'orders')!.columns!.find((c) => c.isPrimaryKey)?.name).toBe('o_orderkey');
+      expect(r.dbml).toContain('("l_tag", "l_linenumber") [unique]');
+      expect(links(r.dbml)).toEqual(['lineitem(l_orderkey)>orders many-to-one']);
+    }
+  });
+
   const table = 'CREATE TABLE t (id int PRIMARY KEY, a int, b int, c int';
   it.each([
     ['inline UNIQUE', 'postgres', `${table} UNIQUE, d int);`, ['t(c)']],
@@ -212,9 +227,17 @@ describe('cardinality: one-to-one when the FK is its table\'s whole key or exact
     expect(links(r.dbml)).toEqual(['emp(mentor_id)>emp one-to-one']);
   });
 
-  it('an FK that is its table\'s key but references a non-key cannot be written from the FK side: many-to-one, and said', () => {
-    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, code int UNIQUE);\nCREATE TABLE c (code int PRIMARY KEY REFERENCES p (code));');
-    expect(links(r.dbml)).toEqual(['c(code)>p many-to-one']);
+  it('an FK that is its table\'s key but references a unique non-key is one-to-one, declared on the FK column (Synapse, GitLab)', () => {
+    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, code int UNIQUE);\nCREATE TABLE c (code int PRIMARY KEY REFERENCES p (code) ON DELETE CASCADE);');
+    expect(links(r.dbml)).toEqual(['c(code)>p one-to-one']);
+    expect(entries(r, 'one-to-one link')).toHaveLength(0);
+    // The inline reference has no place for its action: said, not dropped silently.
+    expect(entries(r, 'FK action')).toHaveLength(1);
+  });
+
+  it('a composite FK that is its table\'s key but references a non-key cannot be written from the FK side: many-to-one, and said', () => {
+    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, a int, b int, UNIQUE (a, b));\nCREATE TABLE c (a int, b int, PRIMARY KEY (a, b), FOREIGN KEY (a, b) REFERENCES p (a, b));');
+    expect(links(r.dbml)).toEqual(['c(a,b)>p many-to-one']);
     expect(entries(r, 'one-to-one link')).toHaveLength(1);
   });
 
@@ -358,6 +381,22 @@ describe('constraint replay, in file order', () => {
 });
 
 describe('the schema context', () => {
+  it('a key or reference on schema.t, when no CREATE TABLE is in that schema, is on the one table t with none (TPC-H dbgen: TPCD.REGION)', () => {
+    const sql = 'CREATE TABLE REGION (R_REGIONKEY INTEGER NOT NULL, R_NAME CHAR(25));\nCREATE TABLE NATION (N_NATIONKEY INTEGER NOT NULL, N_REGIONKEY INTEGER NOT NULL);\n'
+      + 'ALTER TABLE TPCD.REGION ADD PRIMARY KEY (R_REGIONKEY);\nALTER TABLE TPCD.NATION ADD PRIMARY KEY (N_NATIONKEY);\n'
+      + 'ALTER TABLE TPCD.NATION ADD FOREIGN KEY (N_REGIONKEY) REFERENCES TPCD.REGION (R_REGIONKEY);\nCOMMENT ON TABLE TPCD.REGION IS \'Regions\';';
+    const r = convert('postgres', sql);
+    expect(r.dbml).toContain('"R_REGIONKEY" INTEGER [pk]');
+    expect(r.dbml).toContain('"N_NATIONKEY" INTEGER [pk]');
+    expect(links(r.dbml)).toEqual(['NATION(N_REGIONKEY)>REGION many-to-one']);
+    expect(r.dbml).toContain("Note: 'Regions'");
+    // Said once per table, in the ledger.
+    expect(entries(r, 'schema qualifier').map((e) => [e.where?.table, e.count])).toEqual([['TPCD.REGION', 1], ['TPCD.NATION', 1]]);
+    // A schema some CREATE TABLE uses is a schema: a key on a table not in it is still not in the files.
+    const other = convert('postgres', 'CREATE TABLE s.a (id int);\nCREATE TABLE b (id int);\nALTER TABLE s.b ADD PRIMARY KEY (id);');
+    expect(other.dbml).not.toContain('[pk]');
+  });
+
   it('MySQL USE db: unqualified tables and references are in it (sakila)', () => {
     const r = convert('mysql', 'CREATE DATABASE sakila;\nUSE sakila;\nCREATE TABLE a (id int PRIMARY KEY);\nCREATE TABLE b (id int PRIMARY KEY, a_id int, FOREIGN KEY (a_id) REFERENCES a (id));');
     expect(r.dbml).toContain('Table "sakila"."a"');
@@ -384,6 +423,16 @@ describe('the schema context', () => {
   it('the dialect\'s default schema is no schema (USE SCHEMA PUBLIC, search_path public)', () => {
     expect(convert('snowflake', 'USE SCHEMA PUBLIC;\nCREATE TABLE a (id int);').dbml).toMatch(/^Table "a" \{/m);
     expect(convert('postgres', 'SET search_path TO public;\nCREATE TABLE a (id int);').dbml).toMatch(/^Table "a" \{/m);
+  });
+
+  it('tables some name in the default schema and some with none are one schema (Northwind: Orders and [dbo].[Region])', () => {
+    const r = convert('sqlserver', 'CREATE TABLE "Orders" ("OrderID" int NOT NULL, "RegionID" int)\nGO\nCREATE TABLE [dbo].[Region] ([RegionID] [int] NOT NULL)\nGO\nALTER TABLE [dbo].[Region] ADD CONSTRAINT [PK_Region] PRIMARY KEY ([RegionID])\nGO\nALTER TABLE Orders ADD FOREIGN KEY (RegionID) REFERENCES dbo.Region (RegionID)\nGO');
+    expect(r.dbml).toContain('Table "dbo"."Orders"');
+    expect(r.dbml).toContain('Table "dbo"."Region"');
+    expect(entries(r, 'default schema').map((e) => e.count)).toEqual([1]);
+    // All with none, or all qualified: unchanged.
+    expect(convert('sqlserver', 'CREATE TABLE a (id int)\nGO\nCREATE TABLE b (id int)\nGO').dbml).toMatch(/^Table "a" \{/m);
+    expect(convert('postgres', 'CREATE TABLE public.a (id int);\nCREATE TABLE b (id int);').dbml).toContain('Table "b"');
   });
 
   it('SQL Server USE db picks a database, never a schema', () => {
@@ -583,6 +632,43 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
 });
 
 describe('more places a schema says structure', () => {
+  it('a foreign key to a table not in the files names its table as the files leave it (renamed later: Snowplow r1 → r2)', () => {
+    const r = convert('postgres', 'CREATE TABLE atomic.a_1 (root_id char(36) NOT NULL, FOREIGN KEY (root_id) REFERENCES atomic.events (event_id));\n'
+      + 'ALTER TABLE atomic.a_1 RENAME TO a_1_r1;\nCREATE TABLE atomic.a_1 (root_id char(36) NOT NULL, FOREIGN KEY (root_id) REFERENCES atomic.events (event_id));');
+    const lines = r.skipped.filter((l) => l.includes('atomic.events'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('foreign key atomic.a_1_r1(root_id) → atomic.events: that table is not in the files');
+    expect(lines[1]).toContain('foreign key atomic.a_1(root_id) → atomic.events');
+  });
+
+  it('CREATE TABLE … AS SELECT CAST(NULL AS type) AS column, with no FROM, is an empty table of those columns (OMOP CDM for Spark)', () => {
+    const sql = [
+      'CREATE TABLE @cdmDatabaseSchema.person  ',
+      'USING DELTA',
+      'AS',
+      'SELECT',
+      'CAST(NULL AS integer) AS person_id,',
+      '\tCAST(NULL AS TIMESTAMP) AS birth_datetime,',
+      '\tCAST(NULL AS STRING) AS person_source_value,',
+      "\tIF(try_cast(NULL  AS DATE) IS NULL, to_date(cast(NULL  AS STRING), 'yyyyMMdd'), try_cast(NULL  AS DATE)) AS birth_date,",
+      '\tCAST(NULL AS decimal(10, 2)) AS amount  WHERE 1 = 0;',
+      'OPTIMIZE @cdmDatabaseSchema.person   ZORDER BY person_id;',
+      'CREATE TABLE @cdmDatabaseSchema.copy USING DELTA AS SELECT CAST(person_id AS bigint) AS id FROM @cdmDatabaseSchema.person;',
+      'ALTER TABLE @cdmDatabaseSchema.person ADD CONSTRAINT xpk_person PRIMARY KEY (person_id);',
+    ].join('\n');
+    const r = convert('databricks', sql);
+    const t = plan(r.dbml).newTables;
+    expect(t.map((x) => x.name)).toEqual(['person']);
+    expect(t[0].columns!.map((c) => [c.name, c.dataType, !!c.isPrimaryKey])).toEqual([
+      ['person_id', 'integer', true], ['birth_datetime', 'TIMESTAMP', false], ['person_source_value', 'STRING', false],
+      ['birth_date', 'DATE', false], ['amount', 'decimal(10,2)', false],
+    ]);
+    // Each column at its own line; the type read from inside an expression is said; the real CTAS is still skipped.
+    expect(entries(r, 'CREATE TABLE … AS SELECT').map((e) => [e.where?.file, e.where?.line, e.where?.table?.replace(/^.*\./, '')])).toEqual([['schema.sql', 1, 'person']]);
+    expect(entries(r, 'type from an expression').map((e) => [e.where?.line, e.where?.column])).toEqual([[8, 'birth_date']]);
+    expect(r.skipped.join('\n')).toContain('1 CREATE TABLE without a column list');
+  });
+
   it('pg_dump: ALTER COLUMN … ADD GENERATED AS IDENTITY makes the column an identity', () => {
     const r = convert('postgres', 'CREATE TABLE public.t (id integer NOT NULL, n text);\nALTER TABLE public.t ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (\n    SEQUENCE NAME public.t_id_seq\n    START WITH 1\n);');
     expect(r.dbml).toMatch(/"id" integer \[increment, not null\]/);

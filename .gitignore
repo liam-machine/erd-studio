@@ -40,3 +40,6 @@ scripts/.regen-*.cjs
 test/stories/out/
 # ...and the narration voice cache (run.mjs --narrate) and its espeak data copy
 test/stories/.cache/
+
+# The import corpus cache (scripts/corpus/fetch.mjs): downloaded schemas, never committed
+/.cache/

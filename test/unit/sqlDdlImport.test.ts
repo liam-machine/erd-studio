@@ -556,6 +556,10 @@ describe('dialects', () => {
     expect(detectSqlDialect('CREATE TABLE t (id SERIAL, j JSONB);')).toBe('postgres');
     expect(detectSqlDialect('CREATE TABLE t (id int);')).toBeUndefined();
     expect(detectSqlDialect('-- USING DELTA in a comment\nCREATE TABLE t (id int);')).toBeUndefined();
+    // Data is not a signal: MySQL's Chinook has `names` and a string 'Emerson String Quartet' (once read as Databricks).
+    expect(detectSqlDialect("CREATE TABLE `Artist` (`ArtistId` INT NOT NULL, `Name` NVARCHAR(120));\nINSERT INTO `Artist` VALUES (1, N'Emerson String Quartet');")).toBe('mysql');
+    expect(detectSqlDialect("CREATE TABLE t (id int, note text);\nINSERT INTO t VALUES (1, 'USING DELTA ENGINE=x');")).toBe('postgres');
+    expect(detectSqlDialect('CREATE TABLE `s`.`t` (`id` BIGINT, `name` STRING);')).toBe('databricks');
   });
 
   it('a grammar crash is never thrown: the table is salvaged without the grammar', () => {
@@ -738,6 +742,8 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(countCreateTablesWithColumns("SELECT 'CREATE TABLE x (id int)';")).toBe(0);
     expect(countCreateTablesWithColumns('CREATE TABLE [dbo].[A]([Id] [int])\nGO\nCREATE TABLE `b` (`id` INT) ENGINE=InnoDB;')).toBe(2);
     expect(countCreateTablesWithColumns('CREATE TABLE IF NOT EXISTS "users" ("id" SERIAL PRIMARY KEY);')).toBe(1);
+    // A typed empty SELECT is a column list; a SELECT from a table is not.
+    expect(countCreateTablesWithColumns('CREATE TABLE p USING DELTA AS SELECT CAST(NULL AS int) AS id WHERE 1 = 0;\nCREATE TABLE q AS SELECT CAST(id AS int) AS id FROM p;')).toBe(1);
   });
 
   it('knows Oracle DDL, and not Snowflake\'s NUMBER', () => {
@@ -764,5 +770,75 @@ describe('what the folder looks count, and a dump without its data', () => {
     const converted = convert('mysql', [{ name: 'dump.sql', text: stripped.text }]);
     expect(converted.tableCount).toBe(2);
     expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
+  });
+
+  it('a folder with no CREATE TABLE in it says so for each file, at its first line', () => {
+    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'SELECT 1;' }, { name: 'keys/b.sql', text: 'CREATE VIEW v AS SELECT 1;' }] }, dbmlCoreSqlEngine);
+    expect(result.ok).toBe(false);
+    expect(result.ledger?.filter((e) => e.outcome === 'problem').map((e) => e.where)).toEqual([{ file: 'a.sql', line: 1 }, { file: 'keys/b.sql', line: 1 }]);
+  });
+
+  it('what the DBML reader rejects is left out at its statement, never the whole import', () => {
+    const files = [{ name: 'a.sql', text: 'CREATE TABLE a (id int PRIMARY KEY);\n\nCREATE TABLE b (\n  id int PRIMARY KEY,\n  a_id int REFERENCES a (id)\n);\nCREATE TABLE c (id int PRIMARY KEY, a_id int REFERENCES a (id));' }];
+    // The reader rejects b's block (any line of it), then nothing.
+    const rejectB = (dbml: string): Array<{ line: number; message: string }> => {
+      const lines = dbml.split('\n');
+      const at = lines.findIndex((l) => l.startsWith('Table "b"'));
+      return at < 0 ? [] : [{ line: at + 2, message: "No column named 'X' inside Table 'b'" }];
+    };
+    const r = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectB);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.dbml).not.toContain('Table "b"');
+    expect(r.dbml).toContain('Ref: "c"."a_id" > "a"."id"');
+    expect(r.problems).toEqual([expect.objectContaining({ file: 'a.sql', line: 3, table: 'b' })]);
+    expect(r.problems[0].message).toMatch(/^Table b could not be written as DBML \(No column named 'X' inside Table 'b'\), so it is left out\.$/);
+    expect(r.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', where: { file: 'a.sql', line: 3, table: 'b', column: 'a_id' } }));
+    // A rejected Ref line leaves out that reference only.
+    const rejectRef = (dbml: string): Array<{ line: number; message: string }> => {
+      const at = dbml.split('\n').findIndex((l) => l.startsWith('Ref: "c"'));
+      return at < 0 ? [] : [{ line: at + 1, message: 'bad ref' }];
+    };
+    const r2 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectRef);
+    expect(r2.ok && r2.tableCount).toBe(3);
+    expect(r2.ok && r2.dbml).not.toContain('Ref: "c"');
+    expect(r2.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', cause: 'parseError', where: { file: 'a.sql', line: 7, table: 'c', column: 'a_id' } }));
+    // Every table rejected: nothing imported, each said at its own line.
+    const r3 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, (dbml) => dbml.split('\n').flatMap((l, i) => (l.startsWith('Table') ? [{ line: i + 1, message: 'no' }] : [])));
+    expect(r3.ok).toBe(false);
+    expect(r3.problems.map((p) => [p.table, p.line])).toEqual([['a', 1], ['b', 3], ['c', 7]]);
+    // The engine reads its output back as Import DBML does: a clean file is unchanged.
+    const clean = sqlDdlToDbml({ dialect: 'postgres', files });
+    expect(clean.ok && clean.tableCount).toBe(3);
+    expect(clean.problems).toEqual([]);
+  });
+
+  it('splits a file\'s skipped summary into lines of at most 300 characters, every kind still counted', () => {
+    const sql = [
+      'SET x = 1;', 'CREATE VIEW v AS SELECT 1;', 'CREATE INDEX i ON a (id);', 'CREATE SEQUENCE s;', 'DROP TABLE IF EXISTS z;',
+      'CREATE SCHEMA k;', 'GRANT SELECT ON a TO u;', 'SELECT 1;', 'CREATE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;',
+      'CREATE TYPE r AS (a int);', 'COMMENT ON SCHEMA k IS \'x\';', 'ALTER TABLE a OWNER TO u;', 'ALTER TABLE a ENABLE ROW LEVEL SECURITY;',
+      'CREATE TABLE a (id int) WITH (fillfactor = 70);', 'CREATE TABLE b AS SELECT 1;', 'VACUUM a;',
+    ].join('\n');
+    const result = convert('postgres', [{ name: 'pagila-schema.sql', text: sql }]);
+    expect(result.skipped.length).toBeGreaterThan(1);
+    for (const line of result.skipped) expect(line.length).toBeLessThanOrEqual(300);
+    expect(result.skipped[0]).toMatch(/^pagila-schema\.sql: skipped /);
+    expect(result.skipped[1]).toMatch(/^pagila-schema\.sql: also skipped /);
+    const all = result.skipped.join(', ');
+    for (const kind of ['1 view', '1 index', '1 sequence', '1 DROP statement', '1 query', '1 CREATE TABLE without a column list']) expect(all).toContain(kind);
+  });
+
+  it('ends a big script\'s INSERT with no `;` at its GO line or the next statement, never at a `;` further on', () => {
+    // SQL Server install scripts (Northwind) write INSERTs with no `;`, batched by GO: a CREATE TABLE after them is kept.
+    const rows = Array.from({ length: 40_000 }, (_, i) => `Insert Into Region Values (${i},'Eastern')`).join('\n');
+    const big = `CREATE TABLE [dbo].[A] ([Id] [int] NOT NULL)\nGO\n${rows}\nGo\nCREATE TABLE [dbo].[B] ([Id] [int] NOT NULL)\nINSERT INTO B VALUES (1)\nCREATE TABLE [dbo].[C] ([Id] [int] NOT NULL);\nSELECT 1;\n`;
+    const stripped = withoutSqlData(big);
+    expect(stripped.text.split('\n')).toHaveLength(big.split('\n').length);
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[B]');
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[C]');
+    expect(stripped.text).not.toContain('Eastern');
+    const converted = convert('sqlserver', [{ name: 'instnwnd.sql', text: stripped.text }]);
+    expect(converted.tableCount).toBe(3);
   });
 });

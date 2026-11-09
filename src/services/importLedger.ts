@@ -228,10 +228,13 @@ function nameOf(where: LedgerWhere | undefined): string | undefined {
   return ledgerText(where.column ? `${where.table}.${where.column}` : where.table, MAX_NAME);
 }
 
-function examples(names: readonly string[]): string {
+/** The longest a grouped line runs: it gives fewer example names (then cut ones) rather than run on. */
+const MAX_LINE = 300;
+
+function examples(names: readonly string[], shown = EXAMPLES_SHOWN): string {
   if (names.length === 0) return '';
-  const head = names.slice(0, EXAMPLES_SHOWN).join(', ');
-  return names.length > EXAMPLES_SHOWN ? `${head} and ${names.length - EXAMPLES_SHOWN} more` : head;
+  const head = names.slice(0, shown).join(', ');
+  return names.length > shown ? `${head} and ${names.length - shown} more` : head;
 }
 
 interface Group { outcome: LedgerOutcome; unit: LedgerUnit; cause: LedgerCause; what: string; count: number; details: Set<string>; names: string[] }
@@ -260,8 +263,17 @@ function groupLine(g: Group): string {
   const detail = details.length === 1 && details[0] ? ledgerText(details[0], MAX_DETAIL, true) : '';
   const cause = CAUSE_PHRASES[g.cause];
   const phrase = detail || (cause ? `${OUTCOME_PHRASES[g.outcome]}: ${cause}` : OUTCOME_PHRASES[g.outcome]);
-  const names = examples(g.names);
-  return `${plural(g.count, unitNouns(g.unit))}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
+  const line = (names: string): string => `${plural(g.count, unitNouns(g.unit))}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
+  for (let shown = EXAMPLES_SHOWN; shown >= 1; shown--) {
+    const out = line(examples(g.names, shown));
+    if (out.length <= MAX_LINE || shown === 1) {
+      if (out.length <= MAX_LINE) return out;
+      // One name still too long: cut it to the room left.
+      const room = MAX_LINE - line('').length - (g.names.length > 1 ? ` and ${g.names.length - 1} more`.length : 0) - 3;
+      return line(examples([ledgerText(g.names[0], Math.max(8, room)), ...g.names.slice(1)], 1));
+    }
+  }
+  return line('');
 }
 
 function capped(lines: string[], max: number | undefined): string[] {

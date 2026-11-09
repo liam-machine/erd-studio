@@ -822,8 +822,10 @@ export function configuredSchemaOf(name: string, ymlData?: YmlData, manifest?: M
 /**
  * Key flags for a seeded model, from what dbt tests today: a column is the
  * primary key when it is the model's ONLY column with a standalone `unique`
- * test (and no composite key is declared); a column is a foreign key when a
- * draft relationship leaves from it. Returns a new model; existing flags win.
+ * test and no composite key declared holds it (a surrogate `id` beside a
+ * `unique_combination_of_columns` grain of other columns is the key); a
+ * column is a foreign key when a draft relationship leaves from it. Returns a
+ * new model; existing flags win.
  */
 export function markDraftKeys(
   model: SemanticTable,
@@ -832,14 +834,15 @@ export function markDraftKeys(
 ): SemanticTable {
   const key = normaliseName(model.name);
   const uniqueCols = new Set<string>();
-  let hasComposite = false;
+  const compositeColumns = new Set<string>();
   for (const [m, cols] of unique.uniqueColumns) {
     if (normaliseName(m) === key) { for (const c of cols) { uniqueCols.add(identifierKey(c)); } }
   }
   for (const [m, groups] of unique.compositeUniqueGroups) {
-    if (normaliseName(m) === key && groups.length > 0) { hasComposite = true; }
+    if (normaliseName(m) === key) { for (const g of groups) for (const c of g) compositeColumns.add(identifierKey(c)); }
   }
-  const pk = !hasComposite && uniqueCols.size === 1 ? [...uniqueCols][0] : undefined;
+  const sole = uniqueCols.size === 1 ? [...uniqueCols][0] : undefined;
+  const pk = sole !== undefined && !compositeColumns.has(sole) ? sole : undefined;
   const fks = new Set(relationships
     .map((r) => canonicalRelationship(r))
     .filter((r) => normaliseName(r.fromModel) === key)

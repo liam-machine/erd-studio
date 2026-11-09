@@ -231,6 +231,14 @@ export interface ResolvedRef {
    * Import DBML stores from the FK side.
    */
   oneToOne?: boolean;
+  /**
+   * A one-to-one whose FK columns (one column) are their table's whole key
+   * but whose target is a unique non-key: `Ref: a - b` would be stored from
+   * the target, so it is declared on the FK column instead
+   * (`[ref: - p.code]`), which Import DBML stores from the column that
+   * declared it.
+   */
+  inline?: boolean;
 }
 
 /** Statement kinds that are skipped, with the phrase a summary line uses. */
