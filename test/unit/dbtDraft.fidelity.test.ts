@@ -281,7 +281,7 @@ models:
     const draft = buildDbtDraft({ modelNames: ['person', 'concept', 'visit', 'care_site'], ymlData: data, libraryHas: () => false });
     const lost = draft.ledger.filter((e) => e.outcome === 'lost' && e.what === 'relationships_where condition');
     expect(lost.map((e) => `${e.where?.table}.${e.where?.column}`).sort()).toEqual(['person.gender_concept_id', 'visit.care_site_id']);
-    expect(texts(view(draft, data), 'leftOut')).toContain('2 constraints: relationships_where condition not kept: the relationship is drawn for every row (person.gender_concept_id, visit.care_site_id).');
+    expect(texts(view(draft, data), 'leftOut')).toContain('2 constraints: relationships_where condition not saved, so the line is drawn for every row; Relationships lists each condition (person.gender_concept_id, visit.care_site_id).');
   });
 });
 
