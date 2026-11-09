@@ -579,8 +579,10 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     if (!got) continue;
     checkDesc(t.description, got.description);
     const gotCols = new Map((got.columns ?? []).map((c) => [canon(c.name), c]));
+    // The same name first: `name` and `_name` (Django) are one name by letters and digits.
+    const gotExact = new Map((got.columns ?? []).map((c) => [c.name.toLowerCase(), c]));
     for (const c of t.columns) {
-      const gc = gotCols.get(canon(c[0]));
+      const gc = gotExact.get(c[0].toLowerCase()) ?? gotCols.get(canon(c[0]));
       if (!gc) {
         colMissing++;
         if (mentioned(shown, t.name, c[0]) || mentioned(shown, `${t.name}.${c[0]}`)) colMissingReported++;

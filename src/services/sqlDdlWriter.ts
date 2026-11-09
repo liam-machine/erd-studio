@@ -72,7 +72,13 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
     const oneToOne = cardinalityOf(resolved);
     const ledgerWhere = { file: ref.origin.file, line: ref.origin.line, table: tableLabel(from), column: resolved.fromColumns.join('+') };
     if (oneToOne === 'one-to-one') resolved.oneToOne = true;
-    else if (oneToOne === 'unwritable') {
+    else if (oneToOne === 'unwritable' && resolved.fromColumns.length === 1) {
+      // Declared on the FK column, which Import DBML stores it from; an inline reference has no settings.
+      resolved.oneToOne = true;
+      resolved.inline = true;
+      const actions = refSettings(resolved);
+      if (actions) c.ledger.lost('setting', 'noField', 'FK action', ledgerWhere, `not kept: ${actions.slice(2, -1)} (a one-to-one declared on its column has no place for it)`);
+    } else if (oneToOne === 'unwritable') {
       c.ledger.changed('relationship', 'other', 'one-to-one link', ledgerWhere, 'written as many-to-one: its FK columns are their table\'s key, but it references columns that are not');
     }
     if (ref.name) c.ledger.changed('constraint', 'notDesign', 'foreign key name', ledgerWhere, 'not kept: a constraint\'s name is the database\'s, not the design\'s');
@@ -158,7 +164,7 @@ export function dbmlExpression(expr: string): string {
   return `\`${expr.replace(/`/g, "'")}\``;
 }
 
-export function fieldSettings(field: ModelField): string {
+export function fieldSettings(field: ModelField, inlineRef?: string): string {
   const settings: string[] = [];
   if (field.pk) settings.push('pk');
   if (field.increment) settings.push('increment');
@@ -174,6 +180,7 @@ export function fieldSettings(field: ModelField): string {
   }
   for (const check of field.checks) settings.push(`check: ${dbmlExpression(check)}`);
   if (field.note) settings.push(`note: ${dbmlString(field.note)}`);
+  if (inlineRef) settings.push(`ref: ${inlineRef}`);
   return settings.length ? ` [${settings.join(', ')}]` : '';
 }
 
@@ -187,9 +194,19 @@ export function writeDbml(
     const lines = e.values.map((v) => `  ${quoteIdent(v.name)}${v.note ? ` [note: ${dbmlString(v.note)}]` : ''}`);
     blocks.push(`Enum ${dbmlTableName(e)} {\n${lines.join('\n')}\n}`);
   }
+  // One-to-ones declared on their FK column (one per column; any other is written as a Ref).
+  const inline = new Map<ModelField, string>();
+  const placed = new Set<ResolvedRef>();
+  for (const r of refs) {
+    if (!r.inline) continue;
+    const field = r.from.fields.find((f) => f.name === r.fromColumns[0]);
+    if (!field || inline.has(field)) continue;
+    inline.set(field, `- ${dbmlTableName(r.to)}.${quoteIdent(r.toColumns[0])}`);
+    placed.add(r);
+  }
   for (const table of tables) {
     const header = table.alias ? ` [alias: ${dbmlString(table.alias)}]` : '';
-    const lines = table.fields.map((f) => `  ${quoteIdent(f.name)} ${dbmlType(f.type)}${fieldSettings(f)}`);
+    const lines = table.fields.map((f) => `  ${quoteIdent(f.name)} ${dbmlType(f.type)}${fieldSettings(f, inline.get(f))}`);
     const indexes: string[] = [];
     if (table.primaryKey) indexes.push(`    (${table.primaryKey.map(quoteIdent).join(', ')}) [pk]`);
     // A unique key over the primary key's columns, or one already written, says nothing more.
@@ -206,10 +223,11 @@ export function writeDbml(
     if (table.note) lines.push('', `  Note: ${dbmlString(table.note)}`);
     blocks.push(`Table ${dbmlTableName(table)}${header} {\n${lines.join('\n')}\n}`);
   }
-  if (refs.length) {
+  const blockRefs = refs.filter((r) => !placed.has(r));
+  if (blockRefs.length) {
     const end = (table: ModelTable, columns: string[]): string =>
       columns.length === 1 ? `${dbmlTableName(table)}.${quoteIdent(columns[0])}` : `${dbmlTableName(table)}.(${columns.map(quoteIdent).join(', ')})`;
-    blocks.push(refs.map((r) => (r.oneToOne
+    blocks.push(blockRefs.map((r) => (r.oneToOne
       ? `Ref: ${end(r.to, r.toColumns)} - ${end(r.from, r.fromColumns)}${refSettings(r)}`
       : `Ref: ${end(r.from, r.fromColumns)} > ${end(r.to, r.toColumns)}${refSettings(r)}`)).join('\n'));
   }

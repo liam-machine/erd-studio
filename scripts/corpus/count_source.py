@@ -247,6 +247,9 @@ def ident(e):
 def cols_of(exprs):
     out = []
     for e in exprs or []:
+        # A key's column without its order, operator class or collation (`name text_pattern_ops DESC`).
+        while isinstance(e, (exp.Ordered, exp.Opclass, exp.Collate)) and isinstance(e.this, (exp.Ordered, exp.Opclass, exp.Collate, exp.Column, exp.Identifier)):
+            e = e.this
         if isinstance(e, (exp.Ordered, exp.Column, exp.Identifier)):
             out.append(ident(e))
         elif isinstance(e, exp.Paren):
@@ -469,6 +472,42 @@ def idents(s):
     return [unquote(x) for x in re.findall(IDENT, s)]
 
 
+def index_columns(body, open_at):
+    """An index's key list from its `(`: each key's column (ASC/DESC, NULLS FIRST, an
+    opclass or COLLATE dropped); an expression key is kept as written, with its
+    parentheses, so it is never compared as a column."""
+    depth, q, end = 0, None, -1
+    for i in range(open_at, len(body)):
+        ch = body[i]
+        if q:
+            if ch == q:
+                q = None
+            continue
+        if ch in '"\'`[':
+            q = ']' if ch == '[' else ch
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end < 0:
+        return None
+    out = []
+    for item in split_top(body[open_at + 1:end]):
+        item = item.strip()
+        if not item:
+            continue
+        if '(' in item:
+            out.append(re.sub(r'\s+', ' ', item))
+            continue
+        names = idents(item)
+        if names:
+            out.append(names[0])
+    return out
+
+
 def structural_create(m, sql, where):
     s = strip_comments(sql)
     mm = CREATE_RE.search(s)
@@ -521,7 +560,7 @@ def structural_create(m, sql, where):
             if fm:
                 m.fks.append((name, idents(fm.group(1)), idents(fm.group(2))[-1], idents(fm.group(3)) if fm.group(3) else None, None))
             continue
-        if rup.startswith('UNIQUE'):
+        if re.match(r'UNIQUE\b', rup):  # not a column named unique_device_id
             inside = re.search(r'\(([^)]*)\)', rest)
             if inside:
                 m.uniques.append((name, [c for c in idents(inside.group(1)) if c.upper() not in ('ASC', 'DESC')], False))
@@ -690,12 +729,13 @@ def count_sql(entry, base):
                 stats['structural'] += 1
             elif kind == 'alter' and structural_alter(m, body, where):
                 stats['structural'] += 1
-            elif kind == 'index' and re.search(r'\)\s*(WHERE|INCLUDE\s*\([^)]*\)\s*WHERE)\s', body, re.I):
+            elif kind == 'index' and re.search(r'\)\s*(?:INCLUDE\s*\([^)]*\)\s*)?(?:NULLS\s+(?:NOT\s+)?DISTINCT\s*)?(?:WITH\s*\([^)]*\)\s*)?WHERE\s', body, re.I):
                 m.partial_uniques += 1
             elif kind == 'index':
-                im = re.search(r'INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?' + IDENT + r'?\s*ON\s+(?:ONLY\s+)?((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:USING\s+\w+\s*)?\(([^)]*)\)', body, re.I)
-                if im:
-                    m.uniques.append((idents(im.group(1))[-1], idents(im.group(2)), True))
+                im = re.search(r'INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?' + IDENT + r'?\s*ON\s+(?:ONLY\s+)?((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:USING\s+\w+\s*)?\(', body, re.I)
+                cols = index_columns(body, im.end() - 1) if im else None
+                if im and cols:
+                    m.uniques.append((idents(im.group(1))[-1], cols, True))
                     stats['structural'] += 1
                 else:
                     stats['unread'] += 1

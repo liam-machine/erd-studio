@@ -212,9 +212,17 @@ describe('cardinality: one-to-one when the FK is its table\'s whole key or exact
     expect(links(r.dbml)).toEqual(['emp(mentor_id)>emp one-to-one']);
   });
 
-  it('an FK that is its table\'s key but references a non-key cannot be written from the FK side: many-to-one, and said', () => {
-    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, code int UNIQUE);\nCREATE TABLE c (code int PRIMARY KEY REFERENCES p (code));');
-    expect(links(r.dbml)).toEqual(['c(code)>p many-to-one']);
+  it('an FK that is its table\'s key but references a unique non-key is one-to-one, declared on the FK column (Synapse, GitLab)', () => {
+    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, code int UNIQUE);\nCREATE TABLE c (code int PRIMARY KEY REFERENCES p (code) ON DELETE CASCADE);');
+    expect(links(r.dbml)).toEqual(['c(code)>p one-to-one']);
+    expect(entries(r, 'one-to-one link')).toHaveLength(0);
+    // The inline reference has no place for its action: said, not dropped silently.
+    expect(entries(r, 'FK action')).toHaveLength(1);
+  });
+
+  it('a composite FK that is its table\'s key but references a non-key cannot be written from the FK side: many-to-one, and said', () => {
+    const r = convert('postgres', 'CREATE TABLE p (id int PRIMARY KEY, a int, b int, UNIQUE (a, b));\nCREATE TABLE c (a int, b int, PRIMARY KEY (a, b), FOREIGN KEY (a, b) REFERENCES p (a, b));');
+    expect(links(r.dbml)).toEqual(['c(a,b)>p many-to-one']);
     expect(entries(r, 'one-to-one link')).toHaveLength(1);
   });
 
