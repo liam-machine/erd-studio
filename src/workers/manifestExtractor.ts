@@ -7,6 +7,7 @@
  */
 
 import type { Meta } from '../types/semantic';
+import type { RelationshipTestCondition, YmlSourceRelationshipTest, YmlSourceTable } from '../types/ymlData';
 import type {
   CompositeForeignKey,
   ManifestColumn,
@@ -16,7 +17,7 @@ import type {
 } from '../types/manifest';
 import { THROWAWAY_MARKER_KEY } from '../types/manifest';
 import { readMeta } from '@erd-studio/core';
-import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameUtils';
+import { parseRefModelName, parseSourceCall, resolveModelNameFromNodeId } from '../services/nameUtils';
 
 const MODEL_KEY_PREFIX = 'model.';
 const TEST_KEY_PREFIX = 'test.';
@@ -49,6 +50,9 @@ export function extractManifestData(
       disabledModels,
       resourceDocs: {},
       compositeForeignKeys: [],
+      notNullColumns: {},
+      sourceRelationshipTests: [],
+      sources: extractSources(manifest.sources),
       ...(placeholder ? { placeholderProfile: true } : {}),
     };
   }
@@ -58,6 +62,12 @@ export function extractManifestData(
   const uniqueColumns: Record<string, string[]> = {};
   const compositeUniqueGroups: Record<string, string[][]> = {};
   const resourceDocs: Record<string, ManifestModelInfo> = {};
+  const notNullColumns: Record<string, string[]> = {};
+  const sourceRelationshipTests: YmlSourceRelationshipTest[] = [];
+  const addNotNull = (model: string, column: string): void => {
+    const cols = (notNullColumns[model] ??= []);
+    if (!cols.includes(column)) cols.push(column);
+  };
   // Composite foreign keys, resolved once every model is known (a constraint's
   // `to` may be a rendered relation named by its alias).
   const declaredForeignKeys: Array<CompositeForeignKey & { to: string }> = [];
@@ -76,6 +86,7 @@ export function extractManifestData(
           models[modelInfo.name] = modelInfo;
         }
         declaredForeignKeys.push(...extractForeignKeyConstraints(modelInfo.name, node.constraints));
+        for (const column of notNullConstraintColumns(node)) addNotNull(modelInfo.name, column);
       }
       continue;
     }
@@ -95,9 +106,21 @@ export function extractManifestData(
         continue;
       }
 
+      const sourceTest = extractSourceRelationshipTest(node, nodes);
+      if (sourceTest) {
+        sourceRelationshipTests.push(sourceTest);
+        continue;
+      }
+
       const relTest = extractRelationshipTest(node, nodes);
       if (relTest) {
         relationshipTests.push(relTest);
+        continue;
+      }
+
+      const notNull = extractNotNullTest(node, nodes);
+      if (notNull) {
+        addNotNull(notNull.model, notNull.column);
         continue;
       }
 
@@ -107,6 +130,8 @@ export function extractManifestData(
   }
 
   const compositeForeignKeys = resolveForeignKeyTargets(declaredForeignKeys, models);
+  const sources = extractSources(manifest.sources);
+  const extra = { notNullColumns, sourceRelationshipTests, sources };
   if (placeholder) {
     // Parse without your credentials: every schema came from placeholder
     // connection details (`erd_studio_placeholder…`). Blank them after all
@@ -115,9 +140,135 @@ export function extractManifestData(
     // `configSchema` is the user's own `config.schema` and is kept.
     for (const info of Object.values(models)) { info.schema = ''; }
     for (const info of Object.values(resourceDocs)) { info.schema = ''; }
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, placeholderProfile: true };
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, ...extra, placeholderProfile: true };
   }
-  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys };
+  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, ...extra };
+}
+
+/** A non-empty string, trimmed; undefined for anything else (dbt writes `where: null` on every test). */
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
+/** A test node's `config.where`, when it limits the rows tested. */
+function whereOf(node: Record<string, unknown>): string | undefined {
+  const config = node.config;
+  return isPlainObject(config) ? text(config.where) : undefined;
+}
+
+/** dbt's own `not_null` (no namespace) and dbt_expectations' not-null test. */
+const NOT_NULL_TESTS: ReadonlyArray<{ namespace: string | null; name: string }> = [
+  { namespace: null, name: 'not_null' },
+  { namespace: 'dbt_expectations', name: 'expect_column_values_to_not_be_null' },
+];
+
+/**
+ * A not-null test node (`test_metadata`, written under `tests:` or
+ * `data_tests:`, kwargs top-level or under dbt 1.10's `arguments:` — the
+ * manifest records both as `kwargs`): the model it is attached to and the
+ * column, as dbt passes it (quoted when the column has `quote: true`). Null
+ * when a `where:` config or a `row_condition` limits it to some rows: it
+ * does not say the column is never null.
+ */
+function extractNotNullTest(node: Record<string, unknown>, nodes: Record<string, unknown>): { model: string; column: string } | null {
+  const meta = node.test_metadata;
+  if (!isPlainObject(meta) || typeof meta.name !== 'string') return null;
+  const namespace = typeof meta.namespace === 'string' && meta.namespace !== 'dbt' ? meta.namespace : null;
+  if (!NOT_NULL_TESTS.some((t) => t.name === meta.name && t.namespace === namespace)) return null;
+  const kwargs = isPlainObject(meta.kwargs) ? meta.kwargs : {};
+  if (whereOf(node) || text(kwargs.row_condition)) return null;
+  const column = text(kwargs.column_name) ?? text(node.column_name);
+  if (!column) return null;
+  const model = resolveModelFromTestNode(node, nodes);
+  return model ? { model, column } : null;
+}
+
+/**
+ * The columns a model's contract makes required: a column's own
+ * `constraints: [{ type: not_null }]` (or `primary_key`, never null), and a
+ * model-level `not_null` / `primary_key` constraint's `columns`.
+ */
+function notNullConstraintColumns(node: Record<string, unknown>): string[] {
+  const requiring = (c: unknown): boolean => isPlainObject(c) && (c.type === 'not_null' || c.type === 'primary_key');
+  const out: string[] = [];
+  if (isPlainObject(node.columns)) {
+    for (const [key, col] of Object.entries(node.columns)) {
+      if (!isPlainObject(col) || !Array.isArray(col.constraints) || !col.constraints.some(requiring)) continue;
+      out.push(text(col.name) ?? key);
+    }
+  }
+  if (Array.isArray(node.constraints)) {
+    for (const c of node.constraints) {
+      if (!requiring(c)) continue;
+      for (const column of columnList((c as Record<string, unknown>).columns) ?? []) out.push(column);
+    }
+  }
+  return out;
+}
+
+/**
+ * A relationships test whose `to:` is a dbt `source('raw', 'customers')`: a
+ * source is not a model, so no draft draws it; kept to be said. Null for any
+ * other test.
+ */
+function extractSourceRelationshipTest(node: Record<string, unknown>, nodes: Record<string, unknown>): YmlSourceRelationshipTest | null {
+  const meta = node.test_metadata;
+  if (!isPlainObject(meta) || !isPlainObject(meta.kwargs)) return null;
+  const kwargs = meta.kwargs;
+  const to = text(kwargs.to);
+  const field = text(kwargs.field);
+  const fromColumn = text(kwargs.column_name);
+  const target = to ? parseSourceCall(to) : undefined;
+  if (!target || !field || !fromColumn) return null;
+  const fromModel = resolveModelFromTestNode(node, nodes);
+  if (!fromModel) return null;
+  const file = text(node.original_file_path);
+  return { fromModel, fromColumn, source: `${target.source}.${target.table}`, toColumn: field, ...(file ? { file } : {}) };
+}
+
+/**
+ * The manifest's enabled `sources` (dbt moves a disabled one to `disabled`):
+ * one entry per source table, with its `identifier` when it differs from its
+ * name and whether the identifier is quoted.
+ */
+function extractSources(sources: unknown): YmlSourceTable[] {
+  if (!isPlainObject(sources)) return [];
+  const out: YmlSourceTable[] = [];
+  for (const value of Object.values(sources)) {
+    if (!isPlainObject(value)) continue;
+    const name = text(value.name);
+    const source = text(value.source_name);
+    if (!name || !source) continue;
+    if (isPlainObject(value.config) && value.config.enabled === false) continue;
+    const identifier = text(value.identifier);
+    const quoting = isPlainObject(value.quoting) ? value.quoting : {};
+    const columns = isPlainObject(value.columns)
+      ? Object.values(value.columns).filter(isPlainObject).map((c) => ({
+        name: typeof c.name === 'string' ? c.name : '',
+        description: typeof c.description === 'string' ? c.description : '',
+        dataType: typeof c.data_type === 'string' ? c.data_type : null,
+      })).filter((c) => c.name !== '')
+      : [];
+    out.push({
+      source,
+      name,
+      ...(identifier && identifier !== name ? { identifier } : {}),
+      ...(quoting.identifier === true ? { quoted: true } : {}),
+      description: typeof value.description === 'string' ? value.description : '',
+      columns,
+      file: text(value.original_file_path) ?? '',
+    });
+  }
+  return out;
+}
+
+/** A relationships test's condition: `relationships_where`'s `from_condition` / `to_condition`, and a `where:` config. */
+function conditionOf(kwargs: Record<string, unknown>, node: Record<string, unknown>): RelationshipTestCondition | undefined {
+  const from = text(kwargs.from_condition);
+  const to = text(kwargs.to_condition);
+  const where = whereOf(node) ?? text(kwargs.where);
+  if (!from && !to && !where) return undefined;
+  return { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(where ? { where } : {}) };
 }
 
 /** A plain (non-null, non-array) object. */
@@ -440,7 +591,16 @@ function extractRelationshipTest(
     return null;
   }
 
-  return { fromModel, fromColumn, toModel, toColumn };
+  // relationships_where holds for the rows its conditions pick; a where: config likewise (the yml reader's rule).
+  const condition = conditionOf(kwargs, node);
+  const conditional = testMetadata.name === 'relationships_where' || condition !== undefined;
+  const file = text(node.original_file_path);
+  return {
+    fromModel, fromColumn, toModel, toColumn,
+    ...(conditional ? { conditional: true as const } : {}),
+    ...(condition ? { condition } : {}),
+    ...(file ? { file } : {}),
+  };
 }
 
 function extractUniqueTest(

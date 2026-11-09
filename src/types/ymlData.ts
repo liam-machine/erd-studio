@@ -54,6 +54,23 @@ export interface YmlRelationshipTest {
    * does not keep the condition (the draft says so). Absent: unconditional.
    */
   conditional?: true;
+  /** The condition's text as written (`from_condition`, `to_condition`, `where`), when the test has one. */
+  condition?: RelationshipTestCondition;
+  /** Where the test is written: the schema file, project-relative with forward slashes, and its 1-based line. */
+  file?: string;
+  line?: number;
+}
+
+/**
+ * The rows a conditional relationships test holds for, as the yml (or the
+ * manifest's kwargs) writes them: dbt_utils' `relationships_where`
+ * `from_condition` / `to_condition`, and a `where:` config. Text the user
+ * wrote; shown in the draft, never sent anywhere.
+ */
+export interface RelationshipTestCondition {
+  from?: string;
+  to?: string;
+  where?: string;
 }
 
 /**
@@ -67,6 +84,30 @@ export interface YmlSourceRelationshipTest {
   /** `raw.customers`: the source's name and its table. */
   source: string;
   toColumn: string;
+  file?: string;
+  line?: number;
+}
+
+/**
+ * One table of a dbt `sources:` block. A source is a table dbt reads but does
+ * not build, so Import from dbt never draws one (the draft lists them); it is
+ * kept here so none is dropped without a word.
+ */
+export interface YmlSourceTable {
+  /** The source's `name` (`raw` in `source('raw', 'customers')`). */
+  source: string;
+  /** The table's `name` (`customers`). */
+  name: string;
+  /** The warehouse table name, when `identifier:` sets one that differs from `name`. */
+  identifier?: string;
+  /** `quoting: identifier: true` (on the table, else its source). */
+  quoted?: boolean;
+  description: string;
+  columns: YmlColumn[];
+  /** Project-relative, forward slashes. */
+  file: string;
+  /** 1-based line of the table's entry. */
+  line?: number;
 }
 
 /** Model info extracted from a dbt schema .yml file. */
@@ -89,6 +130,13 @@ export interface YmlModelInfo {
    * schema folder, §2.4). Absent when none is set.
    */
   configSchema?: string;
+  /** `config: enabled: false` (or `enabled: false`) on the model's yml entry: dbt does not build it. */
+  disabled?: true;
+  /**
+   * A versioned model (`versions:`): the version whose columns `columns` holds
+   * (`latest_version`, else the highest `v`). Absent for an unversioned model.
+   */
+  version?: number;
 }
 
 /**
@@ -177,4 +225,9 @@ export interface YmlData {
    * ({@link YmlSourceRelationshipTest}). Optional so hand-built literals stay valid.
    */
   sourceRelationshipTests?: YmlSourceRelationshipTest[];
+  /**
+   * Every enabled table of the project's `sources:` blocks
+   * ({@link YmlSourceTable}). Optional so hand-built literals stay valid.
+   */
+  sources?: YmlSourceTable[];
 }

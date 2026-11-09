@@ -68,3 +68,31 @@ export function resolveModelNameFromNodeId(
   const parts = stripped.split('.');
   return parts[parts.length - 1];
 }
+
+/**
+ * An identifier without one pair of wrapping quotes: `"Order Id"` → `Order Id`,
+ * `` `id` `` → `id`, `[id]` → `id`. dbt passes a column with `quote: true` to
+ * its tests quoted (`column_name: '"Id"'` in the manifest), and some projects
+ * write the quotes into the yml `name:` itself; either way the column is the
+ * name inside. Anything else is returned trimmed.
+ */
+export function unquoteIdentifier(name: string): string {
+  const t = name.trim();
+  const m = /^"(.*)"$|^`(.*)`$|^\[(.*)\]$/s.exec(t);
+  const inner = m ? (m[1] ?? m[2] ?? m[3] ?? '') : t;
+  return m && inner.trim() !== '' ? inner : t;
+}
+
+/** A name as compared when it may be quoted: {@link unquoteIdentifier}, then {@link normaliseName}. */
+export function identifierKey(name: string): string {
+  return normaliseName(unquoteIdentifier(name));
+}
+
+/**
+ * The source and table a dbt `source('raw', 'customers')` call names (a
+ * relationships test's `to:`), or undefined when there is none.
+ */
+export function parseSourceCall(value: string): { source: string; table: string } | undefined {
+  const m = /\bsource\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/.exec(value);
+  return m ? { source: m[1].trim(), table: m[2].trim() } : undefined;
+}

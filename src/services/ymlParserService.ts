@@ -16,20 +16,22 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDocument, isAlias, isSeq, isMap, isNode } from 'yaml';
-import type { Document, YAMLMap, YAMLSeq } from 'yaml';
+import { LineCounter, parseDocument, isAlias, isScalar, isSeq, isMap, isNode, YAMLMap } from 'yaml';
+import type { Document, Pair, YAMLSeq } from 'yaml';
 
 import type {
   YmlColumn,
   YmlData,
   YmlModelInfo,
   YmlRelationshipTest,
+  RelationshipTestCondition,
   YmlResourceDoc,
   YmlSourceRelationshipTest,
+  YmlSourceTable,
 } from '../types/ymlData';
 import type { CompositeForeignKey } from '../types/manifest';
 import { readMeta, type Meta } from '@erd-studio/core';
-import { normaliseName, parseRefModelName } from './nameUtils';
+import { normaliseName, parseRefModelName, parseSourceCall, unquoteIdentifier } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
 import { log } from './logger';
 
@@ -108,7 +110,23 @@ function emptyYmlData(): YmlData {
     compositeForeignKeys: [],
     notNullColumns: new Map(),
     sourceRelationshipTests: [],
+    sources: [],
   };
+}
+
+/** A map pair that is a YAML 1.1 merge key (`<<: *defaults`); the `yaml` package keys it `<<` or a `<<` symbol. */
+function isMergePair(pair: Pair): boolean {
+  if (!isScalar(pair.key)) return pair.key === '<<';
+  const key = pair.key.value;
+  return key === '<<' || (typeof key === 'symbol' && key.description === '<<');
+}
+
+/** How deep `<<:` merges are followed (a merge of a merge of …): far beyond any real file, and no further. */
+const MAX_MERGE_DEPTH = 8;
+
+/** `enabled: false` (a boolean, or the string `false`). */
+function isFalse(value: unknown): boolean {
+  return value === false || (typeof value === 'string' && value.trim().toLowerCase() === 'false');
 }
 
 export class YmlParserService {
@@ -225,6 +243,7 @@ export class YmlParserService {
     const compositeForeignKeys: CompositeForeignKey[] = [];
     const notNullColumns = new Map<string, Set<string>>();
     const sourceRelationshipTests: YmlSourceRelationshipTest[] = [];
+    const sources: YmlSourceTable[] = [];
 
     // One walk finds both the schema .yml files and the source files that
     // define models, seeds and snapshots.
@@ -232,6 +251,7 @@ export class YmlParserService {
 
     for (const filePath of ymlFiles) {
       try {
+        this.currentFile = path.relative(projectPath, filePath).replace(/\\/g, '/');
         this.parseYmlFile(
           filePath,
           models,
@@ -241,6 +261,7 @@ export class YmlParserService {
           compositeForeignKeys,
           notNullColumns,
           sourceRelationshipTests,
+          sources,
         );
       } catch (err) {
         log.warn(
@@ -275,7 +296,7 @@ export class YmlParserService {
       sourceFiles.set(stem, path.relative(projectPath, filePath).replace(/\\/g, '/'));
     }
 
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs, compositeForeignKeys, notNullColumns, sourceRelationshipTests };
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs, compositeForeignKeys, notNullColumns, sourceRelationshipTests, sources };
   }
 
   /**
@@ -420,22 +441,28 @@ export class YmlParserService {
     compositeForeignKeys: CompositeForeignKey[] = [],
     notNullColumns: Map<string, Set<string>> = new Map(),
     sourceRelationshipTests: YmlSourceRelationshipTest[] = [],
+    sources: YmlSourceTable[] = [],
   ): void {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Only
-    // conversions through the document (meta) see it; `get()` lookups do not.
-    const doc = parseDocument(raw, { merge: true });
+    // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Conversions
+    // through the document (meta) see it; `get()` lookups do not, so every map a
+    // test is read from goes through {@link deref}, which applies the merges.
+    this.lineCounter = new LineCounter();
+    const doc = parseDocument(raw, { merge: true, lineCounter: this.lineCounter });
     // `tests: *key_tests`, `- relationships: *to_dim`: dbt reads an alias as the node it
     // names. Resolved where a test is read ({@link deref}), never expanded in place, so an
     // alias bomb costs only what is read.
     this.aliasDoc = doc;
 
-    const modelsNode = doc.get('models');
+    this.extractSources(this.deref(doc.get('sources')), sources);
+
+    const modelsNode = this.deref(doc.get('models'));
     if (!isSeq(modelsNode)) {
       return; // Not a dbt model schema file — skip
     }
 
-    for (const item of (modelsNode as YAMLSeq).items) {
+    for (const rawItem of (modelsNode as YAMLSeq).items) {
+      const item = this.deref(rawItem);
       if (!isMap(item)) {
         continue;
       }
@@ -478,15 +505,10 @@ export class YmlParserService {
     const tags = this.extractTags(modelNode);
     const columns: YmlColumn[] = [];
 
-    // Parse columns and their tests
-    const columnsNode = this.deref(modelNode.get('columns'));
-    if (isSeq(columnsNode)) {
-      for (const rawCol of (columnsNode as YAMLSeq).items) {
-        const colItem = this.deref(rawCol);
-        if (!isMap(colItem)) {
-          continue;
-        }
-        const col = colItem as YAMLMap;
+    // Parse columns and their tests: the model's own, or (a versioned model) its latest version's.
+    const { columns: columnNodes, version } = this.modelColumnNodes(modelNode);
+    {
+      for (const col of columnNodes) {
         const colName = this.getString(col, 'name');
         if (!colName) {
           continue;
@@ -538,6 +560,8 @@ export class YmlParserService {
 
     const meta = this.extractMeta(doc, modelNode);
     const configSchema = this.extractConfigSchema(modelNode);
+    const config = this.deref(modelNode.get('config'));
+    const disabled = isMap(config) && isFalse((config as YAMLMap).get('enabled'));
     models.set(name, {
       name,
       description,
@@ -546,7 +570,111 @@ export class YmlParserService {
       tags,
       ...(meta ? { meta } : {}),
       ...(configSchema ? { configSchema } : {}),
+      ...(disabled ? { disabled: true as const } : {}),
+      ...(version !== undefined ? { version } : {}),
     });
+  }
+
+  /**
+   * The column maps a model's yml declares, merges applied. For a versioned
+   * model (`versions:`) they are its latest version's (`latest_version`, else
+   * the highest `v`), as dbt builds it: the top-level `columns:` the version
+   * includes (`include: all` / `'*'` / a list, minus `exclude:`; all of them
+   * when it says nothing), then each column the version declares itself,
+   * replacing a top-level one of the same name.
+   */
+  private modelColumnNodes(modelNode: YAMLMap): { columns: YAMLMap[]; version?: number } {
+    const mapsOf = (node: unknown): YAMLMap[] => (isSeq(node)
+      ? (node as YAMLSeq).items.map((i) => this.deref(i)).filter((i): i is YAMLMap => isMap(i))
+      : []);
+    const topLevel = mapsOf(this.deref(modelNode.get('columns')));
+    const versions = mapsOf(this.deref(modelNode.get('versions')));
+    const vOf = (m: YAMLMap): number | undefined => {
+      const v = m.get('v');
+      const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v.trim()) : undefined;
+      return n !== undefined && Number.isFinite(n) ? n : undefined;
+    };
+    const numbered = versions.filter((m) => vOf(m) !== undefined);
+    if (numbered.length === 0) return { columns: topLevel };
+    const latestRaw = modelNode.get('latest_version');
+    const latest = typeof latestRaw === 'number' ? latestRaw : typeof latestRaw === 'string' ? Number(latestRaw.trim()) : NaN;
+    const chosen = numbered.find((m) => vOf(m) === latest) ?? numbered.reduce((a, b) => (vOf(b)! > vOf(a)! ? b : a));
+    const version = vOf(chosen)!;
+
+    const own = mapsOf(this.deref(chosen.get('columns')));
+    if (own.length === 0 && !chosen.has('columns')) return { columns: topLevel, version };
+    const rule = own.find((m) => m.has('include') || m.has('exclude'));
+    const names = (node: unknown): Set<string> => new Set((isSeq(node) ? (node as YAMLSeq).items : [])
+      .map((i) => this.resolveScalar(i)).filter((x): x is string => !!x).map(normaliseName));
+    const include = rule ? this.deref(rule.get('include')) : undefined;
+    const includeAll = include === undefined || include === null || (typeof include === 'string' && ['all', '*'].includes(include.trim().toLowerCase()));
+    const included = includeAll ? undefined : names(include);
+    const excluded = rule ? names(this.deref(rule.get('exclude'))) : new Set<string>();
+    const ownByName = new Map(own.filter((m) => this.getString(m, 'name')).map((m) => [normaliseName(this.getString(m, 'name')), m]));
+    const out: YAMLMap[] = [];
+    const taken = new Set<string>();
+    for (const m of topLevel) {
+      const key = normaliseName(this.getString(m, 'name'));
+      if (!key || (included && !included.has(key)) || excluded.has(key)) continue;
+      out.push(ownByName.get(key) ?? m);
+      taken.add(key);
+    }
+    for (const [key, m] of ownByName) if (!taken.has(key)) out.push(m);
+    return { columns: out, version };
+  }
+
+  /**
+   * The enabled tables of a schema file's `sources:` blocks: a source with
+   * `config: enabled: false` (or `enabled: false`) turns off all its tables,
+   * a table's own turns off that one. `identifier:` and `quoting: identifier:`
+   * are read from the table, else its source.
+   */
+  private extractSources(sourcesNode: unknown, out: YmlSourceTable[]): void {
+    if (!isSeq(sourcesNode)) return;
+    const enabled = (m: YAMLMap): boolean => {
+      const config = this.deref(m.get('config'));
+      return !isFalse(m.get('enabled')) && !(isMap(config) && isFalse((config as YAMLMap).get('enabled')));
+    };
+    const quotedIdentifier = (m: YAMLMap): boolean | undefined => {
+      const quoting = this.deref(m.get('quoting'));
+      const q = isMap(quoting) ? (quoting as YAMLMap).get('identifier') : undefined;
+      return q === undefined || q === null ? undefined : q === true || (typeof q === 'string' && q.trim().toLowerCase() === 'true');
+    };
+    for (const rawSource of (sourcesNode as YAMLSeq).items) {
+      const source = this.deref(rawSource);
+      if (!isMap(source)) continue;
+      const sourceMap = source as YAMLMap;
+      const sourceName = this.getString(sourceMap, 'name').trim();
+      if (!sourceName || !enabled(sourceMap)) continue;
+      const tables = this.deref(sourceMap.get('tables'));
+      if (!isSeq(tables)) continue;
+      for (const rawTable of (tables as YAMLSeq).items) {
+        const table = this.deref(rawTable);
+        if (!isMap(table)) continue;
+        const t = table as YAMLMap;
+        const name = this.getString(t, 'name').trim();
+        if (!name || !enabled(t)) continue;
+        const identifier = this.getString(t, 'identifier').trim();
+        const quoted = quotedIdentifier(t) ?? quotedIdentifier(sourceMap) ?? false;
+        const columnsNode = this.deref(t.get('columns'));
+        const columns: YmlColumn[] = isSeq(columnsNode)
+          ? (columnsNode as YAMLSeq).items.map((i) => this.deref(i)).filter((i): i is YAMLMap => isMap(i))
+            .map((c) => ({ name: this.getString(c, 'name'), description: this.getString(c, 'description'), dataType: this.getStringOrNull(c, 'data_type') }))
+            .filter((c) => c.name.trim() !== '')
+          : [];
+        const line = this.lineOf(rawTable);
+        out.push({
+          source: sourceName,
+          name,
+          ...(identifier && identifier !== name ? { identifier } : {}),
+          ...(quoted ? { quoted: true } : {}),
+          description: this.getString(t, 'description'),
+          columns,
+          file: this.currentFile,
+          ...(line !== undefined ? { line } : {}),
+        });
+      }
+    }
   }
 
   /** The custom schema a model's `config: schema:` sets, when it is a non-empty string. */
@@ -614,8 +742,11 @@ export class YmlParserService {
         if (!key) continue;
         const node = testName === key ? testMap : this.deref(testMap.get(key));
         const columnName = this.testMaps(node).map((m) => this.getString(m, 'column_name').trim()).find(Boolean);
-        if (!columnName || !/^"?[A-Za-z_][\w$]*"?$/.test(columnName)) continue;
-        this.readColumnTest(modelName, columnName.replace(/^"|"$/g, ''), testItem, relationshipTests, uniqueColumns, notNullColumns, sourceRelationshipTests);
+        // A plain identifier, or any name in quotes (`"Order Id"`, a `quote: true` column); not an expression.
+        if (!columnName) continue;
+        const unquoted = unquoteIdentifier(columnName);
+        if (unquoted === columnName && !/^[A-Za-z_][\w$]*$/.test(unquoted)) continue;
+        this.readColumnTest(modelName, unquoted, rawItem, relationshipTests, uniqueColumns, notNullColumns, sourceRelationshipTests);
       }
     }
   }
@@ -630,6 +761,7 @@ export class YmlParserService {
     notNullColumns: Map<string, Set<string>>,
     sourceRelationshipTests: YmlSourceRelationshipTest[],
   ): void {
+    const rawItem = testItem;
     testItem = this.deref(testItem);
     // Scalar test: `- unique` or `- not_null`
     const scalarValue = this.resolveScalar(testItem);
@@ -668,9 +800,11 @@ export class YmlParserService {
       const relNode = testNode(key);
       if (isMap(relNode)) {
         const target = this.relationshipTarget(relNode as YAMLMap);
+        const line = this.lineOf(rawItem);
+        const at = { file: this.currentFile, ...(line !== undefined ? { line } : {}) };
         if (target?.source) {
           // `to: source('raw', 'customers')`: a source is not a model, so it is never drawn; kept to be said.
-          sourceRelationshipTests.push({ fromModel: modelName, fromColumn: columnName, source: target.source, toColumn: target.toColumn });
+          sourceRelationshipTests.push({ fromModel: modelName, fromColumn: columnName, source: target.source, toColumn: target.toColumn, ...at });
           continue;
         }
         const relTest = this.extractRelationshipTest(
@@ -682,7 +816,8 @@ export class YmlParserService {
           // relationships_where holds for the rows its conditions pick; a where: config likewise.
           // A disabled test still declares the link: it has no condition.
           if (key !== 'relationships' || !this.testHoldsForEveryRow(relNode)) relTest.conditional = true;
-          relationshipTests.push(relTest);
+          const condition = this.conditionOf(relNode);
+          relationshipTests.push({ ...relTest, ...(condition ? { condition } : {}), ...at });
         }
       }
     }
@@ -724,9 +859,36 @@ export class YmlParserService {
   /** A test node's own map, its `arguments:` and its `config:` (the places dbt reads a setting from). */
   private testMaps(node: unknown): YAMLMap[] {
     if (!isMap(node)) return [];
-    const testNode = node as YAMLMap;
-    const nested = ['arguments', 'config'].map((k) => testNode.get(k)).filter((n): n is YAMLMap => isMap(n));
+    const testNode = this.deref(node) as YAMLMap;
+    const nested = ['arguments', 'config'].map((k) => this.deref(testNode.get(k))).filter((n): n is YAMLMap => isMap(n));
     return [testNode, ...nested];
+  }
+
+  /**
+   * A relationships test's condition as written: `from_condition` /
+   * `to_condition` (dbt_utils' `relationships_where`) and `where:` (at the
+   * top, under `arguments:` or in `config:`). Undefined when it has none.
+   */
+  private conditionOf(node: unknown): RelationshipTestCondition | undefined {
+    const pick = (key: string): string | undefined => {
+      for (const m of this.testMaps(node)) {
+        const v = m.get(key);
+        if (typeof v === 'string' && v.trim() !== '') return v.trim();
+      }
+      return undefined;
+    };
+    const from = pick('from_condition');
+    const to = pick('to_condition');
+    const where = pick('where');
+    if (!from && !to && !where) return undefined;
+    return { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(where ? { where } : {}) };
+  }
+
+  /** The 1-based line a node starts on in the file being read, when the parser recorded it. */
+  private lineOf(node: unknown): number | undefined {
+    const start = isNode(node) ? node.range?.[0] : undefined;
+    if (start === undefined || !this.lineCounter) return undefined;
+    return this.lineCounter.linePos(start).line;
   }
 
   /** Whether a column's `constraints:` list holds a `type: not_null` or `type: primary_key`. */
@@ -741,14 +903,20 @@ export class YmlParserService {
    * `ref()` is {@link extractRelationshipTest}'s).
    */
   private relationshipTarget(relNode: YAMLMap): { source?: string; toColumn: string } | undefined {
-    const argsNode = relNode.get('arguments');
+    const argsNode = this.deref(relNode.get('arguments'));
     const kwargs = isMap(argsNode) ? (argsNode as YAMLMap) : relNode;
     const to = this.getString(kwargs, 'to') || this.getString(relNode, 'to');
     const toColumn = this.getString(kwargs, 'field') || this.getString(relNode, 'field');
-    const source = /\bsource\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/.exec(to);
+    const source = parseSourceCall(to);
     if (!source || !toColumn) return undefined;
-    return { source: `${source[1]}.${source[2]}`, toColumn };
+    return { source: `${source.source}.${source.table}`, toColumn };
   }
+
+  /** The repo-relative path of the schema file being read (forward slashes), for `file:`. */
+  private currentFile = '';
+
+  /** Line positions of the schema file being read, for {@link lineOf}. */
+  private lineCounter: LineCounter | undefined;
 
   /** The schema file being read, for {@link deref}. */
   private aliasDoc: Document | undefined;
@@ -758,13 +926,50 @@ export class YmlParserService {
    * names is read as written, so a nested alias is resolved only when it is
    * read too. Undefined for an alias that names nothing.
    */
-  private deref(node: unknown): unknown {
-    if (!isAlias(node)) return node;
-    try {
-      return this.aliasDoc ? node.resolve(this.aliasDoc) : undefined;
-    } catch {
-      return undefined;
+  private deref(node: unknown, depth = 0): unknown {
+    let resolved: unknown = node;
+    if (isAlias(node)) {
+      try {
+        resolved = this.aliasDoc ? node.resolve(this.aliasDoc) : undefined;
+      } catch {
+        return undefined;
+      }
     }
+    return isMap(resolved) ? this.withMerges(resolved as YAMLMap, depth) : resolved;
+  }
+
+  /**
+   * A map with its YAML 1.1 merge keys applied (`<<: *defaults`,
+   * `<<: [*a, *b]`), as dbt reads it: the map's own keys win, then each
+   * merged map's in order, the first to give a key keeping it. A map with no
+   * merge key is returned as it is; otherwise a new map holds the pairs (the
+   * file's nodes are never changed).
+   */
+  private withMerges(map: YAMLMap, depth: number): YAMLMap {
+    if (!map.items.some(isMergePair) || depth >= MAX_MERGE_DEPTH) return map;
+    const keyOf = (pair: Pair): unknown => (isScalar(pair.key) ? pair.key.value : pair.key);
+    const out = new YAMLMap();
+    const seen = new Set<unknown>();
+    for (const pair of map.items) {
+      if (isMergePair(pair)) continue;
+      seen.add(keyOf(pair));
+      out.items.push(pair);
+    }
+    for (const pair of map.items) {
+      if (!isMergePair(pair)) continue;
+      const value = this.deref(pair.value, depth + 1);
+      const merged = isSeq(value) ? (value as YAMLSeq).items.map((i) => this.deref(i, depth + 1)) : [value];
+      for (const m of merged) {
+        if (!isMap(m)) continue;
+        for (const inner of (m as YAMLMap).items) {
+          const key = keyOf(inner);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.items.push(inner);
+        }
+      }
+    }
+    return out;
   }
 
   private addUniqueColumn(
@@ -800,7 +1005,7 @@ export class YmlParserService {
     fromColumn: string,
     relNode: YAMLMap,
   ): YmlRelationshipTest | null {
-    const argsNode = relNode.get('arguments');
+    const argsNode = this.deref(relNode.get('arguments'));
     const kwargs = isMap(argsNode) ? (argsNode as YAMLMap) : relNode;
 
     const toRef = this.getString(kwargs, 'to') || this.getString(relNode, 'to');
@@ -843,12 +1048,13 @@ export class YmlParserService {
   ): void {
     // dbt supports both `tests:` and `data_tests:` at model level
     for (const key of TEST_LIST_KEYS) {
-      const testsNode = modelNode.get(key);
+      const testsNode = this.deref(modelNode.get(key));
       if (!isSeq(testsNode)) {
         continue;
       }
 
-      for (const testItem of (testsNode as YAMLSeq).items) {
+      for (const rawTest of (testsNode as YAMLSeq).items) {
+        const testItem = this.deref(rawTest);
         if (!isMap(testItem)) {
           continue;
         }
@@ -859,12 +1065,12 @@ export class YmlParserService {
           'unique_combination_of_columns',
           'dbt_utils.unique_combination_of_columns',
         ]) {
-          const ucoNode = testMap.get(testKey);
+          const ucoNode = this.deref(testMap.get(testKey));
           if (!isMap(ucoNode)) {
             continue;
           }
           // dbt 1.10 nests test kwargs under `arguments:`
-          const ucoArgs = (ucoNode as YAMLMap).get('arguments');
+          const ucoArgs = this.deref((ucoNode as YAMLMap).get('arguments'));
           const ucoKwargs = isMap(ucoArgs) ? (ucoArgs as YAMLMap) : (ucoNode as YAMLMap);
           const combo = ucoKwargs.get('combination_of_columns')
             ?? (ucoNode as YAMLMap).get('combination_of_columns');
@@ -1015,6 +1221,7 @@ export class YmlParserService {
       ...(data.sourceRelationshipTests
         ? { sourceRelationshipTests: data.sourceRelationshipTests.filter((t) => modelNames.has(t.fromModel)) }
         : {}),
+      ...(data.sources ? { sources: data.sources.filter((t) => t.file.startsWith(normalizedPrefix)) } : {}),
     };
   }
 
