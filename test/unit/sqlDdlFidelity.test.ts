@@ -139,6 +139,21 @@ describe('verbatim type text', () => {
 });
 
 describe('uniqueness from every source', () => {
+  it('a key names its columns in any case, as unquoted names are (TPC-H: Primary Key(L_ORDERKEY, …) on l_orderkey)', () => {
+    const sql = 'CREATE TABLE orders (o_orderkey int NOT NULL, o_custkey int, Primary Key(O_ORDERKEY));\n'
+      + 'CREATE TABLE lineitem (l_orderkey int NOT NULL, l_linenumber int NOT NULL, l_tag int, Primary Key(L_ORDERKEY, L_LINENUMBER), UNIQUE (L_TAG, L_LINENUMBER));\n'
+      + 'ALTER TABLE lineitem ADD FOREIGN KEY (L_ORDERKEY) REFERENCES orders (O_ORDERKEY);';
+    for (const dialect of ['postgres', 'mysql', 'snowflake'] as const) {
+      const r = convert(dialect, sql);
+      const p = plan(r.dbml);
+      const line = p.newTables.find((t) => t.name === 'lineitem')!;
+      expect(line.columns!.filter((c) => c.isPrimaryKey).map((c) => c.name)).toEqual(['l_orderkey', 'l_linenumber']);
+      expect(p.newTables.find((t) => t.name === 'orders')!.columns!.find((c) => c.isPrimaryKey)?.name).toBe('o_orderkey');
+      expect(r.dbml).toContain('("l_tag", "l_linenumber") [unique]');
+      expect(links(r.dbml)).toEqual(['lineitem(l_orderkey)>orders many-to-one']);
+    }
+  });
+
   const table = 'CREATE TABLE t (id int PRIMARY KEY, a int, b int, c int';
   it.each([
     ['inline UNIQUE', 'postgres', `${table} UNIQUE, d int);`, ['t(c)']],

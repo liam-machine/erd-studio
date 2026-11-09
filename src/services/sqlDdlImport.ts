@@ -71,6 +71,7 @@ import {
   isName,
   isPunct,
   matchParen,
+  readColumnList,
   readName,
   readStringList,
   splitStatements,
@@ -615,6 +616,29 @@ export function looksLikeOracleSql(text: string): boolean {
   return ORACLE_DDL.test(text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' '));
 }
 
+/** The columns of a column list's own `[CONSTRAINT n] PRIMARY KEY [CLUSTERED] (a, b)` item, if it has one. */
+function tablePrimaryKeyItem(t: Token[], open: number, close: number): string[] | undefined {
+  for (const [from, to] of splitTopLevel(t, open + 1, close)) {
+    let k = from;
+    if (upper(t[k]) === 'CONSTRAINT') k += isName(t[k + 1]) ? 2 : 1;
+    if (upper(t[k]) !== 'PRIMARY' || upper(t[k + 1]) !== 'KEY') continue;
+    k += 2;
+    while (k < to && !isPunct(t[k], '(')) k++;
+    const list = k < to ? readColumnList(t, k) : undefined;
+    return list && list.columns.length ? list.columns : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A key's columns as the table spells them: an unquoted name is the same
+ * name in any case (`Primary Key(L_ORDERKEY)` on `l_orderkey`), and DBML
+ * reads a key's column only as its table writes it.
+ */
+function spelledAsColumns(table: ModelTable, columns: readonly string[]): string[] {
+  return columns.map((c) => table.fields.find((f) => f.name === c)?.name ?? table.fields.find((f) => sameIdent(f.name, c))?.name ?? c);
+}
+
 /** The longest a skipped-summary line runs before the file's next kinds go on a line of their own. */
 const SKIPPED_LINE_MAX = 300;
 
@@ -1122,6 +1146,12 @@ class Converter implements ConverterContext {
       if (index.pk) this.setPrimaryKey(table, columns);
       else if (columns.length) this.addUnique(table, columns);
     }
+    // MySQL's and Snowflake's grammars put a one-column `PRIMARY KEY (C)` on the field spelled exactly `C`,
+    // and drop it when the column is written `c`: an unquoted name is the same name in any case.
+    if (!table.primaryKey && !table.fields.some((f) => f.pk)) {
+      const key = tablePrimaryKeyItem(t, open, close);
+      if (key && key.every((c) => table.fields.some((f) => sameIdent(f.name, c)))) this.setPrimaryKey(table, key);
+    }
     plainIndexes += read.droppedIndexes;
     if (plainIndexes) this.skip(file, 'plainIndex', plainIndexes);
     for (const check of rawTable.checks ?? []) {
@@ -1340,7 +1370,7 @@ class Converter implements ConverterContext {
   addUnique(table: ModelTable, columns: string[]): void {
     const field = columns.length === 1 ? table.fields.find((f) => sameIdent(f.name, columns[0])) : undefined;
     if (field) field.unique = true;
-    else table.uniques.push(columns);
+    else table.uniques.push(spelledAsColumns(table, columns));
   }
 
   setPrimaryKey(table: ModelTable, columns: string[]): void {
@@ -1349,7 +1379,7 @@ class Converter implements ConverterContext {
       const field = table.fields.find((f) => sameIdent(f.name, columns[0]));
       if (field) { field.pk = true; return; }
     }
-    table.primaryKey = columns;
+    table.primaryKey = spelledAsColumns(table, columns);
   }
 
   /**
