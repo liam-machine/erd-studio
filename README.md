@@ -38,7 +38,7 @@ ERD Studio is a canvas for logical data modelling in VS Code. You draw tables, k
 When the folder holds a model to bring in, that import leads instead (the first that applies):
 
 - **Import your Power BI semantic model**, for a Power BI or Fabric semantic model. Tables, columns and relationships come across; measures stay in Power BI.
-- **Import your SQL scripts**, for `CREATE TABLE` scripts (PostgreSQL, MySQL, SQL Server, Snowflake or Databricks). Keys, foreign keys and comments come across.
+- **Import your SQL scripts**, for `CREATE TABLE` scripts (PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite). Keys, foreign keys and comments come across.
 - **Import your DBML file**, for a `.dbml` file from dbdiagram.io or any DBML tool.
 
 Every import opens as a draft: nothing is written until you press **Keep as Diagram**.

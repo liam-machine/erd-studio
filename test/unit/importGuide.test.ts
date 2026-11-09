@@ -7,8 +7,8 @@
  * openFolder; never a command id or a URL from the page), the exact text each
  * Copy copies, the fixed command each button runs, and the evidence behind
  * the cards: the Databricks notebook snippet's output and a Fabric Warehouse
- * script convert, and realistic BigQuery DDL does not (so BigQuery is "Not
- * yet").
+ * script convert, and so does realistic BigQuery DDL, read as BigQuery (no
+ * longer "Not yet").
  */
 
 import * as fs from 'fs';
@@ -39,7 +39,7 @@ import {
   parseImportGuideArgs,
   type ImportGuideContext,
 } from '../../src/services/importGuide';
-import { SQL_DIALECTS, convertSqlDdl, type SqlDdlFile } from '../../src/services/sqlDdlImport';
+import { SQL_DIALECTS, convertSqlDdl, detectSqlDialect, type SqlDdlFile } from '../../src/services/sqlDdlImport';
 import { dbmlCoreSqlEngine } from '../../src/services/sqlImportEngine';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { START_INTENTS, type StartIntent } from '../../src/types/startActions';
@@ -155,15 +155,16 @@ describe('the cards', () => {
       .toEqual(['Import Semantic Model…', 'Import SQL Server DDL…']);
   });
 
-  it('lists Oracle, BigQuery and live connections under Not yet, with Send Feedback', () => {
+  it('lists live connections under Not yet, with Send Feedback; Oracle, BigQuery, Redshift and SQLite go through Import…', () => {
     const notYet = page(BLANK).doc.querySelector('[data-card="notYet"]')!;
     const text = notYet.textContent ?? '';
-    expect(text).toMatch(/Oracle/);
-    expect(text).toMatch(/BigQuery/);
+    expect(text).not.toMatch(/Oracle|BigQuery/);
+    const other = page(BLANK).doc.querySelector('[data-card="otherTools"]')?.textContent ?? '';
+    for (const d of ['Oracle', 'BigQuery', 'Redshift', 'SQLite']) expect(other).toContain(d);
     expect(text).toMatch(/Live database connections/);
     expect(notYet.querySelector('[data-action="run"]')?.getAttribute('data-guide-action')).toBe('feedback');
     expect(notYet.querySelector('[data-action="run"]')?.textContent).toBe('Send Feedback');
-    // No BigQuery card: it does not convert yet (see "the evidence" below).
+    // No BigQuery card yet: each card's button is a telemetry key (the Import… of other tools reads it).
     expect(importGuideCards(BLANK)).not.toContain('bigquery');
   });
 });
@@ -395,14 +396,21 @@ describe('the evidence behind the cards (the SQL importer on what each source ex
     expect(result.dbml).toContain('Ref: "dbo"."fct_order"."customer_id" > "dbo"."dim_customer"."customer_id"');
   });
 
-  it('BigQuery: realistic INFORMATION_SCHEMA.TABLES.ddl reads whole in none of the dialects, so it is listed under Not yet', () => {
+  it('BigQuery: realistic INFORMATION_SCHEMA.TABLES.ddl reads whole as BigQuery (detected), keys, links and descriptions kept', () => {
     const files = read('bigquery');
-    for (const dialect of SQL_DIALECTS) {
-      const result = convertSqlDdl({ dialect, files }, dbmlCoreSqlEngine);
-      // The import is partial (one bad table never stops the rest), so a dialect may read some
-      // tables and report the others. BigQuery earns its own card only when a dialect reads every
-      // table with no problem; when this starts to fail, give it one and take it off Not yet.
-      expect(!result.ok || result.problems.length > 0, dialect).toBe(true);
+    expect(detectSqlDialect(files.map((f) => f.text).join('\n'))).toBe('bigquery');
+    const result = convertSqlDdl({ dialect: 'bigquery', files }, dbmlCoreSqlEngine);
+    if (!result.ok) throw new Error(JSON.stringify(result.problems));
+    expect(result.problems).toEqual([]);
+    expect(result.tableCount).toBe(4);
+    expect(result.refCount).toBe(3);
+    expect(result.readWith).toEqual({ grammar: 4, repaired: 0, salvaged: 0 });
+    expect(result.dbml).toContain('Ref: "sales"."fct_order"."customer_id" > "sales"."dim_customer"."customer_id"');
+    expect(result.dbml).toMatch(/"customer_id" INT64 \[[^\]]*note: 'Surrogate key'/);
+    // Every other dialect reads less of it as written.
+    for (const dialect of SQL_DIALECTS.filter((d) => d !== 'bigquery')) {
+      const other = convertSqlDdl({ dialect, files }, dbmlCoreSqlEngine);
+      expect(!other.ok || other.problems.length > 0 || (other.readWith?.grammar ?? 0) < 4, dialect).toBe(true);
     }
   });
 });

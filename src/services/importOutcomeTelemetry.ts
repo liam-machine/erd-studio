@@ -109,8 +109,12 @@ export const IMPORT_OUTCOME_FEATURES: Readonly<Record<ImportOutcomeImporter, Rea
   },
 };
 
-/** SQL dialect × outcome, beside the SQL importer's own key (only when the import had a dialect). */
-export const SQL_DIALECT_OUTCOME_FEATURES: Readonly<Record<SqlDialect, Readonly<Record<ImportOutcome, TelemetryFeature>>>> = {
+/**
+ * SQL dialect × outcome, beside the SQL importer's own key (only when the
+ * import had a dialect). Oracle, BigQuery, Redshift and SQLite have no keys
+ * yet: their imports record the importer's outcome only.
+ */
+export const SQL_DIALECT_OUTCOME_FEATURES: Readonly<Partial<Record<SqlDialect, Readonly<Record<ImportOutcome, TelemetryFeature>>>>> = {
   postgres: {
     clean: 'importSqlOutcomePostgresClean',
     repaired: 'importSqlOutcomePostgresRepaired',

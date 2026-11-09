@@ -37,7 +37,8 @@ export const SQL_CLAUSE_FEATURES: Readonly<Record<SqlClause, TelemetryFeature>> 
   Other: 'importSqlRejectedOther',
 };
 
-export const SQL_FAIL_DIALECT_FEATURES: Readonly<Record<SqlDialect, TelemetryFeature>> = {
+/** The dialect SQL that did not convert was read as (Oracle, BigQuery, Redshift and SQLite have no key yet). */
+export const SQL_FAIL_DIALECT_FEATURES: Readonly<Partial<Record<SqlDialect, TelemetryFeature>>> = {
   postgres: 'importSqlFailPostgres',
   mysql: 'importSqlFailMysql',
   sqlserver: 'importSqlFailSqlserver',

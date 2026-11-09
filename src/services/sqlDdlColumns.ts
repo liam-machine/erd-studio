@@ -12,7 +12,7 @@
  * `dist/sqlImport.js`.
  */
 
-import { isDoubleQuotedComment, isName, isPunct, matchParen, splitTopLevel, upper, type Token } from './sqlDdlLexer';
+import { isDoubleQuotedComment, isName, isPunct, matchParen, optionsDescription, splitTopLevel, upper, type Token } from './sqlDdlLexer';
 import type { ColumnSource, ModelField, PreparedSql, RawSqlField } from './sqlDdlModel';
 import { cleanTypeText, columnTypeSpan, isConstraintItem, strayTypeToken } from './sqlDdlRepair';
 
@@ -189,6 +189,13 @@ export function readColumnSource(tokens: Token[], from: number, to: number): Col
     if (word === 'COMMENT') {
       const value = isPunct(tokens[k + 1], '=') ? tokens[k + 2] : tokens[k + 1];
       if (value?.kind === 'string' || isDoubleQuotedComment(value)) source.comment = value.value;
+    } else if (word === 'OPTIONS' && isPunct(tokens[k + 1], '(')) {
+      // BigQuery: `OPTIONS(description = "…")` is the column's description.
+      const end = matchParen(tokens, k + 1);
+      if (end < 0 || end >= to) break;
+      const description = optionsDescription(tokens, k + 1, end);
+      if (description !== undefined) source.comment = description;
+      k = end;
     } else if (word === 'DEFAULT') {
       let v = k + 1;
       while (isPunct(tokens[v], '(')) v++;
@@ -280,6 +287,10 @@ const MODIFIER_WORDS: Readonly<Record<string, string>> = {
   SRID: 'SRID',
   ENCRYPTED: 'ENCRYPTED',
   COMPRESSION: 'COMPRESSION',
+  // Amazon Redshift's column compression and distribution.
+  ENCODE: 'ENCODE',
+  DISTKEY: 'DISTKEY',
+  SORTKEY: 'SORTKEY',
 };
 
 /**

@@ -229,15 +229,16 @@ describe('detectImportSources', () => {
     expect([...await detectImportSources(broken, '.erd-studio')]).toEqual([]);
   });
 
-  it('never offers what the import refuses or cannot read: a dbt macro, a CTAS, a Databricks notebook, Oracle DDL, ERD Studio\'s own DBML export, a file too big to read', async () => {
+  it('never offers what the import refuses or cannot read: a dbt macro, a CTAS, a Databricks notebook, ERD Studio\'s own DBML export, a file too big to read', async () => {
     const notOffered = {
       'macros/materializations.sql': '{% macro create_table_as(temporary, relation, sql) -%}\n  create or replace table {{ relation }}\n  as (\n    {{ sql }}\n  );\n{%- endmacro %}\n',
       'analyses/backfill.sql': 'create table tmp_backfill as (\n  select * from {{ ref(\'dim_customer\') }}\n);\n',
       'src/gold.sql': '-- Databricks notebook source\n-- COMMAND ----------\nCREATE TABLE gold.x (id INT);\n',
-      'oracle/hr.sql': 'CREATE TABLE HR.EMPLOYEES (\n  ID NUMBER(6) NOT NULL,\n  EMAIL VARCHAR2(25 BYTE)\n);\n',
       'docs/sales.dbml': '// erd-studio dbml-export v2 (DBML 9.1+)\nTable a {\n  id int\n}\n',
     };
     expect([...await detectImportSources(memIo(notOffered), '.erd-studio')]).toEqual([]);
+    // Oracle DDL reads as Oracle: offered.
+    expect([...await detectImportSources(memIo({ 'oracle/hr.sql': 'CREATE TABLE HR.EMPLOYEES (\n  ID NUMBER(6) NOT NULL,\n  EMAIL VARCHAR2(25 BYTE)\n);\n' }), '.erd-studio')]).toEqual(['sqlDdl']);
     const huge = memIo({ 'dump.sql': 'CREATE TABLE a (id int);' }, '/w', { size: async () => MAX_SQL_FILE_BYTES + 1 });
     expect([...await detectImportSources(huge, '.erd-studio')]).toEqual([]);
   });
