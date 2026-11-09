@@ -494,7 +494,8 @@ export function readUniqueIndex(cx: ConverterContext, file: string, st: Statemen
   if (upper(t[i]) === 'USING' && isName(t[i + 1])) i += 2;
   if (upper(t[i]) !== 'ON') { cx.skip(file, 'index'); return; }
   i++;
-  if (upper(t[i]) === 'ONLY') i++;
+  const only = upper(t[i]) === 'ONLY';
+  if (only) i++;
   const target = readName(t, i);
   if (!target) { cx.skip(file, 'index'); return; }
   // A key on a partition stays the partition's until partitions are resolved (`sqlDdlPartitions.ts`).
@@ -526,7 +527,7 @@ export function readUniqueIndex(cx: ConverterContext, file: string, st: Statemen
     cx.ledger.lost('uniqueKey', 'noField', 'partial unique index', where, 'not kept: unique only WHERE its condition holds');
     return;
   }
-  cx.keys.push({ table: parts, kind: 'unique', columns, origin: { file, line: st.line }, ...(indexName ? { name: indexName } : {}) });
+  cx.keys.push({ table: parts, kind: 'unique', columns, origin: { file, line: st.line }, ...(indexName ? { name: indexName } : {}), ...(only ? { only: { partitionsBefore: readerState(cx).partitions.length } } : {}) });
 }
 
 /** An index item that is a column (`name`, `name DESC`, `name COLLATE "C" text_pattern_ops`), or undefined for an expression. */
@@ -606,9 +607,15 @@ type Continues = 'addColumn' | 'addConstraint' | 'dropColumn' | 'dropConstraint'
 export function readAlterTable(cx: ConverterContext, text: string, st: Statement, origin: Origin): void {
   const t = st.tokens;
   let i = 2;
-  while (upper(t[i]) === 'ONLY' || (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS')) i += upper(t[i]) === 'IF' ? 2 : 1;
+  let only = false;
+  while (upper(t[i]) === 'ONLY' || (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS')) {
+    if (upper(t[i]) === 'ONLY') only = true;
+    i += upper(t[i]) === 'IF' ? 2 : 1;
+  }
   const name = readName(t, i);
   if (!name) { cx.skip(origin.file, 'alter'); return; }
+  // `ALTER TABLE ONLY t ADD PRIMARY KEY / UNIQUE`: t's own key, not given to the partitions it already has.
+  const keysBefore = cx.keys.length;
   // What the statement adds that waits for the end (keys, foreign keys, checks, comments, partitions) names the
   // table as written: a partition's are folded or kept with it (`sqlDdlPartitions.ts`). A change to the columns
   // of a child with no table yet (`PARTITION OF`, `() INHERITS`) waits too: it is replayed on the child's table
@@ -713,6 +720,7 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       unhandled();
     }
   }
+  if (only) for (let k = keysBefore; k < cx.keys.length; k++) cx.keys[k].only = { partitionsBefore: readerState(cx).partitions.length };
   if ((unhandledKind || !handled) && !checkOnly) cx.skip(origin.file, unhandledKind ?? 'alter');
 }
 

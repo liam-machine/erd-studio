@@ -209,6 +209,12 @@ export interface PendingKey {
   origin: Origin;
   /** The constraint's or unique index's name, as written (`DROP CONSTRAINT` / `DROP INDEX` replay it). */
   name?: string;
+  /**
+   * Written `ON ONLY t` / `ALTER TABLE ONLY t`: how many partition links the files had made by then. Only a
+   * partition attached later gets the key (PostgreSQL builds the parent's indexes on ATTACH, not on the
+   * partitions it already has; `sqlDdlPartitions.ts`).
+   */
+  only?: { partitionsBefore: number };
 }
 
 /** A ref resolved to the tables and columns it joins, ready to write. */

@@ -40,6 +40,7 @@ import {
   type Origin,
   type PendingComment,
   type PendingKey,
+  type PendingRef,
   type ReaderPartition,
 } from './sqlDdlModel';
 
@@ -278,6 +279,9 @@ export function resolvePartitions(cx: ConverterContext): void {
     changesByKey.delete(key);
   }
 
+  // A partition that is a table has its parent's keys and foreign keys (PostgreSQL makes them on every partition).
+  inheritPartitionKeys(cx, records, groups, fates, keyOf, finalTable);
+
   // What the files said about each folded child is now about its parent.
   if (folds.length === 0) {
     state.partitionsResolved = { folded: 0, kept };
@@ -402,6 +406,101 @@ export function resolvePartitions(cx: ConverterContext): void {
     if (at >= 0) cx.tables.splice(at, 1);
   }
   state.partitionsResolved = { folded: folds.length, kept };
+}
+
+/**
+ * Each partition kept as a table (`PARTITION OF`, `ATTACH PARTITION`; not an
+ * `INHERITS` child, and not one detached) gets its parent's primary key,
+ * unique keys and foreign keys, as PostgreSQL gives every partition: a
+ * partitioned table's PRIMARY KEY and UNIQUE constraints and indexes are
+ * created on each partition when it is created or attached, and its foreign
+ * keys are cloned onto it. A key written `ON ONLY` / `ALTER TABLE ONLY` goes
+ * only to a partition attached after it (pg_dump writes those after every
+ * ATTACH, and then a key on each partition of its own). Parents first, so a partition of a partition gets
+ * its grandparent's too. Added as pending keys and refs, so they are applied
+ * (and checked) like any other; one the partition already has is not added
+ * twice.
+ */
+function inheritPartitionKeys(
+  cx: ConverterContext,
+  records: readonly ReaderPartition[],
+  groups: ReadonlyMap<string, ReaderPartition[]>,
+  fates: ReadonlyMap<string, Fate>,
+  keyOf: (parts: readonly string[]) => string,
+  finalTable: (parts: readonly string[]) => ModelTable | undefined,
+): void {
+  const links: Array<{ child: ModelTable; parent: ModelTable; origin: Origin; depth: number; at: number }> = [];
+  const depthOf = (key: string, seen: Set<string>): number => {
+    const r = groups.get(key)?.find((x) => !x.detached && x.how !== 'INHERITS');
+    if (!r || seen.has(key)) return 0;
+    seen.add(key);
+    return 1 + depthOf(keyOf(r.parent), seen);
+  };
+  for (const [key, recs] of groups) {
+    const fate = fates.get(key);
+    if (fate?.kind !== 'table') continue;
+    const live = recs.filter((r) => !r.detached);
+    if (live.length === 0 || live.some((r) => r.how === 'INHERITS' || keyOf(r.parent) !== keyOf(live[0].parent))) continue;
+    const parent = finalTable(live[0].parent);
+    if (!parent || parent === fate.table) continue;
+    links.push({ child: fate.table, parent, origin: live[0].origin, depth: depthOf(key, new Set()), at: records.indexOf(live[0]) });
+  }
+  if (links.length === 0) return;
+  links.sort((a, b) => a.depth - b.depth);
+
+  // Pending keys and refs by the table they are on, looked up once (a dump of thousands of partitions stays linear).
+  const tableOf = new Map<string, ModelTable | undefined>();
+  const find = (parts: readonly string[]): ModelTable | undefined => {
+    const k = parts.join('\u0000');
+    if (!tableOf.has(k)) tableOf.set(k, cx.findTable(parts));
+    return tableOf.get(k);
+  };
+  const keysOn = new Map<ModelTable, PendingKey[]>();
+  const addKey = (table: ModelTable, k: PendingKey): void => { const l = keysOn.get(table); if (l) l.push(k); else keysOn.set(table, [k]); };
+  for (const k of cx.keys) { const t = find(k.table); if (t) addKey(t, k); }
+  const refsFrom = new Map<ModelTable, PendingRef[]>();
+  const addRef = (table: ModelTable, r: PendingRef): void => { const l = refsFrom.get(table); if (l) l.push(r); else refsFrom.set(table, [r]); };
+  for (const r of cx.refs) { const t = r.fromTable ?? find(r.from.parts); if (t) addRef(t, r); }
+
+  for (const { child, parent, origin, at } of links) {
+    const parts = partsOf(child);
+    const hasColumns = (columns: readonly string[]): boolean => columns.every((c) => child.fields.some((f) => sameIdent(f.name, c)));
+    const has = (kind: 'pk' | 'unique', columns: readonly string[]): boolean => {
+      const pending = keysOn.get(child) ?? [];
+      if (kind === 'pk') return primaryKeyOf(child).length > 0 || pending.some((k) => k.kind === 'pk');
+      return child.uniques.some((u) => sameSet(u, columns))
+        || (columns.length === 1 && child.fields.some((f) => f.unique && sameIdent(f.name, columns[0])))
+        || pending.some((k) => k.kind === 'unique' && sameSet(k.columns, columns));
+    };
+    const wanted: Array<{ kind: 'pk' | 'unique'; columns: readonly string[] }> = [];
+    if (primaryKeyOf(parent).length) wanted.push({ kind: 'pk', columns: primaryKeyOf(parent) });
+    for (const u of parent.uniques) wanted.push({ kind: 'unique', columns: u });
+    for (const f of parent.fields) if (f.unique) wanted.push({ kind: 'unique', columns: [f.name] });
+    // `ON ONLY parent` / `ALTER TABLE ONLY parent`: built on a partition attached later, not on one it already had.
+    for (const k of keysOn.get(parent) ?? []) if (!k.only || at >= k.only.partitionsBefore) wanted.push({ kind: k.kind, columns: k.columns });
+    for (const w of wanted) {
+      if (!hasColumns(w.columns) || has(w.kind, w.columns)) continue;
+      const copy: PendingKey = { table: parts, kind: w.kind, columns: [...w.columns], origin: { ...origin } };
+      cx.keys.push(copy);
+      addKey(child, copy);
+    }
+    for (const ref of refsFrom.get(parent) ?? []) {
+      if (!hasColumns(ref.from.columns)) continue;
+      const target = find(ref.to.parts);
+      const already = (refsFrom.get(child) ?? []).some((r) => sameSet(r.from.columns, ref.from.columns) && find(r.to.parts) === target);
+      if (already) continue;
+      const copy: PendingRef = {
+        from: { parts, columns: [...ref.from.columns] },
+        to: { parts: [...ref.to.parts], columns: [...ref.to.columns] },
+        origin: { ...origin },
+        fromTable: child,
+        ...(ref.onDelete ? { onDelete: ref.onDelete } : {}),
+        ...(ref.onUpdate ? { onUpdate: ref.onUpdate } : {}),
+      };
+      cx.refs.push(copy);
+      addRef(child, copy);
+    }
+  }
 }
 
 /** The columns `own` inherits from `parents` (in their order, before its own); how many were added. */
