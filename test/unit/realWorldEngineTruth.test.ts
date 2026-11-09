@@ -148,6 +148,19 @@ describe('engine truth rules', () => {
     expect(canonType('snowflake', 'NUMBER(12)')).toBe('number(12,0)');
     expect(canonType('snowflake', 'STRING')).toBe('varchar(16777216)');
     expect(canonType('databricks', 'long')).toBe(canonType('databricks', 'BIGINT'));
+    // Oracle's catalog spelling (ALL_TAB_COLUMNS) of what the scripts write.
+    expect(canonType('oracle', 'NUMBER(8, 2)')).toBe(canonType('oracle', 'NUMBER(8,2)'));
+    expect(canonType('oracle', 'INT')).toBe(canonType('oracle', 'NUMBER(*,0)'));
+    expect(canonType('oracle', 'integer')).toBe('number(*,0)');
+    expect(canonType('oracle', 'varchar(50)')).toBe(canonType('oracle', 'VARCHAR2(50)'));
+    expect(canonType('oracle', 'VARCHAR2(20 BYTE)')).toBe(canonType('oracle', 'VARCHAR2(20)'));
+    expect(canonType('oracle', 'VARCHAR2(20 CHAR)')).not.toBe(canonType('oracle', 'VARCHAR2(20)'));
+    expect(canonType('oracle', 'DECIMAL(10,0)')).toBe(canonType('oracle', 'NUMBER(10)'));
+    expect(canonType('oracle', 'FLOAT')).toBe(canonType('oracle', 'FLOAT(126)'));
+    expect(canonType('oracle', 'TIMESTAMP')).toBe(canonType('oracle', 'TIMESTAMP(6)'));
+    expect(canonType('oracle', 'TIMESTAMP WITH TIME ZONE')).toBe(canonType('oracle', 'TIMESTAMP(6) WITH TIME ZONE'));
+    expect(canonType('oracle', 'CHAR')).toBe(canonType('oracle', 'CHAR(1)'));
+    expect(canonType('oracle', 'NUMBER')).not.toBe(canonType('oracle', 'NUMBER(*,0)'));
   });
 
   const rb: EngineReadback = {

@@ -54,3 +54,5 @@ Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Stud
 | jobs | 4 | job_id | – |
 | employees | 11 | employee_id | department_id → departments; job_id → jobs; manager_id → employees |
 | job_history | 5 | employee_id, start_date | job_id → jobs; employee_id → employees; department_id → departments |
+
+Oracle Database agrees item by item: run by SQL*Plus as `hr_install.sql` runs it, on Oracle AI Database 26ai Free 23.26.0 (Docker), the script loads with no error, and the catalog (`ALL_TABLES`, `ALL_TAB_COLUMNS`, `ALL_CONSTRAINTS`, `ALL_CONS_COLUMNS`, `ALL_TAB_COMMENTS`, `ALL_COL_COMMENTS`) holds these 7 tables, 35 columns with their types and NOT NULL, 7 primary keys, the 1 unique key, 10 foreign keys and 42 comments, with no difference (`test/real-world-truth/engine/oracle-hr.json`, `docs/dev/real-world-truth.md`). The 6 `CREATE UNIQUE INDEX` statements are the indexes the primary keys use: Oracle lists no unique index of its own besides them.
