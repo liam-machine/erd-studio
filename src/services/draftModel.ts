@@ -34,7 +34,7 @@ import type {
 } from '../types/draft';
 import type { DisplaySubjectArea } from '../types/display';
 import { createLogger } from './logger';
-import { ledgerLeftOut, ledgerNotes, savedOptionalNote, type LedgerEntry } from './importLedger';
+import { ledgerLeftOut, ledgerLogLines, ledgerNotes, ledgerText, savedOptionalNote, type LedgerEntry } from './importLedger';
 import type { LayerConfig } from '../types/layer';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import {
@@ -591,6 +591,7 @@ function undrawnLinkLine(link: NonNullable<DbtDraft['undrawnLinks']>[number]): s
     case 'source': return `${link.toModel} is a dbt source, not a model, so it can't be drawn.`;
     case 'package': return `${link.toModel} is a model from an installed dbt package, so it can't be drawn.`;
     case 'disabled': return `${link.toModel} is disabled in dbt, so it can't be drawn.`;
+    case 'noColumn': return `${link.missing?.table ?? link.fromModel} has no column ${link.missing?.column ?? link.fromColumn} in dbt (an older version's, or a stale manifest?), so the line can't be drawn.`;
   }
 }
 
@@ -624,14 +625,38 @@ export function dbtConditionText(link: Pick<DraftRelationshipCondition, 'toModel
 /** The longest list of source names Not drawn gives before counting the rest. */
 const SOURCES_NAMED = 20;
 
+/** The longest a source or table name runs in Not drawn before it is cut. */
+const SOURCE_NAME_MAX = 80;
+
 /** Not drawn's line for the project's dbt sources ({@link DbtDraft.sources}). */
 export function dbtSourcesLine(sources: readonly DraftSourceTable[]): string {
-  const names = sources.map((s) => (s.identifier ? `${s.name} (table ${s.identifier})` : s.name));
+  const names = sources.map((s) => (s.identifier
+    ? `${oneLine(s.name, SOURCE_NAME_MAX)} (table ${oneLine(s.identifier, SOURCE_NAME_MAX)})`
+    : oneLine(s.name, SOURCE_NAME_MAX)));
   const listed = names.length > SOURCES_NAMED
     ? `${names.slice(0, SOURCES_NAMED).join(', ')} and ${thousands(names.length - SOURCES_NAMED)} more (ERD Studio: Show Logs lists every one)`
     : names.join(', ');
   const one = sources.length === 1;
   return `${count(sources.length, 'dbt source is', 'dbt sources are')} not drawn: Import from dbt draws models, and a source is a table dbt reads but doesn't build. ${one ? 'It is' : 'They are'} ${listed}.`;
+}
+
+/** The ledger's `what` for a dbt source (see `buildDbtDraft`). */
+const DBT_SOURCE_WHAT = 'dbt source';
+
+/**
+ * The output-log lines for a dbt draft: one per ledger entry
+ * ({@link ledgerLogLines}), and one per dbt source whether or not its file
+ * and line are known, since Not drawn names only the first
+ * {@link SOURCES_NAMED} and points to the log for the rest.
+ */
+export function dbtDraftLogLines(draft: Pick<DbtDraft, 'ledger' | 'sources'>, title = 'Import from dbt'): string[] {
+  const lines = ledgerLogLines((draft.ledger ?? []).filter((e) => e.what !== DBT_SOURCE_WHAT), title);
+  for (const s of draft.sources ?? []) {
+    const at = s.file ? `${ledgerText(s.file, 200)}${s.line !== undefined ? ` line ${s.line}` : ''}: ` : '';
+    const table = s.identifier ? ` (table ${ledgerText(s.identifier, SOURCE_NAME_MAX, true)})` : '';
+    lines.push(`${title}: ${at}dbt source ${ledgerText(s.name, SOURCE_NAME_MAX * 2, true)}${table}: not drawn (a source is a table dbt reads but doesn't build)`);
+  }
+  return lines;
 }
 
 /** The ledger's D18 count (`savedOptional`), and the ledger without it (its note is said in its own words). */

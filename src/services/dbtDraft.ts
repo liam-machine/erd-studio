@@ -227,7 +227,9 @@ export interface DraftUndrawnLink {
    * `package`: a model of an installed dbt package (no draft offers one);
    * `disabled`: a model dbt has disabled.
    */
-  why: 'addable' | 'noColumns' | 'notAModel' | 'source' | 'package' | 'disabled';
+  why: 'addable' | 'noColumns' | 'notAModel' | 'source' | 'package' | 'disabled' | 'noColumn';
+  /** `noColumn`: the end whose table has no such column (a test of an older model version's column, a stale manifest). */
+  missing?: { table: string; column: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -367,40 +369,65 @@ export function rootProjectsOf(ymlData?: YmlData, manifest?: ManifestData): Set<
  * Normalised names of the models dbt does not build: the manifest's
  * `disabled` (a `config(enabled=false)`, a `+enabled: false` subtree), and a
  * schema yml entry with `config: enabled: false` (seen without a manifest).
+ * A model the manifest builds (one of its enabled nodes) is never disabled
+ * by its yml: the SQL file's `config(enabled=true)` overrides the yml, and
+ * only the manifest has seen both.
  */
 export function disabledModelsOf(ymlData?: YmlData, manifest?: ManifestData): Set<string> {
   const out = new Set(manifest?.disabledModels ?? []);
-  for (const m of ymlData?.models.values() ?? []) if (m.disabled) out.add(normaliseName(m.name));
+  const built = new Set([...(manifest?.models.values() ?? [])].map((m) => normaliseName(m.name)));
+  for (const m of ymlData?.models.values() ?? []) {
+    const key = normaliseName(m.name);
+    if (m.disabled && !built.has(key)) out.add(key);
+  }
   return out;
 }
 
 /** Relationship tests from yml and manifest (union, deduped case-insensitively) plus merged uniqueness tests. */
 export function dbtTestsOf(ymlData?: YmlData, manifest?: ManifestData): DbtTestIndex {
-  const seen = new Map<string, DraftRelationshipTest>();
-  const relationshipTests: DraftRelationshipTest[] = [];
   const conditionKey = (c: RelationshipTestCondition): string => [c.from ?? '', c.to ?? '', c.where ?? ''].join('\0');
-  for (const t of [...(ymlData?.relationshipTests ?? []), ...(manifest?.relationshipTests ?? [])]) {
-    const key = testKey(t);
-    const conditional = t.conditional === true;
-    const earlier = seen.get(key);
-    if (earlier) {
-      // One unconditional test of the link is enough: it holds for every row.
-      if (!conditional) { delete earlier.conditional; delete earlier.conditions; }
-      else if (earlier.conditional && t.condition && !(earlier.conditions ?? []).some((c) => conditionKey(c) === conditionKey(t.condition!))) {
-        earlier.conditions = [...(earlier.conditions ?? []), t.condition];
+  const addCondition = (test: DraftRelationshipTest, c: RelationshipTestCondition | undefined): void => {
+    if (c && !(test.conditions ?? []).some((x) => conditionKey(x) === conditionKey(c))) test.conditions = [...(test.conditions ?? []), c];
+  };
+  // Within one source, one unconditional test of the link is enough: it holds for every row.
+  const index = (tests: ReadonlyArray<DraftRelationshipTest & { condition?: RelationshipTestCondition }>): Map<string, DraftRelationshipTest> => {
+    const seen = new Map<string, DraftRelationshipTest>();
+    for (const t of tests) {
+      const key = testKey(t);
+      const conditional = t.conditional === true;
+      const earlier = seen.get(key);
+      if (earlier) {
+        if (!conditional) { delete earlier.conditional; delete earlier.conditions; }
+        else if (earlier.conditional) addCondition(earlier, t.condition);
+        if (earlier.file === undefined && t.file) { earlier.file = t.file; if (t.line !== undefined) earlier.line = t.line; }
+        continue;
+      }
+      seen.set(key, {
+        fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn,
+        ...(conditional ? { conditional: true as const } : {}),
+        ...(conditional && t.condition ? { conditions: [t.condition] } : {}),
+        ...(t.file ? { file: t.file } : {}),
+        ...(t.file && t.line !== undefined ? { line: t.line } : {}),
+      });
+    }
+    return seen;
+  };
+  // The yml and the manifest are two copies of the same tests, not more tests: a link is
+  // conditional when either copy says every test of it is. The manifest applies config the
+  // yml does not show (dbt_project.yml's `tests: +where:`); the yml may be newer than a
+  // stale manifest. Saying a condition that only one copy has is never a loss.
+  const relationshipTests: DraftRelationshipTest[] = [];
+  const byKey = new Map<string, DraftRelationshipTest>();
+  for (const copy of [index(ymlData?.relationshipTests ?? []), index(manifest?.relationshipTests ?? [])]) {
+    for (const [key, t] of copy) {
+      const earlier = byKey.get(key);
+      if (!earlier) { byKey.set(key, t); relationshipTests.push(t); continue; }
+      if (t.conditional) {
+        if (!earlier.conditional) { earlier.conditional = true; delete earlier.conditions; }
+        for (const c of t.conditions ?? []) addCondition(earlier, c);
       }
       if (earlier.file === undefined && t.file) { earlier.file = t.file; if (t.line !== undefined) earlier.line = t.line; }
-      continue;
     }
-    const test: DraftRelationshipTest = {
-      fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn,
-      ...(conditional ? { conditional: true as const } : {}),
-      ...(conditional && t.condition ? { conditions: [t.condition] } : {}),
-      ...(t.file ? { file: t.file } : {}),
-      ...(t.file && t.line !== undefined ? { line: t.line } : {}),
-    };
-    seen.set(key, test);
-    relationshipTests.push(test);
   }
   return {
     relationshipTests,
@@ -679,7 +706,8 @@ export function notNullColumnsOf(ymlData: YmlData | undefined, model: string, ma
 
 /**
  * The project's dbt sources, from the schema yml (with file and line), then
- * any only the manifest lists; one per `source.table`, ignoring case.
+ * any only the manifest lists (but not an installed package's); one per
+ * `source.table`, ignoring case.
  */
 export function dbtSourcesOf(ymlData?: YmlData, manifest?: ManifestData): DraftSourceTable[] {
   const out = new Map<string, DraftSourceTable>();
@@ -695,8 +723,11 @@ export function dbtSourcesOf(ymlData?: YmlData, manifest?: ManifestData): DraftS
       ...(t.line !== undefined ? { line: t.line } : {}),
     });
   };
+  // An installed package's sources (`dbt_packages/`) are not this project's: its file is not here either.
+  const rootProjects = rootProjectsOf(ymlData, manifest);
+  const ours = (t: YmlSourceTable): boolean => !t.projectName || rootProjects.size === 0 || rootProjects.has(t.projectName);
   for (const t of ymlData?.sources ?? []) add(t);
-  for (const t of manifest?.sources ?? []) add(t);
+  for (const t of manifest?.sources ?? []) if (ours(t)) add(t);
   return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -933,13 +964,23 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     for (const c of a.model?.columns ?? []) columnSpelling.set(`${normaliseName(a.name)}\0${identifierKey(c.name)}`, c.name);
   }
   const spelled = (model: string, column: string): string => columnSpelling.get(`${normaliseName(model)}\0${identifierKey(column)}`) ?? column;
+  // A new table whose columns are known has no column the test names (a test of an
+  // older model version's column, a stale manifest): the line would join nothing.
+  const seededModels = new Set(accepted.filter((a) => a.model).map((a) => normaliseName(a.name)));
+  const lacks = (model: string, column: string): boolean =>
+    seededModels.has(normaliseName(model)) && !columnSpelling.has(`${normaliseName(model)}\0${identifierKey(column)}`);
+  const missingColumn: Relationship[] = [];
   const relationships = relationshipsForAddedTables(
     input.existingModelNames ?? [],
     modelNames,
     tests.relationshipTests,
     tests.unique,
     input.existingRelationships ?? [],
-  ).map((r) => ({ ...r, fromColumn: spelled(r.fromModel, r.fromColumn), toColumn: spelled(r.toModel, r.toColumn) }));
+  ).filter((r) => {
+    if (!lacks(r.fromModel, r.fromColumn) && !lacks(r.toModel, r.toColumn)) return true;
+    missingColumn.push(r);
+    return false;
+  }).map((r) => ({ ...r, fromColumn: spelled(r.fromModel, r.fromColumn), toColumn: spelled(r.toModel, r.toColumn) }));
 
   const ledger = createLedger();
   const drawn = new Set([...(input.existingModelNames ?? []), ...modelNames].map(normaliseName));
@@ -974,6 +1015,15 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     undrawnLinks.push({ fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn, why });
     ledger.skipped('relationship', overLimit.has(to) ? 'capped' : why === 'addable' ? 'other' : 'notInFiles', 'link to a model not drawn',
       { ...(t.file ? { file: t.file } : {}), ...(t.line !== undefined ? { line: t.line } : {}), table: t.fromModel, column: t.fromColumn }, `to ${t.toModel}`);
+  }
+  // Tests whose column a drawn table does not have: named, with the test's file and line.
+  const testsByLink = new Map(tests.relationshipTests.map((t) => [linkKey({ ...t, fromColumn: identifierKey(t.fromColumn), toColumn: identifierKey(t.toColumn) }), t]));
+  for (const r of missingColumn) {
+    const [table, column] = lacks(r.fromModel, r.fromColumn) ? [r.fromModel, r.fromColumn] : [r.toModel, r.toColumn];
+    const t = testsByLink.get(linkKey({ ...r, fromColumn: identifierKey(r.fromColumn), toColumn: identifierKey(r.toColumn) }));
+    undrawnLinks.push({ fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, why: 'noColumn', missing: { table, column } });
+    ledger.skipped('relationship', 'notInFiles', 'link from a column the table does not have',
+      { ...(t?.file ? { file: t.file } : {}), ...(t?.line !== undefined ? { line: t.line } : {}), table, column }, `to ${r.toModel}`);
   }
   // Tests to a dbt source: a source is never a model, so no draft draws it (yml first, then the manifest's).
   for (const t of [...(input.ymlData?.sourceRelationshipTests ?? []), ...(input.manifest?.sourceRelationshipTests ?? [])]) {

@@ -249,6 +249,8 @@ function extractSources(sources: unknown): YmlSourceTable[] {
         dataType: typeof c.data_type === 'string' ? c.data_type : null,
       })).filter((c) => c.name !== '')
       : [];
+    const uniqueId = text(value.unique_id);
+    const projectName = text(value.package_name) ?? (uniqueId?.split('.')[1] || undefined);
     out.push({
       source,
       name,
@@ -257,6 +259,7 @@ function extractSources(sources: unknown): YmlSourceTable[] {
       description: typeof value.description === 'string' ? value.description : '',
       columns,
       file: text(value.original_file_path) ?? '',
+      ...(projectName ? { projectName } : {}),
     });
   }
   return out;
@@ -266,7 +269,7 @@ function extractSources(sources: unknown): YmlSourceTable[] {
 function conditionOf(kwargs: Record<string, unknown>, node: Record<string, unknown>): RelationshipTestCondition | undefined {
   const from = text(kwargs.from_condition);
   const to = text(kwargs.to_condition);
-  const where = whereOf(node) ?? text(kwargs.where);
+  const where = whereOf(node) ?? text(kwargs.where) ?? text(kwargs.row_condition);
   if (!from && !to && !where) return undefined;
   return { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(where ? { where } : {}) };
 }

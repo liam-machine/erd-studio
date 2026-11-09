@@ -104,10 +104,12 @@ export interface YmlSourceTable {
   quoted?: boolean;
   description: string;
   columns: YmlColumn[];
-  /** Project-relative, forward slashes. */
+  /** Project-relative, forward slashes (the manifest's: relative to its package's root). */
   file: string;
   /** 1-based line of the table's entry. */
   line?: number;
+  /** The dbt project that defines it (the manifest's `package_name`); absent from the yml. */
+  projectName?: string;
 }
 
 /** Model info extracted from a dbt schema .yml file. */

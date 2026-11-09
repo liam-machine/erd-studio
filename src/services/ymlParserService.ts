@@ -453,6 +453,8 @@ export class YmlParserService {
     // names. Resolved where a test is read ({@link deref}), never expanded in place, so an
     // alias bomb costs only what is read.
     this.aliasDoc = doc;
+    this.merged = new WeakMap();
+    this.merging.clear();
 
     this.extractSources(this.deref(doc.get('sources')), sources);
 
@@ -879,7 +881,8 @@ export class YmlParserService {
     };
     const from = pick('from_condition');
     const to = pick('to_condition');
-    const where = pick('where');
+    // `row_condition` limits rows as `where:` does (the reader's conditional rule, {@link testHoldsForEveryRow}).
+    const where = pick('where') ?? pick('row_condition');
     if (!from && !to && !where) return undefined;
     return { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(where ? { where } : {}) };
   }
@@ -921,6 +924,12 @@ export class YmlParserService {
   /** The schema file being read, for {@link deref}. */
   private aliasDoc: Document | undefined;
 
+  /** The schema file's maps with their merges applied ({@link withMerges}), each built once. */
+  private merged = new WeakMap<YAMLMap, YAMLMap>();
+
+  /** Maps whose merges are being applied, so a map that merges itself stops. */
+  private merging = new Set<YAMLMap>();
+
   /**
    * A node, or the node an alias names (`tests: *key_tests`), once: what it
    * names is read as written, so a nested alias is resolved only when it is
@@ -947,6 +956,25 @@ export class YmlParserService {
    */
   private withMerges(map: YAMLMap, depth: number): YAMLMap {
     if (!map.items.some(isMergePair) || depth >= MAX_MERGE_DEPTH) return map;
+    // Each map is merged once per file: an anchor merged many times over
+    // (`<<: [*a, *a, …]` at every level) would otherwise cost fan-out^depth.
+    // A map met again while its own merge is being built (it merges itself)
+    // is read as written.
+    const done = this.merged.get(map);
+    if (done) return done;
+    if (this.merging.has(map)) return map;
+    this.merging.add(map);
+    try {
+      const out = this.buildMerged(map, depth);
+      this.merged.set(map, out);
+      return out;
+    } finally {
+      this.merging.delete(map);
+    }
+  }
+
+  /** {@link withMerges}' map, built. */
+  private buildMerged(map: YAMLMap, depth: number): YAMLMap {
     const keyOf = (pair: Pair): unknown => (isScalar(pair.key) ? pair.key.value : pair.key);
     const out = new YAMLMap();
     const seen = new Set<unknown>();
