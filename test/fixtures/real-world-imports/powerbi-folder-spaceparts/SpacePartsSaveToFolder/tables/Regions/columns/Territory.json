@@ -1,0 +1,14 @@
+{
+  "name": "Territory",
+  "dataType": "string",
+  "sourceColumn": "territory",
+  "displayFolder": "1. Region Hierarchy",
+  "lineageTag": "85ec7ff6-21a1-4ccc-bdb0-391f173c7cbb",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Year Week Number EU (ie 202125)",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[Calendar Year Week Number EU (ie 202125)]",
+  "displayFolder": "4. Week",
+  "lineageTag": "9239173d-70a1-4fb7-8ef8-b6b580e4c576",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

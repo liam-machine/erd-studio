@@ -1,0 +1,14 @@
+{
+  "name": "Budget QTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Budget QTD]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\iii. QTD",
+  "lineageTag": "4b634367-f3b3-4b7e-a4c5-11ae1f0005a3"
+}

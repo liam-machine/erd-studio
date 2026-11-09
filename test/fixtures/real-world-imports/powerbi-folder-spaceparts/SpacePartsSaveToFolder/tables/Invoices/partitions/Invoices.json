@@ -1,0 +1,16 @@
+{
+  "name": "Invoices",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"invoices\"]}[Data],",
+      "    #\"Select Columns\" = Table.RemoveColumns ( Data, {\"dwcreateddate\", \"net_invoice_cost\"} )",
+      "in",
+      "    #\"Select Columns\""
+    ]
+  }
+}

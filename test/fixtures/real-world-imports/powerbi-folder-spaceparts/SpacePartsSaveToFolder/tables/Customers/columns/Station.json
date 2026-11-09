@@ -1,0 +1,15 @@
+{
+  "name": "Station",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "station",
+  "displayFolder": "4. Keys",
+  "lineageTag": "22b532a7-95c9-4055-98bd-f6c8624e21ea",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

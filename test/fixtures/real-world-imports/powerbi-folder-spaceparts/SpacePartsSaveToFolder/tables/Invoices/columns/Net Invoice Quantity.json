@@ -1,0 +1,17 @@
+{
+  "name": "Net Invoice Quantity",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "net_invoice_quantity",
+  "formatString": "0",
+  "sourceProviderType": "int",
+  "displayFolder": "Columns",
+  "lineageTag": "6f2da7dd-b470-4d32-98ea-5ebd10095643",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "LocalDateTable_4ad7e833-9e3a-4bd3-9873-535c2d4d4285-404d773c-c025-4089-a461-fd536a2e3081",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": "Calendar(Date(Year(MIN('Orders'[Ship Date])), 1, 1), Date(Year(MAX('Orders'[Ship Date])), 12, 31))"
+  }
+}

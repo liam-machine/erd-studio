@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "IsHoliday",
+  "dataType": "boolean",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[IsHoliday]",
+  "displayFolder": "7. Boolean Fields",
+  "lineageTag": "ee3e6d01-2621-4a08-b25a-591318b53703",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Order Status Group",
+  "dataType": "string",
+  "sourceColumn": "order_status_group",
+  "sortByColumn": "Order Status Grouping Ordinal",
+  "displayFolder": "1. Order Status",
+  "lineageTag": "f34f646d-9d85-473b-be9a-0fd08df3cb97",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

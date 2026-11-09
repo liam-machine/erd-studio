@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "IsThisMonth",
+  "dataType": "boolean",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[IsThisMonth]",
+  "displayFolder": "7. Boolean Fields",
+  "lineageTag": "51bcf435-6619-4d65-8dcf-b861329e2a51",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

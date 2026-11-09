@@ -1,0 +1,7 @@
+{
+  "name": "No. Products",
+  "expression": "COUNTROWS ( 'Products' )",
+  "formatString": "#,##0 Products",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "d80a646a-487d-43cf-8469-f960058c7705"
+}

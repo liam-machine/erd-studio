@@ -1,0 +1,13 @@
+{
+  "name": "Sales Forecast",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Forecast],",
+    "    'Exchange Rate'[From Currency] = \"EUR\"",
+    ")"
+  ],
+  "formatString": "#,##0.00",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "d4110b87-0cfc-49d6-8b96-053d05450b96"
+}

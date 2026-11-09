@@ -1,0 +1,10 @@
+{
+  "name": "Budget vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Budget]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "824b1d58-869a-408c-a12e-ccdf950300ef"
+}

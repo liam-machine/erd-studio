@@ -1,0 +1,17 @@
+{
+  "name": "Value",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT ('1) Selected Metric'[Select a Measure]),",
+    "        'Z01CG2 - Value (Budget Rate)'[Measure]",
+    "    )",
+    ") "
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Total\\Actuals",
+  "lineageTag": "c5c7fd2d-5b7d-467c-953c-71338d4296f7"
+}

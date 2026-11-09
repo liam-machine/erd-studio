@@ -1,0 +1,28 @@
+{
+  "type": "calculated",
+  "name": "Workdays MTD %",
+  "dataType": "double",
+  "isDataTypeInferred": true,
+  "expression": [
+    "DIVIDE (",
+    "    'Date'[Workdays MTD],",
+    "    /* Number of weekdays MTD for selected month */",
+    "    CALCULATE (",
+    "        [# Workdays in Selected Month],",
+    "        ALLEXCEPT ( 'Date', 'Date'[Calendar Month Year (ie Jan 21)] )",
+    "    ),",
+    "    /* Total number of weekdays for selected month */",
+    "    0",
+    ")"
+  ],
+  "formatString": "0.00%",
+  "displayFolder": "5. Weekday / Workday\\Workdays",
+  "lineageTag": "cd816ac9-657f-4f27-ae68-ba35c84475f5",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

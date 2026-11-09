@@ -1,0 +1,15 @@
+{
+  "name": "% Workdays QTD",
+  "expression": [
+    "IF (",
+    "    HASONEVALUE ('Date'[Calendar Quarter Year (ie Q1 2021)]),",
+    "    MROUND (",
+    "        DIVIDE ([# Workdays QTD], [# Workdays in Selected Quarter]),",
+    "        0.01",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0%",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "7acd41b3-fc3c-4e8b-809c-a5edc09bc853"
+}

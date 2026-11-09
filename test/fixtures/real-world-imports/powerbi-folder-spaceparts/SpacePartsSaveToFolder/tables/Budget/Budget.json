@@ -1,0 +1,42 @@
+{
+  "name": "Budget",
+  "lineageTag": "a6b0eb60-264f-474d-a8fe-ac16f65fbc35",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Table"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": [
+        "[",
+        "  {",
+        "    \"name\": \"583c271a-a6ae-4f4b-bdb0-dfc91a31493e\",",
+        "    \"fromTable\": \"Budget\",",
+        "    \"fromColumn\": \"Customer Key\",",
+        "    \"toTable\": \"Customers\",",
+        "    \"toColumn\": \"Customer Key\"",
+        "  },",
+        "  {",
+        "    \"name\": \"bbcee627-b8b2-4604-9ad8-9d2036321cfb\",",
+        "    \"fromTable\": \"Budget\",",
+        "    \"fromColumn\": \"Month\",",
+        "    \"toTable\": \"Date\",",
+        "    \"toColumn\": \"Date\"",
+        "  },",
+        "  {",
+        "    \"name\": \"b9c4b659-0116-4f12-af8c-704fe07f3112\",",
+        "    \"fromTable\": \"Budget\",",
+        "    \"fromColumn\": \"Product Key\",",
+        "    \"toTable\": \"Products\",",
+        "    \"toColumn\": \"Product Key\"",
+        "  }",
+        "]"
+      ]
+    }
+  ]
+}

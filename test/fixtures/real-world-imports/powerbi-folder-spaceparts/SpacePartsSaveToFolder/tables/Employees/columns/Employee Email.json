@@ -1,0 +1,15 @@
+{
+  "name": "Employee Email",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "employee_email",
+  "displayFolder": "Columns",
+  "lineageTag": "e4e18027-3292-4531-9c47-c0d2bd3d8efb",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

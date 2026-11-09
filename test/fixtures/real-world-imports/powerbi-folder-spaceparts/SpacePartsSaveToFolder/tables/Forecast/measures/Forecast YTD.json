@@ -1,0 +1,19 @@
+{
+  "name": "Forecast YTD",
+  "expression": [
+    "",
+    "VAR _DATES_YTD =",
+    "    CALCULATETABLE (",
+    "        DATESYTD ('Date'[Date]),",
+    "        'Date'[IsThisMonth] = FALSE",
+    "    )",
+    "VAR _CURRENT_MONTH_Forecast = [Forecast MTD]",
+    "VAR _QTD_Forecast_BEFORE_THIS_MONTH = CALCULATE ([Forecast], _DATES_YTD)",
+    "VAR _RESULT = _CURRENT_MONTH_Forecast + _QTD_Forecast_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\iv. YTD",
+  "lineageTag": "8db40d35-8818-45fb-b008-f39e79ba3084"
+}

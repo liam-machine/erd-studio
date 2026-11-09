@@ -1,0 +1,7 @@
+{
+  "name": "Billing Document Lines",
+  "expression": "[Invoice Lines]",
+  "formatString": "#,##0.00",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "d69dc0a4-9763-403e-8e38-edb03bb5ec7e"
+}

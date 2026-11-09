@@ -1,0 +1,16 @@
+{
+  "name": "Total Net Invoice Value",
+  "description": "This measure is theSumof column 'Invoices'[Net Invoice Value]",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Net Invoice Value]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\I. Total",
+  "lineageTag": "4743b7bf-79cb-4660-846e-243bcf724584"
+}

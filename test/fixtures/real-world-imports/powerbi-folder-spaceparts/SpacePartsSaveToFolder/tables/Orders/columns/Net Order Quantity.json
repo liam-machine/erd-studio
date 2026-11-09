@@ -1,0 +1,15 @@
+{
+  "name": "Net Order Quantity",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "net_order_quantity",
+  "displayFolder": "Columns\\1. Facts",
+  "lineageTag": "38503552-7ce2-412c-bb5e-b56bda227eb0",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

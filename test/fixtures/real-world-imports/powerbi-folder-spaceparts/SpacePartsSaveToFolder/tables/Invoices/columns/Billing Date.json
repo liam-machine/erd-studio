@@ -1,0 +1,21 @@
+{
+  "name": "Billing Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "billing_date",
+  "formatString": "Long Date",
+  "sourceProviderType": "date",
+  "displayFolder": "Columns",
+  "lineageTag": "620c8eea-a6f2-4eea-9dd2-401eacc94636",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

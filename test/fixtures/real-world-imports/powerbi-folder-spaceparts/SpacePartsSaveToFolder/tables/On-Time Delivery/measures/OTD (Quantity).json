@@ -1,0 +1,20 @@
+{
+  "name": "OTD (Quantity)",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Total Net Invoice Quantity],",
+    "    'On-Time Delivery'[OTD Indicator] = TRUE,",
+    "    'Invoice Document Type'[Group] = \"Invoice\"",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "2. Quantity",
+  "lineageTag": "7018a9c2-01fc-4f2b-8312-80c684c99e25",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

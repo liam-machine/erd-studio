@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "IsWeekday",
+  "dataType": "boolean",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[IsWeekday]",
+  "displayFolder": "7. Boolean Fields",
+  "lineageTag": "bf956c16-2355-499b-b503-b88553b552df",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

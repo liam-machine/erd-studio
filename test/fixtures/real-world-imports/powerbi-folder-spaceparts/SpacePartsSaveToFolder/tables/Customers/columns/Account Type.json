@@ -1,0 +1,14 @@
+{
+  "name": "Account Type",
+  "dataType": "string",
+  "sourceColumn": "account_type",
+  "displayFolder": "1. Customer Hierarchy",
+  "lineageTag": "a0a0a72d-6c54-4e38-89c2-acf0084d375a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

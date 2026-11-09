@@ -1,0 +1,15 @@
+{
+  "name": "Employee Name",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "employee_name",
+  "displayFolder": "Columns",
+  "lineageTag": "fc711d7b-da3f-4e5e-9c68-0073c2489c1a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

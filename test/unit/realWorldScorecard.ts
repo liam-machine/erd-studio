@@ -8,7 +8,7 @@
  * The flows mirrored here:
  * - SQL DDL: `gatherSqlFiles` (folder or files, data stripped) → the detected
  *   dialect → `sqlDdlToDbml` → Import DBML's flow on the converted DBML.
- * - Power BI: `walkFiles` + `findSemanticModels` → `readSemanticModel` →
+ * - Power BI: `walkSemanticModelFiles` + `findSemanticModels` → `readSemanticModel` →
  *   `semanticModelToDbml` → Import DBML's flow.
  * - DBML file: `readDbml` → `analyseDbml` → `planDbmlImport`.
  * - Import from dbt: `listDraftScopes` → the top-ranked folder
@@ -26,7 +26,7 @@ import type { ColumnDef, Relationship, SemanticTable } from '../../src/types/sem
 import type { LayerConfig } from '../../src/types/layer';
 import { toDraftView, type Draft, type DraftTarget } from '../../src/types/draft';
 import { gatherSqlFiles } from '../../src/commands/importSqlDdl';
-import { isSemanticModelFile, MAX_SEMANTIC_MODEL_FILES } from '../../src/commands/importSemanticModel';
+import { walkSemanticModelFiles } from '../../src/commands/importSemanticModel';
 import { IMPORT_TITLES } from '../../src/commands/importDbml';
 import * as sqlEngine from '../../src/services/sqlImportEngine';
 import { SQL_DIALECT_LABELS, type SqlDialect } from '../../src/services/sqlDdlImport';
@@ -45,11 +45,10 @@ import {
   semanticModelRenameNote,
   semanticModelSkippedSummary,
   sqlOriginPhrase,
-  walkFiles,
   PROBLEMS_SHOWN,
   type DirEntries,
 } from '../../src/services/importSources';
-import { findSemanticModels, readSemanticModel, semanticModelToDbml, type SemanticModelFile } from '../../src/services/semanticModelImport';
+import { SEMANTIC_MODEL_META, findSemanticModels, readSemanticModel, semanticModelToDbml, type SemanticModelFile } from '../../src/services/semanticModelImport';
 import { draftFromDbt, draftFromImportPlan, dbtDraftScopes } from '../../src/services/draftModel';
 import type { LedgerEntry } from '../../src/services/importLedger';
 import { buildDbtDraft, listDraftModels, listDraftScopes, suggestSubjectAreaName } from '../../src/services/dbtDraft';
@@ -271,7 +270,7 @@ async function runDbmlFile(sample: TruthSample): Promise<ImportRun> {
 async function runSemanticModel(sample: TruthSample): Promise<ImportRun> {
   const folder = path.join(SAMPLES_ROOT, sample.input.folder!);
   const folderName = path.basename(folder);
-  const walk = await walkFiles(folder, fsDir, { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
+  const walk = await walkSemanticModelFiles(folder, fsDir);
   const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
   const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
   const entries = findSemanticModels([...fullOf.keys()]);
@@ -482,7 +481,41 @@ export interface SampleScore {
  */
 const GENERIC_PROBLEM = /(could not|couldn't|can't|cannot) (read|parse) (this|the) (statement|file|line|script)\.?$/i;
 
-export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): SampleScore {
+/**
+ * A semantic model's run with each table and column under the Power BI name
+ * the import keeps (`meta.power_bi_name`, written when snake_case changed it:
+ * `1) Selected Metric` became `t_1_selected_metric`, `YOY%` became
+ * `yoy_pct`), so it is compared with the source by its own name.
+ */
+export function withSourceNames(run: ImportRun): ImportRun {
+  const original = (m: { meta?: unknown }): string | undefined => {
+    const v = ((m.meta ?? {}) as Record<string, unknown>)[SEMANTIC_MODEL_META.name];
+    return typeof v === 'string' && v.trim() ? v : undefined;
+  };
+  const tableName = new Map<string, string>();
+  const columnName = new Map<string, string>();
+  const tables = run.tables.map((t) => {
+    const name = original(t) ?? t.name;
+    tableName.set(t.name, name);
+    const columns = (t.columns ?? []).map((c) => {
+      const col = original(c) ?? c.name;
+      columnName.set(`${t.name}\u0000${c.name}`, col);
+      return { ...c, name: col };
+    });
+    return { ...t, name, columns };
+  });
+  const relationships = run.relationships.map((r) => ({
+    ...r,
+    fromModel: tableName.get(r.fromModel) ?? r.fromModel,
+    fromColumn: columnName.get(`${r.fromModel}\u0000${r.fromColumn}`) ?? r.fromColumn,
+    toModel: tableName.get(r.toModel) ?? r.toModel,
+    toColumn: columnName.get(`${r.toModel}\u0000${r.toColumn}`) ?? r.toColumn,
+  }));
+  return { ...run, tables, relationships };
+}
+
+export function scoreSample(slug: string, truth: TruthSample, given: ImportRun): SampleScore {
+  const run = truth.importer === 'semanticModel' ? withSourceNames(given) : given;
   const shown = run.shown;
   const failed = !run.ok || run.tables.length === 0;
   const reasons: string[] = [];

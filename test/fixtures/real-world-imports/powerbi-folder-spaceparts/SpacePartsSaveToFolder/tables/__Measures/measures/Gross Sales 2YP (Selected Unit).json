@@ -1,0 +1,11 @@
+{
+  "name": "Gross Sales 2YP (Selected Unit)",
+  "expression": [
+    "",
+    "CALCULATE ( [Gross Sales (Selected Unit)], DATEADD('Date'[Date], -2, YEAR ))"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Total\\Sales Target",
+  "lineageTag": "7a676e6e-7385-4ce0-acb9-84a987fededa"
+}

@@ -1,0 +1,24 @@
+{
+  "name": "OTD % (Quantity)",
+  "expression": [
+    "",
+    "VAR _OnTime = [OTD (Quantity)]",
+    "VAR _Total = ",
+    "    CALCULATE (",
+    "        [Total Net Invoice Quantity],",
+    "        'Invoice Document Type'[Group] = \"Invoice\"",
+    "    )",
+    "RETURN",
+    "",
+    "DIVIDE ( _OnTime, _Total )"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "2. Quantity",
+  "lineageTag": "29fcb593-54b0-4061-ae46-2683f72fe75a",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Invoice Lines",
+  "expression": [
+    "",
+    "COUNTROWS ( 'Invoices' )"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "3. Lines",
+  "lineageTag": "a56d5b74-2cd8-4ce0-a673-f229a09a9726"
+}

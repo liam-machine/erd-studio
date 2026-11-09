@@ -1,0 +1,14 @@
+{
+  "name": "Production Series",
+  "dataType": "string",
+  "sourceColumn": "production_series",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "2c8917a4-56c0-41b2-aea6-2b4db37b3711",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

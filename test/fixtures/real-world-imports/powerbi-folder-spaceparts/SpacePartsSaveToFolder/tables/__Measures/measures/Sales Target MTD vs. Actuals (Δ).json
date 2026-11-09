@@ -1,0 +1,10 @@
+{
+  "name": "Sales Target MTD vs. Actuals (Δ)",
+  "expression": [
+    "",
+    "[Actuals MTD] - [Sales Target MTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "2. MTD\\Sales Target",
+  "lineageTag": "30488de0-5eac-468b-a3db-81eea38a2165"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Budget (EUR)",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "total_budget",
+  "displayFolder": "2. Facts",
+  "lineageTag": "3f44e27b-e38e-489b-ab39-80615cb15782",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

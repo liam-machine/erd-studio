@@ -1,0 +1,100 @@
+{
+  "name": "Z01CG4 - Lines",
+  "isHidden": true,
+  "lineageTag": "d0e1c818-c035-4cd9-a3ac-7efb39b1e1a7",
+  "calculationGroup": {
+    "precedence": 3,
+    "calculationItems": [
+      {
+        "name": "Gross Sales",
+        "expression": [
+          "",
+          "[Invoice Lines]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "Net Sales",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "Orders",
+        "expression": [
+          "",
+          "[Net Orders]"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "Invoices",
+        "expression": [
+          "",
+          "[Lines]"
+        ],
+        "ordinal": 3
+      },
+      {
+        "name": "Invoice Cost",
+        "description": "The Net Invoice Cost is",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 4
+      },
+      {
+        "name": "Delivery Cost",
+        "description": "The cost of the delivery only",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 5
+      },
+      {
+        "name": "Delivery Surcharge",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 6
+      },
+      {
+        "name": "Taxes",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 7
+      },
+      {
+        "name": "Overdue Payment Penalties",
+        "description": "Overdue Payments result when the customer hasn't paid their invoice within a certain number of days since the product was shipped.",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 8
+      },
+      {
+        "name": "Late Delivery Penalties",
+        "description": "Late Delivery penalties occur when we fail to meet the SLA for deliveries. If the products take longer than a certain number of days to deliver after the requested delivery date, a Late Delivery Penalty is levied.",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 9
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

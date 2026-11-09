@@ -1,0 +1,18 @@
+{
+  "name": "4) Selected Period",
+  "description": [
+    "This is a disconnected table for Measure Selection.",
+    "It lets you select a Period"
+  ],
+  "lineageTag": "d0747f9f-bab0-419e-87fb-7ae01f97a523",
+  "annotations": [
+    {
+      "name": "TabularEditor_TableGroup",
+      "value": "Measure Selection"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

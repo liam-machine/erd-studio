@@ -1,0 +1,14 @@
+{
+  "name": "Sales Target YTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Sales Target YTD]",
+    "VAR _DELTA  = [Actuals YTD] -  _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "4. YTD",
+  "lineageTag": "0886ae94-a618-4cb5-a879-159717597f72"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Product Business Line Leader",
+  "dataType": "string",
+  "sourceColumn": "product_business_line_leader",
+  "displayFolder": "3. Product Managers",
+  "lineageTag": "f7d90ab0-1767-4d3d-884b-33ce7aab8421",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

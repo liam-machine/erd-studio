@@ -1,0 +1,16 @@
+{
+  "name": "Total Overdue Payment Penalties",
+  "description": "Overdue Payments result when the customer hasn't paid their invoice within a certain number of days since the product was shipped.",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Overdue Payment Penalties]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\II. Penalties and Adjustments",
+  "lineageTag": "279adfbb-4f1f-49e7-8f13-57c380ad1d5d"
+}

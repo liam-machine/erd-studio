@@ -1,0 +1,15 @@
+{
+  "name": "Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "date",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "024862a6-5e54-4cc6-a1d7-2b7b1f393ad6",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

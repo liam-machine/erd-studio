@@ -1,0 +1,31 @@
+{
+  "name": "Customers",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "",
+      "  // Data Source",
+      "  Source = Sql.Database(",
+      "    #\"SqlEndpoint\", ",
+      "    #\"Database\"",
+      "  ), ",
+      "",
+      "  // Step",
+      "  Data = Source",
+      "    {",
+      "      [",
+      "        Schema = \"dbo\", ",
+      "        Item   = \"customers\"",
+      "      ]",
+      "    }",
+      "    [Data]",
+      "",
+      "// Result",
+      "in",
+      "  Data"
+    ]
+  }
+}

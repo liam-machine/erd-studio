@@ -1,0 +1,48 @@
+{
+  "name": "Z03CG2 - Orders Target",
+  "isHidden": true,
+  "lineageTag": "03aebfe4-55ef-4d5c-9ffb-173716934b26",
+  "calculationGroup": {
+    "precedence": 7,
+    "calculationItems": [
+      {
+        "name": "1 Year Prior",
+        "expression": [
+          "",
+          "[Net Orders 1YP]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "2 Years Prior",
+        "expression": [
+          "",
+          "[Net Orders 2YP]"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "Budget",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "Forecast",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 3
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

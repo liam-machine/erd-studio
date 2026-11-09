@@ -1,0 +1,15 @@
+{
+  "name": "Month",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "month",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "fe0e261d-d4be-49a5-b2d0-a644f272b0eb",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

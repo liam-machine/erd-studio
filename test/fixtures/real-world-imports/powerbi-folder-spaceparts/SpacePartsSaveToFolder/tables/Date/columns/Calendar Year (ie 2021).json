@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Year (ie 2021)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Year (ie 2021)]",
+  "sortByColumn": "Calendar Year Number (ie 2021)",
+  "displayFolder": "1. Year",
+  "lineageTag": "3fb515aa-1cf5-4e35-9368-26ba9fe9609b",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Order Lines",
+  "expression": [
+    "",
+    "COUNTROWS ( 'Orders' )"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "3. Lines",
+  "lineageTag": "5324832f-97a5-437f-9604-d6dca47246de",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "All",
+  "dataType": "string",
+  "sourceColumn": "all",
+  "displayFolder": "1. Region Hierarchy",
+  "lineageTag": "01dabba0-927a-447c-933e-dd4282827050",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}
