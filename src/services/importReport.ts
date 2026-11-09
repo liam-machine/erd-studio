@@ -212,11 +212,33 @@ const STATUS_SENTENCES: Readonly<Record<Exclude<ImportReportStatus, 'kept'>, str
   timedOut: 'The import took longer than its time limit and was stopped, so nothing was saved.',
 };
 
-function statusSentence(record: Pick<ImportReportRecord, 'status' | 'diagram'>): string {
-  if (record.status === 'kept') {
-    return record.diagram ? `Kept as the diagram ${ledgerText(record.diagram, MAX_NAME)}.` : 'Kept as a diagram.';
+function statusSentence(record: Pick<ImportReportRecord, 'status' | 'diagram' | 'ledger'>): string {
+  const said = record.status === 'kept'
+    ? (record.diagram ? `Kept as the diagram ${ledgerText(record.diagram, MAX_NAME)}.` : 'Kept as a diagram.')
+    : own(STATUS_SENTENCES, record.status) ?? STATUS_SENTENCES.failed;
+  const stop = record.status === 'draft' || record.status === 'kept' || record.status === 'notKept' ? stoppedEarly(record.ledger) : undefined;
+  return stop ? `${said} ${STOPPED_EARLY_SENTENCES[stop]}` : said;
+}
+
+/**
+ * Said after the status of an import that drew what it had read when it was
+ * stopped (Import SQL DDL's Cancel or time limit: its ledger holds the unread
+ * statements as `problem` entries with the cause `cancelled` / `timeLimit`).
+ */
+const STOPPED_EARLY_SENTENCES: Readonly<Record<'cancelled' | 'timeLimit', string>> = {
+  cancelled: 'The import was cancelled before it read every statement: what it did not read is under Not imported, at the line each file stopped.',
+  timeLimit: 'The import reached its time limit before it read every statement: what it did not read is under Not imported, at the line each file stopped.',
+};
+
+/** The stop an import's ledger records, if it was stopped early (the time limit first, as the outcome count reads it). */
+function stoppedEarly(ledger: readonly LedgerEntry[]): 'cancelled' | 'timeLimit' | undefined {
+  let found: 'cancelled' | undefined;
+  for (const e of Array.isArray(ledger) ? ledger : []) {
+    if (!e || e.outcome !== 'problem' || !(Number(e.count) > 0)) continue;
+    if (e.cause === 'timeLimit') return 'timeLimit';
+    if (e.cause === 'cancelled') found = 'cancelled';
   }
-  return STATUS_SENTENCES[record.status];
+  return found;
 }
 
 const fmt = (n: number): string => n.toLocaleString('en-US');
@@ -402,19 +424,29 @@ export function importReportCounts(view: ImportReportView): Record<ImportReportS
  * Undefined when everything read.
  */
 export function partialImportMessage(title: string, entries: readonly LedgerEntry[]): string | undefined {
-  const byUnit = new Map<LedgerUnit, number>();
+  // What could not be read, and what was never read because the import was stopped first.
+  const unreadable = new Map<LedgerUnit, number>();
+  const unread = new Map<LedgerUnit, number>();
   for (const e of entries) {
     const count = countOf(e);
     if (e.outcome !== 'problem' || e.cause === 'duplicate' || count === 0) continue;
     // A unit this build does not know counts as an item (never `undefined`, never an inherited key).
     const unit = (own(LEDGER_UNIT_NOUNS, e.unit) !== undefined ? e.unit : 'item') as LedgerUnit;
-    byUnit.set(unit, (byUnit.get(unit) ?? 0) + count);
+    const into = e.cause === 'cancelled' || e.cause === 'timeLimit' ? unread : unreadable;
+    into.set(unit, (into.get(unit) ?? 0) + count);
   }
-  if (byUnit.size === 0) return undefined;
-  const parts = [...byUnit].map(([unit, n]) => `${fmt(n)} ${n === 1 ? nounsOf(unit)[0] : nounsOf(unit)[1]}`);
-  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
-  const one = [...byUnit.values()].reduce((a, b) => a + b, 0) === 1;
-  return `${title}: ${list} could not be read, so the diagram leaves ${one ? 'it' : 'them'} out. ` +
+  if (unreadable.size === 0 && unread.size === 0) return undefined;
+  const listOf = (byUnit: Map<LedgerUnit, number>): string => {
+    const parts = [...byUnit].map(([unit, n]) => `${fmt(n)} ${n === 1 ? nounsOf(unit)[0] : nounsOf(unit)[1]}`);
+    return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+  };
+  const total = [...unreadable.values(), ...unread.values()].reduce((a, b) => a + b, 0);
+  const one = total === 1;
+  const said = [
+    ...(unreadable.size ? [`${listOf(unreadable)} could not be read`] : []),
+    ...(unread.size ? [`${listOf(unread)} ${[...unread.values()].reduce((a, b) => a + b, 0) === 1 ? 'was' : 'were'} not read before the import was stopped`] : []),
+  ].join(' and ');
+  return `${title}: ${said}, so the diagram leaves ${one ? 'it' : 'them'} out. ` +
     `${SHOW_IMPORT_REPORT_LABEL} lists ${one ? 'it' : 'each one'} with its file and line.`;
 }
 

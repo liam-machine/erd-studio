@@ -163,6 +163,11 @@ const UNIT_NOUNS: Readonly<Record<LedgerUnit, [string, string]>> = {
   object: ['object', 'objects'],
 };
 
+/** A unit's nouns; a unit this build does not know (a ledger is plain data across bundles and the import worker) is an item. */
+function unitNouns(unit: unknown): [string, string] {
+  return typeof unit === 'string' && Object.prototype.hasOwnProperty.call(UNIT_NOUNS, unit) ? UNIT_NOUNS[unit as LedgerUnit] : ['item', 'items'];
+}
+
 /** What an entry's cause says when it has no `detail` of its own. */
 const CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = {
   parseError: 'could not be read',
@@ -256,7 +261,7 @@ function groupLine(g: Group): string {
   const cause = CAUSE_PHRASES[g.cause];
   const phrase = detail || (cause ? `${OUTCOME_PHRASES[g.outcome]}: ${cause}` : OUTCOME_PHRASES[g.outcome]);
   const names = examples(g.names);
-  return `${plural(g.count, UNIT_NOUNS[g.unit])}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
+  return `${plural(g.count, unitNouns(g.unit))}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
 }
 
 function capped(lines: string[], max: number | undefined): string[] {
@@ -290,7 +295,7 @@ export function ledgerLogLines(entries: readonly LedgerEntry[], title: string): 
     const count = e.count > 1 ? `${e.count} × ` : '';
     const detail = e.detail ? ` (${ledgerText(e.detail, MAX_DETAIL, true)})` : '';
     const what = ledgerText(e.what, MAX_WHAT, true);
-    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}:${what ? ` ${what}` : ''}${detail}`);
+    lines.push(`${title}: ${at}${count}${unitNouns(e.unit)[0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}:${what ? ` ${what}` : ''}${detail}`);
   }
   return lines;
 }

@@ -21,14 +21,19 @@
  *   failure of ours. Never the automatic draft's quiet early end (that is
  *   `draftDrop*`), a project stop (`importStop*`) or a cancel.
  * - `cancelled` — the user stopped an import while it was reading the
- *   source. A closed picker or a discarded draft keeps its own keys.
- * - `timedOut` — the import's time limit stopped it while it was reading.
+ *   source (Import SQL DDL's progress notification): before it read a
+ *   table, or after, when the draft holds what it had read. A closed picker
+ *   or a discarded draft keeps its own keys.
+ * - `timedOut` — the import's time limit (`erdStudio.import.timeLimitSeconds`)
+ *   stopped it while it was reading, with or without tables read.
  *
  * `clean`, `repaired` and `partial` are counted once per plan an import
  * builds (its draft, or the dry run without one): never on a redraw of the
  * same draft; Change options… and Try Again build a new plan, so they count
- * again. `cancelled` and `timedOut` come from the import worker's outcome,
- * through {@link importOutcomeFeatures} like every other.
+ * again. A stopped reading that imported what it read is counted the same
+ * way, its ledger making it `cancelled` / `timedOut` ({@link ledgerImportOutcome});
+ * one stopped before it read a table is counted where Import SQL DDL ends
+ * (`stoppedBeforeATable`), with the stopped reading's ledger.
  *
  * One import is one outcome: each run counts through one {@link importOutcomeOnce}
  * counter, and a redraw of a draft already counted counts nothing, whatever
@@ -54,8 +59,12 @@ export type ImportOutcomeImporter = 'sql' | 'powerbi' | 'dbml' | 'dbt';
 
 export type ImportOutcome = 'clean' | 'repaired' | 'partial' | 'failed' | 'cancelled' | 'timedOut';
 
-/** The outcomes a finished reading can have (the rest end an import before it has a ledger to judge). */
-export type ImportReadOutcome = Extract<ImportOutcome, 'clean' | 'repaired' | 'partial'>;
+/**
+ * The outcomes a reading's ledger can show: `cancelled` / `timedOut` when the
+ * reading stopped early and imported what it had read (the ledger holds its
+ * unread statements); `failed` ends an import before it has a ledger to judge.
+ */
+export type ImportReadOutcome = Exclude<ImportOutcome, 'failed'>;
 
 export const IMPORT_OUTCOMES: readonly ImportOutcome[] = Object.freeze(['clean', 'repaired', 'partial', 'failed', 'cancelled', 'timedOut']);
 
@@ -169,15 +178,26 @@ export const LEDGER_CAUSE_FEATURES: Readonly<Record<LedgerCause, TelemetryFeatur
   other: 'importCauseOther',
 };
 
-/** How a finished reading went, from its ledger alone (see the module comment). */
+/**
+ * How a reading went, from its ledger alone (see the module comment). A
+ * reading the import worker stopped early (a `problem` entry with the cause
+ * `timeLimit` or `cancelled`) is `timedOut` / `cancelled`, ahead of
+ * `partial`: how it ended says more than what it left out.
+ */
 export function ledgerImportOutcome(entries: readonly LedgerEntry[]): ImportReadOutcome {
   let repaired = false;
+  let partial = false;
+  let cancelled = false;
   for (const e of entries) {
     if (!(e.count > 0)) continue;
-    if (e.outcome === 'problem') return 'partial';
+    if (e.outcome === 'problem') {
+      if (e.cause === 'timeLimit') return 'timedOut';
+      if (e.cause === 'cancelled') cancelled = true;
+      partial = true;
+    }
     if (e.outcome === 'repaired') repaired = true;
   }
-  return repaired ? 'repaired' : 'clean';
+  return cancelled ? 'cancelled' : partial ? 'partial' : repaired ? 'repaired' : 'clean';
 }
 
 /** What one import reports: the importer, how it ended (else read from the ledger), its SQL dialect and its ledger. */

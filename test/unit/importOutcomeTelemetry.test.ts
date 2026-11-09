@@ -81,6 +81,24 @@ describe('ledgerImportOutcome', () => {
     }))).toBe('partial');
   });
 
+  it('cancelled / timedOut: a reading the import worker stopped early, ahead of partial', () => {
+    expect(ledgerImportOutcome(ledgerOf((l) => {
+      l.problem('table', 'grammarGap', 'CREATE TABLE', WHERE);
+      l.problem('table', 'cancelled', 'CREATE TABLE', WHERE, 'not read: the import was cancelled first', 12);
+    }))).toBe('cancelled');
+    expect(ledgerImportOutcome(ledgerOf((l) => {
+      l.problem('statement', 'timeLimit', '', WHERE, 'not read: the time limit (2 min) was reached first', 3);
+      l.problem('table', 'cancelled', 'CREATE TABLE', WHERE);
+    }))).toBe('timedOut');
+    // A cause on another outcome is only a cause key.
+    expect(ledgerImportOutcome(ledgerOf((l) => { l.skipped('statement', 'cancelled', '', WHERE); }))).toBe('clean');
+    expect(importOutcomeFeatures({
+      importer: 'sql',
+      dialect: 'postgres',
+      ledger: ledgerOf((l) => { l.problem('table', 'timeLimit', 'CREATE TABLE', WHERE, undefined, 40); }),
+    })).toEqual(['importOutcomeSqlDdlTimedOut', 'importSqlOutcomePostgresTimedOut', 'importCauseTimeLimit']);
+  });
+
   it('ignores an entry with no count', () => {
     expect(ledgerImportOutcome([{ outcome: 'problem', unit: 'table', cause: 'parseError', what: 'x', count: 0 }])).toBe('clean');
   });
