@@ -220,8 +220,23 @@ export interface ErrorMessage {
      *   VS Code restored the tab. Sent on load and as soon as the delete is
      *   seen, so it replaces a loaded canvas too. Retry and Open as Text cannot
      *   help; the screen offers Close and Open Another Diagram instead.
+     * - `invalid` (#261) — the file parses, but ERD Studio can't accept it
+     *   (a `SubjectAreaValidationError`: an unknown layer, a missing
+     *   `schemaVersion`, a legacy format, a newer schema). The file is the
+     *   user's to fix, so the screen says so and offers Open as Text and
+     *   Retry, never Report a Bug. `message` is the reason, project-relative.
+     * - `internal` (#261) — anything else: a problem in ERD Studio, not in the
+     *   user's files. The screen says so and offers Retry and Send Feedback;
+     *   `message` is the exception with every local path redacted, shown only
+     *   as a dimmed detail line and in the feedback prefill.
      */
-    kind?: 'domain-file' | 'not-a-domain' | 'domain-missing';
+    kind?: 'domain-file' | 'not-a-domain' | 'domain-missing' | 'invalid' | 'internal';
+    /**
+     * With `kind: 'invalid'` (#261): the diagram was saved by a newer ERD
+     * Studio. Editing the file is not the fix, so the screen offers Update
+     * ERD Studio instead of Open as Text.
+     */
+    newerSchema?: true;
     /**
      * With `kind: 'domain-file'`: the file holds unresolved git merge
      * conflicts (#145). Retrying cannot help — the screen drops Retry and

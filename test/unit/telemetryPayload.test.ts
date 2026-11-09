@@ -680,7 +680,11 @@ describe('allowlists agree with the Worker', () => {
     // The automatic draft's time-limit drop is appended after them.
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
     expect(FEATURES.at(-1)).toBe('draftDropTimeLimit');
-    expect(ERROR_CODES.at(-1)).toBe('loggedErrorOther');
+    // #262's per-step load codes follow the logged-error ones.
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
+      'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
+      'domainLoadInternalPositions', 'domainLoadInternalPhysical', 'domainLoadInternalDisplay', 'domainLoadInternalOther',
+    ]);
     // Liam's decision for B6: no table-count bucket is ever a key.
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
   });

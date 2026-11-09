@@ -1055,6 +1055,15 @@ const ERROR_CODES = [
   'loggedErrorHarness',
   'loggedErrorDbt',
   'loggedErrorOther',
+  // 2.0 (#262) — which canvas load step threw, beside domainLoadInternal (the total)
+  'domainLoadInternalManifest',
+  'domainLoadInternalYml',
+  'domainLoadInternalCatalog',
+  'domainLoadInternalRead',
+  'domainLoadInternalPositions',
+  'domainLoadInternalPhysical',
+  'domainLoadInternalDisplay',
+  'domainLoadInternalOther',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
