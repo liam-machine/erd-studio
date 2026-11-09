@@ -57,6 +57,14 @@ describe('deploy.yml', () => {
     }
   });
 
+  it('the import corpus runs only by hand and its tooling never starts a release', () => {
+    const corpus = parse(readFileSync(resolve(__dirname, '../../.github/workflows/import-corpus.yml'), 'utf8')) as { on: Record<string, unknown> };
+    expect(Object.keys(corpus.on)).toEqual(['workflow_dispatch']);
+    for (const path of ['.github/**', 'scripts/corpus/**', 'test/unit/importCorpus.score.test.ts']) {
+      expect(ignored).toContain(path);
+    }
+  });
+
   it('the stable GitHub Release is Latest and never a pre-release', () => {
     const run = workflow.jobs.deploy.steps?.find((s) => /gh release create/.test(s.run ?? ''))?.run ?? '';
     expect(run).toContain('gh release create "v${NEW_VERSION}"');

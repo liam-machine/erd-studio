@@ -38,6 +38,10 @@ on:
       - 'test/unit/deployWorkflow.test.ts'
       # Checks prerelease.yml; nothing in the VSIX.
       - 'test/unit/prereleaseWorkflow.test.ts'
+      # The import corpus (import-corpus.yml, run by hand): its fetch, counter
+      # and scorer; nothing in the VSIX.
+      - 'scripts/corpus/**'
+      - 'test/unit/importCorpus.score.test.ts'
       # A sibling project, never in the VSIX. A change to the src/services it
       # imports still triggers a release through src/.
       - 'mcp-server/**'
@@ -103,6 +107,8 @@ jobs:
               - '!test/unit/release.test.ts'
               - '!test/unit/deployWorkflow.test.ts'
               - '!test/unit/prereleaseWorkflow.test.ts'
+              - '!scripts/corpus/**'
+              - '!test/unit/importCorpus.score.test.ts'
               - '!mcp-server/**'
               - '!proxy/**'
               - '!telemetry/**'
