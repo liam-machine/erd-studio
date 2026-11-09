@@ -982,9 +982,21 @@ def tmdl_name(s):
     return (m.group(1), s[m.end():]) if m else (s, '')
 
 
+def one_side_uniques(ft, fc, from_card, tt, tc, to_card):
+    """Power BI requires a relationship's "one" end to be unique: the to end unless
+    toCardinality is many, the from end when fromCardinality is one."""
+    out = []
+    if (to_card or 'one').strip().lower() != 'many':
+        out.append({'table': tt, 'columns': [tc], 'index': False})
+    if (from_card or 'many').strip().lower() == 'one':
+        out.append({'table': ft, 'columns': [fc], 'index': False})
+    return out
+
+
 def count_tmdl(entry, base):
     tables = []
     rels = []
+    uniques = []
     for f in sorted(entry['files'], key=lambda f: f['path']):
         p = f['path']
         if not p.endswith('.tmdl'):
@@ -1055,11 +1067,12 @@ def count_tmdl(entry, base):
             if r.get('isActive') == 'false':
                 o['inactive'] = True
             out_rels.append(o)
-    return tables, out_rels, [], 'TMDL lines: table / column (= expression: calculated) / isKey / relationship fromColumn → toColumn; measures and hierarchies are not tables or columns', [], []
+            uniques.extend(one_side_uniques(ft, fc, r.get('fromCardinality'), tt, tc, r.get('toCardinality')))
+    return tables, out_rels, uniques, 'TMDL lines: table / column (= expression: calculated) / isKey / relationship fromColumn → toColumn; measures and hierarchies are not tables or columns', [], []
 
 
 def count_bim(entry, base):
-    tables = []; rels = []
+    tables = []; rels = []; uniques = []
     for f in entry['files']:
         if not f['path'].lower().endswith('.bim'):
             continue
@@ -1090,7 +1103,8 @@ def count_bim(entry, base):
             if r.get('isActive') is False:
                 o['inactive'] = True
             rels.append(o)
-    return tables, rels, [], 'model.bim JSON: model.tables[].columns[] (rowNumber aside), isKey, relationships[]', [], []
+            uniques.extend(one_side_uniques(r['fromTable'], r['fromColumn'], r.get('fromCardinality'), r['toTable'], r['toColumn'], r.get('toCardinality')))
+    return tables, rels, uniques, 'model.bim JSON: model.tables[].columns[] (rowNumber aside), isKey, relationships[]', [], []
 
 
 # ---------------------------------------------------------------------------
