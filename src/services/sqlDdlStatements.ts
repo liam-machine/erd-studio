@@ -319,11 +319,15 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
   const label = tableLabel(table);
   const names = (table.constraintNames ??= []);
   const ownRefs = cx.refs.filter((r) => r.fromTable === table);
+  const lines = readerState(cx).itemLines;
+  const constraintLines: Array<{ kind: 'pk' | 'unique' | 'fk' | 'check'; columns: string[]; line: number }> = [];
+  lines.set(table, constraintLines);
   for (const [from, to] of splitTopLevel(t, open + 1, close, cx.dialect === 'databricks')) {
     if (from >= to) continue;
     if (isConstraintItem(t, from, to)) {
       const c = readTableConstraint(t, from, to);
       if (!c) continue;
+      constraintLines.push({ kind: c.kind, columns: c.columns, line: t[from].line });
       if (c.name) names.push({ name: c.name, kind: c.kind, columns: c.columns });
       if (c.kind === 'fk') {
         const ref = ownRefs.find((r) => sameColumns(r.from.columns, c.columns) && !r.name) ?? ownRefs.find((r) => sameColumns(r.from.columns, c.columns));
@@ -335,6 +339,7 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
     const field = table.fields.find((f) => sameIdent(f.name, t[from].value));
     if (!field) continue;
     const where = { file, line: t[from].line, table: label, column: field.name };
+    lines.set(field, t[from].line);
     for (const c of field.constraints ?? []) names.push({ name: c.name, kind: c.kind, columns: [field.name] });
     const inline = (field.constraints ?? []).find((c) => c.kind === 'fk');
     const refAt = t.slice(from, to).findIndex((tok) => upper(tok) === 'REFERENCES');
@@ -588,6 +593,13 @@ function dropNamedUnique(cx: ConverterContext, name: string, tableParts?: readon
 
 // -- ALTER TABLE ----------------------------------------------------------
 
+/**
+ * Runs a change to a table's columns on the table named `parts`: now, or,
+ * for a child with no table yet, once partitions are resolved
+ * ({@link ReaderState.childChanges}).
+ */
+type ApplyNow = (where: Origin, run: (parts: readonly string[]) => void) => void;
+
 /** What continues an ALTER TABLE list item that does not start with an action. */
 type Continues = 'addColumn' | 'addConstraint' | 'dropColumn' | 'dropConstraint';
 
@@ -598,10 +610,15 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
   const name = readName(t, i);
   if (!name) { cx.skip(origin.file, 'alter'); return; }
   // What the statement adds that waits for the end (keys, foreign keys, checks, comments, partitions) names the
-  // table as written: a partition's are folded or kept with it (`sqlDdlPartitions.ts`). A change applied
-  // now (a column, a rename) goes to the table the partition is read as.
-  const ownParts = cx.qualify(name.parts);
-  const tableParts = foldPartition(cx, ownParts);
+  // table as written: a partition's are folded or kept with it (`sqlDdlPartitions.ts`). A change to the columns
+  // of a child with no table yet (`PARTITION OF`, `() INHERITS`) waits too: it is replayed on the child's table
+  // once partitions are resolved, or reported at its line when the child folds, never applied to the parent.
+  const tableParts = cx.qualify(name.parts);
+  const deferred = isChildWithoutTable(cx, tableParts);
+  const now: ApplyNow = (where, run) => {
+    if (deferred) readerState(cx).childChanges.push({ child: [...tableParts], origin: where, run });
+    else run(tableParts);
+  };
   let handled = 0;
   let checkOnly = false;
   let unhandledKind: SkipKind | undefined;
@@ -619,21 +636,21 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
     else if (continues && isName(t[k]) && !ALTER_ACTION_WORDS.has(action)) {
       // SQL Server lists more after one DROP: `DROP CONSTRAINT a, b`, `DROP CONSTRAINT a, COLUMN c`.
       const dropsColumn = continues === 'dropColumn' || (continues === 'dropConstraint' && action === 'COLUMN' && isName(t[k + 1]));
-      if (continues === 'addColumn' || continues === 'addConstraint') alterAddColumns(cx, text, tableParts, t, k, to, where);
-      else if (dropsColumn) { alterDropColumn(cx, tableParts, t[action === 'COLUMN' ? k + 1 : k].value, where); continues = 'dropColumn'; }
+      if (continues === 'addColumn' || continues === 'addConstraint') { const at = k; now(where, (parts) => alterAddColumns(cx, text, parts, t, at, to, where)); }
+      else if (dropsColumn) { const column = t[action === 'COLUMN' ? k + 1 : k].value; now(where, (parts) => alterDropColumn(cx, parts, column, where)); continues = 'dropColumn'; }
       else dropConstraint(cx, tableParts, t[k].value, where, false);
       handled++;
       continue;
     }
     continues = undefined;
     if (action === 'ADD' || action === 'ADD…') {
-      const added = readAddItem(cx, text, tableParts, t, action === 'ADD' ? k + 1 : k, to, where, ownParts);
+      const added = readAddItem(cx, text, tableParts, t, action === 'ADD' ? k + 1 : k, to, where, now);
       if (added === 'column') { continues = 'addColumn'; handled++; }
       else if (added === 'constraint') { continues = 'addConstraint'; handled++; }
       else if (added) handled++;
       else unhandled();
     } else if (action === 'DROP') {
-      const dropped = readDropItem(cx, tableParts, t, k + 1, where);
+      const dropped = readDropItem(cx, tableParts, t, k + 1, where, now);
       if (dropped === 'column') { continues = 'dropColumn'; handled++; }
       else if (dropped === 'constraint') { continues = 'dropConstraint'; handled++; }
       else if (dropped) handled++;
@@ -642,14 +659,15 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       k++;
       if (upper(t[k]) === 'TO' || upper(t[k]) === 'AS') {
         const target = readName(t, k + 1);
-        if (target && renamePartitionChild(cx, ownParts, target.parts)) handled++;
+        if (target && renamePartitionChild(cx, tableParts, target.parts)) handled++;
         else if (target) { renameTable(cx, tableParts, target.parts, where); handled++; } else unhandled();
       } else if (upper(t[k]) === 'CONSTRAINT' || upper(t[k]) === 'INDEX' || upper(t[k]) === 'KEY') {
         if (isName(t[k + 1]) && upper(t[k + 2]) === 'TO' && isName(t[k + 3])) { renameConstraint(cx, tableParts, t[k + 1].value, t[k + 3].value, where); handled++; } else unhandled();
       } else {
         if (upper(t[k]) === 'COLUMN') k++;
         if (isName(t[k]) && upper(t[k + 1]) === 'TO' && isName(t[k + 2])) {
-          renameColumn(cx, tableParts, t[k].value, t[k + 2].value, where);
+          const [oldName, newName] = [t[k].value, t[k + 2].value];
+          now(where, (parts) => renameColumn(cx, parts, oldName, newName, where));
           handled++;
         } else unhandled();
       }
@@ -661,18 +679,18 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       const old = t[k].value;
       const defStart = action === 'CHANGE' ? k + 1 : k;
       if (!isName(t[defStart])) { unhandled(); continue; }
-      replaceColumn(cx, text, tableParts, old, t, defStart, to, where);
+      now(where, (parts) => replaceColumn(cx, text, parts, old, t, defStart, to, where));
       handled++;
     } else if (action === 'ALTER') {
-      if (readAlterColumn(cx, text, tableParts, t, k + 1, to, where)) handled++;
+      if (readAlterColumn(cx, text, tableParts, t, k + 1, to, where, now)) handled++;
       else unhandled('alterSetting');
     } else if (action === 'ATTACH' && upper(t[k + 1]) === 'PARTITION') {
       const child = readName(t, k + 2);
-      if (child) { readerState(cx).partitions.push({ child: cx.qualify(child.parts), parent: [...ownParts], how: 'ATTACH PARTITION', origin: where }); handled++; } else unhandled('alterPartition');
+      if (child) { readerState(cx).partitions.push({ child: cx.qualify(child.parts), parent: [...tableParts], how: 'ATTACH PARTITION', origin: where }); handled++; } else unhandled('alterPartition');
     } else if (action === 'DETACH' && upper(t[k + 1]) === 'PARTITION') {
       // From here on a table of its own: no longer folded into this parent.
       const child = readName(t, k + 2);
-      const records = child ? readerState(cx).partitions.filter((p) => !p.detached && p.how !== 'INHERITS' && sameParts(p.child, cx.qualify(child.parts), cx) && sameParts(p.parent, ownParts, cx)) : [];
+      const records = child ? readerState(cx).partitions.filter((p) => !p.detached && p.how !== 'INHERITS' && sameParts(p.child, cx.qualify(child.parts), cx) && sameParts(p.parent, tableParts, cx)) : [];
       for (const p of records) p.detached = true;
       if (records.length) handled++; else unhandled('alterPartition');
     } else if (action === 'INHERIT' || (action === 'NO' && upper(t[k + 1]) === 'INHERIT')) {
@@ -680,12 +698,12 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       const parent = readName(t, action === 'NO' ? k + 2 : k + 1);
       if (!parent) { unhandled('alterPartition'); continue; }
       const parentParts = cx.qualify(parent.parts);
-      if (action === 'INHERIT') readerState(cx).partitions.push({ child: [...ownParts], parent: parentParts, how: 'INHERITS', origin: where });
-      else for (const p of readerState(cx).partitions) if (!p.detached && p.how === 'INHERITS' && sameParts(p.child, ownParts, cx) && sameParts(p.parent, parentParts, cx)) p.detached = true;
+      if (action === 'INHERIT') readerState(cx).partitions.push({ child: [...tableParts], parent: parentParts, how: 'INHERITS', origin: where });
+      else for (const p of readerState(cx).partitions) if (!p.detached && p.how === 'INHERITS' && sameParts(p.child, tableParts, cx) && sameParts(p.parent, parentParts, cx)) p.detached = true;
       handled++;
     } else if (action === 'COMMENT' && (t[k + 1]?.kind === 'string' || (isPunct(t[k + 1], '=') && t[k + 2]?.kind === 'string'))) {
       // MySQL / Snowflake: ALTER TABLE t COMMENT [=] '…' is the table's description.
-      cx.comments.push({ table: [...ownParts], text: (isPunct(t[k + 1], '=') ? t[k + 2] : t[k + 1]).value, origin: where });
+      cx.comments.push({ table: [...tableParts], text: (isPunct(t[k + 1], '=') ? t[k + 2] : t[k + 1]).value, origin: where });
       handled++;
     } else if (action === 'OWNER') {
       unhandled('alterOwner');
@@ -718,7 +736,7 @@ const DROP_SETTING_WORDS = new Set(['DEFAULT', 'NOT', 'IDENTITY', 'EXPRESSION', 
  * (counted), or columns. What it was, or undefined when it does not read.
  */
 function readAddItem(
-  cx: ConverterContext, text: string, tableParts: string[], t: Token[], k: number, to: number, where: Origin, ownParts: string[] = tableParts,
+  cx: ConverterContext, text: string, tableParts: string[], t: Token[], k: number, to: number, where: Origin, now: ApplyNow = (_, run) => run(tableParts),
 ): 'column' | 'columns' | 'constraint' | 'index' | undefined {
   const columnWord = upper(t[k]) === 'COLUMN' || upper(t[k]) === 'COLUMNS';
   if (columnWord) k++;
@@ -735,7 +753,7 @@ function readAddItem(
     if (!target) return undefined;
     const pkCols = isPunct(t[target.next], '(') ? readColumnList(t, target.next) : undefined;
     cx.refs.push({
-      from: { parts: [...ownParts], columns: fkCols.columns },
+      from: { parts: [...tableParts], columns: fkCols.columns },
       to: { parts: cx.qualify(target.parts), columns: pkCols?.columns ?? [] },
       origin: where,
       ...(name ? { name } : {}),
@@ -751,14 +769,14 @@ function readAddItem(
     }
     const cols = readColumnList(t, open);
     if (!cols) return undefined;
-    cx.keys.push({ table: [...ownParts], kind: kind === 'PRIMARY' ? 'pk' : 'unique', columns: cols.columns, origin: where, ...(name ? { name } : {}) });
+    cx.keys.push({ table: [...tableParts], kind: kind === 'PRIMARY' ? 'pk' : 'unique', columns: cols.columns, origin: where, ...(name ? { name } : {}) });
     return 'constraint';
   }
   if (kind === 'CHECK' && isPunct(t[k + 1], '(')) {
     const close = matchParen(t, k + 1);
     if (close < 0 || close === k + 2) return undefined;
     readerState(cx).checks.push({
-      table: [...ownParts],
+      table: [...tableParts],
       expression: text.slice(t[k + 2].start, t[close - 1].end).replace(/\s+/g, ' ').trim(),
       ...(name ? { name } : {}),
       origin: where,
@@ -769,7 +787,8 @@ function readAddItem(
     // SQL Server: ADD [CONSTRAINT df] DEFAULT <expr> FOR col.
     const forAt = t.findIndex((tok, x) => x > k && x < to && upper(tok) === 'FOR');
     if (forAt < 0 || !isName(t[forAt + 1])) return undefined;
-    setDefault(cx, tableParts, t[forAt + 1].value, text, t, k + 1, forAt, where);
+    const from = k + 1;
+    now(where, (parts) => setDefault(cx, parts, t[forAt + 1].value, text, t, from, forAt, where));
     return 'constraint';
   }
   if (kind === 'INDEX' || kind === 'KEY' || kind === 'FULLTEXT' || kind === 'SPATIAL') {
@@ -780,11 +799,12 @@ function readAddItem(
     // ADD [COLUMNS] (a INT, b STRING): MySQL, Databricks.
     const close = matchParen(t, k);
     if (close < 0) return undefined;
-    for (const [cf, ct] of splitTopLevel(t, k + 1, close, cx.dialect === 'databricks')) alterAddColumns(cx, text, tableParts, t, cf, ct, where);
+    for (const [cf, ct] of splitTopLevel(t, k + 1, close, cx.dialect === 'databricks')) now(where, (parts) => alterAddColumns(cx, text, parts, t, cf, ct, where));
     return 'columns';
   }
   if (isName(t[k]) && !ADD_NOT_COLUMN_WORDS.has(kind)) {
-    alterAddColumns(cx, text, tableParts, t, k, to, where);
+    const from = k;
+    now(where, (parts) => alterAddColumns(cx, text, parts, t, from, to, where));
     return 'column';
   }
   return undefined;
@@ -795,7 +815,7 @@ function readAddItem(
  * name (also MySQL's FOREIGN KEY / INDEX / KEY / CHECK by name), the primary
  * key, or a column. What it was, or undefined when it does not read.
  */
-function readDropItem(cx: ConverterContext, tableParts: string[], t: Token[], k: number, where: Origin): 'column' | 'constraint' | 'key' | undefined {
+function readDropItem(cx: ConverterContext, tableParts: string[], t: Token[], k: number, where: Origin, now: ApplyNow): 'column' | 'constraint' | 'key' | undefined {
   const word = upper(t[k]);
   const ifExistsAt = (at: number): number => (upper(t[at]) === 'IF' && upper(t[at + 1]) === 'EXISTS' ? at + 2 : at);
   if (word === 'CONSTRAINT' || (word === 'FOREIGN' && upper(t[k + 1]) === 'KEY') || word === 'INDEX' || word === 'KEY' || (word === 'CHECK' && isName(t[k + 1]))) {
@@ -815,14 +835,15 @@ function readDropItem(cx: ConverterContext, tableParts: string[], t: Token[], k:
   if (columnWord) at++;
   at = ifExistsAt(at);
   if (isName(t[at]) && (columnWord || !DROP_NOT_COLUMN_WORDS.has(upper(t[at])))) {
-    alterDropColumn(cx, tableParts, t[at].value, where);
+    const column = t[at].value;
+    now(where, (parts) => alterDropColumn(cx, parts, column, where));
     return 'column';
   }
   return undefined;
 }
 
 /** `ALTER [COLUMN] x …` from `k`: a type, NOT NULL or default change. Whether it read (the rest are settings: masks, tags, statistics). */
-function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[], t: Token[], k: number, to: number, where: Origin): boolean {
+function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[], t: Token[], k: number, to: number, where: Origin, now: ApplyNow): boolean {
   if (upper(t[k]) === 'COLUMN') k++;
   if (!isName(t[k])) return false;
   const column = t[k].value;
@@ -832,15 +853,18 @@ function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[
     let end = k + 1;
     while (end < to && !['USING', 'COLLATE'].includes(upper(t[end]))) end++;
     if (end <= k + 1) return false;
-    alterColumn(cx, tableParts, column, { type: text.slice(t[k + 1].start, t[end - 1].end) }, where);
+    const type = text.slice(t[k + 1].start, t[end - 1].end);
+    now(where, (parts) => alterColumn(cx, parts, column, { type }, where));
     return true;
   }
   if ((upper(t[k]) === 'SET' || upper(t[k]) === 'DROP') && upper(t[k + 1]) === 'NOT' && upper(t[k + 2]) === 'NULL') {
-    alterColumn(cx, tableParts, column, { notNull: upper(t[k]) === 'SET' }, where);
+    const notNull = upper(t[k]) === 'SET';
+    now(where, (parts) => alterColumn(cx, parts, column, { notNull }, where));
     return true;
   }
   if (upper(t[k]) === 'SET' && upper(t[k + 1]) === 'DEFAULT' && k + 2 < to) {
-    setDefault(cx, tableParts, column, text, t, k + 2, to, where);
+    const from = k + 2;
+    now(where, (parts) => setDefault(cx, parts, column, text, t, from, to, where));
     return true;
   }
   // Databricks / Snowflake: ALTER COLUMN c COMMENT '…' (Snowflake also SET COMMENT = '…'): the column's description.
@@ -853,17 +877,21 @@ function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[
   }
   // PostgreSQL (pg_dump): ALTER COLUMN id ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY (…).
   if (upper(t[k]) === 'ADD' && upper(t[k + 1]) === 'GENERATED' && t.slice(k + 2, to).some((tok) => upper(tok) === 'IDENTITY')) {
-    const table = alterTarget(cx, tableParts, where, `an identity on ${column}`);
-    const field = table?.fields.find((f) => sameIdent(f.name, column));
-    if (field) field.increment = true;
+    now(where, (parts) => {
+      const table = alterTarget(cx, parts, where, `an identity on ${column}`);
+      const field = table?.fields.find((f) => sameIdent(f.name, column));
+      if (field) field.increment = true;
+    });
     return true;
   }
   if (upper(t[k]) === 'DROP' && upper(t[k + 1]) === 'DEFAULT') {
-    const table = alterTarget(cx, tableParts, where, `a default dropped from ${column}`);
-    const field = table?.fields.find((f) => sameIdent(f.name, column));
-    if (!table) return true;
-    if (!field) { cx.notApplied(where, `a default dropped from ${tableLabel(table)}.${column}, which it does not have (not applied)`); return true; }
-    delete field.default;
+    now(where, (parts) => {
+      const table = alterTarget(cx, parts, where, `a default dropped from ${column}`);
+      const field = table?.fields.find((f) => sameIdent(f.name, column));
+      if (!table) return;
+      if (!field) { cx.notApplied(where, `a default dropped from ${tableLabel(table)}.${column}, which it does not have (not applied)`); return; }
+      delete field.default;
+    });
     return true;
   }
   return false;
@@ -1045,10 +1073,12 @@ function dropPrimaryKey(cx: ConverterContext, parts: readonly string[], where: O
 /** `RENAME CONSTRAINT a TO b` (and MySQL's `RENAME INDEX | KEY`): what is named `a` is named `b`. */
 function renameConstraint(cx: ConverterContext, parts: readonly string[], from: string, to: string, where: Origin): void {
   const table = cx.findTable(parts);
+  // Without a table (a partition with no columns of its own), what waits for it by the name written.
+  const on = (named: readonly string[], found?: ModelTable): boolean => (table ? (found ?? cx.findTable(named)) === table : sameParts(named, parts, cx));
   let renamed = 0;
-  for (const r of cx.refs) if (r.name && sameIdent(r.name, from) && (r.fromTable ?? cx.findTable(r.from.parts)) === table) { r.name = to; renamed++; }
-  for (const k of cx.keys) if (k.name && sameIdent(k.name, from) && cx.findTable(k.table) === table) { k.name = to; renamed++; }
-  for (const c of readerState(cx).checks) if (c.name && sameIdent(c.name, from) && cx.findTable(c.table) === table) { c.name = to; renamed++; }
+  for (const r of cx.refs) if (r.name && sameIdent(r.name, from) && on(r.from.parts, r.fromTable)) { r.name = to; renamed++; }
+  for (const k of cx.keys) if (k.name && sameIdent(k.name, from) && on(k.table)) { k.name = to; renamed++; }
+  for (const c of readerState(cx).checks) if (c.name && sameIdent(c.name, from) && on(c.table)) { c.name = to; renamed++; }
   for (const c of table?.constraintNames ?? []) if (sameIdent(c.name, from)) { c.name = to; renamed++; }
   for (const c of table?.checks ?? []) if (c.name && sameIdent(c.name, from)) { c.name = to; renamed++; }
   // A name the database gave (`t_pkey`, `t_a_fkey`…) is the constraint's from now on.
@@ -1107,7 +1137,11 @@ export function readDropTable(cx: ConverterContext, st: Statement, origin: Origi
   for (const [from] of splitTopLevel(t, i, t.length)) {
     const name = readName(t, from);
     const table = name ? cx.findTable(cx.qualify(name.parts)) : undefined;
-    if (!table) continue;
+    if (!table) {
+      // A partition with no columns of its own: no table, but it was created; it and what waits for it go.
+      if (name && forgetChild(cx, cx.qualify(name.parts))) { cx.appliedChanges++; dropped++; }
+      continue;
+    }
     removeTable(cx, table);
     cx.appliedChanges++;
     dropped++;
@@ -1249,9 +1283,38 @@ export function removeTable(cx: ConverterContext, table: ModelTable): void {
   removeWhere(cx.keys, (key) => cx.findTable(key.table) === table);
   removeWhere(cx.comments, (c) => cx.findTable(c.table) === table);
   removeWhere(readerState(cx).checks, (c) => cx.findTable(c.table) === table);
-  // A dropped child is no one's partition; a dropped parent takes its partitions with it.
-  removeWhere(readerState(cx).partitions, (p) => cx.findTable(p.child) === table || cx.findTable(p.parent) === table);
+  // A dropped child is no one's partition; a dropped parent takes its partitions with it, every level of them.
+  const state = readerState(cx);
+  const children = state.partitions.filter((p) => p.noColumns && cx.findTable(p.parent) === table && !cx.findTable(p.child)).map((p) => p.child);
+  for (const child of children) forgetChild(cx, child);
+  removeWhere(state.partitions, (p) => cx.findTable(p.child) === table || cx.findTable(p.parent) === table);
   cx.tables.splice(cx.tables.indexOf(table), 1);
+}
+
+/** Whether `parts` names a partition or inheritance child with no columns of its own, which has no table (yet). */
+export function isChildWithoutTable(cx: ConverterContext, parts: readonly string[]): boolean {
+  return !cx.findTable(parts) && readerState(cx).partitions.some((p) => p.noColumns && sameParts(p.child, parts, cx));
+}
+
+/**
+ * A dropped child with no columns of its own: its partition records, what
+ * waits for it (keys, foreign keys from it, checks, comments, column
+ * changes) and its own partitions, every level. Whether there was one.
+ */
+function forgetChild(cx: ConverterContext, parts: readonly string[], depth = 0): boolean {
+  if (!isChildWithoutTable(cx, parts) || depth > 32) return false;
+  const state = readerState(cx);
+  const named = (x: readonly string[]): boolean => sameParts(x, parts, cx);
+  removeWhere(state.partitions, (p) => named(p.child));
+  removeWhere(cx.refs, (r) => (!r.fromTable && named(r.from.parts)) || named(r.to.parts));
+  removeWhere(cx.keys, (k) => named(k.table));
+  removeWhere(cx.comments, (c) => named(c.table));
+  removeWhere(state.checks, (c) => named(c.table));
+  removeWhere(state.childChanges, (c) => named(c.child));
+  const children = state.partitions.filter((p) => named(p.parent) && !cx.findTable(p.child)).map((p) => p.child);
+  for (const child of children) forgetChild(cx, child, depth + 1);
+  removeWhere(state.partitions, (p) => named(p.parent));
+  return true;
 }
 
 // -- schema context ----------------------------------------------------------
@@ -1616,27 +1679,9 @@ function renamePartitionChild(cx: ConverterContext, parts: readonly string[], ta
   for (const comment of cx.comments) if (sameParts(comment.table, parts, cx)) comment.table = [...renamed];
   for (const check of state.checks) if (sameParts(check.table, parts, cx)) check.table = [...renamed];
   for (const p of state.partitions) if (sameParts(p.parent, parts, cx)) p.parent = [...renamed];
+  for (const c of state.childChanges) if (sameParts(c.child, parts, cx)) c.child = [...renamed];
   cx.appliedChanges++;
   return true;
-}
-
-/**
- * The table a change applied now (a column, a rename) goes to: a child with
- * no columns of its own (`PARTITION OF`, `() INHERITS` from one parent) is
- * read as its parent, through every level, when partitions fold. Keys,
- * foreign keys, checks and comments wait for the end instead
- * (`sqlDdlPartitions.ts`), where they are folded or kept with the child.
- */
-function foldPartition(cx: ConverterContext, parts: string[]): string[] {
-  if (cx.partitionMode === 'tables') return parts;
-  const partitions = readerState(cx).partitions;
-  let current = parts;
-  for (let depth = 0; depth < 32 && !cx.findTable(current); depth++) {
-    const records = partitions.filter((x) => x.noColumns && !x.detached && sameParts(x.child, current, cx));
-    if (records.length !== 1) break;
-    current = [...records[0].parent];
-  }
-  return current;
 }
 
 /**

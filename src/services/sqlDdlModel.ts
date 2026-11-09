@@ -435,7 +435,27 @@ export interface ReaderState {
   schemaElements?: string;
   /** Once partitions are resolved (`sqlDdlPartitions.ts`): how many children were folded into a parent, and how many kept as tables. */
   partitionsResolved?: { folded: number; kept: number };
+  /**
+   * ALTER TABLE changes to a child with no columns of its own (no table yet:
+   * a column added, altered, renamed or dropped), in file order: replayed on
+   * its table once partitions are resolved, or reported at their line when
+   * it folds into its parent. Never applied to the parent.
+   */
+  childChanges: ChildChange[];
+  /** Where each column and table constraint of a CREATE TABLE was written: a folded partition's losses are said at their own line. */
+  itemLines: WeakMap<ModelField | ModelTable, ItemLines>;
 }
+
+/** One deferred ALTER TABLE change to a partition or inheritance child with no table yet ({@link ReaderState.childChanges}). */
+export interface ChildChange {
+  child: string[];
+  origin: Origin;
+  /** Applies the change to the table named `parts`. */
+  run: (parts: readonly string[]) => void;
+}
+
+/** A field's line ({@link ReaderState.itemLines}), or a table's constraint items with theirs. */
+export type ItemLines = number | Array<{ kind: 'pk' | 'unique' | 'fk' | 'check'; columns: string[]; line: number }>;
 
 const READER_STATE = new WeakMap<object, ReaderState>();
 
@@ -443,7 +463,7 @@ const READER_STATE = new WeakMap<object, ReaderState>();
 export function readerState(cx: object): ReaderState {
   let state = READER_STATE.get(cx);
   if (!state) {
-    state = { views: new Set(), domains: [], partitions: [], checks: [] };
+    state = { views: new Set(), domains: [], partitions: [], checks: [], childChanges: [], itemLines: new WeakMap() };
     READER_STATE.set(cx, state);
   }
   return state;

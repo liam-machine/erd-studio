@@ -33,11 +33,13 @@ import {
   sameIdent,
   tableKey,
   tableLabel,
+  type ChildChange,
   type ConverterContext,
   type ModelField,
   type ModelTable,
   type Origin,
   type PendingComment,
+  type PendingKey,
   type ReaderPartition,
 } from './sqlDdlModel';
 
@@ -58,6 +60,14 @@ interface Fold {
   how: ReaderPartition['how'];
   where: Origin;
   columnOptions: NonNullable<ReaderPartition['columnOptions']>;
+  /** Its own table was built from its parent's columns and the ALTER TABLE changes made to it: where each change was written. */
+  changes?: Replayed;
+}
+
+/** ALTER TABLE changes replayed on a child's table: the change that last touched each column (by lower-case name), and each column dropped. */
+interface Replayed {
+  at: Map<string, Origin>;
+  dropped: Array<{ column: string; origin: Origin }>;
 }
 
 const partsOf = (table: ModelTable): string[] => [...(table.schema !== null ? [table.schema] : []), table.name];
@@ -96,6 +106,29 @@ export function resolvePartitions(cx: ConverterContext): void {
   const visiting = new Set<string>();
   const folds: Fold[] = [];
   let kept = 0;
+
+  // Column changes made to a child with no table yet, by child: replayed on its table, or reported when it folds.
+  const changesByKey = new Map<string, ChildChange[]>();
+  for (const c of state.childChanges) {
+    const key = keyOf(c.child);
+    const list = changesByKey.get(key);
+    if (list) list.push(c); else changesByKey.set(key, [c]);
+  }
+  state.childChanges.length = 0;
+  const replay = (key: string, table: ModelTable): Replayed => {
+    const out: Replayed = { at: new Map(), dropped: [] };
+    const changes = changesByKey.get(key) ?? [];
+    changesByKey.delete(key);
+    for (const c of changes) {
+      const before = new Map(table.fields.map((f) => [f, JSON.stringify(f)] as const));
+      c.run(partsOf(table));
+      for (const f of table.fields) if (before.get(f) !== JSON.stringify(f)) out.at.set(f.name.toLowerCase(), c.origin);
+      for (const f of before.keys()) {
+        if (!table.fields.includes(f) && !table.fields.some((g) => sameIdent(g.name, f.name))) out.dropped.push({ column: f.name, origin: c.origin });
+      }
+    }
+    return out;
+  };
 
   /** The table `parts` ends up as: itself, the parent it folds into, the table it is kept as; undefined when it is not in the files. */
   const finalTable = (parts: readonly string[]): ModelTable | undefined => {
@@ -142,6 +175,7 @@ export function resolvePartitions(cx: ConverterContext): void {
         return { kind: 'lost' };
       }
       const table = materialise(cx, first.child, [parent], 'PARTITION OF', first.origin, columnOptions, label);
+      replay(key, table);
       kept++;
       cx.ledger.changed('table', 'other', 'detached partitions kept', where, `as tables of their own, with the columns of ${tableLabel(parent)} (DETACH PARTITION)`);
       return { kind: 'table', table };
@@ -158,6 +192,18 @@ export function resolvePartitions(cx: ConverterContext): void {
     const whatOf = (names: string): string => (how === 'INHERITS' ? `tables inheriting from ${names}` : `partitions of ${names}`);
     const named = (found.length ? found.map((p) => tableLabel(p.table)) : missing).join(', ');
     const notInFiles = missing.length ? `; ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not in the files` : '';
+
+    if (found.length === 0 && missing.length === 0) {
+      // Every parent is the child itself, through a loop of partition links: it stays what the files made it.
+      const what = how === 'INHERITS' ? 'tables inheriting from themselves' : 'partitions of themselves';
+      if (own) {
+        kept++;
+        cx.ledger.changed('table', 'other', `${what} kept`, where, 'as a table of its own: its partition links loop back to it');
+        return { kind: 'table', table: own };
+      }
+      cx.ledger.lost('table', 'other', what, where, 'not kept: its partition links loop back to it, so it has no columns');
+      return { kind: 'lost' };
+    }
 
     if (!own && !noColumns) {
       // `ATTACH PARTITION c` of a table the files never create.
@@ -198,12 +244,27 @@ export function resolvePartitions(cx: ConverterContext): void {
       return { kind: 'table', table: own };
     }
 
-    // No columns of its own.
+    // No columns of its own, unless an ALTER TABLE changed them: its table is its parent's columns with those changes.
+    if (foldMode && single && changesByKey.has(key)) {
+      const table = materialise(cx, first.child, [single], how, first.origin, [], label);
+      const changes = replay(key, table);
+      const extra = table.fields.filter((f) => !single.fields.some((g) => sameIdent(g.name, f.name))).map((f) => f.name);
+      if (extra.length === 0) {
+        folds.push({ key, own: table, label, into: single, how, where, columnOptions, changes });
+        return { kind: 'fold', into: single };
+      }
+      reportColumnOptions(cx, columnOptions, table, label, true);
+      kept++;
+      cx.ledger.changed('table', 'other', `${whatOf(named)} kept`, where,
+        `as a table of its own: it has columns ${named} does not (${extra.slice(0, 3).join(', ')}${extra.length > 3 ? ', …' : ''}), added by ALTER TABLE`);
+      return { kind: 'table', table };
+    }
     if (foldMode && single) {
       folds.push({ key, label, into: single, how, where, columnOptions });
       return { kind: 'fold', into: single };
     }
     const table = materialise(cx, first.child, found.map((p) => p.table), how, first.origin, columnOptions, label);
+    replay(key, table);
     kept++;
     const reason = foldMode ? `as a table of its own, with the columns of ${named}${several}` : KEPT_AS_ASKED;
     cx.ledger.changed('table', 'other', `${whatOf(named)} kept`, where, `${reason}${notInFiles}`);
@@ -211,15 +272,33 @@ export function resolvePartitions(cx: ConverterContext): void {
   };
 
   for (const key of groups.keys()) decide(key);
+  // Changes to a child that is not kept (its parent is not in the files): said, not applied.
+  for (const [key, changes] of changesByKey) {
+    for (const c of changes) c.run(c.child);
+    changesByKey.delete(key);
+  }
 
   // What the files said about each folded child is now about its parent.
+  if (folds.length === 0) {
+    state.partitionsResolved = { folded: 0, kept };
+    return;
+  }
   const intoByKey = new Map(folds.map((f) => [f.key, f.into] as const));
   const intoByTable = new Map(folds.filter((f) => f.own).map((f) => [f.own!, f.into] as const));
+  // Tables do not change from here until the folded ones leave: each name is looked up once (a dump of thousands of partitions stays linear).
+  const found = new Map<string, ModelTable | undefined>();
+  const find = (parts: readonly string[]): ModelTable | undefined => {
+    const k = parts.join('\u0000');
+    if (!found.has(k)) found.set(k, cx.findTable(parts));
+    return found.get(k);
+  };
   const foldedInto = (parts: readonly string[]): ModelTable | undefined => {
-    const table = cx.findTable(parts);
+    const table = find(parts);
     if (table) return intoByTable.get(table);
     return intoByKey.get(normKey(parts));
   };
+  /** What stays: the table a pending item names, unless it is a folded child's. */
+  const stays = (parts: readonly string[]): ModelTable | undefined => (foldedInto(parts) ? undefined : find(parts));
   for (const f of folds) {
     const what = f.how === 'INHERITS' ? `tables inheriting from ${tableLabel(f.into)}` : `partitions of ${tableLabel(f.into)}`;
     cx.ledger.changed('table', 'other', what, f.where, `folded into ${tableLabel(f.into)} (${f.how}: the parent's rows)`);
@@ -234,7 +313,14 @@ export function resolvePartitions(cx: ConverterContext): void {
     const to = foldedInto(ref.to.parts);
     if (to) ref.to.parts = partsOf(to);
   }
-  const pendingKeysOf = (table: ModelTable) => cx.keys.filter((k) => !foldedInto(k.table) && cx.findTable(k.table) === table);
+  const pendingKeys = new Map<ModelTable, PendingKey[]>();
+  for (const k of cx.keys) {
+    const table = stays(k.table);
+    if (!table) continue;
+    const list = pendingKeys.get(table);
+    if (list) list.push(k); else pendingKeys.set(table, [k]);
+  }
+  const pendingKeysOf = (table: ModelTable): PendingKey[] => pendingKeys.get(table) ?? [];
   const hasKey = (into: ModelTable, kind: 'pk' | 'unique', columns: readonly string[]): boolean => {
     if (kind === 'pk' && sameSet(columns, primaryKeyOf(into))) return true;
     if (kind === 'unique') {
@@ -256,29 +342,51 @@ export function resolvePartitions(cx: ConverterContext): void {
     return true;
   });
   const checks = state.checks;
+  const pendingChecks = new Map<ModelTable, Set<string>>();
+  for (const c of checks) {
+    const table = stays(c.table);
+    if (!table) continue;
+    const set = pendingChecks.get(table) ?? new Set<string>();
+    set.add(c.expression);
+    pendingChecks.set(table, set);
+  }
   removeWhere(checks, (check) => {
     const into = foldedInto(check.table);
     if (!into) return false;
-    const onParent = into.checks.some((c) => c.expression === check.expression)
-      || checks.some((c) => c !== check && !foldedInto(c.table) && cx.findTable(c.table) === into && c.expression === check.expression);
+    const onParent = into.checks.some((c) => c.expression === check.expression) || !!pendingChecks.get(into)?.has(check.expression);
     if (!onParent) {
       cx.ledger.lost('constraint', 'other', 'partition check', { file: check.origin.file, line: check.origin.line, table: check.table.slice(-2).join('.') }, `not kept: a check of the partition, not of ${tableLabel(into)}`);
     }
     return true;
   });
-  const sameTarget = (a: PendingComment, b: PendingComment): boolean =>
-    (a.column === undefined ? b.column === undefined : b.column !== undefined && sameIdent(a.column, b.column)) && keyOf(a.table) === keyOf(b.table);
-  const comments = [...cx.comments];
+  const columnKey = (c: PendingComment): string => (c.column === undefined ? '' : `.${c.column.toLowerCase()}`);
+  const targetKey = (c: PendingComment): string => {
+    const table = find(c.table);
+    return `${table ? tableKey(table, cx.dialect) : normKey(c.table)}${columnKey(c)}`;
+  };
+  // A later comment on the same target replaces an earlier one (comments apply in file order).
+  const replaced = new Set<PendingComment>();
+  const seenTargets = new Set<string>();
+  for (let i = cx.comments.length - 1; i >= 0; i--) {
+    const key = targetKey(cx.comments[i]);
+    if (seenTargets.has(key)) replaced.add(cx.comments[i]); else seenTargets.add(key);
+  }
+  // The last pending comment on each table that stays, by column ('' for the table).
+  const lastPending = new Map<ModelTable, Map<string, PendingComment>>();
+  for (const c of cx.comments) {
+    const table = stays(c.table);
+    if (!table) continue;
+    const byColumn = lastPending.get(table) ?? new Map<string, PendingComment>();
+    byColumn.set(columnKey(c), c);
+    lastPending.set(table, byColumn);
+  }
   removeWhere(cx.comments, (comment) => {
     const into = foldedInto(comment.table);
     if (!into) return false;
-    const at = comments.indexOf(comment);
-    // A later comment on the same partition replaces this one (comments apply in file order).
-    if (comments.slice(at + 1).some((c) => sameTarget(c, comment))) return true;
+    if (replaced.has(comment)) return true;
     // What the parent ends up with: its last pending comment, else what its definition says.
     const field = comment.column ? into.fields.find((f) => sameIdent(f.name, comment.column!)) : undefined;
-    const pending = comments.filter((c) => !foldedInto(c.table) && cx.findTable(c.table) === into
-      && (comment.column === undefined ? c.column === undefined : c.column !== undefined && sameIdent(c.column, comment.column))).pop();
+    const pending = lastPending.get(into)?.get(columnKey(comment));
     const parentText = pending ? pending.text : comment.column ? field?.note : into.note;
     if (comment.text && parentText !== comment.text) {
       cx.ledger.lost('description', 'other', 'partition description', { file: comment.origin.file, line: comment.origin.line, table: comment.table.slice(-2).join('.'), ...(comment.column ? { column: comment.column } : {}) },
@@ -289,7 +397,7 @@ export function resolvePartitions(cx: ConverterContext): void {
   // A folded child's own table: what it says that its parent does not, said; then it leaves the model.
   for (const f of folds) {
     if (!f.own) continue;
-    reportOwnDifferences(cx, f.own, f.into, hasKey);
+    reportOwnDifferences(cx, f.own, f.into, hasKey, f.changes);
     const at = cx.tables.indexOf(f.own);
     if (at >= 0) cx.tables.splice(at, 1);
   }
@@ -367,32 +475,69 @@ function reportColumnOptions(cx: ConverterContext, options: NonNullable<ReaderPa
   }
 }
 
-/** A folded child's own definition (pg_dump writes each partition's columns): every key, check, description or column detail its parent lacks, a ledger loss. */
-function reportOwnDifferences(cx: ConverterContext, own: ModelTable, into: ModelTable, hasKey: (into: ModelTable, kind: 'pk' | 'unique', columns: readonly string[]) => boolean): void {
+/**
+ * A folded child's own definition (pg_dump writes each partition's columns,
+ * or an ALTER TABLE changed them): every key, check, description or column
+ * detail its parent lacks, a ledger loss at the line that wrote it.
+ */
+function reportOwnDifferences(
+  cx: ConverterContext, own: ModelTable, into: ModelTable, hasKey: (into: ModelTable, kind: 'pk' | 'unique', columns: readonly string[]) => boolean, changes?: Replayed,
+): void {
   const label = tableLabel(own);
-  const at = { file: own.origin.file, line: own.origin.line, table: label };
+  const lines = readerState(cx).itemLines;
+  const items = lines.get(own);
+  const constraintLines = Array.isArray(items) ? items : [];
+  const fieldLine = (name: string): number | undefined => {
+    const f = own.fields.find((x) => sameIdent(x.name, name));
+    const line = f ? lines.get(f) : undefined;
+    return typeof line === 'number' ? line : undefined;
+  };
+  /** Where a column's detail was written: the ALTER that last changed it, else its line in the CREATE TABLE. */
+  const columnAt = (column: string): { file: string; line: number } => {
+    const changed = changes?.at.get(column.toLowerCase());
+    if (changed) return { file: changed.file, line: changed.line };
+    return { file: own.origin.file, line: fieldLine(column) ?? own.origin.line };
+  };
+  /** Where a key was written: its constraint item, else its column's line (an inline key), else the CREATE TABLE. */
+  const keyAt = (kind: 'pk' | 'unique', columns: readonly string[]): { file: string; line: number } => {
+    const item = constraintLines.find((c) => c.kind === kind && sameSet(c.columns, columns));
+    if (item) return { file: own.origin.file, line: item.line };
+    return columns.length === 1 ? columnAt(columns[0]) : { file: own.origin.file, line: own.origin.line };
+  };
   const pk = primaryKeyOf(own);
   if (pk.length && !hasKey(into, 'pk', pk)) {
-    cx.ledger.lost('primaryKey', 'other', 'partition primary key', { ...at, column: pk.join('+') }, `not kept: a key of the partition, not of ${tableLabel(into)}`);
+    cx.ledger.lost('primaryKey', 'other', 'partition primary key', { ...keyAt('pk', pk), table: label, column: pk.join('+') }, `not kept: a key of the partition, not of ${tableLabel(into)}`);
   }
   const uniques = [...own.fields.filter((f) => f.unique).map((f) => [f.name]), ...own.uniques];
   for (const u of uniques) {
-    if (!hasKey(into, 'unique', u)) cx.ledger.lost('uniqueKey', 'other', 'partition unique key', { ...at, column: u.join('+') }, `not kept: a key of the partition, not of ${tableLabel(into)}`);
+    if (!hasKey(into, 'unique', u)) cx.ledger.lost('uniqueKey', 'other', 'partition unique key', { ...keyAt('unique', u), table: label, column: u.join('+') }, `not kept: a key of the partition, not of ${tableLabel(into)}`);
   }
   const intoChecks = new Set([...into.checks.map((c) => c.expression), ...into.fields.flatMap((f) => f.checks)]);
-  for (const c of [...own.checks.map((x) => x.expression), ...own.fields.flatMap((f) => f.checks)]) {
-    if (!intoChecks.has(c)) cx.ledger.lost('constraint', 'other', 'partition check', at, `not kept: a check of the partition, not of ${tableLabel(into)}`);
+  const checkItems = constraintLines.filter((c) => c.kind === 'check');
+  own.checks.forEach((c, i) => {
+    if (intoChecks.has(c.expression)) return;
+    const line = checkItems[i]?.line ?? own.origin.line;
+    cx.ledger.lost('constraint', 'other', 'partition check', { file: own.origin.file, line, table: label }, `not kept: a check of the partition, not of ${tableLabel(into)}`);
+  });
+  for (const f of own.fields) {
+    for (const c of f.checks) {
+      if (!intoChecks.has(c)) cx.ledger.lost('constraint', 'other', 'partition check', { ...columnAt(f.name), table: label, column: f.name }, `not kept: a check of the partition, not of ${tableLabel(into)}`);
+    }
   }
-  if (own.note && own.note !== into.note) cx.ledger.lost('description', 'other', 'partition description', at, `not kept: the partition's, not ${tableLabel(into)}'s`);
+  if (own.note && own.note !== into.note) cx.ledger.lost('description', 'other', 'partition description', { file: own.origin.file, line: own.origin.line, table: label }, `not kept: the partition's, not ${tableLabel(into)}'s`);
   for (const f of own.fields) {
     const g = into.fields.find((x) => sameIdent(x.name, f.name));
     if (!g) continue;
-    const where = { ...at, column: f.name };
+    const where = { ...columnAt(f.name), table: label, column: f.name };
     if (f.note && f.note !== g.note) cx.ledger.lost('description', 'other', 'partition description', where, `not kept: the partition's, not ${tableLabel(into)}'s`);
     const differs: string[] = [];
     if (typeText(f.typeAsWritten ?? f.type) !== typeText(g.typeAsWritten ?? g.type)) differs.push(`type ${f.typeAsWritten ?? f.type}`);
     if (f.notNull && !g.notNull) differs.push('NOT NULL');
     if (f.default && (f.default.value !== g.default?.value)) differs.push('its default');
+    if (f.increment && !g.increment) differs.push('its identity');
     if (differs.length) cx.ledger.lost('column', 'other', 'partition column', where, `not kept: ${differs.join(', ')} on the partition only (folded into ${tableLabel(into)})`);
+  }
+  for (const d of changes?.dropped ?? []) {
+    cx.notApplied(d.origin, `${label}.${d.column} dropped on the partition only, folded into ${tableLabel(into)} (not applied)`);
   }
 }

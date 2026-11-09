@@ -113,7 +113,7 @@ import { ambiguousPlaceholderNames, neutralisePlaceholders } from './sqlDdlPlace
 import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingCommas, repairHints, rewriteCreateTable, type MissingComma, type Repair, type RepairRung } from './sqlDdlRepair';
 import { salvageCreateTable } from './sqlDdlSalvage';
 import { resolvePartitions } from './sqlDdlPartitions';
-import { readStatement } from './sqlDdlStatements';
+import { isChildWithoutTable, readStatement } from './sqlDdlStatements';
 import { quoteIdent, resolveRefs, writeDbml } from './sqlDdlWriter';
 
 export type {
@@ -797,8 +797,8 @@ class Converter implements ConverterContext {
     if (isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'))) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
-    // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined does nothing.
-    if (ifNotExists && this.findTable(this.qualify(name.parts))) { this.skip(file, 'existing'); return; }
+    // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.
+    if (ifNotExists && (this.findTable(this.qualify(name.parts)) || isChildWithoutTable(this, this.qualify(name.parts)))) { this.skip(file, 'existing'); return; }
     const open = name.next;
     const close = matchParen(t, open);
     if (close < 0) {

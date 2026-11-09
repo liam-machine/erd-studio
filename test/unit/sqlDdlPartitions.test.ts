@@ -374,3 +374,156 @@ describe("partitions: 'tables' keeps each partition as a table", () => {
     expect(links(r)).toEqual(['s_eu_0.o>o.id']);
   });
 });
+
+describe('messy files: changes, drops and loops around a partition', () => {
+  const P = "CREATE TABLE p (id int, at date, CONSTRAINT pos CHECK (id > 0)) PARTITION BY RANGE (at);\nCREATE TABLE p_1 PARTITION OF p FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');";
+
+  it('an ALTER on a folded partition never changes its parent: each change is reported at its own line', () => {
+    const text = [
+      P,
+      'ALTER TABLE p_1 ALTER COLUMN id SET NOT NULL;',
+      'ALTER TABLE p_1 ALTER COLUMN at SET DEFAULT now();',
+      'ALTER TABLE p_1 DROP CONSTRAINT pos;',
+    ].join('\n');
+    const r = convert(text);
+    expect(tables(r)).toEqual(['p']);
+    expect(r.dbml).toMatch(/Table "p" \{\n\s+"id" int\n\s+"at" date\n/);
+    expect(r.dbml).toContain('`id > 0`');
+    const losses = r.ledger.filter((e) => e.outcome === 'lost').map((e) => `${e.unit} ${e.where?.file}:${e.where?.line} ${e.where?.column ?? ''}`);
+    expect(losses).toEqual(['column schema.sql:3 id', 'column schema.sql:4 at']);
+    // A constraint the partition never had by that name is said, not taken from the parent.
+    expect(r.skipped.join('\n')).toMatch(/line 5: constraint pos dropped from p_1, which the files never defined by that name \(not applied\)/);
+    expectConserved(r, text);
+  });
+
+  it('a column renamed on a folded partition does not rename its parent\'s', () => {
+    const r = convert(`${P}\nALTER TABLE p_1 RENAME COLUMN id TO ident;`);
+    expect(columnsOf(r, 'p')).toEqual(['id', 'at']);
+  });
+
+  it("a partition's own check dropped later is gone, not reported lost", () => {
+    const r = convert("CREATE TABLE p (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE p_1 PARTITION OF p (CONSTRAINT p_1_pos CHECK (id > 0)) FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');\nALTER TABLE p_1 DROP CONSTRAINT p_1_pos;");
+    expect(r.ledger.filter((e) => e.outcome === 'lost')).toEqual([]);
+    expect(r.skipped.join('\n')).not.toMatch(/not applied/);
+  });
+
+  it('a column added to an empty INHERITS child keeps it as a table; the parent is untouched', () => {
+    const text = 'CREATE TABLE base (id int);\nCREATE TABLE c () INHERITS (base);\nALTER TABLE c ADD COLUMN extra text;';
+    const r = convert(text);
+    expect(tables(r)).toEqual(['base', 'c']);
+    expect(columnsOf(r, 'base')).toEqual(['id']);
+    expect(columnsOf(r, 'c')).toEqual(['id', 'extra']);
+    expect(r.partitions).toEqual({ folded: 0, kept: 1 });
+    expectConserved(r, text);
+  });
+
+  it("kept as tables, an ALTER on a partition applies to it (it is in the files)", () => {
+    const r = convert(`${P}\nALTER TABLE p_1 ALTER COLUMN id SET NOT NULL;`, 'tables');
+    expect(r.dbml).toMatch(/Table "p_1" \{\n\s+"id" int \[not null\]/);
+    expect(r.dbml).toMatch(/Table "p" \{\n\s+"id" int\n/);
+    expect(r.skipped.join('\n')).not.toMatch(/not in the files/);
+  });
+
+  it('a column added to a detached partition is its own', () => {
+    const r = convert(`${P}\nALTER TABLE p DETACH PARTITION p_1;\nALTER TABLE p_1 ADD COLUMN extra text;`);
+    expect(columnsOf(r, 'p_1')).toEqual(['id', 'at', 'extra']);
+    expect(columnsOf(r, 'p')).toEqual(['id', 'at']);
+    expect(r.skipped.join('\n')).not.toMatch(/not in the files/);
+  });
+
+  it('DROP TABLE of a partition drops it; a table created again by that name is a table of its own', () => {
+    const dropped = convert(`${P}\nDROP TABLE p_1;`);
+    expect(folded(dropped.ledger)).toEqual([]);
+    expect(dropped.skipped.join('\n')).not.toMatch(/DROP/);
+    const again = convert(`${P}\nDROP TABLE p_1;\nCREATE TABLE p_1 (id int, x text);`);
+    expect(tables(again)).toEqual(['p', 'p_1']);
+    expect(again.ledger.filter((e) => e.unit === 'table')).toEqual([]);
+    // A dropped parent takes every level of its partitions with it.
+    const deep = convert('CREATE TABLE p (id int) PARTITION BY LIST (id);\nCREATE TABLE p_1 PARTITION OF p FOR VALUES IN (1) PARTITION BY LIST (id);\nCREATE TABLE p_1_a PARTITION OF p_1 FOR VALUES IN (1);\nDROP TABLE p;\nCREATE TABLE z (id int);');
+    expect(tables(deep)).toEqual(['z']);
+    expect(deep.ledger.filter((e) => e.unit === 'table')).toEqual([]);
+  });
+
+  it('CREATE TABLE IF NOT EXISTS of a partition already created does nothing', () => {
+    const r = convert('CREATE TABLE p (id int) PARTITION BY LIST (id);\nCREATE TABLE p_1 PARTITION OF p FOR VALUES IN (1);\nCREATE TABLE IF NOT EXISTS p_1 (id int, other text);');
+    expect(tables(r)).toEqual(['p']);
+    expect(folded(r.ledger).map((e) => e.where?.line)).toEqual([2]);
+  });
+
+  it('a loop of partitions names no empty table', () => {
+    for (const text of [
+      'CREATE TABLE a (id int);\nCREATE TABLE b (id int);\nALTER TABLE a ATTACH PARTITION b FOR VALUES IN (1);\nALTER TABLE b ATTACH PARTITION a FOR VALUES IN (1);',
+      'CREATE TABLE a (id int);\nCREATE TABLE a PARTITION OF a FOR VALUES IN (1);',
+    ]) {
+      const r = convert(text);
+      for (const e of r.ledger) {
+        expect(`${e.what} ${e.detail ?? ''}`).not.toMatch(/ of +kept|, which|  /);
+      }
+      expect(r.tableCount).toBeGreaterThan(0);
+    }
+  });
+
+  it("pg_dump's multi-line partition: each detail its parent lacks is reported at its own line", () => {
+    const text = [
+      'CREATE TABLE p (',
+      '    id integer NOT NULL,',
+      '    at date NOT NULL',
+      ') PARTITION BY RANGE (at);',
+      'CREATE TABLE p_1 (',
+      '    id integer DEFAULT 0 NOT NULL,',
+      '    at date NOT NULL,',
+      '    CONSTRAINT p_1_uq UNIQUE (id),',
+      '    CONSTRAINT p_1_ck CHECK (id > 0)',
+      ');',
+      "ALTER TABLE ONLY p ATTACH PARTITION p_1 FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+    ].join('\n');
+    const r = convert(text);
+    const losses = r.ledger.filter((e) => e.outcome === 'lost').map((e) => `${e.unit} ${e.where?.line}`).sort();
+    expect(losses).toEqual(['column 6', 'constraint 9', 'uniqueKey 8']);
+  });
+
+  it("two partitions' copies of one foreign key with different actions: the one not kept is reported", () => {
+    const r = convert([
+      'CREATE TABLE o (id int PRIMARY KEY);',
+      'CREATE TABLE p (id int, o int) PARTITION BY LIST (id);',
+      'CREATE TABLE p_1 PARTITION OF p FOR VALUES IN (1);',
+      'CREATE TABLE p_2 PARTITION OF p FOR VALUES IN (2);',
+      'CREATE TABLE p_3 PARTITION OF p FOR VALUES IN (3);',
+      'ALTER TABLE p_1 ADD FOREIGN KEY (o) REFERENCES o (id) ON DELETE CASCADE;',
+      'ALTER TABLE p_2 ADD FOREIGN KEY (o) REFERENCES o (id) ON DELETE SET NULL;',
+      'ALTER TABLE p_3 ADD FOREIGN KEY (o) REFERENCES o (id) ON DELETE CASCADE;',
+    ].join('\n'));
+    expect(links(r)).toEqual(['p.o>o.id']);
+    expect(r.dbml).toContain('[delete: cascade]');
+    const lost = r.ledger.filter((e) => e.outcome === 'lost');
+    expect(lost.map((e) => [e.unit, e.where?.line])).toEqual([['setting', 7]]);
+  });
+
+  it('a pg_dump of a thousand partitions, each with its key, foreign key, index and comment, stays fast', () => {
+    const n = 1000;
+    const lines = [
+      'CREATE TABLE public.customer (customer_id integer NOT NULL);',
+      'ALTER TABLE ONLY public.customer ADD CONSTRAINT customer_pkey PRIMARY KEY (customer_id);',
+      'CREATE TABLE public.payment (\n    payment_id integer NOT NULL,\n    customer_id integer NOT NULL,\n    payment_date timestamp with time zone NOT NULL\n) PARTITION BY RANGE (payment_date);',
+      'ALTER TABLE ONLY public.payment ADD CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id);',
+    ];
+    for (let i = 0; i < n; i++) lines.push(`CREATE TABLE public.payment_p${i} (\n    payment_id integer NOT NULL,\n    customer_id integer NOT NULL,\n    payment_date timestamp with time zone NOT NULL\n);`);
+    for (let i = 0; i < n; i++) lines.push(`ALTER TABLE ONLY public.payment ATTACH PARTITION public.payment_p${i} FOR VALUES FROM ('${i}') TO ('${i + 1}');`);
+    for (let i = 0; i < n; i++) {
+      lines.push(`ALTER TABLE ONLY public.payment_p${i} ADD CONSTRAINT payment_p${i}_pkey PRIMARY KEY (payment_date, payment_id);`);
+      lines.push(`CREATE INDEX payment_p${i}_idx ON public.payment_p${i} USING btree (customer_id);`);
+      lines.push(`ALTER TABLE ONLY public.payment_p${i} ADD CONSTRAINT payment_p${i}_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(customer_id);`);
+      lines.push(`COMMENT ON TABLE public.payment_p${i} IS 'one month';`);
+    }
+    const text = lines.join('\n');
+    const started = Date.now();
+    const r = convertSqlDdl({ files: [{ name: 'dump.sql', text }], dialect: 'postgres' }, dbmlCoreSqlEngine);
+    const ms = Date.now() - started;
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.tableCount).toBe(2);
+    expect(r.partitions).toEqual({ folded: n, kept: 0 });
+    // Each partition's comment is its own: reported, once each.
+    expect(r.ledger.filter((e) => e.outcome === 'lost').reduce((s, e) => s + e.count, 0)).toBe(n);
+    expect(ms).toBeLessThan(8000);
+  }, 60_000);
+});
