@@ -59,6 +59,11 @@ const FLOORS: Record<string, Floor> = {
   // Added with the Power BI robustness track (Save to Folder, TMDL isolation, M merge sources).
   'powerbi-folder-spaceparts': { tablesMatched: 23, columnsMatched: 172, primaryKeysMatched: 1, relationshipsMatched: 22, uniqueKeysKept: 0, typeDetailsKept: 9, descriptionsExact: 7, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
   'powerbi-tmdl-bc-purchase': { tablesMatched: 34, columnsMatched: 511, primaryKeysMatched: 8, relationshipsMatched: 55, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  // Added with the Oracle, BigQuery, Redshift and SQLite dialects (each read with the PostgreSQL grammar after its own pre-steps).
+  'oracle-hr': { tablesMatched: 7, columnsMatched: 35, primaryKeysMatched: 7, relationshipsMatched: 10, uniqueKeysKept: 7, typeDetailsKept: 30, descriptionsExact: 42, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'bigquery-cloud-learning-platform': { tablesMatched: 11, columnsMatched: 129, primaryKeysMatched: 0, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 5, descriptionsExact: 54, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'redshift-tpch': { tablesMatched: 8, columnsMatched: 61, primaryKeysMatched: 8, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 38, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'sqlite-chinook': { tablesMatched: 11, columnsMatched: 64, primaryKeysMatched: 11, relationshipsMatched: 11, uniqueKeysKept: 0, typeDetailsKept: 37, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
 };
 const RANK: Record<SampleScore['verdict'], number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
 

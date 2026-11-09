@@ -181,7 +181,7 @@ describe('Import SQL DDL…', () => {
     expect(sql.dialectPicks).toHaveLength(1);
     // Every dialect is labelled by how many of the tables it reads, the detected one marked first.
     expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected · reads all 4 tables' });
-    expect(sql.dialectPicks[0].map((i) => i.dialect).sort()).toEqual(['databricks', 'mysql', 'postgres', 'snowflake', 'sqlserver']);
+    expect(sql.dialectPicks[0].map((i) => i.dialect).sort()).toEqual(['bigquery', 'databricks', 'mysql', 'oracle', 'postgres', 'redshift', 'snowflake', 'sqlite', 'sqlserver']);
     // The name comes from the folder; the headline says what the tables came from.
     expect(ui.inputs).toEqual(['postgres']);
     expect(ui.confirms).toHaveLength(1);
@@ -429,11 +429,11 @@ describe('gatherSqlFiles', () => {
 
 describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide\'s SQL cards)', () => {
   it('accepts exactly { dialect: <a dialect it reads> }; anything else is the step-by-step flow, and { quick } wins', () => {
-    for (const dialect of ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'] as const) {
+    for (const dialect of ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite'] as const) {
       expect(sqlDialectOfImportArg({ dialect })).toBe(dialect);
     }
     for (const arg of [
-      undefined, null, 'databricks', ['databricks'], [{ dialect: 'databricks' }], {}, { dialect: 'oracle' }, { dialect: 'bigquery' },
+      undefined, null, 'databricks', ['databricks'], [{ dialect: 'databricks' }], {}, { dialect: 'db2' }, { dialect: 'teradata' },
       { dialect: 'Databricks' }, { dialect: 1 }, { dialect: { toString: () => 'mysql' } }, { quick: true }, { quick: true, dialect: 'mysql' },
     ]) {
       expect(sqlDialectOfImportArg(arg), JSON.stringify(arg)).toBeUndefined();

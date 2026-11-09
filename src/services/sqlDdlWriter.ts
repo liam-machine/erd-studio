@@ -39,8 +39,9 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
   const seen = new Map<string, ResolvedRef>();
   for (const ref of c.refs) {
     const where = `${ref.origin.file} line ${ref.origin.line}`;
-    const fkLabel = `${ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
     const from = ref.fromTable ?? c.findTable(ref.from.parts);
+    // The FK's table as it is imported (a later rename applied), so the line names a table the draft has.
+    const fkLabel = `${from ? tableLabel(from) : ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
     const to = c.findTable(ref.to.parts);
     if (!from) { c.skippedLines.push(`${where}: foreign key ${fkLabel}: ${ref.from.parts.slice(-2).join('.')} is not in the files`); continue; }
     if (!to) { c.skippedLines.push(`${where}: foreign key ${fkLabel} → ${ref.to.parts.slice(-2).join('.')}: that table is not in the files`); continue; }

@@ -22,7 +22,6 @@ import {
   detectSqlDialect,
   isSqlDialect,
   looksLikeMigrationFile,
-  looksLikeOracleSql,
   withoutSqlData,
   type SqlDdlFile,
   type SqlDdlToDbmlResult,
@@ -228,6 +227,101 @@ const STARS: Record<SqlDialect, Star> = {
       'fct_order.amount': 'Order line amount in AUD',
     },
   },
+  oracle: {
+    dir: 'oracle',
+    schema: 'sales',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'NUMBER(10)',
+      'dim_customer.customer_name': 'VARCHAR2(200 CHAR)',
+      'dim_customer.created_at': 'TIMESTAMP(6) WITH LOCAL TIME ZONE',
+      'dim_customer.notes': 'CLOB',
+      'dim_product.product_name': 'VARCHAR2(100 BYTE)',
+      'dim_product.unit_price': 'NUMBER(10,2)',
+      'fct_order_line.raw_payload': 'RAW(16)',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      'dim_customer.customer_name': 'Name as the customer entered it',
+      'fct_order_line.amount': 'Line amount in AUD, after discounts',
+    },
+  },
+  bigquery: {
+    dir: 'bigquery',
+    schema: 'sales',
+    fact: 'fct_order',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_no'],
+    links: [
+      'fct_order.customer_id > dim_customer.customer_id',
+      'fct_order.date_key > dim_date.date_key',
+      'fct_order.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'INT64',
+      'dim_customer.emails': 'ARRAY<STRING>',
+      'dim_customer.address': 'STRUCT<street STRING, city STRING, postcode STRING>',
+      'dim_product.product_name': 'STRING(200)',
+      'dim_product.unit_price': 'NUMERIC(10,2)',
+      'fct_order.timestamp': 'TIMESTAMP',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      fct_order: 'One row per order line',
+      'dim_customer.customer_id': 'Surrogate key',
+      'fct_order.amount': 'Order line amount in AUD',
+    },
+  },
+  redshift: {
+    dir: 'redshift',
+    schema: 'sales',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'BIGINT',
+      'dim_customer.attributes': 'SUPER',
+      'dim_customer.created_at': 'TIMESTAMPTZ',
+      'dim_product.product_name': 'VARCHAR(MAX)',
+      'fct_order_line.amount': 'DOUBLE PRECISION',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      'fct_order_line.amount': 'Line amount in AUD, after discounts',
+    },
+  },
+  sqlite: {
+    dir: 'sqlite',
+    schema: '',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'INTEGER',
+      'dim_customer.extra': 'unknown',
+      'dim_product.big': 'UNSIGNED BIG INT',
+      'dim_product.unit_price': 'NUMERIC(10,2)',
+      'fct_order_line.amount': 'REAL',
+    },
+    descriptions: {},
+  },
 };
 
 describe.each(SQL_DIALECTS.map((d) => [d] as const))('the %s star schema', (dialect) => {
@@ -336,7 +430,7 @@ describe('dialect details', () => {
     const result = convert('sqlserver', fixtureFiles('sqlserver'));
     expect(result.dbml).toContain('"CustomerKey" int [pk, increment]');
     expect(result.dbml).not.toMatch(/IDENTITY|\[dbo\]/);
-    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 3 table options (ENGINE, CHARSET, ON [filegroup], USING, CLUSTER BY…: physical, not design), 1 index, 1 view']);
+    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 3 table options (ENGINE, ON [filegroup], CLUSTER BY, DISTKEY, TABLESPACE…: physical, not design), 1 index, 1 view']);
   });
 
   it('snowflake: CREATE OR REPLACE TRANSIENT, database.schema.table names, CLUSTER BY and COMMENT =', () => {
@@ -528,11 +622,20 @@ describe('names', () => {
 // ---------------------------------------------------------------------------
 
 describe('dialects', () => {
-  it('lists five dialects with labels; sqlserver reads with the mssql grammar', () => {
-    expect([...SQL_DIALECTS]).toEqual(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks']);
+  it('lists nine dialects with labels; sqlserver reads with the mssql grammar, the four pre-stepped ones with the postgres one', () => {
+    expect([...SQL_DIALECTS]).toEqual(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite']);
     for (const d of SQL_DIALECTS) expect(SQL_DIALECT_LABELS[d]).toBeTruthy();
     expect(isSqlDialect('sqlserver')).toBe(true);
-    expect(isSqlDialect('oracle')).toBe(false);
+    expect(isSqlDialect('oracle')).toBe(true);
+    expect(isSqlDialect('db2')).toBe(false);
+    for (const d of ['oracle', 'bigquery', 'redshift', 'sqlite'] as const) {
+      const used: string[] = [];
+      convertSqlDdl({ dialect: d, files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int)' }] }, (sql, format) => {
+        used.push(format);
+        return dbmlCoreSqlEngine(sql, format);
+      });
+      expect(used, d).toEqual(['postgres']);
+    }
     const formats: string[] = [];
     convertSqlDdl({ dialect: 'sqlserver', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int)' }] }, (sql, format) => {
       formats.push(format);
@@ -542,9 +645,9 @@ describe('dialects', () => {
   });
 
   it('an unknown dialect is a problem, not a throw', () => {
-    expect(convertSqlDdl({ dialect: 'oracle' as SqlDialect, files: [{ name: 'a.sql', text: '' }] }, dbmlCoreSqlEngine)).toEqual({
+    expect(convertSqlDdl({ dialect: 'db2' as SqlDialect, files: [{ name: 'a.sql', text: '' }] }, dbmlCoreSqlEngine)).toEqual({
       ok: false,
-      problems: [{ file: '', message: 'Unknown SQL dialect: oracle.' }],
+      problems: [{ file: '', message: 'Unknown SQL dialect: db2.' }],
     });
   });
 
@@ -741,8 +844,8 @@ describe('what the folder looks count, and a dump without its data', () => {
   });
 
   it('knows Oracle DDL, and not Snowflake\'s NUMBER', () => {
-    expect(looksLikeOracleSql('CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));')).toBe(true);
-    expect(looksLikeOracleSql('create or replace TABLE A.B.C (ID NUMBER(38,0), E VARCHAR(16777216));')).toBe(false);
+    expect(detectSqlDialect('CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));')).toBe('oracle');
+    expect(detectSqlDialect('create or replace TABLE A.B.C (ID NUMBER(38,0), E VARCHAR(16777216));')).toBe('snowflake');
   });
 
   it('takes pg_dump\'s COPY rows and a big dump\'s INSERTs out, keeping every line break and the statements to count', () => {

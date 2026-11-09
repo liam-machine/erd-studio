@@ -113,6 +113,30 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
     counts: { tables: 37, columns: 421, primaryKeys: 28, relationships: 174, descriptions: 344 },
     provenance: "Bundle .source.expected counts the whole project (66 tables, 741 columns, 41 primary keys, 235 relationships); the draft draws one folder, so these are the omop folder's (scope folder:omop, the one dbtDraftScopes ranks first), counted from the yml with the yaml package in a scratch script. Source: https://github.com/OHDSI/dbt-synthea/tree/33fdbfa9b354f00def5ee6e45525cb2da80e0ddf @ 33fdbfa9b354f00def5ee6e45525cb2da80e0ddf (main, 2026-05-22; the repo has no tags or releases).",
   },
+  // oracle-hr: Oracle HR sample schema (Oracle, SQL*Plus script)
+  'oracle-hr': {
+    importer: 'sql',
+    counts: { tables: 7, columns: 35, primaryKeys: 7, relationships: 10, descriptions: 42 },
+    provenance: "Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally); keys and foreign keys from the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists, descriptions from COMMENT ON. Source: https://github.com/oracle-samples/db-sample-schemas/blob/e3325a83e56c516815844025418a96ecaf219751/human_resources/hr_create.sql @ e3325a83e56c516815844025418a96ecaf219751 (tag v23.3); SHA-256 7d5b1e75a450f4e96a2efb23d9bac81963d8331974a72feacee712464091dd47 (17,112 bytes).",
+  },
+  // bigquery-cloud-learning-platform: Google Cloud Learning Platform's BigQuery tables (BigQuery DDL folder)
+  'bigquery-cloud-learning-platform': {
+    importer: 'sql',
+    counts: { tables: 11, columns: 129, primaryKeys: 0, relationships: 0, descriptions: 54 },
+    provenance: "Counted by sqlglot 27.29 (bigquery) over the 11 upstream files, never through ERD Studio (11 of 11 statements); STRUCT<...> and ARRAY<...> one column each, descriptions from the columns' OPTIONS(description = ...). Source: https://github.com/GoogleCloudPlatform/cloud-learning-platform/tree/5da5e36798114b103480f494157cfaaf44530409/utils/tables_sql @ 5da5e36798114b103480f494157cfaaf44530409 (main).",
+  },
+  // redshift-tpch: TPC-H derived benchmark tables for Amazon Redshift (awslabs/amazon-redshift-utils)
+  'redshift-tpch': {
+    importer: 'sql',
+    counts: { tables: 8, columns: 61, primaryKeys: 8, relationships: 0, descriptions: 0 },
+    provenance: "Counted structurally over the upstream file, never through ERD Studio (sqlglot cannot read Redshift's distkey/sortkey attributes): 8 CREATE TABLEs, one column per line, each table's Primary Key(...) (upper-case names of the lower-case columns); no foreign keys. Source: https://github.com/awslabs/amazon-redshift-utils/blob/f208c1100370eebca8b38d3e7d0654fb337e3463/src/CloudDataWarehouseBenchmark/Cloud-DWB-Derived-from-TPCH/3TB/ddl.sql @ f208c1100370eebca8b38d3e7d0654fb337e3463 (master); SHA-256 f028f8981aab99cca7d84154f56910414d776d2372dcc84efa0960adf57ff033 (5,324 bytes).",
+  },
+  // sqlite-chinook: Chinook for SQLite (lerocha/chinook-database)
+  'sqlite-chinook': {
+    importer: 'sql',
+    counts: { tables: 11, columns: 64, primaryKeys: 11, relationships: 11, descriptions: 0 },
+    provenance: "Counted by sqlglot 27.29 (sqlite) over the upstream file, never through ERD Studio (11 of 11 CREATE TABLEs; types re-read as written), every foreign key inside its table. Source: https://github.com/lerocha/chinook-database/blob/4a944a942426e1f3263fe539155fb7ef92b04b4a/ChinookDatabase/DataSources/Chinook_Sqlite.sql @ 4a944a942426e1f3263fe539155fb7ef92b04b4a (tag v1.4.5); SHA-256 fdcb271b3e9c840216b09168752bddca973ed3917b40e49b603b15831114aea1 (611,447 bytes).",
+  },
 };
 
 /** The samples, in the order the scorecard lists them. */

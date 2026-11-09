@@ -31702,6 +31702,2081 @@
      "expect": "^date$"
     }
    ]
+  },
+  "oracle-hr": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "oracle-hr/human_resources/hr_create.sql"
+    ],
+    "dialect": "oracle"
+   },
+   "counts": {
+    "tables": 7,
+    "columns": 35,
+    "primaryKeys": 7,
+    "relationships": 10
+   },
+   "notes": "Counted by sqlglot 27.29 (oracle) over the upstream file, never through ERD Studio (62 of 63 DDL statements; countries, an ORGANIZATION INDEX table, read structurally), types re-read as written. Primary and foreign keys are the ALTER TABLE ... ADD ( CONSTRAINT ... ) lists; emp_dept_fk and emp_manager_fk reference their table's primary key (REFERENCES with no column list). The 7 unique keys are the CREATE UNIQUE INDEX statements on the key columns. Descriptions are the COMMENT ON TABLE / COLUMN statements.",
+   "tables": [
+    {
+     "name": "regions",
+     "pk": [
+      "region_id"
+     ],
+     "columns": [
+      [
+       "region_id",
+       "NUMBER",
+       "PN",
+       "Primary key of regions table."
+      ],
+      [
+       "region_name",
+       "VARCHAR2(25)",
+       "",
+       "Names of regions. Locations are in the countries of these regions."
+      ]
+     ],
+     "description": "Regions table that contains region numbers and names. references with the Countries table."
+    },
+    {
+     "name": "countries",
+     "pk": [
+      "country_id"
+     ],
+     "columns": [
+      [
+       "country_id",
+       "CHAR(2)",
+       "PN",
+       "Primary key of countries table."
+      ],
+      [
+       "country_name",
+       "VARCHAR2(60)",
+       "",
+       "Country name"
+      ],
+      [
+       "region_id",
+       "NUMBER",
+       "",
+       "Region ID for the country. Foreign key to region_id column in the departments table."
+      ]
+     ],
+     "description": "country table. References with locations table."
+    },
+    {
+     "name": "locations",
+     "pk": [
+      "location_id"
+     ],
+     "columns": [
+      [
+       "location_id",
+       "NUMBER(4)",
+       "PN",
+       "Primary key of locations table"
+      ],
+      [
+       "street_address",
+       "VARCHAR2(40)",
+       "",
+       "Street address of an office, warehouse, or production site of a company.\nContains building number and street name"
+      ],
+      [
+       "postal_code",
+       "VARCHAR2(12)",
+       "",
+       "Postal code of the location of an office, warehouse, or production site \nof a company. "
+      ],
+      [
+       "city",
+       "VARCHAR2(30)",
+       "N",
+       "A not null column that shows city where an office, warehouse, or \nproduction site of a company is located. "
+      ],
+      [
+       "state_province",
+       "VARCHAR2(25)",
+       "",
+       "State or Province where an office, warehouse, or production site of a \ncompany is located."
+      ],
+      [
+       "country_id",
+       "CHAR(2)",
+       "",
+       "Country where an office, warehouse, or production site of a company is\nlocated. Foreign key to country_id column of the countries table."
+      ]
+     ],
+     "description": "Locations table that contains specific address of a specific office,\nwarehouse, and/or production site of a company. Does not store addresses /\nlocations of customers. references with the departments and countries tables. "
+    },
+    {
+     "name": "departments",
+     "pk": [
+      "department_id"
+     ],
+     "columns": [
+      [
+       "department_id",
+       "NUMBER(4)",
+       "PN",
+       "Primary key column of departments table."
+      ],
+      [
+       "department_name",
+       "VARCHAR2(30)",
+       "N",
+       "A not null column that shows name of a department. Administration, \nMarketing, Purchasing, Human Resources, Shipping, IT, Executive, Public \nRelations, Sales, Finance, and Accounting. "
+      ],
+      [
+       "manager_id",
+       "NUMBER(6)",
+       "",
+       "Manager_id of a department. Foreign key to employee_id column of employees table. The manager_id column of the employee table references this column."
+      ],
+      [
+       "location_id",
+       "NUMBER(4)",
+       "",
+       "Location id where a department is located. Foreign key to location_id column of locations table."
+      ]
+     ],
+     "description": "Departments table that shows details of departments where employees \nwork. references with locations, employees, and job_history tables."
+    },
+    {
+     "name": "jobs",
+     "pk": [
+      "job_id"
+     ],
+     "columns": [
+      [
+       "job_id",
+       "VARCHAR2(10)",
+       "PN",
+       "Primary key of jobs table."
+      ],
+      [
+       "job_title",
+       "VARCHAR2(35)",
+       "N",
+       "A not null column that shows job title, e.g. AD_VP, FI_ACCOUNTANT"
+      ],
+      [
+       "min_salary",
+       "NUMBER(6)",
+       "",
+       "Minimum salary for a job title."
+      ],
+      [
+       "max_salary",
+       "NUMBER(6)",
+       "",
+       "Maximum salary for a job title"
+      ]
+     ],
+     "description": "jobs table with job titles and salary ranges.\nReferences with employees and job_history table."
+    },
+    {
+     "name": "employees",
+     "pk": [
+      "employee_id"
+     ],
+     "columns": [
+      [
+       "employee_id",
+       "NUMBER(6)",
+       "PN",
+       "Primary key of employees table."
+      ],
+      [
+       "first_name",
+       "VARCHAR2(20)",
+       "",
+       "First name of the employee. A not null column."
+      ],
+      [
+       "last_name",
+       "VARCHAR2(25)",
+       "N",
+       "Last name of the employee. A not null column."
+      ],
+      [
+       "email",
+       "VARCHAR2(25)",
+       "N",
+       "Email id of the employee"
+      ],
+      [
+       "phone_number",
+       "VARCHAR2(20)",
+       "",
+       "Phone number of the employee; includes country code and area code"
+      ],
+      [
+       "hire_date",
+       "DATE",
+       "N",
+       "Date when the employee started on this job. A not null column."
+      ],
+      [
+       "job_id",
+       "VARCHAR2(10)",
+       "N",
+       "Current job of the employee; foreign key to job_id column of the \njobs table. A not null column."
+      ],
+      [
+       "salary",
+       "NUMBER(8, 2)",
+       "",
+       "Monthly salary of the employee. Must be greater \nthan zero (enforced by constraint emp_salary_min)"
+      ],
+      [
+       "commission_pct",
+       "NUMBER(2, 2)",
+       "",
+       "Commission percentage of the employee; Only employees in sales \ndepartment elgible for commission percentage"
+      ],
+      [
+       "manager_id",
+       "NUMBER(6)",
+       "",
+       "Manager id of the employee; has same domain as manager_id in \ndepartments table. Foreign key to employee_id column of employees table. \n(useful for reflexive joins and CONNECT BY query)"
+      ],
+      [
+       "department_id",
+       "NUMBER(4)",
+       "",
+       "Department id where employee works; foreign key to department_id \ncolumn of the departments table"
+      ]
+     ],
+     "description": "employees table. References with departments,\njobs, job_history tables. Contains a self reference."
+    },
+    {
+     "name": "job_history",
+     "pk": [
+      "employee_id",
+      "start_date"
+     ],
+     "columns": [
+      [
+       "employee_id",
+       "NUMBER(6)",
+       "PN",
+       "A not null column in the complex primary key employee_id+start_date. \nForeign key to employee_id column of the employee table"
+      ],
+      [
+       "start_date",
+       "DATE",
+       "PN",
+       "A not null column in the complex primary key employee_id+start_date. \nMust be less than the end_date of the job_history table. (enforced by \nconstraint jhist_date_interval)"
+      ],
+      [
+       "end_date",
+       "DATE",
+       "N",
+       "Last day of the employee in this job role. A not null column. Must be \ngreater than the start_date of the job_history table. \n(enforced by constraint jhist_date_interval)"
+      ],
+      [
+       "job_id",
+       "VARCHAR2(10)",
+       "N",
+       "Job role in which the employee worked in the past; foreign key to \njob_id column in the jobs table. A not null column."
+      ],
+      [
+       "department_id",
+       "NUMBER(4)",
+       "",
+       "Department id in which the employee worked in the past; foreign key to deparment_id column in the departments table"
+      ]
+     ],
+     "description": "Table that stores job history of the employees. If an employee \nchanges departments within the job or changes jobs within the department, \nnew rows get inserted into this table with old job information of the \nemployee. Contains a complex primary key: employee_id+start_date.\nReferences with jobs, employees, and departments tables."
+    }
+   ],
+   "relationships": [
+    {
+     "from": "countries",
+     "fromColumn": "region_id",
+     "to": "regions",
+     "toColumn": "region_id"
+    },
+    {
+     "from": "locations",
+     "fromColumn": "country_id",
+     "to": "countries",
+     "toColumn": "country_id"
+    },
+    {
+     "from": "departments",
+     "fromColumn": "location_id",
+     "to": "locations",
+     "toColumn": "location_id"
+    },
+    {
+     "from": "employees",
+     "fromColumn": "department_id",
+     "to": "departments",
+     "toColumn": "department_id"
+    },
+    {
+     "from": "employees",
+     "fromColumn": "job_id",
+     "to": "jobs",
+     "toColumn": "job_id"
+    },
+    {
+     "from": "employees",
+     "fromColumn": "manager_id",
+     "to": "employees",
+     "toColumn": "employee_id"
+    },
+    {
+     "from": "departments",
+     "fromColumn": "manager_id",
+     "to": "employees",
+     "toColumn": "employee_id"
+    },
+    {
+     "from": "job_history",
+     "fromColumn": "job_id",
+     "to": "jobs",
+     "toColumn": "job_id"
+    },
+    {
+     "from": "job_history",
+     "fromColumn": "employee_id",
+     "to": "employees",
+     "toColumn": "employee_id"
+    },
+    {
+     "from": "job_history",
+     "fromColumn": "department_id",
+     "to": "departments",
+     "toColumn": "department_id"
+    }
+   ],
+   "uniqueKeys": [
+    {
+     "table": "regions",
+     "columns": [
+      "region_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "locations",
+     "columns": [
+      "location_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "departments",
+     "columns": [
+      "department_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "jobs",
+     "columns": [
+      "job_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "employees",
+     "columns": [
+      "email"
+     ]
+    },
+    {
+     "table": "employees",
+     "columns": [
+      "employee_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "job_history",
+     "columns": [
+      "employee_id",
+      "start_date"
+     ],
+     "index": true
+    }
+   ]
+  },
+  "bigquery-cloud-learning-platform": {
+   "importer": "sql",
+   "input": {
+    "folder": "bigquery-cloud-learning-platform/tables_sql",
+    "dialect": "bigquery"
+   },
+   "counts": {
+    "tables": 11,
+    "columns": 129,
+    "primaryKeys": 0,
+    "relationships": 0
+   },
+   "notes": "Counted by sqlglot 27.29 (bigquery) over the 11 upstream files, never through ERD Studio (11 of 11 statements), types re-read as written (STRUCT<...> and ARRAY<...> as one type). No keys: the tables declare none. Descriptions are the columns' OPTIONS(description = ...).",
+   "tables": [
+    {
+     "name": "cohort",
+     "pk": [],
+     "columns": [
+      [
+       "cohortId",
+       "STRING",
+       "",
+       "firestore uuid from cohort table"
+      ],
+      [
+       "name",
+       "STRING",
+       "",
+       "cohort name"
+      ],
+      [
+       "description",
+       "STRING",
+       ""
+      ],
+      [
+       "startDate",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "endDate",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "registrationStartDate",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "registrationEndDate",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "maxStudents",
+       "INTEGER",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "courseTemplate",
+     "pk": [],
+     "columns": [
+      [
+       "courseTemplateId",
+       "STRING",
+       "",
+       "firestore uuid from courseTemplate table"
+      ],
+      [
+       "classroomId",
+       "STRING",
+       "",
+       "course id of google classroom course"
+      ],
+      [
+       "name",
+       "STRING",
+       "",
+       "name of Course Template as mentioned in google classroom"
+      ],
+      [
+       "description",
+       "STRING",
+       "",
+       "description of Course Template as mentioned in google classroom"
+      ],
+      [
+       "instructionalDesigners",
+       "ARRAY<STRING>",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "courseWorkCollection",
+     "pk": [],
+     "columns": [
+      [
+       "uuid",
+       "STRING",
+       "N",
+       "unique id"
+      ],
+      [
+       "id",
+       "STRING",
+       "N",
+       "course work id"
+      ],
+      [
+       "courseId",
+       "STRING",
+       "N",
+       "course id"
+      ],
+      [
+       "title",
+       "STRING",
+       "",
+       "course work name"
+      ],
+      [
+       "description",
+       "STRING",
+       "",
+       "course work description"
+      ],
+      [
+       "materials",
+       "ARRAY<JSON>",
+       ""
+      ],
+      [
+       "state",
+       "STRING",
+       "",
+       "course work state"
+      ],
+      [
+       "alternateLink",
+       "STRING",
+       "",
+       "course work link"
+      ],
+      [
+       "creationTime",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "updateTime",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "dueDate",
+       "STRUCT<`year` INTEGER",
+       ""
+      ],
+      [
+       "dueTime",
+       "STRUCT<`hours` INTEGER",
+       ""
+      ],
+      [
+       "scheduledTime",
+       "STRING",
+       ""
+      ],
+      [
+       "maxPoints",
+       "INTEGER",
+       ""
+      ],
+      [
+       "workType",
+       "STRING",
+       ""
+      ],
+      [
+       "associatedWithDeveloper",
+       "BOOL",
+       ""
+      ],
+      [
+       "assigneeMode",
+       "STRING",
+       ""
+      ],
+      [
+       "individualStudentsOptions",
+       "JSON",
+       ""
+      ],
+      [
+       "submissionModificationMode",
+       "STRING",
+       ""
+      ],
+      [
+       "creatorUserId",
+       "STRING",
+       ""
+      ],
+      [
+       "topicId",
+       "STRING",
+       ""
+      ],
+      [
+       "gradeCategory",
+       "JSON",
+       ""
+      ],
+      [
+       "assignment",
+       "JSON",
+       ""
+      ],
+      [
+       "multipleChoiceQuestion",
+       "JSON",
+       ""
+      ],
+      [
+       "event_type",
+       "STRING",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "message_id",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "courseWorkLogs",
+     "pk": [],
+     "columns": [
+      [
+       "message_id",
+       "STRING",
+       "N",
+       "unique ID"
+      ],
+      [
+       "collection",
+       "STRING",
+       "N"
+      ],
+      [
+       "event_type",
+       "STRING",
+       "N"
+      ],
+      [
+       "resource",
+       "JSON",
+       ""
+      ],
+      [
+       "publish_time",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "enrollmentFailureLogs",
+     "pk": [],
+     "columns": [
+      [
+       "email",
+       "STRING",
+       "N",
+       "user email ID"
+      ],
+      [
+       "error_type",
+       "STRING",
+       "",
+       "type of error which is stored"
+      ],
+      [
+       "traceback",
+       "STRING",
+       "",
+       "error traceback"
+      ],
+      [
+       "log_time",
+       "TIMESTAMP",
+       "",
+       "error timestamp"
+      ],
+      [
+       "section_id",
+       "STRING",
+       "",
+       "section Id for enrollment user"
+      ],
+      [
+       "cohort_id",
+       "STRING",
+       "",
+       "cohort Id for enrollment user"
+      ]
+     ]
+    },
+    {
+     "name": "sectionEnrollmentRecord",
+     "pk": [],
+     "columns": [
+      [
+       "enrollment_id",
+       "STRING",
+       "N",
+       "enrollment uuid generated by firestore"
+      ],
+      [
+       "email",
+       "STRING",
+       "N",
+       "User email"
+      ],
+      [
+       "user_id",
+       "STRING",
+       "N",
+       "User uuid generated by firestore"
+      ],
+      [
+       "role",
+       "STRING",
+       "N",
+       "User enrollment role"
+      ],
+      [
+       "status",
+       "STRING",
+       "N",
+       "enrollment status"
+      ],
+      [
+       "invitation_id",
+       "STRING",
+       "",
+       "invitation id generated by classroom"
+      ],
+      [
+       "section_id",
+       "STRING",
+       "N",
+       "section unique id"
+      ],
+      [
+       "cohort_id",
+       "STRING",
+       "N",
+       "cohort unique id"
+      ],
+      [
+       "course_id",
+       "STRING",
+       "N",
+       "classroom id"
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "rosterLogs",
+     "pk": [],
+     "columns": [
+      [
+       "message_id",
+       "STRING",
+       "N",
+       "unique ID"
+      ],
+      [
+       "collection",
+       "STRING",
+       "N"
+      ],
+      [
+       "event_type",
+       "STRING",
+       "N"
+      ],
+      [
+       "resource",
+       "STRUCT<userId STRING",
+       ""
+      ],
+      [
+       "publish_time",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "section",
+     "pk": [],
+     "columns": [
+      [
+       "sectionId",
+       "STRING",
+       "",
+       "firestore uuid from sections table"
+      ],
+      [
+       "courseId",
+       "STRING",
+       "",
+       "course id of google classroom course"
+      ],
+      [
+       "name",
+       "STRING",
+       "",
+       "name of section as mentioned in google classroom"
+      ],
+      [
+       "description",
+       "STRING",
+       "",
+       "description of section as mentioned in google classroom"
+      ],
+      [
+       "status",
+       "STRING",
+       "",
+       "Status of the section"
+      ],
+      [
+       "enrollmentStatus",
+       "STRING",
+       "",
+       "Enrollment status of the section"
+      ],
+      [
+       "maxStudents",
+       "INTEGER",
+       "",
+       "Max students counts of the section"
+      ],
+      [
+       "classroomUrl",
+       "STRING",
+       "",
+       "url of the class in google classroom"
+      ],
+      [
+       "courseTemplateId",
+       "STRING",
+       "",
+       "firestore uuid from courseTemplate table"
+      ],
+      [
+       "cohortId",
+       "STRING",
+       "",
+       "firestore uuid from cohort table"
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "submittedCourseWorkCollections",
+     "pk": [],
+     "columns": [
+      [
+       "uuid",
+       "STRING",
+       "N",
+       "unique id"
+      ],
+      [
+       "courseId",
+       "STRING",
+       "N",
+       "course id"
+      ],
+      [
+       "courseWorkId",
+       "STRING",
+       "N",
+       "course work id"
+      ],
+      [
+       "id",
+       "STRING",
+       "N",
+       "submitted course work id"
+      ],
+      [
+       "userId",
+       "STRING",
+       "N",
+       "user id (guy id)"
+      ],
+      [
+       "creationTime",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "updateTime",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "state",
+       "STRING",
+       "",
+       "submitted course work state"
+      ],
+      [
+       "late",
+       "BOOL",
+       ""
+      ],
+      [
+       "draftGrade",
+       "NUMERIC",
+       ""
+      ],
+      [
+       "assignedGrade",
+       "NUMERIC",
+       ""
+      ],
+      [
+       "alternateLink",
+       "STRING",
+       "",
+       "submitted course work link"
+      ],
+      [
+       "courseWorkType",
+       "STRING",
+       "",
+       "course work type"
+      ],
+      [
+       "associatedWithDeveloper",
+       "BOOL",
+       ""
+      ],
+      [
+       "assignmentSubmission",
+       "JSON",
+       ""
+      ],
+      [
+       "submissionHistory",
+       "ARRAY<JSON>",
+       ""
+      ],
+      [
+       "shortAnswerSubmission",
+       "JSON",
+       ""
+      ],
+      [
+       "multipleChoiceSubmission",
+       "JSON",
+       ""
+      ],
+      [
+       "event_type",
+       "STRING",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "message_id",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "userCollection",
+     "pk": [],
+     "columns": [
+      [
+       "uuid",
+       "STRING",
+       "N",
+       "unique id"
+      ],
+      [
+       "id",
+       "STRING",
+       "N",
+       "user guy id"
+      ],
+      [
+       "name",
+       "STRUCT<givenName STRING",
+       "N"
+      ],
+      [
+       "emailAddress",
+       "STRING",
+       "N"
+      ],
+      [
+       "photoUrl",
+       "STRING",
+       ""
+      ],
+      [
+       "verifiedTeacher",
+       "BOOL",
+       ""
+      ],
+      [
+       "permissions",
+       "ARRAY<JSON>",
+       ""
+      ],
+      [
+       "event_type",
+       "STRING",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "message_id",
+       "STRING",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "statements",
+     "pk": [],
+     "columns": [
+      [
+       "uuid",
+       "STRING",
+       "N",
+       "UUID"
+      ],
+      [
+       "actor",
+       "STRUCT<uuid STRING NOT NULL OPTIONS(description = \"UUID\")",
+       "N",
+       "Actor/Agent"
+      ],
+      [
+       "verb",
+       "STRUCT<uuid STRING NOT NULL",
+       "N",
+       "Verb"
+      ],
+      [
+       "object",
+       "STRUCT<uuid STRING NOT NULL",
+       "N",
+       "Object/Activity"
+      ],
+      [
+       "object_type",
+       "STRING",
+       "N"
+      ],
+      [
+       "result",
+       "STRING",
+       ""
+      ],
+      [
+       "context",
+       "STRING",
+       ""
+      ],
+      [
+       "timestamp",
+       "TIMESTAMP",
+       ""
+      ],
+      [
+       "result_success",
+       "BOOLEAN",
+       ""
+      ],
+      [
+       "result_completion",
+       "BOOLEAN",
+       ""
+      ],
+      [
+       "result_score_raw",
+       "FLOAT64",
+       ""
+      ],
+      [
+       "result_score_min",
+       "FLOAT64",
+       ""
+      ],
+      [
+       "result_score_max",
+       "FLOAT64",
+       ""
+      ],
+      [
+       "stored",
+       "TIMESTAMP",
+       "N"
+      ],
+      [
+       "authority",
+       "STRING",
+       ""
+      ],
+      [
+       "attachments",
+       "ARRAY<STRING>",
+       ""
+      ],
+      [
+       "session_id",
+       "STRING",
+       "N"
+      ]
+     ]
+    }
+   ],
+   "relationships": [],
+   "uniqueKeys": []
+  },
+  "redshift-tpch": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "redshift-tpch/3TB/ddl.sql"
+    ],
+    "dialect": "redshift"
+   },
+   "counts": {
+    "tables": 8,
+    "columns": 61,
+    "primaryKeys": 8,
+    "relationships": 0
+   },
+   "notes": "Counted structurally over the upstream file (sqlglot 27.29 cannot read Redshift's distkey/sortkey table attributes), never through ERD Studio, types as written. Each table's Primary Key(...) names its columns in upper case against lower-case column definitions: unquoted names fold case, so they are the same columns (pk lists the columns as defined). The file declares no foreign keys; its 8 COPY and 8 SELECT statements are data and queries, not design.",
+   "tables": [
+    {
+     "name": "customer",
+     "pk": [
+      "c_custkey"
+     ],
+     "columns": [
+      [
+       "c_custkey",
+       "int8",
+       "PN"
+      ],
+      [
+       "c_name",
+       "varchar(25)",
+       "N"
+      ],
+      [
+       "c_address",
+       "varchar(40)",
+       "N"
+      ],
+      [
+       "c_nationkey",
+       "int4",
+       "N"
+      ],
+      [
+       "c_phone",
+       "char(15)",
+       "N"
+      ],
+      [
+       "c_acctbal",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "c_mktsegment",
+       "char(10)",
+       "N"
+      ],
+      [
+       "c_comment",
+       "varchar(117)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "lineitem",
+     "pk": [
+      "l_orderkey",
+      "l_linenumber"
+     ],
+     "columns": [
+      [
+       "l_orderkey",
+       "int8",
+       "PN"
+      ],
+      [
+       "l_partkey",
+       "int8",
+       "N"
+      ],
+      [
+       "l_suppkey",
+       "int4",
+       "N"
+      ],
+      [
+       "l_linenumber",
+       "int4",
+       "PN"
+      ],
+      [
+       "l_quantity",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "l_extendedprice",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "l_discount",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "l_tax",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "l_returnflag",
+       "char(1)",
+       "N"
+      ],
+      [
+       "l_linestatus",
+       "char(1)",
+       "N"
+      ],
+      [
+       "l_shipdate",
+       "date",
+       "N"
+      ],
+      [
+       "l_commitdate",
+       "date",
+       "N"
+      ],
+      [
+       "l_receiptdate",
+       "date",
+       "N"
+      ],
+      [
+       "l_shipinstruct",
+       "char(25)",
+       "N"
+      ],
+      [
+       "l_shipmode",
+       "char(10)",
+       "N"
+      ],
+      [
+       "l_comment",
+       "varchar(44)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "nation",
+     "pk": [
+      "n_nationkey"
+     ],
+     "columns": [
+      [
+       "n_nationkey",
+       "int4",
+       "PN"
+      ],
+      [
+       "n_name",
+       "char(25)",
+       "N"
+      ],
+      [
+       "n_regionkey",
+       "int4",
+       "N"
+      ],
+      [
+       "n_comment",
+       "varchar(152)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "orders",
+     "pk": [
+      "o_orderkey"
+     ],
+     "columns": [
+      [
+       "o_orderkey",
+       "int8",
+       "PN"
+      ],
+      [
+       "o_custkey",
+       "int8",
+       "N"
+      ],
+      [
+       "o_orderstatus",
+       "char(1)",
+       "N"
+      ],
+      [
+       "o_totalprice",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "o_orderdate",
+       "date",
+       "N"
+      ],
+      [
+       "o_orderpriority",
+       "char(15)",
+       "N"
+      ],
+      [
+       "o_clerk",
+       "char(15)",
+       "N"
+      ],
+      [
+       "o_shippriority",
+       "int4",
+       "N"
+      ],
+      [
+       "o_comment",
+       "varchar(79)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "part",
+     "pk": [
+      "p_partkey"
+     ],
+     "columns": [
+      [
+       "p_partkey",
+       "int8",
+       "PN"
+      ],
+      [
+       "p_name",
+       "varchar(55)",
+       "N"
+      ],
+      [
+       "p_mfgr",
+       "char(25)",
+       "N"
+      ],
+      [
+       "p_brand",
+       "char(10)",
+       "N"
+      ],
+      [
+       "p_type",
+       "varchar(25)",
+       "N"
+      ],
+      [
+       "p_size",
+       "int4",
+       "N"
+      ],
+      [
+       "p_container",
+       "char(10)",
+       "N"
+      ],
+      [
+       "p_retailprice",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "p_comment",
+       "varchar(23)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "partsupp",
+     "pk": [
+      "ps_partkey",
+      "ps_suppkey"
+     ],
+     "columns": [
+      [
+       "ps_partkey",
+       "int8",
+       "PN"
+      ],
+      [
+       "ps_suppkey",
+       "int4",
+       "PN"
+      ],
+      [
+       "ps_availqty",
+       "int4",
+       "N"
+      ],
+      [
+       "ps_supplycost",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "ps_comment",
+       "varchar(199)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "region",
+     "pk": [
+      "r_regionkey"
+     ],
+     "columns": [
+      [
+       "r_regionkey",
+       "int4",
+       "PN"
+      ],
+      [
+       "r_name",
+       "char(25)",
+       "N"
+      ],
+      [
+       "r_comment",
+       "varchar(152)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "supplier",
+     "pk": [
+      "s_suppkey"
+     ],
+     "columns": [
+      [
+       "s_suppkey",
+       "int4",
+       "PN"
+      ],
+      [
+       "s_name",
+       "char(25)",
+       "N"
+      ],
+      [
+       "s_address",
+       "varchar(40)",
+       "N"
+      ],
+      [
+       "s_nationkey",
+       "int4",
+       "N"
+      ],
+      [
+       "s_phone",
+       "char(15)",
+       "N"
+      ],
+      [
+       "s_acctbal",
+       "numeric(12, 2)",
+       "N"
+      ],
+      [
+       "s_comment",
+       "varchar(101)",
+       "N"
+      ]
+     ]
+    }
+   ],
+   "relationships": [],
+   "uniqueKeys": []
+  },
+  "sqlite-chinook": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "sqlite-chinook/DataSources/Chinook_Sqlite.sql"
+    ],
+    "dialect": "sqlite"
+   },
+   "counts": {
+    "tables": 11,
+    "columns": 64,
+    "primaryKeys": 11,
+    "relationships": 11
+   },
+   "notes": "Counted by sqlglot 27.29 (sqlite) over the upstream file, never through ERD Studio (11 of 11 CREATE TABLE statements), types re-read as written (sqlglot reads NVARCHAR as TEXT). Square-bracket names; every foreign key is declared inside its table, as SQLite requires; the 15,000 INSERT rows are data.",
+   "tables": [
+    {
+     "name": "Album",
+     "pk": [
+      "AlbumId"
+     ],
+     "columns": [
+      [
+       "AlbumId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Title",
+       "NVARCHAR(160)",
+       "N"
+      ],
+      [
+       "ArtistId",
+       "INTEGER",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "Artist",
+     "pk": [
+      "ArtistId"
+     ],
+     "columns": [
+      [
+       "ArtistId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Name",
+       "NVARCHAR(120)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Customer",
+     "pk": [
+      "CustomerId"
+     ],
+     "columns": [
+      [
+       "CustomerId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "FirstName",
+       "NVARCHAR(40)",
+       "N"
+      ],
+      [
+       "LastName",
+       "NVARCHAR(20)",
+       "N"
+      ],
+      [
+       "Company",
+       "NVARCHAR(80)",
+       ""
+      ],
+      [
+       "Address",
+       "NVARCHAR(70)",
+       ""
+      ],
+      [
+       "City",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "State",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "Country",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "PostalCode",
+       "NVARCHAR(10)",
+       ""
+      ],
+      [
+       "Phone",
+       "NVARCHAR(24)",
+       ""
+      ],
+      [
+       "Fax",
+       "NVARCHAR(24)",
+       ""
+      ],
+      [
+       "Email",
+       "NVARCHAR(60)",
+       "N"
+      ],
+      [
+       "SupportRepId",
+       "INTEGER",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Employee",
+     "pk": [
+      "EmployeeId"
+     ],
+     "columns": [
+      [
+       "EmployeeId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "LastName",
+       "NVARCHAR(20)",
+       "N"
+      ],
+      [
+       "FirstName",
+       "NVARCHAR(20)",
+       "N"
+      ],
+      [
+       "Title",
+       "NVARCHAR(30)",
+       ""
+      ],
+      [
+       "ReportsTo",
+       "INTEGER",
+       ""
+      ],
+      [
+       "BirthDate",
+       "DATETIME",
+       ""
+      ],
+      [
+       "HireDate",
+       "DATETIME",
+       ""
+      ],
+      [
+       "Address",
+       "NVARCHAR(70)",
+       ""
+      ],
+      [
+       "City",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "State",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "Country",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "PostalCode",
+       "NVARCHAR(10)",
+       ""
+      ],
+      [
+       "Phone",
+       "NVARCHAR(24)",
+       ""
+      ],
+      [
+       "Fax",
+       "NVARCHAR(24)",
+       ""
+      ],
+      [
+       "Email",
+       "NVARCHAR(60)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Genre",
+     "pk": [
+      "GenreId"
+     ],
+     "columns": [
+      [
+       "GenreId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Name",
+       "NVARCHAR(120)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Invoice",
+     "pk": [
+      "InvoiceId"
+     ],
+     "columns": [
+      [
+       "InvoiceId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "CustomerId",
+       "INTEGER",
+       "N"
+      ],
+      [
+       "InvoiceDate",
+       "DATETIME",
+       "N"
+      ],
+      [
+       "BillingAddress",
+       "NVARCHAR(70)",
+       ""
+      ],
+      [
+       "BillingCity",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "BillingState",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "BillingCountry",
+       "NVARCHAR(40)",
+       ""
+      ],
+      [
+       "BillingPostalCode",
+       "NVARCHAR(10)",
+       ""
+      ],
+      [
+       "Total",
+       "NUMERIC(10, 2)",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "InvoiceLine",
+     "pk": [
+      "InvoiceLineId"
+     ],
+     "columns": [
+      [
+       "InvoiceLineId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "InvoiceId",
+       "INTEGER",
+       "N"
+      ],
+      [
+       "TrackId",
+       "INTEGER",
+       "N"
+      ],
+      [
+       "UnitPrice",
+       "NUMERIC(10, 2)",
+       "N"
+      ],
+      [
+       "Quantity",
+       "INTEGER",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "MediaType",
+     "pk": [
+      "MediaTypeId"
+     ],
+     "columns": [
+      [
+       "MediaTypeId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Name",
+       "NVARCHAR(120)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "Playlist",
+     "pk": [
+      "PlaylistId"
+     ],
+     "columns": [
+      [
+       "PlaylistId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Name",
+       "NVARCHAR(120)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "PlaylistTrack",
+     "pk": [
+      "PlaylistId",
+      "TrackId"
+     ],
+     "columns": [
+      [
+       "PlaylistId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "TrackId",
+       "INTEGER",
+       "PN"
+      ]
+     ]
+    },
+    {
+     "name": "Track",
+     "pk": [
+      "TrackId"
+     ],
+     "columns": [
+      [
+       "TrackId",
+       "INTEGER",
+       "PN"
+      ],
+      [
+       "Name",
+       "NVARCHAR(200)",
+       "N"
+      ],
+      [
+       "AlbumId",
+       "INTEGER",
+       ""
+      ],
+      [
+       "MediaTypeId",
+       "INTEGER",
+       "N"
+      ],
+      [
+       "GenreId",
+       "INTEGER",
+       ""
+      ],
+      [
+       "Composer",
+       "NVARCHAR(220)",
+       ""
+      ],
+      [
+       "Milliseconds",
+       "INTEGER",
+       "N"
+      ],
+      [
+       "Bytes",
+       "INTEGER",
+       ""
+      ],
+      [
+       "UnitPrice",
+       "NUMERIC(10, 2)",
+       "N"
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "Album",
+     "fromColumn": "ArtistId",
+     "to": "Artist",
+     "toColumn": "ArtistId"
+    },
+    {
+     "from": "Customer",
+     "fromColumn": "SupportRepId",
+     "to": "Employee",
+     "toColumn": "EmployeeId"
+    },
+    {
+     "from": "Employee",
+     "fromColumn": "ReportsTo",
+     "to": "Employee",
+     "toColumn": "EmployeeId"
+    },
+    {
+     "from": "Invoice",
+     "fromColumn": "CustomerId",
+     "to": "Customer",
+     "toColumn": "CustomerId"
+    },
+    {
+     "from": "InvoiceLine",
+     "fromColumn": "InvoiceId",
+     "to": "Invoice",
+     "toColumn": "InvoiceId"
+    },
+    {
+     "from": "InvoiceLine",
+     "fromColumn": "TrackId",
+     "to": "Track",
+     "toColumn": "TrackId"
+    },
+    {
+     "from": "PlaylistTrack",
+     "fromColumn": "PlaylistId",
+     "to": "Playlist",
+     "toColumn": "PlaylistId"
+    },
+    {
+     "from": "PlaylistTrack",
+     "fromColumn": "TrackId",
+     "to": "Track",
+     "toColumn": "TrackId"
+    },
+    {
+     "from": "Track",
+     "fromColumn": "AlbumId",
+     "to": "Album",
+     "toColumn": "AlbumId"
+    },
+    {
+     "from": "Track",
+     "fromColumn": "GenreId",
+     "to": "Genre",
+     "toColumn": "GenreId"
+    },
+    {
+     "from": "Track",
+     "fromColumn": "MediaTypeId",
+     "to": "MediaType",
+     "toColumn": "MediaTypeId"
+    }
+   ],
+   "uniqueKeys": []
   }
  }
 }

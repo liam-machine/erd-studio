@@ -504,7 +504,7 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
     expect(entries(r, 'generated column expression')).toHaveLength(1);
     const skipped = r.skipped.join('\n');
     expect(skipped).toMatch(/2 column settings \(COLLATE, CHARACTER SET/);
-    expect(skipped).toMatch(/4 table options \(ENGINE, CHARSET/);
+    expect(skipped).toMatch(/4 table options \(ENGINE, ON \[filegroup\]/);
     expect(ledgerLeftOut(r.ledger).join('\n')).toMatch(/1 column: ON UPDATE not kept/);
   });
 

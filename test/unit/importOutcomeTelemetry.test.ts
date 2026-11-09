@@ -37,7 +37,8 @@ describe('the key tables', () => {
   it('are every importer, outcome, dialect and cause, each key in FEATURES once', () => {
     expect(Object.keys(IMPORT_OUTCOME_FEATURES)).toEqual(['sql', 'powerbi', 'dbml', 'dbt']);
     for (const byOutcome of Object.values(IMPORT_OUTCOME_FEATURES)) expect(Object.keys(byOutcome)).toEqual([...IMPORT_OUTCOMES]);
-    expect(Object.keys(SQL_DIALECT_OUTCOME_FEATURES)).toEqual([...SQL_DIALECTS]);
+    // Oracle, BigQuery, Redshift and SQLite have no dialect keys yet (a new key is a telemetry contract change, the Worker first).
+    expect(Object.keys(SQL_DIALECT_OUTCOME_FEATURES)).toEqual(SQL_DIALECTS.filter((d) => !['oracle', 'bigquery', 'redshift', 'sqlite'].includes(d)));
     for (const byOutcome of Object.values(SQL_DIALECT_OUTCOME_FEATURES)) expect(Object.keys(byOutcome)).toEqual([...IMPORT_OUTCOMES]);
     expect(Object.keys(LEDGER_CAUSE_FEATURES)).toHaveLength(21);
     expect(ALL_KEYS).toHaveLength(24 + 30 + 21);

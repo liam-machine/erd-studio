@@ -68,6 +68,10 @@ export const TRAILING_OPTIONS: Readonly<Record<SqlDialect, readonly string[]>> =
   sqlserver: ['ON [PRIMARY]', 'WITH (DATA_COMPRESSION = PAGE)'],
   snowflake: ['CLUSTER BY (id)', 'DATA_RETENTION_TIME_IN_DAYS = 1', "COMMENT = 'generated'"],
   databricks: ['USING DELTA', 'CLUSTER BY (id)', "TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported')", "LOCATION '/mnt/x'"],
+  oracle: ['TABLESPACE users', 'PCTFREE 10 STORAGE (INITIAL 64K NEXT 1M)', 'NOCOMPRESS LOGGING'],
+  bigquery: ['PARTITION BY _PARTITIONDATE', 'CLUSTER BY id', "OPTIONS(labels = [('team', 'sales')])"],
+  redshift: ['DISTSTYLE KEY', 'DISTKEY (id)', 'COMPOUND SORTKEY (id)', 'BACKUP NO'],
+  sqlite: ['WITHOUT ROWID', 'STRICT'],
 };
 
 export interface VariantKnobs {
@@ -110,6 +114,10 @@ export const EXTRA_COLUMNS: Readonly<Record<SqlDialect, Readonly<Record<ExtraCol
   sqlserver: { exoticType: 'doc XML(dbo.DocSchemaCollection) NULL', keywordColumn: 'user nvarchar(20)', modifier: 'note nvarchar(10) SPARSE NULL' },
   snowflake: { exoticType: 'embedding VECTOR(FLOAT, 768)', keywordColumn: 'FILE_FORMAT varchar(20)', modifier: 'secret varchar(9) WITH MASKING POLICY mask_secret' },
   databricks: { exoticType: 'attrs MAP<STRING, ARRAY<INT>>', keywordColumn: 'date DATE', modifier: 'masked_email STRING MASK mask_email USING COLUMNS (id)' },
+  oracle: { exoticType: 'seen TIMESTAMP(6) WITH LOCAL TIME ZONE', keywordColumn: 'timestamp TIMESTAMP', modifier: 'margin NUMBER(10,2) GENERATED ALWAYS AS (1.5) VIRTUAL' },
+  bigquery: { exoticType: 'tags ARRAY<STRUCT<k STRING, v INT64>>', keywordColumn: 'timestamp TIMESTAMP', modifier: "code STRING COLLATE 'und:ci'" },
+  redshift: { exoticType: 'payload SUPER', keywordColumn: 'type varchar(10)', modifier: 'note varchar(10) ENCODE zstd' },
+  sqlite: { exoticType: 'big UNSIGNED BIG INT', keywordColumn: 'action TEXT', modifier: 'code TEXT COLLATE NOCASE' },
 };
 
 /** A routine per dialect whose body holds a CREATE TABLE (never one of the schema's tables). */
@@ -119,6 +127,10 @@ const ROUTINES: Readonly<Record<SqlDialect, string>> = {
   sqlserver: 'CREATE PROCEDURE p AS\nBEGIN\n  CREATE TABLE #tmp_x (id int);\n  DROP TABLE #tmp_x;\nEND;',
   snowflake: "CREATE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS $$\nBEGIN\n  CREATE TEMPORARY TABLE tmp_x (id int);\n  RETURN 'x';\nEND;\n$$;",
   databricks: 'CREATE FUNCTION f() RETURNS INT RETURN 1;',
+  oracle: "CREATE OR REPLACE PROCEDURE p AS\nBEGIN\n  EXECUTE IMMEDIATE 'CREATE TABLE tmp_x (id NUMBER)';\n  NULL;\nEND;\n/",
+  bigquery: 'CREATE PROCEDURE p()\nBEGIN\n  CREATE TEMP TABLE tmp_x (id INT64);\n  DROP TABLE tmp_x;\nEND;',
+  redshift: 'CREATE OR REPLACE PROCEDURE p()\nAS $$\nBEGIN\n  CREATE TEMP TABLE tmp_x (id int);\n  DROP TABLE tmp_x;\nEND;\n$$ LANGUAGE plpgsql;',
+  sqlite: 'CREATE TRIGGER trg AFTER INSERT ON customer\nBEGIN\n  INSERT INTO customer_profile (customer_id, vip) VALUES (new.id, 0);\n  UPDATE customer SET email = lower(email) WHERE id = new.id;\nEND;',
 };
 
 export interface SpecTruth {
@@ -142,6 +154,10 @@ const TYPES: Readonly<Record<SqlDialect, Readonly<Record<SpecType, string>>>> = 
   sqlserver: { int: 'int', bigint: 'bigint', text: 'nvarchar(max)', varchar: 'nvarchar(100)', decimal: 'decimal(10,2)', timestamp: 'datetime2', date: 'date', boolean: 'bit' },
   snowflake: { int: 'number(38,0)', bigint: 'number(38,0)', text: 'varchar', varchar: 'varchar(100)', decimal: 'number(10,2)', timestamp: 'timestamp_ntz', date: 'date', boolean: 'boolean' },
   databricks: { int: 'int', bigint: 'bigint', text: 'string', varchar: 'string', decimal: 'decimal(10,2)', timestamp: 'timestamp', date: 'date', boolean: 'boolean' },
+  oracle: { int: 'NUMBER(10)', bigint: 'NUMBER(19)', text: 'CLOB', varchar: 'VARCHAR2(100 CHAR)', decimal: 'NUMBER(10,2)', timestamp: 'TIMESTAMP(6)', date: 'DATE', boolean: 'NUMBER(1)' },
+  bigquery: { int: 'INT64', bigint: 'INT64', text: 'STRING', varchar: 'STRING(100)', decimal: 'NUMERIC(10, 2)', timestamp: 'TIMESTAMP', date: 'DATE', boolean: 'BOOL' },
+  redshift: { int: 'integer', bigint: 'bigint', text: 'varchar(max)', varchar: 'varchar(100)', decimal: 'decimal(10,2)', timestamp: 'timestamp', date: 'date', boolean: 'boolean' },
+  sqlite: { int: 'INTEGER', bigint: 'INTEGER', text: 'TEXT', varchar: 'VARCHAR(100)', decimal: 'NUMERIC(10,2)', timestamp: 'DATETIME', date: 'DATE', boolean: 'BOOLEAN' },
 };
 
 /** A small schema with the shapes that matter: a composite PK and FK, a one-to-one (unique FK), required and optional FKs, comments, a unique key. */
@@ -199,8 +215,8 @@ function cased(text: string, mode: VariantKnobs['keywordCase']): string {
 function quote(name: string, knobs: VariantKnobs): string {
   if (knobs.quoting !== 'dialect') return name;
   switch (knobs.dialect) {
-    case 'mysql': case 'databricks': return `\`${name}\``;
-    case 'sqlserver': return `[${name}]`;
+    case 'mysql': case 'databricks': case 'bigquery': return `\`${name}\``;
+    case 'sqlserver': case 'sqlite': return `[${name}]`;
     default: return `"${name}"`;
   }
 }
@@ -250,7 +266,9 @@ export function specToDdl(spec: SqlSpec, knobs: VariantKnobs): { files: SqlDdlFi
   const tables = copied(spec, knobs.copies ?? 1);
   const prefix = knobs.placeholder ? `${PLACEHOLDER_SYNTAXES[knobs.placeholder]}` : '';
   const tableName = (name: string): string => (prefix ? `${prefix.endsWith('.') ? prefix : `${prefix}.`}${quote(name, knobs)}` : quote(name, knobs));
-  const inlineComments = d === 'mysql' || d === 'databricks' || d === 'snowflake';
+  const inlineComments = d === 'mysql' || d === 'databricks' || d === 'snowflake' || d === 'bigquery';
+  // SQLite has no comments on tables or columns: its files hold none.
+  const comments = d !== 'sqlite';
   const columnList = (cols: readonly string[]): string => cols.map((c) => quote(c, knobs)).join(', ');
   const fkClause = (fk: SpecForeignKey): string =>
     `${fk.name ? `CONSTRAINT ${quote(fk.name, knobs)} ` : ''}FOREIGN KEY (${columnList(fk.columns)}) REFERENCES ${tableName(fk.table)} (${columnList(fk.references)})`;
@@ -266,7 +284,7 @@ export function specToDdl(spec: SqlSpec, knobs: VariantKnobs): { files: SqlDdlFi
       if (c.default !== undefined) parts.push(`DEFAULT ${c.default}`);
       if (c.pk) parts.push('PRIMARY KEY');
       if (c.unique) parts.push('UNIQUE');
-      if (c.comment && inlineComments) parts.push(`COMMENT ${sqlString(c.comment)}`);
+      if (c.comment && inlineComments) parts.push(d === 'bigquery' ? `OPTIONS(description = ${sqlString(c.comment)})` : `COMMENT ${sqlString(c.comment)}`);
       lines.push(`  ${parts.join(' ')}`);
     }
     for (const extra of knobs.extras ?? []) lines.push(`  ${EXTRA_COLUMNS[d][extra]}`);
@@ -275,7 +293,7 @@ export function specToDdl(spec: SqlSpec, knobs: VariantKnobs): { files: SqlDdlFi
     if (fkStyle === 'table') for (const fk of t.foreignKeys ?? []) lines.push(`  ${fkClause(fk)}`);
     const options = (knobs.trailingOptions ?? []).map((i) => TRAILING_OPTIONS[d][i]).filter(Boolean);
     const tableComment = t.comment && inlineComments
-      ? [d === 'mysql' ? `COMMENT=${sqlString(t.comment)}` : d === 'snowflake' ? `COMMENT = ${sqlString(t.comment)}` : `COMMENT ${sqlString(t.comment)}`]
+      ? [d === 'mysql' ? `COMMENT=${sqlString(t.comment)}` : d === 'snowflake' ? `COMMENT = ${sqlString(t.comment)}` : d === 'bigquery' ? `OPTIONS(description = ${sqlString(t.comment)})` : `COMMENT ${sqlString(t.comment)}`]
       : [];
     const tail = knobs.tableCommentFirst ? [...tableComment, ...options] : [...options, ...tableComment];
     tableSql.set(t.name, `CREATE TABLE ${tableName(t.name)} (${eol}${lines.join(`,${eol}`)}${eol})${tail.length ? ` ${tail.join(' ')}` : ''};`);
@@ -283,7 +301,7 @@ export function specToDdl(spec: SqlSpec, knobs: VariantKnobs): { files: SqlDdlFi
     if (fkStyle === 'alterList' && t.foreignKeys?.length) {
       alters.push(`ALTER TABLE ${tableName(t.name)} ADD ${t.foreignKeys.map(fkClause).join(`,${eol}  `)};`);
     }
-    if (!inlineComments) {
+    if (!inlineComments && comments) {
       const target = tableName(t.name);
       if (d === 'sqlserver') {
         const prop = (text: string, column?: string): string =>
@@ -309,6 +327,7 @@ export function specToDdl(spec: SqlSpec, knobs: VariantKnobs): { files: SqlDdlFi
   const truth = specTruth(spec, knobs.copies ?? 1);
   const adjusted: SpecTruth = {
     ...truth,
+    ...(d === 'sqlite' ? { descriptions: 0 } : {}),
     columns: truth.columns + (knobs.extras?.length ?? 0) * truth.tables,
     ...(knobs.brokenTable ? { unreadableTables: 1 } : {}),
   };

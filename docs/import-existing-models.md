@@ -13,6 +13,10 @@ Every import works the same way once you have the files: you pick the files (or 
 - [SQL Server and Azure SQL](#sql-server-and-azure-sql)
 - [PostgreSQL](#postgresql)
 - [MySQL and MariaDB](#mysql-and-mariadb)
+- [Oracle](#oracle)
+- [Google BigQuery](#google-bigquery)
+- [Amazon Redshift](#amazon-redshift)
+- [SQLite](#sqlite)
 - [dbdiagram.io and other DBML tools](#dbdiagramio-and-other-dbml-tools)
 - [Other modelling tools](#other-modelling-tools)
 - [dbt](#dbt)
@@ -99,6 +103,50 @@ mysqldump --no-data --result-file=schema.sql <database>
 
 `--result-file` writes the file as it is on every system (a `>` redirect in Windows PowerShell can change its encoding). Then run **ERD Studio: Import SQL DDL…** and choose **MySQL / MariaDB**.
 
+## Oracle
+
+A SQL*Plus script that creates the tables imports as it is, such as Oracle's own sample schemas. To write one for an existing schema, run this in SQL*Plus or SQLcl as the schema's owner:
+
+```sql
+SET LONG 1000000 LONGCHUNKSIZE 1000000 PAGESIZE 0 LINESIZE 32767 TRIMSPOOL ON FEEDBACK OFF
+EXEC DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SQLTERMINATOR', TRUE);
+SPOOL schema.sql
+SELECT DBMS_METADATA.GET_DDL('TABLE', table_name) FROM user_tables;
+SPOOL OFF
+```
+
+Then run **ERD Studio: Import SQL DDL…** and choose **Oracle**. `VARCHAR2`, `NUMBER(p,s)` and the other Oracle types keep their names; keys and foreign keys added later with `ALTER TABLE … ADD ( CONSTRAINT … )` are read with their tables, and `COMMENT ON` becomes the descriptions. Storage, tablespace and partitioning clauses are left out, and so are `PROMPT`, `SET` and the other SQL*Plus commands, sequences, views and PL/SQL.
+
+## Google BigQuery
+
+BigQuery keeps each table's DDL. Run this in the BigQuery console for your dataset and save the `ddl` column, one statement after another, into a `.sql` file:
+
+```sql
+SELECT ddl FROM `my-project.my_dataset`.INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE';
+```
+
+Then run **ERD Studio: Import SQL DDL…** and choose **Google BigQuery**. A column's `OPTIONS(description = …)` becomes its description, `STRUCT<…>` and `ARRAY<…>` columns keep their types, and `` `project.dataset.table` `` names keep their dataset. `PARTITION BY`, `CLUSTER BY` and the table's other options are left out.
+
+## Amazon Redshift
+
+Redshift writes a table's DDL with `SHOW TABLE`; run it for each table and save the results in a `.sql` file:
+
+```sql
+SHOW TABLE my_schema.my_table;
+```
+
+Then run **ERD Studio: Import SQL DDL…** and choose **Amazon Redshift**. `ENCODE`, `DISTKEY`, `SORTKEY`, `DISTSTYLE` and `BACKUP` are left out (physical settings, listed as not imported); keys whose columns are written in another case (`Primary Key(L_ORDERKEY)`) still name their columns.
+
+## SQLite
+
+The `sqlite3` shell writes the schema of a database file:
+
+```sh
+sqlite3 my.db .schema > schema.sql
+```
+
+Then run **ERD Studio: Import SQL DDL…** and choose **SQLite**. Square-bracket names, `AUTOINCREMENT` and foreign keys inside the tables come across; a column without a type is imported as `unknown` (and listed), and virtual tables (`USING fts5` and the like) and triggers are left out.
+
 ## dbdiagram.io and other DBML tools
 
 DBML is the open-source schema language behind dbdiagram.io, so ERD Studio imports it as it is.
@@ -110,7 +158,7 @@ Then run **ERD Studio: Import DBML…**. More on moving between ERD Studio and d
 
 ## Other modelling tools
 
-erwin Data Modeler, ER/Studio, DbSchema, DBeaver, DataGrip, Visual Paradigm and most other tools can generate SQL DDL (often called forward engineering) or export DBML. Generate the DDL for PostgreSQL, MySQL, SQL Server, Snowflake or Databricks (or export DBML), save it in your project folder, then run **ERD Studio: Import…** and pick **SQL DDL scripts** or **DBML file**.
+erwin Data Modeler, ER/Studio, DbSchema, DBeaver, DataGrip, Visual Paradigm and most other tools can generate SQL DDL (often called forward engineering) or export DBML. Generate the DDL for PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite (or export DBML), save it in your project folder, then run **ERD Studio: Import…** and pick **SQL DDL scripts** or **DBML file**.
 
 ## dbt
 
@@ -118,8 +166,6 @@ dbt is optional. If your folder is a dbt project, **Import from dbt** copies you
 
 ## Not yet
 
-- **Oracle:** the SQL importer does not read Oracle DDL yet.
-- **BigQuery:** its DDL (`OPTIONS(…)` on columns and `project.dataset.table` names) does not read yet.
 - **Live database connections:** ERD Studio reads files you export, never a database.
 
 Need one of these, or another source? Run **ERD Studio: Send Feedback** and tell us which.

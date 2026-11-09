@@ -111,13 +111,16 @@ const TYPE_STOP = new Set([
   'ENFORCED', 'RELY', 'NORELY', 'CLUSTERED', 'NONCLUSTERED', 'COMPRESSION', 'STORAGE',
   // SQL Server's inline `int FOREIGN KEY REFERENCES t(id)`; Snowflake's policies without WITH; MySQL's column attributes.
   'FOREIGN', 'MASKING', 'PROJECTION', 'COLUMN_FORMAT', 'ENGINE_ATTRIBUTE', 'SECONDARY_ENGINE_ATTRIBUTE',
+  // BigQuery's column OPTIONS(…); Redshift's column DISTKEY / SORTKEY; Oracle's ENCRYPT.
+  'OPTIONS', 'DISTKEY', 'SORTKEY', 'ENCRYPT',
 ]);
 
 /** Whether the token at `k` ends a column's type (`ON UPDATE`, `CHARACTER SET`, `WITH (…)` and the {@link TYPE_STOP} words). */
 export function endsType(t: readonly Token[], k: number): boolean {
   const w = upper(t[k]);
   if (TYPE_STOP.has(w)) return true;
-  if (w === 'ON') return upper(t[k + 1]) === 'UPDATE';
+  // MySQL's `ON UPDATE CURRENT_TIMESTAMP`; SQLite's `ON CONFLICT REPLACE`.
+  if (w === 'ON') return upper(t[k + 1]) === 'UPDATE' || upper(t[k + 1]) === 'CONFLICT';
   if (w === 'CHARACTER') return upper(t[k + 1]) === 'SET';
   if (w === 'WITH') return !(upper(t[k + 1]) === 'TIME' || upper(t[k + 1]) === 'LOCAL');
   return false;

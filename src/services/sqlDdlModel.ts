@@ -16,8 +16,12 @@ import type { Statement, Token } from './sqlDdlLexer';
 // Public types (re-exported by sqlDdlImport.ts)
 // ---------------------------------------------------------------------------
 
-/** The SQL dialects Import SQL DDL… reads. */
-export type SqlDialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks';
+/**
+ * The SQL dialects Import SQL DDL… reads. Oracle, BigQuery, Redshift and
+ * SQLite have no `@dbml/core` grammar of their own in the bundle: each is
+ * read with the PostgreSQL one after its own pre-steps (`sqlDdlDialects.ts`).
+ */
+export type SqlDialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks' | 'oracle' | 'bigquery' | 'redshift' | 'sqlite';
 
 export interface SqlDdlFile {
   /** How messages name the file (a base name or a workspace-relative path). */
@@ -200,6 +204,12 @@ export interface PendingComment {
   column?: string;
   text: string;
   origin: Origin;
+  /**
+   * The table the name meant when the comment was read, if it was in the files
+   * by then: a later rename (a migration's `RENAME TO x_r1`, then a new `x`)
+   * keeps the comment on the table it was written about.
+   */
+  target?: ModelTable;
 }
 
 export interface PendingKey {
@@ -241,14 +251,16 @@ export const SKIP_LABELS = {
   drop: ['DROP statement', 'DROP statements'],
   query: ['query', 'queries'],
   ctas: ['CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)', 'CREATE TABLEs without a column list (AS SELECT, LIKE, CLONE)'],
+  virtualTable: ['SQLite virtual table (USING fts4, fts5, rtree…: a search or index module, not design)', 'SQLite virtual tables (USING fts4, fts5, rtree…: search or index modules, not design)'],
+  clientCommand: ['SQL*Plus command (PROMPT, SET, CONNECT, DEFINE, @file…)', 'SQL*Plus commands (PROMPT, SET, CONNECT, DEFINE, @file…)'],
   existing: ['CREATE TABLE IF NOT EXISTS of a table already defined', 'CREATE TABLE IF NOT EXISTS statements of tables already defined'],
   temporary: ['SQL Server temporary table (#name: a session\'s scratch table, not design)', 'SQL Server temporary tables (#name: a session\'s scratch tables, not design)'],
   alter: ['ALTER TABLE action ERD Studio does not read', 'ALTER TABLE actions ERD Studio does not read'],
   alterOwner: ['ALTER TABLE … OWNER TO (ownership, not design)', 'ALTER TABLE … OWNER TO statements (ownership, not design)'],
   alterSetting: ['ALTER TABLE setting (storage, triggers, tags, masks, row security…)', 'ALTER TABLE settings (storage, triggers, tags, masks, row security…)'],
   alterPartition: ['ATTACH / DETACH PARTITION', 'ATTACH / DETACH PARTITION statements'],
-  tableOption: ['table option (ENGINE, CHARSET, ON [filegroup], USING, CLUSTER BY…: physical, not design)', 'table options (ENGINE, CHARSET, ON [filegroup], USING, CLUSTER BY…: physical, not design)'],
-  columnSetting: ['column setting (COLLATE, CHARACTER SET, ROWGUIDCOL, IDENTITY seed…: physical, not design)', 'column settings (COLLATE, CHARACTER SET, ROWGUIDCOL, IDENTITY seed…: physical, not design)'],
+  tableOption: ['table option (ENGINE, ON [filegroup], CLUSTER BY, DISTKEY, TABLESPACE…: physical, not design)', 'table options (ENGINE, ON [filegroup], CLUSTER BY, DISTKEY, TABLESPACE…: physical, not design)'],
+  columnSetting: ['column setting (COLLATE, CHARACTER SET, ENCODE, ROWGUIDCOL, IDENTITY seed…: physical, not design)', 'column settings (COLLATE, CHARACTER SET, ENCODE, ROWGUIDCOL, IDENTITY seed…: physical, not design)'],
   block: ['procedural block (DO, IF … BEGIN) with no schema change in it', 'procedural blocks (DO, IF … BEGIN) with no schema change in them'],
   dynamic: ['dynamic SQL statement (EXECUTE \'…\', not run)', 'dynamic SQL statements (EXECUTE \'…\', not run)'],
   comment: ['comment on something other than a table or column', 'comments on something other than a table or column'],
@@ -357,6 +369,11 @@ export const DEFAULT_SCHEMA: Readonly<Record<SqlDialect, string | null>> = {
   sqlserver: 'dbo',
   snowflake: 'public',
   databricks: 'default',
+  // Oracle: the connected user's schema; BigQuery: the default dataset (neither is in the script).
+  oracle: null,
+  bigquery: null,
+  redshift: 'public',
+  sqlite: 'main',
 };
 
 export const sameIdent = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();

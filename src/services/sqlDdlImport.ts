@@ -112,8 +112,9 @@ import {
 import { ambiguousPlaceholderNames, neutralisePlaceholders } from './sqlDdlPlaceholders';
 import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingCommas, repairHints, rewriteCreateTable, type MissingComma, type Repair, type RepairRung } from './sqlDdlRepair';
 import { salvageCreateTable } from './sqlDdlSalvage';
+import { ANGLE_TYPE_DIALECTS, isPreStepped, rewriteDialectTable } from './sqlDdlDialects';
 import { resolvePartitions } from './sqlDdlPartitions';
-import { isChildWithoutTable, readStatement } from './sqlDdlStatements';
+import { isChildWithoutTable, isView, readStatement } from './sqlDdlStatements';
 import { quoteIdent, resolveRefs, writeDbml } from './sqlDdlWriter';
 
 export type {
@@ -140,7 +141,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 /** Every dialect, in the order a picker lists them. */
-export const SQL_DIALECTS: readonly SqlDialect[] = Object.freeze(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks']);
+export const SQL_DIALECTS: readonly SqlDialect[] = Object.freeze(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite']);
 
 /** How a picker names each dialect. */
 export const SQL_DIALECT_LABELS: Readonly<Record<SqlDialect, string>> = Object.freeze({
@@ -149,6 +150,10 @@ export const SQL_DIALECT_LABELS: Readonly<Record<SqlDialect, string>> = Object.f
   sqlserver: 'SQL Server / Azure SQL',
   snowflake: 'Snowflake',
   databricks: 'Databricks / Spark SQL',
+  oracle: 'Oracle',
+  bigquery: 'Google BigQuery',
+  redshift: 'Amazon Redshift',
+  sqlite: 'SQLite',
 });
 
 /** Whether `value` is a {@link SqlDialect}. */
@@ -349,15 +354,20 @@ export function sqlDialectReading(dialect: SqlDialect, result: SqlDdlToDbmlResul
 
 /**
  * Readings best first: the most tables read; then the fewest read without a
- * grammar, then the fewest rewritten (a dialect that reads the files as
- * written is the one they are in); ties go to `detected`, then to
- * {@link SQL_DIALECT_LIKELIHOOD}.
+ * grammar; then a dialect with a grammar of its own (or the detected one)
+ * before Oracle, BigQuery, Redshift and SQLite, whose pre-steps read more as
+ * written than PostgreSQL's grammar does on its own (they quote every name),
+ * so a PostgreSQL script stays PostgreSQL; then the fewest rewritten (a
+ * dialect that reads the files as written is the one they are in); ties go to
+ * `detected`, then to {@link SQL_DIALECT_LIKELIHOOD}.
  */
 export function rankSqlDialectReadings(readings: readonly SqlDialectReading[], detected?: SqlDialect): SqlDialectReading[] {
   const likely = (d: SqlDialect): number => SQL_DIALECT_LIKELIHOOD.indexOf(d);
+  const borrowed = (d: SqlDialect): number => (d !== detected && isPreStepped(d) ? 1 : 0);
   return [...readings].sort((a, b) =>
     b.tablesRead - a.tablesRead
     || a.salvaged - b.salvaged
+    || borrowed(a.dialect) - borrowed(b.dialect)
     || a.repaired - b.repaired
     || (a.dialect === detected ? -1 : b.dialect === detected ? 1 : 0)
     || likely(a.dialect) - likely(b.dialect));
@@ -372,13 +382,22 @@ export function sqlDialectReadingLabel(r: Pick<SqlDialectReading, 'tablesRead' |
   return r.salvaged > 0 ? `${of} (${r.salvaged.toLocaleString('en-US')} without its grammar)` : of;
 }
 
-/** The grammar each dialect is read with (Databricks: rewritten for Postgres first). */
+/**
+ * The grammar each dialect is read with. Databricks is rewritten for the
+ * PostgreSQL grammar first; Oracle, BigQuery, Redshift and SQLite have their
+ * own pre-steps for it (`sqlDdlDialects.ts`): `@dbml/core` has no grammar for
+ * the last three, and its Oracle one is not bundled (`esbuild.js`).
+ */
 export const SQL_PARSE_FORMAT: Readonly<Record<SqlDialect, SqlParseFormat>> = Object.freeze({
   postgres: 'postgres',
   mysql: 'mysql',
   sqlserver: 'mssql',
   snowflake: 'snowflake',
   databricks: 'postgres',
+  oracle: 'postgres',
+  bigquery: 'postgres',
+  redshift: 'postgres',
+  sqlite: 'postgres',
 });
 
 // ---------------------------------------------------------------------------
@@ -408,6 +427,24 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
   ['postgres', /::\s*\w/, 3],
   ['postgres', /\bTIMESTAMPTZ\b|\bJSONB\b|\$\$/i, 3],
   ['postgres', /\bTEXT\b|\bCOMMENT\s+ON\b/i, 1],
+  ['oracle', /\bN?VARCHAR2\b/i, 3],
+  ['oracle', /\(\s*\d+\s+(?:BYTE|CHAR)\s*\)/i, 3],
+  ['oracle', /\bSEGMENT\s+CREATION\b|\bPCTFREE\b|\bNOCOMPRESS\b|\bORGANIZATION\s+INDEX\b|\bNOCACHE\b|\bNOCYCLE\b|\bNOLOGGING\b/i, 2],
+  ['oracle', /^[ \t]*\/[ \t]*$|^[ \t]*(?:PROMPT|REM|REMARK)\b/im, 2],
+  ['oracle', /\bN?CLOB\b|\bBINARY_(?:FLOAT|DOUBLE)\b|\bSYSDATE\b|\bSYSTIMESTAMP\b|\bLONG\s+RAW\b|\bRAW\s*\(/i, 2],
+  ['oracle', /\bNUMBER\b/i, 1],
+  ['bigquery', /\bINT64\b|\bFLOAT64\b|\bBIGNUMERIC\b|\bBIGDECIMAL\b/i, 3],
+  ['bigquery', /\bOPTIONS\s*\(\s*(?:description|labels|expiration_timestamp|partition_expiration_days|require_partition_filter|friendly_name)\s*=/i, 3],
+  ['bigquery', /\bPARTITION\s+BY\s+(?:DATE|DATE_TRUNC|TIMESTAMP_TRUNC|DATETIME_TRUNC|RANGE_BUCKET|_PARTITIONDATE)\b|@@(?:dataset_id|project_id)\b/i, 3],
+  ['bigquery', /`[A-Za-z][\w-]*\.[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?`/, 2],
+  ['bigquery', /\bGEOGRAPHY\b|\bBYTES\b|\bBOOL\b/i, 1],
+  ['redshift', /\bDISTSTYLE\s+(?:KEY|ALL|EVEN|AUTO)\b|\bDISTKEY\b|\bSORTKEY\b/i, 3],
+  ['redshift', /\bENCODE\s+(?:RAW|AZ64|BYTEDICT|DELTA|DELTA32K|LZO|MOSTLY8|MOSTLY16|MOSTLY32|RUNLENGTH|TEXT255|TEXT32K|ZSTD|AUTO)\b/i, 3],
+  ['redshift', /\bBACKUP\s+(?:YES|NO)\b|\bFROM\s+'s3:\/\//i, 2],
+  ['sqlite', /\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/i, 3],
+  ['sqlite', /\bWITHOUT\s+ROWID\b|\bCREATE\s+VIRTUAL\s+TABLE\b|\bPRAGMA\b|\bsqlite_\w+|\)\s*STRICT\s*[;,]/i, 3],
+  // Square brackets without SQL Server's batches, schemas or types: `[AlbumId] INTEGER` (SQLite's affinity name).
+  ['sqlite', /\[\w+\]\s+INTEGER\b/i, 2],
 ];
 
 /** Each dialect's score from the text's signals (comments ignored). Never parses. */
@@ -443,7 +480,7 @@ export function detectSqlDialect(text: string): SqlDialect | undefined {
  * every file): the most widely used first. Plain ANSI CREATE TABLEs read the
  * same in most of them.
  */
-export const SQL_DIALECT_LIKELIHOOD: readonly SqlDialect[] = Object.freeze(['postgres', 'sqlserver', 'mysql', 'snowflake', 'databricks']);
+export const SQL_DIALECT_LIKELIHOOD: readonly SqlDialect[] = Object.freeze(['postgres', 'sqlserver', 'mysql', 'snowflake', 'databricks', 'redshift', 'bigquery', 'oracle', 'sqlite']);
 
 /** Every dialect, most likely first: the text's signals, highest first, then {@link SQL_DIALECT_LIKELIHOOD}. Never parses. */
 export function rankSqlDialects(text: string): SqlDialect[] {
@@ -603,14 +640,6 @@ function isCreateTableWithColumns(t: Token[]): boolean {
     if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
   }
   return true;
-}
-
-/** Oracle's own DDL words, which no dialect the import reads has (`VARCHAR2`, `VARCHAR2(25 BYTE)`, storage clauses). */
-const ORACLE_DDL = /\bN?VARCHAR2\b|\(\s*\d+\s+(?:BYTE|CHAR)\s*\)|\bSEGMENT\s+CREATION\b|\bPCTFREE\b|\bNOCOMPRESS\s+(?:NO)?LOGGING\b/i;
-
-/** Whether the text is Oracle DDL, which Import SQL DDL… does not read (comments ignored). */
-export function looksLikeOracleSql(text: string): boolean {
-  return ORACLE_DDL.test(text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' '));
 }
 
 /** Above this many characters a script's INSERT statements are taken out before it is read (a dump with its data). */
@@ -1024,7 +1053,7 @@ class Converter implements ConverterContext {
       fields: (read.rawTable.fields ?? []).map((f) => (grammarName(f.name) === f.name ? f : { ...f, name: grammarName(f.name) })),
       indexes: (read.rawTable.indexes ?? []).map((ix) => ({ ...ix, columns: (ix.columns ?? []).map((c) => (c.type === 'expression' ? c : { ...c, value: grammarName(c.value) })) })),
     };
-    const columnSources = readColumnSources(t, open, close, this.dialect === 'databricks');
+    const columnSources = readColumnSources(t, open, close, ANGLE_TYPE_DIALECTS.has(this.dialect));
     const table: ModelTable = {
       name: tableName,
       schema,
@@ -1034,6 +1063,7 @@ class Converter implements ConverterContext {
       origin,
     };
     const seen = new Set<string>();
+    const typelessColumns: string[] = [];
     for (const rf of rawTable.fields ?? []) {
       const key = rf.name.toLowerCase();
       if (seen.has(key)) {
@@ -1041,7 +1071,11 @@ class Converter implements ConverterContext {
         return;
       }
       seen.add(key);
-      table.fields.push(toField(rf, prepared, text, columnSources.get(key)));
+      const field = toField(rf, prepared, text, columnSources.get(key));
+      table.fields.push(field);
+      if (read.typeless?.has(key) && field.type === 'unknown' && this.readingColumns === 0) {
+        typelessColumns.push(field.name);
+      }
     }
     if (table.fields.length === 0) {
       this.problems.push({ file, line: st.line, message: `CREATE TABLE ${label} has no columns.`, kind: 'structure', table: label });
@@ -1067,8 +1101,10 @@ class Converter implements ConverterContext {
         keyLosses.push(() => this.ledger.lost(unit, 'noField', index.pk ? 'primary key' : 'unique key', where, `not kept: it names ${unknown.length > 32 ? `${unknown.slice(0, 31)}…` : unknown}, which is not a column of the table`));
         continue;
       }
-      if (index.pk) this.setPrimaryKey(table, columns);
-      else if (columns.length) this.addUnique(table, columns);
+      // Unquoted names fold case (`Primary Key(L_ORDERKEY)` names the column l_orderkey): the key names the columns as the table does.
+      const named = columns.map((c) => table.fields.find((f) => sameIdent(f.name, c))?.name ?? c);
+      if (index.pk) this.setPrimaryKey(table, named);
+      else if (named.length) this.addUnique(table, named);
     }
     plainIndexes += read.droppedIndexes;
     if (plainIndexes) this.skip(file, 'plainIndex', plainIndexes);
@@ -1099,6 +1135,10 @@ class Converter implements ConverterContext {
         this.ledger.repaired(r.unit, r.cause, r.what, { file, line: r.line, table: label, ...(r.column ? { column: r.column } : {}) }, r.detail);
       }
       for (const record of keyLosses) record();
+      for (const column of typelessColumns) {
+        const at = t.find((tok, k) => k > open && k < close && isName(tok) && tok.value === column)?.line ?? st.line;
+        this.ledger.changed('type', 'inferred', 'column without a type', { file, line: at, table: label, column }, 'none declared: typed unknown');
+      }
     }
     this.tables.push(table);
 
@@ -1136,11 +1176,16 @@ class Converter implements ConverterContext {
   private parseCreateTable(
     file: string, text: string, st: Statement, name: { parts: string[]; next: number; first: number },
     open: number, close: number, label: string, tableName: string,
-  ): { raw: RawSqlDatabase; prepared: PreparedSql; rawTable: RawSqlTable; repairs: Repair[]; how: keyof SqlReadWith; droppedIndexes: number } | { problem: SqlDdlProblem } {
+  ): { raw: RawSqlDatabase; prepared: PreparedSql; rawTable: RawSqlTable; repairs: Repair[]; how: keyof SqlReadWith; droppedIndexes: number; typeless?: ReadonlySet<string> } | { problem: SqlDdlProblem } {
     const own = SQL_PARSE_FORMAT[this.dialect];
-    const strict = this.dialect === 'databricks'
-      ? this.rewriteDatabricksTable(text, st, name, open, close)
-      : { sql: this.dialect === 'snowflake' ? snowflakeInlineReferences(text, st, open, close) : text.slice(st.start, st.end), types: new Map<string, string>(), comments: new Map<string, string>(), identity: new Set<string>() };
+    const preStepped = isPreStepped(this.dialect) ? rewriteDialectTable(this.dialect, text, st, name, open, close) : undefined;
+    const strict: PreparedSql = preStepped
+      ?? (this.dialect === 'databricks'
+        ? this.rewriteDatabricksTable(text, st, name, open, close)
+        : { sql: this.dialect === 'snowflake' ? snowflakeInlineReferences(text, st, open, close) : text.slice(st.start, st.end), types: new Map<string, string>(), comments: new Map<string, string>(), identity: new Set<string>() });
+    // The repair ladder starts from what the dialect's pre-steps made of the statement (Oracle, BigQuery, Redshift, SQLite).
+    let ladderFrom: Restatement | undefined;
+    const withPreSteps = (prepared: PreparedSql): PreparedSql => (preStepped ? mergePrepared(preStepped, prepared) : prepared);
     const tableOf = (raw: RawSqlDatabase): RawSqlTable | undefined => {
       const found = (raw.tables ?? []).find((rt) => sameIdent(rt.name, tableName)) ?? raw.tables?.[0];
       return found && (found.fields?.length ?? 0) > 0 ? found : undefined;
@@ -1154,7 +1199,7 @@ class Converter implements ConverterContext {
     } else try {
       const raw = this.engine(strict.sql, own);
       const rawTable = tableOf(raw);
-      if (rawTable) return { raw, prepared: strict, rawTable, repairs: [], how: 'grammar', droppedIndexes: 0 };
+      if (rawTable) return { raw, prepared: strict, rawTable, repairs: [], how: 'grammar', droppedIndexes: 0, typeless: preStepped?.typeless };
       strictError = new Error('the parser found no table in it');
     } catch (error) {
       strictError = error;
@@ -1170,10 +1215,13 @@ class Converter implements ConverterContext {
     if (repairOn && !tooDeep && this.ladderAllowed()) {
       this.ladderTables++;
       type Attempt = { raw: RawSqlDatabase; rawTable: RawSqlTable; rewrite: ReturnType<typeof rewriteCreateTable> } | undefined;
+      if (preStepped) ladderFrom = restatement(strict.sql, st.line);
       // Each rewrite is parsed once; the same SQL again (a rung that changed nothing) has the same answer.
       const tried = new Map<string, Attempt>();
       const attempt = (format: SqlParseFormat, rungs: ReadonlySet<RepairRung>): Attempt => {
-        const rewrite = rewriteCreateTable({ text, st, name, open, close, dialect: this.dialect, target: format, rungs });
+        const rewrite = ladderFrom
+          ? rewriteCreateTable({ ...ladderFrom, dialect: 'postgres', target: format, rungs })
+          : rewriteCreateTable({ text, st, name, open, close, dialect: this.dialect, target: format, rungs });
         const key = `${format}\u0000${rewrite.prepared.sql}`;
         if (tried.has(key)) { const seen = tried.get(key); return seen && { ...seen, rewrite }; }
         let result: Attempt;
@@ -1201,7 +1249,7 @@ class Converter implements ConverterContext {
           const smaller = attempt(own, fewer);
           if (smaller) { needed.delete(rung); ok = smaller; }
         }
-        return { raw: ok.raw, prepared: ok.rewrite.prepared, rawTable: ok.rawTable, repairs: ok.rewrite.repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes };
+        return { raw: ok.raw, prepared: withPreSteps(ok.rewrite.prepared), rawTable: ok.rawTable, repairs: ok.rewrite.repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes, typeless: preStepped?.typeless };
       }
       for (const format of OTHER_GRAMMARS) {
         if (this.stopAsked()) break;
@@ -1209,7 +1257,7 @@ class Converter implements ConverterContext {
         const ok = attempt(format, ALL_RUNGS);
         if (ok) {
           const repairs: Repair[] = [...ok.rewrite.repairs, { rung: 'allTypes', unit: 'table', cause: 'grammarGap', what: 'CREATE TABLE', detail: 'read with another dialect\'s grammar', line: st.line }];
-          return { raw: ok.raw, prepared: ok.rewrite.prepared, rawTable: ok.rawTable, repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes };
+          return { raw: ok.raw, prepared: withPreSteps(ok.rewrite.prepared), rawTable: ok.rawTable, repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes, typeless: preStepped?.typeless };
         }
       }
     }
@@ -1476,7 +1524,13 @@ class Converter implements ConverterContext {
     const name = parts[parts.length - 1];
     const schema = parts.length >= 2 ? parts[parts.length - 2] : null;
     const candidates = this.tables.filter((tb) => sameIdent(tb.name, name));
-    if (schema !== null) return candidates.find((tb) => sameSchema(tb.schema, schema, this.dialect));
+    if (schema !== null) {
+      const found = candidates.find((tb) => sameSchema(tb.schema, schema, this.dialect));
+      // Oracle and BigQuery scripts often create a table unqualified (in the user's schema, the default dataset)
+      // and name it qualified elsewhere (`ALTER TABLE hr.employees`, `REFERENCES project.dataset.t`): the one table.
+      if (!found && QUALIFIED_MATCHES_UNQUALIFIED.has(this.dialect) && candidates.length === 1 && candidates[0].schema === null) return candidates[0];
+      return found;
+    }
     if (candidates.length === 1) return candidates[0];
     return candidates.find((tb) => sameSchema(tb.schema, null, this.dialect));
   }
@@ -1493,7 +1547,9 @@ class Converter implements ConverterContext {
       else this.addUnique(table, columns as string[]);
     }
     for (const comment of this.comments) {
-      const table = this.findTable(comment.table);
+      const table = comment.target && this.tables.includes(comment.target) ? comment.target : this.findTable(comment.table);
+      // A comment on a view (Oracle's sample schemas describe theirs): views are not imported, so neither is it.
+      if (!table && isView(this, comment.table)) { this.skip(comment.origin.file, 'comment', 1, { line: comment.origin.line, name: ledgerText(comment.table.join('.'), 64) }); continue; }
       if (!table) { this.skippedLines.push(`${comment.origin.file} line ${comment.origin.line}: a comment on ${comment.table.join('.')}, which is not in the files`); continue; }
       // An empty text (`IS NULL`) clears what an earlier comment set.
       if (!comment.column) { if (comment.text) table.note = comment.text; else delete table.note; continue; }
@@ -1562,6 +1618,9 @@ class Converter implements ConverterContext {
   }
 }
 
+/** Dialects whose unqualified tables are in a schema the script does not name (Oracle's user, BigQuery's default dataset). */
+const QUALIFIED_MATCHES_UNQUALIFIED: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['oracle', 'bigquery']);
+
 /** The name an ALTER TABLE's added columns are read under (as a table of their own). */
 const ALTER_COLUMNS_TABLE = 'erd_studio_added_columns';
 
@@ -1598,6 +1657,39 @@ function snowflakeInlineReferences(text: string, st: Statement, open: number, cl
     }
   }
   return edits.length ? applyEdits(text, st.start, st.end, edits) : text.slice(st.start, st.end);
+}
+
+/** A rewritten CREATE TABLE as a statement of its own, for the repair ladder: its tokens' lines are the file's. */
+interface Restatement {
+  text: string;
+  st: Statement;
+  name: { parts: string[]; next: number; first: number };
+  open: number;
+  close: number;
+}
+
+/** {@link Restatement} of a pre-step's SQL (`sqlDdlDialects.ts`), whose first line is the file's `line`; undefined when it is no CREATE TABLE with a column list. */
+function restatement(sql: string, line: number): Restatement | undefined {
+  const tokens = tokenize(sql, 'postgres').map((tok) => ({ ...tok, line: tok.line + line - 1 }));
+  const head = createTableName(tokens);
+  if (!head) return undefined;
+  const name = readName(tokens, head.at);
+  if (!name || !isPunct(tokens[name.next], '(')) return undefined;
+  const close = matchParen(tokens, name.next);
+  if (close < 0) return undefined;
+  return { text: sql, st: { tokens, start: 0, end: sql.length, line }, name, open: name.next, close };
+}
+
+/** What a pre-step set aside, with what the repair ladder then set aside on top of it (a ladder placeholder over a pre-step's one reads as the file's type). */
+function mergePrepared(pre: PreparedSql, ladder: PreparedSql): PreparedSql {
+  const types = new Map(pre.types);
+  for (const [key, value] of ladder.types) types.set(key, pre.types.get(value) ?? value);
+  return {
+    sql: ladder.sql,
+    types,
+    comments: new Map([...pre.comments, ...ladder.comments]),
+    identity: new Set([...pre.identity, ...ladder.identity]),
+  };
 }
 
 /** Deeper than this, a column list never goes to a grammar (their parse time grows steeply with depth: 200 levels take seconds). */

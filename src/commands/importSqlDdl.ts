@@ -1,7 +1,10 @@
 /**
  * **Import SQL DDL…** (`erdStudio.importSqlDdl`) — CREATE TABLE scripts in as
  * a new diagram: PostgreSQL, MySQL / MariaDB, SQL Server / Azure SQL,
- * Snowflake or Databricks / Spark SQL.
+ * Snowflake, Databricks / Spark SQL, Oracle, Google BigQuery, Amazon
+ * Redshift or SQLite (the last four read with the PostgreSQL grammar after
+ * their own pre-steps, `sqlDdlDialects.ts`; they have no telemetry keys of
+ * their own yet).
  *
  * Steps: `.sql` files, or a folder (every `.sql` under it, bounded) → read
  * them (`workspace.fs`) → the dialect (a quick pick, the detected one first)
@@ -131,8 +134,12 @@ export const MAX_SQL_FILES = 500;
 /** At most this much SQL text in one import (characters). */
 export const MAX_SQL_CHARS = 20 * 1024 * 1024;
 
-/** The funnel key for the dialect a conversion ran with. */
-export const SQL_DIALECT_FEATURES: Readonly<Record<SqlDialect, TelemetryFeature>> = {
+/**
+ * The funnel key for the dialect a conversion ran with. Oracle, BigQuery,
+ * Redshift and SQLite have none yet (a new key changes the telemetry
+ * contract, the Worker first): they record only the import's own keys.
+ */
+export const SQL_DIALECT_FEATURES: Readonly<Partial<Record<SqlDialect, TelemetryFeature>>> = {
   postgres: 'importSqlDialectPostgres',
   mysql: 'importSqlDialectMysql',
   sqlserver: 'importSqlDialectSqlserver',
@@ -816,7 +823,8 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
       if (!choice) return cancelled();
       dialect = choice.dialect;
     }
-    telemetry.feature(SQL_DIALECT_FEATURES[dialect]);
+    const dialectKey = SQL_DIALECT_FEATURES[dialect];
+    if (dialectKey) telemetry.feature(dialectKey);
 
     // 3. Convert (or the pick's reading of this dialect).
     // A reading stopped before it read a table is read again, under a limit of its own.
@@ -979,8 +987,7 @@ function importConvertedSql(
  * tables) or changes their columns (a later migration, applied in file
  * order) — from the start screen's own listing (`listImportFiles`: the same
  * folders skipped, the ERD Studio folder never read) and by its own test
- * (`isSqlScriptTaken`: never a dbt macro, a Databricks notebook or Oracle
- * DDL), so whatever the start screen offers is taken here. At most
+ * (`isSqlScriptTaken`: never a dbt macro or a Databricks notebook), so whatever the start screen offers is taken here. At most
  * {@link MAX_SQL_FILES} files are opened, names that usually hold table
  * definitions first (`rankSqlFiles`, the look's order); a file larger than
  * the import reads is left out. `truncated`: not every `.sql` file in the
@@ -1095,7 +1102,8 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     return importSqlDdl(deps, { ...gathered, readings });
   }
   const chosenDialect = best.dialect;
-  telemetry.feature(SQL_DIALECT_FEATURES[chosenDialect]);
+  const chosenKey = SQL_DIALECT_FEATURES[chosenDialect];
+  if (chosenKey) telemetry.feature(chosenKey);
   // The first dialect tried was not the one that read the most.
   if (!quiet && chosenDialect !== order[0]) telemetry.feature('quickSqlDialectFallback');
   if (best.result.problems?.length) {

@@ -29,6 +29,8 @@ export interface Token {
    * this flag).
    */
   delimited?: boolean;
+  /** An Oracle SQL*Plus command line (`PROMPT …`, `SET ECHO OFF`, `@file`), read as its first word only. */
+  client?: boolean;
 }
 
 export interface Statement {
@@ -39,7 +41,24 @@ export interface Statement {
 }
 
 /** Dialects whose '…' strings take backslash escapes (`'it\'s'`). */
-export const BACKSLASH_ESCAPES: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake']);
+export const BACKSLASH_ESCAPES: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake', 'bigquery']);
+
+/** Dialects where `#` starts a comment that runs to the end of the line. */
+const HASH_COMMENTS: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'bigquery']);
+
+/**
+ * SQL*Plus commands: an Oracle script's client lines (`PROMPT …`, `REM …`,
+ * `SET ECHO OFF`, `CONNECT u/p`, `DEFINE x = y`, `@other.sql`). Each is one
+ * line, needs no `;`, and may hold anything (an apostrophe in a PROMPT), so it
+ * is read as a statement of its own, the command word only. `SET` is one only
+ * with a SQL*Plus option after it (`SET TRANSACTION` is SQL).
+ */
+const SQLPLUS_LINE = /^[ \t]*(?:(?:PRO|PROMPT|REM|REMARK|DEF|DEFINE|UNDEF|UNDEFINE|SPO|SPOOL|WHENEVER|CONN|CONNECT|DISC|DISCONNECT|EXIT|QUIT|PAU|PAUSE|ACC|ACCEPT|HO|HOST|CL|CLEAR|COL|COLUMN|TTI|TTITLE|BTI|BTITLE|BRE|BREAK|COMP|COMPUTE|VAR|VARIABLE|SHO|SHOW|TIMING|STORE|PASSW|PASSWORD|XQUERY)(?=[ \t]|$)|SET[ \t]+(?:ECHO|FEED|FEEDBACK|DEF|DEFINE|VER|VERIFY|TERM|TERMOUT|SERVEROUT|SERVEROUTPUT|PAGES|PAGESIZE|LIN|LINES|LINESIZE|HEA|HEADING|TIMING|TRIMS|TRIMSPOOL|TRIMOUT|LONG|LONGCHUNKSIZE|SQLBL|SQLBLANKLINES|AUTOT|AUTOTRACE|NUM|NUMWIDTH|NUMFORMAT|TAB|SCAN|CONCAT|ESC|ESCAPE|NEWP|NEWPAGE|NULL|SQLP|SQLPROMPT|WRA|WRAP|COLSEP|UND|UNDERLINE|ARRAY|ARRAYSIZE|AUTO|AUTOCOMMIT|TI|TIME|EMB|EMBEDDED|MARK|MARKUP|ERRORL|ERRORLOGGING|COPYC|COPYCOMMIT|FLU|FLUSH|SHOW|SHOWMODE|SQLC|SQLCASE|SUF|SUFFIX|HEADSEP|PAUSE|APPI|APPINFO|DESCRIBE|WRAP|BLO|BLOCKTERMINATOR|SQLT|SQLTERMINATOR|SQLN|SQLNUMBER|STATEMENTC|STATEMENTCACHE)\b|@)/i;
+
+/** The SQL*Plus commands {@link SQLPLUS_LINE} reads, by their first word (and `@` for `@file` / `@@file`). */
+export function isSqlPlusCommand(t: Token[]): boolean {
+  return t.length === 1 && t[0].client === true;
+}
 
 /** Words that start a statement when they open a line outside any parentheses. */
 const STATEMENT_KEYWORDS = new Set(['CREATE', 'ALTER', 'DROP', 'INSERT', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'USE', 'TRUNCATE']);
@@ -66,6 +85,10 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
   let delimiter = ';';
   /** Open `/*!` versioned comments (MySQL), read as code. */
   let versioned = 0;
+  const oracle = dialect === 'oracle';
+  /** Oracle: parentheses open, and whether the last token ended a statement (`;`, a `/` line): a SQL*Plus command may start there. */
+  let parens = 0;
+  const hashComments = HASH_COMMENTS.has(dialect);
   const advanceLines = (from: number, to: number): void => {
     for (let k = from; k < to; k++) if (text.charCodeAt(k) === 10) line++;
   };
@@ -75,7 +98,22 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
   };
   const push = (token: Token): void => {
     if (delimiter !== ';') token.delimited = true;
+    if (oracle && token.kind === 'punct') {
+      if (token.value === '(') parens++;
+      else if (token.value === ')') parens = Math.max(0, parens - 1);
+      // A statement's end: no parentheses outlive it (an unbalanced one spoils one statement, not the file).
+      else if (token.value === ';' || (token.value === '/' && isSlashLine(text, token.start))) parens = 0;
+    }
     tokens.push(token);
+  };
+  /** Oracle: where a SQL*Plus command may start (outside parentheses, at the start of a statement). */
+  const statementStart = (): boolean => {
+    if (parens > 0) return false;
+    const last = tokens[tokens.length - 1];
+    if (!last) return true;
+    if (last.kind === 'punct' && last.value === ';') return true;
+    // A `/` alone on its line ends the statement before it.
+    return last.kind === 'punct' && last.value === '/' && isSlashLine(text, last.start);
   };
   while (i < n) {
     const c = text[i];
@@ -99,7 +137,19 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
     }
     // Comments (MySQL's versioned `/*!NNNNN … */` are code).
     if (c === '-' && text[i + 1] === '-') { while (i < n && text[i] !== '\n') i++; continue; }
-    if (c === '#' && mysql) { while (i < n && text[i] !== '\n') i++; continue; }
+    if (c === '#' && hashComments) { while (i < n && text[i] !== '\n') i++; continue; }
+    // Oracle: a SQL*Plus command line is a statement of its own, read as its first word.
+    if (oracle && isLineStart(text, i) && statementStart() && SQLPLUS_LINE.test(text.slice(i, Math.min(lineEnd(i), i + 64)))) {
+      const word = /^@*[A-Za-z_]*/.exec(text.slice(i, i + 32))![0] || '@';
+      // `REM …` is SQL*Plus's comment line: nothing to read.
+      if (/^REM(?:ARK)?$/i.test(word)) { i = lineEnd(i); continue; }
+      tokens.push({ kind: 'punct', value: ';', start: i, end: i, line });
+      tokens.push({ kind: 'word', value: word, start: i, end: i + word.length, line, client: true });
+      const eol = lineEnd(i);
+      tokens.push({ kind: 'punct', value: ';', start: eol, end: eol, line });
+      i = eol;
+      continue;
+    }
     if (c === '/' && text[i + 1] === '*') {
       if (mysql && (text[i + 2] === '!' || (text[i + 2] === 'M' && text[i + 3] === '!'))) {
         i += text[i + 2] === '!' ? 3 : 4;
@@ -180,6 +230,19 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
         value = text.slice(start + 1, i);
       }
       advanceLines(start, i);
+      // BigQuery quotes a whole path in one pair of backticks (`` `project.dataset.table` ``): one name part each.
+      if (closed && c === '`' && dialect === 'bigquery' && /^[^.]+(?:\.[^.]+)+$/.test(value) && !value.includes('\n')) {
+        const parts = value.split('.');
+        let at = start + 1;
+        parts.forEach((part, k) => {
+          const partStart = k === 0 ? start : at;
+          const partEnd = k === parts.length - 1 ? i : at + part.length;
+          push({ kind: 'ident', value: part, start: partStart, end: partEnd, line: startLine, quote: c });
+          at += part.length;
+          if (k < parts.length - 1) { push({ kind: 'punct', value: '.', start: at, end: at + 1, line: startLine }); at++; }
+        });
+        continue;
+      }
       push({ kind: 'ident', value, start, end: i, line: startLine, quote: c });
       continue;
     }
@@ -212,7 +275,7 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
 }
 
 /** Dialects whose "…" is a string (not a name), read with backslash escapes. */
-const DOUBLE_QUOTED_STRINGS: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'databricks']);
+const DOUBLE_QUOTED_STRINGS: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'databricks', 'bigquery']);
 
 /** `SET standard_conforming_strings = off` (older pg_dump output), and back `on`. */
 const STANDARD_STRINGS = /^[ \t]*SET\s+(?:SESSION\s+)?standard_conforming_strings\s*(?:=|TO)\s*'?(on|off|true|false)'?/gim;
@@ -299,6 +362,17 @@ export function uncommentVersioned(text: string): string {
   return out.join('');
 }
 
+/** Whether the character at `offset` is a `/` alone on its line (Oracle's SQL*Plus runs the buffer: it ends a statement or a PL/SQL block). */
+export function isSlashLine(text: string, offset: number): boolean {
+  if (text[offset] !== '/' || !isLineStart(text, offset)) return false;
+  for (let k = offset + 1; k < text.length; k++) {
+    const ch = text[k];
+    if (ch === '\n') return true;
+    if (ch !== ' ' && ch !== '\t' && ch !== '\r') return false;
+  }
+  return true;
+}
+
 /** SQL Server's batch separator: `GO` (optionally a count) alone on its line. */
 export const GO_LINE = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*;?[ \t\r]*$/i;
 
@@ -338,15 +412,33 @@ export function splitStatements(text: string, dialect: SqlDialect): Statement[] 
   let routine = false;
   let blocks = 0;
   const toBatchEnd = dialect === 'sqlserver' && goLines.size > 0;
+  // Oracle: a PL/SQL unit (CREATE PROCEDURE | FUNCTION | TRIGGER | PACKAGE | TYPE BODY, an anonymous
+  // DECLARE / BEGIN block) runs to the `/` line after it, when there is one; otherwise to its last END.
+  const oracle = dialect === 'oracle';
+  const slashOffsets = oracle ? tokens.filter((tok) => tok.kind === 'punct' && tok.value === '/' && isSlashLine(text, tok.start)).map((tok) => tok.start) : [];
+  const slashAfter = (offset: number): boolean => slashOffsets.length > 0 && slashOffsets[slashOffsets.length - 1] > offset;
+  let toSlash = false;
   const baseFlush = flush;
-  const flushAll = (): void => { baseFlush(); routine = false; blocks = 0; };
+  const flushAll = (): void => { baseFlush(); routine = false; blocks = 0; toSlash = false; };
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
     if (goLines.has(token.line) && token.kind === 'word' && /^GO$/i.test(token.value) && !token.delimited) { flushAll(); continue; }
     if (goLines.has(token.line) && token.kind === 'number' && current.length === 0) continue;
+    // Oracle: a `/` alone on its line ends what came before it (a statement, or a PL/SQL unit).
+    if (oracle && token.kind === 'punct' && token.value === '/' && isSlashLine(text, token.start)) { flushAll(); lastLine = token.line; continue; }
+    if (oracle && !routine && current.length === 0 && token.kind === 'word' && (upper(token) === 'DECLARE' || upper(token) === 'BEGIN') && slashAfter(token.start)) {
+      routine = true;
+      toSlash = true;
+    }
     if (!routine && current.length > 0 && current.length < 12 && token.kind === 'word' && ROUTINE_WORDS.has(upper(token)) && upper(current[0]) === 'CREATE'
       && current.every((t) => t.kind === 'word' || isPunct(t, '=') || isPunct(t, '@') || t.kind === 'ident' || t.kind === 'string')) {
       routine = true;
+      toSlash = oracle && slashAfter(token.start);
+    }
+    // Oracle's `CREATE [OR REPLACE] TYPE x AS OBJECT (…);` has no body; its `TYPE BODY` does.
+    if (oracle && !routine && current.length > 0 && current.length < 8 && upper(token) === 'BODY' && upper(current[current.length - 1]) === 'TYPE' && upper(current[0]) === 'CREATE') {
+      routine = true;
+      toSlash = slashAfter(token.start);
     }
     if (routine && !token.delimited && token.kind === 'word') {
       const w = upper(token);
@@ -354,7 +446,7 @@ export function splitStatements(text: string, dialect: SqlDialect): Statement[] 
       if ((w === 'BEGIN' && !/^(TRANSACTION|TRAN|WORK|DISTRIBUTED)$/.test(next)) || w === 'CASE') blocks++;
       else if (w === 'END' && !/^(IF|LOOP|WHILE|REPEAT|FOR)$/.test(next) && blocks > 0) blocks--;
     }
-    const inBody = routine && (toBatchEnd || blocks > 0);
+    const inBody = routine && (toBatchEnd || toSlash || blocks > 0);
     if (token.kind === 'punct' && token.value === ';' && !token.delimited && !inBody) {
       if (depth <= 0) { flushAll(); lastLine = token.line; openSemicolon = false; continue; }
       openSemicolon = true;
@@ -383,7 +475,7 @@ export function splitStatements(text: string, dialect: SqlDialect): Statement[] 
 }
 
 /** Words after CREATE [OR REPLACE | DEFINER = …] that make the statement a routine with a body. */
-const ROUTINE_WORDS = new Set(['PROCEDURE', 'PROC', 'FUNCTION', 'TRIGGER', 'EVENT']);
+const ROUTINE_WORDS = new Set(['PROCEDURE', 'PROC', 'FUNCTION', 'TRIGGER', 'EVENT', 'PACKAGE']);
 
 /** Whether `tokens[i]` starts `CREATE [modifiers] <object>` or `ALTER TABLE` (a statement, wherever the parentheses stand). */
 function startsDefinition(tokens: readonly Token[], i: number): boolean {
@@ -481,6 +573,7 @@ export const CREATE_OBJECT_WORDS = new Set([
   'TABLE', 'TYPE', 'VIEW', 'INDEX', 'SCHEMA', 'DATABASE', 'CATALOG', 'SEQUENCE', 'FUNCTION', 'PROCEDURE', 'PROC', 'TRIGGER',
   'EXTENSION', 'ROLE', 'USER', 'STAGE', 'STREAM', 'TASK', 'PIPE', 'WAREHOUSE', 'DOMAIN', 'POLICY', 'TAG', 'VOLUME', 'LOGIN',
   'SYNONYM', 'RULE', 'AGGREGATE', 'CAST', 'COLLATION', 'PUBLICATION', 'SUBSCRIPTION', 'SERVER', 'EVENT', 'FILE', 'SHARE',
+  'PACKAGE', 'DIRECTORY', 'LIBRARY', 'CONTEXT', 'PROFILE', 'TABLESPACE', 'DIMENSION',
 ]);
 
 /**
@@ -511,12 +604,28 @@ export function readStringList(tokens: Token[], open: number): string[] | undefi
   return tokens.slice(open + 1, close).filter((t) => t.kind === 'string').map((t) => t.value);
 }
 
-/** A table's `COMMENT [=] '…'` after its column list (Snowflake, Databricks, MySQL). */
+/** A table's `COMMENT [=] '…'` after its column list (Snowflake, Databricks, MySQL), or BigQuery's `OPTIONS(description = '…')`. */
 export function tailComment(tokens: Token[], from: number): string | undefined {
   for (let k = from; k < tokens.length; k++) {
+    if (upper(tokens[k]) === 'OPTIONS' && isPunct(tokens[k + 1], '(')) {
+      const end = matchParen(tokens, k + 1);
+      const description = end > 0 ? optionsDescription(tokens, k + 1, end) : undefined;
+      if (description !== undefined) return description;
+      continue;
+    }
     if (upper(tokens[k]) !== 'COMMENT') continue;
     const value = isPunct(tokens[k + 1], '=') ? tokens[k + 2] : tokens[k + 1];
     if (value?.kind === 'string' || isDoubleQuotedComment(value)) return value.value;
+  }
+  return undefined;
+}
+
+/** BigQuery's `OPTIONS(…, description = "…", …)` from its `(` at `open` to `)` at `close`: the description, or undefined. */
+export function optionsDescription(tokens: Token[], open: number, close: number): string | undefined {
+  for (let k = open + 1; k + 2 < close + 1; k++) {
+    if (!(tokens[k].kind === 'word' && /^description$/i.test(tokens[k].value) && isPunct(tokens[k + 1], '='))) continue;
+    const value = tokens[k + 2];
+    if (value && k + 2 < close && (value.kind === 'string' || isDoubleQuotedComment(value))) return value.value;
   }
   return undefined;
 }

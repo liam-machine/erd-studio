@@ -135,12 +135,12 @@
         },
         "changed": {
           "relationship": 36,
-          "column": 1,
           "table": 55,
+          "column": 1,
           "constraint": 37
         },
         "repaired": {
-          "column": 5
+          "column": 1
         },
         "skipped": {
           "object": 1,
@@ -240,7 +240,6 @@
         },
         "repaired": {
           "statement": 5,
-          "table": 4,
           "column": 6
         },
         "skipped": {
@@ -430,7 +429,8 @@
         "lost": {
           "object": 30,
           "setting": 139,
-          "table": 2
+          "column": 2,
+          "table": 3
         },
         "changed": {
           "type": 11,
@@ -483,7 +483,8 @@
       "ledger": {
         "lost": {
           "object": 11,
-          "setting": 4
+          "setting": 4,
+          "column": 10
         },
         "changed": {
           "table": 9,
@@ -643,13 +644,16 @@
         "descriptions": 0
       },
       "ledger": {
-        "lost": {},
+        "lost": {
+          "constraint": 32
+        },
         "changed": {
           "relationship": 38
         },
         "repaired": {},
         "skipped": {
-          "relationship": 5
+          "relationship": 5,
+          "table": 29
         },
         "problem": {}
       },
@@ -657,6 +661,181 @@
       "reasons": [
         "83 item(s) left out and reported"
       ]
+    },
+    {
+      "slug": "oracle-hr",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 7,
+        "columns": 35,
+        "primaryKeys": 7,
+        "relationships": 10,
+        "descriptions": 42
+      },
+      "imported": {
+        "tables": 7,
+        "columns": 35,
+        "primaryKeys": 7,
+        "relationships": 10,
+        "descriptions": 42
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 3,
+          "constraint": 10
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 33
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "bigquery-cloud-learning-platform",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 11,
+        "columns": 129,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 54
+      },
+      "imported": {
+        "tables": 11,
+        "columns": 129,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 54
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {},
+        "repaired": {},
+        "skipped": {},
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "redshift-tpch",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 8,
+        "columns": 61,
+        "primaryKeys": 8,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 8,
+        "columns": 61,
+        "primaryKeys": 8,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {},
+        "repaired": {},
+        "skipped": {
+          "statement": 32
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "sqlite-chinook",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 11,
+        "columns": 64,
+        "primaryKeys": 11,
+        "relationships": 11,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 11,
+        "columns": 64,
+        "primaryKeys": 11,
+        "relationships": 11,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 7
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 46
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
     }
   ]
 }

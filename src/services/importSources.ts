@@ -13,7 +13,7 @@
 import type { DetectedImportSource } from '../types/startActions';
 import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
 
-import { countCreateTablesWithColumns, looksLikeOracleSql } from './sqlDdlImport';
+import { countCreateTablesWithColumns } from './sqlDdlImport';
 
 /**
  * The sources Import… offers, in the order shown when the folder suggests none.
@@ -69,12 +69,12 @@ const DATABRICKS_NOTEBOOK = /^\s*--\s*Databricks notebook source/;
 
 /**
  * Whether a `.sql` file is one no folder look offers, whatever it holds: a
- * dbt macro (under `macros/`: Jinja, not DDL), a Databricks notebook, or
- * Oracle DDL (Import SQL DDL… reads none of them). Pick such a file in
- * Import SQL DDL… to read it anyway.
+ * dbt macro (under `macros/`: Jinja, not DDL) or a Databricks notebook
+ * (Import SQL DDL… reads neither). Pick such a file in Import SQL DDL… to
+ * read it anyway. Oracle DDL is offered: it reads as Oracle.
  */
 export function isUnofferedSqlFile(filePath: string, text: string): boolean {
-  return /(^|[\\/])macros[\\/]/i.test(filePath) || DATABRICKS_NOTEBOOK.test(text) || looksLikeOracleSql(text);
+  return /(^|[\\/])macros[\\/]/i.test(filePath) || DATABRICKS_NOTEBOOK.test(text);
 }
 
 /**
