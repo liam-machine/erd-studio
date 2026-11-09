@@ -488,6 +488,27 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{"modelFileDbmlSyntax":1,"modelFileDbmlInvalid":2,"modelFileDbmlStructure":3,"domainLoadDbml":4,"convertToDbmlFailed":5}');
   });
 
+  it('keeps the import outcome keys (importer, SQL dialect, ledger cause), and drops a look-alike', async () => {
+    const params = await storedParams(
+      heartbeat({
+        features: {
+          importOutcomeSqlDdlPartial: 2,
+          importSqlOutcomeSnowflakePartial: 2,
+          importCauseGrammarGap: 1,
+          importOutcomeDbtTimedOut: 1,
+          importCauseOther: 1,
+          importOutcomeSqlDdlFailed: 3,
+          importCauseDimCustomer: 1,
+        },
+      }),
+    );
+    assert.equal(
+      params[17],
+      // In the allowlist's order, not the body's.
+      '{"importOutcomeSqlDdlPartial":2,"importOutcomeDbtTimedOut":1,"importSqlOutcomeSnowflakePartial":2,"importCauseGrammarGap":1,"importCauseOther":1}',
+    );
+  });
+
   it('treats omitted features and errors as empty', async () => {
     const body = heartbeat();
     delete body.features;
