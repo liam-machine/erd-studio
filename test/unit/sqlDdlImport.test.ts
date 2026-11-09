@@ -766,6 +766,22 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
   });
 
+  it('splits a file\'s skipped summary into lines of at most 300 characters, every kind still counted', () => {
+    const sql = [
+      'SET x = 1;', 'CREATE VIEW v AS SELECT 1;', 'CREATE INDEX i ON a (id);', 'CREATE SEQUENCE s;', 'DROP TABLE IF EXISTS z;',
+      'CREATE SCHEMA k;', 'GRANT SELECT ON a TO u;', 'SELECT 1;', 'CREATE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;',
+      'CREATE TYPE r AS (a int);', 'COMMENT ON SCHEMA k IS \'x\';', 'ALTER TABLE a OWNER TO u;', 'ALTER TABLE a ENABLE ROW LEVEL SECURITY;',
+      'CREATE TABLE a (id int) WITH (fillfactor = 70);', 'CREATE TABLE b AS SELECT 1;', 'VACUUM a;',
+    ].join('\n');
+    const result = convert('postgres', [{ name: 'pagila-schema.sql', text: sql }]);
+    expect(result.skipped.length).toBeGreaterThan(1);
+    for (const line of result.skipped) expect(line.length).toBeLessThanOrEqual(300);
+    expect(result.skipped[0]).toMatch(/^pagila-schema\.sql: skipped /);
+    expect(result.skipped[1]).toMatch(/^pagila-schema\.sql: also skipped /);
+    const all = result.skipped.join(', ');
+    for (const kind of ['1 view', '1 index', '1 sequence', '1 DROP statement', '1 query', '1 CREATE TABLE without a column list']) expect(all).toContain(kind);
+  });
+
   it('ends a big script\'s INSERT with no `;` at its GO line or the next statement, never at a `;` further on', () => {
     // SQL Server install scripts (Northwind) write INSERTs with no `;`, batched by GO: a CREATE TABLE after them is kept.
     const rows = Array.from({ length: 40_000 }, (_, i) => `Insert Into Region Values (${i},'Eastern')`).join('\n');

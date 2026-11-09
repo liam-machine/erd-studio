@@ -615,6 +615,9 @@ export function looksLikeOracleSql(text: string): boolean {
   return ORACLE_DDL.test(text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' '));
 }
 
+/** The longest a skipped-summary line runs before the file's next kinds go on a line of their own. */
+const SKIPPED_LINE_MAX = 300;
+
 /** Above this many characters a script's INSERT statements are taken out before it is read (a dump with its data). */
 export const STRIP_INSERTS_ABOVE_CHARS = 1024 * 1024;
 
@@ -847,13 +850,27 @@ class Converter implements ConverterContext {
     return (this.skippedByFile.get(file)?.size ?? 0) > 0;
   }
 
+  /**
+   * One line per file (`orders.sql: skipped 2 views, 1 index`); a file that
+   * skipped many kinds goes on in `… also skipped …` lines, so no line runs
+   * past {@link SKIPPED_LINE_MAX} characters and every kind is still counted.
+   */
   skippedSummary(fileOrder: readonly string[]): string[] {
     const lines: string[] = [];
     for (const file of fileOrder) {
       const byKind = this.skippedByFile.get(file);
       if (!byKind || byKind.size === 0) continue;
       const parts = [...byKind].map(([kind, count]) => `${count} ${SKIP_LABELS[kind][count === 1 ? 0 : 1]}`);
-      lines.push(`${file}: skipped ${parts.join(', ')}`);
+      let line = `${file}: skipped ${parts[0]}`;
+      for (const part of parts.slice(1)) {
+        if (line.length + 2 + part.length > SKIPPED_LINE_MAX) {
+          lines.push(line);
+          line = `${file}: also skipped ${part}`;
+        } else {
+          line += `, ${part}`;
+        }
+      }
+      lines.push(line);
     }
     return lines;
   }

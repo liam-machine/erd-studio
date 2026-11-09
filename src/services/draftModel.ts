@@ -638,16 +638,36 @@ const SOURCES_NAMED = 20;
 /** The longest a source or table name runs in Not drawn before it is cut. */
 const SOURCE_NAME_MAX = 80;
 
-/** Not drawn's line for the project's dbt sources ({@link DbtDraft.sources}). */
+/** The longest Not drawn's sources line runs: the names that fit, then a count of the rest. */
+const SOURCES_LINE_MAX = 300;
+
+/**
+ * Not drawn's line for the project's dbt sources ({@link DbtDraft.sources}):
+ * as many names as fit in {@link SOURCES_LINE_MAX} characters (at most
+ * {@link SOURCES_NAMED}), then a count of the rest. A table name that is
+ * still a Jinja expression (`{{ var('x_identifier', 'x') }}`, the project
+ * was never compiled) is not a name, so it is left out.
+ */
 export function dbtSourcesLine(sources: readonly DraftSourceTable[]): string {
-  const names = sources.map((s) => (s.identifier
+  const names = sources.map((s) => (s.identifier && !/\{[{%]/.test(s.identifier)
     ? `${oneLine(s.name, SOURCE_NAME_MAX)} (table ${oneLine(s.identifier, SOURCE_NAME_MAX)})`
     : oneLine(s.name, SOURCE_NAME_MAX)));
-  const listed = names.length > SOURCES_NAMED
-    ? `${names.slice(0, SOURCES_NAMED).join(', ')} and ${thousands(names.length - SOURCES_NAMED)} more (ERD Studio: Show Logs lists every one)`
-    : names.join(', ');
   const one = sources.length === 1;
-  return `${count(sources.length, 'dbt source is', 'dbt sources are')} not drawn: Import from dbt draws models, and a source is a table dbt reads but doesn't build. ${one ? 'It is' : 'They are'} ${listed}.`;
+  const head = `${count(sources.length, 'dbt source is', 'dbt sources are')} not drawn: Import from dbt draws models, and a source is a table dbt reads but doesn't build. ${one ? 'It is' : 'They are'} `;
+  const rest = (n: number): string => ` and ${thousands(n)} more (ERD Studio: Show Logs lists every one)`;
+  if (`${head}${names.join(', ')}.`.length <= SOURCES_LINE_MAX && names.length <= SOURCES_NAMED) return `${head}${names.join(', ')}.`;
+  let shown = 0;
+  let listed = '';
+  while (shown < Math.min(names.length, SOURCES_NAMED)) {
+    const tail = rest(names.length - shown - 1);
+    const room = SOURCES_LINE_MAX - head.length - tail.length - 1;
+    // The first name is always given, cut to the room left; a later one only when it fits whole.
+    const next = shown === 0 ? oneLine(names[0], room) : `${listed}, ${names[shown]}`;
+    if (shown > 0 && next.length > room) break;
+    listed = next;
+    shown++;
+  }
+  return `${head}${listed}${shown < names.length ? rest(names.length - shown) : ''}.`;
 }
 
 /** The ledger's `what` for a dbt source (see `buildDbtDraft`). */
