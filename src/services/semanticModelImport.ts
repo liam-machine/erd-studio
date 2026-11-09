@@ -1370,13 +1370,17 @@ interface TmdlParse {
    * file was read as its expression): named, so the ledger can say each one
    * was not read. `table` is the top-level object they were under.
    */
-  unread: Array<{ keyword: string; name: string; line: number; table?: string }>;
-  /** Git merge conflicts left in the file (`<<<<<<<` … `>>>>>>>`): the line each starts on, and the table it is in. */
-  conflicts: Array<{ line: number; table?: string }>;
+  unread: Array<{ keyword: string; name: string; line: number; table?: string; from?: { table: string; column: string } }>;
+  /**
+   * Git merge conflicts left in the file (`<<<<<<<` … `>>>>>>>`): the line
+   * each starts on, the table it is in, and the lines of the side that was
+   * not read (`=======` to `>>>>>>>`, and a diff3 base from `|||||||`).
+   */
+  conflicts: Array<{ line: number; table?: string; skipped?: { from: number; to: number } }>;
 }
 
-/** A Git merge conflict marker line: `<<<<<<< HEAD`, `=======`, `>>>>>>> branch`. */
-const MERGE_CONFLICT_MARKER = /^(?:<{7}|>{7})(?:\s|$)|^={7}$/;
+/** A Git merge conflict marker line: `<<<<<<< HEAD`, `||||||| base` (diff3), `=======`, `>>>>>>> branch`. */
+const MERGE_CONFLICT_MARKER = /^(?:<{7}|>{7}|\|{7})(?:\s|$)|^={7}$/;
 
 /** Why a TMDL object did not read: the end of its ledger phrase (`TMDL column with no closing quote`), so each reason is its own line. */
 const TMDL_BROKEN = {
@@ -1406,7 +1410,8 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
   const problems: SemanticModelProblem[] = [];
   const unread: TmdlParse['unread'] = [];
   const conflicts: TmdlParse['conflicts'] = [];
-  let inConflict = false;
+  /** In a merge conflict: reading its first side (`ours`), or passing over the rest of it (`other`). */
+  let conflictSide: 'ours' | 'other' | undefined;
   const root: TmdlNode = { keyword: '', kind: 'object', name: '', indent: -1, line: 0, children: [] };
   const stack: TmdlNode[] = [root];
   let doc: string[] = [];
@@ -1414,6 +1419,28 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const trimmed = raw.trim();
+    const lineNo = i + 1;
+    if (MERGE_CONFLICT_MARKER.test(trimmed)) {
+      // Only the first side of a conflict is read (as the file stood on the branch it was merged into); the
+      // base and the other side are passed over and named, so nothing is read twice or as a copy of itself.
+      const open = conflicts[conflicts.length - 1];
+      if (trimmed.startsWith('<')) {
+        if (conflictSide === undefined) {
+          const table = [...stack].reverse().find((n) => n.keyword.toLowerCase() === 'table' && n.name);
+          conflicts.push({ line: lineNo, ...(table ? { table: table.name } : {}) });
+        }
+        conflictSide = 'ours';
+      } else if (trimmed.startsWith('>')) {
+        if (open?.skipped) open.skipped.to = lineNo;
+        conflictSide = undefined;
+      } else if (conflictSide !== undefined) {
+        if (open && !open.skipped) open.skipped = { from: lineNo, to: lines.length };
+        conflictSide = 'other';
+      }
+      doc = [];
+      continue;
+    }
+    if (conflictSide === 'other') continue;
     if (trimmed === '') continue;
     if (trimmed.startsWith('///')) {
       // `/// ` and the text as written: only the one space TMDL writes after the slashes goes, so an indented line stays indented.
@@ -1422,17 +1449,6 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
     }
     if (trimmed.startsWith('//')) continue;
     const indent = indentWidth(raw);
-    const lineNo = i + 1;
-    if (MERGE_CONFLICT_MARKER.test(trimmed)) {
-      // Both sides are read as they stand (nothing here can say which is meant): the conflict is named where it starts.
-      if (!inConflict) {
-        const top = stack.length > 1 ? stack[1] : undefined;
-        conflicts.push({ line: lineNo, ...(top && top.keyword.toLowerCase() === 'table' && top.name ? { table: top.name } : {}) });
-      }
-      inConflict = !trimmed.startsWith('>');
-      doc = [];
-      continue;
-    }
 
     const head = /^([A-Za-z_][A-Za-z0-9_]*)(.*)$/.exec(trimmed);
     if (!head) {
@@ -1497,18 +1513,27 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
             node.broken = TMDL_BROKEN.fence;
             // The rest of the file was read as the expression: name what is declared in it, so none of it goes unsaid.
             while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
-            const top = stack.length > 1 ? stack[1] : node;
-            // The table what follows is declared in: this one, until a later `table` line starts another.
-            let context = top.keyword.toLowerCase() === 'table' ? top.name : undefined;
+            // The table what follows is declared in: the nearest one open here (inside a `createOrReplace`
+            // script too), until a later `table` line starts another or a line no deeper than it ends it.
+            const open = [...stack.slice(1), node].reverse().find((n) => n.keyword.toLowerCase() === 'table');
+            let context = open?.name;
+            let contextIndent = open?.indent ?? -1;
             for (let k = i + 1; k < lines.length; k++) {
               const decl = /^\s*(table|column|measure|relationship|partition|hierarchy|role|perspective|cultureInfo|expression|dataSource|function|calculationItem)\s+(.+)$/.exec(lines[k]);
               const declared = decl ? readTmdlName(decl[2].trim()) : undefined;
               if (!decl || !declared) continue;
               const kw = decl[1];
-              if (kw === 'table') context = declared.name;
-              else if (indentWidth(lines[k]) === 0) context = undefined;
+              const at = indentWidth(lines[k]);
+              if (kw === 'table') {
+                context = declared.name;
+                contextIndent = at;
+              } else if (context !== undefined && at <= contextIndent) {
+                context = undefined;
+              }
               const table = kw === 'table' ? declared.name : context;
-              unread.push({ keyword: kw, name: declared.name, line: k + 1, ...(table ? { table } : {}) });
+              // A relationship is named by the column it starts from (its own name is a GUID).
+              const from = kw === 'relationship' ? tmdlFromColumnBelow(lines, k, at) : undefined;
+              unread.push({ keyword: kw, name: declared.name, line: k + 1, ...(table ? { table } : {}), ...(from ? { from } : {}) });
             }
             i = lines.length;
           } else {
@@ -1552,10 +1577,44 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
   return { nodes: root.children, problems, unread, conflicts };
 }
 
-/** Why a node, or one under it, did not read (the first such); undefined when all of it read. */
-function brokenIn(node: TmdlNode): { node: TmdlNode; detail: string } | undefined {
+/** The `fromColumn:` of the object declared on line `k` (0-based) at `indent`, read from the lines indented under it. */
+function tmdlFromColumnBelow(lines: readonly string[], k: number, indent: number): { table: string; column: string } | undefined {
+  for (let m = k + 1; m < lines.length; m++) {
+    if (lines[m].trim() === '') continue;
+    if (indentWidth(lines[m]) <= indent) return undefined;
+    const p = /^\s*fromColumn\s*:\s*(.+)$/.exec(lines[m]);
+    if (p) return parseTmdlColumnRef(unquoteTmdlValue(p[1].trim()));
+  }
+  return undefined;
+}
+
+/**
+ * Why a node did not read: the node itself, or a ``` block under it (which
+ * took the rest of the file, so the node is incomplete). Undefined when it
+ * reads; then each object under it whose own name did not read (an
+ * annotation, a variation, a level…) is taken out of it and passed to
+ * `leftOut`, so the node is read without it: one broken annotation never
+ * costs its column, measure or relationship.
+ */
+function brokenIn(node: TmdlNode, leftOut: (n: TmdlNode) => void = () => {}): { node: TmdlNode; detail: string } | undefined {
   if (node.broken) return { node, detail: node.broken };
-  for (const d of descendants(node)) if (d.broken) return { node: d, detail: d.broken };
+  const all = descendants(node);
+  const whole = all.find((d) => d.broken && d.broken !== TMDL_BROKEN.name);
+  if (whole) return { node: whole, detail: whole.broken! };
+  if (!all.some((d) => d.broken)) return undefined;
+  const todo: TmdlNode[] = [node];
+  while (todo.length > 0) {
+    const n = todo.pop()!;
+    const kept: TmdlNode[] = [];
+    for (const c of n.children) {
+      if (c.broken) leftOut(c);
+      else {
+        kept.push(c);
+        todo.push(c);
+      }
+    }
+    n.children = kept;
+  }
   return undefined;
 }
 
@@ -1720,10 +1779,12 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
       const keyword = node.keyword.toLowerCase();
       const isContainer = keyword === 'createorreplace' || keyword === 'create' || keyword === 'alter' || keyword === 'model' || keyword === 'database';
       // A container's own objects are read one by one; any other object that did not read is left out whole.
-      const broken = isContainer ? (node.broken ? { node, detail: node.broken } : undefined) : keyword === 'table' ? undefined : brokenIn(node);
+      const names = keyword === 'role' || keyword === 'perspective' || keyword === 'cultureinfo' || keyword === 'expression' || keyword === 'datasource' || keyword === 'function'
+        ? { table: node.name } : {};
+      // An object under it whose own name did not read (an annotation, a table permission) is left out alone, named under it.
+      const leftOut = (d: TmdlNode): void => unreadObject(file, d.keyword, d.line, d.broken!, names);
+      const broken = isContainer ? (node.broken ? { node, detail: node.broken } : undefined) : keyword === 'table' ? undefined : brokenIn(node, leftOut);
       if (broken && !(node.kind === 'property')) {
-        const names = keyword === 'role' || keyword === 'perspective' || keyword === 'cultureinfo' || keyword === 'expression' || keyword === 'datasource' || keyword === 'function'
-          ? { table: node.name } : {};
         if (keyword === 'relationship') {
           const from = parseTmdlColumnRef(prop(node, 'fromColumn') ?? '');
           unreadObject(file, node.keyword, broken.node.line, broken.detail, from ? { table: from.table, column: from.column } : {});
@@ -1781,14 +1842,24 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
       }
     }
     for (const c of parsed.conflicts) {
-      problems.push({ file: file.path, line: c.line, message: 'A Git merge conflict (<<<<<<< … >>>>>>>) is left in this file: both sides were read. Resolve it and import again.' });
-      ledger.problem('file', 'parseError', 'TMDL merge conflict', { file: file.path, line: c.line, ...(c.table ? { table: c.table } : {}) }, 'not resolved: both sides were read');
+      const other = c.skipped ? `lines ${c.skipped.from}–${c.skipped.to}` : undefined;
+      problems.push({
+        file: file.path,
+        line: c.line,
+        message: `A Git merge conflict (<<<<<<< … >>>>>>>) is left in this file: only its first side was read${other ? `, and ${other} were not` : ''}. Resolve it and import again.`,
+      });
+      ledger.problem('file', 'parseError', 'TMDL merge conflict', { file: file.path, line: c.line, ...(c.table ? { table: c.table } : {}) },
+        other ? `only the first side read; ${other} not read` : 'only the first side read');
     }
     for (const u of parsed.unread) {
-      unreadObject(file, u.keyword, u.line, TMDL_BROKEN.afterFence, {
-        ...(u.table ? { table: u.table } : u.keyword.toLowerCase() !== 'column' ? { table: u.name } : {}),
-        ...(u.keyword.toLowerCase() === 'column' ? { column: u.name } : {}),
-      });
+      const k = u.keyword.toLowerCase();
+      // A relationship by the column it starts from; a column with its table; anything else by its table, or its own name.
+      const names = k === 'relationship'
+        ? (u.from ? { table: u.from.table, column: u.from.column } : {})
+        : k === 'column'
+          ? { ...(u.table ? { table: u.table } : {}), column: u.name }
+          : { table: u.table ?? u.name };
+      unreadObject(file, u.keyword, u.line, TMDL_BROKEN.afterFence, names);
     }
   }
   resolveSources(partitions, expressions);
@@ -1831,7 +1902,14 @@ function tmdlTable(node: TmdlNode, file: SemanticModelFile, warnings: string[], 
   for (const child of node.children) {
     const k = child.keyword.toLowerCase();
     // One object of the table that did not read is left out (and named); the rest of the table is read.
-    const broken = brokenIn(child);
+    // An object under it whose own name did not read (an annotation) is left out alone, named under this child.
+    const broken = brokenIn(child, (d) => {
+      const { unit, what } = tmdlUnreadUnit(d.keyword, d.broken!);
+      ledger.problem(unit, 'parseError', what, {
+        file: file.path, line: d.line, table: node.name,
+        ...(k === 'column' && child.name ? { column: child.name } : {}),
+      }, TMDL_NOT_READ);
+    });
     if (broken) {
       const { unit, what } = tmdlUnreadUnit(child.keyword, broken.detail);
       ledger.problem(unit, 'parseError', what, {

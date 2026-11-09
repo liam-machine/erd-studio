@@ -17,7 +17,7 @@ import {
   IMPORT_MODEL_COMMAND,
   IMPORT_PICK_FEATURES,
   IMPORT_SOURCE_COMMANDS,
-  SEMANTIC_MODEL_GLOB,
+  IMPORT_SOURCE_ITEMS,
   detectExcludeGlob,
   detectImportFindings,
   findImportDbmlFile,
@@ -36,6 +36,7 @@ import {
   convertedFileName,
   sqlImportFileName,
   describeImportProblems,
+  isSemanticModelMarker,
   listImportFiles,
   looksLikeSqlDdl,
   orderImportSources,
@@ -272,10 +273,28 @@ describe('detectImportSources', () => {
     expect((await detectImportFindings(memIo({ 'a.sql': 'select 1' }), '.erd-studio')).dbtProject).toBeUndefined();
   });
 
-  it('a bare .pbip (a report-only project, live-connected to a published model) is not a semantic model', () => {
+  it('a bare .pbip (a report-only project, live-connected to a published model) is not a semantic model', async () => {
     // Every shape findSemanticModels reads holds one of these; a thin report has only X.pbip + X.Report/.
-    expect(SEMANTIC_MODEL_GLOB).toBe('**/{*.bim,definition.pbism,model.tmdl,database.tmdl}');
-    expect(SEMANTIC_MODEL_GLOB).not.toMatch(/pbip/);
+    for (const name of ['Model.bim', 'definition.pbism', 'model.tmdl', 'database.tmdl', 'database.json']) expect(isSemanticModelMarker(name), name).toBe(true);
+    expect(isSemanticModelMarker('Sales.pbip')).toBe(false);
+    expect((await detectImportFindings(memIo({ 'Sales.pbip': '{}', 'Sales.Report/report.json': '{}' }), '.erd-studio')).sources.has('semanticModel')).toBe(false);
+  });
+
+  it('finds a Tabular Editor Save to Folder model (database.json with a tables/ folder beside it), and ranks Power BI first', async () => {
+    const io = memIo({ 'Model/database.json': '{}', 'Model/tables/Sales/Sales.json': '{}' });
+    const found = await detectImportFindings(io, '.erd-studio');
+    expect(found.sources.has('semanticModel')).toBe(true);
+    expect(importSourceItems(found.sources)[0]).toMatchObject({ source: 'semanticModel', description: FOUND_HERE });
+    expect((await listImportFiles('/w', io.readDirectory, { semanticDir: '.erd-studio' })).semanticModel).toEqual(['/w/Model/database.json']);
+  });
+
+  it('a database.json of another tool (db-migrate\'s, no tables/ folder beside it) is not a semantic model', async () => {
+    const io = memIo({ 'database.json': '{"dev":{}}', 'migrations/1.js': '' });
+    expect((await detectImportFindings(io, '.erd-studio')).sources.has('semanticModel')).toBe(false);
+  });
+
+  it('the source picker says a Save to Folder model is read too', () => {
+    expect(IMPORT_SOURCE_ITEMS.semanticModel.detail).toMatch(/Tabular Editor/);
   });
 
   it('reads only the start of a file, however big it is', async () => {

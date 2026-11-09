@@ -62,12 +62,20 @@ export function extractManifestData(
   const uniqueColumns: Record<string, string[]> = {};
   const compositeUniqueGroups: Record<string, string[][]> = {};
   const resourceDocs: Record<string, ManifestModelInfo> = {};
-  const notNullColumns: Record<string, string[]> = {};
   const sourceRelationshipTests: YmlSourceRelationshipTest[] = [];
-  const addNotNull = (model: string, column: string): void => {
-    const cols = (notNullColumns[model] ??= []);
+  /**
+   * Not-null columns by the model node they are on (`model.p.dim.v1`): a
+   * versioned model's versions each have their own, and only the version
+   * kept in `models` gives its name's (below, once every node is seen).
+   */
+  const notNullByNode = new Map<string, string[]>();
+  const addNotNull = (nodeId: string, column: string): void => {
+    let cols = notNullByNode.get(nodeId);
+    if (!cols) notNullByNode.set(nodeId, (cols = []));
     if (!cols.includes(column)) cols.push(column);
   };
+  /** The node each model name was taken from (the latest version of a versioned model). */
+  const keptNode = new Map<string, string>();
   // Composite foreign keys, resolved once every model is known (a constraint's
   // `to` may be a rendered relation named by its alias).
   const declaredForeignKeys: Array<CompositeForeignKey & { to: string }> = [];
@@ -84,9 +92,10 @@ export function extractManifestData(
         const existing = models[modelInfo.name];
         if (!existing || isPreferredVersion(modelInfo, existing)) {
           models[modelInfo.name] = modelInfo;
+          keptNode.set(modelInfo.name, nodeKey);
         }
         declaredForeignKeys.push(...extractForeignKeyConstraints(modelInfo.name, node.constraints));
-        for (const column of notNullConstraintColumns(node)) addNotNull(modelInfo.name, column);
+        for (const column of notNullConstraintColumns(node)) addNotNull(nodeKey, column);
       }
       continue;
     }
@@ -118,9 +127,9 @@ export function extractManifestData(
         continue;
       }
 
-      const notNull = extractNotNullTest(node, nodes);
+      const notNull = extractNotNullTest(node);
       if (notNull) {
-        addNotNull(notNull.model, notNull.column);
+        addNotNull(notNull.nodeId, notNull.column);
         continue;
       }
 
@@ -129,6 +138,16 @@ export function extractManifestData(
     }
   }
 
+  // A model's not-null columns are its kept node's: a not_null only an older version has does not reach the latest.
+  const notNullColumns: Record<string, string[]> = {};
+  for (const [nodeId, columns] of notNullByNode) {
+    const name = resolveModelNameFromNodeId(nodeId, nodes);
+    if (!name) continue;
+    const kept = keptNode.get(name);
+    if (kept !== undefined && kept !== nodeId) continue;
+    const cols = (notNullColumns[name] ??= []);
+    for (const column of columns) if (!cols.includes(column)) cols.push(column);
+  }
   const compositeForeignKeys = resolveForeignKeyTargets(declaredForeignKeys, models);
   const sources = extractSources(manifest.sources);
   const extra = { notNullColumns, sourceRelationshipTests, sources };
@@ -170,7 +189,7 @@ const NOT_NULL_TESTS: ReadonlyArray<{ namespace: string | null; name: string }> 
  * when a `where:` config or a `row_condition` limits it to some rows: it
  * does not say the column is never null.
  */
-function extractNotNullTest(node: Record<string, unknown>, nodes: Record<string, unknown>): { model: string; column: string } | null {
+function extractNotNullTest(node: Record<string, unknown>): { nodeId: string; column: string } | null {
   const meta = node.test_metadata;
   if (!isPlainObject(meta) || typeof meta.name !== 'string') return null;
   const namespace = typeof meta.namespace === 'string' && meta.namespace !== 'dbt' ? meta.namespace : null;
@@ -179,8 +198,8 @@ function extractNotNullTest(node: Record<string, unknown>, nodes: Record<string,
   if (whereOf(node) || text(kwargs.row_condition)) return null;
   const column = text(kwargs.column_name) ?? text(node.column_name);
   if (!column) return null;
-  const model = resolveModelFromTestNode(node, nodes);
-  return model ? { model, column } : null;
+  const nodeId = modelNodeOfTest(node);
+  return nodeId ? { nodeId, column } : null;
 }
 
 /**
@@ -667,6 +686,15 @@ function extractCompositeUniqueTest(
     compositeUniqueGroups[modelName] = [];
   }
   compositeUniqueGroups[modelName].push(columns);
+}
+
+/** The model node a test is on (`model.p.dim.v2`): its `attached_node`, else the first model it depends on. */
+function modelNodeOfTest(node: Record<string, unknown>): string | undefined {
+  const attached = node.attached_node;
+  if (typeof attached === 'string' && attached.startsWith('model.')) return attached;
+  const dependsOn = node.depends_on as { nodes?: unknown } | undefined;
+  const refs = Array.isArray(dependsOn?.nodes) ? dependsOn.nodes : [];
+  return refs.find((r): r is string => typeof r === 'string' && r.startsWith('model.'));
 }
 
 function resolveModelFromTestNode(

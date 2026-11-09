@@ -181,10 +181,17 @@ describe('TMDL isolation, case by case', () => {
     expect(problems(r.model.ledger ?? [])).toEqual([expect.objectContaining({ unit: 'table', where: { file: 'm/definition/tables/G%2FL Accounts.tmdl', table: 'G/L Accounts' } })]);
   });
 
-  it('a role whose table permission does not read is left out whole, and named', () => {
+  it('a role whose table permission does not read is read without it, and the permission is named under the role', () => {
     const r = readOk([good('T'), { path: 'm/definition/roles/R.tmdl', text: "role Readers\n\ttablePermission 'T = [Id] > 0\n" }]);
-    expect(problems(r.model.ledger ?? [])).toEqual([expect.objectContaining({ unit: 'object', what: 'TMDL role with no closing quote', where: expect.objectContaining({ line: 2, table: 'Readers' }) })]);
-    expect((r.model.features ?? []).filter((f) => f.kind === 'role')).toEqual([]);
+    expect(problems(r.model.ledger ?? [])).toEqual([expect.objectContaining({ unit: 'object', what: 'TMDL tablePermission with no closing quote', where: expect.objectContaining({ line: 2, table: 'Readers' }) })]);
+    expect((r.model.features ?? []).filter((f) => f.kind === 'role').map((f) => f.name)).toEqual(['Readers']);
+    expect((r.model.features ?? []).filter((f) => f.kind === 'rowFilter')).toEqual([]);
+  });
+
+  it('a role whose own name does not read is still left out whole, and named', () => {
+    const r = readOk([good('T'), { path: 'm/definition/roles/R.tmdl', text: "role 'Readers\n\ttablePermission T = [Id] > 0\n" }]);
+    expect(problems(r.model.ledger ?? [])).toEqual([expect.objectContaining({ unit: 'object', what: 'TMDL role with no closing quote', where: expect.objectContaining({ line: 1, table: 'Readers' }) })]);
+    expect((r.model.features ?? []).filter((f) => f.kind === 'role' || f.kind === 'rowFilter')).toEqual([]);
   });
 
   it('only broken files: nothing to draw, so the import fails with every problem', () => {

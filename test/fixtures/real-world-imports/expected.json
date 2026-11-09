@@ -4347,6 +4347,3216 @@
     }
    ]
   },
+  "postgres-pagila-partitions-kept": {
+   "importer": "sql",
+   "input": {
+    "files": [
+     "postgres-pagila/pagila-schema.sql"
+    ],
+    "dialect": "postgres",
+    "partitions": "tables"
+   },
+   "counts": {
+    "tables": 71,
+    "columns": 479,
+    "primaryKeys": 16,
+    "relationships": 37
+   },
+   "notes": "The same pg_dump as postgres-pagila, imported with 'Keep each partition as a table' (input.partitions 'tables'): payment's 55 monthly partitions are CREATE TABLE ... (the same 7 columns) of their own and count as tables, as SOURCE.md counts them (71 tables, 479 columns, 16 primary keys, 37 FKs: the 18 FKs pg_dump declares only on partitions 2022_01..06 included). This is the truth the scorecard held before folding became the default, kept so the kept-as-tables reading of a real dump stays measured. length_hours is a PostgreSQL 18 VIRTUAL generated column.",
+   "tables": [
+    {
+     "name": "customer",
+     "schema": "public",
+     "pk": [
+      "customer_id"
+     ],
+     "columns": [
+      [
+       "customer_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "store_id",
+       "integer",
+       "N"
+      ],
+      [
+       "first_name",
+       "text",
+       "N"
+      ],
+      [
+       "last_name",
+       "text",
+       "N"
+      ],
+      [
+       "email",
+       "text",
+       ""
+      ],
+      [
+       "address_id",
+       "integer",
+       "N"
+      ],
+      [
+       "activebool",
+       "boolean",
+       "N"
+      ],
+      [
+       "create_date",
+       "date",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       ""
+      ],
+      [
+       "active",
+       "integer",
+       ""
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "actor",
+     "schema": "public",
+     "pk": [
+      "actor_id"
+     ],
+     "columns": [
+      [
+       "actor_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "first_name",
+       "text",
+       "N"
+      ],
+      [
+       "last_name",
+       "text",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "category",
+     "schema": "public",
+     "pk": [
+      "category_id"
+     ],
+     "columns": [
+      [
+       "category_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "name",
+       "text",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "film",
+     "schema": "public",
+     "pk": [
+      "film_id"
+     ],
+     "columns": [
+      [
+       "film_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "title",
+       "text",
+       "N"
+      ],
+      [
+       "description",
+       "text",
+       ""
+      ],
+      [
+       "release_year",
+       "public.year",
+       ""
+      ],
+      [
+       "language_id",
+       "integer",
+       "N"
+      ],
+      [
+       "original_language_id",
+       "integer",
+       ""
+      ],
+      [
+       "rental_duration",
+       "smallint",
+       "N"
+      ],
+      [
+       "rental_rate",
+       "numeric(4,2)",
+       "N"
+      ],
+      [
+       "length",
+       "smallint",
+       ""
+      ],
+      [
+       "replacement_cost",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "rating",
+       "public.mpaa_rating",
+       ""
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "special_features",
+       "text[]",
+       ""
+      ],
+      [
+       "fulltext",
+       "tsvector",
+       "N"
+      ],
+      [
+       "length_hours",
+       "numeric(4,2)",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "film_actor",
+     "schema": "public",
+     "pk": [
+      "actor_id",
+      "film_id"
+     ],
+     "columns": [
+      [
+       "actor_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "film_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "film_category",
+     "schema": "public",
+     "pk": [
+      "film_id",
+      "category_id"
+     ],
+     "columns": [
+      [
+       "film_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "category_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "film_embedding",
+     "schema": "public",
+     "pk": [
+      "film_id"
+     ],
+     "columns": [
+      [
+       "film_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "embedding",
+       "public.vector(20)",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "address",
+     "schema": "public",
+     "pk": [
+      "address_id"
+     ],
+     "columns": [
+      [
+       "address_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "address",
+       "text",
+       "N"
+      ],
+      [
+       "address2",
+       "text",
+       ""
+      ],
+      [
+       "district",
+       "text",
+       "N"
+      ],
+      [
+       "city_id",
+       "integer",
+       "N"
+      ],
+      [
+       "postal_code",
+       "text",
+       ""
+      ],
+      [
+       "phone",
+       "text",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "city",
+     "schema": "public",
+     "pk": [
+      "city_id"
+     ],
+     "columns": [
+      [
+       "city_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "city",
+       "text",
+       "N"
+      ],
+      [
+       "country_id",
+       "integer",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "country",
+     "schema": "public",
+     "pk": [
+      "country_id"
+     ],
+     "columns": [
+      [
+       "country_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "country",
+       "text",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "inventory",
+     "schema": "public",
+     "pk": [
+      "inventory_id"
+     ],
+     "columns": [
+      [
+       "inventory_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "film_id",
+       "integer",
+       "N"
+      ],
+      [
+       "store_id",
+       "integer",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "language",
+     "schema": "public",
+     "pk": [
+      "language_id"
+     ],
+     "columns": [
+      [
+       "language_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "name",
+       "text",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment",
+     "schema": "public",
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "PN"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_01",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_02",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_03",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_04",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_05",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_06",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_07",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_08",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_09",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_10",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_11",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2022_12",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_01",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_02",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_03",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_04",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_05",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_06",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_07",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_08",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_09",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_10",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_11",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2023_12",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_01",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_02",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_03",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_04",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_05",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_06",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_07",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_08",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_09",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_10",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_11",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2024_12",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_01",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_02",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_03",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_04",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_05",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_06",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_07",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_08",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_09",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_10",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_11",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2025_12",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_01",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_02",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_03",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_04",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_05",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_06",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "payment_p2026_07",
+     "schema": "public",
+     "pk": [],
+     "columns": [
+      [
+       "payment_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "rental_id",
+       "integer",
+       "N"
+      ],
+      [
+       "amount",
+       "numeric(5,2)",
+       "N"
+      ],
+      [
+       "payment_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "rental",
+     "schema": "public",
+     "pk": [
+      "rental_id"
+     ],
+     "columns": [
+      [
+       "rental_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "rental_date",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "inventory_id",
+       "integer",
+       "N"
+      ],
+      [
+       "customer_id",
+       "integer",
+       "N"
+      ],
+      [
+       "return_date",
+       "timestamp with time zone",
+       ""
+      ],
+      [
+       "staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "uuid",
+       "uuid",
+       "N"
+      ]
+     ]
+    },
+    {
+     "name": "staff",
+     "schema": "public",
+     "pk": [
+      "staff_id"
+     ],
+     "columns": [
+      [
+       "staff_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "first_name",
+       "text",
+       "N"
+      ],
+      [
+       "last_name",
+       "text",
+       "N"
+      ],
+      [
+       "address_id",
+       "integer",
+       "N"
+      ],
+      [
+       "email",
+       "text",
+       ""
+      ],
+      [
+       "store_id",
+       "integer",
+       "N"
+      ],
+      [
+       "active",
+       "boolean",
+       "N"
+      ],
+      [
+       "username",
+       "text",
+       "N"
+      ],
+      [
+       "password",
+       "text",
+       ""
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ],
+      [
+       "picture",
+       "bytea",
+       ""
+      ]
+     ]
+    },
+    {
+     "name": "store",
+     "schema": "public",
+     "pk": [
+      "store_id"
+     ],
+     "columns": [
+      [
+       "store_id",
+       "integer",
+       "PN"
+      ],
+      [
+       "manager_staff_id",
+       "integer",
+       "N"
+      ],
+      [
+       "address_id",
+       "integer",
+       "N"
+      ],
+      [
+       "last_update",
+       "timestamp with time zone",
+       "N"
+      ]
+     ]
+    }
+   ],
+   "relationships": [
+    {
+     "from": "address",
+     "fromColumn": "city_id",
+     "to": "city",
+     "toColumn": "city_id"
+    },
+    {
+     "from": "city",
+     "fromColumn": "country_id",
+     "to": "country",
+     "toColumn": "country_id"
+    },
+    {
+     "from": "customer",
+     "fromColumn": "address_id",
+     "to": "address",
+     "toColumn": "address_id"
+    },
+    {
+     "from": "customer",
+     "fromColumn": "store_id",
+     "to": "store",
+     "toColumn": "store_id"
+    },
+    {
+     "from": "film_actor",
+     "fromColumn": "actor_id",
+     "to": "actor",
+     "toColumn": "actor_id"
+    },
+    {
+     "from": "film_actor",
+     "fromColumn": "film_id",
+     "to": "film",
+     "toColumn": "film_id"
+    },
+    {
+     "from": "film_category",
+     "fromColumn": "category_id",
+     "to": "category",
+     "toColumn": "category_id"
+    },
+    {
+     "from": "film_category",
+     "fromColumn": "film_id",
+     "to": "film",
+     "toColumn": "film_id"
+    },
+    {
+     "from": "film_embedding",
+     "fromColumn": "film_id",
+     "to": "film",
+     "toColumn": "film_id"
+    },
+    {
+     "from": "film",
+     "fromColumn": "language_id",
+     "to": "language",
+     "toColumn": "language_id"
+    },
+    {
+     "from": "film",
+     "fromColumn": "original_language_id",
+     "to": "language",
+     "toColumn": "language_id"
+    },
+    {
+     "from": "inventory",
+     "fromColumn": "film_id",
+     "to": "film",
+     "toColumn": "film_id"
+    },
+    {
+     "from": "inventory",
+     "fromColumn": "store_id",
+     "to": "store",
+     "toColumn": "store_id"
+    },
+    {
+     "from": "payment_p2022_01",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_01",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_01",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "payment_p2022_02",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_02",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_02",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "payment_p2022_03",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_03",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_03",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "payment_p2022_04",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_04",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_04",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "payment_p2022_05",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_05",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_05",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "payment_p2022_06",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "payment_p2022_06",
+     "fromColumn": "rental_id",
+     "to": "rental",
+     "toColumn": "rental_id"
+    },
+    {
+     "from": "payment_p2022_06",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "rental",
+     "fromColumn": "customer_id",
+     "to": "customer",
+     "toColumn": "customer_id"
+    },
+    {
+     "from": "rental",
+     "fromColumn": "inventory_id",
+     "to": "inventory",
+     "toColumn": "inventory_id"
+    },
+    {
+     "from": "rental",
+     "fromColumn": "staff_id",
+     "to": "staff",
+     "toColumn": "staff_id"
+    },
+    {
+     "from": "staff",
+     "fromColumn": "address_id",
+     "to": "address",
+     "toColumn": "address_id"
+    },
+    {
+     "from": "staff",
+     "fromColumn": "store_id",
+     "to": "store",
+     "toColumn": "store_id"
+    },
+    {
+     "from": "store",
+     "fromColumn": "address_id",
+     "to": "address",
+     "toColumn": "address_id"
+    }
+   ],
+   "uniqueKeys": [
+    {
+     "table": "store",
+     "columns": [
+      "manager_staff_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "rental",
+     "columns": [
+      "rental_date",
+      "inventory_id",
+      "customer_id"
+     ],
+     "index": true
+    },
+    {
+     "table": "customer",
+     "columns": [
+      "uuid"
+     ],
+     "index": true
+    },
+    {
+     "table": "rental",
+     "columns": [
+      "uuid"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    }
+   ]
+  },
   "mysql-sakila": {
    "importer": "sql",
    "input": {

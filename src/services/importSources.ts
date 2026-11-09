@@ -206,11 +206,20 @@ export function isOwnDbmlExport(text: string): boolean {
 /** How many file names one listing of the open folder holds at most (names only; nothing is read). */
 export const IMPORT_LIST_LIMIT = 5000;
 
-/** A file every semantic model Import Semantic Model… can read holds (`findSemanticModels`). */
+/**
+ * A file every semantic model Import Semantic Model… can read holds
+ * (`findSemanticModels`): a `.bim`, a TMDL model's `definition.pbism`,
+ * `model.tmdl` or `database.tmdl`, or a Tabular Editor Save to Folder
+ * model's `database.json` (a model only with a `tables/` folder beside it:
+ * {@link listImportFiles} checks).
+ */
 export function isSemanticModelMarker(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.endsWith('.bim') || lower === 'definition.pbism' || lower === 'model.tmdl' || lower === 'database.tmdl';
+  return lower.endsWith('.bim') || lower === 'definition.pbism' || lower === 'model.tmdl' || lower === 'database.tmdl' || lower === 'database.json';
 }
+
+/** At most this many `database.json` files are looked beside for a `tables/` folder (one listing each). */
+const MAX_FOLDER_MODEL_CHECKS = 20;
 
 /** What one listing of the open folder found, by kind (paths joined with `/` under the root, sorted). */
 export interface ImportListing {
@@ -242,10 +251,17 @@ export async function listImportFiles(
     cancelled: options.cancelled,
   });
   const base = (p: string): string => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
+  // A database.json is a Save to Folder model only with a tables/ folder beside it (not db-migrate's, say).
+  const folderModels = new Set<string>();
+  for (const f of walk.files.filter((x) => base(x).toLowerCase() === 'database.json').slice(0, MAX_FOLDER_MODEL_CHECKS)) {
+    if (options.cancelled?.()) break;
+    const entries = await readDir(f.slice(0, f.length - base(f).length - 1)).catch(() => [] as DirEntries);
+    if (entries.some(([name, isDirectory]) => isDirectory && name.toLowerCase() === 'tables')) folderModels.add(f);
+  }
   return {
     sql: walk.files.filter((f) => /\.sql$/i.test(f)),
     dbml: walk.files.filter((f) => /\.dbml$/i.test(f)),
-    semanticModel: walk.files.filter((f) => isSemanticModelMarker(base(f))),
+    semanticModel: walk.files.filter((f) => isSemanticModelMarker(base(f)) && (base(f).toLowerCase() !== 'database.json' || folderModels.has(f))),
     dbtProject: walk.files.some((f) => base(f) === 'dbt_project.yml'),
     truncated: walk.truncated,
   };

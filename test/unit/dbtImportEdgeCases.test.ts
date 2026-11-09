@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildDbtDraft, dbtSourcesOf, dbtTestsOf, listDraftModels, type DbtDraft } from '../../src/services/dbtDraft';
 import { dbtDraftLogLines, dbtSourcesLine } from '../../src/services/draftModel';
@@ -72,6 +72,8 @@ describe('YAML merge keys cannot blow up', () => {
   });
 
   it('a map that merges itself is read once, not followed round', async () => {
+    // Each map's merge is built once: without the self-merge guard, `defaults` would be rebuilt at every level down to the depth limit.
+    const built = vi.spyOn(YmlParserService.prototype as unknown as { buildMerged: (map: unknown, depth: number) => unknown }, 'buildMerged');
     const data = await loadYml({ 'models/schema.yml': `
 defaults: &d
   tests: [not_null]
@@ -83,6 +85,10 @@ models:
         <<: *d
 ` });
     expect([...(data.notNullColumns.get('m') ?? [])]).toEqual(['id']);
+    const maps = built.mock.calls.map((c) => c[0]);
+    expect(new Set(maps).size).toBe(maps.length);
+    expect(maps).toHaveLength(2); // the column's map and `defaults`, once each
+    built.mockRestore();
   });
 });
 

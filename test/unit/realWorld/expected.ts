@@ -46,6 +46,13 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
     counts: { tables: 16, columns: 94, primaryKeys: 16, relationships: 22, descriptions: 0 },
     provenance: "Counted with a regex script over every top-level 'CREATE TABLE public.<name> (...)' block (one column per line, skipping the inline PRIMARY KEY line; the 55 payment_pYYYY_MM partitions folded into payment: 16 base tables, 94 columns, 19 base FKs + payment to customer, rental and staff, declared only on partitions 2022_01..06; Source: https://raw.githubusercontent.com/devrimgunduz/pagila/6ea53f812254c91a602f61c0ef62beca3fa676b1/pagila-schema.sql @ 6ea53f812254c91a602f61c0ef62beca3fa676b1 (master, 2026-11-01); file last changed in 85bf46a5 (2026-08-01); sha256 071ee940a73c8f4fad2997185788065291607e2c55559e3747959e8275391536.",
   },
+  // postgres-pagila-partitions-kept: the same Pagila dump, imported with 'Keep each partition as a table'
+  'postgres-pagila-partitions-kept': {
+    importer: 'sql',
+    // Each of payment's 55 partitions a table of its own, as SOURCE.md counts them: the counts this scorecard held before folding became the default.
+    counts: { tables: 71, columns: 479, primaryKeys: 16, relationships: 37, descriptions: 0 },
+    provenance: "The postgres-pagila file and script, with the partitions kept: every top-level 'CREATE TABLE public.<name> (...)' block a table (16 base tables and the 55 payment_pYYYY_MM partitions, 7 columns each: 479 columns), 19 base FKs and the 18 declared on partitions 2022_01..06 (37). Source: as postgres-pagila (pagila-schema.sql sha256 071ee940a73c8f4fad2997185788065291607e2c55559e3747959e8275391536).",
+  },
   // mysql-sakila: Sakila (MySQL)
   'mysql-sakila': {
     importer: 'sql',
@@ -87,6 +94,18 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
     importer: 'semanticModel',
     counts: { tables: 9, columns: 174, primaryKeys: 7, relationships: 13, descriptions: 0 },
     provenance: "Counted with a Python script loading the JSON and walking model.tables[] (columns/measures/hierarchies) and model.relationships[]; Source: https://raw.githubusercontent.com/microsoft/Analysis-Services/d3ccb5032c9029b097276b88412f7b61df6e73b8/AsPartitionProcessing/AsPartitionProcessing.AdventureWorks/Model.bim @ microsoft/Analysis-Services@d3ccb5032c9029b097276b88412f7b61df6e73b8 (master, 2026-11-07); file last changed in 9304105c694f4332615405ea8066c75a63107db6 (2017-04-18). Model.bim SHA-256 e05cce59fc9405171f296283275c3073033f6e49d5f207e137f627ae85fdc248, 62,707 bytes, compatibilityLevel 1400.",
+  },
+  // powerbi-folder-spaceparts: SpaceParts (Tabular Editor Save to Folder)
+  'powerbi-folder-spaceparts': {
+    importer: 'semanticModel',
+    counts: { tables: 30, columns: 186, primaryKeys: 1, relationships: 22, descriptions: 7 },
+    provenance: "Counted from the JSON files (tables/*/*.json, columns/, the TabularEditor_Relationships annotations) without ERD Studio, as expected.json's truth: auto date/time tables (5 LocalDateTable_ and 1 DateTableTemplate_), the 5 relationships into them and RowNumber columns not counted; the isKey column Date[Date] the one primary key. Source: https://github.com/TabularEditor/SessionArchive/tree/f5f9153f015392ed953c5419ad6c038331455208/Webinars/2025-12-10%20-%20CICD%20and%20version%20control%20for%20Fabric/src/solution/model/SpacePartsSaveToFolder @ f5f9153f015392ed953c5419ad6c038331455208 (folder last changed in 725c4c73f5f456268ca69ca84ff40a07ca52201e).",
+  },
+  // powerbi-tmdl-bc-purchase: Business Central Purchase app (Power BI TMDL)
+  'powerbi-tmdl-bc-purchase': {
+    importer: 'semanticModel',
+    counts: { tables: 34, columns: 511, primaryKeys: 8, relationships: 55, descriptions: 0 },
+    provenance: "Counted with a line reader over definition/tables/*.tmdl and relationships.tmdl, without ERD Studio, as expected.json's truth: a table a `table` block (34, G/L Accounts in `G%2FL Accounts.tmdl`), a column a `column` line at one tab (511, 7 calculated), the isKey columns the primary keys (8), 55 relationships. Source: https://github.com/microsoft/BCApps/tree/616174f697c0387751fe71ce068b3653ee27adc8/src/Apps/W1/PowerBIReports/Power%20BI%20Files/Purchase%20app/Purchase%20app.SemanticModel @ 616174f697c0387751fe71ce068b3653ee27adc8 (folder last changed in 3896a32e10c592141a52f9bf2a142a539d784ec7).",
   },
   // dbt-synthea-omop: dbt-synthea: Synthea to OMOP CDM (OHDSI, dbt)
   'dbt-synthea-omop': {

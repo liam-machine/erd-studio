@@ -29,7 +29,7 @@ import { gatherSqlFiles } from '../../src/commands/importSqlDdl';
 import { walkSemanticModelFiles } from '../../src/commands/importSemanticModel';
 import { IMPORT_TITLES } from '../../src/commands/importDbml';
 import * as sqlEngine from '../../src/services/sqlImportEngine';
-import { SQL_DIALECT_LABELS, type SqlDialect } from '../../src/services/sqlDdlImport';
+import { SQL_DIALECT_LABELS, type SqlDialect, type SqlPartitionMode } from '../../src/services/sqlDdlImport';
 import { readDbml, readDbmlImportLayout } from '../../src/services/dbmlImportParse';
 import {
   analyseDbml,
@@ -89,7 +89,8 @@ export interface TruthRelationship {
 
 export interface TruthSample {
   importer: 'sql' | 'dbml' | 'semanticModel' | 'dbt';
-  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string };
+  /** `partitions`: the SQL import's choice for partitions (absent: fold them, the default and the one-click import's). */
+  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string; partitions?: SqlPartitionMode };
   counts: { tables: number; columns: number; primaryKeys: number; relationships: number };
   tables: TruthTable[];
   relationships: TruthRelationship[];
@@ -243,7 +244,7 @@ async function runSql(sample: TruthSample): Promise<ImportRun> {
   const detected = sqlEngine.detectSqlDialect(gathered.files.map((f) => f.text).join('\n')) ?? null;
   const dialect = detected ?? sample.input.dialect ?? 'postgres';
   const label = SQL_DIALECT_LABELS[dialect];
-  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect });
+  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect, ...(sample.input.partitions ? { options: { partitions: sample.input.partitions } } : {}) });
   if (!result.ok) {
     const failureMessage = describeImportProblems(IMPORT_TITLES.sql, result.problems, `They were read as ${label}.`);
     return {

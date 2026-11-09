@@ -12,6 +12,7 @@ import { walkSemanticModelFiles } from '../../src/commands/importSemanticModel';
 import type { DirEntries } from '../../src/services/importSources';
 import type { LedgerEntry } from '../../src/services/importLedger';
 import { jsonErrorLineOf, parseJsonWithLines } from '../../src/services/jsonLines';
+import { callInWorker } from './helpers/inWorker';
 import {
   findSemanticModels,
   mCombinedSources,
@@ -19,6 +20,9 @@ import {
   semanticModelToDbml,
   type SemanticModelFile,
 } from '../../src/services/semanticModelImport';
+
+/** The module the timed calls run from, in a worker (`callInWorker`). */
+const SOURCE = 'src/services/semanticModelImport.ts';
 
 function readOk(files: SemanticModelFile[]): Extract<ReturnType<typeof readSemanticModel>, { ok: true }> {
   const r = readSemanticModel(files);
@@ -145,7 +149,7 @@ describe('Power Query: shared queries that read each other', () => {
     expect(r.model.tables[0].source?.combined?.kind).toBe('append');
   });
 
-  it('a long chain of shared queries, each appending the two before it, resolves without an exponential walk', () => {
+  it('a long chain of shared queries, each appending the two before it, resolves without an exponential walk', async () => {
     const chain = (n: number): Map<string, string> => {
       const queries = new Map<string, string>([['Q0', nav('A')], ['Q1', nav('B')]]);
       for (let i = 2; i < n; i++) queries.set(`Q${i}`, `let a = Table.Combine({Q${i - 1}, Q${i - 2}}) in a`);
@@ -153,16 +157,16 @@ describe('Power Query: shared queries that read each other', () => {
     };
     // Twelve deep: followed to the warehouse tables.
     expect(mCombinedSources('let a = Table.Combine({Q11, Q10}) in a', chain(12), new Set())?.inputs.sort()).toEqual(['dbo.A', 'dbo.B']);
-    // Sixty deep: fast, and what is too deep to follow is named, never dropped.
+    // Sixty deep: fast, and what is too deep to follow is named, never dropped. In a worker with a deadline,
+    // so an exponential walk fails the test instead of hanging the run.
     const queries = chain(60);
-    const started = Date.now();
-    const got = mCombinedSources('let a = Table.Combine({Q59, Q58}) in a', queries, new Set());
-    expect(Date.now() - started).toBeLessThan(1000);
+    const { value: got, ms } = await callInWorker<ReturnType<typeof mCombinedSources>>(SOURCE, 'mCombinedSources', ['let a = Table.Combine({Q59, Q58}) in a', queries, new Set()], 15_000);
+    expect(ms).toBeLessThan(1000);
     expect(got?.inputs.length).toBeGreaterThan(0);
     for (const input of got?.inputs ?? []) expect(queries.has(input) || /^dbo\.[AB]$/.test(input), input).toBe(true);
-  });
+  }, 30_000);
 
-  it('1500 tables whose queries each merge two others read in a few seconds (no table × query × regex blow-up)', () => {
+  it('1500 tables whose queries each merge two others read in a few seconds (no table × query × regex blow-up)', async () => {
     const n = 1500;
     const files: SemanticModelFile[] = [];
     for (let i = 0; i < n; i++) {
@@ -174,11 +178,11 @@ describe('Power Query: shared queries that read each other', () => {
         '\t\t\tin', '\t\t\t\tJ', '',
       ].join('\n') });
     }
-    const started = Date.now();
-    const r = readOk(files);
-    expect(Date.now() - started).toBeLessThan(3000);
+    const { value: r, ms } = await callInWorker<ReturnType<typeof readSemanticModel>>(SOURCE, 'readSemanticModel', [files], 30_000);
+    expect(ms).toBeLessThan(3000);
+    if (!r.ok) throw new Error(JSON.stringify(r.problems));
     expect(r.model.tables.find((t) => t.name === 'T0')?.source?.combined?.inputs).toEqual(['T1', 'T2']);
-  });
+  }, 60_000);
 });
 
 describe('finding a Save to Folder model in a repo', () => {
