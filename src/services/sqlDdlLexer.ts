@@ -42,7 +42,7 @@ export interface Statement {
 export const BACKSLASH_ESCAPES: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake']);
 
 /** Words that start a statement when they open a line outside any parentheses. */
-const STATEMENT_KEYWORDS = new Set(['CREATE', 'ALTER', 'DROP', 'INSERT', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'USE', 'TRUNCATE']);
+export const STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(['CREATE', 'ALTER', 'DROP', 'INSERT', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'USE', 'TRUNCATE']);
 
 /** A MySQL client `DELIMITER x` line: `x` is one to four punctuation characters (`;;`, `//`, `$$`, `|`, `;`). */
 const DELIMITER_LINE = /^[ \t]*DELIMITER[ \t]+([^\sA-Za-z0-9_(),'"`]{1,4})[ \t]*(?:--[^\n]*)?\r?$/i;

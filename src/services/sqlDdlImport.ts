@@ -67,6 +67,7 @@ import {
   applyEdits,
   BACKSLASH_ESCAPES,
   CREATE_OBJECT_WORDS,
+  GO_LINE,
   isName,
   isPunct,
   matchParen,
@@ -74,6 +75,7 @@ import {
   readStringList,
   splitStatements,
   splitTopLevel,
+  STATEMENT_KEYWORDS,
   tailComment,
   tokenize,
   uncommentVersioned,
@@ -652,8 +654,9 @@ export function withoutSqlData(text: string): { text: string; sqlChars: number }
       const word = m.index + m[0].search(/INSERT/i);
       const end = findStatementEnd(text, word, escapes);
       // `INSERT` and its `;` stay (the statement is still counted as skipped data), but are not SQL to import.
-      const lineEnd = text.startsWith('\r\n', end + 1) ? 2 : text.startsWith('\n', end + 1) ? 1 : 0;
-      removed.splice(r, 0, [word + 'INSERT'.length, end, 'INSERT;'.length + lineEnd]);
+      // With no `;` (it ends at a line break), `INSERT` and that line break.
+      const lineEnd = text[end] !== ';' ? 1 : text.startsWith('\r\n', end + 1) ? 2 : text.startsWith('\n', end + 1) ? 1 : 0;
+      removed.splice(r, 0, [word + 'INSERT'.length, end, (text[end] === ';' ? 'INSERT;' : 'INSERT').length + lineEnd]);
       r++;
       INSERT_INTO.lastIndex = end;
     }
@@ -687,12 +690,33 @@ function findCopyEnd(text: string, from: number): number {
   }
 }
 
-/** The index of the `;` ending the statement at `from` (outside strings and quoted names), or the end of the text. */
+/**
+ * Where the statement at `from` ends (outside strings, quoted names and
+ * comments): its `;`, or, where a script writes none (SQL Server's
+ * `Insert Into … Values (…)` lines batched by GO), the line break before a
+ * `GO` line or a line that starts the next statement, as `splitStatements`
+ * reads one. Else the end of the text.
+ */
 function findStatementEnd(text: string, from: number, escapes: boolean): number {
   const n = text.length;
+  let depth = 0;
   for (let i = from; i < n; i++) {
     const c = text.charCodeAt(i);
     if (c === 59 /* ; */) return i;
+    if (c === 40 /* ( */) depth++;
+    else if (c === 41 /* ) */) depth--;
+    else if (c === 10 /* \n */ && depth <= 0 && startsNextStatement(text, i + 1)) return i;
+    else if (c === 45 /* - */ && text.charCodeAt(i + 1) === 45) {
+      const eol = text.indexOf('\n', i);
+      if (eol < 0) return n;
+      i = eol - 1;
+      continue;
+    } else if (c === 47 /* / */ && text.charCodeAt(i + 1) === 42 /* * */) {
+      const close = text.indexOf('*/', i + 2);
+      if (close < 0) return n;
+      i = close + 1;
+      continue;
+    }
     if (c === 39 /* ' */ || c === 34 /* " */ || c === 96 /* ` */) {
       for (i++; i < n; i++) {
         const d = text.charCodeAt(i);
@@ -705,6 +729,17 @@ function findStatementEnd(text: string, from: number, escapes: boolean): number 
     }
   }
   return n;
+}
+
+/** Whether the line at `at` is a `GO` line or starts a statement (`CREATE`, `INSERT`, `COMMENT ON`…). */
+function startsNextStatement(text: string, at: number): boolean {
+  const eol = text.indexOf('\n', at);
+  const line = text.slice(at, eol < 0 ? text.length : eol);
+  if (GO_LINE.test(line)) return true;
+  const word = /^[ \t]*([A-Za-z]+)\b(?:[ \t]+([A-Za-z]+))?/.exec(line);
+  if (!word) return false;
+  const first = word[1].toUpperCase();
+  return STATEMENT_KEYWORDS.has(first) || (first === 'COMMENT' && word[2]?.toUpperCase() === 'ON');
 }
 
 function countLineBreaks(text: string, from: number, to: number): number {

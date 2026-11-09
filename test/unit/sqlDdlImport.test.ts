@@ -765,4 +765,17 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(converted.tableCount).toBe(2);
     expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
   });
+
+  it('ends a big script\'s INSERT with no `;` at its GO line or the next statement, never at a `;` further on', () => {
+    // SQL Server install scripts (Northwind) write INSERTs with no `;`, batched by GO: a CREATE TABLE after them is kept.
+    const rows = Array.from({ length: 40_000 }, (_, i) => `Insert Into Region Values (${i},'Eastern')`).join('\n');
+    const big = `CREATE TABLE [dbo].[A] ([Id] [int] NOT NULL)\nGO\n${rows}\nGo\nCREATE TABLE [dbo].[B] ([Id] [int] NOT NULL)\nINSERT INTO B VALUES (1)\nCREATE TABLE [dbo].[C] ([Id] [int] NOT NULL);\nSELECT 1;\n`;
+    const stripped = withoutSqlData(big);
+    expect(stripped.text.split('\n')).toHaveLength(big.split('\n').length);
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[B]');
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[C]');
+    expect(stripped.text).not.toContain('Eastern');
+    const converted = convert('sqlserver', [{ name: 'instnwnd.sql', text: stripped.text }]);
+    expect(converted.tableCount).toBe(3);
+  });
 });
