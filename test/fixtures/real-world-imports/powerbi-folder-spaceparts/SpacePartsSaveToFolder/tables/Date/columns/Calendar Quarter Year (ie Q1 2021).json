@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Quarter Year (ie Q1 2021)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Quarter Year (ie Q1 2021)]",
+  "sortByColumn": "Calendar Year Quarter (ie 202101)",
+  "displayFolder": "2. Quarter",
+  "lineageTag": "d8f8780d-8364-4be5-ad87-fb1d7e8bb57c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

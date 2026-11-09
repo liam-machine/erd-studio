@@ -1,0 +1,21 @@
+{
+  "name": "__Measures",
+  "description": [
+    "Everything in this Table Requires Measure Selection",
+    "1. Select a Metric",
+    "2. Select a Unit",
+    "3. Select a Target",
+    "4. Select a Period",
+    "5. Select a Currency (from 'Exchange Rate')",
+    "6. Select a Year and/or Month from 'Date'",
+    ""
+  ],
+  "isHidden": true,
+  "lineageTag": "c1f26e78-ea20-4757-b4d4-89e2237d2584",
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

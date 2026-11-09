@@ -1,0 +1,17 @@
+{
+  "name": "OTD Indicator",
+  "dataType": "boolean",
+  "isHidden": true,
+  "sourceColumn": "otd_indicator",
+  "formatString": "\"TRUE\";\"TRUE\";\"FALSE\"",
+  "sourceProviderType": "bit",
+  "displayFolder": "Columns",
+  "lineageTag": "8e50d053-0fc7-4fa2-b869-24364a0ae99a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "# Workdays in Selected Quarter",
+  "expression": [
+    "IF (",
+    "    HASONEVALUE ('Date'[Calendar Quarter Year (ie Q1 2021)]),",
+    "    CALCULATE (",
+    "        MAX ('Date'[Workdays QTD]),",
+    "        VALUES ('Date'[Calendar Quarter Year (ie Q1 2021)])",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "84ccfbbd-bf7b-43b6-8e35-df7a54d0d9e7"
+}

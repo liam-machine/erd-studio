@@ -1,0 +1,22 @@
+{
+  "name": "Orders Target YTD",
+  "expression": [
+    "",
+    "VAR _CURRENT_MONTH_TARGET = [Orders Target MTD]",
+    "VAR _YTD_TARGET_BEFORE_THIS_MONTH =",
+    "    CALCULATE (",
+    "        [Orders Target],",
+    "        CALCULATETABLE (",
+    "            DATESYTD ('Date'[Date]),",
+    "            'Date'[IsThisMonth] = FALSE,",
+    "            'Date'[IsDateInScope] = TRUE",
+    "        )",
+    "    )",
+    "VAR _RESULT = _CURRENT_MONTH_TARGET + _YTD_TARGET_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "4. YTD",
+  "lineageTag": "056c010c-5b3c-4faa-a65e-daeb3231600d"
+}

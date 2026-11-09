@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "IsActualToday",
+  "dataType": "boolean",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[IsActualToday]",
+  "displayFolder": "7. Boolean Fields",
+  "lineageTag": "c158c062-5f41-4066-9b71-07040d22ea1c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

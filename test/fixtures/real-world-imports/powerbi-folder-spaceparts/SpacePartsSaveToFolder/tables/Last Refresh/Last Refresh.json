@@ -1,0 +1,29 @@
+{
+  "name": "Last Refresh",
+  "lineageTag": "8df9a87e-0917-4ec3-8a2f-297dbfaa148e",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "DateTimeZone"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": [
+        "[",
+        "  {",
+        "    \"name\": \"cf55bb82-b832-4bdf-bc81-c415a3504ae9\",",
+        "    \"fromTable\": \"Last Refresh\",",
+        "    \"fromColumn\": \"Last Refresh\",",
+        "    \"toTable\": \"LocalDateTable_595bdce4-ba17-4e98-90af-2d00b0a66670\",",
+        "    \"toColumn\": \"Date\",",
+        "    \"joinOnDateBehavior\": \"datePartOnly\"",
+        "  }",
+        "]"
+      ]
+    }
+  ]
+}

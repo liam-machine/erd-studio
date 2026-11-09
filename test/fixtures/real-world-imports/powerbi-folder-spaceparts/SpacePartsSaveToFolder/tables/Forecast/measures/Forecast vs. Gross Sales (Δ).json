@@ -1,0 +1,10 @@
+{
+  "name": "Forecast vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Forecast]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "68c5bb1f-fa70-42a1-8f9c-34f95ed0950b"
+}

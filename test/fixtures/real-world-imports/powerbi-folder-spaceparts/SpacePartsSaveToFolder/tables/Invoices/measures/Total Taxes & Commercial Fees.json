@@ -1,0 +1,16 @@
+{
+  "name": "Total Taxes & Commercial Fees",
+  "description": "This measure is theSumof column 'Invoices'[Taxes & Commercial Fees]",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Taxes & Commercial Fees]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\II. Penalties and Adjustments",
+  "lineageTag": "187488af-0dcd-44e3-b20e-7fd7b0f489dd"
+}

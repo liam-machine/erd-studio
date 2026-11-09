@@ -1,0 +1,15 @@
+{
+  "name": "Target",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "Name",
+  "sortByColumn": "Ordinal",
+  "lineageTag": "3f903a26-3226-403d-a33a-4ec211020c27",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

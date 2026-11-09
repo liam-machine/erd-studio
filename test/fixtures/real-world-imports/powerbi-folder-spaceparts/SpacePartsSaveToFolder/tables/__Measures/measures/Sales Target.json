@@ -1,0 +1,18 @@
+{
+  "name": "Sales Target",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT (",
+    "            '3) Selected Target'[Select a Target]",
+    "        ),",
+    "        'Z03CG1 - Sales Target'[Target]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Total\\Sales Target",
+  "lineageTag": "14bbba44-f1d9-49ad-ab20-4c7910d9d7da"
+}

@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Month Day (i.e. Jan 05)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Month Day (i.e. Jan 05)]",
+  "sortByColumn": "Calendar Month Day (i.e. 0105)",
+  "displayFolder": "3. Month",
+  "lineageTag": "1b09698b-a90f-40ce-9596-6c6047ebe042",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "To Currency",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "to_currency",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "7640e9c9-9b46-48e7-bdaa-c96bb487b625",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

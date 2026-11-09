@@ -3,7 +3,8 @@
  * — a semantic model saved as files in as a new diagram: a Power BI Project's
  * `<Name>.SemanticModel` folder (or the older `<Name>.Dataset`), as TMDL
  * (`definition/*.tmdl`) or as one `model.bim`, from Power BI Desktop, Fabric
- * Git integration or Tabular Editor.
+ * Git integration or Tabular Editor, or a Tabular Editor Save to Folder model
+ * (`database.json` and a JSON file per table, column, relationship…).
  *
  * Steps: a folder (an Open dialog) → every file under it, bounded →
  * `findSemanticModels` (a quick pick when the folder holds several) → read
@@ -49,7 +50,7 @@ import {
   type DirEntries,
 } from '../services/importSources';
 import { log } from '../services/logger';
-import { ledgerLogLines } from '../services/importLedger';
+import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
 import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL, problemLedger } from '../services/importReport';
 import { recordImportReport } from '../services/importReportStore';
 import {
@@ -59,6 +60,8 @@ import {
   semanticModelToDbml,
   type SemanticModelEntry,
   type SemanticModelFile,
+  type SemanticModelKind,
+  type SemanticModelProblem,
 } from '../services/semanticModelImport';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
@@ -81,8 +84,15 @@ export const IMPORT_SEMANTIC_MODEL_COMMAND = 'erdStudio.importSemanticModel';
 
 const TITLE = IMPORT_TITLES.semanticModel;
 
-/** At most this many files under the picked folder are listed. */
+/** At most this many model files (`.tmdl`, `.bim`, `database.json`) under the picked folder are listed. */
 export const MAX_SEMANTIC_MODEL_FILES = 5000;
+/**
+ * At most this many files of the Save to Folder models under the picked
+ * folder (one JSON file per table, column, measure, partition…, so a
+ * mid-size model has thousands). Their text is bounded by
+ * {@link MAX_SEMANTIC_MODEL_CHARS} too.
+ */
+export const MAX_FOLDER_MODEL_FILES = 100_000;
 /** At most this much model text (characters). */
 export const MAX_SEMANTIC_MODEL_CHARS = 50 * 1024 * 1024;
 
@@ -178,7 +188,7 @@ export async function importSemanticModel(
   // Only model files count toward the bound: findSemanticModels reads nothing
   // else, and a big repo holding one model somewhere must still import from its root.
   // Model files, and the files of formats this import does not read (only to say so by name when no model is found).
-  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: (f) => isSemanticModelFile(f) || isUnreadModelFile(f), limit: MAX_SEMANTIC_MODEL_FILES });
+  const walk = await walkSemanticModelFiles(folder, (f) => ui.readDirectory(f), { alsoUnread: true });
   // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
   if (quick && (walk.truncated || walk.files.length === 0)) {
     if (quiet) {
@@ -191,7 +201,9 @@ export async function importSemanticModel(
   if (walk.truncated) {
     limited('tooManyFiles');
     showError(
-      `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
+      walk.tooBigFolderModel !== undefined
+        ? `${TITLE}: the Tabular Editor folder ${path.basename(walk.tooBigFolderModel)} holds more than ${MAX_FOLDER_MODEL_FILES.toLocaleString('en-US')} files, too many to import at once.`
+        : `${TITLE}: ${folderName} holds more than ${MAX_SEMANTIC_MODEL_FILES} model files. Pick the <Name>.SemanticModel folder itself, or the folder just above it.`,
       { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
     );
     return undefined;
@@ -232,7 +244,7 @@ export async function importSemanticModel(
         options: offered.map((e) => ({
           id: e.root,
           label: path.posix.basename(e.root) || e.name,
-          description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim',
+          description: SEMANTIC_MODEL_FORMAT_LABELS[e.kind],
         })),
       },
       // The user's own choice: never quiet from here on (a model that does not convert says why).
@@ -245,7 +257,7 @@ export async function importSemanticModel(
     };
   } else if (entries.length > 1) {
     const picked = await ui.pickModel(
-      entries.map((e) => ({ label: e.name, description: e.kind === 'tmdl' ? 'TMDL' : 'model.bim', detail: e.root, entry: e })),
+      entries.map((e) => ({ label: e.name, description: SEMANTIC_MODEL_FORMAT_LABELS[e.kind], detail: e.root, entry: e })),
       { title: TITLE, placeHolder: 'Which semantic model?', ignoreFocusOut: true },
     );
     if (!picked) return cancelled();
@@ -298,7 +310,7 @@ export async function importSemanticModel(
           ...(first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {}),
           ...(reportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(reportId) } : {}),
         },
-        entry.kind === 'tmdl' ? 'importSemanticModelParseTmdl' : 'importSemanticModelParseBim',
+        SEMANTIC_MODEL_PARSE_FEATURES[entry.kind],
       );
     }
     converted = semanticModelToDbml(read.model);
@@ -313,8 +325,10 @@ export async function importSemanticModel(
     return undefined;
   }
   const warnings = [...read.warnings, ...converted.warnings];
+  // What did not read was left out (each named in the ledger, so in the draft's Not imported list): every message to the log.
+  for (const p of read.problems ?? []) log.info(`[ERD Studio] ${TITLE}: ${p.file}${p.line !== undefined ? ` line ${p.line}` : ''}: ${p.message}`);
   for (const line of [...converted.skipped, ...warnings]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
-  for (const line of ledgerLogLines(converted.ledger ?? [], TITLE)) log.info(`[ERD Studio] ${line}`);
+  for (const line of ledgerLogLines(withoutLoggedProblems(converted.ledger ?? [], read.problems ?? []), TITLE)) log.info(`[ERD Studio] ${line}`);
 
   // 3. Import DBML's flow, with the converted DBML as its file.
   const renameNote = semanticModelRenameNote(converted.renamed);
@@ -347,6 +361,28 @@ export async function importSemanticModel(
 function modelFiles(files: readonly string[], fullOf: ReadonlyMap<string, string>): Record<string, string> {
   return Object.fromEntries(files.flatMap((f) => (fullOf.has(f) ? [[f, fullOf.get(f)!]] : [])));
 }
+
+/**
+ * The ledger without the problems already logged with their own message
+ * (the same file and line), so each problem is logged once; a problem with
+ * no message of its own (an annotation left out of the column it is under)
+ * is still logged from the ledger.
+ */
+export function withoutLoggedProblems(ledger: readonly LedgerEntry[], problems: readonly SemanticModelProblem[]): LedgerEntry[] {
+  const logged = new Set(problems.map((p) => `${p.file}\u0000${p.line ?? ''}`));
+  return ledger.filter((e) => e.outcome !== 'problem' || !logged.has(`${e.where?.file ?? ''}\u0000${e.where?.line ?? ''}`));
+}
+
+/**
+ * Why a model that does not read did not, by format: model.bim and TMDL
+ * each have their own count; a Save to Folder model is counted only as
+ * `importSemanticModelInvalid` (never as a model.bim).
+ */
+const SEMANTIC_MODEL_PARSE_FEATURES: Readonly<Record<SemanticModelKind, TelemetryFeature | undefined>> = {
+  tmdl: 'importSemanticModelParseTmdl',
+  tmsl: 'importSemanticModelParseBim',
+  folder: undefined,
+};
 
 /**
  * The model folder's Fabric `.platform` file, when it has one (`root` is
@@ -398,9 +434,9 @@ export function quietImportSemanticModelUi(base: ImportSemanticModelUi): ImportS
   };
 }
 
-/** A file of a model format this import does not read: a `.pbix` / `.pbit` (a zip), Tabular Editor 2's folder `database.json`. */
+/** A file of a model format this import does not read: a `.pbix` / `.pbit` (a zip). */
 export function isUnreadModelFile(name: string): boolean {
-  return /\.(pbix|pbit)$/i.test(name) || /(^|[\\/])database\.json$/i.test(name);
+  return /\.(pbix|pbit)$/i.test(name);
 }
 
 /**
@@ -416,14 +452,66 @@ export function unreadModelFormat(paths: readonly string[]): string | undefined 
   }
   const folderModel = paths.find((p) => base(p).toLowerCase() === 'database.json');
   if (folderModel) {
-    return `${folderModel} is a model saved by Tabular Editor's Save to Folder (JSON files), which this import does not read: open it in Tabular Editor and save it as TMDL or as one model.bim, then import that.`;
+    return `${folderModel} has no tables/ folder of JSON files beside it, so it is not a model saved by Tabular Editor's Save to Folder: pick the folder Tabular Editor saved the whole model to.`;
   }
   return undefined;
 }
 
-/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */
+/** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`), or that starts a Save to Folder model (`database.json`). */
 export function isSemanticModelFile(name: string): boolean {
-  return /\.(tmdl|bim)$/i.test(name);
+  return /\.(tmdl|bim)$/i.test(name) || /(^|[\\/])database\.json$/i.test(name);
+}
+
+/** How the model pick and the draft's Model list name each format. */
+export const SEMANTIC_MODEL_FORMAT_LABELS: Readonly<Record<SemanticModelKind, string>> = {
+  tmdl: 'TMDL',
+  tmsl: 'model.bim',
+  folder: 'Tabular Editor folder',
+};
+
+/**
+ * Every model file under `folder`, bounded by {@link MAX_SEMANTIC_MODEL_FILES}:
+ * `.tmdl`, `.bim` and `database.json` (`alsoUnread`: `.pbix` / `.pbit` too,
+ * only to name them), then, under each `database.json`'s folder that has a
+ * `tables/` folder beside it, every `.json` (a Save to Folder model's files),
+ * bounded by {@link MAX_FOLDER_MODEL_FILES} on their own: a model with a
+ * file per column is one model, however many files it has. Only model files
+ * count toward either bound, so a big repo holding one model somewhere still
+ * imports from its root. `tooBigFolderModel` is the Save to Folder model
+ * that went over its bound, when that is why the walk was cut short.
+ */
+export async function walkSemanticModelFiles(
+  folder: string,
+  readDirectory: (folder: string) => Promise<DirEntries>,
+  opts: { alsoUnread?: boolean } = {},
+): Promise<{ files: string[]; truncated: boolean; tooBigFolderModel?: string }> {
+  const walk = await walkFiles(folder, readDirectory, {
+    include: (f) => isSemanticModelFile(f) || (!!opts.alsoUnread && isUnreadModelFile(f)),
+    limit: MAX_SEMANTIC_MODEL_FILES,
+  });
+  if (walk.truncated) return walk;
+  const files = new Set(walk.files);
+  const roots = walk.files.filter((f) => path.basename(f).toLowerCase() === 'database.json').map((f) => path.dirname(f));
+  /** The Save to Folder models' own files, counted toward their own bound. */
+  let folderFiles = 0;
+  for (const root of roots) {
+    // Only a Save to Folder model's folder (a tables/ folder beside its database.json) is walked: a database.json
+    // of another tool (db-migrate's, at a repo's root) must not pull in every JSON file of the repo.
+    let entries: DirEntries;
+    try {
+      entries = await readDirectory(root);
+    } catch {
+      continue;
+    }
+    if (!entries.some(([name, isDirectory]) => isDirectory && name.toLowerCase() === 'tables')) continue;
+    const inner = await walkFiles(root, readDirectory, { include: (f) => /\.json$/i.test(f), limit: MAX_FOLDER_MODEL_FILES - folderFiles });
+    for (const f of inner.files) {
+      if (!files.has(f)) folderFiles++;
+      files.add(f);
+    }
+    if (inner.truncated) return { files: [...files], truncated: true, tooBigFolderModel: root };
+  }
+  return { files: [...files].sort(), truncated: false };
 }
 
 /** The real UI. */

@@ -1,0 +1,28 @@
+{
+  "name": "Total Net Order Value",
+  "description": "The net order value is the sum of all order intake including cancellations (also known as Gross Orders)",
+  "expression": [
+    "",
+    "VAR _RATE = MAX ('Exchange Rate'[Rate])",
+    "RETURN",
+    "",
+    "    -- Convert to common currency (WAT)",
+    "    SUMX (",
+    "        'Orders',",
+    "        'Orders'[Net Order Value]",
+    "            / RELATED ('Budget Rate'[Rate])",
+    "    )",
+    "",
+    "        -- Convert to selected currency",
+    "        * _RATE "
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\i. Total",
+  "lineageTag": "7bb01c04-5462-4841-93f9-e0d850e8c1cf",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

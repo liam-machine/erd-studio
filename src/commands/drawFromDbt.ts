@@ -28,7 +28,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { afterScope, dbtDraftFingerprint, dbtDraftScopes, draftFromDbt as buildDbtDraftView, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
+import { afterScope, dbtDraftFingerprint, dbtDraftLogLines, dbtDraftScopes, draftFromDbt as buildDbtDraftView, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftTarget, DraftTrigger } from '../types/draft';
 import {
   buildDbtDraft,
@@ -505,6 +505,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
           importReportId: reportId,
         });
+        // What the draft could not keep, each with its file and line: Not drawn points here for the rest.
+        for (const line of dbtDraftLogLines(draft, TITLE)) log.info(`[ERD Studio] ${line}`);
       } catch (err) {
         telemetry.error('draftBuildFailed');
         log.error(`[ERD Studio] ${TITLE}: could not build the draft:`, err);

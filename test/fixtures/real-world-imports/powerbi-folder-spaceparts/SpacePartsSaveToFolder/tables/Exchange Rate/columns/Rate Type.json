@@ -1,0 +1,15 @@
+{
+  "name": "Rate Type",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "rate_type",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "452c5cfd-c704-4b98-be56-71082368b44b",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Month",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "month",
+  "formatString": "Long Date",
+  "displayFolder": "1. Keys",
+  "lineageTag": "23bef58e-18a2-4193-856d-2498101b880c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

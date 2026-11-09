@@ -1,0 +1,20 @@
+{
+  "name": "Net Invoice Value",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "net_invoice_value",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "ac304df8-7ccc-450b-8d1c-a57f93db365d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

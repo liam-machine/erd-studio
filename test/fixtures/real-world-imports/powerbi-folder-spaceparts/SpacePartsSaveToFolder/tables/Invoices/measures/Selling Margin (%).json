@@ -1,0 +1,17 @@
+{
+  "name": "Selling Margin (%)",
+  "description": "The selling margin is the margin earned when considering only the revenue and costs associated with the product, before delivery",
+  "expression": [
+    "VAR _TOTAL =",
+    "    CALCULATE (",
+    "        [Total Net Invoice Value],",
+    "        'Invoice Document Type'[Billing Document Type Code] = \"invoice\"",
+    "    )",
+    "VAR _MARGIN = [Selling Margin (Value)]",
+    "RETURN",
+    "    DIVIDE (_MARGIN, _TOTAL)"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "1. Value\\d. Margins\\II. Selling Margin\\%",
+  "lineageTag": "3663b091-8e64-487b-95c5-a3a356cd6b5b"
+}

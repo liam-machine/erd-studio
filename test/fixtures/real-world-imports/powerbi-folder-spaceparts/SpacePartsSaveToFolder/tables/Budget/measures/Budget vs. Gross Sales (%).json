@@ -1,0 +1,14 @@
+{
+  "name": "Budget vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Budget]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "e5eb5098-0e4f-4d23-b7c5-bb287ff8bb59"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Orders Target vs. Net Orders (%)",
+  "description": "Net orders exclude cancellation document types",
+  "expression": [
+    "",
+    "VAR _TARGET = [Orders Target]",
+    "VAR _DELTA  = [Net Orders] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "1. Total\\Orders Target",
+  "lineageTag": "e6cda3c8-6f0c-4d5a-8685-d41623fb81d9"
+}

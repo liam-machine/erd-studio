@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Quarter (ie Q1)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Quarter (ie Q1)]",
+  "displayFolder": "2. Quarter",
+  "lineageTag": "0808e9ee-085c-4934-9b9d-c647eba54590",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Forecast Month",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "forecast_month",
+  "formatString": "Long Date",
+  "displayFolder": "2. Keys",
+  "lineageTag": "1c521f45-cb4d-444a-94da-8684fd62cf37",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

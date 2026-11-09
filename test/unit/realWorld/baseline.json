@@ -49,6 +49,59 @@
       "slug": "postgres-pagila",
       "verdict": "Clean",
       "expected": {
+        "tables": 16,
+        "columns": 94,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 16,
+        "columns": 94,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "column": 1
+        },
+        "changed": {
+          "relationship": 21,
+          "table": 55,
+          "column": 1,
+          "constraint": 22
+        },
+        "repaired": {
+          "column": 1
+        },
+        "skipped": {
+          "object": 1,
+          "statement": 205
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "postgres-pagila-partitions-kept",
+      "verdict": "Clean",
+      "expected": {
         "tables": 71,
         "columns": 479,
         "primaryKeys": 16,
@@ -439,6 +492,117 @@
         "repaired": {},
         "skipped": {
           "object": 21
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "1 unique key(s) not in the source"
+      ]
+    },
+    {
+      "slug": "powerbi-folder-spaceparts",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 30,
+        "columns": 186,
+        "primaryKeys": 1,
+        "relationships": 22,
+        "descriptions": 7
+      },
+      "imported": {
+        "tables": 23,
+        "columns": 172,
+        "primaryKeys": 1,
+        "relationships": 22,
+        "descriptions": 7
+      },
+      "reported": {
+        "tables": 7,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 13,
+          "setting": 378,
+          "table": 9,
+          "column": 4
+        },
+        "changed": {
+          "type": 9,
+          "table": 14,
+          "primaryKey": 9
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 180,
+          "table": 13,
+          "relationship": 5
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "7 item(s) left out and reported"
+      ]
+    },
+    {
+      "slug": "powerbi-tmdl-bc-purchase",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 34,
+        "columns": 511,
+        "primaryKeys": 8,
+        "relationships": 55,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 34,
+        "columns": 511,
+        "primaryKeys": 8,
+        "relationships": 55,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 771,
+          "setting": 856,
+          "column": 7,
+          "table": 34
+        },
+        "changed": {
+          "type": 20,
+          "table": 3,
+          "uniqueKey": 1,
+          "primaryKey": 7
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 778
         },
         "problem": {}
       },

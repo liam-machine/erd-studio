@@ -1,0 +1,12 @@
+{
+  "name": "# Products",
+  "expression": [
+    "",
+    "COUNTROWS ( ",
+    "    VALUES ( 'Products'[Product Name] )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures",
+  "lineageTag": "1fb6f2e9-ed3c-4c97-8fdc-95d1d037a0de"
+}

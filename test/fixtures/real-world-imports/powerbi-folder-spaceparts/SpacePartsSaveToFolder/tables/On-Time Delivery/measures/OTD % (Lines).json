@@ -1,0 +1,23 @@
+{
+  "name": "OTD % (Lines)",
+  "expression": [
+    "",
+    "VAR _OnTime = [OTD (Lines)]",
+    "VAR _Total = CALCULATE (",
+    "    [Invoice Lines],",
+    "    'Invoice Document Type'[Group] = \"Invoice\"",
+    ")",
+    "RETURN",
+    "",
+    "DIVIDE ( _OnTime, _Total )"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "3. Lines",
+  "lineageTag": "ac99485b-fc61-474e-a30e-d0889efce03f",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Actuals QTD",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Actuals],",
+    "    CALCULATETABLE (",
+    "        DATESQTD ('Date'[Date]),",
+    "        'Date'[IsDateInScope]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "3. QTD\\Actuals",
+  "lineageTag": "75670b7b-105c-4bdd-83a1-1ead1595f242"
+}

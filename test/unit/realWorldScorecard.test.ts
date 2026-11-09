@@ -17,6 +17,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED, SAMPLE_SLUGS } from './realWorld/expected';
 import { COUNT_KEYS, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
+import { SAMPLES_ROOT, loadTruth } from './realWorldScorecard';
 
 const BASELINE = path.join(__dirname, 'realWorld', 'baseline.json');
 
@@ -30,6 +31,21 @@ describe('real-world scorecard against its baseline', () => {
   it('has a baseline and expected counts for every sample', () => {
     expect(baseline.samples.map((s) => s.slug).sort()).toEqual([...SAMPLE_SLUGS].sort());
     for (const s of baseline.samples) expect(s.expected, s.slug).toEqual(EXPECTED[s.slug].counts);
+  });
+
+  it('covers every sample folder, and the same samples as the detailed scorecard (expected.json)', () => {
+    const truth = loadTruth();
+    expect([...SAMPLE_SLUGS].sort()).toEqual(Object.keys(truth.samples).sort());
+    // Each folder under test/fixtures/real-world-imports/ is some sample's input.
+    const inputs = new Set(Object.values(truth.samples).flatMap((s) => [s.input.folder, s.input.file, s.input.project, ...(s.input.files ?? [])])
+      .filter((p): p is string => !!p).map((p) => p.split('/')[0]));
+    const folders = fs.readdirSync(SAMPLES_ROOT, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    for (const folder of folders) expect(inputs.has(folder), folder).toBe(true);
+    // A sample's counts here are its truth's.
+    for (const slug of SAMPLE_SLUGS) {
+      const { descriptions: _d, ...counts } = EXPECTED[slug].counts;
+      expect(counts, slug).toEqual(truth.samples[slug].counts);
+    }
   });
 
   for (const slug of SAMPLE_SLUGS) {

@@ -107,11 +107,13 @@ import {
   type SqlDialect,
   type SqlParseEngine,
   type SqlParseFormat,
+  type SqlPartitionMode,
 } from './sqlDdlModel';
 import { ambiguousPlaceholderNames, neutralisePlaceholders } from './sqlDdlPlaceholders';
 import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingCommas, repairHints, rewriteCreateTable, type MissingComma, type Repair, type RepairRung } from './sqlDdlRepair';
 import { salvageCreateTable } from './sqlDdlSalvage';
-import { readStatement } from './sqlDdlStatements';
+import { resolvePartitions } from './sqlDdlPartitions';
+import { isChildWithoutTable, readStatement } from './sqlDdlStatements';
 import { quoteIdent, resolveRefs, writeDbml } from './sqlDdlWriter';
 
 export type {
@@ -129,6 +131,7 @@ export type {
   SqlDialect,
   SqlParseEngine,
   SqlParseFormat,
+  SqlPartitionMode,
   SqlProblemKind,
 } from './sqlDdlModel';
 
@@ -228,6 +231,11 @@ export type SqlDdlToDbmlResult =
       readWith?: SqlReadWith;
       /** The reading stopped before the end of the files (cancelled, or the time limit): what was read is the result, the rest is in the ledger. */
       stopped?: SqlConvertStop;
+      /**
+       * Partition and inheritance children (`PARTITION OF`, `ATTACH PARTITION`, `INHERITS`): how many were
+       * folded into their parent and how many kept as tables. Absent when the scripts have none.
+       */
+      partitions?: { folded: number; kept: number };
     }
   | { ok: false; problems: SqlDdlProblem[]; ledger?: LedgerEntry[]; tablesFound?: number; readWith?: SqlReadWith; stopped?: SqlConvertStop };
 
@@ -299,6 +307,11 @@ export interface SqlDdlConvertOptions {
   onReadingEnd?: () => void;
   /** The time limit the caller set (ms), only for the ledger's wording when `shouldStop` says `timeLimit`. */
   timeLimitMs?: number;
+  /**
+   * Partition and inheritance children with no columns of their own: `fold` (default) reads each as its
+   * parent's rows (one ledger note per child); `tables` keeps each as a table with its parent's columns.
+   */
+  partitions?: SqlPartitionMode;
 }
 
 /** The repair ladder's budget: tables beyond it go straight to salvage, so a huge file of failing tables stays fast. */
@@ -774,6 +787,10 @@ class Converter implements ConverterContext {
 
   constructor(readonly dialect: SqlDialect, readonly engine: SqlParseEngine, private readonly options: SqlDdlConvertOptions = {}) {}
 
+  get partitionMode(): SqlPartitionMode {
+    return this.options.partitions === 'tables' ? 'tables' : 'fold';
+  }
+
   qualify(parts: readonly string[]): string[] {
     if (this.currentSchema === null || parts.length !== 1) return [...parts];
     return [this.currentSchema, ...parts];
@@ -958,8 +975,8 @@ class Converter implements ConverterContext {
     if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
-    // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined does nothing.
-    if (ifNotExists && this.findTable(this.qualify(name.parts))) { this.skip(file, 'existing'); return; }
+    // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.
+    if (ifNotExists && (this.findTable(this.qualify(name.parts)) || isChildWithoutTable(this, this.qualify(name.parts)))) { this.skip(file, 'existing'); return; }
     const open = name.next;
     const close = matchParen(t, open);
     if (close < 0) {
@@ -1465,6 +1482,8 @@ class Converter implements ConverterContext {
   }
 
   applyDeferred(): void {
+    // Partition children folded into their parents (or kept as tables) first: what the files say about one is then about its table.
+    resolvePartitions(this);
     for (const key of this.keys) {
       const table = this.findTable(key.table);
       if (!table) { this.skippedLines.push(`${key.origin.file} line ${key.origin.line}: a key on ${key.table.join('.')}, which is not in the files`); continue; }
@@ -1805,6 +1824,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     })),
   );
   const unusedEnums = converter.enums.length - usedEnums.length;
+  const partitions = readerState(converter).partitionsResolved;
   const skipped = [
     ...unused.map((name) => `${name}: no tables, keys or comments in it`),
     ...converter.skippedSummary(fileOrder),
@@ -1823,6 +1843,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     tablesFound: converter.tablesFound,
     readWith: converter.readWith,
     ...stopped,
+    ...(partitions && (partitions.folded || partitions.kept) ? { partitions: { ...partitions } } : {}),
   };
 }
 

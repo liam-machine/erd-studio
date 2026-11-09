@@ -1,0 +1,25 @@
+{
+  "name": "3) Selected Target",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "SELECTCOLUMNS (",
+      "    'Z03CG1 - Sales Target',",
+      "    \"Select a Target\", 'Z03CG1 - Sales Target'[Target],",
+      "    \"Order\", 'Z03CG1 - Sales Target'[Ordinal],",
+      "    \"MTD Slicer\",",
+      "        VAR _TARGET = 'Z03CG1 - Sales Target'[Target]",
+      "        RETURN",
+      "            SWITCH (",
+      "                TRUE (),",
+      "                _TARGET = \"Budget\",         \"Gross Sales MTD vs. Budget\",",
+      "                _TARGET = \"Forecast\",       \"Gross Sales MTD vs. FCST\",",
+      "                _TARGET = \"1 Year Prior\",   \"Gross Sales MTD vs. 1YP\",",
+      "                _TARGET = \"2 Years Prior\",  \"Gross Sales MTD vs. 2YP\"",
+      "            )",
+      ")"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "Billing Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "billing_date",
+  "formatString": "Long Date",
+  "displayFolder": "Columns\\3. Keys\\Dates",
+  "lineageTag": "0dfc4547-ab35-4e31-b8c9-e1ac1f97746e",
+  "summarizeBy": "none",
+  "variations": [
+    {
+      "name": "Variation",
+      "relationship": "0b2be8fb-09ab-4abc-a26a-c2b736c312b4",
+      "defaultHierarchy": {
+        "table": "LocalDateTable_fca581ec-8430-42e1-9f91-795770007388",
+        "hierarchy": "Date Hierarchy"
+      },
+      "isDefault": true
+    }
+  ],
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

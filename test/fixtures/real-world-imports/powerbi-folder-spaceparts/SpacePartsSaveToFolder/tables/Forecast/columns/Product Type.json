@@ -1,0 +1,15 @@
+{
+  "name": "Product Type",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "product_type",
+  "displayFolder": "2. Keys",
+  "lineageTag": "a3e38e2f-113c-4b33-97bd-ba68256feaff",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

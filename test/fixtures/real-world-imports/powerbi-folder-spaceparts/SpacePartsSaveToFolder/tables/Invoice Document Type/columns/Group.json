@@ -1,0 +1,15 @@
+{
+  "name": "Group",
+  "dataType": "string",
+  "sourceColumn": "group",
+  "sortByColumn": "Group Ordinal",
+  "displayFolder": "1. Billing Doc. Type",
+  "lineageTag": "494309fe-449d-447a-9522-5aaac15890e8",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Budget MTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[MTD Gross Sales] - [Budget MTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\ii. MTD",
+  "lineageTag": "dae40a70-a31d-41e3-bf4d-f77b08aefe31"
+}

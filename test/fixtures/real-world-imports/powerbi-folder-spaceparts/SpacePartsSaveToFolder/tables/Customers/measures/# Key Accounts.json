@@ -1,0 +1,12 @@
+{
+  "name": "# Key Accounts",
+  "expression": [
+    "",
+    "COUNTROWS (",
+    "    VALUES ( 'Customers'[Key Account Name] )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures",
+  "lineageTag": "19c6259b-8906-4d55-9f07-f38335a43d03"
+}

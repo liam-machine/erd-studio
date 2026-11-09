@@ -80,6 +80,26 @@ describe('the SQL import worker', () => {
     }
   }, 120_000);
 
+  it('the partitions choice crosses to the worker: folded by default, kept as tables when asked', async () => {
+    const text = [
+      'CREATE TABLE payment (payment_id int NOT NULL, paid_on date NOT NULL, PRIMARY KEY (payment_id, paid_on)) PARTITION BY RANGE (paid_on);',
+      "CREATE TABLE payment_2024 PARTITION OF payment FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      "CREATE TABLE payment_2025 PARTITION OF payment FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+    ].join('\n');
+    const files = [{ name: 'payment.sql', text }];
+    const converter = workerSqlConverter({ extensionPath: ext, log: (m) => { throw new Error(`fell back: ${m}`); } });
+    try {
+      const folded = await converter.convert({ files, dialect: 'postgres' });
+      const kept = await converter.convert({ files, dialect: 'postgres', options: { partitions: 'tables' } });
+      expect(folded.ok && folded.tableCount).toBe(1);
+      expect(folded.ok && folded.partitions).toEqual({ folded: 2, kept: 0 });
+      expect(kept.ok && kept.tableCount).toBe(3);
+      expect(kept).toEqual(engine.sqlDdlToDbml({ files, dialect: 'postgres', options: { partitions: 'tables' } }));
+    } finally {
+      converter.dispose();
+    }
+  }, 60_000);
+
   it('Cancel mid-way: the worker stops at the next statement and returns what it read, the rest in the ledger', async () => {
     const files = [{ name: 'big.sql', text: generatedSql(TABLES) }];
     const converter = workerSqlConverter({ extensionPath: ext });

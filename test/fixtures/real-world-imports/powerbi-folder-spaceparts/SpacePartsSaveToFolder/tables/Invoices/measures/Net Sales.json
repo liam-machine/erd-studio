@@ -1,0 +1,33 @@
+{
+  "name": "Net Sales",
+  "expression": [
+    "",
+    "VAR _RATE = MAX ('Exchange Rate'[Rate])",
+    "RETURN",
+    "    CALCULATE (",
+    "",
+    "        -- Convert to common currency (WAT)",
+    "        SUMX (",
+    "            'Invoices',",
+    "",
+    "            -- Net sales",
+    "            ('Invoices'[Net Invoice Value]",
+    "                + 'Invoices'[Freight]",
+    "                - 'Invoices'[Taxes & Commercial Fees]",
+    "                + 'Invoices'[Late Delivery Penalties]",
+    "                + 'Invoices'[Overdue Payment Penalties] )",
+    "",
+    "                / RELATED ('Budget Rate'[Rate])",
+    "        )",
+    "",
+    "            -- Convert to selected currency",
+    "            * _RATE,",
+    "",
+    "        -- Limit to dates in scope",
+    "        'Date'[IsDateInScope] = TRUE",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\c. Net Sales",
+  "lineageTag": "2afed537-1de8-4905-967c-83cf6ae8c661"
+}

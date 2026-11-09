@@ -1,0 +1,15 @@
+{
+  "name": "Text",
+  "dataType": "string",
+  "sourceColumn": "text",
+  "sortByColumn": "Doc. Type Ordinal",
+  "displayFolder": "1. Billing Doc. Type",
+  "lineageTag": "b90274be-9a59-4782-b817-fe6c65a5c0b3",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

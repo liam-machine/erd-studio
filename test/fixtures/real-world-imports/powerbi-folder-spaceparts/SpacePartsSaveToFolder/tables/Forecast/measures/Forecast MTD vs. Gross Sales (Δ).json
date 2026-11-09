@@ -1,0 +1,10 @@
+{
+  "name": "Forecast MTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[MTD Gross Sales] - [Forecast MTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\ii. MTD",
+  "lineageTag": "32e7cb6e-42b1-4549-ac5a-4dcd6d678b1c"
+}

@@ -1,0 +1,48 @@
+{
+  "name": "Z03CG1 - Sales Target",
+  "isHidden": true,
+  "lineageTag": "04c41956-f84c-47b8-a9d6-c2264d42e1e9",
+  "calculationGroup": {
+    "precedence": 6,
+    "calculationItems": [
+      {
+        "name": "Budget",
+        "expression": [
+          "",
+          "[Total Budget]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "Forecast",
+        "expression": [
+          "",
+          "[Forecast]"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "1 Year Prior",
+        "expression": [
+          "",
+          "[Gross Sales 1YP (Selected Unit)]"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "2 Years Prior",
+        "expression": [
+          "",
+          "[Gross Sales 2YP (Selected Unit)]"
+        ],
+        "ordinal": 3
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

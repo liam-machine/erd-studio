@@ -1,0 +1,15 @@
+{
+  "name": "Order Status Ordinal",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "order_status_ordinal",
+  "displayFolder": "3. Ordinal",
+  "lineageTag": "d641dd45-15cd-45fa-9d89-069004a9392c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

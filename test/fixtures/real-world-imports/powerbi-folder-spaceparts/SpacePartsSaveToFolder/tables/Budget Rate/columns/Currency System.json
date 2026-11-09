@@ -1,0 +1,15 @@
+{
+  "name": "Currency System",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "currency_system",
+  "displayFolder": "3. Other Currency Fields",
+  "lineageTag": "f92a040a-f088-449b-8486-33aeeef0c9b2",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

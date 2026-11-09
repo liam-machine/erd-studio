@@ -1,0 +1,14 @@
+{
+  "name": "Forecast MTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Forecast MTD]",
+    "VAR _DELTA  = [MTD Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\ii. MTD",
+  "lineageTag": "852154a6-c9a0-46bc-bc2f-f27301426027"
+}

@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Weekday Number EU (i.e. 1)",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Weekday Number EU (i.e. 1)]",
+  "displayFolder": "5. Weekday / Workday\\Weekday",
+  "lineageTag": "6d6d80e2-e8a9-4d10-acff-4d7531522034",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

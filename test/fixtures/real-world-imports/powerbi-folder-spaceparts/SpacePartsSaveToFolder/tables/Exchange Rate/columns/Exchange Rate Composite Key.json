@@ -1,0 +1,15 @@
+{
+  "name": "Exchange Rate Composite Key",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "exchange_rate_composite_key",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "5b3738b3-2625-4510-909a-71dd86316090",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

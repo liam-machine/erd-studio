@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "OTD Sort Order",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[OTD Sort Order]",
+  "displayFolder": "Columns\\3. Ordinal",
+  "lineageTag": "7a38eab2-031b-4605-9352-d562e2c842c7",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Subtype",
+  "dataType": "string",
+  "sourceColumn": "subtype",
+  "displayFolder": "1. Product Hierarchy",
+  "lineageTag": "15258ae0-314c-4258-b6a9-c5f4b1f7c0df",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

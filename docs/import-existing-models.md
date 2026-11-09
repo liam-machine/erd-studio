@@ -61,13 +61,13 @@ Then run **ERD Studio: Import SQL DDL…** and choose **Snowflake**. Anything in
 
 ## Power BI
 
-A report saved as a Power BI project keeps its semantic model in a `<Name>.SemanticModel` folder, which ERD Studio reads as TMDL or as `model.bim`.
+A report saved as a Power BI project keeps its semantic model in a `<Name>.SemanticModel` folder, which ERD Studio reads as TMDL or as `model.bim`. A model saved with Tabular Editor's **Save to Folder** (a `database.json` with a `tables/` folder of JSON files beside it) reads too: pick the folder it was saved to.
 
 1. In Power BI Desktop, choose **File → Save as**, pick **Power BI project files (`*.pbip`)**, and save it in your project folder.
 2. No such option? Turn on **Power BI Project (.pbip) save option** in **File → Options and settings → Options → Preview features**, then restart Power BI Desktop.
 3. Run **ERD Studio: Import Power BI or Fabric Semantic Model…** and pick the folder.
 
-Tables, columns and relationships come across; DAX measures stay in Power BI.
+Tables, columns and relationships come across; DAX measures stay in Power BI. A file that does not read is left out and listed under **Not imported**, with the rest of the model imported.
 
 ## Microsoft Fabric
 

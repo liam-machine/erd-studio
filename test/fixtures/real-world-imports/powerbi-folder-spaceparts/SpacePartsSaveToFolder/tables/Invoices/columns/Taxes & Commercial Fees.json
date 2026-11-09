@@ -1,0 +1,20 @@
+{
+  "name": "Taxes & Commercial Fees",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "taxes__commercial_fees",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "a2efa68e-4950-49e5-8c33-68120ad1616d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

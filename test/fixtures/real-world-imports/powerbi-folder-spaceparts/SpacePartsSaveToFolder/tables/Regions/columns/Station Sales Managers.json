@@ -1,0 +1,14 @@
+{
+  "name": "Station Sales Managers",
+  "dataType": "string",
+  "sourceColumn": "station_sales_managers",
+  "displayFolder": "3. Managers",
+  "lineageTag": "d38439ea-70ae-4a7f-82b1-6cdd6536ba53",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

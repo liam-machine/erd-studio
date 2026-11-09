@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Week ISO (ie WK25)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[Calendar Week ISO (ie WK25)]",
+  "sortByColumn": "Calendar Week Number ISO (ie 25)",
+  "displayFolder": "4. Week",
+  "lineageTag": "ef48982f-eb1c-4196-8059-9a69d4a1c7fe",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

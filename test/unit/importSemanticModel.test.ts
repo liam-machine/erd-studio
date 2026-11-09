@@ -18,6 +18,7 @@ import { fakeDraftPreview } from './helpers/draftDriver';
 import {
   CHOOSE_ANOTHER_FOLDER_BUTTON,
   IMPORT_SEMANTIC_MODEL_COMMAND,
+  MAX_FOLDER_MODEL_FILES,
   MAX_SEMANTIC_MODEL_FILES,
   importSemanticModel,
   type ImportSemanticModelDeps,
@@ -213,8 +214,8 @@ describe('Import Semantic Model…', () => {
     expect(features()).toEqual(['importSemanticModelInvalid', 'importSemanticModelNoModel']);
   });
 
-  it('a folder holding only a .pbix, or a Tabular Editor JSON folder, names it and says how to save it so it imports', async () => {
-    for (const [file, expected] of [['Sales.pbix', /Sales\.pbix is a Power BI Desktop file.*Power BI project \(\*\.pbip\)/], ['tables/database.json', /database\.json is a model saved by Tabular Editor's Save to Folder.*TMDL or as one model\.bim/]] as const) {
+  it('a folder holding only a .pbix, or a database.json with no tables/ beside it, names it and says what to pick instead', async () => {
+    for (const [file, expected] of [['Sales.pbix', /Sales\.pbix is a Power BI Desktop file.*Power BI project \(\*\.pbip\)/], ['tables/database.json', /database\.json has no tables\/ folder of JSON files beside it.*Save to Folder/]] as const) {
       const folder = path.join(tmp, `reports-${path.basename(file)}`);
       fs.mkdirSync(path.join(folder, path.dirname(file)), { recursive: true });
       fs.writeFileSync(path.join(folder, file), 'PK\u0003\u0004 binary');
@@ -313,5 +314,93 @@ describe('Import Semantic Model… — names and the loss ledger', () => {
     // The date-only Date Table[Date] (formatString Long Date) is a date, said in the notes.
     const notes = draft.details.find((section) => section.id === 'notes')?.items.map((i) => i.text) ?? [];
     expect(notes.join('\n')).toMatch(/1 type: dateTime → date because Power BI marks the column date-only \(Date Table\.Date\)/);
+  });
+});
+
+/** The model UI over files held in memory (paths under `root`, joined with `/`). */
+function memModelUi(root: string, files: Record<string, string>): ModelRecorder {
+  const dirs = new Map<string, Map<string, boolean>>([[root, new Map()]]);
+  for (const rel of Object.keys(files)) {
+    let dir = root;
+    rel.split('/').forEach((part, i, parts) => {
+      if (!dirs.has(dir)) dirs.set(dir, new Map());
+      dirs.get(dir)!.set(part, i < parts.length - 1);
+      dir = `${dir}/${part}`;
+    });
+  }
+  const ui = modelUi(root);
+  ui.readDirectory = async (f) => [...(dirs.get(f) ?? new Map<string, boolean>())];
+  ui.readFile = async (f) => {
+    const text = files[f.slice(root.length + 1)];
+    if (text === undefined) throw new Error(`ENOENT ${f}`);
+    return text;
+  };
+  return ui;
+}
+
+describe('Import Semantic Model… — review findings', () => {
+  it('a Save to Folder model with a file per column, more files than the model-file bound, imports', async () => {
+    const files: Record<string, string> = { 'database.json': JSON.stringify({ name: 'Big', compatibilityLevel: 1550, model: {} }) };
+    for (let t = 0; t < 200; t++) {
+      files[`tables/T${t}/T${t}.json`] = JSON.stringify({ name: `T${t}` });
+      for (let c = 0; c < 25; c++) files[`tables/T${t}/columns/C${c}.json`] = JSON.stringify({ name: `C${c}`, dataType: 'int64', sourceColumn: `C${c}` });
+    }
+    expect(Object.keys(files).length).toBeGreaterThan(MAX_SEMANTIC_MODEL_FILES);
+    const model = memModelUi('/w/Big', files);
+    const modal = importUi({ confirm: false });
+    await importSemanticModel(deps(model, modal));
+    expect(model.errors).toEqual([]);
+    expect(modal.confirms[0].message).toMatch(/^Import 200 tables from the semantic model Big /);
+  });
+
+  it('a Save to Folder model over its own bound says so, naming the model folder, not "pick the SemanticModel folder"', async () => {
+    const model = modelUi('/w/Huge');
+    model.readDirectory = async (f) => {
+      if (f === '/w/Huge') return [['database.json', false], ['tables', true]];
+      if (f === '/w/Huge/tables') return [['T', true]];
+      if (f === '/w/Huge/tables/T') return [['T.json', false], ['columns', true]];
+      if (f === '/w/Huge/tables/T/columns') return Array.from({ length: MAX_FOLDER_MODEL_FILES + 1 }, (_, i) => [`C${i}.json`, false] as const);
+      return [];
+    };
+    await importSemanticModel(deps(model, importUi()));
+    expect(model.errors[0].message).toBe(`Import Semantic Model: the Tabular Editor folder Huge holds more than ${MAX_FOLDER_MODEL_FILES.toLocaleString('en-US')} files, too many to import at once.`);
+    expect(features()[0]).toBe('importLimitTooManyFiles');
+  });
+
+  it('each problem with a TMDL file is logged once (its message), not again as a ledger line', async () => {
+    const info = vi.spyOn(log, 'info');
+    const model = memModelUi('/w/M.SemanticModel', {
+      'definition/model.tmdl': 'model Model\n',
+      'definition/tables/Good.tmdl': 'table Good\n\tcolumn id\n\t\tdataType: int64\n',
+      'definition/tables/Bad.tmdl': "table 'Bad\n\tcolumn id\n\t\tdataType: int64\n",
+    });
+    await importSemanticModel(deps(model, importUi({ confirm: false })));
+    const logged = info.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('Bad.tmdl'));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatch(/Bad\.tmdl line 1: "table" has a name that is not closed with a quote\./);
+  });
+
+  it('a problem the ledger holds with no message of its own is still logged', async () => {
+    const info = vi.spyOn(log, 'info');
+    const model = memModelUi('/w/M.SemanticModel', {
+      'definition/model.tmdl': 'model Model\n',
+      'definition/tables/Sales.tmdl': "table Sales\n\tcolumn id\n\t\tdataType: int64\n\t\tannotation 'Broken = x\n",
+    });
+    await importSemanticModel(deps(model, importUi({ confirm: false })));
+    const logged = info.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('Sales.tmdl'));
+    expect(logged.length).toBeGreaterThanOrEqual(1);
+    expect(logged.join('\n')).toMatch(/annotation/);
+  });
+
+  it('a Save to Folder model that does not read is not counted as a model.bim that does not read', async () => {
+    const model = memModelUi('/w/M', {
+      'database.json': JSON.stringify({ name: 'M', model: {} }),
+      'tables/T/T.json': '{ not json',
+    });
+    await importSemanticModel(deps(model, importUi()));
+    expect(model.errors).toHaveLength(1);
+    expect(features()).toContain('importSemanticModelInvalid');
+    expect(features()).not.toContain('importSemanticModelParseBim');
+    expect(features()).not.toContain('importSemanticModelParseTmdl');
   });
 });

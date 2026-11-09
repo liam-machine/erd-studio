@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { canon, loadTruth, normaliseType, runSample, scoreSample, scorecardTable, totalsOf, typeDetails, type ImportRun, type SampleScore, type Scorecard, type TruthSample } from './realWorldScorecard';
+import { SEMANTIC_MODEL_META } from '../../src/services/semanticModelImport';
 
 const truth = loadTruth();
 const only = (process.env.SCORECARD_ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -38,10 +39,15 @@ interface Floor {
   descriptionsExact: number;
   maxSilentLosses: number;
   verdictAtLeast: SampleScore['verdict'];
+  /** Filtered links (dbt `relationships_where`) whose condition the draft shows. */
+  conditionsShown?: number;
 }
 const FLOORS: Record<string, Floor> = {
   'dbml-qut-workbench': { tablesMatched: 49, columnsMatched: 466, primaryKeysMatched: 45, relationshipsMatched: 96, uniqueKeysKept: 27, typeDetailsKept: 39, descriptionsExact: 32, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
-  'postgres-pagila': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 16, relationshipsMatched: 37, uniqueKeysKept: 5, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Pagila's truth folds payment's 55 partitions into payment (expected.json notes): every unit of the folded model is matched.
+  'postgres-pagila': { tablesMatched: 16, columnsMatched: 94, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 5, typeDetailsKept: 23, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // The same dump with 'Keep each partition as a table': the 71-table reading the scorecard held before folding became the default.
+  'postgres-pagila-partitions-kept': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 16, relationshipsMatched: 37, uniqueKeysKept: 5, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'mysql-sakila': { tablesMatched: 16, columnsMatched: 90, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 2, typeDetailsKept: 60, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlserver-adventureworks': { tablesMatched: 71, columnsMatched: 486, primaryKeysMatched: 71, relationshipsMatched: 90, uniqueKeysKept: 58, typeDetailsKept: 69, descriptionsExact: 530, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'snowflake-grid-reliability': { tablesMatched: 18, columnsMatched: 237, primaryKeysMatched: 18, relationshipsMatched: 12, uniqueKeysKept: 0, typeDetailsKept: 176, descriptionsExact: 13, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
@@ -49,7 +55,10 @@ const FLOORS: Record<string, Floor> = {
   'migrations-harbor': { tablesMatched: 48, columnsMatched: 397, primaryKeysMatched: 47, relationshipsMatched: 14, uniqueKeysKept: 44, typeDetailsKept: 136, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'powerbi-tmdl-salessense': { tablesMatched: 8, columnsMatched: 84, primaryKeysMatched: 3, relationshipsMatched: 5, uniqueKeysKept: 0, typeDetailsKept: 11, descriptionsExact: 7, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
   'powerbi-bim-adventureworks': { tablesMatched: 9, columnsMatched: 174, primaryKeysMatched: 7, relationshipsMatched: 13, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
-  'dbt-synthea-omop': { tablesMatched: 15, columnsMatched: 247, primaryKeysMatched: 15, relationshipsMatched: 113, uniqueKeysKept: 0, typeDetailsKept: 57, descriptionsExact: 223, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  'dbt-synthea-omop': { tablesMatched: 15, columnsMatched: 247, primaryKeysMatched: 15, relationshipsMatched: 113, uniqueKeysKept: 0, typeDetailsKept: 57, descriptionsExact: 223, maxSilentLosses: 0, verdictAtLeast: 'With gaps', conditionsShown: 32 },
+  // Added with the Power BI robustness track (Save to Folder, TMDL isolation, M merge sources).
+  'powerbi-folder-spaceparts': { tablesMatched: 23, columnsMatched: 172, primaryKeysMatched: 1, relationshipsMatched: 22, uniqueKeysKept: 0, typeDetailsKept: 9, descriptionsExact: 7, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  'powerbi-tmdl-bc-purchase': { tablesMatched: 34, columnsMatched: 511, primaryKeysMatched: 8, relationshipsMatched: 55, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
 };
 const RANK: Record<SampleScore['verdict'], number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
 
@@ -85,6 +94,7 @@ describe('real-world import scorecard', () => {
         expect(score.descriptions.exact, `${slug} descriptions`).toBeGreaterThanOrEqual(floor.descriptionsExact);
         expect(score.silentLosses.total, `${slug} silent losses ${JSON.stringify(score.silentLosses)}`).toBeLessThanOrEqual(floor.maxSilentLosses);
         expect(RANK[score.verdict], `${slug} verdict ${score.verdict}: ${score.reasons.join('; ')}`).toBeGreaterThanOrEqual(RANK[floor.verdictAtLeast]);
+        if (floor.conditionsShown !== undefined) expect(score.conditions.shown, `${slug} conditions shown`).toBeGreaterThanOrEqual(floor.conditionsShown);
       }
     }, 120_000);
   }
@@ -169,6 +179,29 @@ describe('scorecard rules', () => {
     expect(s.silentLosses.total).toBe(0);
     expect(s.requiredFks.noteClaims).toBe(2);
     expect(s.verdict).toBe('With gaps');
+  });
+
+  it('a semantic model is compared by the Power BI names the import keeps in meta, not the snake_case ones', () => {
+    const pbi: TruthSample = {
+      importer: 'semanticModel', input: {}, counts: { tables: 2, columns: 3, primaryKeys: 1, relationships: 1 },
+      tables: [
+        { name: '1) Selected Metric', pk: [], columns: [['YOY%', 'double', '']] },
+        { name: 'Store', pk: ['Id'], columns: [['Id', 'int64', 'P'], ['Metric #', 'int64', '']] },
+      ],
+      relationships: [{ from: 'Store', fromColumn: 'Metric #', to: '1) Selected Metric', toColumn: 'YOY%' }],
+      uniqueKeys: [],
+    };
+    const meta = (name: string) => ({ [SEMANTIC_MODEL_META.name]: name });
+    const s = scoreSample('pbi', pbi, run({
+      tables: [
+        { name: 't_1_selected_metric', meta: meta('1) Selected Metric'), columns: [{ name: 'yoy_pct', dataType: 'double', description: '', meta: meta('YOY%') }] },
+        { name: 'store', meta: meta('Store'), columns: [{ name: 'id', dataType: 'bigint', description: '', isPrimaryKey: true, meta: meta('Id') }, { name: 'metric_num', dataType: 'bigint', description: '', meta: meta('Metric #') }] },
+      ] as never,
+      relationships: [{ fromModel: 'store', fromColumn: 'metric_num', toModel: 't_1_selected_metric', toColumn: 'yoy_pct', cardinality: 'many-to-one' }] as never,
+    }));
+    expect(s.tables).toMatchObject({ matched: 2, extra: [] });
+    expect(s.columns).toMatchObject({ matched: 3, extra: 0 });
+    expect(s.relationships).toMatchObject({ matched: 1, extra: [] });
   });
 
   it('a failed import is Failed, with every loss reported', () => {

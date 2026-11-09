@@ -1,0 +1,14 @@
+{
+  "name": "Type",
+  "dataType": "string",
+  "sourceColumn": "type",
+  "displayFolder": "1. Product Hierarchy",
+  "lineageTag": "85080b98-1526-4199-8045-b27395dcead7",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

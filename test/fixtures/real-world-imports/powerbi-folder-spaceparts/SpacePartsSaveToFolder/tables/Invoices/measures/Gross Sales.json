@@ -1,0 +1,14 @@
+{
+  "name": "Gross Sales",
+  "expression": [
+    "",
+    "[Total Net Invoice Value]",
+    "    + [Total Freight Surcharge]",
+    "    + [Total Late Delivery Penalties]",
+    "    + [Total Overdue Payment Penalties]",
+    "    - [Total Taxes & Commercial Fees]"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\I. Total",
+  "lineageTag": "683196db-ff3e-4763-8161-a11c1626c646"
+}

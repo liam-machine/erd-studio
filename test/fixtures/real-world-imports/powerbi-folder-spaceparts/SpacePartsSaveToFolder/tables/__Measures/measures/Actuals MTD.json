@@ -1,0 +1,16 @@
+{
+  "name": "Actuals MTD",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Actuals],",
+    "    CALCULATETABLE (",
+    "        DATESMTD ('Date'[Date]),",
+    "        'Date'[IsDateInScope]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "2. MTD\\Actuals",
+  "lineageTag": "ea39866d-9863-418f-884b-661ffb7be937"
+}

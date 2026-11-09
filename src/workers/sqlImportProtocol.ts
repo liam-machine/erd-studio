@@ -21,7 +21,7 @@ export interface SqlWorkerData {
 }
 
 /** The options that cross to the worker: plain data only. */
-export type SqlConvertPlainOptions = Pick<SqlDdlConvertOptions, 'repair' | 'ladderTables' | 'ladderMs'>;
+export type SqlConvertPlainOptions = Pick<SqlDdlConvertOptions, 'repair' | 'ladderTables' | 'ladderMs' | 'partitions'>;
 
 /** One conversion, as the host asks for it. */
 export interface SqlConvertRequest extends SqlDdlToDbmlInput {

@@ -1,0 +1,15 @@
+{
+  "name": "Exchange Rate",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"exchange_rate\"]}[Data]",
+      "in",
+      "    Data"
+    ]
+  }
+}

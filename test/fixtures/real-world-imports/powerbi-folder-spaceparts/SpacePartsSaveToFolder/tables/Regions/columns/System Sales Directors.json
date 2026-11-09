@@ -1,0 +1,14 @@
+{
+  "name": "System Sales Directors",
+  "dataType": "string",
+  "sourceColumn": "system_sales_directors",
+  "displayFolder": "3. Managers",
+  "lineageTag": "af710796-8d11-4cc9-964f-6571ccfc7f0a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

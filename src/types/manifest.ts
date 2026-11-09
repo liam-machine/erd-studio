@@ -7,6 +7,7 @@
  */
 
 import type { Meta } from './semantic';
+import type { RelationshipTestCondition, YmlSourceRelationshipTest, YmlSourceTable } from './ymlData';
 
 /**
  * The `manifest.metadata.env` key a Parse without your credentials run
@@ -40,6 +41,16 @@ export interface ManifestRelationshipTest {
   toModel: string;
   /** PK column name (from test_metadata.kwargs.field) */
   toColumn: string;
+  /**
+   * The test holds only for some rows: `relationships_where` (its
+   * `from_condition` / `to_condition`) or a `where:` config. Absent: unconditional.
+   */
+  conditional?: true;
+  /** The condition as written, when the test has one. */
+  condition?: RelationshipTestCondition;
+  /** The schema file the test is written in (`original_file_path`); the manifest gives no line. */
+  file?: string;
+  line?: number;
 }
 
 /** Model info extracted from a dbt manifest node. */
@@ -117,6 +128,12 @@ export interface ManifestWorkerResult {
    * means false (older results).
    */
   placeholderProfile?: boolean;
+  /** Columns tested `not_null` (or constrained not null / primary key), by model short name. See ManifestData.notNullColumns. */
+  notNullColumns?: Record<string, string[]>;
+  /** Relationships tests whose `to:` is a `source()`. */
+  sourceRelationshipTests?: YmlSourceRelationshipTest[];
+  /** The manifest's `sources` (enabled ones). */
+  sources?: YmlSourceTable[];
 }
 
 /** Error result from the manifest worker thread. */
@@ -165,4 +182,18 @@ export interface ManifestData {
    * were blanked. Absent means false (older results, hand-built literals).
    */
   placeholderProfile?: boolean;
+  /**
+   * Columns dbt declares required, by model short name: a `not_null` test
+   * node (`test_metadata.name: not_null`, from `tests:` or `data_tests:`,
+   * any dbt version) or dbt_expectations' `expect_column_values_to_not_be_null`,
+   * neither limited by a `where:` / `row_condition:`; and a contract's
+   * `not_null` or `primary_key` constraint (on the column, or the model with
+   * `columns:`). The manifest twin of `YmlData.notNullColumns`. Optional so
+   * hand-built literals stay valid.
+   */
+  notNullColumns?: Map<string, Set<string>>;
+  /** Relationships tests to a dbt source (`YmlData.sourceRelationshipTests`' twin). */
+  sourceRelationshipTests?: YmlSourceRelationshipTest[];
+  /** The manifest's enabled sources (`YmlData.sources`' twin: `file` is `original_file_path`, no `line`). */
+  sources?: YmlSourceTable[];
 }

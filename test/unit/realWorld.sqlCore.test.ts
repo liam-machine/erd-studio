@@ -23,7 +23,8 @@ const fsUi = {
 };
 
 const SAMPLES: ReadonlyArray<{ slug: string; source: { files: string[] } | { folder: string }; dialect: SqlDialect; tables: number; before: number }> = [
-  { slug: 'postgres-pagila', source: { files: ['postgres-pagila/pagila-schema.sql'] }, dialect: 'postgres', tables: 71, before: 0 },
+  // 16: payment's 55 ATTACHed partitions fold into payment (sqlDdlPartitions.ts); 71 with each kept as a table.
+  { slug: 'postgres-pagila', source: { files: ['postgres-pagila/pagila-schema.sql'] }, dialect: 'postgres', tables: 16, before: 0 },
   { slug: 'mysql-sakila', source: { files: ['mysql-sakila/sakila-schema.sql'] }, dialect: 'mysql', tables: 16, before: 16 },
   { slug: 'sqlserver-adventureworks', source: { files: ['sqlserver-adventureworks/instawdb.sql'] }, dialect: 'sqlserver', tables: 71, before: 0 },
   { slug: 'snowflake-grid-reliability', source: { folder: 'snowflake-grid-reliability/scripts' }, dialect: 'snowflake', tables: 18, before: 0 },

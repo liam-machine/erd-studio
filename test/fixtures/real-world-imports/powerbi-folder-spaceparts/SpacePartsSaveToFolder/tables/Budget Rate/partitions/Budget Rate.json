@@ -1,0 +1,15 @@
+{
+  "name": "Budget Rate",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"budget_rate\"]}[Data]",
+      "in",
+      "    Data"
+    ]
+  }
+}

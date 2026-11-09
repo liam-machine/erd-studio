@@ -1,0 +1,31 @@
+{
+  "name": "Actuals MTD, Latest Data Point",
+  "expression": [
+    "",
+    "-- Max workday in scope",
+    "VAR _MAXWD =",
+    "    CALCULATE (",
+    "        MAX ( 'Date'[Workdays MTD] ),",
+    "        'Date'[IsDateInScope],",
+    "        ALLEXCEPT ('Date', 'Date'[Calendar Month Year (ie Jan 21)])",
+    "    )",
+    "",
+    "-- Max date in scope",
+    "VAR _MAXDT =",
+    "    CALCULATE ( MAX ('Date'[Date] ),",
+    "        'Date'[IsDateInScope],",
+    "        ALLEXCEPT ('Date', 'Date'[Calendar Month Year (ie Jan 21)]) )",
+    "RETURN",
+    "",
+    "    -- If the selected workday = the max workday in scope, return the value",
+    "    -- Otherwise return blank (don't show the marker / value)",
+    "    IF (",
+    "        MAX ('Date'[Workdays MTD]) = _MAXWD",
+    "            || MAX ('Date'[Date]) = _MAXDT,",
+    "        [Actuals MTD]",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "9. Technical Measures",
+  "lineageTag": "f526af90-be40-4e71-a8af-700e44503379"
+}

@@ -1,0 +1,104 @@
+{
+  "name": "SpacePartsSaveToFolder",
+  "id": "90c78d27-49f6-4236-9b8c-f87b72915ae6",
+  "compatibilityLevel": 1702,
+  "model": {
+    "name": "SpacePartsSpacePartsSaveToFolder",
+    "culture": "en-US",
+    "collation": "Latin1_General_100_BIN2_UTF8",
+    "dataAccessOptions": {
+      "legacyRedirects": true,
+      "returnErrorValuesAsNull": true
+    },
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "discourageImplicitMeasures": true,
+    "sourceQueryCulture": "en-US",
+    "queryGroups": [
+      {
+        "folder": "Parameters",
+        "annotations": [
+          {
+            "name": "PBI_QueryGroupOrder",
+            "value": "0"
+          }
+        ]
+      },
+      {
+        "folder": "Scalar Values",
+        "annotations": [
+          {
+            "name": "PBI_QueryGroupOrder",
+            "value": "1"
+          }
+        ]
+      },
+      {
+        "folder": "Tables",
+        "annotations": [
+          {
+            "name": "PBI_QueryGroupOrder",
+            "value": "2"
+          }
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "name": "Comparison.RelativeToTarget",
+        "expression": [
+          "//Compare to a target and return the relative percent",
+          "//Example usage: Comparing Sales to budget or forecast to get relative performance",
+          "//Examples:",
+          "// - 9/10 is -10%",
+          "// - 11/10 is +10%",
+          "(",
+          "    // The actual value",
+          "    actual: SCALAR NUMERIC VAL,",
+          " ",
+          "    // The target that you are comparing to",
+          "    target: SCALAR NUMERIC VAL",
+          ") =>",
+          "VAR _target = target",
+          "VAR _actual = actual",
+          "VAR _delta  = _actual - _target",
+          "VAR _percent  = DIVIDE ( _delta, _target )",
+          "",
+          "RETURN",
+          "    _percent",
+          ""
+        ],
+        "lineageTag": "4b641776-6b1e-42c4-8839-1d1fd0fd5fe4"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "TabularEditor_SerializeOptions",
+        "value": "{\"IgnoreInferredObjects\":true,\"IgnoreInferredProperties\":true,\"IgnoreTimestamps\":true,\"SplitMultilineStrings\":true,\"PrefixFilenames\":false,\"LocalTranslations\":true,\"LocalPerspectives\":true,\"LocalRelationships\":true,\"Levels\":[\"Data Sources\",\"Perspectives\",\"Relationships\",\"Roles\",\"Shared Expressions\",\"Tables\",\"Tables/CalculationItems\",\"Tables/Columns\",\"Tables/Hierarchies\",\"Tables/Measures\",\"Tables/Partitions\",\"Translations\"]}"
+      },
+      {
+        "name": "DataGoblins_SnekHighScore",
+        "value": "3"
+      },
+      {
+        "name": "__PBI_TimeIntelligenceEnabled",
+        "value": "1"
+      },
+      {
+        "name": "PBI_QueryOrder",
+        "value": "[\"Brands\",\"Budget Rate\",\"Customers\",\"Employees\",\"Exchange Rate\",\"Invoice Document Type\",\"Products\",\"Regions\",\"Budget\",\"Orders\",\"Forecast\",\"Order Document Type\",\"Order Status\",\"SqlEndpoint\",\"Database\",\"RangeStart\",\"RangeEnd\",\"Last Refresh\",\"Invoices\"]"
+      },
+      {
+        "name": "PBI_ProTooling",
+        "value": "[\"DaxQueryView_Desktop\",\"TMDLView_Desktop\"]"
+      },
+      {
+        "name": "__PBI_ServiceStoredInTmdl",
+        "value": "reserved"
+      },
+      {
+        "name": "TabularEditor_Perspectives",
+        "value": "[{\"Name\":\"Measure Selection\",\"Description\":\"\",\"Annotations\":{}},{\"Name\":\"No Measure Selection\",\"Description\":\"\",\"Annotations\":{}}]"
+      }
+    ]
+  }
+}

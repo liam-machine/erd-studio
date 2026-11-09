@@ -6,7 +6,7 @@
  * is: the command hands the text to the same flow Open Example Diagram uses,
  * so the user still names the diagram and sees the dry run first.
  *
- * Two formats, both read here:
+ * Three formats, all read here:
  *
  * - **TMSL**: one JSON file, `<Name>.SemanticModel/model.bim` (the older
  *   `<Name>.Dataset/model.bim`, or a bare `*.bim`): `{ model: { tables,
@@ -21,6 +21,11 @@
  *   A TMDL script (`createOrReplace` → `database` → `model` → tables) reads
  *   the same; a property value wrapped whole in `"…"` is unwrapped; LF, CRLF
  *   and a lone CR all end a line.
+ * - **Tabular Editor Save to Folder**: `database.json` and one JSON file per
+ *   table, column, measure, partition, relationship, role…
+ *   (`tables/<Table>/columns/<Column>.json`), relationships kept with their
+ *   table when saved so (`TabularEditor_Relationships`): put back together as
+ *   one TMSL database (`semanticModelFolder.ts`) and read as TMSL.
  *   Model features an ERD has no place for (hierarchies, roles with their
  *   row filters and column permissions, perspectives, cultures, shared
  *   expressions, data sources, KPIs, variations, DAX user-defined functions,
@@ -46,7 +51,9 @@
  * | `isActive: false` | the Ref kept, named (so its role is) "inactive in Power BI"; skipped with `inactiveRelationships: 'skip'` |
  * | the original name, when snake_case changed it | `meta_power_bi_name` (ERD Studio's `meta.power_bi_name`) |
  * | a hidden table or column | `meta_power_bi_hidden: 'true'` |
- * | a calculated column or table | kept, with a sentence in its note and `meta_power_bi_calculated: 'true'` (its DAX is not imported) |
+ * | a calculated column or table | kept, with `meta_power_bi_calculated: 'true'`; its DAX is not imported (a ledger `lost` entry, and the note says so when there is no description to keep) |
+ * | a query that merges or appends (`Table.NestedJoin`, `Table.Combine`…) | `meta_power_bi_sources: 'dbo.Orders, Customer'`: every source it reads ({@link mCombinedSources}) |
+ * | `crossFilteringBehavior` / `securityFilteringBehavior` both ways, `relyOnReferentialIntegrity` | not kept: a ledger `lost` entry on the relationship's line |
  *
  * A table with no columns (a measure table) cannot be a DBML table: it is a
  * `lost` ledger entry by name (its measures counted as every table's are).
@@ -72,10 +79,19 @@
  * cut to {@link MAX_TABLE_NAME_LENGTH}), deterministically, and Refs use the converted names. Two
  * names that convert to the same one get `_2`, `_3`… (and a warning).
  *
+ * One file that does not read never fails the model: a TMDL file (or the
+ * object in it that does not read), or a Save to Folder JSON file, is left
+ * out and recorded in the ledger as a `problem` with its file and line; only
+ * a model with nothing left to draw fails. TMSL entries carry their
+ * `model.bim` line too ({@link parseJsonWithLines}).
+ *
  * Pure: no `vscode`, no Node built-ins. The host passes paths and file texts.
  */
 
-import { createLedger, type LedgerEntry, type LedgerUnit } from './importLedger';
+import { createLedger, type ImportLedger, type LedgerEntry, type LedgerUnit } from './importLedger';
+import { jsonErrorLineOf, parseJsonWithLines } from './jsonLines';
+import { mCombineCalls, mName, mReferences, parseMLet, type MCombineCall } from './powerQueryLet';
+import { isSaveToFolderLayout, readFolderModel, type JsonPlace } from './semanticModelFolder';
 import { DBML_RICH_META_PREFIX } from '@erd-studio/core';
 
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
@@ -84,7 +100,8 @@ import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN } from '../types/naming';
 // The model
 // ---------------------------------------------------------------------------
 
-export type SemanticModelKind = 'tmsl' | 'tmdl';
+/** `tmsl`: one `model.bim`; `tmdl`: a TMDL definition folder; `folder`: Tabular Editor's Save to Folder (`database.json` and a JSON file per object). */
+export type SemanticModelKind = 'tmsl' | 'tmdl' | 'folder';
 
 /** A column. `kind` is TMSL's `type` (`data` when absent); TMDL's `column X = <DAX>` is `calculated`. */
 export interface SemanticModelColumn {
@@ -104,8 +121,10 @@ export interface SemanticModelColumn {
   isNullable?: boolean;
   /** TMSL's `isUnique`. */
   isUnique?: boolean;
-  /** 1-based line of the column in its file (TMDL). */
+  /** 1-based line of the column in its file. */
   line?: number;
+  /** The file it is defined in, when not its table's (Save to Folder keeps each column in its own file). */
+  file?: string;
 }
 
 /** A measure: only its name, description and whether it has a KPI are read (never its DAX). */
@@ -115,6 +134,7 @@ export interface SemanticModelMeasure {
   /** It carries a KPI (target and status). */
   kpi?: boolean;
   line?: number;
+  file?: string;
 }
 
 /**
@@ -127,6 +147,15 @@ export interface SemanticModelSource {
   /** `schema.item` (or `item`) for `navigation` and `entity`. */
   table?: string;
   line?: number;
+  /** The partition's file, when not its table's (Save to Folder). */
+  file?: string;
+  /**
+   * The query merges or appends rows from several sources (`Table.NestedJoin`,
+   * `Table.Join`, `Table.Combine`…): each one, as the warehouse table it
+   * navigates to (`dbo.Orders`), the query or table it reads (`Item`), or what
+   * kind of source it is (`a file`); in the order the query names them.
+   */
+  combined?: { kind: 'merge' | 'append' | 'merge and append'; inputs: string[] };
 }
 
 /**
@@ -192,6 +221,13 @@ export interface SemanticModelRelationship {
   isActive: boolean;
   /** `oneDirection` (the default, so undefined), `bothDirections`, `automatic`. */
   crossFilteringBehavior?: string;
+  /** `relyOnReferentialIntegrity` (Assume referential integrity): true when set. */
+  relyOnReferentialIntegrity?: boolean;
+  /** `oneDirection` (the default, so undefined), `bothDirections`, `none`. */
+  securityFilteringBehavior?: string;
+  /** Where it is defined. */
+  file?: string;
+  line?: number;
 }
 
 export interface SemanticModel {
@@ -202,6 +238,13 @@ export interface SemanticModel {
   relationships: SemanticModelRelationship[];
   /** What the model holds that an ERD has no place for (named in the ledger, never imported). */
   features?: SemanticModelFeature[];
+  /**
+   * What reading the files recorded (`importLedger.ts`): a file, table,
+   * column or relationship that did not read (`problem`, with its file and
+   * line), a file outside the layout (`skipped`). {@link semanticModelToDbml}
+   * puts it first in its own ledger.
+   */
+  ledger?: LedgerEntry[];
 }
 
 export interface SemanticModelFile {
@@ -218,7 +261,8 @@ export interface SemanticModelProblem {
 }
 
 export type ReadSemanticModelResult =
-  | { ok: true; model: SemanticModel; warnings: string[] }
+  /** `problems`: what did not read and was left out (one bad file never fails the model; each is in `model.ledger` too). */
+  | { ok: true; model: SemanticModel; warnings: string[]; problems?: SemanticModelProblem[] }
   | { ok: false; problems: SemanticModelProblem[] };
 
 // ---------------------------------------------------------------------------
@@ -256,7 +300,10 @@ function modelFolderName(segment: string): string | undefined {
  *   folder saved by Tabular Editor, or a bare `definition/`) is TMDL, root
  *   that folder (its parent when it is named `definition`), with every
  *   `.tmdl` under it;
- * - outside both, each `*.bim` is TMSL on its own, root its folder, named
+ * - outside those, a folder holding `database.json` with
+ *   `tables/<Table>/<file>.json` beside it is Tabular Editor's Save to
+ *   Folder (`folder`), root that folder, with every `.json` under it;
+ * - outside all three, each `*.bim` is TMSL on its own, root its folder, named
  *   after the file (after the folder for `model.bim`).
  *
  * Paths under `node_modules`, `.git` or `.pbi` are ignored. Sorted by root,
@@ -323,10 +370,40 @@ export function findSemanticModels(paths: readonly string[]): SemanticModelEntry
     found.push({ entry: { name, kind: 'tmdl', root: rootOf(r.index, r.normRoot), files }, normRoot: r.normRoot });
   }
 
-  // 3. Bare .bim files.
+  // 3. Tabular Editor Save to Folder models: database.json with tables/<Table>/*.json beside it.
+  const folderRoots: string[] = [];
+  norm.forEach((p, i) => {
+    if (!usable[i] || underPbip(p) || p.split('/').pop()!.toLowerCase() !== 'database.json') return;
+    if (tmdlRoots.some((r) => r.normRoot === '' || isUnder(p, r.normRoot))) return;
+    const dir = dirOf(p);
+    const inside = (q: string): boolean => dir === '' || isUnder(q, dir);
+    // This database.json's own tables/ folder: one deeper down (another model's) does not make it a model.
+    const tables = `${dir ? `${dir}/` : ''}tables/`.toLowerCase();
+    if (!isSaveToFolderLayout([p, ...norm.filter((q, j) => usable[j] && q.toLowerCase().startsWith(tables))])) return;
+    if (folderRoots.some((r) => r.toLowerCase() === dir.toLowerCase())) return;
+    folderRoots.push(dir);
+    const files: string[] = [];
+    norm.forEach((q, j) => {
+      if (!usable[j] || !/\.json$/i.test(q) || !inside(q)) return;
+      files.push(paths[j]);
+    });
+    const name = dir.split('/').pop() || 'model';
+    found.push({ entry: { name, kind: 'folder', root: rootOf(i, dir), files }, normRoot: dir });
+  });
+  // A Save to Folder model nested in another owns its own files.
+  for (const f of found) {
+    if (f.entry.kind !== 'folder') continue;
+    f.entry.files = f.entry.files.filter((file) => {
+      const n = file.replace(/\\/g, '/');
+      return !folderRoots.some((r) => r.length > f.normRoot.length && isUnder(n, r));
+    });
+  }
+
+  // 4. Bare .bim files.
   norm.forEach((p, i) => {
     if (!usable[i] || !/\.bim$/i.test(p) || underPbip(p)) return;
     if (tmdlRoots.some((r) => r.normRoot === '' || isUnder(p, r.normRoot))) return;
+    if (folderRoots.some((r) => r === '' || isUnder(p, r))) return;
     const dir = dirOf(p);
     const base = p.split('/').pop()!.replace(/\.bim$/i, '');
     const name = base.toLowerCase() === 'model' ? dir.split('/').pop() || 'model' : base;
@@ -353,11 +430,11 @@ export function findSemanticModels(paths: readonly string[]): SemanticModelEntry
 export function readSemanticModel(files: readonly SemanticModelFile[]): ReadSemanticModelResult {
   const tmdl = files.filter((f) => /\.tmdl$/i.test(f.path));
   const bim = files.filter((f) => /\.bim$/i.test(f.path));
-  // Text that is not UTF-8 (a UTF-16 file read as UTF-8 is full of NULs) would read as no model at all, or as JSON gibberish.
-  const encoding = [...(tmdl.length > 0 ? tmdl : bim)].filter((f) => notTextReason(f.text)).map((f) => ({ file: f.path, message: notTextReason(f.text)! }));
-  if (encoding.length > 0) return { ok: false, problems: encoding };
+  const json = files.filter((f) => /\.json$/i.test(f.path));
+  const folder = tmdl.length === 0 && isSaveToFolderLayout(json.map((f) => f.path));
   // Fabric Git integration's `.platform` names the item (its displayName): the best name there is.
   const platformName = files.map((f) => (baseName(f.path).toLowerCase() === '.platform' ? platformDisplayName(f.text) : undefined)).find((n) => !!n);
+  // TMDL and Save to Folder read file by file: a file that is not UTF-8 text is left out there, with the rest read.
   if (tmdl.length > 0) {
     const result = readTmdl(tmdl, platformName);
     if (result.ok && bim.length > 0) {
@@ -365,6 +442,16 @@ export function readSemanticModel(files: readonly SemanticModelFile[]): ReadSema
     }
     return result;
   }
+  if (folder) {
+    const result = readSaveToFolder(json, platformName);
+    if (result.ok && bim.length > 0) {
+      result.warnings.unshift(`Read the Tabular Editor folder (database.json); ${bim.map((f) => baseName(f.path)).join(', ')} was ignored.`);
+    }
+    return result;
+  }
+  // Text that is not UTF-8 (a UTF-16 file read as UTF-8 is full of NULs) would read as JSON gibberish.
+  const encoding = bim.filter((f) => notTextReason(f.text)).map((f) => ({ file: f.path, message: notTextReason(f.text)! }));
+  if (encoding.length > 0) return { ok: false, problems: encoding };
   if (bim.length === 1) return readTmsl(bim[0], platformName);
   if (bim.length > 1) {
     return {
@@ -374,7 +461,7 @@ export function readSemanticModel(files: readonly SemanticModelFile[]): ReadSema
   }
   return {
     ok: false,
-    problems: [{ file: files[0]?.path ?? '', message: 'No semantic model files: expected a model.bim (TMSL) or a definition folder of .tmdl files (TMDL).' }],
+    problems: [{ file: files[0]?.path ?? '', message: 'No semantic model files: expected a model.bim (TMSL), a definition folder of .tmdl files (TMDL) or a Tabular Editor Save to Folder model (database.json).' }],
   };
 }
 
@@ -570,6 +657,8 @@ interface RawPartition {
   text?: string;
   entity?: { schema?: string; name?: string };
   line?: number;
+  /** Its file, when not its table's (Save to Folder). */
+  file?: string;
 }
 
 /** The `key="value"` fields of one M record selector's body (keys lower case, `""` unescaped). */
@@ -683,7 +772,7 @@ export function stripMComments(m: string): string {
 /** A partition's source, resolved against the model's shared expressions. */
 function resolveSource(raw: RawPartition | undefined, expressions: ReadonlyMap<string, string>): SemanticModelSource | undefined {
   if (!raw) return undefined;
-  const at = raw.line !== undefined ? { line: raw.line } : {};
+  const at = { ...(raw.line !== undefined ? { line: raw.line } : {}), ...(raw.file ? { file: raw.file } : {}) };
   if (raw.type === 'calculated') return { kind: 'calculated', ...at };
   if (raw.type === 'entity') {
     const name = raw.entity?.name?.trim();
@@ -694,6 +783,163 @@ function resolveSource(raw: RawPartition | undefined, expressions: ReadonlyMap<s
   if (raw.type === 'query') return { kind: 'nativeQuery', ...at };
   if (raw.type === 'm' && raw.text) return { ...describeMSource(raw.text, expressions), ...at };
   return { kind: 'other', ...at };
+}
+
+/**
+ * What a query merges or appends (`Table.NestedJoin`, `Table.Join`,
+ * `Table.FuzzyNestedJoin`, `Table.FuzzyJoin`, `Table.AddJoinColumn`,
+ * `Table.Combine`), every source each call reads, in order: a step is
+ * followed to where its rows come from (the warehouse table its navigation
+ * reaches, `dbo.Orders`), another table of the model or a shared query by its
+ * name (a shared query that navigates, by its warehouse table), else `a
+ * file`, `a native query`, `tables listed at run time` (a `Table.Combine`
+ * over a list it builds) or `its own rows` (the query's earlier steps, when
+ * they name no source). Undefined when it does neither.
+ */
+export function mCombinedSources(
+  m: string,
+  queries: ReadonlyMap<string, string> = new Map(),
+  tableNames: ReadonlySet<string> = new Set(),
+): { kind: 'merge' | 'append' | 'merge and append'; inputs: string[] } | undefined {
+  return combinedSourcesIn(m, mSourcesContext(queries, tableNames), 0);
+}
+
+/**
+ * What resolving one query's merge sources shares across the shared queries
+ * it reaches: each shared query is resolved once (`memo`), one that reads
+ * itself through others stops at its name (`visiting`), and the queries and
+ * tables an expression can start from are listed once, not per expression.
+ */
+interface MSourcesContext {
+  queries: ReadonlyMap<string, string>;
+  lowerTables: ReadonlySet<string>;
+  /** Shared queries that hold rows (not a parameter or a function), then tables with no query of their own, in that order. */
+  candidates: readonly string[];
+  /** Names (lower case) never followed: the table whose query this is. */
+  exclude: ReadonlySet<string>;
+  memo: Map<string, string[]>;
+  visiting: Set<string>;
+}
+
+/** Shared queries deeper than this are named, not followed. */
+const MAX_M_QUERY_NESTING = 16;
+
+function mSourcesContext(queries: ReadonlyMap<string, string>, tableNames: ReadonlySet<string>, exclude: ReadonlySet<string> = new Set()): MSourcesContext {
+  const candidates = [
+    ...[...queries].filter(([, text]) => !isMParameter(text) && !isMFunction(text)).map(([q]) => q),
+    ...[...tableNames].filter((t) => !queries.has(t)),
+  ].filter((q) => !exclude.has(q.toLowerCase()));
+  return { queries, lowerTables: new Set([...tableNames].map((t) => t.toLowerCase())), candidates, exclude, memo: new Map(), visiting: new Set() };
+}
+
+function combinedSourcesIn(m: string, ctx: MSourcesContext, nesting: number): { kind: 'merge' | 'append' | 'merge and append'; inputs: string[] } | undefined {
+  const { steps } = parseMLet(m);
+  const byName = new Map(steps.map((s) => [s.name, s.expr]));
+  const calls = steps.flatMap((s) => mCombineCalls(s.expr));
+  if (calls.length === 0) return undefined;
+  const memo = new Map<string, string[]>();
+  /** A shared query or table: a table by its name, a query by the warehouse table it navigates to, else its name. */
+  const query = (name: string, depth: number): string[] => {
+    const lower = name.toLowerCase();
+    if (ctx.lowerTables.has(lower) || ctx.exclude.has(lower) || depth > 4) return [name];
+    const text = ctx.queries.get(name);
+    if (text === undefined) return [name];
+    // Followed only above step depth 4, so remembered per side of it.
+    const key = `${name}\u0000${depth < 4}`;
+    const known = ctx.memo.get(key);
+    if (known) return known;
+    // A query that reads itself through others (Power BI refuses the cycle; a file can still hold one): named, not followed again.
+    if (ctx.visiting.has(name) || nesting >= MAX_M_QUERY_NESTING) return [name];
+    ctx.visiting.add(name);
+    let out: string[];
+    try {
+      const nested = combinedSourcesIn(text, ctx, nesting + 1);
+      if (nested && depth < 4) out = nested.inputs;
+      else {
+        const source = describeMSource(text, ctx.queries);
+        out = [source.kind === 'navigation' && source.table ? source.table : name];
+      }
+    } finally {
+      ctx.visiting.delete(name);
+    }
+    ctx.memo.set(key, out);
+    return out;
+  };
+  /** The steps an expression reads, each with the steps it reads, in step order: the text a navigation is spread over. */
+  const chain = (expr: string, seen = new Set<string>()): string => {
+    const parts: string[] = [];
+    for (const ref of mReferences(expr, byName.keys())) {
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      parts.push(chain(byName.get(ref) ?? '', seen), byName.get(ref) ?? '');
+    }
+    return [...parts, expr].join('\n');
+  };
+  const resolve = (expr: string, depth: number): string[] => {
+    const name = mName(expr);
+    if (name !== undefined && byName.has(name) && depth < 32) {
+      if (memo.has(name)) return memo.get(name)!;
+      memo.set(name, ['its own rows']);
+      const inner = mCombineCalls(byName.get(name)!);
+      const out = inner.length > 0 ? inputsOf(inner, depth + 1) : resolve(byName.get(name)!, depth + 1);
+      memo.set(name, out);
+      return out;
+    }
+    if (name !== undefined && !byName.has(name)) return query(name, depth);
+    const text = stripMComments(chain(expr));
+    if (NATIVE_QUERY.test(text)) return ['a native query'];
+    const table = mNavigationTable(text);
+    if (table) return [table];
+    if (FILE_SOURCE.test(text)) return ['a file'];
+    // An expression that starts from a shared query or another table (`Table.SelectColumns(Item, …)`); a parameter or a function is not a source.
+    const named = mReferences(expr, ctx.candidates.filter((q) => !byName.has(q)));
+    if (named.length > 0) return query(named[0], depth);
+    return ['its own rows'];
+  };
+  const inputsOf = (list: readonly MCombineCall[], depth: number): string[] => {
+    const out: string[] = [];
+    for (const call of list) {
+      if (call.dynamic) out.push('tables listed at run time');
+      for (const t of call.tables) for (const input of resolve(t, depth)) out.push(input);
+    }
+    return [...new Set(out)];
+  };
+  // A call nested in another step's call is reached through it: only the outermost calls count.
+  const inner = new Set(steps.flatMap((s) => mCombineCalls(s.expr).flatMap((c) => c.tables.map(mName).filter((n): n is string => !!n))));
+  const outer = steps.filter((s) => !inner.has(s.name) || mCombineCalls(s.expr).length === 0).flatMap((s) => mCombineCalls(s.expr));
+  const inputs = inputsOf(outer.length > 0 ? outer : calls, 0);
+  const kinds = new Set(calls.map((c) => c.kind));
+  return { kind: kinds.size > 1 ? 'merge and append' : kinds.has('merge') ? 'merge' : 'append', inputs };
+}
+
+/** Each table's source, resolved against the model's shared expressions, with what its query merges or appends. */
+function resolveSources(partitions: ReadonlyMap<SemanticModelTable, RawPartition | undefined>, expressions: ReadonlyMap<string, string>): void {
+  // A query may read another table's query by its name, as it reads a shared expression.
+  const queries = new Map(expressions);
+  const tableNames = new Set<string>();
+  for (const [table, raw] of partitions) {
+    tableNames.add(table.name);
+    if (raw?.type === 'm' && raw.text && !queries.has(table.name)) queries.set(table.name, raw.text);
+  }
+  // Listed once for the model: which queries hold rows (a regex over every query's text) does not change per table.
+  const shared = mSourcesContext(queries, tableNames);
+  for (const [table, raw] of partitions) {
+    const source = resolveSource(raw, expressions);
+    if (!source) continue;
+    if (raw?.type === 'm' && raw.text && mCombineCalls(raw.text).length > 0) {
+      // Its own query is never one of its sources.
+      const self = table.name.toLowerCase();
+      const ctx: MSourcesContext = { ...shared, candidates: shared.candidates.filter((q) => q.toLowerCase() !== self), exclude: new Set([self]), memo: new Map(), visiting: new Set() };
+      const combined = combinedSourcesIn(raw.text, ctx, 0);
+      if (combined && combined.inputs.length > 0) source.combined = combined;
+    }
+    table.source = source;
+  }
+}
+
+/** Whether a shared M expression is a function (`(x as number) => …`, or a `let` whose first step is one). */
+function isMFunction(text: string): boolean {
+  return /^\s*(?:let\s+(?:#"(?:[^"]|"")*"|[A-Za-z_][\w.]*)\s*=\s*)?\([^()]*\)\s*(?:as\s+[\w.]+\s*)?=>/.test(stripMComments(text));
 }
 
 /** Whether a shared M expression is a parameter (`… meta [IsParameterQuery=true]`). */
@@ -718,7 +964,8 @@ function countTmslTranslations(v: unknown): number {
   while (todo.length > 0) {
     const x = todo.pop();
     if (Array.isArray(x)) {
-      todo.push(...x);
+      // One push each: spreading a list of 100 000+ items into push() overflows the stack.
+      for (const y of x) todo.push(y);
     } else if (isObject(x)) {
       for (const [k, y] of Object.entries(x)) {
         if (/^translated(Caption|Description|DisplayFolder)$/.test(k) && textOf(y)) n++;
@@ -740,20 +987,63 @@ function withRefreshPolicy(partition: RawPartition | undefined, sourceExpression
   if (!sourceExpression?.trim()) return partition;
   if (partition && partition.type === 'm' && partition.text?.trim()) return partition;
   if (partition && partition.type !== 'policyrange' && partition.type !== '' && partition.type !== 'm') return partition;
-  return { type: 'm', text: sourceExpression, ...(partition?.line !== undefined ? { line: partition.line } : {}) };
+  return { type: 'm', text: sourceExpression, ...(partition?.line !== undefined ? { line: partition.line } : {}), ...(partition?.file ? { file: partition.file } : {}) };
 }
 
 function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticModelResult {
   const text = file.text.replace(/^﻿/, '');
   if (text.trim() === '') return { ok: false, problems: [{ file: file.path, message: 'The file is empty, so it holds no semantic model.' }] };
-  let json: unknown;
+  let parsed: ReturnType<typeof parseJsonWithLines>;
   try {
-    json = JSON.parse(text);
+    parsed = parseJsonWithLines(text);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    const line = jsonErrorLine(text, message);
+    const line = jsonErrorLineOf(e) ?? jsonErrorLine(text, message);
     return { ok: false, problems: [{ file: file.path, ...(line ? { line } : {}), message: `Not valid JSON: ${message}` }] };
   }
+  const { lines } = parsed;
+  const place = (obj: unknown, key?: string): JsonPlace => {
+    const line = (key !== undefined ? lines.keyLine(obj, key) : undefined) ?? lines.lineOf(obj);
+    return { file: file.path, ...(line !== undefined ? { line } : {}) };
+  };
+  return readTmslDatabase(parsed.value, { file: file.path, kind: 'tmsl', place, platformName });
+}
+
+/** Tabular Editor's Save to Folder: its files put back together as one database (`semanticModelFolder.ts`), then read as TMSL. */
+function readSaveToFolder(files: readonly SemanticModelFile[], platformName?: string): ReadSemanticModelResult {
+  const folder = readFolderModel(files);
+  const file = folder.databaseFile || files[0]?.path || '';
+  const result = readTmslDatabase(folder.database, {
+    file,
+    kind: 'folder',
+    place: (obj, key) => folder.place(obj, key) ?? { file },
+    platformName,
+    localTranslations: folder.localTranslations,
+    readLedger: folder.ledger,
+    readProblems: folder.problems,
+  });
+  return result;
+}
+
+interface TmslReadOptions {
+  /** The file problems with the whole model are reported against. */
+  file: string;
+  kind: SemanticModelKind;
+  /** Where an object (or one of its keys) is written. */
+  place: (obj: unknown, key?: string) => JsonPlace;
+  platformName?: string;
+  /** Translations kept on the objects themselves (Save to Folder's LocalTranslations), per culture. */
+  localTranslations?: ReadonlyMap<string, number>;
+  /** What reading the files recorded already (Save to Folder: files that did not read). */
+  readLedger?: readonly LedgerEntry[];
+  readProblems?: readonly SemanticModelProblem[];
+}
+
+/** A TMSL database (or a script around one), read into the model: `model.bim` and Save to Folder share it. */
+function readTmslDatabase(json: unknown, opts: TmslReadOptions): ReadSemanticModelResult {
+  const { place } = opts;
+  const fileName = baseName(opts.file);
+  const readProblems = [...(opts.readProblems ?? [])];
   // The model, or a TMSL script around a database.
   let database: Loose | undefined = isObject(json) ? json : undefined;
   // A TMSL script: `{ createOrReplace: { database } }`, `{ database }`, or a
@@ -776,35 +1066,45 @@ function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticM
   if (database) database = unwrap(database) ?? database;
   const model = database && isObject(database.model) ? database.model : undefined;
   if (!database || !model) {
-    return { ok: false, problems: [{ file: file.path, message: 'This .bim file has no "model" object, so it is not a TMSL semantic model.' }] };
+    return { ok: false, problems: [{ file: opts.file, message: 'This .bim file has no "model" object, so it is not a TMSL semantic model.' }] };
   }
   const warnings: string[] = [];
   const features: SemanticModelFeature[] = [];
-  const feature = (f: Omit<SemanticModelFeature, 'file'>): void => { features.push({ ...f, file: file.path }); };
+  const at = (obj: unknown, key?: string): Pick<SemanticModelFeature, 'file' | 'line'> => {
+    const p = place(obj, key);
+    return { file: p.file, ...(p.line !== undefined ? { line: p.line } : {}) };
+  };
+  const feature = (f: Omit<SemanticModelFeature, 'file' | 'line'>, obj: unknown, key?: string): void => { features.push({ ...f, ...at(obj, key) }); };
   const tables: SemanticModelTable[] = [];
   const partitions = new Map<SemanticModelTable, RawPartition | undefined>();
   const rawTables = arr(model.tables);
   rawTables.forEach((raw, i) => {
     if (!isObject(raw) || !str(raw.name)?.trim()) {
-      warnings.push(`Table ${i + 1} in ${baseName(file.path)} has no name, so it was skipped.`);
+      const p = place(raw);
+      warnings.push(`Table ${i + 1} in ${baseName(p.file) || fileName} has no name, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
       return;
     }
     const tableName = raw.name as string;
+    const tablePlace = place(raw);
     const rawPartitions = arr(raw.partitions).filter(isObject);
     const calculated = rawPartitions.some((p) => isObject(p.source) && str(p.source.type)?.toLowerCase() === 'calculated');
     const columns: SemanticModelColumn[] = [];
     arr(raw.columns).forEach((c, ci) => {
       if (!isObject(c) || !str(c.name)?.trim()) {
-        warnings.push(`Column ${ci + 1} of table ${tableName} in ${baseName(file.path)} has no name, so it was skipped.`);
+        const p = place(c);
+        warnings.push(`Column ${ci + 1} of table ${tableName} in ${baseName(p.file) || fileName} has no name, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
         return;
       }
       const type = str(c.type) as SemanticModelColumn['kind'] | undefined;
+      const columnPlace = place(c);
       const column: SemanticModelColumn = {
         name: c.name as string,
         dataType: str(c.dataType) ?? '',
         isKey: c.isKey === true,
         isHidden: c.isHidden === true,
         kind: type && COLUMN_KINDS.has(type) ? type : 'data',
+        ...(columnPlace.line !== undefined ? { line: columnPlace.line } : {}),
+        ...(columnPlace.file !== tablePlace.file ? { file: columnPlace.file } : {}),
       };
       const description = textOf(c.description);
       if (description) column.description = description;
@@ -819,19 +1119,27 @@ function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticM
       for (const setting of REPORT_COLUMN_SETTINGS) {
         const v = c[setting];
         if (v === undefined || v === null || v === false || v === '' || (setting === 'summarizeBy' && str(v)?.toLowerCase() === 'default')) continue;
-        feature({ kind: 'setting', name: setting, table: tableName, column: column.name });
+        feature({ kind: 'setting', name: setting, table: tableName, column: column.name }, c, setting);
       }
       for (const v of arr(c.variations)) {
         if (!isObject(v)) continue;
         const target = isObject(v.defaultHierarchy) ? str(v.defaultHierarchy.table) : undefined;
-        feature({ kind: 'variation', name: str(v.name) ?? 'Variation', table: tableName, column: column.name, ...(target ? { target } : {}) });
+        feature({ kind: 'variation', name: str(v.name) ?? 'Variation', table: tableName, column: column.name, ...(target ? { target } : {}) }, v);
       }
     });
     const measures: SemanticModelMeasure[] = [];
     for (const m of arr(raw.measures)) {
       if (!isObject(m) || !str(m.name)) continue;
       const description = textOf(m.description);
-      measures.push({ name: m.name as string, ...(description ? { description } : {}), ...(isObject(m.kpi) ? { kpi: true } : {}) });
+      const p = place(m);
+      measures.push({
+        name: m.name as string,
+        ...(description ? { description } : {}),
+        ...(isObject(m.kpi) ? { kpi: true } : {}),
+        ...(p.line !== undefined ? { line: p.line } : {}),
+        ...(p.file !== tablePlace.file ? { file: p.file } : {}),
+      });
+      if (isObject(m.kpi)) feature({ kind: 'kpi', name: m.name as string, table: tableName, column: m.name as string }, m);
     }
     const calculationGroup = isObject(raw.calculationGroup) ? raw.calculationGroup : undefined;
     const table: SemanticModelTable = {
@@ -842,30 +1150,34 @@ function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticM
       kind: calculationGroup ? 'calculationGroup' : calculated ? 'calculated' : 'table',
       columns,
       measures,
-      file: file.path,
+      file: tablePlace.file,
+      ...(tablePlace.line !== undefined ? { line: tablePlace.line } : {}),
     };
     if (calculationGroup) table.calculationItems = arr(calculationGroup.calculationItems).length;
     const description = textOf(raw.description);
     if (description) table.description = description;
     tables.push(table);
     const category = str(raw.dataCategory);
-    if (category && category.toLowerCase() === 'time') feature({ kind: 'dateTable', name: tableName, table: tableName });
-    else if (category) feature({ kind: 'setting', name: 'dataCategory', table: tableName });
+    if (category && category.toLowerCase() === 'time') feature({ kind: 'dateTable', name: tableName, table: tableName }, raw, 'dataCategory');
+    else if (category) feature({ kind: 'setting', name: 'dataCategory', table: tableName }, raw, 'dataCategory');
     for (const h of arr(raw.hierarchies)) {
-      if (isObject(h) && str(h.name)) feature({ kind: 'hierarchy', name: h.name as string, table: tableName, count: arr(h.levels).length });
+      if (isObject(h) && str(h.name)) feature({ kind: 'hierarchy', name: h.name as string, table: tableName, count: arr(h.levels).length }, h);
     }
     for (const c of arr(raw.calendars)) {
-      if (isObject(c) && str(c.name)) feature({ kind: 'calendar', name: c.name as string, table: tableName });
+      if (isObject(c) && str(c.name)) feature({ kind: 'calendar', name: c.name as string, table: tableName }, c);
     }
     const first = rawPartitions[0];
     const source = first && isObject(first.source) ? first.source : undefined;
     let partition: RawPartition | undefined;
     if (source) {
       const type = (str(source.type) ?? '').toLowerCase();
+      const p = place(first);
       partition = {
         type,
         ...(textOf(source.expression) ? { text: textOf(source.expression) } : textOf(source.query) ? { text: textOf(source.query) } : {}),
         ...(type === 'entity' ? { entity: { schema: str(source.schemaName), name: str(source.entityName) } } : {}),
+        ...(p.line !== undefined ? { line: p.line } : {}),
+        ...(p.file !== tablePlace.file ? { file: p.file } : {}),
       };
     }
     const policy = isObject(raw.refreshPolicy) ? textOf(raw.refreshPolicy.sourceExpression) : undefined;
@@ -875,13 +1187,15 @@ function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticM
   const relationships: SemanticModelRelationship[] = [];
   const rawRels = arr(model.relationships);
   rawRels.forEach((r, i) => {
+    const p = place(r);
+    const at = `${p.line !== undefined ? ` (${baseName(p.file) || fileName}, line ${p.line})` : ''}`;
     if (!isObject(r)) {
-      warnings.push(`Relationship ${i + 1} in ${baseName(file.path)} is not an object, so it was skipped.`);
+      warnings.push(`Relationship ${i + 1} in ${baseName(p.file) || fileName} is not an object, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
       return;
     }
     const ends = [r.fromTable, r.fromColumn, r.toTable, r.toColumn].map(str);
     if (ends.some((e) => !e)) {
-      warnings.push(`Relationship ${str(r.name) ?? i + 1} does not name both tables and columns, so it was skipped.`);
+      warnings.push(`Relationship ${str(r.name) ?? i + 1}${at} does not name both tables and columns, so it was skipped.`);
       return;
     }
     const rel: SemanticModelRelationship = {
@@ -892,88 +1206,106 @@ function readTmsl(file: SemanticModelFile, platformName?: string): ReadSemanticM
       fromCardinality: cardinality(r.fromCardinality, 'many'),
       toCardinality: cardinality(r.toCardinality, 'one'),
       isActive: r.isActive !== false,
+      file: p.file,
+      ...(p.line !== undefined ? { line: p.line } : {}),
     };
     if (str(r.name)) rel.name = r.name as string;
     if (str(r.crossFilteringBehavior)) rel.crossFilteringBehavior = r.crossFilteringBehavior as string;
+    if (r.relyOnReferentialIntegrity === true) rel.relyOnReferentialIntegrity = true;
+    if (str(r.securityFilteringBehavior)) rel.securityFilteringBehavior = r.securityFilteringBehavior as string;
     relationships.push(rel);
   });
 
   // Model-level features: roles, perspectives, cultures, data sources, shared expressions.
   for (const role of arr(model.roles)) {
     if (!isObject(role) || !str(role.name)) continue;
-    feature({ kind: 'role', name: role.name as string });
+    feature({ kind: 'role', name: role.name as string }, role);
     for (const tp of arr(role.tablePermissions)) {
       if (!isObject(tp) || !str(tp.name)) continue;
       const tableName = tp.name as string;
-      if (textOf(tp.filterExpression)?.trim()) feature({ kind: 'rowFilter', name: role.name as string, table: tableName });
-      if (str(tp.metadataPermission)?.toLowerCase() === 'none') feature({ kind: 'tablePermission', name: role.name as string, table: tableName });
+      if (textOf(tp.filterExpression)?.trim()) feature({ kind: 'rowFilter', name: role.name as string, table: tableName }, tp, 'filterExpression');
+      if (str(tp.metadataPermission)?.toLowerCase() === 'none') feature({ kind: 'tablePermission', name: role.name as string, table: tableName }, tp, 'metadataPermission');
       for (const cp of arr(tp.columnPermissions)) {
         // Only `none` hides the column (object-level security); `read` / `default` grant what the table does.
         if (isObject(cp) && str(cp.name) && str(cp.metadataPermission)?.toLowerCase() === 'none') {
-          feature({ kind: 'columnPermission', name: role.name as string, table: tableName, column: cp.name as string });
+          feature({ kind: 'columnPermission', name: role.name as string, table: tableName, column: cp.name as string }, cp);
         }
       }
     }
   }
   for (const p of arr(model.perspectives)) {
-    if (isObject(p) && str(p.name)) feature({ kind: 'perspective', name: p.name as string });
+    if (isObject(p) && str(p.name)) feature({ kind: 'perspective', name: p.name as string }, p);
   }
+  const local = new Map(opts.localTranslations ?? []);
   for (const c of arr(model.cultures)) {
     if (!isObject(c) || !str(c.name)) continue;
-    const n = countTmslTranslations(c.translations);
-    if (n > 0) feature({ kind: 'translation', name: c.name as string, count: n });
-    if (c.linguisticMetadata !== undefined && c.linguisticMetadata !== null) feature({ kind: 'linguisticMetadata', name: c.name as string });
+    const name = c.name as string;
+    const n = countTmslTranslations(c.translations) + (local.get(name) ?? 0);
+    local.delete(name);
+    if (n > 0) feature({ kind: 'translation', name, count: n }, c);
+    if (c.linguisticMetadata !== undefined && c.linguisticMetadata !== null) feature({ kind: 'linguisticMetadata', name }, c, 'linguisticMetadata');
   }
+  // Translations kept on the objects for a culture with no file of its own.
+  for (const [name, n] of local) if (n > 0) features.push({ kind: 'translation', name, count: n, file: opts.file });
   for (const d of arr(model.dataSources)) {
-    if (isObject(d) && str(d.name)) feature({ kind: 'dataSource', name: d.name as string });
+    if (isObject(d) && str(d.name)) feature({ kind: 'dataSource', name: d.name as string }, d);
   }
   const expressions = new Map<string, string>();
   for (const e of arr(model.expressions)) {
     if (!isObject(e) || !str(e.name)) continue;
     const body = textOf(e.expression) ?? '';
     expressions.set(e.name as string, body);
-    feature({ kind: isMParameter(body) ? 'parameter' : 'expression', name: e.name as string });
+    feature({ kind: isMParameter(body) ? 'parameter' : 'expression', name: e.name as string }, e);
   }
-  for (const [table, raw] of partitions) {
-    const source = resolveSource(raw, expressions);
-    if (source) table.source = source;
-  }
-  for (const t of tables) {
-    for (const m of t.measures) if (m.kpi) feature({ kind: 'kpi', name: m.name, table: t.name, column: m.name });
-  }
+  resolveSources(partitions, expressions);
   for (const f of arr(model.functions)) {
-    if (isObject(f) && str(f.name)) feature({ kind: 'function', name: f.name as string });
+    if (isObject(f) && str(f.name)) feature({ kind: 'function', name: f.name as string }, f);
   }
 
-  return finish(
+  const result = finish(
     {
-      name: chooseModelName(file.path, platformName, [str(database.name), str(model.name)]),
-      kind: 'tmsl',
+      name: chooseModelName(opts.file, opts.platformName, [str(database.name), str(model.name)]),
+      kind: opts.kind,
       tables,
       relationships,
       features,
+      ...(opts.readLedger?.length ? { ledger: [...opts.readLedger] } : {}),
     },
     warnings,
-    file.path,
+    opts.file,
+    readProblems,
   );
+  return result;
 }
 
-/** Shared checks: a model with no tables cannot be imported; duplicate table names keep the first. */
-function finish(model: SemanticModel, warnings: string[], file: string): ReadSemanticModelResult {
+/**
+ * Shared checks: a model with no tables cannot be imported (when files did
+ * not read, those are why); duplicate table names keep the first.
+ * `problems`: what did not read and was left out, each in `model.ledger`.
+ */
+function finish(model: SemanticModel, warnings: string[], file: string, problems: readonly SemanticModelProblem[] = []): ReadSemanticModelResult {
   if (model.tables.length === 0) {
-    return { ok: false, problems: [{ file, message: 'The semantic model has no tables.' }] };
+    return { ok: false, problems: problems.length > 0 ? [...problems] : [{ file, message: 'The semantic model has no tables.' }] };
   }
+  // What did not read left no column to draw: those problems are why nothing imports.
+  if (problems.length > 0 && !model.tables.some((t) => t.columns.length > 0)) return { ok: false, problems: [...problems] };
   const seen = new Set<string>();
+  const duplicates = createLedger();
   model.tables = model.tables.filter((t) => {
     const key = t.name.toLowerCase();
     if (seen.has(key)) {
       warnings.push(`Table "${t.name}" is defined more than once; the first definition was used.`);
+      // Its columns go with it: named where it is defined, so the second definition is not left unsaid.
+      duplicates.skipped('table', 'duplicate', 'table defined more than once', {
+        ...(t.file ? { file: t.file } : {}), ...(t.line !== undefined ? { line: t.line } : {}), table: t.name,
+      }, 'not read: the first definition was used');
       return false;
     }
     seen.add(key);
     return true;
   });
-  return { ok: true, model, warnings };
+  if (duplicates.entries.length > 0) model.ledger = [...(model.ledger ?? []), ...duplicates.entries];
+  return { ok: true, model, warnings, ...(problems.length > 0 ? { problems: [...problems] } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -994,6 +1326,8 @@ interface TmdlNode {
   indent: number;
   line: number;
   children: TmdlNode[];
+  /** It did not read (a name with no closing quote, a ``` block never closed): why, as {@link TMDL_BROKEN} says it. */
+  broken?: string;
 }
 
 /** Width of a line's leading whitespace: a tab is four columns. */
@@ -1031,7 +1365,30 @@ function readTmdlName(s: string): { name: string; rest: string } | undefined {
 interface TmdlParse {
   nodes: TmdlNode[];
   problems: SemanticModelProblem[];
+  /**
+   * Objects declared after a ``` block that is never closed (the rest of the
+   * file was read as its expression): named, so the ledger can say each one
+   * was not read. `table` is the top-level object they were under.
+   */
+  unread: Array<{ keyword: string; name: string; line: number; table?: string; from?: { table: string; column: string } }>;
+  /**
+   * Git merge conflicts left in the file (`<<<<<<<` … `>>>>>>>`): the line
+   * each starts on, the table it is in, and the lines of the side that was
+   * not read (`=======` to `>>>>>>>`, and a diff3 base from `|||||||`).
+   */
+  conflicts: Array<{ line: number; table?: string; skipped?: { from: number; to: number } }>;
 }
+
+/** A Git merge conflict marker line: `<<<<<<< HEAD`, `||||||| base` (diff3), `=======`, `>>>>>>> branch`. */
+const MERGE_CONFLICT_MARKER = /^(?:<{7}|>{7}|\|{7})(?:\s|$)|^={7}$/;
+
+/** Why a TMDL object did not read: the end of its ledger phrase (`TMDL column with no closing quote`), so each reason is its own line. */
+const TMDL_BROKEN = {
+  name: 'with no closing quote',
+  fence: 'with a ``` block never closed',
+  afterFence: 'after a ``` block never closed',
+  noName: 'with no name',
+} as const;
 
 /** Line breaks: LF, CRLF, or a lone CR (classic Mac line endings some editors still write). */
 const TMDL_LINE_BREAK = /\r\n|\r|\n/;
@@ -1051,6 +1408,10 @@ export function unquoteTmdlValue(value: string): string {
 function parseTmdl(file: SemanticModelFile): TmdlParse {
   const lines = file.text.replace(/^﻿/, '').split(TMDL_LINE_BREAK);
   const problems: SemanticModelProblem[] = [];
+  const unread: TmdlParse['unread'] = [];
+  const conflicts: TmdlParse['conflicts'] = [];
+  /** In a merge conflict: reading its first side (`ours`), or passing over the rest of it (`other`). */
+  let conflictSide: 'ours' | 'other' | undefined;
   const root: TmdlNode = { keyword: '', kind: 'object', name: '', indent: -1, line: 0, children: [] };
   const stack: TmdlNode[] = [root];
   let doc: string[] = [];
@@ -1058,6 +1419,28 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const trimmed = raw.trim();
+    const lineNo = i + 1;
+    if (MERGE_CONFLICT_MARKER.test(trimmed)) {
+      // Only the first side of a conflict is read (as the file stood on the branch it was merged into); the
+      // base and the other side are passed over and named, so nothing is read twice or as a copy of itself.
+      const open = conflicts[conflicts.length - 1];
+      if (trimmed.startsWith('<')) {
+        if (conflictSide === undefined) {
+          const table = [...stack].reverse().find((n) => n.keyword.toLowerCase() === 'table' && n.name);
+          conflicts.push({ line: lineNo, ...(table ? { table: table.name } : {}) });
+        }
+        conflictSide = 'ours';
+      } else if (trimmed.startsWith('>')) {
+        if (open?.skipped) open.skipped.to = lineNo;
+        conflictSide = undefined;
+      } else if (conflictSide !== undefined) {
+        if (open && !open.skipped) open.skipped = { from: lineNo, to: lines.length };
+        conflictSide = 'other';
+      }
+      doc = [];
+      continue;
+    }
+    if (conflictSide === 'other') continue;
     if (trimmed === '') continue;
     if (trimmed.startsWith('///')) {
       // `/// ` and the text as written: only the one space TMDL writes after the slashes goes, so an indented line stays indented.
@@ -1066,7 +1449,6 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
     }
     if (trimmed.startsWith('//')) continue;
     const indent = indentWidth(raw);
-    const lineNo = i + 1;
 
     const head = /^([A-Za-z_][A-Za-z0-9_]*)(.*)$/.exec(trimmed);
     if (!head) {
@@ -1088,7 +1470,13 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
       const named = readTmdlName(after.trim());
       if (!named) {
         problems.push({ file: file.path, line: lineNo, message: `"${keyword}" has a name that is not closed with a quote.` });
+        // Kept as a broken object, so what is indented under it stays with it (and is left out with it).
+        const partial = after.trim().replace(/^'/, '').replace(/\s*[=:].*$/, '').trim();
+        node = { keyword, kind: 'object', name: partial, indent, line: lineNo, children: [], broken: TMDL_BROKEN.name };
         doc = [];
+        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+        stack[stack.length - 1].children.push(node);
+        stack.push(node);
         continue;
       }
       node = { keyword, kind: 'object', name: named.name, indent, line: lineNo, children: [] };
@@ -1122,6 +1510,31 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
           }
           if (!closed) {
             problems.push({ file: file.path, line: lineNo, message: `The expression of ${keyword} ${node.name || ''} starts a \`\`\` block that is never closed.`.replace('  ', ' ') });
+            node.broken = TMDL_BROKEN.fence;
+            // The rest of the file was read as the expression: name what is declared in it, so none of it goes unsaid.
+            while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+            // The table what follows is declared in: the nearest one open here (inside a `createOrReplace`
+            // script too), until a later `table` line starts another or a line no deeper than it ends it.
+            const open = [...stack.slice(1), node].reverse().find((n) => n.keyword.toLowerCase() === 'table');
+            let context = open?.name;
+            let contextIndent = open?.indent ?? -1;
+            for (let k = i + 1; k < lines.length; k++) {
+              const decl = /^\s*(table|column|measure|relationship|partition|hierarchy|role|perspective|cultureInfo|expression|dataSource|function|calculationItem)\s+(.+)$/.exec(lines[k]);
+              const declared = decl ? readTmdlName(decl[2].trim()) : undefined;
+              if (!decl || !declared) continue;
+              const kw = decl[1];
+              const at = indentWidth(lines[k]);
+              if (kw === 'table') {
+                context = declared.name;
+                contextIndent = at;
+              } else if (context !== undefined && at <= contextIndent) {
+                context = undefined;
+              }
+              const table = kw === 'table' ? declared.name : context;
+              // A relationship is named by the column it starts from (its own name is a GUID).
+              const from = kw === 'relationship' ? tmdlFromColumnBelow(lines, k, at) : undefined;
+              unread.push({ keyword: kw, name: declared.name, line: k + 1, ...(table ? { table } : {}), ...(from ? { from } : {}) });
+            }
             i = lines.length;
           } else {
             i = j;
@@ -1161,7 +1574,48 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
     stack[stack.length - 1].children.push(node);
     stack.push(node);
   }
-  return { nodes: root.children, problems };
+  return { nodes: root.children, problems, unread, conflicts };
+}
+
+/** The `fromColumn:` of the object declared on line `k` (0-based) at `indent`, read from the lines indented under it. */
+function tmdlFromColumnBelow(lines: readonly string[], k: number, indent: number): { table: string; column: string } | undefined {
+  for (let m = k + 1; m < lines.length; m++) {
+    if (lines[m].trim() === '') continue;
+    if (indentWidth(lines[m]) <= indent) return undefined;
+    const p = /^\s*fromColumn\s*:\s*(.+)$/.exec(lines[m]);
+    if (p) return parseTmdlColumnRef(unquoteTmdlValue(p[1].trim()));
+  }
+  return undefined;
+}
+
+/**
+ * Why a node did not read: the node itself, or a ``` block under it (which
+ * took the rest of the file, so the node is incomplete). Undefined when it
+ * reads; then each object under it whose own name did not read (an
+ * annotation, a variation, a level…) is taken out of it and passed to
+ * `leftOut`, so the node is read without it: one broken annotation never
+ * costs its column, measure or relationship.
+ */
+function brokenIn(node: TmdlNode, leftOut: (n: TmdlNode) => void = () => {}): { node: TmdlNode; detail: string } | undefined {
+  if (node.broken) return { node, detail: node.broken };
+  const all = descendants(node);
+  const whole = all.find((d) => d.broken && d.broken !== TMDL_BROKEN.name);
+  if (whole) return { node: whole, detail: whole.broken! };
+  if (!all.some((d) => d.broken)) return undefined;
+  const todo: TmdlNode[] = [node];
+  while (todo.length > 0) {
+    const n = todo.pop()!;
+    const kept: TmdlNode[] = [];
+    for (const c of n.children) {
+      if (c.broken) leftOut(c);
+      else {
+        kept.push(c);
+        todo.push(c);
+      }
+    }
+    n.children = kept;
+  }
+  return undefined;
 }
 
 /** A property's value (`undefined` when absent; `'true'` for a bare flag). */
@@ -1257,9 +1711,25 @@ function descendants(node: TmdlNode): TmdlNode[] {
   return out;
 }
 
+/** The ledger unit and phrase for a TMDL object of this keyword that did not read. */
+function tmdlUnreadUnit(keyword: string, why: string): { unit: LedgerUnit; what: string } {
+  const k = keyword.toLowerCase();
+  const unit: LedgerUnit = k === 'table' ? 'table' : k === 'column' ? 'column' : k === 'relationship' ? 'relationship' : 'object';
+  return { unit, what: `TMDL ${keyword} ${why}` };
+}
+
+/** The ledger's detail for every TMDL object that did not read (the reason is in its phrase). */
+const TMDL_NOT_READ = 'not read';
+
+/**
+ * Read a TMDL definition, file by file: a file (or an object in it) that does
+ * not read is left out and recorded in the model's ledger with its file and
+ * line, and the rest is read. Only a model with no table left fails.
+ */
 function readTmdl(files: readonly SemanticModelFile[], platformName?: string): ReadSemanticModelResult {
   const problems: SemanticModelProblem[] = [];
   const warnings: string[] = [];
+  const ledger = createLedger();
   const tables: SemanticModelTable[] = [];
   const relationships: SemanticModelRelationship[] = [];
   const features: SemanticModelFeature[] = [];
@@ -1267,26 +1737,78 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
   const expressions = new Map<string, string>();
   let databaseName: string | undefined;
   let modelName: string | undefined;
+  /** One object that did not read: a problem entry naming it, at its line. */
+  const unreadObject = (file: SemanticModelFile, keyword: string, line: number, why: string, names: { table?: string; column?: string } = {}): void => {
+    const { unit, what } = tmdlUnreadUnit(keyword, why);
+    ledger.problem(unit, 'parseError', what, { file: file.path, line, ...names }, TMDL_NOT_READ);
+  };
 
   // Model order is the file order; sort by path so the result never depends on how the host listed them.
   const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const read: SemanticModelFile[] = [];
+  /** A whole file that did not read: under `tables/`, the table it is named after (`G%2FL Accounts.tmdl` holds `G/L Accounts`). */
+  const unreadFile = (file: SemanticModelFile, message: string, detail: string): void => {
+    problems.push({ file: file.path, message });
+    const stem = /(?:^|[\\/])tables[\\/]([^\\/]+)\.tmdl$/i.exec(file.path)?.[1];
+    let table: string | undefined;
+    try {
+      table = stem !== undefined ? decodeURIComponent(stem) : undefined;
+    } catch {
+      table = stem;
+    }
+    if (table) ledger.problem('table', 'parseError', `TMDL table file ${detail}`, { file: file.path, table }, TMDL_NOT_READ);
+    else ledger.problem('file', 'parseError', `TMDL file ${detail}`, { file: file.path }, TMDL_NOT_READ);
+  };
   for (const file of sorted) {
-    const parsed = parseTmdl(file);
+    const notText = notTextReason(file.text);
+    if (notText) {
+      unreadFile(file, notText, 'that is not UTF-8 text');
+      continue;
+    }
+    let parsed: TmdlParse;
+    try {
+      parsed = parseTmdl(file);
+    } catch {
+      unreadFile(file, 'This file could not be read as TMDL.', 'that is not TMDL');
+      continue;
+    }
+    read.push(file);
     problems.push(...parsed.problems);
     const at = (node: TmdlNode): Pick<SemanticModelFeature, 'file' | 'line'> => ({ file: file.path, line: node.line });
     for (const node of topObjects(parsed.nodes)) {
       const keyword = node.keyword.toLowerCase();
+      const isContainer = keyword === 'createorreplace' || keyword === 'create' || keyword === 'alter' || keyword === 'model' || keyword === 'database';
+      // A container's own objects are read one by one; any other object that did not read is left out whole.
+      const names = keyword === 'role' || keyword === 'perspective' || keyword === 'cultureinfo' || keyword === 'expression' || keyword === 'datasource' || keyword === 'function'
+        ? { table: node.name } : {};
+      // An object under it whose own name did not read (an annotation, a table permission) is left out alone, named under it.
+      const leftOut = (d: TmdlNode): void => unreadObject(file, d.keyword, d.line, d.broken!, names);
+      const broken = isContainer ? (node.broken ? { node, detail: node.broken } : undefined) : keyword === 'table' ? undefined : brokenIn(node, leftOut);
+      if (broken && !(node.kind === 'property')) {
+        if (keyword === 'relationship') {
+          const from = parseTmdlColumnRef(prop(node, 'fromColumn') ?? '');
+          unreadObject(file, node.keyword, broken.node.line, broken.detail, from ? { table: from.table, column: from.column } : {});
+        } else {
+          unreadObject(file, node.keyword, broken.node.line, broken.detail, names);
+        }
+        continue;
+      }
       if (keyword === 'database' && node.name) databaseName ??= node.name;
       else if (keyword === 'model' && node.name) modelName ??= node.name;
       else if (keyword === 'table') {
-        if (node.kind !== 'object' || !node.name.trim()) {
-          problems.push({ file: file.path, line: node.line, message: 'A table has no name.' });
+        if (node.broken) {
+          unreadObject(file, 'table', node.line, node.broken, node.name ? { table: node.name } : {});
           continue;
         }
-        const read = tmdlTable(node, file, warnings);
-        tables.push(read.table);
-        partitions.set(read.table, read.partition);
-        features.push(...read.features);
+        if (node.kind !== 'object' || !node.name.trim()) {
+          problems.push({ file: file.path, line: node.line, message: 'A table has no name.' });
+          unreadObject(file, 'table', node.line, TMDL_BROKEN.noName);
+          continue;
+        }
+        const table = tmdlTable(node, file, warnings, ledger);
+        tables.push(table.table);
+        partitions.set(table.table, table.partition);
+        features.push(...table.features);
       } else if (keyword === 'relationship') {
         const rel = tmdlRelationship(node, file, warnings);
         if (rel) relationships.push(rel);
@@ -1319,15 +1841,31 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
         features.push({ kind: 'function', name: node.name, ...at(node) });
       }
     }
+    for (const c of parsed.conflicts) {
+      const other = c.skipped ? `lines ${c.skipped.from}–${c.skipped.to}` : undefined;
+      problems.push({
+        file: file.path,
+        line: c.line,
+        message: `A Git merge conflict (<<<<<<< … >>>>>>>) is left in this file: only its first side was read${other ? `, and ${other} were not` : ''}. Resolve it and import again.`,
+      });
+      ledger.problem('file', 'parseError', 'TMDL merge conflict', { file: file.path, line: c.line, ...(c.table ? { table: c.table } : {}) },
+        other ? `only the first side read; ${other} not read` : 'only the first side read');
+    }
+    for (const u of parsed.unread) {
+      const k = u.keyword.toLowerCase();
+      // A relationship by the column it starts from; a column with its table; anything else by its table, or its own name.
+      const names = k === 'relationship'
+        ? (u.from ? { table: u.from.table, column: u.from.column } : {})
+        : k === 'column'
+          ? { ...(u.table ? { table: u.table } : {}), column: u.name }
+          : { table: u.table ?? u.name };
+      unreadObject(file, u.keyword, u.line, TMDL_BROKEN.afterFence, names);
+    }
   }
-  if (problems.length > 0) return { ok: false, problems };
-  for (const [table, raw] of partitions) {
-    const source = resolveSource(raw, expressions);
-    if (source) table.source = source;
-  }
+  resolveSources(partitions, expressions);
   // model.tmdl's `ref table …` lines give the model's own table order; tables it does not list follow, in file order.
   const order = new Map<string, number>();
-  for (const file of sorted) {
+  for (const file of read) {
     for (const line of file.text.split(TMDL_LINE_BREAK)) {
       const m = /^\s*ref\s+table\s+(.+)$/.exec(line);
       const named = m ? readTmdlName(m[1].trim()) : undefined;
@@ -1338,13 +1876,21 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
   tables.sort((a, b) => rank(a) - rank(b));
   const path = files[0]?.path ?? '';
   return finish(
-    { name: chooseModelName(path, platformName, [databaseName, modelName]), kind: 'tmdl', tables, relationships, features },
+    {
+      name: chooseModelName(path, platformName, [databaseName, modelName]),
+      kind: 'tmdl',
+      tables,
+      relationships,
+      features,
+      ...(ledger.entries.length > 0 ? { ledger: [...ledger.entries] } : {}),
+    },
     warnings,
     path,
+    problems,
   );
 }
 
-function tmdlTable(node: TmdlNode, file: SemanticModelFile, warnings: string[]): { table: SemanticModelTable; partition?: RawPartition; features: SemanticModelFeature[] } {
+function tmdlTable(node: TmdlNode, file: SemanticModelFile, warnings: string[], ledger: ImportLedger): { table: SemanticModelTable; partition?: RawPartition; features: SemanticModelFeature[] } {
   const columns: SemanticModelColumn[] = [];
   const measures: SemanticModelMeasure[] = [];
   const features: SemanticModelFeature[] = [];
@@ -1355,6 +1901,23 @@ function tmdlTable(node: TmdlNode, file: SemanticModelFile, warnings: string[]):
   let refreshSource: string | undefined;
   for (const child of node.children) {
     const k = child.keyword.toLowerCase();
+    // One object of the table that did not read is left out (and named); the rest of the table is read.
+    // An object under it whose own name did not read (an annotation) is left out alone, named under this child.
+    const broken = brokenIn(child, (d) => {
+      const { unit, what } = tmdlUnreadUnit(d.keyword, d.broken!);
+      ledger.problem(unit, 'parseError', what, {
+        file: file.path, line: d.line, table: node.name,
+        ...(k === 'column' && child.name ? { column: child.name } : {}),
+      }, TMDL_NOT_READ);
+    });
+    if (broken) {
+      const { unit, what } = tmdlUnreadUnit(child.keyword, broken.detail);
+      ledger.problem(unit, 'parseError', what, {
+        file: file.path, line: broken.node.line, table: node.name,
+        ...(k === 'column' && child.name ? { column: child.name } : {}),
+      }, TMDL_NOT_READ);
+      continue;
+    }
     if (k === 'column' && (child.kind !== 'object' || !child.name.trim())) {
       warnings.push(`A column in table ${node.name} (${baseName(file.path)}, line ${child.line}) has no name, so it was skipped.`);
     } else if (k === 'column' && child.kind === 'object') {
@@ -1460,6 +2023,11 @@ function tmdlRelationship(node: TmdlNode, file: SemanticModelFile, warnings: str
   };
   const cross = prop(node, 'crossFilteringBehavior');
   if (cross) rel.crossFilteringBehavior = cross.trim();
+  if (flag(node, 'relyOnReferentialIntegrity')) rel.relyOnReferentialIntegrity = true;
+  const security = prop(node, 'securityFilteringBehavior');
+  if (security?.trim()) rel.securityFilteringBehavior = security.trim();
+  rel.file = file.path;
+  rel.line = node.line;
   return rel;
 }
 
@@ -1561,6 +2129,8 @@ export const SEMANTIC_MODEL_META = {
   calculated: 'power_bi_calculated',
   /** The warehouse table a table's partition reads (`schema.item`), from its M navigation or Direct Lake entity. */
   source: 'power_bi_source',
+  /** Every source a table's query merges or appends, in order, comma-separated (`dbo.Orders, Customer`). */
+  sources: 'power_bi_sources',
 } as const;
 
 /** The sentence a calculated column's note carries. */
@@ -1596,6 +2166,13 @@ const FEATURE_LEDGER: Readonly<Record<Exclude<SemanticModelFeatureKind, 'setting
   kpi: { unit: 'object', what: 'KPI', detail: 'not kept, as its measure is not' },
   function: { unit: 'object', what: 'DAX function', detail: 'not kept: a user-defined DAX function, not data' },
   calendar: { unit: 'object', what: 'calendar', detail: 'not kept: a time-intelligence calendar over columns that were kept' },
+};
+
+/** How the DBML header names each format. */
+export const SEMANTIC_MODEL_KIND_LABELS: Readonly<Record<SemanticModelKind, string>> = {
+  tmsl: 'TMSL',
+  tmdl: 'TMDL',
+  folder: 'TMSL, Tabular Editor folder',
 };
 
 /** The role (the Ref's name) an inactive relationship gets. */
@@ -1732,9 +2309,11 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
   const warnings: string[] = [];
   const renamed: SemanticModelRename[] = [];
   const skippedCounts: SemanticModelSkippedCounts = { measures: 0, autoDateTables: 0, calculationGroups: 0, relationships: 0 };
-  const ledger = createLedger();
-  const where = (table: SemanticModelTable, line?: number, column?: string): { file?: string; line?: number; table: string; column?: string } => ({
-    ...(table.file ? { file: table.file } : {}),
+  // What reading the files recorded comes first: a file or object that did not read.
+  const ledger = createLedger(model.ledger ?? []);
+  /** A place in a table: its file (or `file`, where a column or partition has its own), the line, the table and column. */
+  const where = (table: SemanticModelTable, line?: number, column?: string, file?: string): { file?: string; line?: number; table: string; column?: string } => ({
+    ...(file ?? table.file ? { file: file ?? table.file } : {}),
     ...(line !== undefined ? { line } : {}),
     table: table.name,
     ...(column ? { column } : {}),
@@ -1747,6 +2326,8 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
   const skippedTables = new Map<string, 'auto-date' | 'calculation-group' | 'no-columns'>();
   /** Tables whose source the ledger names, after the model's features. */
   const sourced: SemanticModelTable[] = [];
+  /** The DAX of calculated tables and columns, named after the model's features. */
+  const daxLost: Array<() => void> = [];
   for (const table of model.tables) {
     if (isAutoDateTable(table)) {
       skippedTables.set(table.name.toLowerCase(), 'auto-date');
@@ -1794,9 +2375,10 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
       if (columnName !== column.name) renamed.push({ kind: 'column', table: name, from: column.name, to: columnName });
       columns.push({ source: column, name: columnName });
       byName.set(column.name.toLowerCase(), columnName);
+      if (column.kind === 'calculated') daxLost.push(() => ledger.lost('column', 'notDesign', 'DAX expression', where(table, column.line, column.name, column.file), "not kept: a calculated column's DAX (the column is kept)"));
       const kind = semanticDateTimeKind(column);
       if (kind === 'date' || kind === 'time') {
-        ledger.changed('type', 'inferred', `dateTime → ${kind}`, where(table, column.line, column.name), `because Power BI marks the column ${kind}-only`);
+        ledger.changed('type', 'inferred', `dateTime → ${kind}`, where(table, column.line, column.name, column.file), `because Power BI marks the column ${kind}-only`);
       }
     }
     if (table.measures.length > 0) {
@@ -1805,6 +2387,7 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
       skipped.push(`${n} measure${n === 1 ? '' : 's'} in ${table.name} (${table.measures.map((m) => m.name).join(', ')}): measures are DAX calculations, not columns.`);
       ledger.skipped('object', 'notDesign', 'measure', where(table), undefined, n);
     }
+    if (table.kind === 'calculated') daxLost.push(() => ledger.lost('table', 'notDesign', 'DAX expression', where(table, table.line), "not kept: a calculated table's DAX (the table is kept)"));
     const pk = new Set(columns.filter((c) => c.source.isKey).map((c) => c.name));
     const unique = new Set(columns.filter((c) => c.source.isUnique && !pk.has(c.name)).map((c) => c.name));
     const entry: ConvertedTable = { source: table, name, columns, byName, pk, fk: new Set(), unique };
@@ -1831,11 +2414,18 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
       : { table: f.name };
     ledger.lost(spec.unit, 'notDesign', spec.what, { ...at, ...named }, spec.detail, f.kind === 'translation' ? Math.max(1, f.count ?? 1) : 1);
   }
+  for (const record of daxLost) record();
   // Where each table's rows come from: kept when the M names a warehouse table, else named as not kept.
   for (const table of sourced) {
     if (!table.source) continue;
+    const combined = table.source.combined;
+    if (combined) {
+      // A merge or an append: every source it reads, kept in meta power_bi_sources.
+      ledger.changed('table', 'other', `Power Query ${combined.kind}`, where(table, table.source.line, undefined, table.source.file),
+        `reads ${listJoin(combined.inputs)}; all kept as ${SEMANTIC_MODEL_META.sources}`);
+    }
     if (table.source.kind === 'navigation' || table.source.kind === 'entity') {
-      ledger.changed('table', 'other', 'Power Query source', where(table, table.source.line), 'kept as the warehouse table it reads');
+      ledger.changed('table', 'other', 'Power Query source', where(table, table.source.line, undefined, table.source.file), 'kept as the warehouse table it reads');
     } else {
       const lost: Record<string, [string, string]> = {
         nativeQuery: ['native query', 'not kept: its SQL is not read'],
@@ -1844,7 +2434,7 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
         calculated: ['Power Query source', 'not kept: its M names no warehouse table'],
       };
       const [what, detail] = lost[table.source.kind] ?? lost.other;
-      ledger.lost('table', 'notDesign', what, where(table, table.source.line), detail);
+      ledger.lost('table', 'notDesign', what, where(table, table.source.line, undefined, table.source.file), detail);
     }
   }
 
@@ -1865,53 +2455,58 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
     if (!map.has(table)) map.set(table, new Set());
     map.get(table)!.add(column);
   };
-  /** Relationships that filter both ways: one warning for them all, so a model full of them does not bury the other notes. */
-  const bothDirections: string[] = [];
-  const skipRelationship = (line: string, table?: string): void => {
-    skippedCounts.relationships++;
-    skipped.push(line);
-    ledger.skipped('relationship', 'other', 'relationship', table ? { table } : undefined);
-  };
+  /** Where a relationship is written, named by its "many" end. */
+  const relWhere = (r: SemanticModelRelationship): { file?: string; line?: number; table: string; column: string } => ({
+    ...(r.file ? { file: r.file } : {}),
+    ...(r.line !== undefined ? { line: r.line } : {}),
+    table: r.fromTable,
+    column: r.fromColumn,
+  });
   for (const rel of model.relationships) {
+    const skipRelationship = (line: string): void => {
+      skippedCounts.relationships++;
+      skipped.push(line);
+      ledger.skipped('relationship', 'other', 'relationship', { ...(rel.file ? { file: rel.file } : {}), ...(rel.line !== undefined ? { line: rel.line } : {}), table: rel.fromTable });
+    };
     const label = `${rel.fromTable}[${rel.fromColumn}] → ${rel.toTable}[${rel.toColumn}]`;
     const skippedEnd = [rel.fromTable, rel.toTable].map((t) => skippedTables.get(t.toLowerCase()));
     if (skippedEnd.includes('auto-date')) {
       // Part of Auto date/time: the table's own line says so.
-      ledger.skipped('relationship', 'notDesign', 'auto date/time link', { table: rel.fromTable });
+      ledger.skipped('relationship', 'notDesign', 'auto date/time link', { ...(rel.file ? { file: rel.file } : {}), ...(rel.line !== undefined ? { line: rel.line } : {}), table: rel.fromTable });
       continue;
     }
     if (skippedEnd.includes('calculation-group')) {
-      skipRelationship(`Relationship ${label}: it joins a calculation group.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: it joins a calculation group.`);
       continue;
     }
     const noColumns = [rel.fromTable, rel.toTable].find((t) => skippedTables.get(t.toLowerCase()) === 'no-columns');
     if (noColumns) {
-      skipRelationship(`Relationship ${label}: ${noColumns} has no columns.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: ${noColumns} has no columns.`);
       continue;
     }
     const fromTable = bySource.get(rel.fromTable.toLowerCase());
     const toTable = bySource.get(rel.toTable.toLowerCase());
     if (!fromTable || !toTable) {
-      skipRelationship(`Relationship ${label}: the model has no table ${!fromTable ? rel.fromTable : rel.toTable}.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: the model has no table ${!fromTable ? rel.fromTable : rel.toTable}.`);
       continue;
     }
     const fromColumn = fromTable.byName.get(rel.fromColumn.toLowerCase());
     const toColumn = toTable.byName.get(rel.toColumn.toLowerCase());
     if (!fromColumn || !toColumn) {
-      skipRelationship(`Relationship ${label}: ${!fromColumn ? rel.fromTable : rel.toTable} has no column ${!fromColumn ? rel.fromColumn : rel.toColumn}.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: ${!fromColumn ? rel.fromTable : rel.toTable} has no column ${!fromColumn ? rel.fromColumn : rel.toColumn}.`);
       continue;
     }
     if (fromTable === toTable && fromColumn === toColumn) {
-      skipRelationship(`Relationship ${label}: it joins a column to itself.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: it joins a column to itself.`);
       continue;
     }
     if (!rel.isActive && !keepInactive) {
-      skipRelationship(`Inactive relationship ${label}.`, rel.fromTable);
+      skipRelationship(`Inactive relationship ${label}.`);
       continue;
     }
     const linkKey = [`${fromTable.name}.${fromColumn}`, `${toTable.name}.${toColumn}`].sort().join('|');
     if (seenLinks.has(linkKey)) {
-      skipRelationship(`Relationship ${label}: the same two columns are already joined.`, rel.fromTable);
+      skipRelationship(`Relationship ${label}: the same two columns are already joined.`);
       continue;
     }
     seenLinks.add(linkKey);
@@ -1933,16 +2528,14 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
       addTo(oneSideColumns, to.table, to.column);
       addTo(uniqueOnly, from.table, from.column);
     }
-    if (rel.crossFilteringBehavior && rel.crossFilteringBehavior.toLowerCase() === 'bothdirections') bothDirections.push(label);
+    // How the relationship filters, and what Power BI may assume of it: no place in a diagram, so named as not kept.
+    const cross = rel.crossFilteringBehavior?.trim().toLowerCase();
+    if (cross === 'bothdirections') ledger.lost('setting', 'noField', 'cross-filter direction', relWhere(rel), 'not kept: it filters both ways in Power BI');
+    const security = rel.securityFilteringBehavior?.trim().toLowerCase();
+    if (security === 'bothdirections') ledger.lost('setting', 'noField', 'security filter direction', relWhere(rel), 'not kept: row-level security filters across it both ways');
+    else if (security === 'none') ledger.lost('setting', 'noField', 'security filter direction', relWhere(rel), 'not kept: row-level security does not filter across it');
+    if (rel.relyOnReferentialIntegrity) ledger.lost('setting', 'noField', 'assume referential integrity', relWhere(rel), 'not kept: Power BI assumes every row has a match (inner joins)');
     refs.push({ from, to, op, inactive: !rel.isActive });
-  }
-
-  if (bothDirections.length === 1) {
-    warnings.push(`Relationship ${bothDirections[0]} filters in both directions in Power BI; ERD Studio does not record filter direction.`);
-  } else if (bothDirections.length > 1) {
-    const shown = bothDirections.slice(0, 3);
-    const more = bothDirections.length - shown.length;
-    warnings.push(`${bothDirections.length} relationships (${listJoin(more > 0 ? [...shown, `${more} more`] : shown)}) each filters in both directions in Power BI; ERD Studio does not record filter direction.`);
   }
 
   // Keys. Power BI requires the "one" end of a relationship to be unique: the
@@ -2004,7 +2597,7 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
 
   // The text.
   const out: string[] = [];
-  out.push(`// Converted by ERD Studio from the Power BI semantic model "${model.name.replace(/[\r\n]+/g, ' ')}" (${model.kind.toUpperCase()}).`);
+  out.push(`// Converted by ERD Studio from the Power BI semantic model "${model.name.replace(/[\r\n]+/g, ' ')}" (${SEMANTIC_MODEL_KIND_LABELS[model.kind]}).`);
   out.push(`// Measures, calculation groups and auto date/time tables are not included; original names are in meta_${SEMANTIC_MODEL_META.name}.`);
   out.push('');
   const projectName = opts.projectName ?? model.name;
@@ -2019,6 +2612,7 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
     if (t.source.isHidden) tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.hidden}: 'true'`);
     if (t.source.kind === 'calculated') tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.calculated}: 'true'`);
     if (t.source.source?.table && t.source.kind !== 'calculated') tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.source}: ${dbmlString(t.source.source.table)}`);
+    if (t.source.source?.combined && t.source.kind !== 'calculated') tableSettings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.sources}: ${dbmlString(t.source.source.combined.inputs.join(', '))}`);
     out.push(`Table ${ident(t.name)}${tableSettings.length ? ` [${tableSettings.join(', ')}]` : ''} {`);
     for (const c of t.columns) {
       const settings: string[] = [];
@@ -2027,14 +2621,15 @@ export function semanticModelToDbml(model: SemanticModel, opts: SemanticModelToD
       if (c.source.isNullable === false && !t.pk.has(c.name)) settings.push('not null');
       if (t.fk.has(c.name)) settings.push(`foreign_key: 'true'`);
       const calculated = c.source.kind === 'calculated';
-      const note = sentenceJoin([c.source.description ?? '', calculated ? CALCULATED_COLUMN_NOTE : '']);
+      // A description is kept exactly as written; with none, a calculated column's note says its DAX was not imported.
+      const note = c.source.description?.trim() ? sentenceJoin([c.source.description]) : calculated ? CALCULATED_COLUMN_NOTE : '';
       if (note) settings.push(`note: ${dbmlString(note)}`);
       if (c.name !== c.source.name) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.name}: ${dbmlString(c.source.name)}`);
       if (c.source.isHidden) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.hidden}: 'true'`);
       if (calculated) settings.push(`${DBML_RICH_META_PREFIX}${SEMANTIC_MODEL_META.calculated}: 'true'`);
       out.push(`  ${ident(c.name)} ${semanticColumnType(c.source)}${settings.length ? ` [${settings.join(', ')}]` : ''}`);
     }
-    const tableNote = sentenceJoin([t.source.description ?? '', t.source.kind === 'calculated' ? CALCULATED_TABLE_NOTE : '']);
+    const tableNote = t.source.description?.trim() ? sentenceJoin([t.source.description]) : t.source.kind === 'calculated' ? CALCULATED_TABLE_NOTE : '';
     if (tableNote) out.push(`  Note: ${dbmlString(tableNote)}`);
     out.push('}');
   }

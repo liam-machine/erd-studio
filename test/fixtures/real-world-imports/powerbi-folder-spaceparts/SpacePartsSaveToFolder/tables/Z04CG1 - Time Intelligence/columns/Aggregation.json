@@ -1,0 +1,15 @@
+{
+  "name": "Aggregation",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "Name",
+  "sortByColumn": "Ordinal",
+  "lineageTag": "b26f8f5f-3bdc-41ef-8b64-edef27cccd5d",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}
