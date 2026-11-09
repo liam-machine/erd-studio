@@ -1076,12 +1076,17 @@ function readTmslDatabase(json: unknown, opts: TmslReadOptions): ReadSemanticMod
   };
   const feature = (f: Omit<SemanticModelFeature, 'file' | 'line'>, obj: unknown, key?: string): void => { features.push({ ...f, ...at(obj, key) }); };
   const tables: SemanticModelTable[] = [];
+  /** What could not be read as an object of the model (no name, no ends): in the ledger, with its place. */
+  const unread = createLedger(opts.readLedger ?? []);
+  const prefix = opts.kind === 'tmsl' ? 'TMSL ' : '';
   const partitions = new Map<SemanticModelTable, RawPartition | undefined>();
   const rawTables = arr(model.tables);
   rawTables.forEach((raw, i) => {
     if (!isObject(raw) || !str(raw.name)?.trim()) {
+      // Left out, and said: a problem (with its columns, which go with it), in the ledger with its place.
       const p = place(raw);
-      warnings.push(`Table ${i + 1} in ${baseName(p.file) || fileName} has no name, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
+      readProblems.push({ file: p.file, ...(p.line !== undefined ? { line: p.line } : {}), message: `Table ${i + 1} has no name, so it was skipped (with its columns).` });
+      unread.problem('table', 'parseError', `${prefix}table with no name`, { file: p.file, ...(p.line !== undefined ? { line: p.line } : {}) }, 'not read');
       return;
     }
     const tableName = raw.name as string;
@@ -1093,6 +1098,7 @@ function readTmslDatabase(json: unknown, opts: TmslReadOptions): ReadSemanticMod
       if (!isObject(c) || !str(c.name)?.trim()) {
         const p = place(c);
         warnings.push(`Column ${ci + 1} of table ${tableName} in ${baseName(p.file) || fileName} has no name, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
+        unread.problem('column', 'parseError', `${prefix}column with no name`, { file: p.file, ...(p.line !== undefined ? { line: p.line } : {}), table: tableName }, 'not read');
         return;
       }
       const type = str(c.type) as SemanticModelColumn['kind'] | undefined;
@@ -1189,13 +1195,16 @@ function readTmslDatabase(json: unknown, opts: TmslReadOptions): ReadSemanticMod
   rawRels.forEach((r, i) => {
     const p = place(r);
     const at = `${p.line !== undefined ? ` (${baseName(p.file) || fileName}, line ${p.line})` : ''}`;
+    const where = { file: p.file, ...(p.line !== undefined ? { line: p.line } : {}) };
     if (!isObject(r)) {
       warnings.push(`Relationship ${i + 1} in ${baseName(p.file) || fileName} is not an object, so it was skipped${p.line !== undefined ? ` (line ${p.line})` : ''}.`);
+      unread.problem('relationship', 'parseError', `${prefix}relationship that is not an object`, where, 'not read');
       return;
     }
     const ends = [r.fromTable, r.fromColumn, r.toTable, r.toColumn].map(str);
     if (ends.some((e) => !e)) {
       warnings.push(`Relationship ${str(r.name) ?? i + 1}${at} does not name both tables and columns, so it was skipped.`);
+      unread.problem('relationship', 'parseError', `${prefix}relationship without both ends`, { ...where, ...(ends[0] ? { table: ends[0] } : {}) }, 'not read');
       return;
     }
     const rel: SemanticModelRelationship = {
@@ -1269,7 +1278,7 @@ function readTmslDatabase(json: unknown, opts: TmslReadOptions): ReadSemanticMod
       tables,
       relationships,
       features,
-      ...(opts.readLedger?.length ? { ledger: [...opts.readLedger] } : {}),
+      ...(unread.entries.length ? { ledger: [...unread.entries] } : {}),
     },
     warnings,
     opts.file,
@@ -1920,6 +1929,7 @@ function tmdlTable(node: TmdlNode, file: SemanticModelFile, warnings: string[], 
     }
     if (k === 'column' && (child.kind !== 'object' || !child.name.trim())) {
       warnings.push(`A column in table ${node.name} (${baseName(file.path)}, line ${child.line}) has no name, so it was skipped.`);
+      ledger.problem('column', 'parseError', 'TMDL column with no name', { file: file.path, line: child.line, table: node.name }, TMDL_NOT_READ);
     } else if (k === 'column' && child.kind === 'object') {
       const calculatedColumn = child.value !== undefined && child.value !== '';
       const column: SemanticModelColumn = {

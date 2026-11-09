@@ -490,6 +490,14 @@ interface Context {
   erdStudioExport: boolean;
   /** ERD Studio's plain (v1) export: a one-to-one's first end is the FK. */
   erdStudioPlainExport: boolean;
+  /**
+   * Keys the source itself declared, read back from an export's `meta_json`
+   * (a column's `unique`, a table's unique indexes by their columns): a
+   * one-to-one's `unique` that is one of these is the source's, not the
+   * export's addition, so it stays (see `dropOneToOneUniques`).
+   */
+  declaredUnique: WeakSet<object>;
+  declaredUniqueIndexes: WeakMap<object, Set<string>>;
 }
 
 /**
@@ -520,7 +528,10 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     layoutProblems: [...(input.layout?.problems ?? [])],
     ledger: [],
   };
-  const ctx: Context = { report, erdStudioExport: model.erdStudioExport, erdStudioPlainExport: model.erdStudioPlainExport === true };
+  const ctx: Context = {
+    report, erdStudioExport: model.erdStudioExport, erdStudioPlainExport: model.erdStudioPlainExport === true,
+    declaredUnique: new WeakSet(), declaredUniqueIndexes: new WeakMap(),
+  };
 
   const names = planTableNames(model.tables, input.library, ctx);
   const planned: PlannedTable[] = model.tables.map((dbml, i) => planTable(dbml, names[i], input.library, ctx));
@@ -601,7 +612,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
   // with a unique index), which the relationship already says: that is not kept in
   // meta. Any other file declared that key itself, so it stays (a SQL conversion's
   // `UNIQUE` on a one-to-one FK is a key of the source, not an export artefact).
-  if (model.erdStudioExport) dropOneToOneUniques(planned, relationships);
+  if (model.erdStudioExport) dropOneToOneUniques(planned, relationships, ctx);
   report.keptInMeta = newTables.reduce((n, t) => n + (hasDbmlMeta(t.meta) ? 1 : 0)
     + (t.columns ?? []).filter((c) => hasDbmlMeta(c.meta)).length, 0);
   report.relationships = countLinks(relationships);
@@ -657,7 +668,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
  * Take out the `unique` a rich export adds to a one-to-one's FK column, or
  * the unnamed unique index it adds over a composite one's columns.
  */
-function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: readonly Relationship[]): void {
+function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: readonly Relationship[], ctx: Pick<Context, 'declaredUnique' | 'declaredUniqueIndexes'>): void {
   const groups = new Map<string, Relationship[]>();
   for (const rel of relationships) {
     if (rel.cardinality !== 'one-to-one') continue;
@@ -670,7 +681,7 @@ function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: re
     if (members.length === 1) {
       const column = table.columns?.find((c) => c.name === members[0].fromColumn);
       const extras = dbmlMetaOf(column?.meta);
-      if (column && extras?.unique === true) {
+      if (column && extras?.unique === true && !ctx.declaredUnique.has(column)) {
         delete extras.unique;
         column.meta = tidyDbmlMeta(column.meta!);
         if (Object.keys(column.meta).length === 0) delete column.meta;
@@ -680,6 +691,10 @@ function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: re
     const extras = dbmlMetaOf(table.meta);
     if (!extras || !Array.isArray(extras.indexes)) continue;
     const wanted = members.map((m) => normaliseName(m.fromColumn)).sort().join('\u0000');
+    // The source's own unique index over these columns (in meta_json) is a key, not the export's addition:
+    // only a second copy of it, the one the export wrote for the one-to-one, goes.
+    const copies = extras.indexes.filter((i) => isBareUniqueIndexOver(i, wanted)).length;
+    if (ctx.declaredUniqueIndexes.get(table)?.has(wanted) && copies < 2) continue;
     const at = extras.indexes.findIndex((i) => {
       if (!i || typeof i !== 'object' || Array.isArray(i)) return false;
       const keys = Object.keys(i).sort().join(',');
@@ -692,6 +707,27 @@ function dropOneToOneUniques(planned: readonly PlannedTable[], relationships: re
     table.meta = tidyDbmlMeta(table.meta!);
     if (Object.keys(table.meta).length === 0) delete table.meta;
   }
+}
+
+/** A unique index with no name, type or note over exactly `wanted` (normalised names, sorted, NUL-joined): what an export adds. */
+function isBareUniqueIndexOver(i: unknown, wanted: string): boolean {
+  if (!i || typeof i !== 'object' || Array.isArray(i)) return false;
+  const index = i as Record<string, unknown>;
+  const keys = Object.keys(index).sort().join(',');
+  const cols = Array.isArray(index.columns) ? index.columns.map((c) => normaliseName(String(c))).sort().join('\u0000') : '';
+  return keys === 'columns,unique' && index.unique === true && cols === wanted;
+}
+
+/** The unique indexes `meta` (an export's `meta_json`) declares, each as its normalised column names, sorted, NUL-joined. */
+function declaredUniqueIndexKeys(meta: Meta): Set<string> {
+  const out = new Set<string>();
+  const indexes = dbmlMetaOf(meta)?.indexes;
+  if (!Array.isArray(indexes)) return out;
+  for (const i of indexes) {
+    if (!i || typeof i !== 'object' || Array.isArray(i) || i.unique !== true || i.pk === true || !Array.isArray(i.columns)) continue;
+    out.add(i.columns.map((c) => normaliseName(String(c))).sort().join('\u0000'));
+  }
+  return out;
 }
 
 /** `meta.dbml` when it is a map. */
@@ -959,6 +995,8 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   if (Object.keys(tableUnknown).length > 0) tableExtras.properties = tableUnknown;
 
   if (Object.keys(rationale).length > 0) table.rationale = rationale;
+  const declared = declaredUniqueIndexKeys(meta);
+  if (declared.size > 0) ctx.declaredUniqueIndexes.set(table, declared);
   meta = withDbmlMeta(meta, tableExtras);
   if (Object.keys(meta).length > 0) table.meta = meta;
   return { dbml, name, table, reused: false, columns, primaryKey };
@@ -1013,6 +1051,8 @@ function planColumn(field: DbmlField, name: string, label: string, ctx: Context)
     }
   }
 
+  // A `unique` the export's meta_json carries is the source's own key (see dropOneToOneUniques).
+  if (dbmlMetaOf(meta)?.unique === true) ctx.declaredUnique.add(column);
   const extras: Record<string, MetaValue> = {};
   if (name !== field.name) extras.name = field.name;
   if (field.notNull) extras.not_null = true;
