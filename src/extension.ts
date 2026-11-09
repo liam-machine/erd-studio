@@ -179,6 +179,7 @@ import {
 } from './services/importGuide';
 import { ImportGuidePanel } from './providers/ImportGuidePanel';
 import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemanticModel, type ImportSemanticModelDeps } from './commands/importSemanticModel';
+import { SHOW_IMPORT_REPORT_COMMAND, showImportReport } from './commands/showImportReport';
 import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleDraft } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
@@ -803,6 +804,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showImportGuide',
   'erdStudio.showMeAround',
   'erdStudio.customiseFields',
+  'erdStudio.showImportReport',
 ]);
 
 /**
@@ -3726,6 +3728,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       const deps = semanticModelDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
       await (isQuickImportArg(arg) ? quickImportSemanticModel : importSemanticModel)(deps);
     }),
+    // Show Import Report: the last import's ledger, grouped and counted, read-only
+    // (src/services/importReport.ts). Linked from the draft's banner, the toast
+    // after a Keep that left tables out and the imports' failure messages.
+    vscode.commands.registerCommand(SHOW_IMPORT_REPORT_COMMAND, () => showImportReport()),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
       async (layerArg?: Layer | { type: 'layer'; layer: Layer }) => {

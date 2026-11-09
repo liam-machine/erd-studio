@@ -304,3 +304,10 @@ export function savedOptionalNote(requiredCount: number, total?: number): string
   const rest = others > 0 ? `; the other ${others.toLocaleString('en-US')} may be empty` : '';
   return `Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the source, ${required}${rest}.`;
 }
+
+/** A unit's singular and plural noun (`column`, `columns`), for other renderers of the ledger (the import report). */
+export const LEDGER_UNIT_NOUNS: Readonly<Record<LedgerUnit, readonly [string, string]>> = UNIT_NOUNS;
+/** What each cause says (`not in the SQL grammar`; `other` says nothing), for other renderers of the ledger (the import report). */
+export const LEDGER_CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = CAUSE_PHRASES;
+/** What each outcome says when an entry has no `detail` (`not kept`, `rewritten so it reads`). */
+export const LEDGER_OUTCOME_PHRASES: Readonly<Record<LedgerOutcome, string>> = OUTCOME_PHRASES;
