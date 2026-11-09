@@ -169,10 +169,47 @@ describe('the cards', () => {
   });
 });
 
+describe('getting the DDL out', () => {
+  const SOURCES = ['databricks', 'snowflake', 'powerBi', 'sqlServer', 'postgres', 'mysql'] as const;
+
+  it('is one step per source, shown on its own (never "1."), with no numbered list of alternatives', () => {
+    const p = page(BLANK);
+    for (const id of SOURCES) {
+      const card = p.doc.querySelector(`[data-card="${id}"]`)!;
+      expect(card.querySelectorAll('.ig-step'), id).toHaveLength(1);
+      expect(card.querySelector('.ig-step--only'), id).not.toBeNull();
+      expect(card.querySelector('ol, li'), id).toBeNull();
+    }
+    // No card in any window numbers a lone step, and none lists alternatives as steps.
+    for (const ctx of [NOFOLDER, BLANK, DBT]) {
+      for (const list of page(ctx).doc.querySelectorAll('.ig-steps')) expect(list.querySelectorAll(':scope > li').length).toBeGreaterThan(1);
+    }
+  });
+
+  it('is at schema or database grain, never one table', () => {
+    const p = page(BLANK);
+    const text = p.text;
+    expect(text).not.toMatch(/One table|<table>/);
+    expect(p.doc.querySelector('[data-card="databricks"] [data-snippet="databricksSchema"]')).not.toBeNull();
+    expect(p.doc.querySelector('[data-card="snowflake"] .ig-step .ig-snippet__code')?.textContent).toBe("SELECT GET_DDL('SCHEMA', '<database>.<schema>');");
+  });
+
+  it('puts an alternative or a fallback in a quiet note after the step, not in a second step', () => {
+    const p = page(BLANK);
+    const notes = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-note`)].map((n) => n.textContent);
+    expect(notes('snowflake')).toEqual(["For a whole database: SELECT GET_DDL('DATABASE', '<database>');"]);
+    expect(notes('powerBi')).toEqual(['No such option? Turn on Power BI Project (.pbip) save option in File → Options and settings → Options → Preview features, then restart Power BI Desktop.']);
+    expect(notes('dbml')).toEqual(['Another DBML tool: save or export the .dbml file into this folder.']);
+    for (const note of p.doc.querySelectorAll('.ig-note')) {
+      expect(note.closest('li.ig-step, .ig-step')).toBeNull();
+      expect(note.querySelector('[data-action]')).toBeNull();
+    }
+  });
+});
+
 describe('the Copy buttons', () => {
   it('copy exactly these commands', () => {
     expect(IMPORT_GUIDE_SNIPPETS).toEqual({
-      databricksTable: 'SHOW CREATE TABLE <catalog>.<schema>.<table>;',
       databricksSchema:
         'catalog, schema = "main", "sales"  # your catalog and schema\n' +
         'tables = spark.sql(f"""\n' +
@@ -183,7 +220,6 @@ describe('the Copy buttons', () => {
         '    ddl = spark.sql(f"SHOW CREATE TABLE `{catalog}`.`{schema}`.`{t.table_name}`").first()[0]\n' +
         '    print(ddl.rstrip().rstrip(";") + ";\\n")',
       snowflakeSchema: "SELECT GET_DDL('SCHEMA', '<database>.<schema>');",
-      snowflakeDatabase: "SELECT GET_DDL('DATABASE', '<database>');",
       postgres: 'pg_dump --schema-only --no-owner --no-privileges -d <database> -f schema.sql',
       mysql: 'mysqldump --no-data --result-file=schema.sql <database>',
     });
@@ -254,7 +290,7 @@ describe('the page', () => {
     const p = page(BLANK);
     p.click('[data-card="databricks"] [data-action="run"]');
     p.click('[data-card="databricks"] [data-action="copy"]');
-    expect(p.posted).toEqual([{ type: 'run', action: 'databricks' }, { type: 'copy', snippet: 'databricksTable' }]);
+    expect(p.posted).toEqual([{ type: 'run', action: 'databricks' }, { type: 'copy', snippet: 'databricksSchema' }]);
     expect(p.doc.querySelector('[data-card="databricks"] [data-action="copy"]')?.textContent).toBe('Copied');
     for (const message of p.posted) expect(isImportGuideToHost(message)).toBe(true);
   });

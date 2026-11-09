@@ -90,7 +90,6 @@ export type ImportGuideAction = (typeof IMPORT_GUIDE_ACTIONS)[number];
 
 /** The text each Copy button copies, exactly. */
 export const IMPORT_GUIDE_SNIPPETS = {
-  databricksTable: 'SHOW CREATE TABLE <catalog>.<schema>.<table>;',
   databricksSchema: [
     'catalog, schema = "main", "sales"  # your catalog and schema',
     'tables = spark.sql(f"""',
@@ -102,7 +101,6 @@ export const IMPORT_GUIDE_SNIPPETS = {
     '    print(ddl.rstrip().rstrip(";") + ";\\n")',
   ].join('\n'),
   snowflakeSchema: "SELECT GET_DDL('SCHEMA', '<database>.<schema>');",
-  snowflakeDatabase: "SELECT GET_DDL('DATABASE', '<database>');",
   postgres: 'pg_dump --schema-only --no-owner --no-privileges -d <database> -f schema.sql',
   mysql: 'mysqldump --no-data --result-file=schema.sql <database>',
 } as const satisfies Record<string, string>;
@@ -114,10 +112,18 @@ export interface ImportGuideStep {
   snippet?: ImportGuideSnippet;
 }
 
-/** A part of a card: its steps and the button that imports what they made. */
+/**
+ * A part of a card: its steps, any notes, and the button that imports what
+ * they made. Steps are consecutive actions: one step shows on its own, never
+ * as "1."; only two or more are numbered. An alternative or a fallback (a
+ * whole database instead of a schema, an option Power BI hides) is a note,
+ * shown quietly after the steps, never a numbered step. Getting the DDL out
+ * is one step, at schema or database grain, never one table at a time.
+ */
 export interface ImportGuideSection {
   heading?: string;
   steps: readonly ImportGuideStep[];
+  notes?: readonly string[];
   action: ImportGuideAction;
 }
 
@@ -248,11 +254,10 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   databricks: {
     id: 'databricks',
     title: 'Databricks (Unity Catalog)',
-    what: 'Export the CREATE TABLE statements of your tables. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships.',
+    what: 'Export the CREATE TABLE statements of a whole schema in one notebook cell. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships.',
     sections: [{
       steps: [
-        { text: 'One table: run this in a notebook or the SQL editor, and copy the result into a `.sql` file in this folder.', snippet: 'databricksTable' },
-        { text: 'A whole schema: run this in a Python notebook cell, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
+        { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
       ],
       action: 'databricks',
     }],
@@ -264,8 +269,8 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [{
       steps: [
         { text: 'Run this in a worksheet, and copy the result into a `.sql` file in this folder.', snippet: 'snowflakeSchema' },
-        { text: 'Or a whole database:', snippet: 'snowflakeDatabase' },
       ],
+      notes: ["For a whole database: `SELECT GET_DDL('DATABASE', '<database>');`"],
       action: 'snowflake',
     }],
   },
@@ -276,8 +281,8 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [{
       steps: [
         { text: 'In Power BI Desktop, choose File → Save as, pick Power BI project files (`*.pbip`), and save it in this folder.' },
-        { text: 'No such option? Turn on Power BI Project (.pbip) save option in File → Options and settings → Options → Preview features, then restart Power BI Desktop.' },
       ],
+      notes: ['No such option? Turn on Power BI Project (.pbip) save option in File → Options and settings → Options → Preview features, then restart Power BI Desktop.'],
       action: 'powerBi',
     }],
   },
@@ -338,8 +343,8 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [{
       steps: [
         { text: 'dbdiagram.io: copy all the code from the editor into a file such as `model.dbml` in this folder.' },
-        { text: 'Another DBML tool: save or export the `.dbml` file into this folder.' },
       ],
+      notes: ['Another DBML tool: save or export the `.dbml` file into this folder.'],
       action: 'dbml',
     }],
   },
@@ -350,8 +355,8 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [{
       steps: [
         { text: 'Generate the DDL for PostgreSQL, MySQL, SQL Server, Snowflake or Databricks (or export DBML), save it in this folder, then pick it in Import….' },
-        { text: 'Oracle, BigQuery, Amazon Redshift and SQLite: save the CREATE TABLE scripts in this folder (a SQL*Plus script, `INFORMATION_SCHEMA.TABLES.ddl`, `SHOW TABLE` output, a `.schema` dump), then pick them in Import….' },
       ],
+      notes: ['Oracle, BigQuery, Amazon Redshift and SQLite: save the CREATE TABLE scripts in this folder (a SQL*Plus script, `INFORMATION_SCHEMA.TABLES.ddl`, `SHOW TABLE` output, a `.schema` dump), then pick them in Import….'],
       action: 'otherTools',
     }],
   },
@@ -500,6 +505,8 @@ body {
 .ig-section__heading { margin: 0 0 6px; font-weight: 600; }
 .ig-steps { margin: 0 0 10px; padding: 0 0 0 20px; }
 .ig-step { margin: 0 0 8px; line-height: 1.5; }
+.ig-step--only { margin: 0 0 10px; }
+.ig-note { margin: 0 0 10px; line-height: 1.5; font-size: 0.95em; color: var(--vscode-descriptionForeground); }
 .ig-code {
   font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
   padding: 0 3px; border-radius: 3px; background: var(--vscode-textCodeBlock-background);
@@ -542,19 +549,27 @@ const SCRIPT = `
 })();
 `;
 
-function renderStep(step: ImportGuideStep): string {
-  const snippet = step.snippet
+function renderSnippet(step: ImportGuideStep): string {
+  return step.snippet
     ? `<div class="ig-snippet"><pre class="ig-snippet__code"><code>${escapeHtml(IMPORT_GUIDE_SNIPPETS[step.snippet])}</code></pre>` +
       `<button class="ig-btn ig-btn--secondary ig-btn--copy" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`
     : '';
-  return `<li class="ig-step">${inline(step.text)}${snippet}</li>`;
+}
+
+/** One step stands on its own (no "1."); only consecutive steps are a numbered list. Notes follow, quietly. */
+function renderSteps(section: ImportGuideSection): string {
+  const steps = section.steps.length === 1
+    ? `<div class="ig-step ig-step--only">${inline(section.steps[0].text)}${renderSnippet(section.steps[0])}</div>`
+    : `<ol class="ig-steps">${section.steps.map((step) => `<li class="ig-step">${inline(step.text)}${renderSnippet(step)}</li>`).join('')}</ol>`;
+  const notes = (section.notes ?? []).map((note) => `<p class="ig-note">${inline(note)}</p>`).join('');
+  return steps + notes;
 }
 
 function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | undefined): string {
   const sections = card.sections.map((section) => `
       <div class="ig-section">${section.heading ? `
         <h3 class="ig-section__heading">${escapeHtml(section.heading)}</h3>` : ''}
-        <ol class="ig-steps">${section.steps.map(renderStep).join('')}</ol>
+        ${renderSteps(section)}
         <button class="ig-btn${lead ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(importGuideActionLabel(section.action, intent))}</button>
       </div>`).join('');
   return `

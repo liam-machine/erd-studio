@@ -1,0 +1,270 @@
+# 2.0 launch post (VARIANT=launch): the LinkedIn feed video for ERD Studio 2.0. Not committed as
+# media: the render lives in renders/ (gitignored) and is uploaded by hand.
+#
+# The story (Liam, 2026-11-10), the pro cut's arc (script.yaml) with 2.0 facts, the interesting
+# part first and getting started last:
+#   THE PROBLEM  we've built the data model backwards for decades: drawn for the business in a
+#                separate tool, developers work backwards from the picture, it drifts; and an AI
+#                can read the SQL but not the design, so it guesses.
+#   THE FIX      flip it: the model in the repo as DBML (an open format) next to the SQL; ERD
+#                Studio draws it in VS Code and edits go both ways; by hand or with your AI (a
+#                built-in skill); a real 2,000-table diagram with its lines routed in the
+#                background and the hover flow; one pull request for design + code; ERD Studio
+#                for Confluence for the business.
+#   GET STARTED  already have a model? (the reverse-engineering nod lives here) every source the
+#                import reads on one still logo wall; the DDL out in one step at schema grain
+#                (Snowflake GET_DDL, pg_dump); a draft first; dbt as an add-on (Compare); free to
+#                use in VS Code.
+# Voice only (`music: false`). Per-scene direction: SCENES.launch.md. Scenes reuse the README cut's
+# 2.0 modules (readme/flip, readme/canvas, readme/dbt) and the pro cut's hook and ai (their visuals
+# carry no file format), with the launch modules for the rest.
+#
+# Format: exactly as script.yaml (see its header). Wording follows docs/dev/onboarding-and-cli.md
+# → "User-facing wording": DBML is "an open format" (never an open standard), ERD Studio is free
+# to use and source available (never "open source"), every label on screen is the product's own.
+# ERD Studio for Confluence is never called free and has no price. No competitor is named. No
+# routing time in seconds anywhere (it depends on the machine). Never "No AI needed".
+
+title: ERD Studio 2.0
+maxDuration: 150
+# Voice only, like the README cut.
+music: false
+
+voice:
+  engine: kokoro
+  kokoro: af_heart
+  speed: 1.06
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["THE PROBLEM", "THE FIX", "GET STARTED"]
+
+scenes:
+  # ---------------------------------------------------------------- THE PROBLEM
+  - id: hook
+    module: hook                     # the pro cut's: the ERD upside down, turned the right way up on "the fix"
+    chapter: 1
+    minDur: 5
+    accent: amber
+    headline: ["We've built data models", "{backwards} for decades."]
+    lines:
+      - id: h_backwards
+        beat: backwards
+        caption: For decades, we've built | the data model {backwards}.
+      - id: h_loop
+        beat: loop
+        caption: Here's the fix, | and why your {AI} needs it.
+
+  - id: problem
+    module: launch/problem
+    chapter: 1
+    minDur: 9
+    accent: amber
+    headline: ["Drawn for the business.", "{Invisible} to the code."]
+    lines:
+      - id: p_drawn
+        beat: drawn
+        caption: We draw the logical model | for the business, | in {another SaaS product}.
+        say: "We draw the logical model for the business, in another sass product."   # Kokoro spells out S-A-A-S
+      - id: p_back
+        beat: back
+        caption: Developers work backwards | from the picture,
+      - id: p_drift
+        beat: drift
+        caption: so the design {drifts}, | and nobody trusts the diagram.
+
+  - id: ai
+    module: launch/ai                # the pro cut's ai scene + the lock-in chip: reads the SQL, can't reach the design, guesses
+    chapter: 1
+    minDur: 8
+    accent: blue
+    headline: ["Then I tried", "building {with AI}."]
+    lines:
+      - id: a_vibe
+        beat: vibe
+        caption: Then I tried | building with {AI}.
+      - id: a_blind
+        beat: blind
+        caption: It could read every line of SQL, | but not the {design}.
+      - id: a_lock
+        beat: lock
+        caption: "It's locked in someone else's {SaaS}: | hard to reach, | with API and MCP access | that costs extra, | or might one day."
+        say: "It's locked in someone else's sass: hard to reach, with API and MCP access that costs extra, or might one day."   # "A P I" reads as "a pee eye"; plain API / MCP phonemize as letters; SaaS as "sass"
+      - id: a_guess
+        beat: guess
+        caption: So it had to {guess} | the grain and the keys.
+
+  # ---------------------------------------------------------------- THE FIX
+  - id: flip
+    module: launch/flip              # readme/flip + the ownership chips
+    chapter: 2
+    minDur: 7
+    accent: green
+    headline: ["So flip it.", "Keep it {in your repo}."]
+    lines:
+      - id: f_repo
+        beat: repo
+        caption: "So flip it. | Keep the model in {your own repo}, | as DBML, an open format, | right next to the SQL."
+      - id: f_own
+        beat: own
+        caption: No separate repo | to manage model changes, | and {you own} the data.
+
+  - id: canvas
+    module: readme/canvas
+    chapter: 2
+    minDur: 7.6
+    accent: blue
+    headline: ["The files become", "a {diagram}."]
+    lines:
+      - id: c_draw
+        beat: draw
+        caption: ERD Studio draws those files | as a {diagram}, in VS Code.
+      - id: c_sync
+        beat: sync
+        caption: Edit either one, | and the other {follows}.
+
+  - id: aiwrite
+    module: launch/aiwrite
+    chapter: 2
+    minDur: 9
+    accent: blue
+    headline: ["By hand, or", "{with your AI}."]
+    lines:
+      - id: w_write
+        beat: write
+        caption: Edit it {by hand}, | or ask your AI assistant | in plain words. | A built-in {skill} teaches it the format, | and the new table appears | on the canvas.
+
+  - id: scale
+    module: launch/scale
+    chapter: 2
+    minDur: 12.3          # the arrows flow about 1 s past "to the many", no longer
+    accent: blue
+    props:
+      poster: { beat: hover, offset: 3.4 }   # thumb.mjs: the poster, the hover's gold flowing lines
+    headline: ["Built for", "{big models}."]
+    lines:
+      - id: s_big
+        beat: big
+        caption: "And it's built for big models: | {2,000 tables}, | every line routed around them | in the background."
+        say: "And it's built for big models: two thousand tables, every line routed around them in the background."
+      - id: s_hover
+        beat: hover
+        pause: 0.7
+        caption: Point at a table, | and arrows flow along | its {relationships}, | from the one side to the many.
+
+  - id: pr
+    module: launch/pr
+    chapter: 2
+    minDur: 8
+    accent: green
+    headline: ["One pull request,", "{design + code}."]
+    lines:
+      - id: pr_same
+        beat: same
+        caption: The design change and the SQL | go in the {same pull request}.
+      - id: pr_review
+        beat: review
+        caption: Reviewed together. | Shipped together.
+      - id: pr_why
+        beat: why
+        pause: 0.4
+        caption: Why did this take us {decades}?
+
+  - id: confluence
+    module: launch/confluence
+    chapter: 2
+    minDur: 9
+    accent: blue
+    headline: ["For the business:", "view it in {Confluence}."]
+    lines:
+      - id: c_app
+        beat: app
+        caption: "And the business still gets its diagram: | {ERD Studio for Confluence} | reads the same DBML | from {GitHub},"
+      - id: c_view
+        beat: view
+        caption: so business users can | view the data model there, | {no VS Code} needed.
+
+  # ---------------------------------------------------------------- GET STARTED
+  - id: wall
+    module: launch/wall
+    chapter: 3
+    minDur: 13.55         # about 1 s on the full wall after the line ends (viewers can pause)
+    accent: amber
+    props:
+      poster: { beat: list, offset: 12.6 }   # thumb.mjs --scene wall: the secondary still, every logo lit
+    headline: ["Already have a model?", "{Bring it in}."]
+    lines:
+      # Liam (2026-11-10): short, not every source read out; the tiles light as it plays.
+      - id: w_list
+        beat: list
+        caption: "Already have a model? | Everyone's reverse-engineering | apps with AI, | so start with {yours}: | bring it in from dbt, Databricks, | Snowflake, Power BI | and the most popular {SQL databases}."
+
+  - id: export
+    module: launch/export
+    chapter: 3
+    minDur: 8
+    accent: blue
+    headline: ["Getting it out?", "{One step}."]
+    lines:
+      - id: x_one
+        beat: one
+        caption: "Getting it out is one step: | one query in {Snowflake}, | one command in {PostgreSQL}."
+        say: "Getting it out is one step: one query in Snowflake, one command in postgress cue ell."   # Kokoro reads PostgreSQL as "post-ger S-Q-L"; this phonemizes as /ˈpoʊstɡɹɛs kjˈuː ˈɛl/
+      - id: x_whole
+        beat: whole
+        caption: A {whole schema} at a time, | in one .sql file.
+        say: "A whole schema at a time, in one dot S Q L file."
+
+  - id: draft
+    module: launch/draft
+    chapter: 3
+    minDur: 7.5
+    accent: amber
+    headline: ["A {draft} first,", "then DBML in Git."]
+    lines:
+      - id: d_import
+        beat: import
+        caption: "{Import…} shows you | a {draft} first."
+        say: "Import shows you a draft first."
+      - id: d_keep
+        beat: keep
+        caption: "{Keep as Diagram}, | and it's DBML files in your repo."
+
+  - id: dbt
+    module: readme/dbt
+    chapter: 3
+    minDur: 8
+    accent: green
+    headline: ["Using dbt?", "{Compare} with your design."]
+    lines:
+      - id: d_open
+        beat: open
+        caption: Using dbt? | The {Physical} tab | shows what it builds, read-only,
+      - id: d_compare
+        beat: compare
+        caption: "and {Compare with dbt} marks | every difference from your design, | before it ships."
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 6
+    accent: green
+    headline: null
+    props:
+      tagline: ["Your data model, ", "in Git."]
+      pills: ["Free to use in VS Code", "Source available"]
+      pillWords: ["free", "source"]
+      link: { text: Also on Open VSX, chevron: false }
+    lines:
+      - id: e_name
+        beat: name
+        caption: ERD Studio is {free to use} | in VS Code, | source available on GitHub.
+      - id: e_cta
+        beat: cta
+        caption: Search {ERD Studio} | in the VS Code Extensions view.

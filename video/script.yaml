@@ -4,17 +4,20 @@
 # this checkout, driven by record/ in an isolated window, the footage set into the light frame
 # below the headline and above the chapter bar (`recording.inset`). See README.md, "Recording".
 #
-# The story: most teams already have a data model, so it starts by bringing one in (Import…, the
-# Snowflake DDL a project folder holds, its draft, Keep as Diagram), then the DBML files that saves
-# next to the code, an edit by hand, the same kind of edit by Claude Code (Set Up My AI Helper's
-# skill, its pre-tool hook, the diagram updating), what it changed (held: the lines it wrote, the new
-# table on the canvas), that change and the code that builds it in one pull request, what a dbt
-# project adds (Import from dbt, Run dbt parse, the Physical tab, Compare with dbt), and ERD Studio
-# for Confluence showing the diagram from the repo.
+# The story: most teams already have a data model, so it starts with where it lives (every source
+# the import reads, one wall of their logos), getting its DDL out in one step (pg_dump in the
+# terminal, for real; Snowflake's GET_DDL beside it), bringing that in (Import SQL DDL…, the nine
+# dialects with the detected one marked, its draft, Keep as Diagram), then the DBML files that saves
+# next to the code, a 2,000-table diagram (its lines routed in the background, a hovered table's
+# arrows), an edit by hand, the same kind of edit by Claude Code (Set Up My AI Helper's skill, its
+# pre-tool hook, the diagram updating), what it changed (held: the lines it wrote, the new table on
+# the canvas), that change and the code that builds it in one pull request, what a dbt project adds
+# (Import from dbt, Run dbt parse, the Physical tab, Compare with dbt), and ERD Studio for
+# Confluence showing the diagram from the repo.
 #
 # Each scene has a headline (two lines; `{word}` is highlighted in the scene's accent colour),
 # the player module that draws its frame (rec/window: the window the footage plays in, and the
-# props it draws beside it; tour/aiChange, tour/pullRequest, tour/confluence and the end card are HTML), narration lines, and
+# props it draws beside it; sources/wall, tour/aiChange, tour/pullRequest, tour/confluence and the end card are HTML), narration lines, and
 # `minDur`, which leaves the real UI time to do what the line says. record/scenes.mjs performs each
 # scene's clicks on its beats.
 #
@@ -31,26 +34,29 @@
 # starts `lead` seconds in; each further line follows `gap` seconds after the previous one;
 # the scene lasts max(minDur, lastLineEnd + tail).
 #
-# Words to keep out of every scene but the dbt beat (id dbt) and the import (id bring, which names
+# Words to keep out of every scene but the dbt beat (id dbt) and the sources (id bring, which names
 # dbt among the tools a data model already lives in): dbt, Physical, Diff, manifest, sample
 # project — in narration, captions, headlines and anything on screen. `npm test` checks the file and
 # the text the recording saw on screen (record/takes.json). Never "No AI needed": the tour shows
 # both ways, by hand and with an AI assistant.
 #
-# Length: 80–140 s (maxDuration 140); the product calls it "Watch the Tour", with no length in
-# its name.
+# Length: 80–200 s (maxDuration 200; no cap was set for the 2.0 tour); the product calls it "Watch
+# the Tour", with no length in its name.
 
 title: ERD Studio — getting started
-maxDuration: 140
+maxDuration: 200
 
 # The recorded window's place in the 1920x1080 frame (frame px). The isolated VS Code window is
 # 1440x600 CSS px (record/vscode.mjs WINDOW) rendered at 2x (DPR), filmed scaled down to fill this rect exactly.
 recording:
   inset: { x: 96, y: 240, w: 1728, h: 720 }
-  # A punch-in (record/composite.mjs): from `beat` + `offset` in `scene`, the region around `focus`
-  # (inset px) dissolves in at `scale`x and holds to the scene's end. Here: the comparison's marks
-  # and its panel, whose small text needs it.
-  zoom: { scene: dbt, beat: compare, offset: 1.6, dur: 0.5, scale: 1.45, focus: [1400, 430] }
+  # Punch-ins (record/composite.mjs): from `beat` + `offset` in `scene`, the region around `focus`
+  # (inset px) dissolves in at `scale`x and holds to the scene's end, or until `until` ([beat,
+  # offset]), where it dissolves out again. Here: the terminal while pg_dump is typed (its text is
+  # small), and the comparison's marks and its panel.
+  zoom:
+    - { scene: export, beat: pg, offset: 0.5, dur: 0.4, scale: 1.6, focus: [1230, 150], until: [pg, 3.9] }
+    - { scene: dbt, beat: compare, offset: 1.6, dur: 0.5, scale: 1.45, focus: [1400, 430] }
 
 voice:
   engine: kokoro        # kokoro | say
@@ -65,7 +71,7 @@ timing:
   tail: 0.45
   fade: 0.25
 
-chapters: ["1 · IMPORT", "2 · SAVE", "3 · EDIT", "4 · COMPARE", "5 · SHARE"]
+chapters: ["1 · IMPORT", "2 · SAVE", "3 · SCALE", "4 · EDIT", "5 · COMPARE", "6 · SHARE"]
 
 scenes:
   - id: hook
@@ -86,35 +92,60 @@ scenes:
         caption: Edit it by hand, or with your AI assistant, through a built-in skill it uses by itself.
 
   - id: bring
-    module: rec/window
+    module: sources/wall
     chapter: 1
-    minDur: 9.2
+    minDur: 11.4   # about a second after the line, then on
     accent: blue
     headline: ["Already have a model?", "{Bring it in}."]
-    # the tools a data model already lives in, each lit as the line names it (seconds after the beat)
+    # every source the import reads, each mark beside its name, landing as the line plays and then
+    # still, the scene ending about a second after the line (a viewer can pause on it); the line
+    # names the best-known tools and sums up the rest (player/scenes/sources/wall.js SOURCES)
     props:
-      logos: [[snowflake, have, 1.6], [databricks, have, 2.3], [dbt, have, 3.0], [powerBiFabric, have, 3.4], [sql, have, 4.6]]
+      sources: [dbt, databricks, snowflake, powerBi, fabric, postgresql, sqlServer, mysql, oracle, bigquery, redshift, mariadb, sqlite, dbml]
     lines:
       - id: b_have
         beat: have
-        caption: Most teams already have one, in Snowflake, Databricks, dbt, Power BI, Fabric or SQL.
-      - id: b_open
-        beat: open
-        caption: Open your project, and click Import.
+        caption: "Already have a model? Bring it in from the tools most teams use: dbt, Databricks, Snowflake and Power BI, and the most popular SQL databases."
 
-  - id: importSql
+  - id: export
     module: rec/window
     chapter: 1
     minDur: 9
     accent: blue
-    headline: ["Snowflake or Databricks?", "Import the {DDL}."]
+    headline: ["Getting the DDL out?", "{One step}."]
+    # pg_dump in the terminal, for real (record/fixtures.mjs: a local PostgreSQL database, the whole
+    # database in one file); Snowflake's one query is a card right of the headline (props.query), not filmed
+    props:
+      query: { beat: sf, offset: 0.3, logo: snowflake, name: Snowflake, sql: "SELECT GET_DDL('SCHEMA', 'SHOP.SALES');", note: saved as a .sql file }
     lines:
-      - id: s_sources
-        beat: sources
-        caption: Import reads DBML, SQL scripts, or a Power BI or Fabric model.
-      - id: s_ddl
-        beat: ddl
-        caption: From Snowflake or Databricks, import the exported DDL. It works out the dialect.
+      - id: x_one
+        beat: one
+        caption: Getting the DDL out is one step, for a whole schema or database.
+      - id: x_pg
+        beat: pg
+        caption: From PostgreSQL, pg_dump writes it to a file.
+        say: From Postgress Q L, P G dump writes it to a file.
+      - id: x_sf
+        beat: sf
+        pause: 0.149   # the take was filmed for this scene's length: Postgress Q L is a little longer than the voice's first reading
+        caption: From Snowflake, it's one query, GET_DDL, saved as a .sql file.
+        say: From Snowflake, it's one query, get D D L, saved as a dot S Q L file.
+
+  - id: importSql
+    module: rec/window
+    chapter: 1
+    minDur: 8
+    accent: blue
+    headline: ["Import the {DDL}.", "Nine SQL dialects."]
+    lines:
+      - id: s_import
+        beat: import
+        caption: Then click New, Import SQL DDL, and import the folder.
+      - id: s_dialect
+        beat: dialect
+        pause: 0.149   # as x_sf: the scene keeps the length its take was filmed for
+        caption: "It works out the dialect: PostgreSQL, one of the nine it reads."
+        say: "It works out the dialect: Postgress Q L, one of the nine it reads."
 
   - id: draft
     module: rec/window
@@ -134,7 +165,7 @@ scenes:
   - id: files
     module: rec/window
     chapter: 2
-    minDur: 9.276   # the length the take was filmed for (f_review was reworded shorter after it; record/takes.json)
+    minDur: 6
     accent: blue
     headline: ["Saved as {DBML},", "next to your code."]
     lines:
@@ -145,9 +176,32 @@ scenes:
         beat: review
         caption: Change it, and Git shows exactly what changed.
 
-  - id: byHand
+  - id: scale
     module: rec/window
     chapter: 3
+    minDur: 17.2   # the hovered table's arrows flow for about 2.5 s, then the pointer moves on to a dimension
+    accent: blue
+    headline: ["Big models?", "{2,000 tables}."]
+    # its own take, in a 2,000-table project (record/bigProject.mjs): opened from the side bar, its
+    # lines settling as the routing worker finishes (timed on the take, kept in record/takes.json
+    # scale.notes.routing, but never claimed: the time depends on the machine), fitted, a zoom into
+    # one area, a table hovered. The figures sit right of the headline.
+    props:
+      stats: [['2,000 tables', big, 1.4], ['2,700 relationships', big, 2.2], ['Lines routed in the background', route, 0.6]]
+    lines:
+      - id: z_big
+        beat: big
+        caption: "Big models stay readable: this one has 2,000 tables and 2,700 relationships."
+      - id: z_route
+        beat: route
+        caption: Every line finds its way around the tables in the background, in seconds.
+      - id: z_hover
+        beat: hover
+        caption: "Zoom in, and hover a table: arrows flow along its relationships."
+
+  - id: byHand
+    module: rec/window
+    chapter: 4
     minDur: 7
     accent: blue
     headline: ["Edit it {by hand},", "on the canvas."]
@@ -161,7 +215,7 @@ scenes:
 
   - id: aiSetup
     module: rec/window
-    chapter: 3
+    chapter: 4
     minDur: 7
     accent: blue
     headline: ["Or ask your", "{AI assistant}."]
@@ -180,7 +234,7 @@ scenes:
 
   - id: aiRun
     module: rec/window
-    chapter: 3
+    chapter: 4
     minDur: 15.5   # the new table holds on screen, in the open, for about 2 s after its line
     accent: blue
     headline: ["Ask for a change.", "{Watch it appear}."]
@@ -203,7 +257,7 @@ scenes:
 
   - id: aiShow
     module: tour/aiChange
-    chapter: 3
+    chapter: 4
     minDur: 9.6    # the change held: what it wrote, then the canvas punched in on the new table, about 1.9 s in silence after its last line
     accent: blue
     headline: ["See what it {changed}:", "in the {files}, on the {canvas}."]
@@ -222,7 +276,7 @@ scenes:
 
   - id: pr
     module: tour/pullRequest
-    chapter: 3
+    chapter: 4
     minDur: 8.6    # the review held after its last line
     accent: blue
     headline: ["One pull request:", "the {design} and the {code}."]
@@ -238,7 +292,7 @@ scenes:
 
   - id: dbt
     module: rec/window
-    chapter: 4
+    chapter: 5
     # a separate take, in a dbt project (record/fixtures.mjs): the scene that shows dbt. Import from dbt
     # (the side bar's New… menu) is how a dbt project becomes a diagram; Run dbt parse, the Physical
     # tab (held while its line plays and the pause after it) and Compare with dbt check a design
@@ -268,7 +322,7 @@ scenes:
 
   - id: confluence
     module: tour/confluence
-    chapter: 5
+    chapter: 6
     minDur: 13.3   # about 1.3 s after its last line: the page and its pills hold before the end card
     accent: blue
     headline: ["One source of truth:", "{your repo}."]

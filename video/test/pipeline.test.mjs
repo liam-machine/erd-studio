@@ -18,8 +18,8 @@ const scriptSrc = readFileSync(join(HERE, '..', 'script.yaml'), 'utf8');
 const SCENES = join(HERE, '..', 'player', 'scenes');
 /** Scene module files (no extension) directly in `dir` under player/scenes/. */
 const modulesIn = (dir = '') => readdirSync(join(SCENES, dir)).filter((f) => f.endsWith('.js')).map((f) => (dir ? `${dir}/` : '') + f.replace(/\.js$/, ''));
-/** rec/: the frame both cuts' recorded footage plays in. tour/: their HTML scenes (Confluence, the end card; no dbt anywhere). */
-const ALL_MODULES = [...modulesIn('tour'), ...modulesIn('rec')];
+/** rec/: the frame both cuts' recorded footage plays in. tour/: their HTML scenes (Confluence, the end card; no dbt anywhere). sources/: the wall of sources the import reads. */
+const ALL_MODULES = [...modulesIn('tour'), ...modulesIn('rec'), ...modulesIn('sources')];
 
 const mini = {
   timing: { lead: 0.5, gap: 0.25, tail: 0.6, fade: 0.3 },
@@ -164,17 +164,20 @@ const NEW_LAYER = (() => {
 /** The name box every import ends on in a new folder without dbt: one layer, Main. */
 const IMPORT_NAME_PROMPT = `Name the diagram. It is saved in the ${NEW_LAYER.label} layer.`;
 
-test('both cuts lead with importing what you have, then by hand, with AI and Confluence; only the default cut has a dbt beat', () => {
-  // the default cut: the hook, the import (picker, the SQL a project holds, its draft), its files, an
-  // edit by hand, the same kind of edit by Claude Code, dbt, Confluence, the end card
-  // edit by Claude Code, what it changed (held), that change and its code in one pull request, dbt, Confluence, the end card
-  assert.deepEqual(script.scenes.map((s) => s.id), ['hook', 'bring', 'importSql', 'draft', 'files', 'byHand', 'aiSetup', 'aiRun', 'aiShow', 'pr', 'dbt', 'confluence', 'end']);
-  assert.deepEqual(script.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'rec/window', 'tour/confluence', 'tour/endCard']);
+test('both cuts lead with importing what you have, then scale, by hand, with AI and Confluence; only the default cut has a dbt beat', () => {
+  // the default cut: the hook, where a model lives (the wall of sources), getting its DDL out (pg_dump),
+  // the import (New…, Import SQL DDL…, the dialects, its draft), its files, a 2,000-table diagram, an
+  // edit by hand, the same kind of edit by Claude Code, what it changed (held), that change and its
+  // code in one pull request, dbt, Confluence, the end card
+  const IDS = ['hook', 'bring', 'export', 'importSql', 'draft', 'files', 'scale', 'byHand', 'aiSetup', 'aiRun', 'aiShow', 'pr', 'dbt', 'confluence', 'end'];
+  assert.deepEqual(script.scenes.map((s) => s.id), IDS);
+  assert.deepEqual(script.scenes.map((s) => s.module), ['rec/window', 'sources/wall', ...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'rec/window', 'tour/confluence', 'tour/endCard']);
   const at = (id) => script.scenes.findIndex((s) => s.id === id);
-  assert.ok(at('importSql') < at('byHand') && at('draft') < at('byHand'), 'the import comes before any table built by hand');
+  assert.ok(at('export') < at('importSql') && at('importSql') < at('byHand') && at('draft') < at('byHand'), 'the DDL out, then in, before any table built by hand');
+  assert.equal(at('scale'), at('files') + 1, 'the 2,000-table diagram after the files, before the edit by hand');
   // the logical cut: the same scenes, minus the dbt beat
-  assert.deepEqual(logical.scenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => id !== 'dbt'));
-  assert.deepEqual(logical.scenes.map((s) => s.module), [...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'tour/confluence', 'tour/endCard']);
+  assert.deepEqual(logical.scenes.map((s) => s.id), IDS.filter((id) => id !== 'dbt'));
+  assert.deepEqual(logical.scenes.map((s) => s.module), ['rec/window', 'sources/wall', ...Array(8).fill('rec/window'), 'tour/aiChange', 'tour/pullRequest', 'tour/confluence', 'tour/endCard']);
   // the AI change is held right after it, then the pull request
   for (const sc of [script, logical]) {
     const ids = sc.scenes.map((s) => s.id);
@@ -187,32 +190,34 @@ test('both cuts lead with importing what you have, then by hand, with AI and Con
   assert.deepEqual(modulesIn(), []);
   assert.deepEqual(modulesIn('tour').sort(), ['tour/aiChange', 'tour/confluence', 'tour/endCard', 'tour/pullRequest']);
   assert.deepEqual(modulesIn('rec'), ['rec/window']);
+  assert.deepEqual(modulesIn('sources'), ['sources/wall']);
   assert.equal(existsSync(join(SCENES, 'dbt')) && readdirSync(join(SCENES, 'dbt')).length > 0, false, 'the HTML dbt beat is gone: the default cut films the real one');
-  // "Watch the Tour" names no length: the default cut may run 80–140 s (maxDuration), the dbt beat
-  // 12–24 s; the scenes' minimum lengths alone already fit, so a script edit fails here without a build
-  assert.ok(script.maxDuration <= 140);
-  const floor = script.scenes.reduce((n, s) => n + s.minDur, 0);
-  assert.ok(floor <= script.maxDuration, `the minDurs add up to ${floor}s`);
-  assert.ok(logical.maxDuration <= 140);
-  const floorL = logical.scenes.reduce((n, s) => n + s.minDur, 0);
-  assert.ok(floorL <= logical.maxDuration, `the logical minDurs add up to ${floorL}s`);
+  // "Watch the Tour" names no length: each cut may run 80–200 s (maxDuration; no cap was set for the
+  // 2.0 tour), the dbt beat 12–24 s; the scenes' minimum lengths alone already fit, so a script edit
+  // fails here without a build
+  for (const sc of [script, logical]) {
+    assert.ok(sc.maxDuration <= 200);
+    const floor = sc.scenes.reduce((n, s) => n + s.minDur, 0);
+    assert.ok(floor <= sc.maxDuration, `the minDurs add up to ${floor}s`);
+  }
+  // the import's draft is kept within the first minute (the sources and the export come first)
+  const KEEP_BY = 60;
   const builtL = join(HERE, '..', 'build-logical', 'timeline.json');
   if (existsSync(builtL)) {
     const tl = JSON.parse(readFileSync(builtL, 'utf8'));
-    assert.ok(tl.total >= 80 && tl.total <= 140, `build-logical: ${tl.total}s`);
+    assert.ok(tl.total >= 80 && tl.total <= 200, `build-logical: ${tl.total}s`);
     const draft = tl.scenes.find((s) => s.id === 'draft');
-    assert.ok(draft.start + draft.beats.keep.t < 40, `logical: Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
+    assert.ok(draft.start + draft.beats.keep.t < KEEP_BY, `logical: Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
   }
   const built = join(HERE, '..', 'build', 'timeline.json');
   if (existsSync(built)) {
     const tl = JSON.parse(readFileSync(built, 'utf8'));
-    assert.ok(tl.total >= 80 && tl.total <= 140, `build: ${tl.total}s`);
+    assert.ok(tl.total >= 80 && tl.total <= 200, `build: ${tl.total}s`);
     const beat = tl.scenes.find(isDbtBeat);
     // Import from dbt, Run dbt parse, the Physical tab held, Compare with dbt: short beside the tour, but each one seen
     assert.ok(beat.dur >= 12 && beat.dur <= 24, `dbt beat ${beat.dur}s`);
-    // the import's draft is kept within the first 40 s
     const draft = tl.scenes.find((s) => s.id === 'draft');
-    assert.ok(draft.start + draft.beats.keep.t < 40, `Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
+    assert.ok(draft.start + draft.beats.keep.t < KEEP_BY, `Keep as Diagram at ${draft.start + draft.beats.keep.t}s`);
   }
 });
 
@@ -244,7 +249,7 @@ const NO_DBT = /\bdbt\b|Physical|manifest/i;
 const NO_DBT_ON_SCREEN = /\bdbt\b|Physical|manifest|\bDiff\b|sample project/i;
 /** The default cut's dbt beat: its own take, in a dbt project, the one scene that may name dbt. */
 const isDbtBeat = (sc) => sc.id === 'dbt';
-/** The import scene names dbt among the tools a data model already lives in (its narration and logo row). */
+/** The wall of sources names dbt among the tools a data model already lives in (its narration and its tiles). */
 const namesDbt = (sc) => isDbtBeat(sc) || sc.id === 'bring';
 
 test('no line of script.logical.yaml or of a tour scene module names dbt; script.yaml only in its dbt beat and the import\'s list of tools', () => {
@@ -397,17 +402,18 @@ test('the end card is short: the name, one line, free to use in VS Code, the ext
 test('the files the recording\'s import wrote are the 2.0 layer-first DBML a new folder gets', async () => {
   // what the real take wrote in a new plain folder (record/fixtures.erd.mjs, a copy of it)
   const { DBT_ERD } = await import('../record/fixtures.erd.mjs');
-  const L = NEW_LAYER.id;   // main: the layer folder, the schema and the relationships file's name
+  const L = NEW_LAYER.id;   // main: the layer folder and the relationships file's name
+  const { SCHEMA: S, DIAGRAM } = await import('../record/scenes.mjs');   // sales: the PostgreSQL schema, kept by the import
   const rels = DBT_ERD[`${L}/relationships/${L}.dbml`].split('\n');
   assert.ok(read('packages', 'core', 'src', 'dbmlRichProperties.ts').includes(`'${rels[0]}'`), 'the relationships file header line');
-  for (const l of rels.filter((x) => x.startsWith('use '))) assert.match(l, new RegExp(`^use \\{ table ${L}\\.\\w+ \\} +from '\\.\\./tables/${L}/\\w+\\.dbml'$`));
-  assert.ok(rels.includes(`Ref: ${L}.fct_order.date_key >? ${L}.dim_date.date_key`));
-  assert.match(DBT_ERD[`${L}/tables/${L}/fct_order.dbml`], new RegExp(`^Table ${L}\\.fct_order \\{`));
+  for (const l of rels.filter((x) => x.startsWith('use '))) assert.match(l, new RegExp(`^use \\{ table ${S}\\.\\w+ \\} +from '\\.\\./tables/${S}/\\w+\\.dbml'$`));
+  assert.ok(rels.includes(`Ref: ${S}.fct_order.date_key >? ${S}.dim_date.date_key`));
+  assert.match(DBT_ERD[`${L}/tables/${S}/fct_order.dbml`], new RegExp(`^Table ${S}\\.fct_order \\{`));
   assert.match(read('packages', 'core', 'src', 'dbml', 'writeTable.ts'), /\[pk/);
   // the first diagram starting a DBML project writes layers.json and the folder's README.md
   const ext = read('src', 'extension.ts');
   assert.ok(ext.includes('if (createdSemanticDir && dbml) {') && ext.includes('semanticReadmeCreate(fullSemanticDirPath'));
-  for (const f of ['layers.json', 'README.md', `${L}/diagrams/sales.dbml`]) assert.ok(DBT_ERD[f], f);
+  for (const f of ['layers.json', 'README.md', `${L}/diagrams/${DIAGRAM}.dbml`]) assert.ok(DBT_ERD[f], f);
 });
 
 test('the README GIF is drawn from the same pieces: a plain folder, no dbt, the layer-first tree', async () => {
@@ -467,10 +473,16 @@ test('a folder without dbt draws no stage colours (the renderer\'s neutral canva
 });
 
 test('the README GIF\'s draft matches what the product draws: Show details, no reused table', async () => {
-  const { SALES_DRAFT: sales, SHOW_DETAILS } = editor;
+  const { SALES_DRAFT: sales, SHOW_DETAILS, SHOW_IMPORT_REPORT } = editor;
   assert.equal(SHOW_DETAILS, tsConst('webview-draft/lib/wording.ts', 'SHOW_DETAILS'));
-  assert.ok(read('webview-draft', 'components', 'DraftBanner.tsx').includes('const showSecondLine = banner.changeOptions || counts !== \'\' || hasDetails;'));
+  assert.equal(SHOW_IMPORT_REPORT, tsConst('webview-draft/lib/wording.ts', 'SHOW_IMPORT_REPORT'));
+  const banner = read('webview-draft', 'components', 'DraftBanner.tsx');
+  assert.ok(banner.includes('const showSecondLine = banner.changeOptions || counts !== \'\' || hasDetails || importReport;'));
   assert.ok(sales.details, 'an import draft always has details');
+  // a DBML file's import records a report, and its draft links to it after Show details
+  assert.match(read('src', 'commands', 'importDbml.ts'), /IMPORT_REPORT_SOURCES[^=]*= \{\n  file: 'dbml',/);
+  assert.ok(sales.importReport, 'an imported DBML file\'s draft offers its report');
+  assert.ok(banner.indexOf('{SHOW_DETAILS}') < banner.indexOf('{SHOW_IMPORT_REPORT}'));
   // a name already in the library would be reused (dbmlImport.ts) and the detail would say so
   const { HERO_TREE } = await import('../player/hero.js');
   const library = new Set(HERO_TREE.filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, '')));
@@ -493,7 +505,8 @@ test('the README GIF uses the layer a new folder without dbt really gets (Main),
   assert.ok(HERO_TREE.some(([d, k, l]) => d === 1 && k === 'folder' && l === NEW_LAYER.id));
   // the recording's plain folder got the same one layer: the import's draft and name box say Main
   const shown = Object.values(takes).flatMap((s) => s.take === 'plain' ? s.screenText : []);
-  for (const s of [`Keep saves it as sales in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/sales.dbml).`, IMPORT_NAME_PROMPT]) assert.ok(shown.some((x) => x.startsWith(s)), s);
+  const { DIAGRAM } = await import('../record/scenes.mjs');
+  for (const s of [`Keep saves it as ${DIAGRAM} in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/${DIAGRAM}.dbml).`, IMPORT_NAME_PROMPT]) assert.ok(shown.some((x) => x.startsWith(s)), s);
   // no Silver or Gold anywhere in the player's HTML scenes or the GIF
   for (const f of [...readdirSync(join(HERE, '..', 'player', 'scenes', 'tour')).map((x) => join('scenes', 'tour', x)), 'hero.js', 'editor.js']) {
     assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /\b(Gold|Silver|GLD|SLV)\b|gold\//, f);
@@ -510,6 +523,211 @@ test('the README GIF never shows dbt in any frame', async () => {
   }
 });
 
+// The README GIF's hover beat draws what packages/renderer draws when the pointer rests on a table in a
+// folder without dbt. When the renderer's arrows, timings, fades or colours change, these fail so the
+// mock is updated (and the GIF re-rendered) with it.
+const numConst = (src, name) => Number(src.match(new RegExp(`export const ${name} = ([\\d.]+);`))?.[1]);
+test('the README GIF\'s hover preview uses the product\'s numbers: arrows, delays, fades and colours', async () => {
+  const { HOVER, FLOW, CHEVRON_D } = await import('../player/hero.js');
+  const flow = read('packages', 'renderer', 'src', 'lib', 'edgeFlow.ts');
+  assert.equal(FLOW.speed, numConst(flow, 'FLOW_SPEED_PX_S'));
+  assert.equal(FLOW.spacing, numConst(flow, 'FLOW_SPACING_PX'));
+  assert.equal(FLOW.minGlyphs, numConst(flow, 'FLOW_MIN_GLYPHS'));
+  assert.equal(FLOW.maxGlyphs, numConst(flow, 'FLOW_MAX_GLYPHS'));
+  assert.equal(FLOW.minDur, numConst(flow, 'FLOW_MIN_DUR_S'));
+  assert.equal(FLOW.maxDur, numConst(flow, 'FLOW_MAX_DUR_S'));
+  assert.equal(FLOW.durBucket, numConst(flow, 'FLOW_DUR_BUCKET_S'));
+  // the rule: many-to-one runs against the path (fromModel → toModel), so from the 1 end to the * end
+  assert.ok(flow.includes("case 'many-to-one':\n    default:\n      return 'reverse';"));
+  assert.ok(flow.includes("const STREAM_OPACITY = { opacityValues: '0;1;1;0', opacityKeyTimes: '0;0.1;0.9;1' };"));
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'EdgeFlow.tsx').includes(`export const CHEVRON_D = '${CHEVRON_D}';`));
+  const intent = read('packages', 'renderer', 'src', 'lib', 'hoverIntent.ts');
+  assert.equal(HOVER.enterDelay * 1000, numConst(intent, 'HOVER_ENTER_DELAY_MS'));
+  assert.equal(HOVER.switchDelay * 1000, numConst(intent, 'HOVER_SWITCH_DELAY_MS'));
+  assert.equal(HOVER.leaveGrace * 1000, numConst(intent, 'HOVER_LEAVE_GRACE_MS'));
+  const edgeCss = read('packages', 'renderer', 'src', 'components', 'Graph', 'FkEdge.css');
+  const nodeCss = read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.css');
+  assert.ok(edgeCss.includes(`.erd-flow--hover-focus .fk-edge {\n  opacity: ${HOVER.lineOpacity};`));
+  assert.ok(edgeCss.includes(`.erd-flow--hover-focus .fk-edge__adornment {\n  opacity: ${HOVER.labelOpacity};`));
+  assert.ok(nodeCss.includes(`.erd-flow--hover-focus .model-node {\n  opacity: ${HOVER.tableOpacity};`));
+  for (const css of [edgeCss, nodeCss]) assert.ok(css.includes(`transition: opacity ${HOVER.fade}s ease`));
+  assert.ok(edgeCss.includes('.fk-edge--flowing {\n  stroke-width: 2.5;') && edgeCss.includes('.fk-edge {\n  stroke-width: 2;'));
+  // the hovered table's ring: 3px of the neutral ring colour (the line colour at 30%), not blue
+  assert.ok(nodeCss.includes('box-shadow: 0 0 0 3px var(--stage-logical-ring);'));
+  assert.ok(read('packages', 'renderer', 'src', 'styles', 'theme.css').includes('--canvas-neutral-ring:   color-mix(in srgb, var(--canvas-neutral-line) 30%, transparent);'));
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(lib.COLORS.neutralLine.slice(i, i + 2), 16));
+  assert.equal(HOVER.ring, `rgba(${r},${g},${b},0.3)`);
+  // colour on hover: the focused lines, labels and arrows take the diagram's layer colour; a new
+  // folder without dbt has one layer, Main
+  const routing = read('packages', 'renderer', 'src', 'canvas', 'EdgeRouting.css');
+  assert.ok(routing.includes('.editor-canvas--neutral .fk-edge--logical.fk-edge--lit,') && routing.includes('--stage-logical: var(--diagram-layer-color, var(--canvas-neutral-line));'));
+  assert.ok(read('src', 'services', 'layerService.ts').includes(`{ id: 'main', label: 'Main', abbreviation: 'MAIN', color: '${HOVER.layerColour}'`));
+});
+
+test('the README GIF\'s hover beat: arrows run from the 1 end to the * end, only on the hovered table\'s lines, and the loop is seamless', async () => {
+  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, DRAWN, flowGlyphs, CHEVRON_D } = await import('../player/hero.js');
+  // the pointer rests on fct_order, then dim_customer, then leaves
+  assert.deepEqual(FOCUS_CHANGES.map((c) => c.id), ['fct_order', 'dim_customer', null]);
+  const [onFact, onCustomer, off] = FOCUS_CHANGES.map((c) => c.t);
+  assert.ok(onCustomer - onFact >= 1.5 && off - onCustomer >= 1.5, 'each hover held long enough to read');
+  for (const [i, line] of LINES.entries()) {
+    // each path starts at the FK's table (`*` end) and ends at the key's table (`1` end)
+    assert.equal(line.cardinality, 'many-to-one');
+    assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12, `${line.id}: * at the path's start`);
+    assert.ok(Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, `${line.id}: 1 at the path's end`);
+    // so every chevron moves towards the path's start (the `*` end), and points that way
+    const drawn = DRAWN.curved[i];
+    const a = flowGlyphs(drawn, line, 12), b = flowGlyphs(drawn, line, 12.05);
+    assert.ok(a.length >= 2 && a.length <= 4);
+    for (const [k, g] of a.entries()) {
+      assert.ok(g.reverse);
+      if (g.at <= 0.05) continue;   // just wrapped round
+      assert.ok(b[k].at < g.at, `${line.id}: glyph ${k} moves from the 1 end to the * end`);
+    }
+  }
+  const html = (t) => render(t);
+  const chevrons = (h) => h.split(CHEVRON_D).length - 1;
+  const faded = (h) => (h.match(new RegExp(`opacity:${HOVER.tableOpacity.toFixed(3)};`, 'g')) ?? []).length;
+  // fct_order: its four lines flow in the layer colour; every table is one line away, so none fades
+  const factLines = LINES.filter((l) => l.from === 'fct_order' || l.to === 'fct_order').length;
+  assert.equal(factLines, 4);
+  const fact = html((onFact + onCustomer) / 2);
+  assert.ok(chevrons(fact) >= 2 * factLines && fact.includes(HOVER.layerColour));
+  assert.equal(faded(fact), 0);
+  // dim_customer: one line flows; the three tables it does not touch fade
+  const cust = html(onCustomer + 0.6);
+  assert.ok(chevrons(cust) >= 2 && chevrons(cust) <= 4);
+  assert.equal(faded(cust), 3);
+  // no arrows, no layer colour and no pointer outside the hover; the first and last frames match
+  for (const t of [0, 2, 5, 8, off + HOVER.fade + 0.01, 17.5]) {
+    const h = html(t);
+    assert.equal(chevrons(h), 0, `+${t}s`);
+    assert.ok(!h.includes(HOVER.layerColour), `+${t}s`);
+  }
+  for (const t of [0, 2, 5, 8, HOVER_PATH.at(-1).t + 0.01]) assert.ok(!html(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
+  assert.equal(html(HERO.loop - 1 / HERO.fps), html(0));
+});
+
+// The README GIF's line styles are drawn as packages/renderer draws them. When the router's corners,
+// crossings, the switch or its glyphs change, these fail so the mock follows.
+test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, halo, the switch', async () => {
+  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, styleAt, HERO } = await import('../player/hero.js');
+  const routing = (...p) => read('packages', 'renderer', 'src', 'lib', 'edgeRouting', ...p);
+  const corners = routing('render', 'corners.ts');
+  const paths = routing('render', 'pathRender.ts');
+  const types = routing('types.ts');
+  const constIn = (src, name) => Number(src.match(new RegExp(`(?:export )?const ${name} = ([\\d.]+);`))?.[1]);
+  assert.equal(ROUTE.roundedRadius, constIn(corners, 'ROUNDED_RADIUS'));
+  assert.equal(ROUTE.curveRadius, constIn(corners, 'CURVE_RADIUS'));
+  assert.equal(ROUTE.curveRatio, constIn(corners, 'CURVE_RATIO'));
+  assert.equal(ROUTE.curveEndKeep, constIn(corners, 'CURVE_END_KEEP'));
+  assert.equal(ROUTE.curveClearance, constIn(corners, 'CURVE_CLEARANCE'));
+  assert.equal(ROUTE.kappa, constIn(corners, 'KAPPA'));
+  assert.equal(ROUTE.haloCutHalf, constIn(paths, 'HALO_CUT_HALF'));
+  assert.equal(ROUTE.cornerClear, constIn(paths, 'CORNER_CLEAR'));
+  assert.equal(ROUTE.stubClear, constIn(paths, 'STUB_CLEAR'));
+  assert.equal(ROUTE.mergeSlack, constIn(paths, 'MERGE_SLACK'));
+  assert.equal(ROUTE.pathGap, constIn(types, 'PATH_GAP'));
+  assert.equal(ROUTE.labelOffset, constIn(types, 'LABEL_OFFSET'));
+  // hops sized as hopRadiusFor(0.5): HOP_SCREEN_RADIUS / zoom, between HOP_RADIUS and HOP_MAX_RADIUS
+  const zoom = 0.5;
+  assert.equal(ROUTE.hopRadius, Math.min(constIn(paths, 'HOP_MAX_RADIUS'), Math.max(constIn(paths, 'HOP_RADIUS'), constIn(paths, 'HOP_SCREEN_RADIUS') / zoom)));
+  assert.ok(paths.includes('return Math.min(HOP_MAX_RADIUS, Math.max(HOP_RADIUS, HOP_SCREEN_RADIUS / z));'));
+  // ...and the arrows as glyphScaleForZoom(0.5)
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'EdgeFlow.tsx').includes('const scale = Math.ceil((1 / zoom) * 4 - 1e-9) / 4;'));
+  assert.match(readFileSync(join(HERE, '..', 'player', 'hero.js'), 'utf8'), new RegExp(`const GLYPH_SCALE = ${Math.ceil((1 / zoom) * 4 - 1e-9) / 4};`));
+  assert.ok(read('packages', 'renderer', 'src', 'canvas', 'EdgeRouting.css').includes(`.fk-edge__halo {\n  fill: none;\n  stroke: var(--editor-bg);\n  stroke-width: ${ROUTE.haloWidth};`));
+  // the two styles, in the toolbar's order, the default first
+  const style = routing('lineStyle.ts');
+  assert.ok(style.includes(`export const LINE_STYLES: readonly LineStyle[] = [${LINE_STYLES.map((x) => `'${x}'`).join(', ')}];`));
+  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${styleAt(0)}';`));
+  for (const [name, o] of Object.entries(LINE_STYLE_OPTIONS)) assert.ok(style.includes(`${name}: { crossings: '${o.crossings}', underTables: `) && style.includes(`corners: '${o.corners}' }`), name);
+  // the switch's glyphs are the product's own paths
+  const sw = read('webview', 'components', 'Toolbar', 'LineStyleSwitch.tsx');
+  for (const [name, ds] of Object.entries(lib.LINE_STYLE_GLYPHS)) for (const d of ds) assert.ok(sw.includes(`<path d="${d}" />`), `${name}: ${d}`);
+  assert.ok(sw.includes("curved: { label: 'Curved',") && sw.includes("hops: { label: 'Hops',"));
+  assert.ok(HERO.loop > 0);
+});
+
+test('the README GIF\'s line style beat: the pointer clicks Hops, the lines hop, then Curved again', async () => {
+  const { render, DRAWN, LINES, styleAt, HOVER_PATH, SWITCH_AT, FOCUS_CHANGES, HERO } = await import('../player/hero.js');
+  // Curved at the seam, Hops for a while after the hover, then Curved again before the pointer leaves
+  const hops = [];
+  for (let t = 0; t < HERO.loop; t += 0.05) if (styleAt(t) === 'hops') hops.push(t);
+  assert.ok(hops.length, 'Hops is shown');
+  assert.ok(hops[0] > FOCUS_CHANGES.at(-1).t, 'after the hover');
+  assert.ok(hops.at(-1) - hops[0] >= 2.4, 'Hops held long enough to see');
+  assert.ok(hops.at(-1) < HOVER_PATH.at(-1).t && styleAt(HERO.loop - 0.01) === 'curved');
+  // each switch happens with the pointer on that option (its click)
+  const { path } = lib;
+  for (const t of [hops[0], hops.at(-1) + 0.05]) {
+    const p = path(t, HOVER_PATH), want = styleAt(t);
+    assert.ok(Math.abs(p.x - SWITCH_AT[want].x) <= 20 && Math.abs(p.y - SWITCH_AT[want].y) <= 17, `+${t}s: the pointer is on ${want}`);
+  }
+  // the switch shows the style in use
+  const chosen = (h) => h.match(/data-line-style="(\w+)" style="[^"]*background:#0e639c/)?.[1];
+  assert.equal(chosen(render(0)), 'curved');
+  assert.equal(chosen(render(hops[1])), 'hops');
+  // Curved: cubic corners and a halo casing; the line passing under another is cut there
+  const curved = DRAWN.curved, hopsDrawn = DRAWN.hops;
+  assert.ok(curved.some((l) => l.strokeD), 'a cut under a crossing');
+  assert.ok(curved.filter((l, i) => LINES[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
+  assert.match(render(0), /stroke="var\(--card\)" stroke-width="8.75"/);
+  // Hops: quadratic (rounded) corners, a hop (two cubic quarters) on the more horizontal line, no casing
+  assert.ok(hopsDrawn.filter((l, i) => LINES[i].pts.length > 2).every((l) => / Q /.test(l.d)));
+  const hopped = hopsDrawn.filter((l) => / C /.test(l.d));
+  assert.ok(hopped.length >= 2, 'at least two hops');
+  assert.doesNotMatch(render(hops[1]), /stroke-width="8.75"/);
+});
+
+test('the README GIF\'s draft page draws Curved lines too: the product\'s draft canvas is the same renderer', async () => {
+  const { DRAFT_LINES, DRAFT_DRAWN, render } = await import('../player/hero.js');
+  const { SALES_DRAFT: sales } = editor;
+  assert.equal(DRAFT_LINES.length, sales.rels.length, 'one line per relationship the headline counts');
+  for (const [i, [a, , b]] of sales.rels.entries()) {
+    assert.equal(DRAFT_LINES[i].from, sales.tables[a].name);
+    assert.equal(DRAFT_LINES[i].to, sales.tables[b].name);
+    assert.match(DRAFT_DRAWN[i].d, / C /, 'curved corners');
+    assert.doesNotMatch(DRAFT_DRAWN[i].d, / Q /);
+  }
+  const draft = render(8.2);
+  for (const l of DRAFT_DRAWN) assert.ok(draft.includes(`d="${l.d}"`), 'drawn on the draft page');
+});
+
+test('the README GIF\'s captions: one per beat, five words at most, big, in a band above the window', async () => {
+  const { CAPTIONS, render, HERO, HOVER_PATH, FOCUS_CHANGES } = await import('../player/hero.js');
+  for (const c of CAPTIONS) {
+    assert.ok(c.text.split(/\s+/).length <= 5, c.text);
+    assert.ok(c.text.includes(c.em), c.text);
+    assert.doesNotMatch(c.text, NO_DBT_ON_SCREEN);
+  }
+  // the loop opens and closes on the same caption
+  assert.equal(CAPTIONS[0].text, CAPTIONS.at(-1).text);
+  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at > CAPTIONS[i - 1].at));
+  const shown = (t) => { let i = 0; while (i + 1 < CAPTIONS.length && CAPTIONS[i + 1].at <= t) i++; return CAPTIONS[i].text; };
+  assert.equal(shown(2), 'Your model, as DBML files');
+  assert.equal(shown(8), 'Import what you have');
+  assert.equal(shown((FOCUS_CHANGES[0].t + FOCUS_CHANGES[1].t) / 2), 'Hover to trace relationships');
+  assert.equal(shown(17), 'Lines: Curved or Hops');
+  // 58 px at 1440 is 32 px at the README's 800; the band sits above the window, never over the canvas
+  const h = render(2);
+  assert.match(h, /font-size:58px;font-weight:800/);
+  const band = Number(h.match(/^<div class="abs" style="left:0;top:0;width:\d+px;height:(\d+)px">/)[1]);
+  const winTop = Number(h.match(/<div class="card" style="left:\d+px;top:(\d+)px/)[1]);
+  assert.ok(winTop >= band, 'the window starts below the caption band');
+  assert.ok(HERO.w === 1440 && HOVER_PATH.length > 0);
+});
+
+// The loop and its beats, in order (re-time the README GIF section of video/README.md with these).
+test('the README GIF\'s loop: 22 s at 12 fps, files → text → draft → hover → line styles', async () => {
+  const { HERO, CAPTIONS, FOCUS_CHANGES, styleAt } = await import('../player/hero.js');
+  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [22, 12, 1440, 1010]);
+  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 6.2, 10.4, 14.9, 21.2]);
+  assert.ok(FOCUS_CHANGES[0].t > 10.4 && FOCUS_CHANGES.at(-1).t < 15.5);
+  assert.equal(styleAt(16.5), 'hops');
+  assert.equal(styleAt(19.5), 'curved');
+});
+
 // ---- the default cut is a recording of the real VS Code (record/) ----------------------------
 const takes = JSON.parse(readFileSync(join(HERE, '..', 'record', 'takes.json'), 'utf8'));
 const recScenes = script.scenes.filter((s) => s.module.startsWith('rec/'));
@@ -517,12 +735,13 @@ const recScenes = script.scenes.filter((s) => s.module.startsWith('rec/'));
 test('the default cut films the real VS Code, in its light theme: every scene before Confluence, in one of the takes, at the inset\'s size', async () => {
   const { SCENES: ACTIONS, TAKES } = await import('../record/scenes.mjs');
   const { WINDOW, SETTINGS } = await import('../record/vscode.mjs');
-  // every scene but the AI change's still, the pull request, Confluence and the end card (HTML)
-  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => !['aiShow', 'pr', 'confluence', 'end'].includes(id)));
+  // every scene but the wall of sources, the AI change's still, the pull request, Confluence and the end card (HTML)
+  assert.deepEqual(recScenes.map((s) => s.id), script.scenes.map((s) => s.id).filter((id) => !['bring', 'aiShow', 'pr', 'confluence', 'end'].includes(id)));
   const filmed = Object.values(TAKES).flatMap((t) => t.scenes);
   assert.deepEqual([...filmed].sort(), recScenes.map((s) => s.id).sort(), 'each recorded scene in exactly one take');
   for (const s of recScenes) assert.equal(typeof ACTIONS[s.id]?.run, 'function', `record/scenes.mjs has no ${s.id}`);
   assert.deepEqual(TAKES.dbt.scenes, ['dbt'], 'the dbt beat is its own take, in the dbt project');
+  assert.deepEqual(TAKES.big.scenes, ['scale'], 'the 2,000-table diagram is its own uncut take');
   // the window fills the inset exactly (filmed at 1.2x its CSS size), between the headline and the chapter bar
   const { x, y, w, h } = script.recording.inset;
   assert.equal(w / h, WINDOW.width / WINDOW.height);
@@ -628,32 +847,28 @@ test('the recording shows dbt only in the dbt beat, and there shows what the lin
   assert.match(read('src', 'commands', 'runDbtParse.ts'), /writes `\{target-path\}\/manifest\.json`/);
 });
 
-test('the logical cut plays the default cut\'s plain take: its recorded scenes are script.yaml\'s, minus dbt', async () => {
+test('the logical cut plays the default cut\'s takes without dbt: its recorded scenes are script.yaml\'s, minus dbt', async () => {
   const { checkFootage, footageVariant } = await import('../record/composite.mjs');
   assert.equal(logical.recording.footage, 'default');
   assert.equal(footageVariant(logical.recording.footage), '');
   assert.deepEqual(logical.recording.inset, script.recording.inset);
-  assert.equal(logical.recording.zoom, undefined, 'the punch-in is the dbt beat\'s');
   // the chapters: script.yaml's without COMPARE, renumbered
   assert.deepEqual(logical.chapters.map((c) => c.replace(/^\d+ · /, '')), script.chapters.map((c) => c.replace(/^\d+ · /, '')).filter((c) => c !== 'COMPARE'));
   const byId = Object.fromEntries(script.scenes.map((s) => [s.id, s]));
   for (const sc of logical.scenes.filter((s) => s.module.startsWith('rec/'))) {
-    const d = byId[sc.id];
-    // filmed in the plain take, a folder without dbt_project.yml
-    assert.equal(takes[sc.id].take, 'plain', sc.id);
-    if (sc.id !== 'bring') { assert.deepEqual(sc, d, `${sc.id} is script.yaml's scene`); continue; }
-    // the import: its first line names no dbt, its logo row has no dbt mark, and the pause puts `open` back
-    const { lines, props, ...rest } = sc;
-    const { lines: dl, props: dp, ...drest } = d;
-    assert.deepEqual(rest, drest);
-    assert.doesNotMatch(lines[0].caption, NO_DBT);
-    assert.deepEqual(props.logos.map(([id]) => id), dp.logos.map(([id]) => id).filter((id) => id !== 'dbt'));
-    const { pause, ...open } = lines[1];
-    const { pause: dpause, ...dopen } = dl[1];
-    assert.deepEqual(open, dopen);
-    assert.ok(pause > (dpause ?? script.timing.gap), 'b_have is shorter, so the pause is longer');
+    // filmed in a folder without dbt_project.yml: the plain take, or the 2,000-table project
+    assert.ok(['plain', 'big'].includes(takes[sc.id].take), sc.id);
+    assert.deepEqual(sc, byId[sc.id], `${sc.id} is script.yaml's scene`);
   }
-  // the non-recorded scenes are the default cut's, but for the chapter number
+  // the wall of sources: its own lines (no dbt), the rest as script.yaml's
+  // (its length is its own: about a second after its shorter line)
+  const { lines, props, minDur, ...rest } = logical.scenes.find((s) => s.id === 'bring');
+  const { lines: dl, props: dp, minDur: _m, ...drest } = byId.bring;
+  assert.deepEqual(rest, drest);
+  for (const l of lines) assert.doesNotMatch(l.caption, NO_DBT);
+  assert.equal(lines.length, dl.length);
+  assert.deepEqual(props.sources, dp.sources.filter((id) => id !== 'dbt'));
+  // the other HTML scenes are the default cut's, but for the chapter number
   for (const id of ['aiShow', 'pr', 'confluence', 'end']) {
     const { chapter, ...a } = logical.scenes.find((s) => s.id === id);
     const { chapter: _, ...b } = byId[id];
@@ -677,33 +892,57 @@ test('nothing the logical cut films shows dbt: on screen or in the terminal', ()
   for (const c of logical.chapters) assert.doesNotMatch(c, NO_DBT_ON_SCREEN);
 });
 
-test('each recorded scene shows the product labels its narration names', () => {
+test('each recorded scene shows the product labels its narration names', async () => {
   const shown = (id) => new Set(takes[id].screenText);
   const cmd = (id) => pkg.contributes.commands.find((c) => c.command === id).title;
-  const { HAND_TABLE } = { HAND_TABLE: 'dim_promotion' };
+  const { HAND_TABLE, DIAGRAM, BIG_DIAGRAM } = await import('../record/scenes.mjs');
+  const { PG_DUMP } = await import('../record/fixtures.mjs');
+  const DIALECTS = Object.values(Object.fromEntries([...read('src', 'services', 'sqlDdlImport.ts').match(/SQL_DIALECT_LABELS[^{]+\{([^}]+)\}/)[1].matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]])));
+  assert.equal(DIALECTS.length, 9, 'nine dialects');
   const expect = {
-    hook: ['dim_customer.dbml', 'fct_order.dbml', 'sales.dbml', '6 tables'],
-    bring: ['sales.sql', 'No diagrams yet. This folder has CREATE TABLE scripts.', START_LABELS.importSqlDdl, tsConst('src/types/startActions.ts', 'MORE_STARTS_LABEL'), START_LABELS.import, tsConst('src/types/startActions.ts', 'IMPORT_GUIDE_LABEL')],
-    importSql: ['SQL DDL scripts', 'Power BI or Fabric semantic model', 'Import SQL DDL', 'Databricks / Spark SQL'],
-    draft: ['Draft from 1 SQL file (Snowflake) · 4 tables, 3 relationships · not saved', tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM')],
+    hook: ['dim_customer.dbml', 'fct_order.dbml', `${DIAGRAM}.dbml`, '6 tables'],
+    export: ['sales.sql', 'pipelines', 'README.md'],
+    importSql: [cmd('erdStudio.importSqlDdl'), 'Import SQL DDL', 'Import', 'Detected from your SQL', ...DIALECTS],
+    draft: ['Draft from 1 SQL file (PostgreSQL) · 4 tables, 3 relationships · not saved', tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM')],
     files: ['.erd-studio', 'fct_order.dbml', 'pipelines', 'DBML Table'],
+    scale: [BIG_DIAGRAM, '2000 tables', '2719 relationships'],
     byHand: ['Starter columns (optional)', HAND_TABLE],
     aiSetup: [cmd('erdStudio.setupAiHelper'), ...editor.HELP_ROWS],
     aiRun: ['dim_customer', 'customer_id', '6 tables'],
-    dbt: [lib.COMPARE_WORDS.logical, 'Physical', 'NUMBER(18,2)', 'order_status'],
+    dbt: [lib.COMPARE_WORDS.logical, 'Physical', 'numeric(18,2)', 'order_status'],
   };
   assert.deepEqual(Object.keys(expect).sort(), recScenes.map((s) => s.id).sort());
   for (const [id, labels] of Object.entries(expect)) for (const l of labels) assert.ok(shown(id).has(l), `${id} never showed "${l}"`);
-  // the import picker's rows are importModel.ts's; the dialect was detected
-  const picker = read('src', 'commands', 'importModel.ts');
-  for (const r of ['SQL DDL scripts', 'DBML file', 'Power BI or Fabric semantic model']) assert.ok(picker.includes(`label: '$(`) && picker.includes(` ${r}'`), r);
-  assert.ok([...shown('importSql')].some((t) => /^Snowflake/.test(t)) || [...shown('importSql')].includes('Snowflakedetected') || [...shown('importSql')].includes('detected'), 'the Snowflake row');
+  // the export ran pg_dump in the terminal, for real; the dialect PostgreSQL was detected
+  assert.ok(takes.export.terminalText.some((r) => r.includes(`$ ${PG_DUMP}`)), 'pg_dump in the terminal');
+  assert.ok([...shown('importSql')].some((t) => /^detected · /.test(t)), 'a dialect marked detected');
   assert.ok([...shown('importSql')].some((t) => t.startsWith(IMPORT_NAME_PROMPT)));
   // Set Up My AI Helper's toast names the assistant it set up
   assert.ok([...shown('aiSetup')].some((t) => /^AI helper ready for Claude Code/.test(t)), 'Set Up My AI Helper\'s toast');
   // the narration's labels are the product's
   const said = script.scenes.flatMap((s) => s.lines.map((l) => l.caption)).join(' ');
-  for (const l of [cmd('erdStudio.setupAiHelper'), 'Import', 'Run dbt parse', 'Compare with dbt', 'Physical tab']) assert.ok(said.includes(l), l);
+  for (const l of [cmd('erdStudio.setupAiHelper'), 'Import SQL DDL', 'New', 'Run dbt parse', 'Compare with dbt', 'Physical tab']) assert.ok(said.includes(l.replace(/…$/, '')), l);
+  assert.equal(cmd('erdStudio.importSqlDdl'), 'Import SQL DDL…');
+});
+
+test('the scale scene says what its take shows: 2,000 tables, 2,700 relationships, lines routed in the background, and no time for it', () => {
+  const sc = script.scenes.find((s) => s.id === 'scale');
+  const r = takes.scale.notes?.routing;
+  // the take did route, and timed it (kept for reference: the time depends on the machine, so it is never claimed)
+  assert.ok(r && !r.timedOut && r.passMs > 0 && r.linesRoutedMs > 0, 'record/takes.json scale.notes.routing (record the big take)');
+  assert.equal(r.tables, 2000);
+  assert.equal(Math.round(r.lines / 100) * 100, 2700);
+  const said = sc.lines.map((l) => l.caption).join(' ');
+  assert.match(said, /2,000 tables and 2,700 relationships/);
+  assert.match(said, /in the background/);
+  assert.deepEqual(sc.props.stats.map(([l]) => l), ['2,000 tables', '2,700 relationships', 'Lines routed in the background']);
+  // no figure for the routing time, on screen or said, and never a claim the take does not show
+  const NUMBER = /\b(\d+(\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|a half|half a)\s*(-\s*)?(s|secs?|seconds?|ms|milliseconds?)\b/i;
+  for (const sc2 of [script, logical]) {
+    const s2 = sc2.scenes.find((s) => s.id === 'scale');
+    for (const text of [...s2.lines.map((l) => `${l.caption} ${l.say ?? ''}`), ...s2.props.stats.map(([l]) => l), ...s2.headline]) assert.doesNotMatch(text, NUMBER, text);
+    assert.doesNotMatch(JSON.stringify(s2), /instant|smooth|no limit|any size|seamless|no waiting|straight away/i);
+  }
 });
 
 test('the AI helper is what the narration says: plain markdown skill files, and in Claude Code a pre-tool hook', () => {
@@ -716,9 +955,8 @@ test('the AI helper is what the narration says: plain markdown skill files, and 
   assert.match(ai, /pre-tool hook/);
 });
 
-test('the recorded frame: the window\'s bezel, the hook\'s claims and the import\'s logos, nothing about dbt but its logo, the footage fading only where it starts and ends', async () => {
+test('the recorded frame: the window\'s bezel, the hook\'s claims, the export\'s query card and the scale scene\'s figures, the footage fading only where it starts and ends', async () => {
   const mod = (await import('../player/scenes/rec/window.js')).default;
-  const { LOGOS } = await import('../player/scenes/rec/window.js');
   globalThis.TIMELINE = { recording: script.recording };
   const durations = Object.fromEntries(script.scenes.flatMap((s) => s.lines.map((l) => [l.id, 2.5])));
   const tl = buildTimeline(script, durations);
@@ -729,24 +967,79 @@ test('the recorded frame: the window\'s bezel, the hook\'s claims and the import
   assert.doesNotMatch(html.replace(/<[^>]+>/g, ' '), NO_DBT_ON_SCREEN);
   const { x, y, w, h } = script.recording.inset;
   assert.ok(html.includes(`left:${x}px;top:${y}px;width:${w}px;height:${h}px`), 'the inset the footage covers');
-  // the logos: each one's file is there, vetted in LOGOS.md, and the line names each
-  const bring = tl.scenes.find((s) => s.id === 'bring');
-  const logoHtml = mod.render(bring.dur - 0.1, { beats: bring.beats, dur: bring.dur, scene: bring });
+  // the export: Snowflake's one query, beside the pg_dump the window films; its logo vetted in LOGOS.md
   const notes = readFileSync(join(HERE, '..', 'player', 'assets', 'logos', 'LOGOS.md'), 'utf8');
-  for (const [id] of bring.props.logos) {
-    const l = LOGOS[id];
-    assert.ok(logoHtml.includes(l.name), l.name);
-    // a chip naming two products (Power BI / Fabric) is named word for word in the line, each of them
-    for (const name of l.name.split(' / ')) assert.ok(bring.lines[0].caption.includes(name), `the line names ${name}`);
-    if (l.file) { assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'logos', l.file)), l.file); assert.ok(notes.includes(`\`${l.file}\``), `${l.file} in LOGOS.md`); }
-  }
+  const exp = tl.scenes.find((s) => s.id === 'export');
+  const q = exp.props.query;
+  const qHtml = mod.render(exp.dur - 0.1, { beats: exp.beats, dur: exp.dur, scene: exp });
+  assert.ok(qHtml.includes("SELECT GET_DDL(&#39;SCHEMA&#39;, &#39;SHOP.SALES&#39;);") || qHtml.includes("SELECT GET_DDL('SCHEMA', 'SHOP.SALES');"), 'the query');
+  assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'logos', `${q.logo}.svg`)) && notes.includes(`\`${q.logo}.svg\``));
+  const said = exp.lines.map((l) => l.caption).join(' ');
+  for (const wd of ['one step', 'schema or database', 'PostgreSQL', 'pg_dump', 'Snowflake', 'GET_DDL']) assert.ok(said.includes(wd), wd);
+  // never a single-table export: the whole database (pg_dump -d) and a whole schema (GET_DDL 'SCHEMA')
+  const { PG_DUMP } = await import('../record/fixtures.mjs');
+  assert.match(PG_DUMP, /^pg_dump --schema-only --no-owner --no-privileges -d shop -f sales\.sql$/);
+  assert.doesNotMatch(PG_DUMP, / -t /);
+  assert.match(q.sql, /^SELECT GET_DDL\('SCHEMA', /);
+  // the scale scene: its figures, as the pills say them
+  const scale = tl.scenes.find((s) => s.id === 'scale');
+  const sHtml = mod.render(scale.dur - 0.1, { beats: scale.beats, dur: scale.dur, scene: scale });
+  for (const [label] of scale.props.stats) for (const part of label.split(' ')) assert.ok(sHtml.includes(part), part);
   // video/ never loads anything from social-video/ at run time
-  for (const f of ['scenes/rec/window.js', 'scenes/tour/confluence.js']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /social-video/, f);
+  for (const f of ['scenes/rec/window.js', 'scenes/sources/wall.js', 'scenes/tour/confluence.js']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /social-video/, f);
   const main = readFileSync(join(HERE, '..', 'player', 'main.js'), 'utf8');
   assert.match(main, /holdsWindow\(scs\[i - 1\]\) \? 1 : pin\) \* \(holdsWindow\(scs\[i \+ 1\]\) \? 1 : 1 - pout\)/);
   const comp = readFileSync(join(HERE, '..', 'record', 'composite.mjs'), 'utf8');
   assert.match(comp, /holdsWindow\(r\.before\) \? '' : `,fade=t=in:st=\$\{a\.toFixed\(3\)\}:d=\$\{fade\}:alpha=1`/);
   assert.match(comp, /holdsWindow\(r\.after\) \? '' : `,fade=t=out:st=\$\{\(b - fade\)\.toFixed\(3\)\}:d=\$\{fade\}:alpha=1`/);
+});
+
+test('the wall of sources: every source the import reads, in order, each mark beside its name, landing in the first second and then still', async () => {
+  const { SOURCES, WALL } = await import('../player/scenes/sources/wall.js');
+  const mod = (await import('../player/scenes/sources/wall.js')).default;
+  globalThis.TIMELINE = { recording: script.recording };
+  const ORDER = ['dbt', 'databricks', 'snowflake', 'powerBi', 'fabric', 'postgresql', 'sqlServer', 'mysql', 'oracle', 'bigquery', 'redshift', 'mariadb', 'sqlite', 'dbml'];
+  const bring = (sc) => sc.scenes.find((s) => s.id === 'bring');
+  assert.deepEqual(bring(script).props.sources, ORDER);
+  assert.deepEqual(bring(logical).props.sources, ORDER.filter((id) => id !== 'dbt'), 'the logical cut: the same wall without dbt');
+  const notes = readFileSync(join(HERE, '..', 'player', 'assets', 'logos', 'LOGOS.md'), 'utf8');
+  for (const id of ORDER) {
+    const src = SOURCES[id];
+    if (id === 'dbml') { assert.equal(src.file, null, 'DBML has no mark: a text badge'); continue; }
+    assert.ok(existsSync(join(HERE, '..', 'player', 'assets', 'logos', src.file)), src.file);
+    assert.ok(notes.includes(`\`${src.file}\``), `${src.file} in LOGOS.md`);
+  }
+  // the narration is short: it names the best-known tools, in the wall's order, and sums up the rest
+  for (const sc of [script, logical]) {
+    const said = bring(sc).lines.map((l) => l.caption).join(' ');
+    assert.equal(bring(sc).lines.length, 1, 'one line');
+    let from = 0;
+    for (const id of ['dbt', 'databricks', 'snowflake', 'powerBi'].filter((x) => bring(sc).props.sources.includes(x))) {
+      const i = said.indexOf(SOURCES[id].name, from);
+      assert.ok(i >= from, `${SOURCES[id].name} is said, in order`);
+      from = i + SOURCES[id].name.length;
+    }
+    assert.match(said, /the most popular SQL databases/);
+  }
+  // all land within the first second, then the wall holds still: every later frame is the same
+  for (const sc of [script, logical]) {
+    const durations = Object.fromEntries(sc.scenes.flatMap((s) => s.lines.map((l) => [l.id, 2.5])));
+    const b = buildTimeline(sc, durations).scenes.find((s) => s.id === 'bring');
+    const still = mod.render(1.2, { beats: b.beats, dur: b.dur, scene: b });
+    for (let lt = 1.2; lt < b.dur; lt += 0.5) assert.equal(mod.render(lt, { beats: b.beats, dur: b.dur, scene: b }), still, `the wall moved at +${lt}s`);
+    assert.ok(b.dur - 1.2 >= 4, 'still long enough to read');
+    for (const id of b.props.sources) assert.ok(still.includes(SOURCES[id].name), SOURCES[id].name);
+  }
+  // on the real timeline, the scene ends about a second after its line: a viewer can pause, nobody waits
+  for (const [sc, dir] of [[script, 'build'], [logical, 'build-logical']]) {
+    const built = join(HERE, '..', dir, 'timeline.json');
+    if (!existsSync(built)) continue;
+    const b = JSON.parse(readFileSync(built, 'utf8')).scenes.find((s) => s.id === 'bring');
+    const after = b.dur - b.beats.have.end;
+    assert.ok(after >= 0.8 && after <= 1.3, `${dir}: the wall holds ${after.toFixed(2)} s after its line`);
+  }
+  // same-size tiles, big enough to read at 1920x1080, in rows that fit the window's place
+  assert.ok(WALL.mark >= 72 && WALL.perRow * WALL.tileW + (WALL.perRow - 1) * WALL.gap <= script.recording.inset.w - 80);
 });
 
 test('the Confluence scene: the real render of the tour\'s diagram, a read-only viewer reading the repo', async () => {
@@ -853,42 +1146,66 @@ test('composite draws the pointer from the driver\'s path, on the video clock: e
   assert.match(readFileSync(join(HERE, '..', 'record', 'record.mjs'), 'utf8'), /pointer\.json/);
 });
 
-test('the punch-in on the dbt beat\'s comparison panel stays inside the window and its scene', () => {
-  const { zoom, inset } = script.recording;
-  assert.equal(zoom.scene, 'dbt');
-  const sc = script.scenes.find((s) => s.id === zoom.scene);
-  assert.ok(sc.lines.some((l) => l.beat === zoom.beat), zoom.beat);
-  assert.ok(zoom.scale > 1 && zoom.scale <= 1.6);
-  assert.ok(zoom.focus[0] > 0 && zoom.focus[0] < inset.w && zoom.focus[1] > 0 && zoom.focus[1] < inset.h);
+test('the punch-ins (the terminal\'s pg_dump, the dbt beat\'s comparison panel) stay inside the window and their scenes', async () => {
+  const { zoomsOf, zoomSpan } = await import('../record/composite.mjs');
+  const { inset } = script.recording;
+  const zooms = zoomsOf(script.recording);
+  assert.deepEqual(zooms.map((z) => z.scene), ['export', 'dbt']);
+  assert.deepEqual(zoomsOf(logical.recording), zooms.filter((z) => z.scene !== 'dbt'), 'the logical cut: the same, but the dbt beat\'s');
+  assert.deepEqual(zoomsOf({ zoom: { scene: 'a' } }), [{ scene: 'a' }]);
+  assert.deepEqual(zoomsOf({}), []);
+  for (const zoom of zooms) {
+    const sc = script.scenes.find((s) => s.id === zoom.scene);
+    assert.ok(sc.lines.some((l) => l.beat === zoom.beat), zoom.beat);
+    if (zoom.until) assert.ok(sc.lines.some((l) => l.beat === zoom.until[0]), zoom.until[0]);
+    assert.ok(zoom.scale > 1 && zoom.scale <= 1.6);
+    assert.ok(zoom.focus[0] > 0 && zoom.focus[0] < inset.w && zoom.focus[1] > 0 && zoom.focus[1] < inset.h);
+  }
   const built = join(HERE, '..', 'build', 'timeline.json');
   if (existsSync(built)) {
-    const s = JSON.parse(readFileSync(built, 'utf8')).scenes.find((x) => x.id === zoom.scene);
-    assert.ok(s.beats[zoom.beat].t + zoom.offset + zoom.dur < s.dur - 0.5, 'held for at least half a second');
+    const tl = JSON.parse(readFileSync(built, 'utf8'));
+    for (const zoom of zooms) {
+      const s = tl.scenes.find((x) => x.id === zoom.scene);
+      const { at, to } = zoomSpan(zoom, s, s.start);
+      assert.ok(to - at - 2 * zoom.dur >= 0.5, `${zoom.scene}: held for at least half a second`);
+      assert.ok(to <= s.dur + 1e-6, `${zoom.scene}: ends inside its scene`);
+    }
   }
+  // a span: from the beat + offset to `until`, or to the scene's end
+  const sc = { start: 10, dur: 8, beats: { a: { t: 1 }, b: { t: 4 } } };
+  assert.deepEqual(zoomSpan({ scene: 'x', beat: 'a', offset: 0.5, dur: 0.4 }, sc, 2), { at: 9.5, to: 16 });
+  assert.deepEqual(zoomSpan({ scene: 'x', beat: 'a', offset: 0.5, dur: 0.4, until: ['b', 0.5] }, sc, 2), { at: 9.5, to: 12.5 });
+  assert.throws(() => zoomSpan({ scene: 'x', beat: 'b', dur: 0.4, until: ['a', 0] }, sc), /before it has dissolved in/);
 });
 
-test('the fixtures: a project folder holding Snowflake\'s exported DDL, and a dbt project that differs from the design on purpose', async () => {
+test('the fixtures: a project folder whose warehouse is a real PostgreSQL database (exported by pg_dump on camera), and a dbt project that differs from the design on purpose', async () => {
   const fx = readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8');
-  // the plain folder opens with nothing ERD Studio wrote and no dbt
+  // the plain folder opens with nothing ERD Studio wrote, no dbt, and no DDL yet (the export scene writes sales.sql)
   const plain = fx.slice(fx.indexOf('const PLAIN = {'), fx.indexOf('};', fx.indexOf('const PLAIN = {')));
-  assert.doesNotMatch(plain, /\.erd-studio|dbt_project/);
-  const { SALES_SQL, dimCustomerYml, DBT_ERD } = await import('../record/fixtures.mjs');
-  // GET_DDL's shape: create or replace TABLE, Snowflake types, declared keys; four tables, three foreign keys
-  assert.equal((SALES_SQL.match(/^create or replace TABLE /gm) ?? []).length, 4);
-  assert.equal((SALES_SQL.match(/foreign key \(/g) ?? []).length, 3);
-  assert.match(SALES_SQL, /NUMBER\(38,0\)/);
-  assert.doesNotMatch(SALES_SQL, /\/Users\/|@/);
+  assert.doesNotMatch(plain, /\.erd-studio|dbt_project|sales\.sql|Snowflake/);
+  const { SHOP_SQL, PG_DUMP, dimCustomerYml, DBT_ERD } = await import('../record/fixtures.mjs');
+  // the shop database: a sales schema, four tables, three foreign keys, ordinary PostgreSQL types
+  assert.equal((SHOP_SQL.match(/^CREATE TABLE sales\.\w+ \(/gm) ?? []).length, 4);
+  assert.equal((SHOP_SQL.match(/ REFERENCES sales\./g) ?? []).length, 3);
+  assert.doesNotMatch(SHOP_SQL, /NUMBER\(|NOT NULL REFERENCES/);
+  // its unedited pg_dump is detected as PostgreSQL (the dump's own signals: its header, ALTER TABLE ONLY)
+  assert.ok(read('src', 'services', 'sqlDdlImport.ts').includes("['postgres', /^-- PostgreSQL database dump\\b/m, 3, 'comments']"), 'a pg_dump header is a PostgreSQL signal');
+  assert.match(PG_DUMP, /^pg_dump --schema-only --no-owner --no-privileges -d shop -f sales\.sql$/);
+  // pg_dump and psql on the window's own PATH
+  const { PG_TOOLS } = await import('../record/vscode.mjs');
+  assert.deepEqual(PG_TOOLS, ['pg_dump', 'psql']);
   // no scratch or home paths in committed code
   for (const f of ['fixtures.mjs', 'scenes.mjs', 'vscode.mjs', 'record.mjs']) assert.doesNotMatch(readFileSync(join(HERE, '..', 'record', f), 'utf8'), /\/Users\/|scratchpad|claude-501/, f);
   // the design the dbt take starts from: the import, the table added by hand, the one Claude Code added
-  for (const t of ['fct_order', 'dim_store', 'dim_product', 'dim_date', 'dim_promotion', 'dim_customer']) assert.ok(DBT_ERD[`main/tables/main/${t}.dbml`], t);
-  // the dbt project's models differ on purpose: an extra order_status, amount NUMBER(18,2), no dim_promotion
-  assert.match(fx, /- name: order_status\n\s+data_type: VARCHAR\(20\)/);
-  assert.match(fx, /- name: amount\n\s+data_type: NUMBER\(18,2\)/);
-  assert.match(DBT_ERD['main/tables/main/fct_order.dbml'], /amount +"NUMBER\(12,2\)"/);
+  const { SCHEMA } = await import('../record/scenes.mjs');
+  for (const t of ['fct_order', 'dim_store', 'dim_product', 'dim_date', 'dim_promotion', 'dim_customer']) assert.ok(DBT_ERD[`main/tables/${SCHEMA}/${t}.dbml`], t);
+  // the dbt project's models differ on purpose: an extra order_status, amount numeric(18,2), no dim_promotion
+  assert.match(fx, /- name: order_status\n\s+data_type: character varying\(20\)/);
+  assert.match(fx, /- name: amount\n\s+data_type: numeric\(18,2\)/);
+  assert.match(DBT_ERD[`main/tables/${SCHEMA}/fct_order.dbml`], /amount +"numeric\(12,2\)"/);
   assert.doesNotMatch(fx, /- name: dim_promotion/);
-  // dim_customer's model follows the design's columns (Claude Code chose them)
-  assert.match(dimCustomerYml('Table main.dim_customer {\n  customer_id "NUMBER(38,0)" [pk]\n  email       VARCHAR\n}\n'), /- name: customer_id\n {8}data_type: NUMBER\(38,0\)\n {8}data_tests: \[unique, not_null\]\n {6}- name: email\n {8}data_type: VARCHAR/);
+  // dim_customer's model follows the design's columns (Claude Code chose them), quoted types kept whole
+  assert.match(dimCustomerYml('Table sales.dim_customer {\n  customer_id integer [pk]\n  name        "character varying(100)"\n}\n'), /- name: customer_id\n {8}data_type: integer\n {8}data_tests: \[unique, not_null\]\n {6}- name: name\n {8}data_type: character varying\(100\)/);
   // Run dbt parse on camera: real dbt Core, pinned, and a profile in the project that connects nowhere
   const { DBT_UVX_ARGS } = await import('../record/vscode.mjs');
   assert.ok(DBT_UVX_ARGS.some((a) => /^dbt-core==\d/.test(a)) && DBT_UVX_ARGS.some((a) => /^dbt-duckdb==\d/.test(a)));
@@ -900,7 +1217,7 @@ test('the design the take wrote is formatted as ERD Studio writes it, but for th
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
   const { DBT_ERD } = await import('../record/fixtures.mjs');
   // ERD Studio formats every file it writes (Claude Code edited fct_order, the relationships and dim_customer; Layout rewrote the diagram after it)
-  const ours = ['main/tables/main/dim_store.dbml', 'main/tables/main/dim_product.dbml', 'main/tables/main/dim_date.dbml', 'main/tables/main/dim_promotion.dbml', 'main/diagrams/sales.dbml'];
+  const ours = ['main/tables/sales/dim_store.dbml', 'main/tables/sales/dim_product.dbml', 'main/tables/sales/dim_date.dbml', 'main/tables/sales/dim_promotion.dbml', 'main/diagrams/shop-analytics.dbml'];
   const texts = ours.map((f) => DBT_ERD[f]);
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
@@ -930,7 +1247,7 @@ test('the footage is filmed at the inset\'s own size, scaled down from a 2x wind
     }
     return null;
   };
-  for (const take of ['plain', 'dbt']) {
+  for (const take of ['plain', 'big', 'dbt']) {
     const f = join(HERE, '..', 'build', 'rec', take, 'f00010.jpg');
     if (!existsSync(f)) continue;
     assert.deepEqual(jpegSize(readFileSync(f)), { w: inset.w, h: inset.h }, `${take}'s frames`);
@@ -954,8 +1271,9 @@ test('the AI change is held on a still of the take\'s last frame, showing the li
   assert.ok(DBT_ERD[rel(CHANGE.ref.path)].split('\n').includes(CHANGE.ref.line));
   // and the terminal showed Claude Code writing them
   const term = takes.aiRun.terminalText.join('\n');
-  assert.match(term, /Write\(\.erd-studio\/main\/tables\/main\/dim_customer\.dbml\)/);
-  assert.match(term, /Update\(\.erd-studio\/main\/relationships\/main\.dbml\)/);
+  assert.match(term, /Write\(\.erd-studio\/main\/tables\/sales\/dim_customer\.dbml\)/);
+  // the relationships file's edit (the terminal is sampled every 0.6 s, so its Update header or its added Ref row)
+  assert.ok(/Update\(\.erd-studio\/main\/relationships\/main\.dbml\)/.test(term) || term.split('\n').some((r) => /^\d+ \+Ref: sales\.fct_order\.customer_id >\? /.test(r)), 'Claude Code edited the relationships file');
   for (const l of CHANGE.table.lines.slice(1, -1)) assert.ok(term.includes(l.trim()), l);
   // the marks sit inside the window
   const { w, h } = script.recording.inset;
@@ -980,7 +1298,7 @@ test('one pull request: the .dbml change and the SQL that builds the table, in t
   // the code: a .sql in pipelines/, the plain folder's code folder (record/fixtures.mjs), building the same table and columns
   assert.match(readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8'), /'pipelines\//);
   assert.match(CODE.path, /^pipelines\/dim_customer\.sql$/);
-  assert.match(CODE.lines[0], /table dim_customer/);
+  assert.match(CODE.lines[0], /table (sales\.)?dim_customer/);
   for (const col of ['customer_id', 'customer_name', 'email', 'city', 'region']) assert.ok(CODE.lines.some((l) => l.includes(col)), col);
   // and fct_order's new key has code too: the loader the plain folder already has, one line changed
   const { CODE_ALSO, FILES, ADDED } = await import('../player/scenes/tour/pullRequest.js');

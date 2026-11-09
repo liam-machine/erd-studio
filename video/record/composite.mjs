@@ -14,7 +14,7 @@
 // is drawn here, from the path the driver logged (build/rec/<take>/pointer.json), on the video's
 // own clock: the screencast's ~25 frames a second would make a filmed pointer judder. A
 // `recording.zoom` punches in on part of the window (a panel whose text is small) from its beat
-// to the scene's end. HTML scenes may sit between recorded ones (the AI change and the pull
+// to the scene's end (or to its `until`). HTML scenes may sit between recorded ones (the AI change and the pull
 // request, before the dbt beat): each run of recorded scenes (runsOf) is laid over the frame on its
 // own and fades in and out with the frame's own fades (main.js), except into a scene that holds the
 // window (holdsWindow: an HTML still of the footage's last frame, props.still), where it cuts with
@@ -135,6 +135,21 @@ export function runsOf(tl) {
  * still across the change.
  */
 export const holdsWindow = (sc) => !!sc && (sc.module.startsWith('rec/') || !!sc.props?.still);
+
+/** `recording.zoom`: one punch-in or a list of them (none: []). */
+export const zoomsOf = (recording) => (!recording?.zoom ? [] : Array.isArray(recording.zoom) ? recording.zoom : [recording.zoom]);
+
+/**
+ * A punch-in's span on the recording's clock (seconds from its first recorded scene, `start`): from
+ * its beat + offset to its scene's end, or to `until` ([beat, offset] in the same scene), where it
+ * has dissolved out again. Pure (exported for the test).
+ */
+export function zoomSpan(zoom, sc, start = 0) {
+  const at = sc.start - start + (zoom.beat ? sc.beats[zoom.beat].t : 0) + (zoom.offset ?? 0);
+  const to = zoom.until ? sc.start - start + sc.beats[zoom.until[0]].t + zoom.until[1] : sc.start - start + sc.dur;
+  if (!(to > at + 2 * (zoom.dur ?? 0))) throw new Error(`recording.zoom on ${zoom.scene}: ends at ${to.toFixed(2)}s, before it has dissolved in (from ${at.toFixed(2)}s)`);
+  return { at, to };
+}
 
 /** The take frame painted by `at` in take `name` (binary search; frames are in time order). */
 function frameAt(takes, name, at) {
@@ -405,18 +420,20 @@ async function main() {
   g.push(`[${segments.length}:v]format=rgba[cur]`);
   g.push(`[${last}][cur]overlay=x='${axisExpr(terms, 'x', scale)}':y='${axisExpr(terms, 'y', scale)}':eval=frame:shortest=1:format=auto,format=yuv444p[p]`);
   last = 'p';
-  // the punch-in: from its beat to the end of its scene, the focus region scaled up to fill the window
-  const zoom = timeline.recording.zoom;
-  if (zoom) {
+  // the punch-ins: each from its beat to the end of its scene (or its `until`), the focus region
+  // scaled up to fill the window, dissolving in (and out, at `until`)
+  const zooms = zoomsOf(timeline.recording);
+  for (const [k, zoom] of zooms.entries()) {
     const sc = timeline.scenes.find((s) => s.id === zoom.scene);
     if (!sc) throw new Error(`recording.zoom: no scene ${zoom.scene}`);
-    const at = sc.start - start + (zoom.beat ? sc.beats[zoom.beat].t : 0) + (zoom.offset ?? 0);
+    const { at, to } = zoomSpan(zoom, sc, start);
     const zw = Math.round(w / zoom.scale / 2) * 2, zh = Math.round(h / zoom.scale / 2) * 2;
     const zx = Math.round(clip(zoom.focus[0] - zw / 2, 0, w - zw)), zy = Math.round(clip(zoom.focus[1] - zh / 2, 0, h - zh));
-    g.push(`[${last}]split[za][zb]`);
-    g.push(`[zb]crop=${zw}:${zh}:${zx}:${zy},scale=${w}:${h}:flags=lanczos,format=yuva444p,fade=t=in:st=${at.toFixed(3)}:d=${zoom.dur}:alpha=1[zz]`);
-    g.push(`[za][zz]overlay=0:0:enable='between(t,${at.toFixed(3)},${(sc.start - start + sc.dur).toFixed(3)})':format=auto,format=yuv444p[z]`);
-    last = 'z';
+    const out = zoom.until ? `,fade=t=out:st=${(to - zoom.dur).toFixed(3)}:d=${zoom.dur}:alpha=1` : '';
+    g.push(`[${last}]split[za${k}][zb${k}]`);
+    g.push(`[zb${k}]crop=${zw}:${zh}:${zx}:${zy},scale=${w}:${h}:flags=lanczos,format=yuva444p,fade=t=in:st=${at.toFixed(3)}:d=${zoom.dur}:alpha=1${out}[zz${k}]`);
+    g.push(`[za${k}][zz${k}]overlay=0:0:enable='between(t,${at.toFixed(3)},${to.toFixed(3)})':format=auto,format=yuv444p[z${k}]`);
+    last = `z${k}`;
   }
   // the "sped up" badge while the footage runs faster than real time (in the window's empty title bar, top left)
   const ffs = fastForwards(timeline, takes);
@@ -455,7 +472,7 @@ async function main() {
   const graph = og.join(';');
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(BUILD, 'chrome.mkv'), '-i', recording, '-filter_complex', graph, '-map', '[v]',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '0', '-pix_fmt', 'yuv444p', '-color_range', 'tv', '-r', String(fps), join(BUILD, 'master.mkv')], { stdio: 'inherit' });
-  console.log(`composite: ${footage ? `the ${footage} cut's footage, ` : ''}${frames.length} recorded frames (${start}s–${end}s, ${runs.length} run${runs.length > 1 ? 's' : ''}), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zoom ? `, punch-in on ${zoom.scene}` : ''}${ffs.length ? `, sped up: ${ffs.map((f) => `${f.scene} ${f.speed.toFixed(1)}x`).join(', ')}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
+  console.log(`composite: ${footage ? `the ${footage} cut's footage, ` : ''}${frames.length} recorded frames (${start}s–${end}s, ${runs.length} run${runs.length > 1 ? 's' : ''}), ${cuts.length} cross-fades (${cuts.map((c) => `${c.before.id}→${c.after.id}`).join(', ')}), pointer from ${terms.length} terms${zooms.length ? `, punch-in on ${zooms.map((z) => z.scene).join(', ')}` : ''}${ffs.length ? `, sped up: ${ffs.map((f) => `${f.scene} ${f.speed.toFixed(1)}x`).join(', ')}` : ''}, at ${x},${y} ${w}x${h} -> ${join(BUILD, 'master.mkv')}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

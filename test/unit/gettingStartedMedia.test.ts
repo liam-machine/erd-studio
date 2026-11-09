@@ -60,7 +60,7 @@ describe.each(CUTS)('getting-started captions: $name', (cut) => {
       expect(cue.text.length).toBeLessThanOrEqual(84);
       prevEnd = cue.end;
     }
-    expect(prevEnd).toBeLessThanOrEqual(140); // the scripts' maxDuration (video/script*.yaml): "Watch the Tour" names no length
+    expect(prevEnd).toBeLessThanOrEqual(200); // the scripts' maxDuration (video/script*.yaml): "Watch the Tour" names no length
   });
 
   it('transcript carries every cue, in order', () => {
@@ -95,10 +95,10 @@ describe('getting-started media', () => {
   const present = (file: string) => fs.existsSync(path.join(MEDIA, file));
 
   describe.each(CUTS)('$name', (cut) => {
-    it.runIf(present(cut.video))('keeps the mp4 under the 9 MiB ceiling and fast-start (moov before mdat)', () => {
+    it.runIf(present(cut.video))('keeps the mp4 under the 12 MiB ceiling and fast-start (moov before mdat)', () => {
       const buf = fs.readFileSync(path.join(MEDIA, cut.video));
-      // 9 MiB (video/encode.sh): the recorded default cut is ~120 s of real UI, whose small text needs CRF 20
-      expect(buf.length).toBeLessThanOrEqual(9 * 1024 * 1024);
+      // 12 MiB (video/encode.sh): the recorded default cut is ~175 s of real UI (a 2,000-table diagram among it), whose small text needs CRF 24
+      expect(buf.length).toBeLessThanOrEqual(12 * 1024 * 1024);
       const moov = buf.indexOf('moov');
       const mdat = buf.indexOf('mdat');
       expect(moov).toBeGreaterThan(0);
@@ -106,7 +106,8 @@ describe('getting-started media', () => {
     });
 
     it.runIf(present(cut.video))('uses MP3 audio, never AAC (VS Code documents MP3 and has no AAC decoder)', () => {
-      const head = fs.readFileSync(path.join(MEDIA, cut.video)).subarray(0, 64 * 1024);
+      // the moov (faststart) holds the sample entries; a 3-minute cut's sample tables run past 64 KiB
+      const head = fs.readFileSync(path.join(MEDIA, cut.video)).subarray(0, 512 * 1024);
       expect(head.includes(Buffer.from('avc1'))).toBe(true);
       // MP3 and AAC share the `mp4a` sample entry: audioObjectType reads which (0x6B = MP3).
       expect(head.includes(Buffer.from('mp4a'))).toBe(true);
@@ -114,14 +115,14 @@ describe('getting-started media', () => {
       expect(audioObjectType(head)).toBe(0x6b);
     });
 
-    it.runIf(present(cut.video))('lasts the tour (50–140 s), and its last caption ends inside it', () => {
+    it.runIf(present(cut.video))('lasts the tour (50–200 s), and its last caption ends inside it', () => {
       // mvhd (version 0): size, 'mvhd', version/flags, creation, modification, timescale, duration
       const buf = fs.readFileSync(path.join(MEDIA, cut.video));
       const mvhd = buf.indexOf('mvhd');
       expect(buf[mvhd + 4]).toBe(0);
       const seconds = buf.readUInt32BE(mvhd + 20) / buf.readUInt32BE(mvhd + 16);
       expect(seconds).toBeGreaterThanOrEqual(50);
-      expect(seconds).toBeLessThanOrEqual(140);
+      expect(seconds).toBeLessThanOrEqual(200);
       expect(cut.cues[cut.cues.length - 1].end).toBeLessThanOrEqual(seconds);
     });
 

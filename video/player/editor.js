@@ -96,27 +96,38 @@ export const SALES_DRAFT = {
   buttons: [['Keep as Diagram', 'primary'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
   // An import's draft always carries its review (draftModel detailsFromImportReview): "Show details".
   details: true,
+  // ...and every import's draft (not an example's) offers its report (draftModel `importReport`, set
+  // from importDbml.ts's reportId: a DBML file is an IMPORT_REPORT_SOURCES source): "Show Import Report".
+  importReport: true,
   // No name the README GIF's library already has (its .erd-studio tables): a name that is would be
   // reused, and the detail would say so.
   tables: [
     { name: 'dim_store', x: 0, y: 0, cols: [['PK', 'store_id', 'int'], [null, 'store_name', 'varchar'], [null, 'region', 'varchar']] },
     { name: 'dim_staff', x: 0, y: 330, cols: [['PK', 'staff_id', 'int'], [null, 'staff_name', 'varchar']] },
-    { name: 'fct_sale', x: 520, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'store_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
-    { name: 'dim_calendar', x: 1040, y: 0, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
-    { name: 'fct_refund', x: 1040, y: 300, cols: [['PK', 'refund_id', 'int'], ['FK', 'sale_id', 'int'], [null, 'refunded', 'decimal(12,2)']] },
+    { name: 'fct_sale', x: 540, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'store_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
+    { name: 'dim_calendar', x: 1080, y: 0, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
+    { name: 'fct_refund', x: 1080, y: 300, cols: [['PK', 'refund_id', 'int'], ['FK', 'sale_id', 'int'], [null, 'refunded', 'decimal(12,2)']] },
   ],
   rels: [[2, 1, 0, 0], [2, 2, 1, 0], [2, 3, 3, 0], [4, 1, 2, 0]],
 };
 
 /** DraftBanner's link to the draft's details (webview-draft/lib/wording.ts SHOW_DETAILS). */
 export const SHOW_DETAILS = 'Show details';
+/** DraftBanner's link to the import's report (webview-draft/lib/wording.ts SHOW_IMPORT_REPORT). */
+export const SHOW_IMPORT_REPORT = 'Show Import Report';
 
-const MINI_W = 400;
+const MINI_W = 360;
+/** The draft diagram's table width (local px): hero.js routes the draft's lines around these cards. */
+export const DRAFT_NODE_W = MINI_W;
 const miniRowY = (top, i) => top + 62 + i * 46 + 23;
-/** A draft's diagram at full node scale, in local coordinates (scaled by draftPage). */
-function draftDiagram(d, { op = 1 } = {}) {
-  let h = '';
-  for (const [a, ar, b, br] of d.rels) {
+/**
+ * A draft's diagram at full node scale, in local coordinates (scaled by draftPage). `edges`: its
+ * lines, drawn by the caller (the README GIF routes them Curved, as the product's draft canvas
+ * does); without it, plain square steps between the key rows.
+ */
+function draftDiagram(d, { op = 1, edges = null } = {}) {
+  let h = edges ? `<div class="abs" style="left:0;top:0;opacity:${op.toFixed(3)}">${edges}</div>` : '';
+  if (!edges) for (const [a, ar, b, br] of d.rels) {
     const A = d.tables[a], B = d.tables[b];
     const rightward = B.x > A.x;
     const x0 = rightward ? A.x + MINI_W : A.x, x1 = rightward ? B.x : B.x + MINI_W;
@@ -134,9 +145,11 @@ function draftDiagram(d, { op = 1 } = {}) {
  * rows: the text, then the switcher and buttons) over the draft's read-only diagram. `press` is
  * [buttonIndex, 0..1] for a click, `glow` rings the primary; `diagramOp` fades the diagram in.
  */
-export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17 } = {}) {
-  // DraftBanner: the headline, the detail, then (a draft with details) a "Show details" line.
-  const BAN = d.details ? 162 : 132;
+export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17, edges = null } = {}) {
+  // DraftBanner: the headline, the detail, then (a draft with details or an import's report) a line
+  // of links: "Show details · Show Import Report".
+  const links = [d.details && SHOW_DETAILS, d.importReport && SHOW_IMPORT_REPORT].filter(Boolean);
+  const BAN = links.length ? 162 : 132;
   const bx = 28;
   const btnHtml = d.buttons.map(([label, kind], i) => {
     const pressed = press && press[0] === i && press[1] > 0 && press[1] < 1;
@@ -149,11 +162,11 @@ export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagra
     : '';
   const html = `<div class="abs" style="left:${left}px;top:0;width:${width}px;bottom:0;background:var(--card);opacity:${op.toFixed(3)};overflow:hidden">
       <div class="abs grid-bg" style="left:0;right:0;top:${BAN}px;bottom:0"></div>
-      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp })}</div>
+      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp, edges })}</div>
       <div class="abs" style="left:0;right:0;top:0;height:${BAN}px;background:#1d2633;border-bottom:1px solid #2d4a70"></div>
       <div class="abs" style="left:${bx}px;top:14px;right:20px;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.headline)}</div>
       <div class="abs" style="left:${bx}px;top:46px;right:20px;font-size:17px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.detail)}</div>
-      ${d.details ? `<div class="abs" style="left:${bx}px;top:74px;font-size:17px;color:#3794ff;white-space:nowrap">${SHOW_DETAILS}</div>` : ''}
+      ${links.length ? `<div class="abs" style="left:${bx}px;top:74px;font-size:17px;color:#3794ff;white-space:nowrap">${links.join('<span style="color:var(--text-2)"> · </span>')}</div>` : ''}
       <div class="abs" style="left:${bx}px;top:${BAN - 52}px;display:flex;align-items:center;gap:8px;font-size:${font}px;white-space:nowrap">${scope}${btnHtml}</div></div>`;
   return { html };
 }

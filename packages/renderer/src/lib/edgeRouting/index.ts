@@ -14,7 +14,7 @@
  * fails or is too slow for the diagram (`createEdgeRoutingEngine`).
  */
 
-import type { RoutedEdge, RoutingInput } from './types';
+import type { EdgeSpec, RoutedEdge, RoutingInput } from './types';
 import { createAvoidRouter } from './routers/orthogonalAvoid';
 import { routeAll, safely } from './routeAll';
 import { lineStyleOptions, type LineStyle } from './lineStyle';
@@ -126,11 +126,63 @@ export interface EdgeRoutingEngineOptions {
 
 /** A pass sent to the worker, with what is needed to use its answer. */
 interface WorkerJob {
+  /** The newest request this pass answers (see `sameJob`). */
   seq: number;
+  /** The sequence number the worker was sent, and answers with. */
+  sent: number;
   input: RoutingInput;
   style: LineStyle;
   zoom: number;
   lineCount: number;
+  /** Each card's box key (`rectKeysOf`), computed once per job. */
+  rects: Map<string, string>;
+  /**
+   * The worker starts this pass from scratch, or nearly: it has finished no
+   * pass yet, or at least `COLD_PASS_SHARE` of the cards moved or changed size
+   * since the last one it finished. Its router has nothing worth keeping.
+   */
+  cold: boolean;
+}
+
+/**
+ * A worker pass in which at least this share of the cards moved or changed
+ * size since the worker's last pass routes (nearly) every line again: when a
+ * newer request supersedes it, the worker is restarted rather than waited for.
+ */
+export const COLD_PASS_SHARE = 0.5;
+
+/** Do two passes route exactly the same thing (cards, lines, style and zoom)? */
+function sameJob(a: WorkerJob, b: WorkerJob): boolean {
+  if (a.style !== b.style || a.zoom !== b.zoom || a.rects.size !== b.rects.size) return false;
+  for (const [id, key] of b.rects) if (a.rects.get(id) !== key) return false;
+  const ea = a.input.edges;
+  const eb = b.input.edges;
+  if (ea.length !== eb.length) return false;
+  const sameAnchor = (p: EdgeSpec['sourceAnchor'], q: EdgeSpec['sourceAnchor']) => p.x === q.x && p.y === q.y && p.side === q.side;
+  for (let i = 0; i < ea.length; i++) {
+    const x = ea[i];
+    const y = eb[i];
+    if (
+      x.id !== y.id ||
+      x.source !== y.source ||
+      x.target !== y.target ||
+      x.isSelfLoop !== y.isSelfLoop ||
+      x.loopIndex !== y.loopIndex ||
+      x.cardinality !== y.cardinality ||
+      !sameAnchor(x.sourceAnchor, y.sourceAnchor) ||
+      !sameAnchor(x.targetAnchor, y.targetAnchor)
+    )
+      return false;
+  }
+  return true;
+}
+
+/** Is a pass over `next` (nearly) a cold one for a router that last routed `known`? */
+function isColdPass(known: Map<string, string> | null, next: Map<string, string>): boolean {
+  if (!known) return true;
+  let changed = 0;
+  for (const [id, key] of next) if (known.get(id) !== key) changed++;
+  return changed >= COLD_PASS_SHARE * Math.max(1, next.size);
 }
 
 /** Each card's box, as a comparable key: a route is still right while both its cards' keys are unchanged. */
@@ -162,7 +214,13 @@ function endsOf(input: RoutingInput): Map<string, [string, string]> {
  *   `update` returns 'pending' with the last routes still right (lines on a
  *   moved card fall back), and `onUpdate` delivers the new ones. A drag holds
  *   the routes; an answer to a request that has since been superseded is
- *   dropped, and only the latest waiting request is sent next.
+ *   dropped, and only the latest waiting request is sent next. When the pass
+ *   in flight is a cold one (the worker's first, sent before the cards were
+ *   measured, say, or one after most cards moved) and a newer request
+ *   arrives, the worker is stopped and a fresh one routes the newer request
+ *   at once: waiting would cost a whole pass, and a cold router has no memory
+ *   worth keeping. A warm pass (a few cards moved) is waited for, so the
+ *   router keeps its memory and the next pass stays incremental.
  * - With the worker, every diagram is routed, whatever its size. Without it
  *   (it cannot start, or failed), more than `MAX_ROUTED_LINES_WITHOUT_WORKER`
  *   lines are not. A main-thread pass over `ROUTING_HARD_LIMIT_MS`, or a
@@ -194,6 +252,10 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
   let held: { key: string; routes: Map<string, RoutedEdge> } | null = null;
   /** The worker: undefined until first needed, null when it cannot start or failed. */
   let worker: RoutingWorkerHandle | null | undefined;
+  /** Which worker is current: events from a worker that was restarted or stopped are ignored. */
+  let workerGeneration = 0;
+  /** The card boxes of the last pass the current worker finished (null: none yet, its router is cold). */
+  let workerKnows: Map<string, string> | null = null;
   /** The newest request's sequence number: only its answer is used. */
   let seq = 0;
   /** The pass the worker is computing, and the newest one waiting behind it. */
@@ -259,8 +321,19 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
   const workerHandle = (): RoutingWorkerHandle | null => {
     if (worker !== undefined || disposed) return worker ?? null;
     worker = null;
+    workerKnows = null;
+    const generation = ++workerGeneration;
+    const current = () => generation === workerGeneration && !disposed;
     try {
-      worker = opts.worker?.({ onResult, onFailure }) ?? null;
+      worker =
+        opts.worker?.({
+          onResult: (result) => {
+            if (current()) onResult(result);
+          },
+          onFailure: (err) => {
+            if (current()) onFailure(err);
+          },
+        }) ?? null;
     } catch (err) {
       onError(err);
       worker = null;
@@ -268,21 +341,38 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
     return worker;
   };
 
+  /**
+   * Stops the worker in the middle of a pass and starts a fresh one (empty
+   * router). Nothing the stopped worker computed is ever used: its events are
+   * ignored from here on. Returns null when a new worker cannot start.
+   */
+  const restartWorker = (): RoutingWorkerHandle | null => {
+    workerGeneration++;
+    worker?.terminate();
+    worker = undefined;
+    inFlight = null;
+    return workerHandle();
+  };
+
   const post = (job: WorkerJob) => {
+    job.cold = isColdPass(workerKnows, job.rects);
     inFlight = job;
-    worker?.post({ type: 'route', seq: job.seq, input: job.input, style: job.style, zoom: job.zoom });
+    worker?.post({ type: 'route', seq: job.sent, input: job.input, style: job.style, zoom: job.zoom });
   };
 
   function onResult(result: WorkerRouteResult) {
     if (disposed) return;
     const job = inFlight;
+    // Only the answer to the pass in flight (the worker answers one at a time, in order).
+    if (!job || result.seq !== job.sent) return;
     inFlight = null;
+    workerKnows = job.rects;
     if (queued) {
       const next = queued;
       queued = null;
       post(next);
     }
-    if (!job || result.seq !== job.seq || job.seq !== seq) return; // superseded
+    if (job.seq !== seq) return; // superseded
     if (result.error) onError(new Error(result.error));
     if (result.millis > WORKER_HARD_LIMIT_MS) {
       slowAt = job.lineCount;
@@ -300,6 +390,7 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
   function onFailure(err: unknown) {
     if (disposed) return;
     onError(err);
+    workerGeneration++;
     worker = null;
     inFlight = null;
     queued = null;
@@ -327,10 +418,24 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
         held = null;
         const input = safely(request.input, null, onError);
         if (!input) return off();
-        const job: WorkerJob = { seq: ++seq, input, style: request.style, zoom: request.zoom ?? 1, lineCount: n };
-        if (inFlight) queued = job;
-        else post(job);
-        return { routes: stillRight(rectKeysOf(input)), pass: 'pending', millis: 0 };
+        const rects = rectKeysOf(input);
+        const job: WorkerJob = { seq: ++seq, sent: seq, input, style: request.style, zoom: request.zoom ?? 1, lineCount: n, rects, cold: false };
+        if (inFlight && sameJob(inFlight, job)) {
+          // The pass in flight already routes exactly this: its answer is this request's.
+          inFlight.seq = job.seq;
+          inFlight.lineCount = n;
+          queued = null;
+        } else if (inFlight?.cold) {
+          // The pass in flight is (nearly) from scratch and already out of date
+          // (the first pass, sent before the cards were measured, say): waiting
+          // for it would cost a whole pass, and its router has nothing worth
+          // keeping. Stop it and route the newest request in a fresh worker.
+          queued = null;
+          if (!restartWorker()) return engine.update(request); // carry on on the main thread
+        }
+        if (!inFlight) post(job);
+        else if (inFlight.seq !== job.seq) queued = job;
+        return { routes: stillRight(rects), pass: 'pending', millis: 0 };
       }
 
       seq++; // a worker answer still on its way is stale now
@@ -364,6 +469,7 @@ export function createEdgeRoutingEngine(options: EdgeRoutingEngineOptions | (() 
     },
     dispose() {
       disposed = true;
+      workerGeneration++;
       worker?.terminate();
       worker = null;
       inFlight = null;

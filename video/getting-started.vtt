@@ -13,121 +13,149 @@ Edit it by hand, or with your AI assistant,
 through a built-in skill it uses by itself.
 
 4
-00:00:11.012 --> 00:00:17.176
-Most teams already have one, in Snowflake, Databricks, dbt, Power BI, Fabric or SQL.
+00:00:11.012 --> 00:00:12.475
+Already have a model?
 
 5
-00:00:17.226 --> 00:00:19.592
-Open your project, and click Import.
+00:00:12.525 --> 00:00:16.724
+Bring it in from the tools most teams use: dbt, Databricks,
 
 6
-00:00:20.212 --> 00:00:25.277
-Import reads DBML, SQL scripts, or a Power BI or Fabric model.
+00:00:16.774 --> 00:00:21.374
+Snowflake and Power BI, and the most popular SQL databases.
 
 7
-00:00:25.327 --> 00:00:30.816
-From Snowflake or Databricks, import the exported DDL. It works out the dialect.
+00:00:22.412 --> 00:00:26.613
+Getting the DDL out is one step, for a whole schema or database.
 
 8
-00:00:31.266 --> 00:00:34.076
-You get a draft of every table and relationship.
+00:00:26.663 --> 00:00:30.045
+From PostgreSQL, pg_dump writes it to a file.
 
 9
-00:00:34.626 --> 00:00:36.578
-Keep it, and it's your diagram.
+00:00:30.095 --> 00:00:35.439
+From Snowflake, it's one query, GET_DDL, saved as a .sql file.
 
 10
-00:00:37.266 --> 00:00:42.804
-Each table is now a DBML file, an open format, next to the code that builds it.
+00:00:35.889 --> 00:00:39.677
+Then click New, Import SQL DDL, and import the folder.
 
 11
-00:00:42.854 --> 00:00:45.807
-Change it, and Git shows exactly what changed.
+00:00:39.727 --> 00:00:44.129
+It works out the dialect: PostgreSQL, one of the nine it reads.
 
 12
-00:00:46.542 --> 00:00:48.256
-Edit it by hand, on the canvas.
+00:00:44.579 --> 00:00:47.389
+You get a draft of every table and relationship.
 
 13
-00:00:48.306 --> 00:00:51.985
-Add a table, with starter columns if you like, and lay it out.
+00:00:47.939 --> 00:00:49.891
+Keep it, and it's your diagram.
 
 14
-00:00:52.035 --> 00:00:54.103
-Every edit is saved to its file.
+00:00:50.579 --> 00:00:56.117
+Each table is now a DBML file, an open format, next to the code that builds it.
 
 15
-00:00:54.553 --> 00:00:58.184
-Or ask your AI assistant. Click Set Up My AI Helper.
+00:00:56.167 --> 00:00:59.120
+Change it, and Git shows exactly what changed.
 
 16
-00:00:58.234 --> 00:01:03.749
-It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
+00:00:59.570 --> 00:01:05.752
+Big models stay readable: this one has 2,000 tables and 2,700 relationships.
 
 17
-00:01:04.199 --> 00:01:07.191
-Ask Claude Code for a change, in plain words.
+00:01:05.802 --> 00:01:10.024
+Every line finds its way around the tables in the background, in seconds.
 
 18
-00:01:07.341 --> 00:01:09.777
-It loads the ERD Studio skill by itself,
+00:01:10.074 --> 00:01:14.302
+Zoom in, and hover a table: arrows flow along its relationships.
 
 19
-00:01:09.827 --> 00:01:13.395
-and a pre-tool hook makes sure it has, before any edit,
+00:01:16.770 --> 00:01:18.484
+Edit it by hand, on the canvas.
 
 20
-00:01:13.445 --> 00:01:16.743
-so what it writes is a diagram you can see, right away.
+00:01:18.534 --> 00:01:22.213
+Add a table, with starter columns if you like, and lay it out.
 
 21
-00:01:19.699 --> 00:01:24.421
-Here's the change: a new table file, and the line that links it to the orders table.
+00:01:22.263 --> 00:01:24.331
+Every edit is saved to its file.
 
 22
-00:01:24.471 --> 00:01:27.432
-On the canvas, the new table and its relationship.
+00:01:24.781 --> 00:01:28.412
+Or ask your AI assistant. Click Set Up My AI Helper.
 
 23
-00:01:29.299 --> 00:01:33.463
-The design change goes in the same pull request as the code that builds it,
+00:01:28.462 --> 00:01:33.977
+It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
 
 24
-00:01:33.513 --> 00:01:35.661
-so your team reviews both together.
+00:01:34.427 --> 00:01:37.419
+Ask Claude Code for a change, in plain words.
 
 25
-00:01:37.899 --> 00:01:42.820
-Using dbt? Import from dbt turns your models into a diagram.
+00:01:37.569 --> 00:01:40.005
+It loads the ERD Studio skill by itself,
 
 26
-00:01:42.870 --> 00:01:46.269
-To check your design against them, click Run dbt parse.
+00:01:40.055 --> 00:01:43.623
+and a pre-tool hook makes sure it has, before any edit,
 
 27
-00:01:46.319 --> 00:01:51.231
-It writes manifest.json, a description of every model your project builds.
+00:01:43.673 --> 00:01:46.971
+so what it writes is a diagram you can see, right away.
 
 28
-00:01:51.281 --> 00:01:54.810
-The Physical tab shows what it describes, as a diagram.
+00:01:49.927 --> 00:01:54.649
+Here's the change: a new table file, and the line that links it to the orders table.
 
 29
-00:01:55.660 --> 00:01:58.989
-Compare with dbt marks every difference from your design.
+00:01:54.699 --> 00:01:57.660
+On the canvas, the new table and its relationship.
 
 30
-00:01:59.439 --> 00:02:05.090
-Your repo is the single source of truth: just DBML files, no modelling database.
+00:01:59.527 --> 00:02:03.691
+The design change goes in the same pull request as the code that builds it,
 
 31
-00:02:05.140 --> 00:02:08.344
-ERD Studio for Confluence reads them from GitHub,
+00:02:03.741 --> 00:02:05.889
+so your team reviews both together.
 
 32
-00:02:08.394 --> 00:02:11.400
-and shows the diagram to business users.
+00:02:08.127 --> 00:02:13.048
+Using dbt? Import from dbt turns your models into a diagram.
 
 33
-00:02:12.739 --> 00:02:15.898
+00:02:13.098 --> 00:02:16.497
+To check your design against them, click Run dbt parse.
+
+34
+00:02:16.547 --> 00:02:21.459
+It writes manifest.json, a description of every model your project builds.
+
+35
+00:02:21.509 --> 00:02:25.038
+The Physical tab shows what it describes, as a diagram.
+
+36
+00:02:25.888 --> 00:02:29.217
+Compare with dbt marks every difference from your design.
+
+37
+00:02:29.667 --> 00:02:35.318
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+38
+00:02:35.368 --> 00:02:38.572
+ERD Studio for Confluence reads them from GitHub,
+
+39
+00:02:38.622 --> 00:02:41.628
+and shows the diagram to business users.
+
+40
+00:02:42.967 --> 00:02:46.126
 ERD Studio is free to use in VS Code.

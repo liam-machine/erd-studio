@@ -285,19 +285,28 @@ describe('router isolation (one router per canvas)', () => {
 
 /**
  * A worker that answers only when told to, routing on the spot with its own
- * router (as the real one does), so every ordering is deterministic.
+ * router (as the real one does), so every ordering is deterministic. Each
+ * start is a separate instance (its own router and events): a request is
+ * answered by the instance it was posted to, even after that instance was
+ * terminated, the way a late message from a stopped worker would arrive.
  */
 function fakeWorker() {
   const posted: WorkerRouteRequest[] = [];
-  let events: RoutingWorkerEvents | null = null;
-  const router = createAvoidRouter();
+  /** The instance each posted request went to. */
+  const postedTo: number[] = [];
+  const instances: { events: RoutingWorkerEvents; router: ReturnType<typeof createAvoidRouter>; terminated: boolean }[] = [];
   const state = { starts: 0, terminated: false };
-  const factory: RoutingWorkerFactory = (e) => {
+  const factory: RoutingWorkerFactory = (events) => {
     state.starts++;
-    events = e;
+    const instance = { events, router: createAvoidRouter(), terminated: false };
+    const index = instances.push(instance) - 1;
     return {
-      post: (request) => posted.push(request),
+      post: (request) => {
+        posted.push(request);
+        postedTo.push(index);
+      },
       terminate: () => {
+        instance.terminated = true;
         state.terminated = true;
       },
     };
@@ -305,11 +314,13 @@ function fakeWorker() {
   /** Answers the request at `index` (default: the last one posted). */
   const answer = (index = posted.length - 1, millis = 5) => {
     const request = posted[index];
-    const result = routeAll(request.input, lineStyleOptions(request.style), { router, zoom: request.zoom });
-    events!.onResult({ seq: request.seq, edges: result.edges, millis });
+    const instance = instances[postedTo[index]];
+    const result = routeAll(request.input, lineStyleOptions(request.style), { router: instance.router, zoom: request.zoom });
+    instance.events.onResult({ seq: request.seq, edges: result.edges, millis });
   };
-  const fail = (err: unknown) => events!.onFailure(err);
-  return { factory, posted, answer, fail, state };
+  /** The newest instance fails (or the one at `index`). */
+  const fail = (err: unknown, index = instances.length - 1) => instances[index].events.onFailure(err);
+  return { factory, posted, postedTo, instances, answer, fail, state };
 }
 
 /** An engine with a fake worker, collecting what `onUpdate` delivers. */
@@ -370,24 +381,102 @@ describe('the routing engine — the worker', () => {
     expect(again.routes).toBe(delivered[1].routes);
   });
 
-  it('sends one pass at a time: the newest waiting request goes next, and a superseded answer is dropped', () => {
+  it('sends one pass at a time once warm: the newest waiting request goes next, and a superseded answer is dropped', () => {
     const { engine, worker, delivered } = workerEngine();
     const input = scenarioRoutingInput('star');
     const { card } = busiestCard(input);
     engine.update(large(input));
+    worker.answer(); // the worker's router now knows the diagram
+    engine.update(large(moved(input, card, 5, 0)));
     engine.update(large(moved(input, card, 10, 0)));
     engine.update(large(moved(input, card, 20, 0)));
-    expect(worker.posted).toHaveLength(1); // the other two wait; only the newest is kept
+    // One card moved: a warm pass, waited for (its router memory is worth keeping).
+    expect(worker.state.starts).toBe(1);
+    expect(worker.posted).toHaveLength(2); // the other two wait; only the newest is kept
 
-    worker.answer(0); // the answer to the first request: superseded
-    expect(delivered).toHaveLength(0);
-    expect(worker.posted).toHaveLength(2);
-    const newest = worker.posted[1].input.obstacles.find((o) => o.id === card)!;
+    worker.answer(1); // the answer to the second request: superseded
+    expect(delivered).toHaveLength(1);
+    expect(worker.posted).toHaveLength(3);
+    const newest = worker.posted[2].input.obstacles.find((o) => o.id === card)!;
     expect(newest.x).toBe(input.obstacles.find((o) => o.id === card)!.x + 20);
+
+    worker.answer(2);
+    expect(delivered).toHaveLength(2);
+    expect(delivered[1].pass).toBe('routed');
+  });
+
+  it('does not wait for a superseded cold pass: the worker is restarted with the newest request, and the stale answer is never used', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    // The first pass goes out before React Flow has measured the cards (every card at its default size)…
+    const unmeasured: RoutingInput = { ...input, obstacles: input.obstacles.map((o) => ({ ...o, width: 200, height: 100 })) };
+    expect(engine.update(large(unmeasured)).pass).toBe('pending');
+    expect(worker.posted).toHaveLength(1);
+    // …and the measured cards arrive while it is still running.
+    expect(engine.update(large(input)).pass).toBe('pending');
+    expect(worker.state.starts).toBe(2);
+    expect(worker.instances[0].terminated).toBe(true);
+    expect(worker.posted).toHaveLength(2); // sent at once, to the fresh worker: nothing waits for the stale pass
+    expect(worker.postedTo).toEqual([0, 1]);
+    expect(worker.posted[1].input).toBe(input);
+
+    // A late answer from the stopped worker is never applied.
+    worker.answer(0);
+    expect(delivered).toHaveLength(0);
+    worker.fail(new Error('late error from the stopped worker'), 0);
+    expect(delivered).toHaveLength(0);
 
     worker.answer(1);
     expect(delivered).toHaveLength(1);
     expect(delivered[0].pass).toBe('routed');
+    const expected = routeAll(input, lineStyleOptions('curved')).edges;
+    expect(delivered[0].routes!.size).toBe(expected.size);
+    for (const [id, route] of expected) expect(delivered[0].routes!.get(id)!.d, id).toBe(route.d);
+    // A stale answer arriving even later changes nothing.
+    worker.answer(0);
+    expect(delivered).toHaveLength(1);
+  });
+
+  it('restarts the worker for a pass in which most cards moved, but not for a warm one', () => {
+    const { engine, worker } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    engine.update(large(input));
+    worker.answer();
+    // Every card moved (a new layout): a cold pass, superseded, is not waited for.
+    const shifted = (dx: number): RoutingInput => input.obstacles.reduce((acc, o) => moved(acc, o.id, dx, 0), input);
+    engine.update(large(shifted(300)));
+    engine.update(large(shifted(310)));
+    expect(worker.state.starts).toBe(2);
+    expect(worker.posted).toHaveLength(3);
+  });
+
+  it('a request identical to the pass in flight waits for that pass rather than routing it twice', () => {
+    const { engine, worker, delivered } = workerEngine();
+    const input = scenarioRoutingInput('star');
+    engine.update(large(input));
+    engine.update(large(input)); // say a drag that never moved the card
+    expect(worker.state.starts).toBe(1);
+    expect(worker.posted).toHaveLength(1);
+    worker.answer(0);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].pass).toBe('routed');
+    // A different zoom (hops are sized for it) is a different pass.
+    engine.update(large(input, { zoom: 2 }));
+    expect(worker.posted).toHaveLength(2);
+  });
+
+  it('a worker that cannot restart leaves the newest request to the main thread', () => {
+    const fake = fakeWorker();
+    let starts = 0;
+    const engine = createEdgeRoutingEngine({ now: fakeClock().now, worker: (e) => (++starts === 1 ? fake.factory(e) : null) });
+    const input = scenarioRoutingInput('star');
+    const { card } = busiestCard(input);
+    expect(engine.update(large(input)).pass).toBe('pending');
+    const next = engine.update(large(moved(input, card, 40, 0)));
+    expect(starts).toBe(2);
+    expect(fake.instances[0].terminated).toBe(true);
+    expect(next.pass).toBe('routed');
+    expect(next.routes!.size).toBeGreaterThan(0);
   });
 
   it('holds the routes during a drag, drops an answer from before it, and routes once when the drag ends', () => {

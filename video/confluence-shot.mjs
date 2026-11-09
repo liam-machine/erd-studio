@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Renders player/assets/confluence-sales.png, the diagram on the default cut's Confluence page
-// (player/scenes/tour/confluence.js): the tour's own `sales` diagram (record/fixtures.erd.mjs, the
+// (player/scenes/tour/confluence.js): the tour's own `shop-analytics` diagram (record/fixtures.erd.mjs, the
 // .erd-studio a plain take wrote: the Snowflake import, the table added by hand and the one Claude
 // Code added) loaded by @erd-studio/core's loadDisplaySubjectArea with its DBML reader and drawn by
 // @erd-studio/renderer's ErdCanvas, which the ERD Studio for Confluence macro runs in viewer mode
@@ -31,7 +31,7 @@ import { dbmlStorageReader } from '@erd-studio/core/dbml';
 import '@erd-studio/renderer/styles.css';
 import files from './files.json';
 const domain = await loadDisplaySubjectArea({
-  domainPath: '.erd-studio/main/diagrams/sales.dbml', readOnly: true, dbml: dbmlStorageReader,
+  domainPath: '.erd-studio/main/diagrams/shop-analytics.dbml', readOnly: true, dbml: dbmlStorageReader,
   readFile: async (p) => (files as Record<string, string>)[p] ?? null,
 });
 createRoot(document.getElementById('root')!).render(

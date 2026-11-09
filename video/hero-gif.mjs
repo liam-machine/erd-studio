@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // Renders the README's hero GIF, media/demo.gif, from player/hero.html: ERD Studio in a plain
-// folder (no stage tabs), the Explorer's layer-first .erd-studio tree beside the orders diagram,
-// and one beat of Import DBML…'s draft. Deterministic: hero.js's render(t) is pure, so every run
-// gives the same frames. Laid out at 1440x900 and scaled to 800 px wide (the README shows it at
-// width="800"), 12 fps, a 12 s seamless loop, one palette for the whole loop.
+// folder (no stage tabs) under a caption band, one caption per beat: the Explorer's layer-first
+// .erd-studio tree beside the orders diagram, one beat of Import DBML…'s draft, the pointer
+// hovering fct_order and dim_customer with the moving arrows on their lines, then the toolbar's line
+// style switch: Hops and back to Curved. Deterministic: hero.js's render(t) is pure, so every run
+// gives the same frames. Laid out at HERO's size (1440 wide) and scaled to 800 px wide (the README
+// shows it at width="800"), HERO.fps, the loop's length (HERO.loop) seamless, one palette for the
+// whole loop.
 //
 //   node hero-gif.mjs                 (npm run gif)
 //   node hero-gif.mjs --frames 0,8    only PNG stills of those times, into build/hero/
@@ -24,10 +27,11 @@ const argv = process.argv.slice(2);
 const i = argv.indexOf('--frames');
 const STILLS = i < 0 ? null : argv[i + 1].split(',').map(Number);
 
+const { HERO } = await import('./player/hero.js');
 const server = await startServer(0);
 const browser = await chromium.launch({ args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none'] });
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: HERO.w, height: HERO.h } });
   page.on('pageerror', (e) => { console.error('page error:', e.message); process.exitCode = 1; });
   await page.goto(`http://127.0.0.1:${server.address().port}/video/player/hero.html`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });

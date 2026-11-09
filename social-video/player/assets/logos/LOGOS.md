@@ -1,10 +1,14 @@
 # Third-party logos
 
-Used only in the README cut ("How ERD Studio works", `VARIANT=readme`): the import scene
-(`scenes/readme/import.js`) and the Confluence scene (`scenes/readme/confluence.js`).
+Used in the README cut ("How ERD Studio works", `VARIANT=readme`: `scenes/readme/import.js`,
+`scenes/readme/confluence.js`) and the 2.0 LinkedIn post (`VARIANT=launch`: its logo wall,
+export and Confluence scenes).
 
-**README cut only.** Re-check the Microsoft and Atlassian terms (and each other owner's) before
-using any of these marks in the pro or simple LinkedIn cuts, an ad or any other promotional use.
+**Promotional use (the launch post).** On 2026-11-10 Liam decided to show every import source with
+its official mark in the LinkedIn post, to say which tools ERD Studio is compatible with so people
+recognise what they use (see the note at the end). Each mark stays unaltered, in its owner's
+colours, beside its name, and none is presented as an endorsement. Re-check an owner's terms before
+using a mark in a paid ad.
 
 Each mark names the product it stands for, next to that product's real label in ERD Studio
 (nominative use); none suggests endorsement. The marks remain their owners' trademarks. Colours are each
@@ -27,12 +31,20 @@ cropped, recoloured or redrawn.
 | `snowflake.svg` | Simple Icons 13.21.0, `icons/snowflake.svg`, colour `#29B5E8` | CC0 1.0; Snowflake brand guidelines, https://www.snowflake.com/brand-guidelines/ |
 | `databricks.svg` | Simple Icons 13.21.0, `icons/databricks.svg`, colour `#FF3621` | CC0 1.0; Databricks brand guide, https://brand.databricks.com/Styleguide/Guide/ |
 | `github.svg` | Simple Icons 13.21.0, `icons/github.svg`, colour `#181717` (on the light Confluence page) | CC0 1.0; GitHub logo terms, https://github.com/logos |
+| `fabric.svg` | Microsoft Fabric icons, `fabric_48_color.svg` from `v6.1.0/package/dist/svg/` in https://github.com/microsoft/fabric-samples/raw/main/docs-samples/Icons.zip (as `power-bi.svg`); `viewBox="0 0 48 48"` added so it scales | Microsoft's icon terms, as `power-bi.svg` |
+| `mysql.svg` | Simple Icons 13.21.0, `icons/mysql.svg`, colour `#4479A1` | CC0 1.0; the mark is Oracle's trademark (https://www.mysql.com/about/legal/trademark.html) |
+| `mariadb.svg` | Simple Icons 13.21.0, `icons/mariadb.svg`, colour `#003545` | CC0 1.0; MariaDB trademark policy, https://mariadb.com/trademarks/ |
+| `oracle.svg` | Simple Icons 13.21.0, `icons/oracle.svg`, colour `#F80000` | CC0 1.0; Oracle trademark guidelines, https://www.oracle.com/legal/trademarks/ |
+| `bigquery.svg` | Simple Icons 13.21.0, `icons/googlebigquery.svg`, colour `#669DF6` | CC0 1.0; Google Cloud icons may be used to reference Google technology, https://cloud.google.com/icons |
+| `redshift.svg` | Simple Icons 13.21.0, `icons/amazonredshift.svg`, colour `#8C4FFF` | CC0 1.0; AWS architecture icon terms, https://aws.amazon.com/architecture/icons/ |
+| `sqlite.svg` | Simple Icons 13.21.0, `icons/sqlite.svg`, colour `#003B57` | CC0 1.0; the SQLite name and mark belong to Hipp, Wyrick & Company |
 
-Two sources have no logo on purpose:
+One source has no logo on purpose:
 
-- **MySQL**: Oracle allows "the original MySQL logo" only to MySQL representatives and companies
-  with a written agreement, and its Conditional Use ("Powered by MySQL") logos only on a website
-  that uses MySQL (https://www.mysql.com/about/legal/logos.html, checked 2026-11-05). So the
-  MySQL dialect chip is the name alone.
 - **DBML** has no mark of its own (dbdiagram.io's logo is that product's, and the Import picker's
   detail already names dbdiagram.io in text), so the DBML row draws a plain "DBML" text badge. The ERD Studio icon is the extension's own (`/media/icon.png`).
+
+**Compatibility wall (2026-11-10).** On Liam's decision, every source the import reads is shown with
+its mark, in one same-size grid, so people recognise what they already use: each mark unaltered, in
+its owner's colours, beside its name, and none presented as an endorsement. This supersedes the
+earlier "MySQL has no logo" rule. The marks remain their owners' trademarks.

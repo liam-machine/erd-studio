@@ -165,7 +165,7 @@ export const STAGE_TABS = [['logical', 'Logical', 'your design'], ['physical', '
  * (Toolbar.tsx "Row 2: Stage tabs (attached below toolbar)", `.toolbar-container`). The Physical
  * stage is read-only, so its toolbar has no "+ Add" (`{!isReadOnly && (`).
  */
-export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = '', stage = 'logical', compare = 'off', layout = null, t = 0, style = '', logicalOnly = true, add = null, exportGlyph = true }) {
+export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = '', stage = 'logical', compare = 'off', layout = null, t = 0, style = '', logicalOnly = true, add = null, exportGlyph = true, lineStyle = null, lineStyleHover = null }) {
   // a single-layer project (a new folder without dbt: Main) shows no layer badge (isSingleLayerProject)
   const badge = layer ? `<span class="tb__layer"><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>${layerLabel}</span>` : '';
   // The Layout button ("⊞ Layout", a spinner while ELK runs) — only when a scene asks for it.
@@ -177,14 +177,35 @@ export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = ''
     ? `<span class="tb__diff${add === 'open' ? ' tb__diff--busy' : ''}">+ Add<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>`
     : '';
   const exp = exportGlyph ? `<span class="tb__glyph">${ICON.exportGlyph({ size: 22 })}</span>` : '';
+  const lines = lineStyle ? lineStyleSwitch(lineStyle, lineStyleHover) : '';
   if (logicalOnly) {
-    return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}${addBtn}${exp}</div>`;
+    return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}${lines}${addBtn}${exp}</div>`;
   }
   const tab = ([s, label, hint]) => `<span class="tb__tab${stage === s ? ` tb__tab--${s}` : ''}">${stage === s && s === 'physical' ? ICON.lock({ size: 18 }) : ''}${label}<span class="tb__hint">· ${hint}</span></span>`;
   const cmp = compare === 'on' ? COMPARE_WORDS.stop : COMPARE_WORDS[stage];
   return `<div class="tb-stack" style="left:${x}px;top:${y}px;${style}"><div class="tb tb--row"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}
     <span class="tb__diff${compare === 'on' ? ' tb__diff--amber' : ''}">${cmp}</span>${addBtn}${exp}</div>
     <div class="tb__tabs tb__tabs--row2">${STAGE_TABS.map(tab).join('')}</div></div>`;
+}
+
+/**
+ * The toolbar's line style switch (webview/components/Toolbar/LineStyleSwitch.tsx and .css): a
+ * segmented control of two glyph buttons, Curved then Hops (LINE_STYLES). The chosen one takes the
+ * button colours; the other sits at 0.7 opacity, full with the selection colour while hovered.
+ * Its glyphs are LINE_STYLE_ICONS' paths (16 × 16), drawn at the toolbar's scale.
+ */
+export const LINE_STYLE_GLYPHS = {
+  curved: ['M2 13 V9 C2 5 4.5 3 8.5 3 H14'],
+  hops: ['M8 2 V14', 'M2 9 H5.5 A2.5 2.5 0 0 1 10.5 9 H14'],
+};
+export function lineStyleSwitch(on, hover = null) {
+  const opt = (s) => {
+    const sel = s === on;
+    const bg = sel ? '#0e639c' : hover === s ? '#37373d' : 'transparent';
+    const glyph = `<svg width="27" height="27" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${LINE_STYLE_GLYPHS[s].map((d) => `<path d="${d}"/>`).join('')}</svg>`;
+    return `<span data-line-style="${s}" style="display:flex;align-items:center;justify-content:center;width:40px;height:34px;border-radius:5px;background:${bg};color:${sel ? '#fff' : 'var(--text)'};opacity:${sel || hover === s ? 1 : 0.7}">${glyph}</span>`;
+  };
+  return `<span style="display:flex;align-items:center;gap:2px;height:44px;padding:4px;box-sizing:border-box;border:1px solid var(--card-border);border-radius:8px">${opt('curved')}${opt('hops')}</span>`;
 }
 
 /** Mouse pointer at (x, y); `press` 0..1 draws the click ripple. */
