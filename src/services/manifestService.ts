@@ -104,6 +104,11 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
     ),
     ...(raw.compositeForeignKeys ? { compositeForeignKeys: raw.compositeForeignKeys } : {}),
     ...(raw.placeholderProfile === true ? { placeholderProfile: true } : {}),
+    ...(raw.notNullColumns
+      ? { notNullColumns: new Map(Object.entries(raw.notNullColumns).map(([model, cols]) => [model, new Set(cols)])) }
+      : {}),
+    ...(raw.sourceRelationshipTests ? { sourceRelationshipTests: raw.sourceRelationshipTests } : {}),
+    ...(raw.sources ? { sources: raw.sources } : {}),
   };
 }
 
