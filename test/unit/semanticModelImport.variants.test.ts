@@ -270,6 +270,82 @@ function toTmsl(spec: ModelSpec, knobs: Knobs = {}): SemanticModelFile[] {
   return [{ path: 'Spec.SemanticModel/model.bim', text: `${knobs.bom ? '\uFEFF' : ''}${JSON.stringify(json, null, 2)}` }];
 }
 
+interface FolderKnobs extends Knobs {
+  /** Relationships kept in each from-table's TabularEditor_Relationships annotation (else one file each under relationships/). */
+  localRelationships?: boolean;
+  /** Perspectives named in the model's TabularEditor_Perspectives annotation (else one file each under perspectives/). */
+  localPerspectives?: boolean;
+  /** Captions kept on each table in TabularEditor_TranslatedNames (else in the culture's file). */
+  localTranslations?: boolean;
+  /** `001 Name.json`: files numbered in model order. */
+  prefixFilenames?: boolean;
+}
+
+/** A file name as Tabular Editor writes it: characters a file system refuses escaped as %XX. */
+const teFileName = (name: string): string => name.replace(/[%/\\:*?"<>|]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+
+/**
+ * The spec as Tabular Editor's Save to Folder writes it under `Spec/`: the
+ * TMSL database split into `database.json` and one JSON file per table,
+ * column, measure, partition, hierarchy, calculation item, relationship,
+ * role, perspective, culture, data source and expression.
+ */
+function toSaveToFolder(spec: ModelSpec, knobs: FolderKnobs = {}): SemanticModelFile[] {
+  const db = JSON.parse(toTmsl(spec, { arrays: knobs.arrays, compatibilityLevel: knobs.compatibilityLevel ?? 1604 })[0].text) as Record<string, any>;
+  const model = db.model as Record<string, any>;
+  const files: Array<{ path: string; value: unknown }> = [];
+  const name = (i: number, n: string): string => `${knobs.prefixFilenames ? `${String(i).padStart(3, '0')} ` : ''}${teFileName(n)}.json`;
+  const tables = model.tables as Array<Record<string, any>>;
+  const rels = (model.relationships ?? []) as Array<Record<string, any>>;
+  if (knobs.localTranslations) {
+    for (const c of model.cultures ?? []) {
+      for (const t of c.translations?.model?.tables ?? []) {
+        const table = tables.find((x) => x.name === t.name);
+        if (!table) continue;
+        table.annotations = [...(table.annotations ?? []), { name: 'TabularEditor_TranslatedNames', value: JSON.stringify({ [c.name]: t.translatedCaption }) }];
+      }
+      delete c.translations;
+    }
+  }
+  tables.forEach((t, ti) => {
+    const dir = `tables/${knobs.prefixFilenames ? `${String(ti).padStart(3, '0')} ` : ''}${teFileName(t.name)}`;
+    for (const key of ['columns', 'measures', 'partitions', 'hierarchies']) {
+      (t[key] ?? []).forEach((o: Record<string, any>, i: number) => files.push({ path: `${dir}/${key}/${name(i, o.name)}`, value: o }));
+      delete t[key];
+    }
+    if (t.calculationGroup) {
+      t.calculationGroup.calculationItems.forEach((o: Record<string, any>, i: number) => files.push({ path: `${dir}/calculationItems/${name(i, o.name)}`, value: o }));
+      delete t.calculationGroup.calculationItems;
+    }
+    if (knobs.localRelationships) {
+      const own = rels.filter((r) => r.fromTable === t.name);
+      // Split one string per line, as Tabular Editor writes it (SplitMultilineStrings).
+      t.annotations = [...(t.annotations ?? []), { name: 'TabularEditor_Relationships', value: JSON.stringify(own, null, 2).split('\n') }];
+    }
+    if (knobs.localPerspectives && (spec.perspectives ?? []).length && ti === 0) {
+      t.annotations = [...(t.annotations ?? []), { name: 'TabularEditor_InPerspective', value: JSON.stringify(spec.perspectives) }];
+    }
+    files.push({ path: `${dir}/${teFileName(t.name)}.json`, value: t });
+  });
+  delete model.tables;
+  if (!knobs.localRelationships) rels.forEach((r, i) => files.push({ path: `relationships/${name(i, r.name)}`, value: r }));
+  delete model.relationships;
+  for (const key of ['roles', 'perspectives', 'cultures', 'dataSources', 'expressions']) {
+    if (key === 'perspectives' && knobs.localPerspectives) {
+      if (model.perspectives) model.annotations = [{ name: 'TabularEditor_Perspectives', value: JSON.stringify(model.perspectives.map((p: { name: string }) => ({ Name: p.name, Description: '', Annotations: {} }))) }];
+      delete model.perspectives;
+      continue;
+    }
+    (model[key] ?? []).forEach((o: Record<string, any>, i: number) => files.push({ path: `${key}/${name(i, o.name)}`, value: o }));
+    delete model[key];
+  }
+  model.annotations = [...(model.annotations ?? []), { name: 'TabularEditor_SerializeOptions', value: JSON.stringify({ LocalRelationships: !!knobs.localRelationships, LocalPerspectives: !!knobs.localPerspectives, LocalTranslations: !!knobs.localTranslations, PrefixFilenames: !!knobs.prefixFilenames }) }];
+  files.push({ path: 'database.json', value: db });
+  const eol = knobs.eol ?? '\n';
+  const out = files.map((f) => ({ path: `Spec/${f.path}`, text: `${knobs.bom ? '\uFEFF' : ''}${JSON.stringify(f.value, null, 2).replace(/\n/g, eol)}${eol}` }));
+  return knobs.reverse ? out.reverse() : out;
+}
+
 function read(files: SemanticModelFile[]): SemanticModel {
   const r = readSemanticModel(files);
   if (!r.ok) throw new Error(JSON.stringify(r.problems));
@@ -373,7 +449,7 @@ const TRUTH = {
     hierarchy: 1, 'security role': 1, 'row filter': 1, 'column permission': 1, 'table permission': 1, perspective: 1,
     'translated caption': 3, 'Q&A linguistic metadata': 2, 'data source': 1, 'Power Query expression': 1, 'Power Query parameter': 2,
     'Mark as date table': 1, variation: 1, KPI: 1, summarizeBy: 1, formatString: 6, displayFolder: 1, isDefaultLabel: 1, dataCategory: 1, sortByColumn: 1,
-    'file source': 1, 'native query': 1,
+    'file source': 1, 'native query': 1, 'DAX expression': 3,
   } as Record<string, number>,
   sources: { sales: 'dbo.FactSales', customer: 'PUBLIC.CUSTOMER', date: 'gold.dim_date', product: 'stage.product', lake_orders: 'dbo.orders' } as Record<string, string>,
 };
@@ -385,16 +461,25 @@ const VARIANTS: Array<[string, () => SemanticModelFile[]]> = [
   ['TMSL, bare, level 1200', () => toTmsl(RICH, { compatibilityLevel: 1200 })],
   ['TMSL, createOrReplace, text as arrays, BOM, level 1604', () => toTmsl(RICH, { wrap: true, arrays: true, bom: true, compatibilityLevel: 1604 })],
   ['TMSL, createOrReplace, level 1550', () => toTmsl(RICH, { wrap: true })],
+  ['Save to Folder, a file per object (files in name order)', () => toSaveToFolder(RICH)],
+  ['Save to Folder, local relationships, perspectives and translations, numbered files, CRLF, BOM, reversed', () => toSaveToFolder(RICH, { localRelationships: true, localPerspectives: true, localTranslations: true, prefixFilenames: true, eol: '\r\n', bom: true, reverse: true, arrays: true })],
 ];
 
 describe('variants: one rich model in every format', () => {
   const baseline = semanticModelToDbml(read(toTmdl(RICH)));
 
-  it.each(VARIANTS)('%s: the same DBML and the same ledger', (_label, files) => {
+  it.each(VARIANTS)('%s: the same DBML and the same ledger', (label, files) => {
     const result = semanticModelToDbml(read(files()));
-    expect(result.dbml.replace(/\((TMSL|TMDL)\)/, '(X)').replace(/semantic model "?[^".\n]+"?/g, 'semantic model M')).toBe(
-      baseline.dbml.replace(/\((TMSL|TMDL)\)/, '(X)').replace(/semantic model "?[^".\n]+"?/g, 'semantic model M'),
-    );
+    // The format and model name aside. Save to Folder files not numbered are read in name order (tables and columns), so those compare as sets.
+    const unordered = label.includes('name order');
+    const blocks = (dbml: string): string[] => dbml
+      .replace(/\((TMSL|TMDL|TMSL, Tabular Editor folder)\)/, '(X)')
+      .replace(/semantic model "?[^".\n]+"?/g, 'semantic model M')
+      .replace(/^Project .* \{$/m, 'Project M {')
+      .split('\n\n')
+      .map((b) => (unordered ? b.split('\n').sort().join('\n') : b))
+      .sort();
+    expect(blocks(result.dbml)).toEqual(blocks(baseline.dbml));
     expect(shape(result.ledger)).toEqual(shape(baseline.ledger));
   });
 
@@ -408,7 +493,8 @@ describe('variants: one rich model in every format', () => {
     expect(result.tableCount + (totals.skipped.table ?? 0)).toBe(RICH.tables.length);
     // Columns of imported tables: every one.
     const kept = RICH.tables.filter((t) => !t.calculationItems);
-    expect(imported.newTables.map((t) => t.columns.length)).toEqual(kept.map((t) => t.columns.length));
+    const byName = (list: Array<{ name: string; columns: unknown[] }>): string[] => list.map((t) => `${t.name.toLowerCase().replace(/[^a-z0-9]/g, '')}:${t.columns.length}`).sort();
+    expect(byName(imported.newTables)).toEqual(byName(kept));
     // Relationships: drawn, or skipped and counted.
     expect(result.refCount + (totals.skipped.relationship ?? 0)).toBe(RICH.relationships.length);
     // Measures and calculation items: counted.
@@ -638,14 +724,14 @@ describe('descriptions kept verbatim', () => {
     expect(p.newTables.map((t) => t.columns[0].description)).toEqual(texts);
   });
 
-  it('joins a description with the calculated sentence (a full stop between, only when needed), and empty stays empty', () => {
+  it('keeps a calculated column\'s description as written; with none, the note says its DAX was not imported; empty stays empty', () => {
     const p = plan(semanticModelToDbml(read(toTmdl(one([
       { name: 'a', dataType: 'int64', dax: '1', description: 'Plain' },
       { name: 'b', dataType: 'int64', dax: '1', description: 'Already ends.' },
       { name: 'c', dataType: 'int64', dax: '1' },
       { name: 'd', dataType: 'int64' },
     ])))).dbml);
-    expect(p.newTables[0].columns.map((c) => c.description)).toEqual([`Plain. ${CALCULATED_COLUMN_NOTE}`, `Already ends. ${CALCULATED_COLUMN_NOTE}`, CALCULATED_COLUMN_NOTE, '']);
+    expect(p.newTables[0].columns.map((c) => c.description)).toEqual(['Plain', 'Already ends.', CALCULATED_COLUMN_NOTE, '']);
     expect(sentenceJoin(['x'])).toBe('x');
     expect(sentenceJoin(['  x  ', ''])).toBe('x');
     expect(sentenceJoin(['Why?', 'Then'])).toBe('Why? Then');

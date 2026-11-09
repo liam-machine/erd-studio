@@ -213,8 +213,8 @@ describe('Import Semantic Model…', () => {
     expect(features()).toEqual(['importSemanticModelInvalid', 'importSemanticModelNoModel']);
   });
 
-  it('a folder holding only a .pbix, or a Tabular Editor JSON folder, names it and says how to save it so it imports', async () => {
-    for (const [file, expected] of [['Sales.pbix', /Sales\.pbix is a Power BI Desktop file.*Power BI project \(\*\.pbip\)/], ['tables/database.json', /database\.json is a model saved by Tabular Editor's Save to Folder.*TMDL or as one model\.bim/]] as const) {
+  it('a folder holding only a .pbix, or a database.json with no tables/ beside it, names it and says what to pick instead', async () => {
+    for (const [file, expected] of [['Sales.pbix', /Sales\.pbix is a Power BI Desktop file.*Power BI project \(\*\.pbip\)/], ['tables/database.json', /database\.json has no tables\/ folder of JSON files beside it.*Save to Folder/]] as const) {
       const folder = path.join(tmp, `reports-${path.basename(file)}`);
       fs.mkdirSync(path.join(folder, path.dirname(file)), { recursive: true });
       fs.writeFileSync(path.join(folder, file), 'PK\u0003\u0004 binary');
