@@ -87,7 +87,7 @@ npm run build:packages # publishable dist/ of both packages
 
 ## Architecture map
 
-Six esbuild targets (`esbuild.js`, each in both build and watch branches):
+Seven esbuild targets (`esbuild.js`, each in both build and watch branches):
 
 | Target | Source → output | Notes |
 |---|---|---|
@@ -96,6 +96,7 @@ Six esbuild targets (`esbuild.js`, each in both build and watch branches):
 | Manifest worker | `src/workers/manifestWorker.ts` → `dist/manifestWorker.js` | worker thread, plain `JSON.parse` |
 | CLI | `src/cli/index.ts` → `dist/cli.js` | Node 18, **no `external`**: an `import 'vscode'` anywhere in its graph breaks the build (`test/unit/cli.noVscode.test.ts`) |
 | SQL importer | `src/services/sqlImportEngine.ts` → `dist/sqlImport.js` | Node 18, `@dbml/core`'s SQL grammars (Oracle stubbed); `require`d at run time by `sqlImportLoader.ts` on the first **Import SQL DDL…**. Never import `sqlImportEngine.ts` from host code (`test/unit/sqlDdlImport.test.ts` checks the bundles' inputs) |
+| SQL import worker | `src/workers/sqlImportWorker.ts` → `dist/sqlImportWorker.js` | worker thread for every Import SQL DDL… conversion (progress, Cancel, time limit), started by `workerSqlConverter` (`src/services/sqlConverter.ts`); small: it `require`s `dist/sqlImport.js` itself. No `external`. Without it the conversion runs in-process |
 | Draft preview | `webview-draft/` → `dist/draft.js` + `.css` | browser IIFE, React, the renderer's `ErdCanvas` (viewer) and the ELK worker `define`; its own page and protocol (`src/types/draft.ts`, `parseDraftToHost`), nonce-only CSP with no `unsafe-inline`; writes nothing (`docs/dev/draft-first.md`) |
 
 - Two tsconfigs: `tsconfig.json` (Node) and `tsconfig.webview.json` (DOM, includes `src/types/**`). `@types/vscode` is pinned to `1.85.0` to match `engines.vscode` — **use no newer VS Code APIs**.
