@@ -68,10 +68,10 @@ const FLOORS: Record<string, Floor> = {
   'redshift-tpch': { tablesMatched: 8, columnsMatched: 61, primaryKeysMatched: 8, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 38, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlite-chinook': { tablesMatched: 11, columnsMatched: 64, primaryKeysMatched: 11, relationshipsMatched: 11, uniqueKeysKept: 0, typeDetailsKept: 37, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   // Added from the import corpus (scripts/corpus/), at the numbers they scored when added; truth from the engine read-backs.
-  // The Data Vault's five CREATE TABLE ... AS SELECT tables are skipped and only counted ("skipped 2 CREATE TABLEs without a column
-  // list"), never named: 5 silent table losses. Three of them (ref_region, ref_nation, sat_order_bv) do have a column list, with
-  // their keys; 2 relationships go with them.
-  'snowflake-realtime-datavault': { tablesMatched: 7, columnsMatched: 53, primaryKeysMatched: 5, relationshipsMatched: 4, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 0, maxSilentLosses: 5, verdictAtLeast: 'With problems' },
+  // The Data Vault's three CREATE TABLE ... AS SELECT tables with a typed column list (ref_region, ref_nation, sat_order_bv) are
+  // read from it, with their keys and 2 relationships; stg_nation and stg_region (SELECT src.*, …) have no column list of their
+  // own and are left out by name ("not imported, made from a query …").
+  'snowflake-realtime-datavault': { tablesMatched: 10, columnsMatched: 76, primaryKeysMatched: 8, relationshipsMatched: 6, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
   'snowflake-sqldbm-adventureworksdw': { tablesMatched: 23, columnsMatched: 284, primaryKeysMatched: 15, relationshipsMatched: 36, uniqueKeysKept: 0, typeDetailsKept: 264, descriptionsExact: 25, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   // orders and refunds are each in two schemas: compared as {schema}_{name} (qualifySameNames), the names the import gives them.
   'databricks-uc-catalog-as-code': { tablesMatched: 22, columnsMatched: 118, primaryKeysMatched: 21, relationshipsMatched: 16, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 140, maxSilentLosses: 0, verdictAtLeast: 'Clean' },

@@ -183,6 +183,8 @@ describe.skipIf(!enabled)('import corpus', () => {
         echoedSource: { count: echoed.length, sample: echoed.slice(0, 2).map((m) => `${m.slice(0, 160)}…`) },
         missingTables: missingTables.slice(0, 30),
         missingColumns: missingColumns.slice(0, 30),
+        // What the draft shows (cut short): what the scorer reads to decide reported or silent.
+        shown: run.shown.slice(0, 400).map((m) => m.slice(0, 300)),
         problemMessages: run.problems.slice(0, 40).map((p) => `${p.file ?? ''}${p.line !== undefined ? `:${p.line}` : ''} ${p.message}`.trim().slice(0, 300)),
         score: { ...score, problems: { ...score.problems, messages: score.problems.messages.slice(0, 40).map((m) => m.slice(0, 300)) } },
       };

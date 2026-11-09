@@ -489,7 +489,8 @@ export interface SampleScore {
   reasons: string[];
   tables: { source: number; imported: number; matched: number; missing: number; missingReported: number; extra: string[] };
   columns: { source: number; imported: number; matched: number; missing: number; missingReported: number; extra: number };
-  primaryKeys: { source: number; imported: number; matched: number; composite: number; missing: number; wrong: string[]; extra: number };
+  /** `wrongReported`: of `wrong`, the keys a shown note names with the table and the source's key columns (a choice said, not a silent change). */
+  primaryKeys: { source: number; imported: number; matched: number; composite: number; missing: number; wrong: string[]; wrongReported?: number; extra: number };
   relationships: {
     source: number; imported: number; matched: number;
     missing: number; missingReported: number; missingSilent: string[];
@@ -675,6 +676,7 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
   let pkMatched = 0; let pkMissing = 0; let pkExtra = 0; let pkComposite = 0;
   const pkWrong: string[] = [];
   let pkSilent = 0;
+  let pkWrongReported = 0;
   for (const t of truth.tables) {
     const got = importedByCanon.get(canon(t.name));
     if (!got) continue;
@@ -684,7 +686,9 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
     if (have.join(',') === want.join(',')) { pkMatched++; if (want.length > 1) pkComposite++; continue; }
     if (have.length === 0) { pkMissing++; if (!mentioned(shown, t.name, 'key')) pkSilent++; continue; }
     pkWrong.push(`${t.name}: (${have.join(', ')}) instead of (${want.join(', ')})`);
-    pkSilent++;
+    // A key chosen on purpose and said (a Power BI date table's: every relationship joins DateKey, Date stays unique) is a gap, not a silent change.
+    if (mentioned(shown, t.name, 'key') && t.pk.every((c) => mentioned(shown, t.name, c))) pkWrongReported++;
+    else pkSilent++;
   }
   const pkImported = run.tables.filter((t) => pkOf(t).length > 0).length;
 
@@ -869,7 +873,7 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
     reasons,
     tables: { source: truth.tables.length, imported: run.tables.length, matched: truth.tables.length - missingTables.length, missing: missingTables.length, missingReported: missingTablesReported.length, extra: extraTables },
     columns: { source: colSource, imported: colImported, matched: colMatched, missing: colMissing, missingReported: colMissingReported, extra: colExtra },
-    primaryKeys: { source: truth.tables.filter((t) => t.pk.length > 0).length, imported: pkImported, matched: pkMatched, composite: pkComposite, missing: pkMissing, wrong: pkWrong, extra: pkExtra },
+    primaryKeys: { source: truth.tables.filter((t) => t.pk.length > 0).length, imported: pkImported, matched: pkMatched, composite: pkComposite, missing: pkMissing, wrong: pkWrong, wrongReported: pkWrongReported, extra: pkExtra },
     relationships: {
       source: truthLinks.length, imported: importedLinks.length, matched: matchedLinks.length,
       missing: missingLinks.length, missingReported: missingReported.length, missingSilent,
@@ -903,6 +907,7 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
  *   relationship, a relationship the wrong way round, or a one-to-one drawn as
  *   many-to-one.
  * - With gaps: the structure is right, but something is left out (and said),
+ *   or a key is chosen differently from the source's and a note says so,
  *   or a detail is lost silently (type detail, description, unique key,
  *   NOT NULL, schema, a relationship's condition), or the draft says nothing was lost when it was, or
  *   required relationships are saved optional (D18) with no note.
@@ -932,6 +937,7 @@ export function verdictOf(s: SampleScore, failed: boolean, reasons: string[]): V
   if (L.requiredFks) gap.push(`${L.requiredFks} required FK(s) lost`);
   if (L.schemas) gap.push(`schema(s) ${s.schemas.lostSilently.join(', ')} lost`);
   if (L.conditions) gap.push(`${L.conditions} relationship condition(s) lost silently`);
+  if (s.primaryKeys.wrongReported) gap.push(`${s.primaryKeys.wrongReported} primary key(s) chosen differently and said`);
   if (s.falseNotLostNote) gap.push('a note says details are not lost');
   if (s.requiredFks.source > 0 && !s.requiredFks.toldOptional) gap.push(`${s.requiredFks.source} required relationship(s) saved optional with no note`);
   const claims = s.requiredFks.noteClaims;
