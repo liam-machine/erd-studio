@@ -68,6 +68,8 @@ import {
 import { getErdStudioSetting } from '../services/configService';
 import { log } from '../services/logger';
 import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
+import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL } from '../services/importReport';
+import { recordImportReport } from '../services/importReportStore';
 import {
   SQL_DIALECTS,
   SQL_DIALECT_LABELS,
@@ -185,6 +187,8 @@ export interface ImportSqlDdlUi {
   withProgress?<T>(title: string, task: (progress: SqlProgressReporter, signal: AbortSignal) => Promise<T>): Promise<T>;
   /** Opens the Settings editor at one setting. Absent: no Open Settings button. */
   openSettings?(setting: string): Promise<void>;
+  /** Runs Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent: no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 /** What a reading reports to the progress notification: a line, and how far it is (0 to 1). */
@@ -689,6 +693,18 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
+    // The report lists every problem with its file and line (the message names the first few).
+    if (ui.showImportReport && deps.draft?.quiet !== true) {
+      const reportId = recordImportReport({
+        source: 'sql',
+        title: TITLE,
+        from: sqlOriginPhrase(files.length, SQL_DIALECT_LABELS[dialect]),
+        status: 'failed',
+        ledger: result.ledger ?? [],
+        files: Object.fromEntries(fullPaths),
+      });
+      actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!(reportId);
+    }
     if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
     // Another dialect only when one reads more (or nobody has looked).
     const mine = sqlDialectReading(dialect, result).tablesRead;
@@ -742,6 +758,8 @@ function importConvertedSql(
       skipped: result.skipped,
       ledger,
       ...(sqlPartialNotice(result) ? { notice: sqlPartialNotice(result) } : {}),
+      // The scripts, by the names the ledger gives them: Show Import Report opens them at a line.
+      sourceFiles: Object.fromEntries(read.fullPaths),
     },
     ...(changeOptions ? { changeOptions } : {}),
   }, { filePath, ...resume });
@@ -1059,6 +1077,7 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     showLogs: async () => { await vscode.commands.executeCommand(SHOW_LOGS_COMMAND); },
     withProgress: (title, task) => withDelayedProgress(title, task),
     openSettings: async (setting) => { await vscode.commands.executeCommand('workbench.action.openSettings', setting); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }
 

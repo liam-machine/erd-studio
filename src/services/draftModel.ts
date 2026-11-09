@@ -411,6 +411,10 @@ export interface ImportPlanDraftInput {
   changeOptions: boolean;
   scopes?: DraftScopes;
   notice?: string;
+  /** Offer Show Import Report (the import recorded its report). Never on an example. */
+  importReport?: boolean;
+  /** The import's report id (host only): the banner's link opens that report. Implies `importReport`. */
+  importReportId?: number;
 }
 
 const IMPORT_SOURCE_DRAFT: Readonly<Record<ImportPlanDraftInput['importSource'], DraftSource>> = {
@@ -493,6 +497,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
         changeOptions: input.changeOptions,
         shownStarts: [],
         ...(notice ? { notice } : {}),
+        ...(input.importReport || input.importReportId !== undefined ? { importReport: true } : {}),
       },
       otherStarts: otherStartItems(FIND_STARTS),
     };
@@ -512,6 +517,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     details: detailsFromImportReview(plan, describe, target.diagramFile),
     keep,
     trigger: input.trigger,
+    ...(source !== 'example' && input.importReportId !== undefined ? { importReportId: input.importReportId } : {}),
   };
 }
 
@@ -564,6 +570,10 @@ export interface DbtDraftInput {
   /** Offer Change options… (Import from dbt's picker). Default true. */
   changeOptions?: boolean;
   notice?: string;
+  /** Offer Show Import Report (Import from dbt recorded its report). */
+  importReport?: boolean;
+  /** The draw's report id (host only): the banner's link opens that report. Implies `importReport`. */
+  importReportId?: number;
   /**
    * The project's models dbt declares no columns for (`modelsWithoutColumns`):
    * no folder offers them, and Not drawn says why in one line.
@@ -717,8 +727,10 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
       changeOptions: input.changeOptions ?? true,
       shownStarts: [],
       ...(input.notice ? { notice: input.notice } : {}),
+      ...(input.importReport || input.importReportId !== undefined ? { importReport: true } : {}),
     },
     otherStarts: otherStartItems(DBT_STARTS),
+    ...(input.importReportId !== undefined ? { importReportId: input.importReportId } : {}),
     ...(scopes ? { scopes } : {}),
     summary,
     display,

@@ -154,6 +154,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
     setDrawerOpen(true);
     hostRef.current.post({ type: 'detailsOpened' });
   }, []);
+  const onImportReport = useCallback(() => hostRef.current.post({ type: 'importReport' }), []);
   const postToHost = useCallback((message: Parameters<DraftHost['post']>[0]) => hostRef.current.post(message), []);
   const endGuide = useCallback(() => setGuide(undefined), []);
   // The canvas fitted a draft it was handed laid out: report the layout (2.0 B17).
@@ -202,6 +203,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
         onOtherStart={onOtherStart}
         onScope={onScope}
         onShowDetails={onShowDetails}
+        onImportReport={onImportReport}
       />
       <div className="draft-app__body">
         {showPanel && (

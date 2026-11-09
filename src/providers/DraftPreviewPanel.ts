@@ -346,6 +346,14 @@ export class DraftPreviewPanel {
       case 'detailsOpened':
         this.events.detailsOpened?.(this.view.source);
         return;
+      case 'importReport':
+        try {
+          // The draft's own import (host only), never one the page names.
+          this.events.importReport?.(this.view.source, this.draft.importReportId);
+        } catch (err) {
+          log.warn('The draft preview\'s Show Import Report failed:', err instanceof Error ? err.message : String(err));
+        }
+        return;
       case 'layoutFailed':
         this.layingOut = undefined;
         this.events.layoutFailed?.(this.view.source);

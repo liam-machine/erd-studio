@@ -38,6 +38,7 @@ import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 
 import {
   analyseDbml,
+  importLedgerOf,
   planDbmlImport,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
@@ -88,6 +89,14 @@ import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
 import type { LedgerEntry } from '../services/importLedger';
+import {
+  SHOW_IMPORT_REPORT_COMMAND,
+  SHOW_IMPORT_REPORT_LABEL,
+  partialImportMessage,
+  problemLedger,
+  type ImportReportSource,
+} from '../services/importReport';
+import { recordImportReport, updateImportReport } from '../services/importReportStore';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
@@ -150,7 +159,21 @@ export interface ImportDbmlOrigin {
   ledger?: readonly LedgerEntry[];
   /** A line for the draft's banner (`3 tables could not be read; Show details lists them`). */
   notice?: string;
+  /**
+   * The files the conversion read: each name its ledger gives as
+   * `where.file` → the absolute path. Show Import Report opens these (and
+   * only these) at a ledger entry's line.
+   */
+  sourceFiles?: Readonly<Record<string, string>>;
 }
+
+/** The report each source records (`importReport.ts`); the bundled example records none. */
+const IMPORT_REPORT_SOURCES: Readonly<Record<ImportDbmlSource, ImportReportSource | undefined>> = {
+  file: 'dbml',
+  example: undefined,
+  sql: 'sql',
+  semanticModel: 'semanticModel',
+};
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 /** The fallback dry run's buttons (no preview): Import, and Change Options… on a quick import. */
@@ -196,6 +219,8 @@ export interface ImportDbmlUi {
   addLayer(): Promise<void>;
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Run Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent (a test's fake): no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 export interface ImportDbmlDeps {
@@ -514,8 +539,21 @@ async function runImportDbml(
       if (read.diagnostics.some((d) => SEVERAL_FIELDS_ON_ONE_LINE.test(d.message))) telemetry.feature('importDbmlSeveralFieldsOneLine');
     }
     const first = read.diagnostics[0];
+    // The report lists every problem with its line (the message names the first few). A file
+    // with use lines has one problem, said in full: no report.
+    const reportSource = IMPORT_REPORT_SOURCES[source];
+    const reported = !quiet && !read.importsOtherFiles && reportSource !== undefined && ui.showImportReport !== undefined;
+    const failedReportId = !reported ? undefined : recordImportReport({
+      source: reportSource!,
+      title,
+      from: `from ${fileName}`,
+      status: 'failed',
+      ledger: problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML'),
+      files: { [fileName]: filePath },
+    });
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
+      ...(failedReportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(failedReportId) } : {}),
     });
     return undefined;
   }
@@ -736,6 +774,19 @@ async function runImportDbml(
   };
   const changeOptions = deps.changeOptions;
   const chosen = { layer: chosenLayer, name: slug };
+  // The report of this import (Show Import Report): the plan's ledger and the conversion's, in memory only.
+  const reportSource = IMPORT_REPORT_SOURCES[source];
+  const reportLedger = importLedgerOf(plan, describeOptions);
+  const reportId = reportSource === undefined ? undefined : recordImportReport({
+    source: reportSource,
+    title,
+    from: deps.origin?.from ?? `from ${fileName}`,
+    status: 'draft',
+    imported: { tables: plan.modelNames.length, relationships: plan.report.relationships },
+    ledger: reportLedger,
+    files: source === 'file' ? { [fileName]: filePath } : (deps.origin?.sourceFiles ?? {}),
+  });
+  const notKept = (): void => { updateImportReport(reportId, { status: 'notKept' }); };
   /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
   /** A Keep is waiting: settled once, here or (after a throw) by `importDbml`. */
@@ -790,6 +841,7 @@ async function runImportDbml(
           changeOptions: changeOptions !== undefined,
           ...(draftOptions.scopes ? { scopes: draftOptions.scopes } : {}),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : deps.origin?.notice ? { notice: deps.origin.notice } : {}),
+          ...(reportId !== undefined ? { importReportId: reportId } : {}),
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
@@ -836,6 +888,7 @@ async function runImportDbml(
           break;
         }
         case 'changeOptions':
+          notKept();
           if (!changeOptions) return undefined;
           telemetry.feature('quickImportChangeOptions');
           void Promise.resolve().then(() => changeOptions(chosen));
@@ -850,21 +903,27 @@ async function runImportDbml(
         }
         case 'discard':
         case 'closed':
+          notKept();
           return cancelled();
         // More ways to start: the host ran its fixed command. Superseded: another flow has the page.
         case 'otherStart':
         case 'superseded':
+          notKept();
           return undefined;
       }
     } else if (!draftOptions) {
       const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
       const answer = await dryRun(ui, headline, detail.join('\n'), changeOptions !== undefined);
       if (answer === 'changeOptions' && changeOptions) {
+        notKept();
         telemetry.feature('quickImportChangeOptions');
         void Promise.resolve().then(() => changeOptions(chosen));
         return undefined;
       }
-      if (answer !== 'import') return cancelled();
+      if (answer !== 'import') {
+        notKept();
+        return cancelled();
+      }
     }
     answered = false;
 
@@ -896,9 +955,17 @@ async function runImportDbml(
     if (quick) telemetry.feature('quickImport');
     if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
 
+    updateImportReport(reportId, { status: 'kept', diagram: `${chosenLayer}/${slug}` });
     // Kept: the draft closes and the new diagram opens.
     settleKeep({ kept: true });
     await ui.openDiagram(domainPath);
+    // Something could not be read and is not in the diagram: said once more, now the draft has closed.
+    const partial = reportId !== undefined && ui.showImportReport ? partialImportMessage(title, reportLedger) : undefined;
+    if (partial) {
+      void Promise.resolve(ui.showInformationMessage(partial, SHOW_IMPORT_REPORT_LABEL))
+        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.(reportId) : undefined))
+        .catch((err: unknown) => log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+    }
     return { domainPath, plan };
   }
 
@@ -1109,5 +1176,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     },
     addLayer: async () => { await vscode.commands.executeCommand('erdStudio.addLayer'); },
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

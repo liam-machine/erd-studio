@@ -149,6 +149,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.showImportReport",
+        "title": "Show Import Report",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.showMeAround",
         "title": "Show Me Around",
         "category": "ERD Studio",
@@ -1190,6 +1195,10 @@
         },
         {
           "command": "erdStudio.importSemanticModel",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.showImportReport",
           "when": "erdStudio.hasProject"
         },
         {

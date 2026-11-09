@@ -83,6 +83,10 @@ import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import { log } from '../services/logger';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
+import { countLinks } from '../services/dbmlImport';
+import { createLedger, type LedgerEntry } from '../services/importLedger';
+import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL } from '../services/importReport';
+import { recordImportReport, updateImportReport } from '../services/importReportStore';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -421,6 +425,17 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     return undefined;
   }
 
+  // The report of this draw (Show Import Report): the draft's ledger and the models it left out, in memory only.
+  const reportId = recordImportReport({
+    source: 'dbt',
+    title: TITLE,
+    from: `from ${pick.scope.label}`,
+    status: 'draft',
+    imported: { tables: draft.modelNames.length, relationships: countLinks(draft.relationships) },
+    ledger: dbtReportLedger(draft),
+  });
+  const notKept = (): void => { updateImportReport(reportId, { status: 'notKept' }); };
+
   // The draft (§5.2): the diagram as Keep writes it, read-only, before any write.
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
   /** The draft the viewer answers: asked again after a Keep that did not save, or a switcher choice that drew nothing. */
@@ -454,6 +469,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           changedTables: routed.changed,
           modelsWithoutColumns: modelsWithoutColumns(source),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
+          importReportId: reportId,
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
@@ -503,15 +519,18 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           continue;
         }
         case 'changeOptions':
+          notKept();
           // The picker, layer pick and name box, as before, ending in a draft.
           void Promise.resolve().then(() => drawFromDbt({ ...deps, draft: { ...draftOptions, quiet: false, trigger: 'changeOptions' } }));
           return undefined;
         case 'discard':
         case 'closed':
+          notKept();
           if (!quiet) telemetry.feature('drawCancelScope');
           return undefined;
         case 'otherStart':
         case 'superseded':
+          notKept();
           return undefined;
       }
     }
@@ -554,12 +573,18 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
 
     deps.onWritten({ domainPath, modelNames: written, changedModelNames: outcome.changed });
     telemetry.feature('drawFromDbt');
+    updateImportReport(reportId, { status: 'kept', diagram: `${chosenLayer}/${slug}` });
     settleKeep({ kept: true });
 
     await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), SUBJECT_AREA_EDITOR_VIEW_TYPE);
 
     const notice = [describeDraftNotice(draft), describeUnstoredRelationships(unstored)].filter(Boolean).join(' ');
-    if (notice) { void vscode.window.showInformationMessage(notice); }
+    if (notice) {
+      // What was left out, with the report that lists every one.
+      void Promise.resolve(vscode.window.showInformationMessage(notice, SHOW_IMPORT_REPORT_LABEL))
+        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId) : undefined))
+        .then(undefined, (err: unknown) => log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+    }
     return { domainPath, draft };
   }
 
@@ -622,6 +647,27 @@ export function describeDraftNotice(draft: Pick<DbtDraft, 'modelNames' | 'skippe
   }
   if (other.length > 0) { parts.push(describeSkipped(other)); }
   return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
+/** Why a model the draw left out was left out, as the import report says it (a repeat or one already drawn is not worth a line). */
+const DBT_SKIP_REPORT: Partial<Record<DraftSkipped['reason'], { cause: 'capped' | 'notDesign' | 'notInFiles' | 'other'; detail: string }>> = {
+  'invalid-name': { cause: 'other', detail: 'not drawn: a name ERD Studio cannot use' },
+  'not-found': { cause: 'notInFiles', detail: 'not drawn: not found in the project, or it has no columns' },
+  disabled: { cause: 'notDesign', detail: 'not drawn: disabled in dbt' },
+  'over-limit': { cause: 'capped', detail: 'not drawn, to keep the diagram readable (Add Existing Model adds it)' },
+  'yaml-table': { cause: 'other', detail: "not drawn: a YAML table can't join a DBML diagram" },
+};
+
+/** The draw's report ledger: the draft's own (`DbtDraft.ledger`), then each model it left out. */
+export function dbtReportLedger(draft: Pick<DbtDraft, 'ledger' | 'skipped'>): LedgerEntry[] {
+  const ledger = createLedger(draft.ledger ?? []);
+  for (const s of draft.skipped) {
+    const why = DBT_SKIP_REPORT[s.reason];
+    if (!why) continue;
+    const add = s.reason === 'over-limit' ? ledger.skipped : ledger.lost;
+    add('table', why.cause, 'dbt model', { table: s.name }, why.detail);
+  }
+  return [...ledger.entries];
 }
 
 /** A repeated pick or the cap is not worth a sentence; these are. */
