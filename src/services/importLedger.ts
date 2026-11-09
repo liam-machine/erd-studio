@@ -289,7 +289,8 @@ export function ledgerLogLines(entries: readonly LedgerEntry[], title: string): 
     const name = nameOf(e.where);
     const count = e.count > 1 ? `${e.count} × ` : '';
     const detail = e.detail ? ` (${ledgerText(e.detail, MAX_DETAIL, true)})` : '';
-    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}: ${ledgerText(e.what, MAX_WHAT, true)}${detail}`);
+    const what = ledgerText(e.what, MAX_WHAT, true);
+    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}:${what ? ` ${what}` : ''}${detail}`);
   }
   return lines;
 }
