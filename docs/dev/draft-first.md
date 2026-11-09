@@ -132,6 +132,8 @@ Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`),
 
 Buttons: **Show Me** (Convert: **Convert to DBML…**) and **Don't Ask Again for This Folder**. **More Options…** is gone (the draft's More ways to start replaces it). Show Me answers it for good and opens the draft (`prompt`); Don't Ask Again turns suggestions off for the folder (same message as today) and the folder then gets **no** automatic draft and **no** walkthrough.
 
+A **late Show Me** (clicked after a diagram was kept from the draft or elsewhere) re-checks `hasDiagrams()`: when a diagram exists it focuses `erdStudio.domainTree.focus` and says `START_SUGGESTION_ALREADY_KEPT_MESSAGE` instead of opening a second draft, because VS Code 1.85 cannot dismiss a notification once shown.
+
 The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folder with nothing found gets the example draft on the ERD Studio icon, once per machine, and otherwise only the sidebar.
 
 ### 3.4 The rest of the prompt drip
@@ -181,6 +183,8 @@ The quick paths (`quickImportSqlDdl`, `quickImportSemanticModel`, `quickImportDb
 - `DrawFromDbtDeps` gains `draft?: DbtDraftOptions` — `{ preview; trigger; quiet?; generation? }`; `DrawFromDbtResume` gains `scopeId?`.
 - With `draft` and no `resume.pick`: the scope is the switcher's default (`dbtDraftScopes`, P1), the layer `scope.suggestedLayer` when creatable, else `defaultDiagramLayer`, the name `suggestSubjectAreaName` made free — no picker, no layer pick, no name box (asked only when the name is not valid). With `trigger: 'changeOptions'` the picker, layer pick and name box run as today.
 - After the routing and unsaved-file checks (where it now writes), it builds the `Draft` (`draftFromDbt`, P1) and awaits `ask`. `keep` → the existing `writeNewSubjectArea` call and notice; `scope` → re-enter with `{ scopeId }` and the same preview; staleness as §5.1 (`dbtDraftFingerprint`).
+
+- **What the dbt draft says** (`buildDbtDraft` → `draftFromDbt`): dbt's `not_null` tests (`YmlData.notNullColumns`: scalar, with config, under `data_tests:`, contract constraints, dbt_expectations' not-null test; a where-limited, disabled or `not_null_proportion` test is not counted) are written as `meta.dbml.not_null` by `seedTableFromDbt` and counted in `DbtDraft.requiredRelationships`, which gives the D18 sentence (`savedOptionalNote`) in the draft's **Notes** for a DBML diagram. Every relationships test from a drawn model to a model not drawn is a `DbtDraft.undrawnLinks` entry (`addable`, `noColumns`, `notAModel` for a `source()`), listed in **Not drawn** ("person.location_id → location: drawn when you add location") and counted on the table's line (`describeImportTable(…, toUndrawn)`). A `relationships_where` condition is a lost `constraint` ledger line; models with no columns in their yml get one Not drawn line (`modelsWithoutColumns`); `dbtLayerSchemaNote` says which tables are written in the layer's schema; the banner ends with `DBT_KEEP_SELECTORS_SENTENCE`. `DbtDraft.ledger` gives the Notes section and adds its lost lines to Not drawn (`docs/dev/dbml.md` → Import fidelity).
 
 ### 5.3 Example projects (`openExampleProject`)
 

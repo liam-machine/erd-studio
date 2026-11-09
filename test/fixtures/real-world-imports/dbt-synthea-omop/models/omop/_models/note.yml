@@ -1,0 +1,195 @@
+models:
+  - name: note
+    description: The NOTE table captures unstructured information that was recorded by a provider 
+      about a patient in free text (in ASCII, or preferably in UTF8 format) notes on a given date. 
+      The type of note_text is CLOB or varchar(MAX) depending on RDBMS.
+    tests:
+      - person_completeness:
+          threshold: '100'
+    columns:
+      - name: note_id
+        description: A unique identifier for each note.
+        data_type: integer
+        tests:
+          - not_null
+          - unique
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: person_id
+        description: ''
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              to: ref('person')
+              field: person_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: note_date
+        description: The date the note was recorded.
+        data_type: date
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('date') }}"
+      - name: note_datetime
+        description: ''
+        data_type: datetime
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('timestamp') }}"
+      - name: note_type_concept_id
+        description: The provenance of the note. Most likely this will be EHR.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: note_type_concept_id <> 0
+              to_condition: domain_id = 'Type Concept'
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: note_type_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: note_class_concept_id
+        description: A Standard Concept Id representing the HL7 LOINC Document Type Vocabulary 
+          classification of the note.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: note_class_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: note_title
+        description: The title of the note.
+        data_type: varchar(250)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 250
+              row_condition: note_title is not null
+              strictly: false
+      - name: note_text
+        description: The content of the note.
+        data_type: varchar(MAX)
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+      - name: encoding_concept_id
+        description: This is the Concept representing the character encoding type.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: encoding_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: language_concept_id
+        description: The language of the note.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: language_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: provider_id
+        description: The Provider who wrote the note.
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('provider')
+              field: provider_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: visit_occurrence_id
+        description: The Visit during which the note was written.
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('visit_occurrence')
+              field: visit_occurrence_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: visit_detail_id
+        description: The Visit Detail during which the note was written.
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('visit_detail')
+              field: visit_detail_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: note_source_value
+        description: ''
+        data_type: varchar(50)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 50
+              row_condition: note_source_value is not null
+              strictly: false
+      - name: note_event_id
+        description: If the Note record is related to another record in the database, this field is 
+          the primary key of the linked record.
+        data_type: integer
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: note_event_field_concept_id
+        description: If the Note record is related to another record in the database, this field is 
+          the CONCEPT_ID that identifies which table the primary key of the linked record came from.
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: note_event_field_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL

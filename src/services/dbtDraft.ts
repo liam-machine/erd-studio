@@ -16,6 +16,8 @@
 
 import * as path from 'path';
 
+import { createLedger, type LedgerEntry } from './importLedger';
+
 import { canonicalRelationship, linkKey, toTableNamingDocument } from '@erd-studio/core';
 import { WRITTEN_SCHEMA_VERSION } from '../types/semantic';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
@@ -82,6 +84,8 @@ export interface DraftRelationshipTest {
   fromColumn: string;
   toModel: string;
   toColumn: string;
+  /** Every test of this link holds only for some rows (`relationships_where`, a `where:` config): the condition is not kept. */
+  conditional?: true;
 }
 
 /** Uniqueness tests, the input to cardinality. */
@@ -151,6 +155,36 @@ export interface DbtDraft {
   skipped: DraftSkipped[];
   /** True when more valid models were asked for than `limit` allows. */
   truncated: boolean;
+  /**
+   * What the draft changed or could not keep (`importLedger.ts`): rendered
+   * into the draft's Notes and Not drawn (`draftFromDbt`). [] when every
+   * model, column and relationship came across as dbt has it. It holds a
+   * `skipped` entry per {@link undrawnLinks} link, a `lost` entry per drawn
+   * relationship whose test's condition is not kept, and (a DBML diagram) the
+   * D18 `savedOptional` count of required relationships.
+   */
+  ledger: LedgerEntry[];
+  /**
+   * Relationship tests from a drawn model to one this draft does not draw,
+   * each once (`person.location_id → location`): listed in Not drawn, and
+   * drawn when that model is added (Add Existing Model's batch add finds the
+   * same test). `why`: `addable` (a model with columns, outside the scope or
+   * over the limit), `noColumns` (dbt declares no columns for it) or
+   * `notAModel` (no model by that name: a package's, or a typo) or `source`
+   * (`to: source('raw', 'customers')`: `toModel` is `raw.customers`).
+   */
+  undrawnLinks?: DraftUndrawnLink[];
+  /** Relationships whose foreign-key columns dbt tests `not_null` (all of them): required in the source. */
+  requiredRelationships?: number;
+}
+
+/** A relationship test that leaves the draft (see {@link DbtDraft.undrawnLinks}). */
+export interface DraftUndrawnLink {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+  why: 'addable' | 'noColumns' | 'notAModel' | 'source';
 }
 
 // ---------------------------------------------------------------------------
@@ -277,13 +311,20 @@ export function listDraftModels(input: DraftSourceInput): DraftModelEntry[] {
 
 /** Relationship tests from yml and manifest (union, deduped case-insensitively) plus merged uniqueness tests. */
 export function dbtTestsOf(ymlData?: YmlData, manifest?: ManifestData): DbtTestIndex {
-  const seen = new Set<string>();
+  const seen = new Map<string, DraftRelationshipTest>();
   const relationshipTests: DraftRelationshipTest[] = [];
   for (const t of [...(ymlData?.relationshipTests ?? []), ...(manifest?.relationshipTests ?? [])]) {
     const key = testKey(t);
-    if (seen.has(key)) { continue; }
-    seen.add(key);
-    relationshipTests.push({ fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn });
+    const conditional = (t as { conditional?: true }).conditional === true;
+    const earlier = seen.get(key);
+    if (earlier) {
+      // One unconditional test of the link is enough: it holds for every row.
+      if (!conditional) { delete earlier.conditional; }
+      continue;
+    }
+    const test: DraftRelationshipTest = { fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn, ...(conditional ? { conditional: true as const } : {}) };
+    seen.set(key, test);
+    relationshipTests.push(test);
   }
   return {
     relationshipTests,
@@ -505,7 +546,11 @@ export function seedTableFromDbt(
       declared,
       manifestColumns.get(normaliseName(columnName))?.data_type,
     ).dataType;
-  const columns: ColumnDef[] = yml
+  // dbt's `not_null` tests: kept on the column as `meta.dbml.not_null` (as Import DBML keeps DBML's, D19).
+  const required = notNullColumnsOf(ymlData, yml?.name ?? man!.name);
+  const withNotNull = (column: ColumnDef): ColumnDef =>
+    (required.has(normaliseName(column.name)) ? { ...column, meta: { dbml: { not_null: true } } } : column);
+  const columns: ColumnDef[] = (yml
     ? yml.columns.map((col) => {
       const mc = manifestColumns.get(normaliseName(col.name));
       return {
@@ -518,7 +563,7 @@ export function seedTableFromDbt(
       name: col.name,
       dataType: typeOf(col.name, col.data_type),
       description: col.description ?? '',
-    }));
+    }))).map(withNotNull);
   // Then what only the warehouse has, in its order (the Physical tab shows
   // these too). Only for a model that declares columns: a catalog that may be
   // weeks old never shapes a table dbt declares nothing for.
@@ -537,6 +582,55 @@ export function seedTableFromDbt(
   model.description = yml?.description || man?.description || '';
   model.columns = columns;
   return model;
+}
+
+/** The columns dbt tests `not_null` on `model` (`YmlData.notNullColumns`), normalised. */
+export function notNullColumnsOf(ymlData: YmlData | undefined, model: string): Set<string> {
+  const out = new Set<string>();
+  const key = normaliseName(model);
+  for (const [m, cols] of ymlData?.notNullColumns ?? []) {
+    if (normaliseName(m) === key) { for (const c of cols) { out.add(normaliseName(c)); } }
+  }
+  return out;
+}
+
+/**
+ * The project's models a draft can never draw because dbt declares no
+ * columns for them (no `columns:` in a schema yml, and none in the
+ * manifest): `listDraftModels` leaves them out, so no folder offers them.
+ * The draft names them (`3 models have no columns in your schema yml, so
+ * they can't be drawn`). Disabled models and other packages' models are not counted.
+ */
+export function modelsWithoutColumns(input: Pick<DraftSourceInput, 'ymlData' | 'manifest' | 'modelPaths'>): string[] {
+  const { ymlData, manifest } = input;
+  const disabled = manifest?.disabledModels ?? new Set<string>();
+  const ymlKeys = new Set([...(ymlData?.models.keys() ?? [])].map(normaliseName));
+  const rootProjects = new Set<string>();
+  for (const m of manifest?.models.values() ?? []) {
+    const key = normaliseName(m.name);
+    if (ymlData?.sourceFiles?.has(key) || ymlKeys.has(key)) { rootProjects.add(m.projectName); }
+  }
+  const manifestByKey = new Map([...(manifest?.models.values() ?? [])].map((m) => [normaliseName(m.name), m]));
+  const out = new Map<string, string>();
+  const consider = (name: string): void => {
+    const key = normaliseName(name);
+    if (out.has(key) || disabled.has(key)) { return; }
+    const yml = ymlData?.models.get(name) ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
+    const man = manifestByKey.get(key);
+    if (!yml && man && rootProjects.size > 0 && !rootProjects.has(man.projectName)) { return; }
+    const columns = yml ? yml.columns.length : man?.columns.length ?? 0;
+    if (columns === 0) { out.set(key, name); }
+  };
+  for (const name of ymlData?.models.keys() ?? []) { consider(name); }
+  for (const m of manifest?.models.values() ?? []) { consider(m.name); }
+  // A model with only a .sql file under model-paths (no yml entry, no manifest): the source files know it.
+  if (!manifest) {
+    for (const [stem, file] of ymlData?.sourceFiles ?? []) {
+      if (!/\.(sql|py)$/i.test(file) || out.has(stem) || ymlKeys.has(stem) || folderUnder(file, input.modelPaths) === null) { continue; }
+      out.set(stem, path.basename(file).replace(/\.(sql|py)$/i, ''));
+    }
+  }
+  return [...out.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -738,6 +832,57 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     input.existingRelationships ?? [],
   );
 
+  const ledger = createLedger();
+  const drawn = new Set([...(input.existingModelNames ?? []), ...modelNames].map(normaliseName));
+  const added = new Set(modelNames.map(normaliseName));
+
+  // Tests from a drawn model to one the draft does not draw: named, never dropped without a word (B2).
+  const knownModels = new Map<string, number>();
+  for (const m of input.ymlData?.models.values() ?? []) { knownModels.set(normaliseName(m.name), Math.max(knownModels.get(normaliseName(m.name)) ?? 0, m.columns.length)); }
+  for (const m of input.manifest?.models.values() ?? []) { knownModels.set(normaliseName(m.name), Math.max(knownModels.get(normaliseName(m.name)) ?? 0, m.columns.length)); }
+  const overLimit = new Set(skipped.filter((s) => s.reason === 'over-limit').map((s) => normaliseName(s.name)));
+  const undrawnLinks: DraftUndrawnLink[] = [];
+  const undrawnSeen = new Set<string>();
+  for (const t of tests.relationshipTests) {
+    const from = normaliseName(t.fromModel);
+    const to = normaliseName(t.toModel);
+    if (!added.has(from) || drawn.has(to)) { continue; }
+    const key = testKey(t);
+    if (undrawnSeen.has(key)) { continue; }
+    undrawnSeen.add(key);
+    const columns = knownModels.get(to);
+    const why: DraftUndrawnLink['why'] = columns === undefined ? 'notAModel' : columns === 0 ? 'noColumns' : 'addable';
+    undrawnLinks.push({ fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn, why });
+    ledger.skipped('relationship', overLimit.has(to) ? 'capped' : why === 'addable' ? 'other' : 'notInFiles', 'link to a model not drawn',
+      { table: t.fromModel, column: t.fromColumn }, `to ${t.toModel}`);
+  }
+  // Tests to a dbt source: a source is never a model, so no draft draws it.
+  for (const t of input.ymlData?.sourceRelationshipTests ?? []) {
+    if (!added.has(normaliseName(t.fromModel))) { continue; }
+    const key = `${normaliseName(t.fromModel)}\u0000${normaliseName(t.fromColumn)}\u0000source:${normaliseName(t.source)}\u0000${normaliseName(t.toColumn)}`;
+    if (undrawnSeen.has(key)) { continue; }
+    undrawnSeen.add(key);
+    undrawnLinks.push({ fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.source, toColumn: t.toColumn, why: 'source' });
+    ledger.skipped('relationship', 'notInFiles', 'link to a source', { table: t.fromModel, column: t.fromColumn }, `to ${t.source}`);
+  }
+
+  // A relationship drawn from a conditional test: its condition is not kept (G2).
+  const conditional = new Set(tests.relationshipTests.filter((t) => t.conditional).map(linkKey));
+  for (const rel of relationships) {
+    if (!conditional.has(linkKey(rel))) { continue; }
+    ledger.lost('constraint', 'noField', 'relationships_where condition', { table: rel.fromModel, column: rel.fromColumn },
+      'not kept: the relationship is drawn for every row');
+  }
+
+  // Required in the source: every FK column tested not_null. A DBML diagram saves each Ref `>?` (D18): counted.
+  const requiredRelationships = relationships.filter((rel) => {
+    const notNull = notNullColumnsOf(input.ymlData, rel.fromModel);
+    return notNull.has(normaliseName(rel.fromColumn));
+  }).length;
+  if (input.dbml && requiredRelationships > 0) {
+    ledger.changed('relationship', 'savedOptional', 'NOT NULL foreign key', undefined, 'saved as optional (>?)', requiredRelationships);
+  }
+
   return {
     modelNames,
     newModels: accepted
@@ -747,6 +892,9 @@ export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
     relationships,
     skipped,
     truncated,
+    ledger: ledger.entries,
+    ...(undrawnLinks.length > 0 ? { undrawnLinks } : {}),
+    ...(requiredRelationships > 0 ? { requiredRelationships } : {}),
   };
 }
 
@@ -803,9 +951,36 @@ export function serializeDraftSubjectAreaDocument(doc: DraftSubjectAreaDocument 
 export const SUBJECT_AREA_SLUG_PATTERN = /^[a-z][a-z0-9_-]*$/;
 const SUBJECT_AREA_SLUG_MAX = 64;
 
-/** Turn free text into a domain slug, or '' when nothing usable is left. */
+/** Latin letters NFKD does not take apart, as their usual ASCII spelling. */
+const LATIN_FOLDS: Record<string, string> = {
+  ß: 'ss', ẞ: 'SS', æ: 'ae', Æ: 'AE', œ: 'oe', Œ: 'OE', ø: 'o', Ø: 'O', ł: 'l', Ł: 'L',
+  đ: 'd', Đ: 'D', ð: 'd', Ð: 'D', þ: 'th', Þ: 'TH', ı: 'i', ħ: 'h', Ħ: 'H', ŧ: 't', Ŧ: 'T',
+};
+const LATIN_FOLD_PATTERN = new RegExp(`[${Object.keys(LATIN_FOLDS).join('')}]`, 'g');
+
+/**
+ * Text as ASCII letters where a Latin letter has one: accents dropped
+ * (`Café` → `Cafe`, via NFKD) and the letters NFKD keeps whole spelled out
+ * (`Straße` → `Strasse`, `Œuvre` → `Oeuvre`, `Łódź` → `Lodz`). Anything
+ * else is left as it is.
+ */
+export function foldToAscii(text: string): string {
+  return text
+    // A capital that spells two letters stays one capital before a lower-case letter
+    // (`Œuvre` → `Oeuvre`), so camel-case splitting reads it as one word.
+    .replace(LATIN_FOLD_PATTERN, (ch, at: number, all: string) => {
+      const folded = LATIN_FOLDS[ch] ?? ch;
+      return folded.length > 1 && folded === folded.toUpperCase() && /^\p{Ll}/u.test(all.slice(at + 1))
+        ? folded[0] + folded.slice(1).toLowerCase()
+        : folded;
+    })
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Turn free text into a domain slug, or '' when nothing usable is left. Accented letters keep their base letter (`Café` → `cafe`). */
 export function toSubjectAreaSlug(text: string): string {
-  const slug = text
+  const slug = foldToAscii(text)
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/-{2,}/g, '-')
@@ -843,7 +1018,8 @@ export function freeSubjectAreaSlug(base: string, taken: Iterable<string>): stri
   if (!used.has(base)) { return base; }
   for (let n = 2; ; n++) {
     const suffix = `-${n}`;
-    const candidate = base.slice(0, SUBJECT_AREA_SLUG_MAX - suffix.length) + suffix;
+    // Cut for the suffix without leaving a separator before it (`a--2`).
+    const candidate = base.slice(0, SUBJECT_AREA_SLUG_MAX - suffix.length).replace(/[-_]+$/, '') + suffix;
     if (!used.has(candidate)) { return candidate; }
   }
 }

@@ -10,7 +10,9 @@
  *
  * **Show Me** opens the start's draft (Draft-first, `docs/dev/draft-first.md`
  * §3.3: a read-only preview, nothing written until Keep) by running the
- * start's own command with the `prompt` trigger; Convert keeps its own
+ * start's own command with the `prompt` trigger — unless a diagram was kept
+ * while the notification stayed up (it cannot be dismissed through the API),
+ * when it focuses the Diagrams view and says so instead; Convert keeps its own
  * **Convert to DBML…**. **Don't Ask Again for This Folder** turns it off for
  * this folder (workspace state: machine-local, nothing written into the
  * repo), and the folder then gets no automatic draft and no walkthrough.
@@ -60,6 +62,16 @@ export const SHOW_ME_BUTTON = 'Show Me';
 export const DONT_ASK_AGAIN_FOLDER_BUTTON = "Don't Ask Again for This Folder";
 /** Convert creates no diagram: its button says what it does (the opening notice's own). */
 export const CONVERT_BUTTON = 'Convert to DBML…';
+
+/** VS Code's own focus command for the Diagrams view (`erdStudio.domainTree`, contributed in package.json). */
+export const DIAGRAMS_VIEW_FOCUS_COMMAND = 'erdStudio.domainTree.focus';
+/**
+ * A late Show Me, after a diagram was kept meanwhile (from the sidebar, the
+ * automatic draft or another import): the folder has its start, so the
+ * Diagrams view is shown instead of a second draft of the same files.
+ */
+export const START_SUGGESTION_ALREADY_KEPT_MESSAGE =
+  'This folder already has a diagram, so ERD Studio did not draw another. It is in the Diagrams view.';
 
 /**
  * What "Don't Ask Again" (and Turn Off) answers with: one short line, and
@@ -242,6 +254,16 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
       if (choice === primary) {
         deps.feature(start === 'convert' ? START_SUGGESTION_FEATURES.accepted : START_SUGGESTION_FEATURES.showMe);
         await deps.saveState({ ...latest, answered: true });
+        // The notification may have stayed up while a diagram was kept from elsewhere: VS Code
+        // 1.85 has no API to dismiss a notification once shown (showInformationMessage returns
+        // only the choice), so it cannot be taken down on Keep. Checked here, when Show Me is
+        // finally pressed: a folder that has a diagram now gets the Diagrams view, not a second draft.
+        // Convert is unaffected: it converts the project, whatever diagrams it has.
+        if (start !== 'convert' && deps.hasDiagrams()) {
+          await deps.executeCommand(DIAGRAMS_VIEW_FOCUS_COMMAND);
+          await deps.info(START_SUGGESTION_ALREADY_KEPT_MESSAGE);
+          return;
+        }
         // Show Me: the start's draft, opened by the prompt (it already holds the window's gate).
         await deps.executeCommand(START_ACTION_COMMANDS[start], ...startActionArgs(start, 'prompt'));
       } else if (choice === DONT_ASK_AGAIN_FOLDER_BUTTON) {

@@ -58,6 +58,11 @@ function problemsOf(dialect: SqlDialect, files: SqlDdlFile[]): Extract<SqlDdlToD
   return result.problems;
 }
 
+/** The problems of a conversion that still imported what read (`ok: true`: one bad table never stops the rest). */
+function partialProblemsOf(dialect: SqlDialect, files: SqlDdlFile[]): Converted['problems'] {
+  return convert(dialect, files).problems;
+}
+
 /** What Import DBML… does with the output: read it, then plan a new diagram from it (empty library). */
 function importPlan(dbml: string): DbmlImportPlan {
   const read = readDbml(dbml);
@@ -240,7 +245,8 @@ describe.each(SQL_DIALECTS.map((d) => [d] as const))('the %s star schema', (dial
   it('is DBML Import DBML reads without a problem, with no Records, Project or use lines', () => {
     expect(readDbml(converted.dbml).ok).toBe(true);
     expect(converted.dbml).not.toMatch(/^\s*(Records|Project|use)\b/m);
-    expect(plan.report.dropped).toEqual([]);
+    // FK actions travel on the Ref, so Import's reference-settings report lists them; nothing else is dropped.
+    expect(plan.report.dropped.filter((d) => d.kind !== 'reference-settings')).toEqual([]);
     expect(plan.report.renamed).toEqual([]);
   });
 
@@ -300,9 +306,10 @@ describe('dialect details', () => {
     const both = convert('postgres', [tables, constraints]);
     expect(both.refCount).toBe(3);
     expect(both.dbml.match(/^Ref: "sales"\."fct_order_line"\."customer_id"/gm)).toHaveLength(1);
-    // Constraint names and ON DELETE actions are not written: Import would read the name as a role.
-    expect(both.dbml).not.toMatch(/fct_order_line_product_fk|delete:/);
-    expect(both.skipped).toContain('02_constraints.sql: skipped 1 ALTER TABLE other than a key or a column change');
+    // Constraint names are not written (Import would read the name as a role); ON DELETE actions are, on the Ref.
+    expect(both.dbml).not.toMatch(/fct_order_line_product_fk/);
+    expect(both.dbml).toMatch(/^Ref: "sales"\."fct_order_line"\."order_date_key" > "sales"\."dim_date"\."date_key" \[delete: restrict\]$/m);
+    expect(both.skipped).toContain('02_constraints.sql: skipped 1 ALTER TABLE … OWNER TO (ownership, not design)');
   });
 
   it('postgres: an enum type is kept for the column that uses it; identity, defaults, checks and unique come through', () => {
@@ -329,7 +336,7 @@ describe('dialect details', () => {
     const result = convert('sqlserver', fixtureFiles('sqlserver'));
     expect(result.dbml).toContain('"CustomerKey" int [pk, increment]');
     expect(result.dbml).not.toMatch(/IDENTITY|\[dbo\]/);
-    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 1 index, 1 view']);
+    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 3 table options (ENGINE, CHARSET, ON [filegroup], USING, CLUSTER BY…: physical, not design), 1 index, 1 view']);
   });
 
   it('snowflake: CREATE OR REPLACE TRANSIENT, database.schema.table names, CLUSTER BY and COMMENT =', () => {
@@ -388,28 +395,38 @@ describe('dialect details', () => {
 // ---------------------------------------------------------------------------
 
 describe('problems', () => {
-  it('a broken file names its file and the line of the statement that does not parse', () => {
-    expect(problemsOf('postgres', fixtureFiles('broken'))).toEqual([
-      { file: 'stray_words.sql', line: 6, message: expect.stringMatching(/^CREATE TABLE fct_order could not be read: .*oops/), kind: 'parse', clause: 'CreateTable' },
+  it('a broken file names its file and the line of the statement that does not parse; the rest still imports', () => {
+    const result = convert('postgres', fixtureFiles('broken'));
+    expect(result.problems).toEqual([
+      { file: 'stray_words.sql', line: 6, message: expect.stringMatching(/^CREATE TABLE fct_order could not be read: .*oops/), kind: 'parse', clause: 'CreateTable', cause: 'parseError', table: 'fct_order' },
     ]);
+    // dim_customer read: one bad table never stops the import.
+    expect(result.tableCount).toBe(1);
+    expect(result.tablesFound).toBe(2);
+    expect(result.ledger).toContainEqual(expect.objectContaining({ outcome: 'problem', unit: 'table', where: { file: 'stray_words.sql', line: 6, table: 'fct_order' } }));
   });
 
   it('every file is read: problems in two files are both reported', () => {
     const broken = fixtureFiles('broken')[0];
-    const problems = problemsOf('postgres', [broken, { name: 'b.sql', text: '\n\nCREATE TABLE b (id int,, x int);' }]);
+    const problems = partialProblemsOf('postgres', [broken, { name: 'b.sql', text: '\n\nCREATE TABLE b (id int,, x int);' }]);
     expect(problems.map((p) => `${p.file}:${p.line}`)).toEqual(['stray_words.sql:6', 'b.sql:3']);
   });
 
-  it('a table defined twice, in two files, is a problem naming both', () => {
-    const problems = problemsOf('postgres', [
+  it('a table defined twice, in two files: the first is kept, the second reported naming both', () => {
+    const result = convert('postgres', [
       { name: 'a.sql', text: 'CREATE TABLE sales.customer (id int);' },
       { name: 'b.sql', text: '-- again\nCREATE TABLE SALES.Customer (id int, name text);' },
     ]);
-    expect(problems).toEqual([{ file: 'b.sql', line: 2, message: 'Table SALES.Customer is defined twice (also in a.sql, line 1).', kind: 'duplicateTable' }]);
+    expect(result.problems).toEqual([{
+      file: 'b.sql', line: 2, message: 'Table SALES.Customer is defined twice (also in a.sql, line 1); the first definition is kept.',
+      kind: 'duplicateTable', cause: 'duplicate', table: 'SALES.Customer',
+    }]);
+    expect(result.tableCount).toBe(1);
+    expect(result.dbml).not.toMatch(/"name"/);
   });
 
   it('public.t and t are the same Postgres table', () => {
-    expect(problemsOf('postgres', [{ name: 'a.sql', text: 'CREATE TABLE public.t (id int);\nCREATE TABLE t (id int);' }])[0].message).toMatch(/defined twice/);
+    expect(partialProblemsOf('postgres', [{ name: 'a.sql', text: 'CREATE TABLE public.t (id int);\nCREATE TABLE t (id int);' }])[0].message).toMatch(/defined twice/);
   });
 
   it('no CREATE TABLE at all is a problem', () => {
@@ -462,7 +479,10 @@ describe('skips', () => {
       { name: 'a.sql', text: 'CREATE TABLE a (id int);' },
       { name: 'grants.sql', text: 'GRANT SELECT ON a TO bob;' },
     ]);
-    expect(result.skipped).toEqual(['grants.sql: no tables, keys or comments in it', 'grants.sql: skipped 1 permission statement (GRANT, REVOKE)']);
+    // Said once: a file whose statements were only skipped is not also "no tables, keys or comments".
+    expect(result.skipped).toEqual(['grants.sql: skipped 1 permission statement (GRANT, REVOKE)']);
+    const empty = convert('postgres', [{ name: 'a.sql', text: 'CREATE TABLE a (id int);' }, { name: 'empty.sql', text: '-- nothing here\n' }]);
+    expect(empty.skipped).toEqual(['empty.sql: no tables, keys or comments in it']);
   });
 
   it('a comment on a column that does not exist is skipped', () => {
@@ -538,11 +558,24 @@ describe('dialects', () => {
     expect(detectSqlDialect('-- USING DELTA in a comment\nCREATE TABLE t (id int);')).toBeUndefined();
   });
 
-  it('a grammar crash is reported as a problem, never thrown', () => {
-    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int);' }] }, () => {
-      throw new TypeError("Cannot read properties of undefined (reading 'fields')");
+  it('a grammar crash is never thrown: the table is salvaged without the grammar', () => {
+    const crash = (): never => { throw new TypeError("Cannot read properties of undefined (reading 'fields')"); };
+    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int);' }] }, crash);
+    expect(result).toMatchObject({ ok: true, tableCount: 1, problems: [], tablesFound: 1, readWith: { grammar: 0, repaired: 0, salvaged: 1 } });
+    expect(result.ok && result.ledger).toContainEqual(expect.objectContaining({ outcome: 'repaired', unit: 'table', cause: 'grammarGap', what: 'column list', where: { file: 'a.sql', line: 1, table: 'a' } }));
+  });
+
+  it('a grammar crash on a table salvage cannot read either is a problem, in plain words, never thrown', () => {
+    const crash = (): never => { throw new TypeError("Cannot read properties of undefined (reading 'fields')"); };
+    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int frobnicate);' }] }, crash);
+    expect(result).toEqual({
+      ok: false,
+      problems: [{ file: 'a.sql', line: 1, message: 'CREATE TABLE a could not be read: unexpected "frobnicate" after the type of id', kind: 'parse', clause: 'CreateTable', cause: 'parseError', table: 'a' }],
+      // The ledger holds the same problem, by class and place (no message text), and how many tables the files hold.
+      ledger: [{ outcome: 'problem', unit: 'table', cause: 'parseError', what: 'CREATE TABLE', count: 1, where: { file: 'a.sql', line: 1, table: 'a' }, detail: 'could not be read: a syntax error (Show Logs has each line)' }],
+      tablesFound: 1,
+      readWith: { grammar: 0, repaired: 0, salvaged: 0 },
     });
-    expect(result).toEqual({ ok: false, problems: [{ file: 'a.sql', line: 1, message: 'CREATE TABLE a could not be read: the SQL parser could not read this statement', kind: 'parse', clause: 'CreateTable' }] });
   });
 });
 

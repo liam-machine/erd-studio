@@ -28,6 +28,7 @@ import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { log } from '../../src/services/logger';
 import { telemetry } from '../../src/services/telemetryService';
 import packageJson from '../../package.json';
 
@@ -135,7 +136,8 @@ describe('Import Semantic Model…', () => {
     expect(modal.confirms[0].message).toMatch(/^Import \d+ tables and \d+ relationships from the semantic model AdventureSales into a new diagram "[a-z0-9-]+" in the Gold layer\.$/);
     const detail = modal.confirms[0].detail;
     // The modal counts what was left out, with the first; the draft's details list every one.
-    expect(detail).toMatch(/• Not imported: \d+ measures?: DAX calculations, not columns; and \d+ more\./);
+    // The ledger's lines (model features not kept, most important first) lead; the skipped kinds follow.
+    expect(detail).toMatch(/• Not imported: .+; and \d+ more\./);
     expect(detail).toMatch(/snake_case; the original Power BI names are kept in the table files\./);
     expect(fs.existsSync(erd())).toBe(false);
 
@@ -154,7 +156,7 @@ describe('Import Semantic Model…', () => {
     expect(draft.scopes).toBeUndefined();
     expect(draft.banner.headline).toMatch(/^Draft from the semantic model AdventureSales · \d+ tables, \d+ relationships · not saved$/);
     const left = draft.details.find((section) => section.id === 'leftOut')!.items.map((i) => i.text);
-    expect(left[0]).toMatch(/^\d+ measures?: DAX calculations, not columns$/);
+    expect(left).toContainEqual(expect.stringMatching(/^\d+ measures?: DAX calculations, not columns$/));
     expect(left).toContain('1 auto date/time table: Power BI makes one per date column');
     // What the page shows as text: the banner and the details (the diagram's own meta is the table files').
     const page = JSON.stringify({ banner: draft.banner, details: draft.details });
@@ -211,6 +213,19 @@ describe('Import Semantic Model…', () => {
     expect(features()).toEqual(['importSemanticModelInvalid', 'importSemanticModelNoModel']);
   });
 
+  it('a folder holding only a .pbix, or a Tabular Editor JSON folder, names it and says how to save it so it imports', async () => {
+    for (const [file, expected] of [['Sales.pbix', /Sales\.pbix is a Power BI Desktop file.*Power BI project \(\*\.pbip\)/], ['tables/database.json', /database\.json is a model saved by Tabular Editor's Save to Folder.*TMDL or as one model\.bim/]] as const) {
+      const folder = path.join(tmp, `reports-${path.basename(file)}`);
+      fs.mkdirSync(path.join(folder, path.dirname(file)), { recursive: true });
+      fs.writeFileSync(path.join(folder, file), 'PK\u0003\u0004 binary');
+      const model = modelUi(folder);
+      await importSemanticModel(deps(model, importUi()));
+      expect(model.errors[0].message).toMatch(/no semantic model found in reports-/);
+      expect(model.errors[0].message).toMatch(expected);
+      expect(model.errors[0].message).not.toContain('binary');
+    }
+  });
+
   it('a big repo with one model in it still imports from its root: only model files count toward the bound', async () => {
     const repo = path.join(tmp, 'repo');
     fs.cpSync(path.join(FIXTURES, 'pbip-tmdl'), path.join(repo, 'reports'), { recursive: true });
@@ -242,5 +257,61 @@ describe('Import Semantic Model…', () => {
     await importSemanticModel(deps(modelUi(path.join(FIXTURES, 'pbip-tmdl')), importUi({ confirm: false })));
     expect(features()).toEqual(['importSemanticModelCancelled', 'importSemanticModelCancelled']);
     expect(fs.existsSync(erd('gold', 'diagrams'))).toBe(false);
+  });
+});
+
+describe('Import Semantic Model… — names and the loss ledger', () => {
+  /** The pbip-tmdl fixture copied under tmp, with Fabric's `.platform` naming the item. */
+  function fabricCopy(displayName: string | undefined): string {
+    const src = path.join(FIXTURES, 'pbip-tmdl');
+    const dest = path.join(tmp, 'src', 'fabric-repo');
+    fs.cpSync(src, dest, { recursive: true });
+    if (displayName !== undefined) {
+      fs.writeFileSync(path.join(dest, 'AdventureSales.SemanticModel', '.platform'), JSON.stringify({ metadata: { type: 'SemanticModel', displayName }, config: { version: '2.0' } }));
+    }
+    return dest;
+  }
+
+  it("names the Project after Fabric's .platform displayName, and draws without one as before", async () => {
+    for (const [displayName, expected] of [['Sales Insights (EU)', 'Sales Insights (EU)'], [undefined, 'AdventureSales']] as const) {
+      fs.rmSync(path.join(tmp, 'src'), { recursive: true, force: true });
+      const model = modelUi(fabricCopy(displayName));
+      const preview = fakeDraftPreview(['keep']);
+      const result = await importSemanticModel({ ...deps(model, importUi()), draft: { preview, trigger: 'palette' } });
+      expect(model.errors).toEqual([]);
+      expect(fs.readFileSync(result!.domainPath, 'utf-8')).toContain(`Converted from the Power BI semantic model ${expected}.`);
+      expect(preview.drafts[0].banner.headline).toMatch(new RegExp(`^Draft from the semantic model ${expected.replace(/[()]/g, '\\$&')} · `));
+      fs.rmSync(erd(), { recursive: true, force: true });
+      _resetMockWorkspace();
+    }
+  });
+
+  it("picking the model's definition folder itself names the model after X.SemanticModel (and its .platform), not \"definition\"", async () => {
+    for (const [displayName, expected] of [[undefined, 'AdventureSales'], ['Sales Insights', 'Sales Insights']] as const) {
+      fs.rmSync(path.join(tmp, 'src'), { recursive: true, force: true });
+      const model = modelUi(path.join(fabricCopy(displayName), 'AdventureSales.SemanticModel', 'definition'));
+      const preview = fakeDraftPreview(['keep']);
+      const result = await importSemanticModel({ ...deps(model, importUi()), draft: { preview, trigger: 'palette' } });
+      expect(model.errors).toEqual([]);
+      expect(fs.readFileSync(result!.domainPath, 'utf-8')).toContain(`Converted from the Power BI semantic model ${expected}.`);
+      fs.rmSync(erd(), { recursive: true, force: true });
+      _resetMockWorkspace();
+    }
+  });
+
+  it('passes the ledger to the draft (Not imported names the model features left out) and logs each with its file and line', async () => {
+    const info = vi.spyOn(log, 'info');
+    const model = modelUi(path.join(FIXTURES, 'pbip-tmdl'));
+    const preview = fakeDraftPreview(['discard']);
+    await importSemanticModel({ ...deps(model, importUi()), draft: { preview, trigger: 'palette' } });
+    const draft = preview.drafts[0];
+    const left = draft.details.find((section) => section.id === 'leftOut')!.items.map((i) => i.text);
+    expect(left).toContainEqual(expect.stringMatching(/^1 object: Q&A linguistic metadata not kept \(en-AU\)$/));
+    expect(left).toContainEqual(expect.stringMatching(/settings: summarizeBy not kept: a report setting/));
+    const logged = info.mock.calls.map((c) => String(c[0]));
+    expect(logged).toContainEqual(expect.stringMatching(/Import Semantic Model: .*cultures\/en-AU\.tmdl line \d+: object en-AU: lost, notDesign: Q&A linguistic metadata/));
+    // The date-only Date Table[Date] (formatString Long Date) is a date, said in the notes.
+    const notes = draft.details.find((section) => section.id === 'notes')?.items.map((i) => i.text) ?? [];
+    expect(notes.join('\n')).toMatch(/1 type: dateTime → date because Power BI marks the column date-only \(Date Table\.Date\)/);
   });
 });

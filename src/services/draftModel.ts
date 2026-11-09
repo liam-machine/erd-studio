@@ -34,6 +34,7 @@ import type {
 } from '../types/draft';
 import type { DisplaySubjectArea } from '../types/display';
 import { createLogger } from './logger';
+import { ledgerLeftOut, ledgerNotes, savedOptionalNote, type LedgerEntry } from './importLedger';
 import type { LayerConfig } from '../types/layer';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import {
@@ -42,6 +43,8 @@ import {
   importPlanNotes,
   planDbmlImport,
   suggestDbmlSubjectAreaName,
+  dedupeLines,
+  type DbmlImportOriginDescription,
   type DbmlImportPlan,
   type DescribeDbmlImportOptions,
 } from './dbmlImport';
@@ -258,11 +261,15 @@ function detailsFromImportReview(plan: DbmlImportPlan, describe: DescribeDbmlImp
   });
 }
 
-/** The table sections (one per schema, biggest first) and the relationships section, for drafts that are not imports. */
+/**
+ * The table sections (one per schema, biggest first) and the relationships section, for drafts that are not imports.
+ * `undrawnForeignKeys`: per table, its foreign keys to tables the draft does not draw (counted in its line).
+ */
 function tableAndRelationshipSections(
   tables: ReadonlyArray<{ name: string; schema?: string; columns?: ReadonlyArray<Pick<ColumnDef, 'name' | 'isPrimaryKey'>> }>,
   relationships: readonly Relationship[],
   tagOf: (name: string) => string | undefined,
+  undrawnForeignKeys: ReadonlyMap<string, number> = new Map(),
 ): DraftDetailSection[] {
   const links = relationshipLines(relationships);
   const fkCount = new Map<string, number>();
@@ -277,7 +284,7 @@ function tableAndRelationshipSections(
       .sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))
       .map((t): DraftDetailItem => {
         const tag = tagOf(t.name);
-        const described = describeImportTable({ name: t.name, columns: (t.columns ?? []).map((c) => ({ name: c.name, isPrimaryKey: c.isPrimaryKey })) } as SemanticTable, fkCount.get(t.name) ?? 0);
+        const described = describeImportTable({ name: t.name, columns: (t.columns ?? []).map((c) => ({ name: c.name, isPrimaryKey: c.isPrimaryKey })) } as SemanticTable, fkCount.get(t.name) ?? 0, undrawnForeignKeys.get(lc(t.name)) ?? 0);
         return { path: t.name, text: described, ...(tag ? { tag } : {}) };
       }),
   }));
@@ -376,12 +383,12 @@ export function dbtDraftFingerprint(draft: DbtDraft, relationships: readonly Rel
 // Import plans
 // ---------------------------------------------------------------------------
 
-/** `ImportDbmlOrigin`'s shape: what a conversion says about itself. */
-export interface DraftImportOrigin {
-  from: string;
-  notes?: readonly string[];
-  skipped?: readonly string[];
-}
+/**
+ * `ImportDbmlOrigin`'s shape: what a conversion says about itself, its
+ * ledger (`importLedger.ts`, rendered into the drawer's Notes and Not
+ * imported) and a `notice` for the banner when the input gives none.
+ */
+export type DraftImportOrigin = DbmlImportOriginDescription;
 
 export interface ImportPlanDraftInput {
   plan: DbmlImportPlan;
@@ -473,7 +480,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
   const headline = draftHeadline(headlineInput);
   const from = draftFrom(headlineInput);
   const detail = draftDetail({ keep: target, reusedTables: summary.reusedTables, changedTables: summary.changedTables });
-  const notice = input.notice;
+  const notice = input.notice ?? describe.origin?.notice;
   const { banner, otherStarts } = source === 'example'
     ? exampleBanner(headline, detail, input.hasFolder, notice)
     : {
@@ -557,6 +564,41 @@ export interface DbtDraftInput {
   /** Offer Change options… (Import from dbt's picker). Default true. */
   changeOptions?: boolean;
   notice?: string;
+  /**
+   * The project's models dbt declares no columns for (`modelsWithoutColumns`):
+   * no folder offers them, and Not drawn says why in one line.
+   */
+  modelsWithoutColumns?: readonly string[];
+}
+
+/** What Keep writes beyond the diagram and its tables: Import from dbt regenerates the project's selectors (SelectorsService). */
+export const DBT_KEEP_SELECTORS_SENTENCE = "Keep also adds a selector for it to selectors.yml at your dbt project's root.";
+
+/** A few names, the rest counted: `a, b, c and 4 more`. */
+function someNames(names: readonly string[], shown = 3): string {
+  const head = names.slice(0, shown).join(', ');
+  return names.length > shown ? `${head} and ${thousands(names.length - shown)} more` : head;
+}
+
+/** A dbt draft's link to a model it does not draw, as Not drawn says it. */
+function undrawnLinkLine(link: NonNullable<DbtDraft['undrawnLinks']>[number]): string {
+  switch (link.why) {
+    case 'addable': return `Drawn when you add ${link.toModel} (Add Existing Model).`;
+    case 'noColumns': return `${link.toModel} has no columns in your schema yml, so it can't be drawn.`;
+    case 'notAModel': return `${link.toModel} is not a model in this project (a package's or a source?), so it can't be drawn.`;
+    case 'source': return `${link.toModel} is a dbt source, not a model, so it can't be drawn.`;
+  }
+}
+
+/** The ledger's D18 count (`savedOptional`), and the ledger without it (its note is said in its own words). */
+function splitSavedOptional(entries: readonly LedgerEntry[]): { required: number; rest: LedgerEntry[] } {
+  let required = 0;
+  const rest: LedgerEntry[] = [];
+  for (const e of entries) {
+    if (e.cause === 'savedOptional') required += e.count;
+    else rest.push(e);
+  }
+  return { required, rest };
 }
 
 /** Why a dbt model was left out, as the drawer says it (`duplicate` and `already-in-domain` are not worth a line). */
@@ -569,6 +611,21 @@ function skippedLine(s: DraftSkipped): string | undefined {
     case 'yaml-table': return "A YAML table can't join a DBML diagram; convert the project first.";
     default: return undefined;
   }
+}
+
+/**
+ * A dbt draft for a DBML diagram writes each new table with no custom schema
+ * (`configuredSchema`) in its layer's schema (§2.4): said once, with the
+ * schema dbt builds them in when the manifest names one (it differs per
+ * target), so the schema never changes without a word. '' when every new
+ * table has a custom schema.
+ */
+export function dbtLayerSchemaNote(draft: Pick<DbtDraft, 'newModels'>, layer: string): string {
+  const unset = draft.newModels.filter((t) => !t.configuredSchema);
+  if (unset.length === 0) return '';
+  const built = [...new Set(unset.map((t) => t.schema).filter((s): s is string => !!s))];
+  const where = built.length === 1 ? ` (dbt builds ${unset.length === 1 ? 'it' : 'them'} in ${built[0]} with this target)` : '';
+  return `${count(unset.length, 'model sets', 'models set')} no custom schema in dbt, so ${unset.length === 1 ? 'it is' : 'they are'} written in schema ${layer}, the layer's name${where}: ${someNames(unset.map((t) => t.name))}.`;
 }
 
 /** The draft of one dbt models folder (Import from dbt's `buildDbtDraft`). Keep runs Import from dbt's write step. */
@@ -589,6 +646,20 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
   const leftOut = draft.skipped
     .map((s) => ({ s, line: skippedLine(s) }))
     .filter((x): x is { s: DraftSkipped; line: string } => x.line !== undefined);
+  // What the draft changed or could not keep (`DbtDraft.ledger`): Notes, and lines of Not drawn.
+  const { required, rest: ledger } = splitSavedOptional(draft.ledger ?? []);
+  const dbmlTarget = target.diagramFile.toLowerCase().endsWith('.dbml');
+  const schemaNote = dbmlTarget ? dbtLayerSchemaNote(draft, target.layer) : '';
+  const ledgerNoteLines = dedupeLines([
+    ...(required > 0 ? [savedOptionalNote(required, countLinks(input.relationships))] : []),
+    ...(schemaNote ? [schemaNote] : []),
+    ...ledgerNotes(ledger),
+  ]);
+  const ledgerLostLines = dedupeLines(ledgerLeftOut(ledger));
+  const undrawnLinks = draft.undrawnLinks ?? [];
+  const noColumns = input.modelsWithoutColumns ?? [];
+  const noColumnsLine = noColumns.length === 0 ? undefined
+    : `${count(noColumns.length, 'model has', 'models have')} no columns in your schema yml, so ${noColumns.length === 1 ? "it can't" : "they can't"} be drawn: ${someNames(noColumns, 4)}. Add columns: to ${noColumns.length === 1 ? 'its' : 'their'} yml to draw ${noColumns.length === 1 ? 'it' : 'them'}.`;
   const summary: DraftSummary = {
     tables: draft.modelNames.length,
     relationships: countLinks(input.relationships),
@@ -597,8 +668,8 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
     reusedTables: Math.max(0, draft.reusedModels.length - changed.length),
     changedTables: changed.length,
     schemas: draftSchemas(tables),
-    notes: 0,
-    leftOut: leftOut.length,
+    notes: ledgerNoteLines.length,
+    leftOut: leftOut.length + ledgerLostLines.length + undrawnLinks.length + (noColumnsLine ? 1 : 0),
     ...(available !== undefined ? { available } : {}),
   };
   const switcher = dbtDraftScopes(input.scopes).scopes;
@@ -606,22 +677,32 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
   const headlineInput: DraftHeadlineInput = { source: 'dbt', tables: summary.tables, relationships: summary.relationships, folder: scope.kind === 'folder' ? scope.folder : undefined };
   const headline = draftHeadline(headlineInput);
   const from = draftFrom(headlineInput);
-  const detail = draftDetail({
+  const detail = [draftDetail({
     keep: target,
     reusedTables: summary.reusedTables,
     changedTables: summary.changedTables,
     ...(available !== undefined ? { cap: { drawn: draft.modelNames.length, available } } : {}),
-  });
+  }), DBT_KEEP_SELECTORS_SENTENCE].filter(Boolean).join(' ');
   const reused = new Set(draft.reusedModels.map(lc));
   const changedNames = new Set(changed.map((t) => lc(t.name)));
+  const undrawnFks = new Map<string, number>();
+  for (const l of undrawnLinks) undrawnFks.set(lc(l.fromModel), (undrawnFks.get(lc(l.fromModel)) ?? 0) + 1);
   const details = tableAndRelationshipSections(tables, input.relationships, (name) =>
-    changedNames.has(lc(name)) ? 'changed' : reused.has(lc(name)) ? 'in your library' : 'new');
-  if (leftOut.length > 0) {
+    changedNames.has(lc(name)) ? 'changed' : reused.has(lc(name)) ? 'in your library' : 'new', undrawnFks);
+  if (leftOut.length > 0 || ledgerLostLines.length > 0 || undrawnLinks.length > 0 || noColumnsLine) {
     details.push({
       id: 'leftOut',
       title: 'Not drawn',
-      items: leftOut.map(({ s, line }) => ({ path: s.name, text: line, tag: 'left out' })),
+      items: [
+        ...leftOut.map(({ s, line }) => ({ path: s.name, text: line, tag: 'left out' })),
+        ...undrawnLinks.map((l) => ({ path: `${l.fromModel}.${l.fromColumn} → ${l.toModel}`, text: undrawnLinkLine(l), tag: 'relationship' })),
+        ...(noColumnsLine ? [{ text: noColumnsLine, tag: 'no columns' }] : []),
+        ...ledgerLostLines.map((text) => ({ text, tag: 'not imported' })),
+      ],
     });
+  }
+  if (ledgerNoteLines.length > 0) {
+    details.push({ id: 'notes', title: 'Notes', items: ledgerNoteLines.map((text) => ({ text })) });
   }
   return {
     id: newDraftId('dbt'),

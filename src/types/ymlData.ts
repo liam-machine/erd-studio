@@ -47,6 +47,26 @@ export interface YmlRelationshipTest {
   toModel: string;
   /** PK column name (from the `field` kwarg) */
   toColumn: string;
+  /**
+   * The test holds only for some rows: `relationships_where` /
+   * `dbt_utils.relationships_where` (`from_condition`, `to_condition`), or a
+   * `relationships` test with a `where:` config. A relationship drawn from it
+   * does not keep the condition (the draft says so). Absent: unconditional.
+   */
+  conditional?: true;
+}
+
+/**
+ * A relationship test whose `to:` is a dbt source (`source('raw', 'customers')`),
+ * not a model: no draft can draw it, so it is kept to be said (Import from
+ * dbt's Not drawn), never dropped without a word.
+ */
+export interface YmlSourceRelationshipTest {
+  fromModel: string;
+  fromColumn: string;
+  /** `raw.customers`: the source's name and its table. */
+  source: string;
+  toColumn: string;
 }
 
 /** Model info extracted from a dbt schema .yml file. */
@@ -139,4 +159,22 @@ export interface YmlData {
    * hand-built literals stay valid.
    */
   compositeForeignKeys?: CompositeForeignKey[];
+  /**
+   * Columns dbt declares required, indexed by model name: a `not_null` test
+   * (scalar, a map with `config:`, or the `test_name: not_null` format; not
+   * one with a `where:` condition or `enabled: false`, which holds for only
+   * some rows or none), dbt_expectations'
+   * `expect_column_values_to_not_be_null` (not with a `row_condition:`),
+   * under `tests:` or `data_tests:` (aliases read as what they name), and a
+   * contract's `not_null` or `primary_key` constraint (on the column, or the
+   * model's `constraints:` with `columns:`). Not
+   * `dbt_utils.not_null_proportion`: it allows some nulls. Optional so
+   * hand-built literals stay valid.
+   */
+  notNullColumns?: Map<string, Set<string>>;
+  /**
+   * Relationship tests to a dbt source rather than a model
+   * ({@link YmlSourceRelationshipTest}). Optional so hand-built literals stay valid.
+   */
+  sourceRelationshipTests?: YmlSourceRelationshipTest[];
 }
