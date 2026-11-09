@@ -222,7 +222,7 @@ class Model:
     def __init__(self):
         self.tables = {}  # key (lower name) → dict
         self.order = []
-        self.fks = []  # (from, [cols], to, [cols] or None, name)
+        self.fks = []  # (from, [cols], to, [cols] or None, name, from schema, to schema): the schemas when known
         self.uniques = []  # (table, [cols], index)
         self.partitions = set()
         self.parent = {}  # partition (lower) → its parent's name
@@ -235,6 +235,9 @@ class Model:
         if schema and f'{schema}.{name}'.lower() in self.tables:
             return self.tables[f'{schema}.{name}'.lower()]
         k = name.lower()
+        # Looking one up (an ALTER, a key): a table of this name in another schema is not it.
+        if not create and k in self.tables and schema and self.tables[k].get('schema') and self.tables[k]['schema'].lower() != schema.lower():
+            return None
         if k not in self.tables:
             if not create:
                 return None
@@ -339,7 +342,7 @@ def apply_constraint(m, table, c, name=None):
         ref = c.args.get('reference')
         if ref is not None:
             to, _s, to_cols = ref_target(ref)
-            m.fks.append((table['name'], cols_of(c.expressions), to, to_cols, name))
+            m.fks.append((table['name'], cols_of(c.expressions), to, to_cols, name, table.get('schema'), _s or table.get('schema')))
     elif isinstance(c, exp.UniqueColumnConstraint):
         if isinstance(c.this, (exp.ClusteredColumnConstraint, exp.NonClusteredColumnConstraint)) and isinstance(c.this.this, list):
             cols = cols_of(c.this.this)  # SQL Server: UNIQUE NONCLUSTERED ([a] ASC, [b] ASC)
@@ -384,7 +387,7 @@ def add_column(m, table, cd, dialect):
             m.uniques.append((table['name'], [name], False))
         elif isinstance(k, exp.Reference):
             to, _s, to_cols = ref_target(k)
-            m.fks.append((table['name'], [name], to, to_cols, None))
+            m.fks.append((table['name'], [name], to, to_cols, None, table.get('schema'), _s or table.get('schema')))
         elif isinstance(k, exp.CommentColumnConstraint):
             desc = ident(k.this)
         elif isinstance(k, exp.ComputedColumnConstraint):
@@ -654,7 +657,8 @@ def structural_create(m, sql, where):
         if rup.startswith('FOREIGN KEY'):
             fm = re.match(r'FOREIGN\s+KEY\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)\s*REFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', rest, re.I | re.S)
             if fm:
-                m.fks.append((name, idents(fm.group(1)), idents(fm.group(2))[-1], idents(fm.group(3)) if fm.group(3) else None, None))
+                to_parts = idents(fm.group(2))
+                m.fks.append((name, idents(fm.group(1)), to_parts[-1], idents(fm.group(3)) if fm.group(3) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
             continue
         if re.match(r'UNIQUE\b', rup):  # not a column named unique_device_id
             inside = re.search(r'\(([^)]*)\)', rest)
@@ -680,7 +684,8 @@ def structural_create(m, sql, where):
             t['pk'] = [cname]
         rm = re.search(r'\bREFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', tail, re.I)
         if rm:
-            m.fks.append((name, [cname], idents(rm.group(1))[-1], idents(rm.group(2)) if rm.group(2) else None, None))
+            to_parts = idents(rm.group(1))
+            m.fks.append((name, [cname], to_parts[-1], idents(rm.group(2)) if rm.group(2) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
         dm = re.search(r"\bCOMMENT\s+'((?:[^']|'')*)'", tail, re.I)
         t['columns'].append([cname, typ, flags, dm.group(1).replace("''", "'") if dm else None])
     m.approx.append(f'{where}: {name} read structurally (sqlglot could not)')
@@ -705,11 +710,13 @@ def structural_alter(m, sql, where, dialect=None):
         m.partitions.add(child.lower())
         m.parent[child.lower()] = name
         return True
-    t = m.table(name, None, create=False)
+    name_parts = idents(am.group(1))
+    t = m.table(name, name_parts[-2] if len(name_parts) > 1 else None, create=False)
     if t is None:
         return True
     for fm in re.finditer(r'FOREIGN\s+KEY\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)\s*REFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', rest, re.I):
-        m.fks.append((name, idents(fm.group(1)), last(fm.group(2)), idents(fm.group(3)) if fm.group(3) else None, None))
+        to_parts = idents(fm.group(2))
+        m.fks.append((name, idents(fm.group(1)), last(fm.group(2)), idents(fm.group(3)) if fm.group(3) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
     for pk in re.finditer(r'PRIMARY\s+KEY\s*(?:CLUSTERED|NONCLUSTERED)?\s*\(([^)]*)\)', rest, re.I):
         t['pk'] = [c for c in idents(pk.group(1)) if c.upper() not in ('ASC', 'DESC')]
     for uq in re.finditer(r'\bUNIQUE\s*(?:KEY|INDEX|CLUSTERED|NONCLUSTERED)?\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)', rest, re.I):
@@ -776,11 +783,13 @@ def count_sql(entry, base):
                 target = idents(am.group(1))[-1] if am else ''
                 if dialect == 'bigquery':
                     target = target.split('.')[-1]  # `project.dataset.table` is one quoted path
-                if target.lower() not in m.tables:
+                target_parts = idents(am.group(1)) if am else []
+                target_schema = target_parts[-2] if len(target_parts) > 1 and dialect != 'bigquery' else None
+                if m.table(target, target_schema, create=False) is None:
                     if first:
                         deferred.append((f, line, stmt))  # a keys or FK file may sort before the tables file
                     return
-                t = m.tables[target.lower()]
+                t = m.table(target, target_schema, create=False)
                 rest = am.group(2)
                 rn = re.match(r'\s*RENAME\s+TO\s+(' + IDENT + r')', rest, re.I)
                 if rn:
@@ -905,22 +914,29 @@ def finish_sql(entry, m, stats):
             seen_p.add(name.lower())
             name = m.parent[name.lower()]
         return name
-    for i, (frm, fcols, to, tcols, cname) in enumerate(m.fks):
+    for i, fk in enumerate(m.fks):
+        frm, fcols, to, tcols, cname = fk[:5]
+        fs, ts = (tuple(fk[5:7]) + (None, None))[:2]
         frm, to = folded(frm), folded(to)
         if frm.lower() in m.partitions or to.lower() in m.partitions:
             continue
         if not tcols:
-            target = m.tables.get(to.lower())
+            target = (m.tables.get(f'{ts}.{to}'.lower()) if ts else None) or m.tables.get(to.lower())
             tcols = target['pk'] if target else []
         if not tcols or len(tcols) != len(fcols):
             continue
-        key = (frm.lower(), tuple(c.lower() for c in fcols), to.lower(), tuple(c.lower() for c in tcols))
+        key = ((fs or '').lower(), frm.lower(), tuple(c.lower() for c in fcols), (ts or '').lower(), to.lower(), tuple(c.lower() for c in tcols))
         if key in seen:
             continue
         seen.add(key)
         comp = f'fk{i}' if len(fcols) > 1 else None
         for fc, tc in zip(fcols, tcols):
             r = {'from': frm, 'fromColumn': fc, 'to': to, 'toColumn': tc}
+            # The ends' schemas: the scorer places an end on a table another schema also has (qualifySameNames).
+            if fs:
+                r['fromSchema'] = fs
+            if ts:
+                r['toSchema'] = ts
             if comp:
                 r['composite'] = comp
             rels.append(r)
@@ -970,7 +986,8 @@ def test_name(t):
 def ref_name(s):
     if not isinstance(s, str):
         return None
-    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*['\"]([^'\"]+)['\"])?\s*\)", s)
+    # ref('model'), ref('package', 'model'), and a versioned ref('model', v=1) / ref('model', version='2').
+    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*['\"]([^'\"]+)['\"])?\s*(?:,\s*(?:v|version)\s*=\s*[^)]*)?\)", s)
     if m:
         return m.group(2) or m.group(1)
     m = re.search(r"source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", s)
