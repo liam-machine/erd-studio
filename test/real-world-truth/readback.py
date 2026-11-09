@@ -20,7 +20,8 @@ Engines (each overridable with an environment variable):
   MySQL 8.0      RWT_MYSQL_BIN  (default /opt/homebrew/opt/mysql@8.0/bin; RWT_MYSQL_LIBS for a stale abseil)
   RWT_DOCKER=1   runs PostgreSQL and MySQL in Docker instead (RWT_PG_IMAGE postgres:18, RWT_PG_VECTOR_IMAGE
                  pgvector/pgvector:pg18 for Pagila, RWT_MYSQL_IMAGE mysql:8.0)
-  SQL Server     Docker only    (mcr.microsoft.com/mssql/server:2022-latest; see the doc)
+  SQL Server     Docker only    (mcr.microsoft.com/mssql/server:2025-latest; see the doc)
+  Oracle         Docker only    (RWT_ORACLE_IMAGE gvenzl/oracle-free:23.26.0-slim-faststart; SQL*Plus in the container)
   Snowflake      RWT_SNOWFLAKE_PYTHON: a Python with fakesnow installed (an emulator on DuckDB)
   Databricks     RWT_SPARK_PYTHON: a Python with pyspark installed (Spark's own SQL parser)
   SQLite         the standard library's sqlite3, in memory (nothing to install)
@@ -539,6 +540,205 @@ def sqlserver() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Oracle (Docker: Oracle Database Free, gvenzl/oracle-free; SQL*Plus inside the container)
+# ---------------------------------------------------------------------------
+
+ORACLE_IMAGE = os.environ.get('RWT_ORACLE_IMAGE', 'gvenzl/oracle-free:23.26.0-slim-faststart')
+
+# One JSON object per line (JSON_OBJECT escapes a comment's newlines), so SQL*Plus never wraps a value.
+ORACLE_CATALOG_SQL = r"""
+SET DEFINE OFF
+SET PAGESIZE 0
+SET LINESIZE 32767
+SET LONG 2000000
+SET LONGCHUNKSIZE 32767
+SET TRIMOUT ON
+SET FEEDBACK OFF
+SET HEADING OFF
+SET VERIFY OFF
+SET TAB OFF
+WHENEVER SQLERROR EXIT FAILURE
+SELECT JSON_OBJECT('k' VALUE 'version', 'version' VALUE product || ' ' || version_full)
+  FROM product_component_version WHERE product LIKE 'Oracle%';
+SELECT JSON_OBJECT('k' VALUE 't', 'schema' VALUE t.owner, 'name' VALUE t.table_name, 'iot' VALUE t.iot_type,
+         'partitioned' VALUE t.partitioned, 'comment' VALUE c.comments RETURNING CLOB)
+  FROM all_tables t LEFT JOIN all_tab_comments c ON c.owner = t.owner AND c.table_name = t.table_name
+ WHERE t.owner = '{owner}' AND t.dropped = 'NO' AND t.nested = 'NO' AND t.secondary = 'N'
+   AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+   AND NOT EXISTS (SELECT 1 FROM all_mviews m WHERE m.owner = t.owner AND m.container_name = t.table_name)
+ ORDER BY t.table_name;
+SELECT JSON_OBJECT('k' VALUE 'c', 'table' VALUE c.table_name, 'name' VALUE c.column_name,
+         'dataType' VALUE c.data_type, 'typeOwner' VALUE c.data_type_owner, 'length' VALUE c.data_length,
+         'charLength' VALUE c.char_length, 'charUsed' VALUE c.char_used, 'precision' VALUE c.data_precision,
+         'scale' VALUE c.data_scale, 'nullable' VALUE c.nullable, 'identity' VALUE c.identity_column,
+         'virtual' VALUE x.virtual_column, 'comment' VALUE m.comments RETURNING CLOB)
+  FROM all_tab_columns c
+  JOIN all_tab_cols x ON x.owner = c.owner AND x.table_name = c.table_name AND x.column_name = c.column_name
+  LEFT JOIN all_col_comments m ON m.owner = c.owner AND m.table_name = c.table_name AND m.column_name = c.column_name
+ WHERE c.owner = '{owner}' AND c.table_name IN (SELECT table_name FROM all_tables WHERE owner = '{owner}')
+ ORDER BY c.table_name, c.column_id;
+SELECT JSON_OBJECT('k' VALUE 'k', 'schema' VALUE k.owner, 'name' VALUE k.constraint_name, 'table' VALUE k.table_name,
+         'type' VALUE k.constraint_type, 'rOwner' VALUE k.r_owner, 'rName' VALUE k.r_constraint_name,
+         'columns' VALUE (SELECT JSON_ARRAYAGG(cc.column_name ORDER BY cc.position RETURNING CLOB) FROM all_cons_columns cc
+                           WHERE cc.owner = k.owner AND cc.constraint_name = k.constraint_name AND cc.table_name = k.table_name)
+         RETURNING CLOB)
+  FROM all_constraints k
+ WHERE k.constraint_type IN ('P', 'U', 'R') AND k.table_name NOT LIKE 'BIN$%'
+   AND (k.owner = '{owner}' OR (k.owner, k.constraint_name) IN
+          (SELECT r_owner, r_constraint_name FROM all_constraints WHERE owner = '{owner}' AND constraint_type = 'R'))
+ ORDER BY k.owner, k.table_name, k.constraint_name;
+SELECT JSON_OBJECT('k' VALUE 'i', 'schema' VALUE i.table_owner, 'name' VALUE i.index_name, 'table' VALUE i.table_name,
+         'columns' VALUE (SELECT JSON_ARRAYAGG(ic.column_name ORDER BY ic.column_position RETURNING CLOB) FROM all_ind_columns ic
+                           WHERE ic.index_owner = i.owner AND ic.index_name = i.index_name) RETURNING CLOB)
+  FROM all_indexes i
+ WHERE i.table_owner = '{owner}' AND i.uniqueness = 'UNIQUE' AND i.table_type = 'TABLE' AND i.index_type <> 'LOB'
+   AND NOT EXISTS (SELECT 1 FROM all_constraints k WHERE k.owner = i.table_owner AND k.table_name = i.table_name
+                    AND k.index_owner = i.owner AND k.index_name = i.index_name AND k.constraint_type IN ('P', 'U'))
+ ORDER BY i.table_name, i.index_name;
+EXIT
+"""
+
+ORACLE_ERR = re.compile(r'^(?P<code>(?:ORA|SP2|PLS)-\d{4,5}): (?P<msg>.*)$')
+
+
+def oracle_type(c: dict) -> str:
+    """A column's type as Oracle's DDL writes it, from ALL_TAB_COLUMNS."""
+    t, p, s = c['dataType'], c['precision'], c['scale']
+    if c.get('typeOwner') and c['typeOwner'] not in ('SYS', 'PUBLIC'):
+        return f"{c['typeOwner']}.{t}"
+    if t in ('VARCHAR2', 'CHAR'):
+        return f"{t}({c['charLength']} CHAR)" if c['charUsed'] == 'C' else f"{t}({c['length']})"
+    if t in ('NVARCHAR2', 'NCHAR'):
+        return f"{t}({c['charLength']})"
+    if t == 'RAW':
+        return f"RAW({c['length']})"
+    if t == 'NUMBER':
+        if p is None:
+            return 'NUMBER' if s is None else f'NUMBER(*,{s})'
+        return f'NUMBER({p})' if not s else f'NUMBER({p},{s})'
+    if t == 'FLOAT' and p is not None:
+        return f'FLOAT({p})'
+    return t
+
+
+class Oracle:
+    """Oracle Database Free in a throwaway container; scripts run by SQL*Plus inside it, as their installers run them."""
+
+    def __init__(self, root: Path = SAMPLES) -> None:
+        self.root = root.resolve()
+        self.name = f'rwt-ora-{os.getpid()}'
+        self.password = 'Rwt' + os.urandom(12).hex()
+
+    def __enter__(self) -> 'Oracle':
+        if run(['docker', 'info']).returncode != 0:
+            raise RuntimeError('blocked: needs Docker (Oracle Database runs here only as a container). See docs/dev/real-world-truth.md.')
+        r = run(['docker', 'run', '-d', '--rm', '--name', self.name, '-e', f'ORACLE_PASSWORD={self.password}',
+                 '-v', f'{self.root}:/samples:ro', ORACLE_IMAGE])
+        if r.returncode != 0:
+            raise RuntimeError(f'docker run {ORACLE_IMAGE} failed: {short(r.stderr)}')
+        try:
+            wait_for(['docker', 'exec', self.name, 'healthcheck.sh'], 'Oracle')
+        except Exception:
+            run(['docker', 'rm', '-f', self.name])
+            raise
+        return self
+
+    def __exit__(self, *exc) -> None:
+        run(['docker', 'rm', '-f', self.name])
+
+    def connect(self, user: str = 'system', password: str | None = None, service: str = 'FREEPDB1') -> str:
+        return f'{user}/{password or self.password}@//localhost/{service}'
+
+    def sqlplus(self, login: str, script: str, timeout: int = 3600) -> subprocess.CompletedProcess:
+        return run(['docker', 'exec', '-i', self.name, 'sqlplus', '-S', '-L', login], input=script, timeout=timeout)
+
+    MARK = '@@rwt-file '
+
+    def run_script(self, login: str, files: list[Path], before: str = '') -> list[dict]:
+        """`before`, then each file through SQL*Plus's @, in one session (as one installer run); every error it printed."""
+        wheres = [f.resolve().relative_to(self.root).as_posix() for f in files]
+        script = ''.join(f'PROMPT {self.MARK}{w}\n@/samples/{w}\n' for w in wheres)
+        r = self.sqlplus(login, f'WHENEVER SQLERROR CONTINUE\nPROMPT {self.MARK}(setup)\n{before}\n{script}EXIT\n')
+        errors: list[dict] = []
+        lines = r.stdout.splitlines()
+        where = '(setup)'
+        for i, line in enumerate(lines):
+            if line.startswith(self.MARK):
+                where = line[len(self.MARK):]
+                continue
+            m = ORACLE_ERR.match(line)
+            if not m:
+                continue
+            # SQL*Plus prints the failing line, a "*" under the error, "ERROR at line N:", then the ORA- line.
+            stmt = lines[i - 3].strip() if i >= 3 and lines[i - 1].startswith('ERROR at line') and lines[i - 2].strip() == '*' else ''
+            errors.append({'file': where, **({'statement': short(stmt, 120)} if stmt else {}), 'error': short(f"{m['code']}: {m['msg']}")})
+        return errors
+
+    def catalog(self, login: str, owner: str) -> dict:
+        r = self.sqlplus(login, ORACLE_CATALOG_SQL.replace('{owner}', owner))
+        rows = [json.loads(l) for l in r.stdout.splitlines() if l.startswith('{')]
+        if r.returncode != 0 or not rows:
+            raise RuntimeError(short(r.stdout + r.stderr, 1000))
+        version = next(x['version'] for x in rows if x['k'] == 'version')
+        tables = {x['name']: {'schema': x['schema'], 'name': x['name'], 'comment': x['comment'], 'pk': None, 'columns': [],
+                              **({'organization': 'index'} if x['iot'] else {}), **({'partitioned': True} if x['partitioned'] == 'YES' else {})}
+                  for x in rows if x['k'] == 't'}
+        # Columns of the tables above only (not a materialized view's container table, an IOT's overflow, …).
+        for c in (x for x in rows if x['k'] == 'c' and x['table'] in tables):
+            tables[c['table']]['columns'].append({
+                'name': c['name'], 'type': oracle_type(c), 'notNull': c['nullable'] == 'N',
+                'identity': 'yes' if c['identity'] == 'YES' else None, 'generated': 'virtual' if c['virtual'] == 'YES' else None,
+                'comment': c['comment']})
+        cons = {(k['schema'], k['name']): k for k in rows if k['k'] == 'k'}
+        uniques, fks = [], []
+        for k in cons.values():
+            if k['schema'] != owner or k['table'] not in tables:
+                continue
+            if k['type'] == 'P':
+                tables[k['table']]['pk'] = k['columns']
+            elif k['type'] == 'U':
+                uniques.append({'schema': owner, 'table': k['table'], 'name': k['name'], 'kind': 'constraint', 'partial': False, 'columns': k['columns']})
+            else:
+                ref = cons[(k['rOwner'], k['rName'])]
+                fks.append({'schema': owner, 'table': k['table'], 'name': k['name'], 'columns': k['columns'],
+                            'refSchema': ref['schema'], 'refTable': ref['table'], 'refColumns': ref['columns']})
+        for i in (x for x in rows if x['k'] == 'i' and x['table'] in tables):
+            # A function-based index keys on a hidden SYS_NC column: the expression is not read back.
+            cols = ['(expression)' if c.startswith('SYS_NC') else c for c in i['columns']]
+            uniques.append({'schema': owner, 'table': i['table'], 'name': i['name'], 'kind': 'index', 'partial': False, 'columns': cols})
+        return {'version': version, 'tables': list(tables.values()), 'uniqueKeys': uniques, 'foreignKeys': fks}
+
+
+def oracle_installer_setup(user: str, grants: str) -> str:
+    """What the db-sample-schemas installers (hr_install.sql, …) do before @@<schema>_create.sql, as SYSTEM in the PDB."""
+    return '\n'.join([
+        f'CREATE USER {user} IDENTIFIED BY "{os.urandom(12).hex()}" DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;',
+        f'GRANT {grants} TO {user};',
+        f'ALTER SESSION SET CURRENT_SCHEMA={user};',
+        'ALTER SESSION SET NLS_LANGUAGE=American;',
+        'ALTER SESSION SET NLS_TERRITORY=America;',
+    ])
+
+
+HR_GRANTS = ('CREATE MATERIALIZED VIEW, CREATE PROCEDURE, CREATE SEQUENCE, CREATE SESSION, CREATE SYNONYM, '
+             'CREATE TABLE, CREATE TRIGGER, CREATE TYPE, CREATE VIEW')
+
+
+def oracle_hr() -> dict:
+    f = SAMPLES / 'oracle-hr' / 'human_resources' / 'hr_create.sql'
+    # hr_install.sql (upstream, same commit; not in the sample) creates the user, then runs this script as the
+    # installing administrator with CURRENT_SCHEMA=HR. The same here, without the data (hr_populate.sql) or code.
+    setup = oracle_installer_setup('HR', HR_GRANTS)
+    with Oracle() as ora:
+        errors = ora.run_script(ora.connect(), [f], before=setup)
+        cat = ora.catalog(ora.connect(), 'HR')
+    return {'engine': f"{cat.pop('version')} (Docker {ORACLE_IMAGE})", 'loaded': [rel(f)],
+            'setup': f'as hr_install.sql does, as SYSTEM in FREEPDB1: CREATE USER HR … QUOTA UNLIMITED ON users; '
+                     f'GRANT {HR_GRANTS} TO HR; ALTER SESSION SET CURRENT_SCHEMA=HR (NLS American); then @hr_create.sql',
+            'errors': errors, **cat}
+
+
+# ---------------------------------------------------------------------------
 # SQLite (the standard library's sqlite3, in memory)
 # ---------------------------------------------------------------------------
 
@@ -604,6 +804,7 @@ READERS = {
     'databricks-open-retail-data-model': databricks,
     'sqlserver-adventureworks': sqlserver,
     'sqlite-chinook': chinook,
+    'oracle-hr': oracle_hr,
 }
 
 

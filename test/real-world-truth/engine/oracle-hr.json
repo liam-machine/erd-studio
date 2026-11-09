@@ -1,0 +1,437 @@
+{
+ "sample": "oracle-hr",
+ "engine": "Oracle AI Database 26ai Free 23.26.0.0.0 (Docker gvenzl/oracle-free:23.26.0-slim-faststart)",
+ "loaded": [
+  "oracle-hr/human_resources/hr_create.sql"
+ ],
+ "setup": "as hr_install.sql does, as SYSTEM in FREEPDB1: CREATE USER HR … QUOTA UNLIMITED ON users; GRANT CREATE MATERIALIZED VIEW, CREATE PROCEDURE, CREATE SEQUENCE, CREATE SESSION, CREATE SYNONYM, CREATE TABLE, CREATE TRIGGER, CREATE TYPE, CREATE VIEW TO HR; ALTER SESSION SET CURRENT_SCHEMA=HR (NLS American); then @hr_create.sql",
+ "errors": [],
+ "tables": [
+  {
+   "schema": "HR",
+   "name": "COUNTRIES",
+   "comment": "country table. References with locations table.",
+   "pk": [
+    "COUNTRY_ID"
+   ],
+   "columns": [
+    {
+     "name": "COUNTRY_ID",
+     "type": "CHAR(2)",
+     "notNull": true,
+     "comment": "Primary key of countries table."
+    },
+    {
+     "name": "COUNTRY_NAME",
+     "type": "VARCHAR2(60)",
+     "notNull": false,
+     "comment": "Country name"
+    },
+    {
+     "name": "REGION_ID",
+     "type": "NUMBER",
+     "notNull": false,
+     "comment": "Region ID for the country. Foreign key to region_id column in the departments table."
+    }
+   ],
+   "organization": "index"
+  },
+  {
+   "schema": "HR",
+   "name": "DEPARTMENTS",
+   "comment": "Departments table that shows details of departments where employees\nwork. references with locations, employees, and job_history tables.",
+   "pk": [
+    "DEPARTMENT_ID"
+   ],
+   "columns": [
+    {
+     "name": "DEPARTMENT_ID",
+     "type": "NUMBER(4)",
+     "notNull": true,
+     "comment": "Primary key column of departments table."
+    },
+    {
+     "name": "DEPARTMENT_NAME",
+     "type": "VARCHAR2(30)",
+     "notNull": true,
+     "comment": "A not null column that shows name of a department. Administration,\nMarketing, Purchasing, Human Resources, Shipping, IT, Executive, Public\nRelations, Sales, Finance, and Accounting. "
+    },
+    {
+     "name": "MANAGER_ID",
+     "type": "NUMBER(6)",
+     "notNull": false,
+     "comment": "Manager_id of a department. Foreign key to employee_id column of employees table. The manager_id column of the employee table references this column."
+    },
+    {
+     "name": "LOCATION_ID",
+     "type": "NUMBER(4)",
+     "notNull": false,
+     "comment": "Location id where a department is located. Foreign key to location_id column of locations table."
+    }
+   ]
+  },
+  {
+   "schema": "HR",
+   "name": "EMPLOYEES",
+   "comment": "employees table. References with departments,\njobs, job_history tables. Contains a self reference.",
+   "pk": [
+    "EMPLOYEE_ID"
+   ],
+   "columns": [
+    {
+     "name": "EMPLOYEE_ID",
+     "type": "NUMBER(6)",
+     "notNull": true,
+     "comment": "Primary key of employees table."
+    },
+    {
+     "name": "FIRST_NAME",
+     "type": "VARCHAR2(20)",
+     "notNull": false,
+     "comment": "First name of the employee. A not null column."
+    },
+    {
+     "name": "LAST_NAME",
+     "type": "VARCHAR2(25)",
+     "notNull": true,
+     "comment": "Last name of the employee. A not null column."
+    },
+    {
+     "name": "EMAIL",
+     "type": "VARCHAR2(25)",
+     "notNull": true,
+     "comment": "Email id of the employee"
+    },
+    {
+     "name": "PHONE_NUMBER",
+     "type": "VARCHAR2(20)",
+     "notNull": false,
+     "comment": "Phone number of the employee; includes country code and area code"
+    },
+    {
+     "name": "HIRE_DATE",
+     "type": "DATE",
+     "notNull": true,
+     "comment": "Date when the employee started on this job. A not null column."
+    },
+    {
+     "name": "JOB_ID",
+     "type": "VARCHAR2(10)",
+     "notNull": true,
+     "comment": "Current job of the employee; foreign key to job_id column of the\njobs table. A not null column."
+    },
+    {
+     "name": "SALARY",
+     "type": "NUMBER(8,2)",
+     "notNull": false,
+     "comment": "Monthly salary of the employee. Must be greater\nthan zero (enforced by constraint emp_salary_min)"
+    },
+    {
+     "name": "COMMISSION_PCT",
+     "type": "NUMBER(2,2)",
+     "notNull": false,
+     "comment": "Commission percentage of the employee; Only employees in sales\ndepartment elgible for commission percentage"
+    },
+    {
+     "name": "MANAGER_ID",
+     "type": "NUMBER(6)",
+     "notNull": false,
+     "comment": "Manager id of the employee; has same domain as manager_id in\ndepartments table. Foreign key to employee_id column of employees table.\n(useful for reflexive joins and CONNECT BY query)"
+    },
+    {
+     "name": "DEPARTMENT_ID",
+     "type": "NUMBER(4)",
+     "notNull": false,
+     "comment": "Department id where employee works; foreign key to department_id\ncolumn of the departments table"
+    }
+   ]
+  },
+  {
+   "schema": "HR",
+   "name": "JOBS",
+   "comment": "jobs table with job titles and salary ranges.\nReferences with employees and job_history table.",
+   "pk": [
+    "JOB_ID"
+   ],
+   "columns": [
+    {
+     "name": "JOB_ID",
+     "type": "VARCHAR2(10)",
+     "notNull": true,
+     "comment": "Primary key of jobs table."
+    },
+    {
+     "name": "JOB_TITLE",
+     "type": "VARCHAR2(35)",
+     "notNull": true,
+     "comment": "A not null column that shows job title, e.g. AD_VP, FI_ACCOUNTANT"
+    },
+    {
+     "name": "MIN_SALARY",
+     "type": "NUMBER(6)",
+     "notNull": false,
+     "comment": "Minimum salary for a job title."
+    },
+    {
+     "name": "MAX_SALARY",
+     "type": "NUMBER(6)",
+     "notNull": false,
+     "comment": "Maximum salary for a job title"
+    }
+   ]
+  },
+  {
+   "schema": "HR",
+   "name": "JOB_HISTORY",
+   "comment": "Table that stores job history of the employees. If an employee\nchanges departments within the job or changes jobs within the department,\nnew rows get inserted into this table with old job information of the\nemployee. Contains a complex primary key: employee_id+start_date.\nReferences with jobs, employees, and departments tables.",
+   "pk": [
+    "EMPLOYEE_ID",
+    "START_DATE"
+   ],
+   "columns": [
+    {
+     "name": "EMPLOYEE_ID",
+     "type": "NUMBER(6)",
+     "notNull": true,
+     "comment": "A not null column in the complex primary key employee_id+start_date.\nForeign key to employee_id column of the employee table"
+    },
+    {
+     "name": "START_DATE",
+     "type": "DATE",
+     "notNull": true,
+     "comment": "A not null column in the complex primary key employee_id+start_date.\nMust be less than the end_date of the job_history table. (enforced by\nconstraint jhist_date_interval)"
+    },
+    {
+     "name": "END_DATE",
+     "type": "DATE",
+     "notNull": true,
+     "comment": "Last day of the employee in this job role. A not null column. Must be\ngreater than the start_date of the job_history table.\n(enforced by constraint jhist_date_interval)"
+    },
+    {
+     "name": "JOB_ID",
+     "type": "VARCHAR2(10)",
+     "notNull": true,
+     "comment": "Job role in which the employee worked in the past; foreign key to\njob_id column in the jobs table. A not null column."
+    },
+    {
+     "name": "DEPARTMENT_ID",
+     "type": "NUMBER(4)",
+     "notNull": false,
+     "comment": "Department id in which the employee worked in the past; foreign key to deparment_id column in the departments table"
+    }
+   ]
+  },
+  {
+   "schema": "HR",
+   "name": "LOCATIONS",
+   "comment": "Locations table that contains specific address of a specific office,\nwarehouse, and/or production site of a company. Does not store addresses /\nlocations of customers. references with the departments and countries tables. ",
+   "pk": [
+    "LOCATION_ID"
+   ],
+   "columns": [
+    {
+     "name": "LOCATION_ID",
+     "type": "NUMBER(4)",
+     "notNull": true,
+     "comment": "Primary key of locations table"
+    },
+    {
+     "name": "STREET_ADDRESS",
+     "type": "VARCHAR2(40)",
+     "notNull": false,
+     "comment": "Street address of an office, warehouse, or production site of a company.\nContains building number and street name"
+    },
+    {
+     "name": "POSTAL_CODE",
+     "type": "VARCHAR2(12)",
+     "notNull": false,
+     "comment": "Postal code of the location of an office, warehouse, or production site\nof a company. "
+    },
+    {
+     "name": "CITY",
+     "type": "VARCHAR2(30)",
+     "notNull": true,
+     "comment": "A not null column that shows city where an office, warehouse, or\nproduction site of a company is located. "
+    },
+    {
+     "name": "STATE_PROVINCE",
+     "type": "VARCHAR2(25)",
+     "notNull": false,
+     "comment": "State or Province where an office, warehouse, or production site of a\ncompany is located."
+    },
+    {
+     "name": "COUNTRY_ID",
+     "type": "CHAR(2)",
+     "notNull": false,
+     "comment": "Country where an office, warehouse, or production site of a company is\nlocated. Foreign key to country_id column of the countries table."
+    }
+   ]
+  },
+  {
+   "schema": "HR",
+   "name": "REGIONS",
+   "comment": "Regions table that contains region numbers and names. references with the Countries table.",
+   "pk": [
+    "REGION_ID"
+   ],
+   "columns": [
+    {
+     "name": "REGION_ID",
+     "type": "NUMBER",
+     "notNull": true,
+     "comment": "Primary key of regions table."
+    },
+    {
+     "name": "REGION_NAME",
+     "type": "VARCHAR2(25)",
+     "notNull": false,
+     "comment": "Names of regions. Locations are in the countries of these regions."
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [
+  {
+   "schema": "HR",
+   "table": "EMPLOYEES",
+   "name": "EMP_EMAIL_UK",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "EMAIL"
+   ]
+  }
+ ],
+ "foreignKeys": [
+  {
+   "schema": "HR",
+   "table": "COUNTRIES",
+   "name": "COUNTR_REG_FK",
+   "columns": [
+    "REGION_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "REGIONS",
+   "refColumns": [
+    "REGION_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "DEPARTMENTS",
+   "name": "DEPT_LOC_FK",
+   "columns": [
+    "LOCATION_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "LOCATIONS",
+   "refColumns": [
+    "LOCATION_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "DEPARTMENTS",
+   "name": "DEPT_MGR_FK",
+   "columns": [
+    "MANAGER_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "EMPLOYEES",
+   "refColumns": [
+    "EMPLOYEE_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "EMPLOYEES",
+   "name": "EMP_DEPT_FK",
+   "columns": [
+    "DEPARTMENT_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "DEPARTMENTS",
+   "refColumns": [
+    "DEPARTMENT_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "EMPLOYEES",
+   "name": "EMP_JOB_FK",
+   "columns": [
+    "JOB_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "JOBS",
+   "refColumns": [
+    "JOB_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "EMPLOYEES",
+   "name": "EMP_MANAGER_FK",
+   "columns": [
+    "MANAGER_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "EMPLOYEES",
+   "refColumns": [
+    "EMPLOYEE_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "JOB_HISTORY",
+   "name": "JHIST_DEPT_FK",
+   "columns": [
+    "DEPARTMENT_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "DEPARTMENTS",
+   "refColumns": [
+    "DEPARTMENT_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "JOB_HISTORY",
+   "name": "JHIST_EMP_FK",
+   "columns": [
+    "EMPLOYEE_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "EMPLOYEES",
+   "refColumns": [
+    "EMPLOYEE_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "JOB_HISTORY",
+   "name": "JHIST_JOB_FK",
+   "columns": [
+    "JOB_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "JOBS",
+   "refColumns": [
+    "JOB_ID"
+   ]
+  },
+  {
+   "schema": "HR",
+   "table": "LOCATIONS",
+   "name": "LOC_C_ID_FK",
+   "columns": [
+    "COUNTRY_ID"
+   ],
+   "refSchema": "HR",
+   "refTable": "COUNTRIES",
+   "refColumns": [
+    "COUNTRY_ID"
+   ]
+  }
+ ]
+}

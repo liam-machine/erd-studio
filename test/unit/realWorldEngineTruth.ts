@@ -14,7 +14,7 @@ import type { TruthSample } from './realWorldScorecard';
 
 export const TRUTH_DIR = path.join(__dirname, '../real-world-truth');
 
-export type Dialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks' | 'sqlite';
+export type Dialect = 'postgres' | 'mysql' | 'sqlserver' | 'snowflake' | 'databricks' | 'sqlite' | 'oracle';
 
 export interface EngineColumn {
   name: string;
@@ -67,6 +67,7 @@ export const ENGINE_PAIRS: ReadonlyArray<{ truth: string; engine: string; dialec
   { truth: 'databricks-open-retail-data-model', engine: 'databricks-open-retail-data-model', dialect: 'databricks' },
   { truth: 'migrations-harbor', engine: 'migrations-harbor', dialect: 'postgres' },
   { truth: 'sqlite-chinook', engine: 'sqlite-chinook', dialect: 'sqlite' },
+  { truth: 'oracle-hr', engine: 'oracle-hr', dialect: 'oracle' },
 ];
 
 /**
@@ -76,7 +77,6 @@ export const ENGINE_PAIRS: ReadonlyArray<{ truth: string; engine: string; dialec
  * expected.json to an ENGINE_PAIRS entry or one of these.
  */
 export const NOT_ENGINE_VERIFIED: Readonly<Record<string, string>> = {
-  'oracle-hr': 'needs an Oracle Database container (gvenzl/oracle-free, several GB); not captured yet',
   'bigquery-cloud-learning-platform': 'BigQuery has no local engine (its DDL needs the cloud service)',
   'redshift-tpch': 'Amazon Redshift has no local engine (its DDL needs a cluster)',
 };
@@ -155,6 +155,19 @@ export function canonType(dialect: Dialect, raw: string): string {
         .replace(/^real$/, 'float').replace(/^dec\b|^numeric\b/, 'decimal').replace(/^timestamp_ltz$/, 'timestamp').replace(/^bool$/, 'boolean');
       if (t === 'decimal') t = 'decimal(10,0)';
       return t;
+    }
+    case 'oracle': {
+      // ALL_TAB_COLUMNS' spelling: VARCHAR is VARCHAR2, INTEGER is NUMBER(*,0), DECIMAL(p,s) is NUMBER(p,s).
+      t = t.replace(/^(character varying|char varying|varchar)(?=\(|$)/, 'varchar2').replace(/^(national char varying|nvarchar)(?=\(|$)/, 'nvarchar2')
+        .replace(/^character(?=\(|$)/, 'char').replace(/\((\d+) byte\)$/, '($1)');
+      t = t.replace(/^(integer|int|smallint)$/, 'number(*,0)').replace(/^(decimal|numeric|dec)(?=\()/, 'number');
+      t = t.replace(/^number\((\d+),0\)$/, 'number($1)');
+      if (/^n?char$/.test(t)) t += '(1)';
+      if (t === 'double precision') t = 'float(126)';
+      if (t === 'real') t = 'float(63)';
+      if (t === 'float') t = 'float(126)';
+      // baseForm writes TIMESTAMP(6) WITH TIME ZONE as timestamp(6)with time zone.
+      return t.replace(/^timestamp(?: (with .*))?$/, (_m, tz: string | undefined) => `timestamp(6)${tz ?? ''}`);
     }
   }
 }
