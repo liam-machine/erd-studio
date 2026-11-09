@@ -92,6 +92,7 @@ import {
   SKIP_LABELS,
   type ConverterContext,
   type ModelEnum,
+  DEFAULT_SCHEMA,
   type ModelTable,
   type ResolvedRef,
   type Origin,
@@ -1676,6 +1677,23 @@ class Converter implements ConverterContext {
 
   // -- merging ---------------------------------------------------------------
 
+  /**
+   * Tables some of which name the dialect's default schema (`[dbo].[Region]`)
+   * and some none (`"Orders"`, which is in it too) are one schema: the ones
+   * with none are written in it, as the files spell it (said once). PostgreSQL's
+   * and Snowflake's `public` is no schema to DBML already.
+   */
+  oneDefaultSchema(): void {
+    const fallback = DEFAULT_SCHEMA[this.dialect];
+    if (!fallback || fallback === 'public') return;
+    const spelled = this.tables.find((tb) => tb.schema !== null && sameIdent(tb.schema, fallback))?.schema;
+    const bare = this.tables.filter((tb) => tb.schema === null);
+    if (!spelled || bare.length === 0) return;
+    for (const tb of bare) tb.schema = spelled;
+    this.ledger.changed('table', 'normalised', 'default schema', undefined,
+      `${bare.length === 1 ? 'a table' : `${bare.length} tables`} with no schema written in ${shortName(spelled)}, the default schema other CREATE TABLEs name`);
+  }
+
   findTable(parts: readonly string[]): ModelTable | undefined {
     const name = parts[parts.length - 1];
     const schema = parts.length >= 2 ? parts[parts.length - 2] : null;
@@ -2044,6 +2062,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     converter.notes.push(`${converter.appliedChanges} later schema ${converter.appliedChanges === 1 ? 'change was' : 'changes were'} applied in file order (columns added, renamed, changed or dropped; keys dropped; tables renamed or dropped).`);
   }
   converter.sanitiseNames();
+  converter.oneDefaultSchema();
   const usedEnums = converter.enums.filter((e) =>
     converter.tables.some((tb) => tb.fields.some((f) => {
       const parts = f.type.split('.');

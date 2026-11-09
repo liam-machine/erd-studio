@@ -425,6 +425,16 @@ describe('the schema context', () => {
     expect(convert('postgres', 'SET search_path TO public;\nCREATE TABLE a (id int);').dbml).toMatch(/^Table "a" \{/m);
   });
 
+  it('tables some name in the default schema and some with none are one schema (Northwind: Orders and [dbo].[Region])', () => {
+    const r = convert('sqlserver', 'CREATE TABLE "Orders" ("OrderID" int NOT NULL, "RegionID" int)\nGO\nCREATE TABLE [dbo].[Region] ([RegionID] [int] NOT NULL)\nGO\nALTER TABLE [dbo].[Region] ADD CONSTRAINT [PK_Region] PRIMARY KEY ([RegionID])\nGO\nALTER TABLE Orders ADD FOREIGN KEY (RegionID) REFERENCES dbo.Region (RegionID)\nGO');
+    expect(r.dbml).toContain('Table "dbo"."Orders"');
+    expect(r.dbml).toContain('Table "dbo"."Region"');
+    expect(entries(r, 'default schema').map((e) => e.count)).toEqual([1]);
+    // All with none, or all qualified: unchanged.
+    expect(convert('sqlserver', 'CREATE TABLE a (id int)\nGO\nCREATE TABLE b (id int)\nGO').dbml).toMatch(/^Table "a" \{/m);
+    expect(convert('postgres', 'CREATE TABLE public.a (id int);\nCREATE TABLE b (id int);').dbml).toContain('Table "b"');
+  });
+
   it('SQL Server USE db picks a database, never a schema', () => {
     expect(convert('sqlserver', 'USE [AdventureWorks]\nGO\nCREATE TABLE a (id int)\nGO').dbml).toMatch(/^Table "a" \{/m);
   });
