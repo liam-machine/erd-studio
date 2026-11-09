@@ -41,7 +41,8 @@ interface Floor {
 }
 const FLOORS: Record<string, Floor> = {
   'dbml-qut-workbench': { tablesMatched: 49, columnsMatched: 466, primaryKeysMatched: 45, relationshipsMatched: 96, uniqueKeysKept: 27, typeDetailsKept: 39, descriptionsExact: 32, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
-  'postgres-pagila': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 16, relationshipsMatched: 37, uniqueKeysKept: 5, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Pagila's truth folds payment's 55 partitions into payment (expected.json notes): every unit of the folded model is matched.
+  'postgres-pagila': { tablesMatched: 16, columnsMatched: 94, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 5, typeDetailsKept: 23, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'mysql-sakila': { tablesMatched: 16, columnsMatched: 90, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 2, typeDetailsKept: 60, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlserver-adventureworks': { tablesMatched: 71, columnsMatched: 486, primaryKeysMatched: 71, relationshipsMatched: 90, uniqueKeysKept: 58, typeDetailsKept: 69, descriptionsExact: 530, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'snowflake-grid-reliability': { tablesMatched: 18, columnsMatched: 237, primaryKeysMatched: 18, relationshipsMatched: 12, uniqueKeysKept: 0, typeDetailsKept: 176, descriptionsExact: 13, maxSilentLosses: 0, verdictAtLeast: 'Clean' },

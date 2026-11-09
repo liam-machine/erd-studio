@@ -26,6 +26,7 @@ import {
   type ImportSqlDdlDeps,
   type ImportSqlDdlUi,
   type SqlDialectItem,
+  type SqlPartitionItem,
   type SqlSources,
 } from '../../src/commands/importSqlDdl';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
@@ -38,6 +39,7 @@ import { telemetry } from '../../src/services/telemetryService';
 import { SHOW_LOGS_BUTTON } from '../../src/services/showLogs';
 import packageJson from '../../package.json';
 import { decodeText } from '../../src/services/readFileStart';
+import { log } from '../../src/services/logger';
 
 const FIXTURES = path.join(__dirname, '../fixtures/sql-ddl');
 
@@ -505,5 +507,87 @@ describe('Import SQL DDL… — why it did not import (telemetry, fixed keys onl
     const sql = { ...sqlUi({ files: [file] }, 'postgres'), fileSize: async () => 300 * 1024 * 1024 };
     await importSqlDdl(deps(sql, importUi()));
     expect(features()).toEqual(['importLimitFileTooBig']);
+  });
+});
+
+describe('Import SQL DDL… — partitions (fold them into their parents, or keep each as a table)', () => {
+  const PARTITIONED = [
+    'CREATE TABLE payment (id int NOT NULL, at date NOT NULL, PRIMARY KEY (id, at)) PARTITION BY RANGE (at);',
+    "CREATE TABLE payment_2024 PARTITION OF payment FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+    'CREATE TABLE payment_2025 (id int NOT NULL, at date NOT NULL);',
+    "ALTER TABLE ONLY payment ATTACH PARTITION payment_2025 FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');",
+  ].join('\n');
+
+  /** The SQL UI with a partitions step that answers `mode` (undefined: closes the pick). */
+  function partitionUi(file: string, mode: 'fold' | 'tables' | undefined) {
+    const picks: Array<{ items: SqlPartitionItem[]; options: vscode.QuickPickOptions }> = [];
+    const sql = {
+      ...sqlUi({ files: [file] }, 'postgres'),
+      pickPartitions: async (items: readonly SqlPartitionItem[], options: vscode.QuickPickOptions) => {
+        picks.push({ items: [...items], options });
+        return items.find((i) => i.mode === mode);
+      },
+    };
+    return { sql, picks };
+  }
+
+  it('asks once, fold first and recommended; folding imports the parent alone, each partition said', async () => {
+    const file = path.join(tmp, 'payments.sql');
+    fs.writeFileSync(file, PARTITIONED);
+    const { sql, picks } = partitionUi(file, 'fold');
+    const ui = importUi();
+    const info = vi.spyOn(log, 'info');
+    const result = await importSqlDdl(deps(sql, ui));
+    expect(picks).toHaveLength(1);
+    expect(picks[0].items.map((i) => [i.mode, i.label, i.description])).toEqual([
+      ['fold', 'Fold partitions into their parent tables', 'recommended · 2 partitions are the parent\'s rows'],
+      ['tables', 'Keep each partition as a table', '2 more tables, each with its parent\'s columns'],
+    ]);
+    expect(picks[0].options.placeHolder).toMatch(/^The scripts hold 2 partitions with no columns of their own \(PARTITION OF, ATTACH PARTITION, INHERITS\)\. Fold them into their parents\?$/);
+    expect(result?.plan.newTables.map((t) => t.name)).toEqual(['payment']);
+    // Each folded partition is logged with its file and line.
+    const logged = info.mock.calls.map((c) => String(c[0])).filter((l) => /partitions of payment/.test(l));
+    expect(logged).toEqual([
+      expect.stringMatching(/payments\.sql line 2: table payment_2024: changed, other: partitions of payment \(folded into payment \(PARTITION OF: the parent's rows\)\)$/),
+      expect.stringMatching(/payments\.sql line 3: table payment_2025: changed, other: partitions of payment \(folded into payment \(ATTACH PARTITION: the parent's rows\)\)$/),
+    ]);
+  });
+
+  it('keeping them imports each partition as a table with its parent\'s columns', async () => {
+    const file = path.join(tmp, 'payments.sql');
+    fs.writeFileSync(file, PARTITIONED);
+    const { sql } = partitionUi(file, 'tables');
+    const result = await importSqlDdl(deps(sql, importUi()));
+    expect(result?.plan.newTables.map((t) => t.name).sort()).toEqual(['payment', 'payment_2024', 'payment_2025']);
+    expect(result?.plan.newTables.find((t) => t.name === 'payment_2024')?.columns?.map((c) => c.name)).toEqual(['id', 'at']);
+  });
+
+  it('closing the pick cancels and writes nothing; scripts without partitions are never asked', async () => {
+    const file = path.join(tmp, 'payments.sql');
+    fs.writeFileSync(file, PARTITIONED);
+    const { sql, picks } = partitionUi(file, undefined);
+    const ui = importUi();
+    expect(await importSqlDdl(deps(sql, ui))).toBeUndefined();
+    expect(picks).toHaveLength(1);
+    expect(ui.confirms).toEqual([]);
+    expect(erdFiles()).toEqual([]);
+    expect(features()).toContain('importSqlDdlCancelled');
+
+    const plain = path.join(tmp, 'plain.sql');
+    fs.writeFileSync(plain, 'CREATE TABLE a (id int);');
+    const other = partitionUi(plain, 'tables');
+    expect(await importSqlDdl(deps(other.sql, importUi()))).toBeDefined();
+    expect(other.picks).toEqual([]);
+  });
+
+  it('Change Options…: the answer read before is offered first', async () => {
+    const file = path.join(tmp, 'payments.sql');
+    fs.writeFileSync(file, PARTITIONED);
+    const { sql, picks } = partitionUi(file, 'fold');
+    await importSqlDdl(deps(sql, importUi()), undefined, { partitions: 'tables' });
+    expect(picks[0].items.map((i) => [i.mode, i.description])).toEqual([
+      ['tables', 'read this way before · 2 more tables, each with its parent\'s columns'],
+      ['fold', 'recommended · 2 partitions are the parent\'s rows'],
+    ]);
   });
 });

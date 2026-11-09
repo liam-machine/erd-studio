@@ -7,7 +7,7 @@
  *
  *  - pagila: 73 `timestamp with time zone` columns and `public.vector(20)`
  *    kept as written, 5 unique indexes kept as unique keys, film_embedding
- *    (FK = its whole key) one-to-one, the 55 partitions said;
+ *    (FK = its whole key) one-to-one, the 55 partitions folded into payment and said;
  *  - AdventureWorks: all 90 FKs from the ALTER TABLE action lists (the
  *    composite too), all 530 MS_Description descriptions, every AK unique
  *    index, the 6 one-to-ones (FK = whole key);
@@ -42,14 +42,15 @@ const column = (run: ImportRun, table: string, name: string) =>
 describe('sql-fidelity: the real-world samples', () => {
   it('pagila: time zones, vector(20), unique indexes, film_embedding one-to-one, partitions said', async () => {
     const { run, score } = await sample('postgres-pagila');
-    expect(score.tables.matched).toBe(71);
-    expect(run.tables.flatMap((t) => t.columns ?? []).filter((c) => /with time zone/i.test(c.dataType))).toHaveLength(73);
+    // The 55 payment partitions fold into payment: 18 time-zone columns on the 16 tables (73 with each partition a table).
+    expect(score.tables.matched).toBe(16);
+    expect(run.tables.flatMap((t) => t.columns ?? []).filter((c) => /with time zone/i.test(c.dataType))).toHaveLength(18);
     expect(column(run, 'film_embedding', 'embedding')?.dataType).toBe('public.vector(20)');
     expect(score.uniqueKeys).toMatchObject({ source: 5, kept: 5, lost: 0 });
     expect(score.oneToOne).toMatchObject({ source: 1, imported: 1, drawnAsMany: [] });
     expect(run.relationships.find((r) => r.fromModel === 'film_embedding')).toMatchObject({ toModel: 'film', cardinality: 'one-to-one' });
     expect(score.types.detailLost).toEqual([]);
-    expect(run.notes.some((n) => /55 tables: partitions of public\.payment/.test(n))).toBe(true);
+    expect(run.notes.some((n) => /55 tables: partitions of public\.payment folded into public\.payment \(ATTACH PARTITION: the parent's rows\)/.test(n))).toBe(true);
     expect(run.leftOut.some((n) => /generated column expression/.test(n) && /length_hours/.test(n))).toBe(true);
   });
 
