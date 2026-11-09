@@ -616,6 +616,17 @@ function afterNamePart(tokens: readonly Token[], offset: number): boolean {
     && !!before && (before.kind === 'word' || before.kind === 'ident') && before.end === dot.start;
 }
 
+/**
+ * A `COMMENT [=] '…'` between a CREATE TABLE's name (`next`: the token after
+ * it) and its column list: the clause's first and last token, and the text.
+ */
+export function leadingTableComment(t: readonly Token[], next: number): { from: number; to: number; comment: string } | undefined {
+  if (upper(t[next]) !== 'COMMENT') return undefined;
+  const value = isPunct(t[next + 1], '=') ? next + 2 : next + 1;
+  if (t[value]?.kind !== 'string' || !isPunct(t[value + 1], '(')) return undefined;
+  return { from: next, to: value, comment: t[value].value };
+}
+
 /** Whether only spaces precede `offset` on its line. */
 export function isLineStart(text: string, offset: number): boolean {
   for (let k = offset - 1; k >= 0; k--) {

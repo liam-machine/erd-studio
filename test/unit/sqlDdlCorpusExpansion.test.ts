@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SqlDdlToDbmlResult, SqlDialect } from '../../src/services/sqlDdlImport';
 import { tokenize } from '../../src/services/sqlDdlLexer';
+import { neutralisePlaceholders } from '../../src/services/sqlDdlPlaceholders';
 import { sqlDdlToDbml } from '../../src/services/sqlImportEngine';
 
 type Converted = Extract<SqlDdlToDbmlResult, { ok: true }>;
@@ -97,5 +98,40 @@ describe('CREATE TABLE … AS SELECT', () => {
     expect(line).toContain('c19 (line 21)');
     expect(line).not.toContain('c20 ');
     expect(line.endsWith(' and 3 more')).toBe(true);
+  });
+});
+
+describe('a table comment before the column list', () => {
+  it('Snowflake: CREATE TABLE x COMMENT = \'…\' (columns) imports, the comment as its note', () => {
+    const r = read('snowflake', [
+      'create or replace table db.s.factory comment=\'{"origin":"x","v":{"a":1}}\' (',
+      '\tID NUMBER(4,0) NOT NULL,',
+      '\tNAME VARCHAR(12),',
+      '\tGEN INT AS (ID + 1)',
+      ');',
+      'create table t2 comment = \'before\' (a int) comment = \'after\';',
+    ].join('\n'));
+    expect(tableNames(r.dbml)).toEqual(['s.factory', 't2']);
+    expect(columnNames(r.dbml)).toEqual(['ID', 'NAME', 'GEN', 'a']);
+    expect(r.dbml).toContain('Note: \'{"origin":"x","v":{"a":1}}\'');
+    // The comment after the column list is the table's own.
+    expect(r.dbml).toContain('Note: \'after\'');
+    // What the column list says beyond the model is still recorded, with its line.
+    const gen = (r.ledger ?? []).find((e) => e.what === 'generated column expression');
+    expect(gen?.where).toMatchObject({ table: 's.factory', column: 'GEN', line: 4 });
+  });
+});
+
+describe('template placeholders', () => {
+  it('Jinja subscripts: {{ params[\'name\'] }}.t reads as name.t', () => {
+    const r = read('bigquery', 'CREATE SCHEMA IF NOT EXISTS {{ params[\'name\'] }};\nCREATE TABLE IF NOT EXISTS\n  {{ params["name"] }}.all_clicks(\n    id STRING,\n    n INT64\n);');
+    expect(tableNames(r.dbml)).toEqual(['name.all_clicks']);
+  });
+
+  it('Python format fields: {schema}.t and stg_{env} read as names; a lone {x} in an expression is left alone', () => {
+    const r = read('redshift', 'CREATE TABLE IF NOT EXISTS {redshift_schema_edl}.student_profiles\n(\n    sid VARCHAR NOT NULL,\n    feed VARCHAR(max) NOT NULL\n)\nDISTKEY (sid);\nCREATE TABLE stg_{env} (a INT);');
+    expect(tableNames(r.dbml)).toEqual(['redshift_schema_edl.student_profiles', 'stg_env']);
+    expect(columnNames(r.dbml)).toEqual(['sid', 'feed', 'a']);
+    expect(neutralisePlaceholders('SELECT { x } , {x} FROM t', 'snowflake').count).toBe(0);
   });
 });

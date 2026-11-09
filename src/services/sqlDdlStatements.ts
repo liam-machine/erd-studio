@@ -38,6 +38,7 @@ import {
   isName,
   isSqlPlusCommand,
   isPunct,
+  leadingTableComment,
   matchParen,
   optionsDescription,
   readColumnList,
@@ -233,9 +234,11 @@ function readCreateTableStatement(cx: ConverterContext, file: string, text: stri
   }
   const before = cx.tables.length;
   cx.readCreateTable(file, text, st, at);
-  if (cx.tables.length > before && name && isPunct(t[name.next], '(')) {
-    const close = matchParen(t, name.next);
-    if (close > 0) afterCreateTable(cx, file, t, name.next, close, cx.tables[cx.tables.length - 1]);
+  // The column list: after the name, or after a `COMMENT = '…'` written before it.
+  const open = name ? (isPunct(t[name.next], '(') ? name.next : (leadingTableComment(t, name.next)?.to ?? -2) + 1) : -1;
+  if (cx.tables.length > before && open > 0) {
+    const close = matchParen(t, open);
+    if (close > 0) afterCreateTable(cx, file, t, open, close, cx.tables[cx.tables.length - 1]);
   }
 }
 

@@ -2,8 +2,8 @@
  * Template placeholders in SQL DDL, neutralised before anything reads the
  * text: `${catalog}.${schema}.orders` (Databricks bundles, Terraform),
  * `{{ schema }}` and `{{ var('schema') }}` (dbt, Jinja), `$(schema)`
- * (sqlcmd), `@schema@` (Ant, Maven), `<%= schema %>` (ERB), `%(schema)s`
- * (Python), `&schema.` (SQL*Plus). Real deployments fill them in; an import
+ * (sqlcmd), `@schema@` (Ant, Maven), `<%= schema %>` (ERB), `%(schema)s` and
+ * `{schema}.orders` (Python), `&schema.` (SQL*Plus). Real deployments fill them in; an import
  * reads the file as written, so each placeholder becomes the name inside it:
  *
  *  - a placeholder that is a whole catalog (the first part of a three-part
@@ -76,7 +76,7 @@ const NAME_START = /[A-Za-z_\u0080-￿]/;
 const BACKSLASH = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake', 'bigquery']);
 
 /** A cheap first test: none of the syntaxes' opening characters means nothing to do. */
-const MAY_HOLD = /\$\{|\{\{|\{%|\{#|\$\(|@[A-Za-z_]\w*@|<%|%\(|&&?[A-Za-z_]\w*\./;
+const MAY_HOLD = /\$\{|\{\{|\{%|\{#|\{[A-Za-z_]\w*\}|\$\(|@[A-Za-z_]\w*@|<%|%\(|&&?[A-Za-z_]\w*\./;
 
 /** The placeholder starting at `i`, or undefined. */
 function placeholderAt(text: string, i: number): Match | undefined {
@@ -102,6 +102,14 @@ function placeholderAt(text: string, i: number): Match | undefined {
     const end = text.indexOf('}}', i + 2);
     if (end < 0 || end - i > 1024 || text.slice(i + 2, end).includes('\n\n')) return undefined;
     return { start: i, end: end + 2, ...jinjaName(text.slice(i + 2, end)) };
+  }
+  if (c === '{') {
+    // Python's str.format: `{schema}.orders`, `stg_{env}` (only where it joins a name: a dot or a name character beside it).
+    const m = /^\{([A-Za-z_]\w*)\}/.exec(rest(128));
+    if (!m) return undefined;
+    const before = i > 0 ? text[i - 1] : '';
+    const after = text[i + m[0].length] ?? '';
+    return before === '.' || NAME_CHAR.test(before) || after === '.' || NAME_CHAR.test(after) ? { start: i, end: i + m[0].length, name: m[1] } : undefined;
   }
   if (c === '@') {
     if (i > 0 && text[i - 1] === '@') return undefined;
@@ -137,7 +145,7 @@ function qualified(dotted: string): { name: string; full?: string } {
 
 /**
  * The name a Jinja expression stands for: `{{ schema }}` → schema,
- * `{{ target.schema }}` → schema, `{{ var('schema', 'x') }}` → schema,
+ * `{{ target.schema }}` and `{{ params['schema'] }}` → schema, `{{ var('schema', 'x') }}` → schema,
  * `{{ source('raw', 'orders') }}` → orders, `{{ ref('orders') }}` → orders;
  * '' for anything else (`{{ config(…) }}`), which then reads as spaces.
  */
@@ -145,6 +153,9 @@ function jinjaName(inner: string): { name: string; full?: string } {
   const expr = inner.replace(/^-|-$/g, '').split('|')[0].trim();
   const bare = /^([A-Za-z_][\w.]*)$/.exec(expr);
   if (bare) return qualified(bare[1]);
+  // `{{ params['name'] }}` (Airflow, Jinja's subscript): the key, as `{{ params.name }}` reads.
+  const subscript = /^([A-Za-z_][\w.]*)\s*\[\s*(?:'([A-Za-z_]\w*)'|"([A-Za-z_]\w*)")\s*\]$/.exec(expr);
+  if (subscript) return qualified(`${subscript[1]}.${subscript[2] ?? subscript[3]}`);
   const call = /^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/.exec(expr);
   if (!call) return { name: '' };
   const strings = [...call[2].matchAll(/'([^']*)'|"([^"]*)"/g)].map((m) => m[1] ?? m[2] ?? '');

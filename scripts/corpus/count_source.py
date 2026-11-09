@@ -109,6 +109,9 @@ def preprocess(text, dialect):
     # Template placeholders: @cdmDatabaseSchema.person → cdmDatabaseSchema.person, ${catalog} → catalog.
     text = re.sub(r'@(\w+)\.', r' \1.', text)
     text = re.sub(r'\$\{(\w+)\}', r'\1', text)
+    # Jinja names: {{ schema }}, {{ target.schema }}, {{ params['schema'] }} → schema.
+    text = re.sub(r'\{\{-?\s*(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*-?\}\}', r'\1', text)
+    text = re.sub(r'\{\{-?\s*[A-Za-z_][\w.]*\s*\[\s*[\'"]([A-Za-z_]\w*)[\'"]\s*\]\s*-?\}\}', r'\1', text)
     return text
 
 
@@ -450,7 +453,8 @@ def on_create_table(m, e, dialect, where, written=None):
     t, key = m.create(name, schema_of(tbl), where)
     if not isinstance(target, exp.Schema):
         q = e.args.get('expression')
-        if isinstance(q, exp.Select):
+        # SELECT * (or t.*) names no columns: the source table's, which may not be in the files.
+        if isinstance(q, exp.Select) and not any(isinstance(p, exp.Star) or (isinstance(p, exp.Column) and isinstance(p.this, exp.Star)) for p in q.expressions):
             # CREATE TABLE ... AS SELECT CAST(NULL AS integer) AS person_id, ...: the projections are the columns.
             for p in q.expressions:
                 inner = p.this if isinstance(p, exp.Alias) else p

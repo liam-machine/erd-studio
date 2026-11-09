@@ -70,6 +70,7 @@ import {
   GO_LINE,
   isName,
   isPunct,
+  leadingTableComment,
   matchParen,
   readColumnList,
   readName,
@@ -779,7 +780,7 @@ function strayBeforeColumnList(t: Token[], next: number): boolean {
   // `(LIKE y INCLUDING ALL)`: a copy of another table's columns.
   if (upper(t[open + 1]) === 'LIKE' && splitTopLevel(t, open + 1, close).length === 1) return false;
   for (let k = close + 1; k < t.length; k++) {
-    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return typedColumnList(t, name.next, close);
+    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
   }
   return true;
 }
@@ -1255,6 +1256,9 @@ class Converter implements ConverterContext {
       const typed = typedSelectColumns(t, text, name.next);
       if (typed) { this.readTypedSelect(file, text, st, at, name.next, typed); return; }
     }
+    // `CREATE TABLE x COMMENT = '…' (columns)` (Snowflake takes the table's comment before its column list): the comment set aside, the table read.
+    const leading = name && !this.readingLeadingComment ? leadingTableComment(t, name.next) : undefined;
+    if (leading) { this.readLeadingComment(file, text, st, at, leading); return; }
     if (name && !isPunct(t[name.next], '(') && strayBeforeColumnList(t, name.next)) {
       // A column list behind a stray quote or word (`CREATE TABLE a" (`): a table that did not read, never a CTAS.
       if (this.readingColumns === 0) this.tablesFound++;
@@ -1619,6 +1623,31 @@ class Converter implements ConverterContext {
     for (const c of cols) {
       if (c.inner) this.ledger.changed('type', 'inferred', 'type from an expression', { file, line: c.line, table: label, column: c.name }, 'the type of the CAST inside it');
     }
+  }
+
+  /** Set while a table's leading `COMMENT = '…'` is set aside ({@link readLeadingComment}): never twice. */
+  private readingLeadingComment = false;
+
+  /**
+   * `CREATE TABLE x COMMENT = '…' (a INT, …)` read as `CREATE TABLE x (a INT, …)`
+   * with the comment as the table's note (unless the statement has its own
+   * after the column list). The clause is blanked, so every line keeps its number.
+   */
+  private readLeadingComment(file: string, text: string, st: Statement, at: number, leading: { from: number; to: number; comment: string }): void {
+    const t = st.tokens;
+    const start = t[leading.from].start;
+    const end = t[leading.to].end;
+    const newText = text.slice(0, start) + text.slice(start, end).replace(/[^\n]/g, ' ') + text.slice(end);
+    const tokens = [...t.slice(0, leading.from), ...t.slice(leading.to + 1)];
+    const tablesBefore = this.tables.length;
+    this.readingLeadingComment = true;
+    try {
+      this.readCreateTable(file, newText, { ...st, tokens }, at);
+    } finally {
+      this.readingLeadingComment = false;
+    }
+    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    if (table && table.note === undefined && leading.comment) table.note = leading.comment;
   }
 
   /**
