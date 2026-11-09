@@ -62,6 +62,7 @@ import {
 } from '../services/semanticModelImport';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
+import { recordImportOutcome } from '../services/importOutcomeTelemetry';
 import type { TelemetryFeature } from '../services/telemetryPayload';
 import {
   IMPORT_TITLES,
@@ -112,7 +113,7 @@ export interface ImportSemanticModelUi {
   showImportReport?(reportId?: number): Promise<void>;
 }
 
-export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
+export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
   modelUi?: ImportSemanticModelUi;
   /** The Import DBML half (layer, name, dry run, open). */
   ui?: ImportDbmlUi;
@@ -141,8 +142,17 @@ export async function importSemanticModel(
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
+  /**
+   * The model brought nothing in (`importOutcomeSemanticModelFail`). A success
+   * is counted by Import DBML's flow, once its plan is ready; quiet, the draft's
+   * early end is `draftDrop*` instead.
+   */
+  const failed = (): void => {
+    if (!quiet) recordImportOutcome((key) => telemetry.featureQuiet(key), { importer: 'powerbi', outcome: 'failed' });
+  };
   /** The model does not import: `importSemanticModelInvalid` and why (`reason`); quiet, the draft is dropped as unreadable. */
   const invalid = (message: string, actions: ErrorActions = {}, reason?: TelemetryFeature): undefined => {
+    failed();
     if (quiet) dropQuietly(deps.draft, 'unreadable');
     else {
       telemetry.feature('importSemanticModelInvalid');
@@ -153,6 +163,7 @@ export async function importSemanticModel(
   };
   /** The input could not be taken in (too many files, too much text, a file that does not read). */
   const limited = (limit: ImportInputLimit): void => {
+    failed();
     if (quiet) dropQuietly(deps.draft, 'unreadable');
     else telemetry.feature(IMPORT_LIMIT_FEATURES[limit]);
   };
@@ -293,6 +304,7 @@ export async function importSemanticModel(
     converted = semanticModelToDbml(read.model);
   } catch (err) {
     telemetry.error('importSemanticModelFailed');
+    failed();
     const doing = 'while converting the semantic model';
     log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
     showError(oursMessage(TITLE, doing, 'nothing was changed'), {

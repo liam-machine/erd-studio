@@ -97,6 +97,8 @@ import {
   type ImportReportSource,
 } from '../services/importReport';
 import { recordImportReport, updateImportReport } from '../services/importReportStore';
+import { recordImportOutcome, type ImportOutcome, type ImportOutcomeImporter } from '../services/importOutcomeTelemetry';
+import type { SqlDialect } from '../services/sqlDdlModel';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
@@ -135,6 +137,17 @@ export const IMPORT_SOURCE_TELEMETRY: Readonly<Record<ImportDbmlSource, {
     invalid: 'importSemanticModelInvalid',
     failed: 'importSemanticModelFailed',
   },
+};
+
+/**
+ * The importer each source's outcome is counted under
+ * (`importOutcomeTelemetry.ts`); the example is ERD Studio's own, so none.
+ */
+export const IMPORT_OUTCOME_IMPORTERS: Readonly<Record<ImportDbmlSource, ImportOutcomeImporter | undefined>> = {
+  file: 'dbml',
+  example: undefined,
+  sql: 'sql',
+  semanticModel: 'powerbi',
 };
 
 /**
@@ -255,6 +268,8 @@ export interface ImportDbmlDeps {
   source?: ImportDbmlSource;
   /** With `'sql'` / `'semanticModel'`: what the dry run says about the conversion. */
   origin?: ImportDbmlOrigin;
+  /** With `'sql'`: the dialect the conversion ran with (counted with the import's outcome, nothing else). */
+  sqlDialect?: SqlDialect;
   /**
    * A DBML file in the open folder (the start screen's look at it found one),
    * which the Open dialog then starts on, chosen, so Import takes it in one
@@ -362,6 +377,27 @@ interface ImportRunProgress {
   loud: boolean;
   /** The draft's Keep, not settled yet. */
   settle?: (outcome: DraftKeepOutcome) => void;
+  /** The run's import outcome is counted (`importOutcomeTelemetry.ts`): at most one per run, none on a redraw. */
+  outcomeCounted?: boolean;
+}
+
+/**
+ * Count how the run's import ended (`importOutcomeTelemetry.ts`), once per
+ * run, never for the example. Off the onboarding trail (`featureQuiet`).
+ */
+function countImportOutcome(
+  deps: Pick<ImportDbmlDeps, 'source' | 'sqlDialect'>,
+  progress: ImportRunProgress,
+  report: { outcome?: ImportOutcome; ledger?: readonly LedgerEntry[] },
+): void {
+  const importer = IMPORT_OUTCOME_IMPORTERS[deps.source ?? 'file'];
+  if (!importer || progress.outcomeCounted) return;
+  progress.outcomeCounted = true;
+  recordImportOutcome((key) => telemetry.featureQuiet(key), {
+    importer,
+    ...report,
+    ...(importer === 'sql' && deps.sqlDialect ? { dialect: deps.sqlDialect } : {}),
+  });
 }
 
 /** The title an unexpected failure is said under (Open Example Diagram is its own command, #236). */
@@ -381,7 +417,8 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
   const base = deps.ui ?? vscodeImportDbmlUi();
   const source = deps.source ?? 'file';
   const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[source]) : base;
-  const progress: ImportRunProgress = { loud: !deps.draft?.quiet };
+  // A redraw re-plans a draft whose outcome is already counted: nothing it meets is counted again.
+  const progress: ImportRunProgress = { loud: !deps.draft?.quiet, outcomeCounted: resume?.redraw !== undefined };
   try {
     return await runImportDbml(deps, ui, base, resume, progress);
   } catch (err) {
@@ -389,6 +426,8 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
     // A Keep left waiting gets its answer: kept when the diagram is on disk.
     progress.settle?.(progress.written ? { kept: true } : { kept: false });
     if (!progress.loud) throw err;
+    // Before the import had an outcome, the throw is its outcome.
+    countImportOutcome(deps, progress, { outcome: 'failed' });
     log.error(`[ERD Studio] ${failureTitle(source)} failed:`, err);
     reportUnexpectedImportFailure(base, source, progress, err);
     return undefined;
@@ -470,6 +509,10 @@ async function runImportDbml(
     if (counts.cancelled && !quiet) telemetry.feature(counts.cancelled);
     return undefined;
   };
+  /** The source brought nothing in (`importOutcome*Fail`); never on the automatic draft, whose early end is `draftDrop*`. */
+  const failedOutcome = (): void => {
+    if (!quiet) countImportOutcome(deps, progress, { outcome: 'failed' });
+  };
 
   /** Show an error with its buttons, and run the one the user picks. Never awaited. */
   const showError = (message: string, actions: ErrorActions = {}): void => {
@@ -509,6 +552,7 @@ async function runImportDbml(
     log.error(`[ERD Studio] ${title}: could not read the file:`, err);
     if (quiet) dropQuietly(draftOptions, 'unreadable');
     else telemetry.feature('importInputUnreadable');
+    failedOutcome();
     showError(`${title} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
@@ -521,6 +565,7 @@ async function runImportDbml(
   if (!read.ok && generated) {
     // DBML ERD Studio converted itself and cannot read back: our failure.
     telemetry.error(counts.failed);
+    failedOutcome();
     log.error(`[ERD Studio] ${title}: the converted DBML does not read:`, read.diagnostics.slice(0, 5).map((d) => `line ${d.line}: ${d.message}`).join('; '));
     const doing = 'while reading the converted model';
     showError(oursMessage(title, doing, 'nothing was changed'), {
@@ -530,6 +575,7 @@ async function runImportDbml(
   }
   if (!read.ok) {
     dropQuietly(draftOptions, 'unreadable');
+    failedOutcome();
     if (read.threw) {
       // The parser itself stopped: ours, not the user's file (the message to them is the same).
       telemetry.error('importDbmlParserThrew');
@@ -561,6 +607,7 @@ async function runImportDbml(
   if (model.tables.length === 0) {
     if (quiet) dropQuietly(draftOptions, 'nothingDrawable');
     else telemetry.feature('importDbmlNoTables');
+    failedOutcome();
     void ui.showInformationMessage(`${title}: ${fileName} has no tables, so there is nothing to import.`);
     return undefined;
   }
@@ -733,6 +780,7 @@ async function runImportDbml(
       return undefined;
     }
     telemetry.error(counts.failed);
+    failedOutcome();
     const doing = 'while preparing the import';
     showError(oursMessage(title, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
@@ -751,6 +799,9 @@ async function runImportDbml(
     showUnsaved(dirty[0]);
     return undefined;
   }
+  // The import has its result (the plan, about to show): how the reading went and the
+  // ledger's cause classes, the conversion's and the plan's. Never again on a redraw of it.
+  countImportOutcome(deps, progress, { ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])] });
 
   // 5. The draft: the plan as a read-only diagram, what it creates, reuses and
   // leaves out, before any write (or, with no preview, the dry run's modal).

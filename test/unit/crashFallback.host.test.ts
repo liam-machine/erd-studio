@@ -263,9 +263,12 @@ describe('crashFallback payload and prefill', () => {
     expect(validateCrashFallbackPayload(['reload'])).toBe(false);
   });
 
-  it('is an "other" handler group, and its two keys are appended at the end of FEATURES', () => {
+  it('is an "other" handler group, and its two keys are appended as one run after the 2.0 launch keys', () => {
     expect(handlerGroupOf('crashFallback')).toBe('other');
-    expect(FEATURES.slice(-2)).toEqual(['crashFallbackReload', 'crashFallbackFeedback']);
+    // The import outcome keys were appended after them (importOutcomeTelemetry.test.ts).
+    const at = FEATURES.indexOf('crashFallbackReload');
+    expect(FEATURES.slice(at, at + 3)).toEqual(['crashFallbackReload', 'crashFallbackFeedback', 'importOutcomeSqlDdlClean']);
+    expect(FEATURES[at - 1]).toBe('handlerFileProblem');
   });
 
   it('a crash detail is the first line only, with the error kind, and cut short', () => {

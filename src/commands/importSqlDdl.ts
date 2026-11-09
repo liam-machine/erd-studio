@@ -100,6 +100,7 @@ import {
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import type { SqlImportModule } from '../services/sqlImportLoader';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, sqlInvalidFeatures, type ImportInputLimit } from '../services/importTelemetry';
+import { recordImportOutcome } from '../services/importOutcomeTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
@@ -196,7 +197,7 @@ export interface SqlProgressReporter {
   report(message: string, fraction?: number): void;
 }
 
-export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
+export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
   /** The extension's folder: the SQL importer is `<extensionPath>/dist/sqlImport.js`. */
   extensionPath: string;
   sqlUi?: ImportSqlDdlUi;
@@ -376,6 +377,20 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
     if (!quiet) telemetry.feature('importSqlDdlCancelled');
     return undefined;
   };
+  /**
+   * The scripts brought nothing in (`importOutcomeSqlDdlFail`, by dialect when
+   * one was chosen, with the ledger's cause classes when the reading has one).
+   * A success is counted by Import DBML's flow, once its plan is ready.
+   */
+  const failed = (dialect?: SqlDialect, ledger?: readonly LedgerEntry[]): void => {
+    if (quiet) return;
+    recordImportOutcome((key) => telemetry.featureQuiet(key), {
+      importer: 'sql',
+      outcome: 'failed',
+      ...(dialect ? { dialect } : {}),
+      ...(ledger ? { ledger } : {}),
+    });
+  };
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
@@ -383,8 +398,9 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
-  const ours = (doing: string, err: unknown, code: TelemetryErrorCode = 'importSqlDdlFailed'): undefined => {
+  const ours = (doing: string, err: unknown, code: TelemetryErrorCode = 'importSqlDdlFailed', dialect?: SqlDialect): undefined => {
     telemetry.error(code);
+    failed(dialect);
     log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
     showError(oursMessage(TITLE, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)),
@@ -395,6 +411,8 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
   const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }): undefined => {
     if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
     if (gathered.limit && !quiet) telemetry.feature(IMPORT_LIMIT_FEATURES[gathered.limit]);
+    // No scripts in the folder, a limit or a file that does not read; "no files were picked" is neither.
+    if (gathered.error || gathered.invalid) failed();
     if (gathered.error) showError(gathered.message);
     else void ui.showInformationMessage(gathered.message);
     return undefined;
@@ -428,7 +446,7 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
     showError(`${TITLE} reached its time limit${limit} before it read a table, so nothing was imported. Raise the limit (${TIME_LIMIT_SETTING}), or import fewer scripts at a time.`, actions);
     return undefined;
   };
-  return { cancelled, showError, ours, gatherMessage, invalid, stoppedBeforeATable };
+  return { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable };
 }
 
 /** The setting that holds the time limit (seconds). */
@@ -581,7 +599,7 @@ function noDialectReason(readings: ReadonlyMap<SqlDialect, SqlDialectReading>, d
  */
 export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, preset: SqlPreset = {}): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
-  const { cancelled, showError, ours, gatherMessage, invalid, stoppedBeforeATable } = sqlRun(ui, deps.draft?.quiet === true, deps.draft);
+  const { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable } = sqlRun(ui, deps.draft?.quiet === true, deps.draft);
 
   // 1. The scripts.
   let read = resume;
@@ -678,7 +696,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
           return ours('while loading its SQL importer', err.cause ?? err, 'importSqlEngineLoadFailed');
         }
         if (err instanceof SqlConvertAbandonedError) return stoppedBeforeATable(err.reason, deps.timeLimitMs);
-        return ours('while converting the SQL', err);
+        return ours('while converting the SQL', err, undefined, dialect);
       }
     }
   } finally {
@@ -689,6 +707,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   if (result.stopped) logStop(result.stopped, result.ledger, deps.timeLimitMs);
   if (!result.ok) {
     invalid(result.problems, dialect);
+    failed(dialect, result.ledger ?? []);
     for (const line of ledgerLogLinesWithoutProblems(result.ledger ?? [])) log.info(`[ERD Studio] ${line}`);
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
@@ -751,6 +770,7 @@ function importConvertedSql(
     ...rest,
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
     source: 'sql',
+    sqlDialect: dialect,
     origin: {
       from: sqlOriginPhrase(read.files.length, dialectLabel),
       description: `Imported from ${read.sourceLabel} (${dialectLabel}).`,
