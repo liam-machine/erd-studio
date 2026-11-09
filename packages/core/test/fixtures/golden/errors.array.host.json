@@ -1,6 +1,7 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/array.json does not contain a JSON object"
+    "message": "Subject area file .erd-studio/silver/array.json does not contain a JSON object.",
+    "kind": "invalid"
   }
 }
