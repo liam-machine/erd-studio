@@ -171,7 +171,7 @@ function draftStrings(draft: Draft): string[] {
 }
 
 /** Import DBML's flow for a fresh DBML project: one Main layer, every relationship in the library (D5). */
-function importDbmlFlow(
+export function importDbmlFlow(
   dbml: string,
   fileName: string,
   importSource: 'file' | 'sql' | 'semanticModel',

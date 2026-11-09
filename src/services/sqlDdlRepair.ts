@@ -435,7 +435,11 @@ export function rewriteCreateTable(input: RewriteInput): Rewrite {
       if (phrases.length || comment) {
         repairs.push({
           rung: 'options', unit: 'table', cause: 'trailingOption', what: 'table options',
-          detail: `${phrases.length ? `set aside: ${phrases.slice(0, 4).join(', ')}${phrases.length > 4 ? '…' : ''}` : 'read'}${comment ? `${phrases.length ? '; ' : ''}COMMENT kept as the table note` : ''}`,
+          // `set aside: CLUSTER BY; COMMENT kept as the table note`, or the COMMENT alone (never `readCOMMENT …`).
+          detail: [
+            ...(phrases.length ? [`set aside: ${phrases.slice(0, 4).join(', ')}${phrases.length > 4 ? '…' : ''}`] : []),
+            ...(comment ? ['COMMENT kept as the table note'] : []),
+          ].join('; '),
           line: t[close + 1].line,
         });
       }

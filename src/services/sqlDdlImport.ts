@@ -734,12 +734,37 @@ function typedSelectColumns(t: Token[], text: string | undefined, at: number): {
   return columns.length ? { select, end, columns } : undefined;
 }
 
+/** Words that make a CREATE TABLE one without a column list of its own (or one read elsewhere): never a stray before one. */
+const NO_COLUMN_LIST_WORDS = new Set(['AS', 'LIKE', 'CLONE', 'PARTITION', 'OF', 'INHERITS', 'SELECT', 'COPY', 'USING', 'LOCATION']);
+
+/**
+ * Whether the tokens from `next` (just after a CREATE TABLE's name) are a
+ * column list with a stray token before it: one or two tokens that are not
+ * words of their own (a quoted name or string a lost quote left, a stray
+ * punctuation mark) then `(`, or a quote left open that took the `(` to the
+ * end of its line; and nothing anywhere that makes the statement a CTAS,
+ * `LIKE`, `CLONE` or partition (`NO_COLUMN_LIST_WORDS`).
+ */
+function strayBeforeColumnList(t: Token[], next: number): boolean {
+  if (t.some((tok) => tok.kind === 'word' && NO_COLUMN_LIST_WORDS.has(tok.value.toUpperCase()))) return false;
+  // A quote opened just before the `(` ran to the end of the line and took the `(` with it (`a" (`).
+  const stray = t[next];
+  if (stray && (stray.kind === 'ident' || stray.kind === 'string') && /\(\s*$/.test(stray.value)) {
+    return t.slice(next + 1).some((tok) => isPunct(tok, ')')) && next + 2 < t.length;
+  }
+  const open = [next + 1, next + 2].find((k) => isPunct(t[k], '('));
+  if (open === undefined) return false;
+  for (let k = next; k < open; k++) if (t[k].kind === 'word' || isPunct(t[k], ';') || isPunct(t[k], '.')) return false;
+  return matchParen(t, open) > open + 1;
+}
+
 /** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
 function isCreateTableWithColumns(t: Token[]): boolean {
   const head = createTableName(t);
   if (!head) return false;
   const name = readName(t, head.at);
   if (name && !isPunct(t[name.next], '(') && typedSelectColumns(t, undefined, name.next)) return true;
+  if (name && !isPunct(t[name.next], '(') && strayBeforeColumnList(t, name.next)) return true;
   if (!name || !isPunct(t[name.next], '(')) return false;
   const close = matchParen(t, name.next);
   if (close < 0 || close === name.next + 1) return false;
@@ -1194,6 +1219,12 @@ class Converter implements ConverterContext {
       // `CREATE TABLE x AS SELECT CAST(NULL AS int) AS a, … WHERE 1 = 0`: read as the column list it means.
       const typed = typedSelectColumns(t, text, name.next);
       if (typed) { this.readTypedSelect(file, text, st, at, name.next, typed); return; }
+    }
+    if (name && !isPunct(t[name.next], '(') && strayBeforeColumnList(t, name.next)) {
+      // A column list behind a stray quote or word (`CREATE TABLE a" (`): a table that did not read, never a CTAS.
+      if (this.readingColumns === 0) this.tablesFound++;
+      this.problems.push({ file, line: st.line, message: `CREATE TABLE ${name.parts.join('.')}: something stands between its name and its column list (a stray quote or word).`, kind: 'structure', table: name.parts.slice(-2).join('.') });
+      return;
     }
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
     // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.

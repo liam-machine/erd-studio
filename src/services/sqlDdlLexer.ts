@@ -196,8 +196,8 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
         value += ch;
         i++;
       }
-      if (!closed) {
-        // Open at the end of the text: only to the end of its line.
+      if (!closed || lostQuote(text, start, i, 'string')) {
+        // Open at the end of the text, or a quote lost (it runs across statements): only to the end of its line.
         i = lineEnd(start);
         value = text.slice(start + 1, i);
       }
@@ -227,6 +227,8 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
       i++;
       while (i < n) {
         if (escapes && text[i] === '\\' && i + 1 < n) { value += unescapeChar(text[i + 1]); i += 2; continue; }
+        // A quoted name never spans lines (see lostQuote): it runs to the end of its line.
+        if (!escapes && text[i] === '\n') break;
         if (text[i] === closeChar) {
           if (text[i + 1] === closeChar) { value += closeChar; i += 2; continue; }
           i++;
@@ -236,7 +238,7 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
         value += text[i];
         i++;
       }
-      if (!closed) {
+      if (!closed || (escapes && lostQuote(text, start, i, 'string'))) {
         i = lineEnd(start);
         value = text.slice(start + 1, i);
       }
@@ -288,6 +290,27 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
     i++;
   }
   return tokens;
+}
+
+/** A line ending a statement (`;`), then (after any blank or comment lines) one starting a new one at its first column. */
+const STATEMENT_BOUNDARY = /;[ \t\r]*(?:(?:--|#)[^\n]*)?\n(?:[ \t\r]*(?:(?:--|#)[^\n]*|\/\*[^\n]*?\*\/[ \t\r]*)?\n)*(?:CREATE|ALTER|DROP|INSERT[ \t]+INTO|COMMENT[ \t]+ON|GRANT|REVOKE|TRUNCATE)\b/i;
+
+/**
+ * Whether the quoted text from `start` (its opening quote) to `end` (just
+ * past its closing one) lost a quote, so it must be read as one left open
+ * (to the end of its line) rather than paired with this closing quote: every
+ * quote after a lost one would pair with the wrong partner and the rest of
+ * the file read inside out, its tables gone without a word. A quoted name
+ * never spans lines; a string that does is legitimate (a multi-line
+ * comment) unless it runs across the end of one statement into the start of
+ * the next, at the first column (`…';` then `CREATE TABLE …`). Shared by
+ * every scanner that pairs quotes, so they read a file alike.
+ */
+export function lostQuote(text: string, start: number, end: number, kind: 'string' | 'name'): boolean {
+  const nl = text.indexOf('\n', start);
+  if (nl < 0 || nl >= end) return false;
+  if (kind === 'name') return true;
+  return STATEMENT_BOUNDARY.test(text.slice(start, end));
 }
 
 /** Dialects whose "…" is a string (not a name), read with backslash escapes. */

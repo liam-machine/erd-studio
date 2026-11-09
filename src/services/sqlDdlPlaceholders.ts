@@ -25,7 +25,7 @@
  * `dist/sqlImport.js`.
  */
 
-import { isEscapeStringPrefix, nonStandardStrings } from './sqlDdlLexer';
+import { isEscapeStringPrefix, lostQuote, nonStandardStrings } from './sqlDdlLexer';
 import type { SqlDialect } from './sqlDdlModel';
 
 export interface PlaceholderPass {
@@ -336,8 +336,9 @@ function findPlaceholders(text: string, dialect: SqlDialect, ambiguous?: Readonl
         const quoted = quotedPlaceholders(text, i, j, closeChar, ambiguous);
         if (quoted) { out.push(quoted); i = j + 1; continue; }
       }
-      // Unterminated: only to the end of its line (the lexer reads it the same way).
-      i = j >= n ? lineEnd(text, i) : j + 1;
+      // Unterminated, or a quote lost: only to the end of its line (the lexer reads it the same way).
+      const string = c === "'" || backslash;
+      i = j >= n || lostQuote(text, i, j + 1, string ? 'string' : 'name') ? lineEnd(text, i) : j + 1;
       continue;
     }
     if (c === '$' && text[i + 1] !== '{' && text[i + 1] !== '(') {
