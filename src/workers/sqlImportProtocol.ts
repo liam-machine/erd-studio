@@ -9,7 +9,7 @@
  * No `vscode`.
  */
 
-import type { SqlConvertProgress, SqlDdlConvertOptions, SqlDdlToDbmlInput, SqlDdlToDbmlResult } from '../services/sqlDdlImport';
+import type { SqlConvertProgress, SqlDdlConvertOptions, SqlDdlToDbmlInput, SqlDdlToDbmlResult, SqlStopReason } from '../services/sqlDdlImport';
 
 /** The worker bundle's file name under `dist/`. */
 export const SQL_IMPORT_WORKER_BUNDLE = 'sqlImportWorker.js';
@@ -45,8 +45,16 @@ export interface SqlWorkerRequest {
 /** The value of `control[0]` once the host cancels. */
 export const SQL_WORKER_CANCELLED = 1;
 
-/** Worker → host. */
+/**
+ * Worker → host. `ready` is posted once, as the worker starts: a worker that
+ * fails before it posts anything could not start (the host converts
+ * in-process instead). `stopping` is posted once per request, when the
+ * reading stops at a cancel or the deadline: what is left is converting what
+ * was read, which the host's grace period never cuts short.
+ */
 export type SqlWorkerMessage =
+  | { id?: undefined; type: 'ready' }
+  | { id: number; type: 'stopping'; reason: SqlStopReason }
   | { id: number; type: 'progress'; progress: SqlConvertProgress }
   | { id: number; type: 'result'; result: SqlDdlToDbmlResult }
   /** `load`: the converter bundle could not be loaded (a broken install), not a failed conversion. */

@@ -34,6 +34,7 @@ parentPort!.on('message', (msg: SqlWorkerRequest) => {
   }
   const flag = new Int32Array(msg.control);
   let lastPost = 0;
+  let stopping: SqlStopReason | undefined;
   try {
     const result = engine.sqlDdlToDbml({
       ...msg.request,
@@ -41,8 +42,12 @@ parentPort!.on('message', (msg: SqlWorkerRequest) => {
         ...msg.request.options,
         ...(msg.timeLimitMs !== undefined ? { timeLimitMs: msg.timeLimitMs } : {}),
         shouldStop: (): SqlStopReason | undefined => {
-          if (Atomics.load(flag, 0) === SQL_WORKER_CANCELLED) return 'cancelled';
-          return msg.deadline !== undefined && Date.now() >= msg.deadline ? 'timeLimit' : undefined;
+          if (stopping) return stopping;
+          if (Atomics.load(flag, 0) === SQL_WORKER_CANCELLED) stopping = 'cancelled';
+          else if (msg.deadline !== undefined && Date.now() >= msg.deadline) stopping = 'timeLimit';
+          // Said once: the reading has stopped, and what is left (converting what was read) is never cut short.
+          if (stopping) post({ id: msg.id, type: 'stopping', reason: stopping });
+          return stopping;
         },
         onProgress: (progress) => {
           const now = Date.now();
@@ -57,3 +62,6 @@ parentPort!.on('message', (msg: SqlWorkerRequest) => {
     post({ id: msg.id, type: 'error', error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+// Started: a failure from here on is a failed conversion, not a worker that could not start.
+post({ type: 'ready' });

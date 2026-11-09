@@ -132,12 +132,17 @@ export interface WorkerSqlConverterOptions {
   graceMs?: number;
 }
 
+/** The longest delay a timer holds: a longer one fires at once (Node's TimeoutOverflowWarning). */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /**
  * The extension's converter: each conversion in a worker thread
  * (`dist/sqlImportWorker.js`), started on the first conversion and kept for
  * the next (the dialect ranking reads the scripts several times) until
- * `dispose`. Without the worker bundle, or when a worker cannot start, every
- * conversion runs in-process (`loadInProcess`).
+ * `dispose`. Without the worker bundle, or when a worker cannot start (it
+ * fails or exits before it says anything), every conversion runs in-process
+ * (`loadInProcess`). A worker that dies between conversions is replaced by
+ * the next one, and its error never reaches the host uncaught.
  */
 export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConverter {
   const { extensionPath } = options;
@@ -145,6 +150,8 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
   const workerFile = sqlImportWorkerPath(extensionPath);
   let fallback: SqlConverter | undefined;
   let worker: Worker | undefined;
+  /** Workers that have posted anything (`ready` first): a failure before that is one that could not start. */
+  const spoke = new WeakSet<Worker>();
   let nextId = 1;
 
   const inProcess = (why: string): SqlConverter => {
@@ -153,6 +160,17 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
       fallback = inProcessSqlConverter(options.loadInProcess ?? (() => loadSqlImport(extensionPath)));
     }
     return fallback;
+  };
+
+  const start = (): Worker => {
+    const data: SqlWorkerData = { extensionPath };
+    const w = new Worker(workerFile, { workerData: data });
+    // Listened to for the worker's whole life, not only during a conversion: an error while it
+    // is idle is never an uncaught exception on the host, and one that ended is never posted to.
+    w.on('message', () => { spoke.add(w); });
+    w.on('error', () => {});
+    w.on('exit', () => { if (worker === w) worker = undefined; });
+    return w;
   };
 
   const end = (w: Worker): void => {
@@ -166,8 +184,7 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
       if (!fs.existsSync(workerFile)) return inProcess(`no ${SQL_IMPORT_WORKER_BUNDLE}`).convert(request, control);
       if (!worker) {
         try {
-          const data: SqlWorkerData = { extensionPath };
-          worker = new Worker(workerFile, { workerData: data });
+          worker = start();
         } catch (err) {
           return inProcess(`the worker could not start: ${err instanceof Error ? err.message : String(err)}`).convert(request, control);
         }
@@ -186,6 +203,8 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
       return new Promise<SqlDdlToDbmlResult>((resolve, reject) => {
         let grace: ReturnType<typeof setTimeout> | undefined;
         let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+        /** The worker said it stopped reading: what is left is converting what it read, never cut short. */
+        let stopping = false;
         const settle = (): void => {
           clearTimeout(grace);
           clearTimeout(deadlineTimer);
@@ -196,7 +215,7 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
         };
         // A stop the worker does not reach (one statement keeps it busy): end it after the grace.
         const abandonAfterGrace = (reason: SqlStopReason): void => {
-          if (grace) return;
+          if (grace || stopping) return;
           grace = setTimeout(() => {
             settle();
             end(w);
@@ -207,9 +226,25 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
           Atomics.store(flag, 0, SQL_WORKER_CANCELLED);
           abandonAfterGrace('cancelled');
         };
+        /** A worker that failed before it said anything could not start: this conversion and the rest run in-process. */
+        const failed = (what: string, err: Error): void => {
+          settle();
+          end(w);
+          if (!spoke.has(w)) {
+            inProcess(`the worker could not start: ${what}`).convert(request, control).then(resolve, reject);
+            return;
+          }
+          reject(err);
+        };
         const onMessage = (msg: SqlWorkerMessage): void => {
           if (msg.id !== id) return;
           if (msg.type === 'progress') { control.onProgress?.(msg.progress); return; }
+          if (msg.type === 'stopping') {
+            stopping = true;
+            clearTimeout(grace);
+            grace = undefined;
+            return;
+          }
           settle();
           if (msg.type === 'result') { resolve(msg.result); return; }
           if (msg.load) {
@@ -220,23 +255,17 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
           }
           reject(new Error(msg.error));
         };
-        const onError = (err: Error): void => {
-          settle();
-          end(w);
-          reject(new Error(`The SQL import worker stopped: ${err.message}`));
-        };
-        const onExit = (code: number): void => {
-          settle();
-          if (worker === w) worker = undefined;
-          reject(new Error(`The SQL import worker exited unexpectedly (code ${code}).`));
-        };
+        const onError = (err: Error): void => failed(err.message, new Error(`The SQL import worker stopped: ${err.message}`));
+        const onExit = (code: number): void => failed(`it exited (code ${code})`, new Error(`The SQL import worker exited unexpectedly (code ${code}).`));
         w.on('message', onMessage);
         w.once('error', onError);
         w.once('exit', onExit);
         if (control.signal?.aborted) onAbort();
         else control.signal?.addEventListener('abort', onAbort, { once: true });
         if (control.deadline !== undefined) {
-          deadlineTimer = setTimeout(() => abandonAfterGrace('timeLimit'), Math.max(0, control.deadline - Date.now()));
+          const delay = Math.max(0, control.deadline - Date.now());
+          // Beyond what a timer holds the deadline is weeks away: the worker still stops at it, between statements.
+          if (delay <= MAX_TIMER_MS) deadlineTimer = setTimeout(() => abandonAfterGrace('timeLimit'), delay);
         }
         w.postMessage(message);
       });

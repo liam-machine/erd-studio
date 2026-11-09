@@ -214,10 +214,15 @@ export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' |
 /** `erdStudio.import.timeLimitSeconds`'s default, in ms. */
 export const DEFAULT_SQL_TIME_LIMIT_MS = 120_000;
 
-/** `erdStudio.import.timeLimitSeconds` in ms (0: no limit); a value that is not a number ≥ 0 is the default. */
+/**
+ * `erdStudio.import.timeLimitSeconds` in ms (0: no limit; any other value is
+ * at least 1 ms, never rounded to "no limit"); a value that is not a number
+ * ≥ 0 is the default.
+ */
 export function sqlImportTimeLimitMs(): number {
   const seconds = getErdStudioSetting<unknown>('import.timeLimitSeconds', DEFAULT_SQL_TIME_LIMIT_MS / 1000);
-  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : DEFAULT_SQL_TIME_LIMIT_MS;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return DEFAULT_SQL_TIME_LIMIT_MS;
+  return seconds === 0 ? 0 : Math.max(1, Math.round(seconds * 1000));
 }
 
 /** The converter a run uses: the deps' own, the injected importer in-process, or a worker. */
@@ -436,6 +441,11 @@ function logStop(stop: SqlConvertStop, ledger: readonly LedgerEntry[] | undefine
   for (const line of ledgerLogLines((ledger ?? []).filter((e) => e.cause === stop.reason), TITLE)) log.warn(`[ERD Studio] ${line}`);
 }
 
+/** Readings of the files that read them whole: one that stopped early is never reused by another run. */
+function withoutStoppedReadings(readings: ReadonlyMap<SqlDialect, SqlDialectReading>): ReadonlyMap<SqlDialect, SqlDialectReading> {
+  return new Map([...readings].filter(([, r]) => !r.result.stopped));
+}
+
 /** Every problem of a conversion, one log line each with its file and line. */
 function logProblems(problems: readonly SqlDdlProblem[], dialect: SqlDialect): void {
   for (const p of problems) log.warn(`[ERD Studio] ${TITLE} (${SQL_DIALECT_LABELS[dialect]}): ${problemLabel(p)}`);
@@ -587,7 +597,9 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   //    Cancel and the time limit; the worker ends with this step.
   const converter = converterOf(deps);
   let dialect: SqlDialect;
-  let readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined = read.readings;
+  // A reading that stopped early (cancelled, or the time limit) belongs to the run it stopped in:
+  // another run (Try Another Dialect, the quick path's hand-over) reads that dialect again, whole.
+  let readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined = read.readings && withoutStoppedReadings(read.readings);
   let result: SqlDdlToDbmlResult;
   try {
     const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
@@ -597,12 +609,22 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
       if (!readings || readings.size < SQL_DIALECTS.length) {
         const order = dialectOrder(files.map((f) => f.text).join('\n'), detected);
         const before = readings;
+        let stoppedBy: SqlStopReason | undefined;
         try {
-          readings = await withReadingControl(ui, deps, (control) => readAsDialects(converter, files, order, before, { control }));
+          readings = await withReadingControl(ui, deps, async (control) => {
+            try {
+              return await readAsDialects(converter, files, order, before, { control });
+            } finally {
+              stoppedBy = control.stoppedBy;
+            }
+          });
         } catch (err) {
           // The importer did not load: the conversion after the pick says so.
           if (!(err instanceof SqlEngineLoadError)) log.warn(`[ERD Studio] ${TITLE}: reading the scripts as each dialect failed:`, err);
         }
+        // Cancelled (or the time limit) before any dialect read a table: the import ends here, as
+        // the quick path's does; a dialect pick would only read the scripts again.
+        if (stoppedBy && ![...(readings?.values() ?? [])].some((r) => r.tablesRead > 0)) return stoppedBeforeATable(stoppedBy, deps.timeLimitMs);
       }
       const ranked = readings && readings.size ? rankSqlDialectReadings([...readings.values()], detected).map((r) => r.dialect) : [];
       const rest = [...ranked, ...SQL_DIALECTS.filter((d) => !ranked.includes(d))];

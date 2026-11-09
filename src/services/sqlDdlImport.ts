@@ -743,6 +743,8 @@ class Converter implements ConverterContext {
   statementsRead = 0;
   /** Set once `options.shouldStop` stops the reading: what was read, and where the unread part starts. */
   stopped: SqlConvertStop | undefined;
+  /** A stop `options.shouldStop` gave during a statement (the repair ladder asks between tries): the next statement boundary stops there. */
+  private stopSaid: SqlStopReason | undefined;
   /** For progress: characters in every file, and in the files read before this one. */
   totalChars = 0;
   private charsBefore = 0;
@@ -816,10 +818,10 @@ class Converter implements ConverterContext {
     // teardown or reset script, read after the CREATEs it undoes) is skipped
     // DROP statements, as the quick path never takes it (`isSqlScriptTaken`).
     this.dropsApply = looksLikeMigrationFile(file.name) || statements.some((st) => definesOrChangesTables(st.tokens));
-    const { shouldStop, onProgress } = this.options;
+    const { onProgress } = this.options;
     for (let j = 0; j < statements.length; j++) {
       // Between statements only: a statement is read whole or not at all.
-      const reason = shouldStop?.();
+      const reason = this.stopAsked();
       if (reason) { this.stop(reason, file.name, statements.slice(j)); break; }
       const statement = statements[j];
       this.currentStatement = statement;
@@ -842,6 +844,17 @@ class Converter implements ConverterContext {
   }
 
   // -- stopping early ------------------------------------------------------
+
+  /**
+   * Whether the reading should stop: asked before every statement, and
+   * between the repair ladder's tries (a stop then ends the climb, and the
+   * table is salvaged, so one table's ladder never overruns the limit). Once
+   * said, it holds until the next statement boundary stops there.
+   */
+  private stopAsked(): SqlStopReason | undefined {
+    this.stopSaid ??= this.options.shouldStop?.();
+    return this.stopSaid;
+  }
 
   private reportProgress(charsInFile: number): void {
     this.options.onProgress?.({
@@ -1112,13 +1125,15 @@ class Converter implements ConverterContext {
         return result;
       };
       for (const rungs of REPAIR_LADDER) {
+        // Stopped (cancelled, or the time limit) part-way up: no more tries, the table is salvaged.
+        if (this.stopAsked()) break;
         let ok = attempt(own, rungs);
         if (!ok) continue;
         // The rungs are cumulative: keep only those the table needed, so the ledger names what made it read
         // (a column named like a keyword is not "quoted so it reads" when a VIRTUAL column was the problem).
         const needed = new Set(rungs);
         for (const rung of rungs) {
-          if (needed.size === 1) break;
+          if (needed.size === 1 || this.stopAsked()) break;
           const fewer = new Set([...needed].filter((r) => r !== rung));
           const smaller = attempt(own, fewer);
           if (smaller) { needed.delete(rung); ok = smaller; }
@@ -1126,6 +1141,7 @@ class Converter implements ConverterContext {
         return { raw: ok.raw, prepared: ok.rewrite.prepared, rawTable: ok.rawTable, repairs: ok.rewrite.repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes };
       }
       for (const format of OTHER_GRAMMARS) {
+        if (this.stopAsked()) break;
         if (format === own) continue;
         const ok = attempt(format, ALL_RUNGS);
         if (ok) {
