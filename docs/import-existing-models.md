@@ -115,7 +115,7 @@ SELECT DBMS_METADATA.GET_DDL('TABLE', table_name) FROM user_tables;
 SPOOL OFF
 ```
 
-Then run **ERD Studio: Import SQL DDL…** and choose **Oracle**. `VARCHAR2`, `NUMBER(p,s)` and the other Oracle types keep their names; keys and foreign keys added later with `ALTER TABLE … ADD ( CONSTRAINT … )` are read with their tables, and `COMMENT ON` becomes the descriptions. Storage, tablespace and partitioning clauses are left out, and so are `PROMPT`, `SET` and the other SQL*Plus commands, sequences, views and PL/SQL.
+Then run **ERD Studio: Import SQL DDL…** and choose **Oracle**. `VARCHAR2`, `NUMBER(p,s)` and the other Oracle types keep their names; identity columns stay identities, keys and foreign keys added later with `ALTER TABLE … ADD ( CONSTRAINT … )` are read with their tables, and `COMMENT ON` becomes the descriptions (`q'[…]'` quoting too). Storage, tablespace and partitioning clauses are left out, and so are `PROMPT`, `SET` and the other SQL*Plus commands, sequences, views and PL/SQL.
 
 ## Google BigQuery
 
@@ -125,7 +125,7 @@ BigQuery keeps each table's DDL. Run this in the BigQuery console for your datas
 SELECT ddl FROM `my-project.my_dataset`.INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE';
 ```
 
-Then run **ERD Studio: Import SQL DDL…** and choose **Google BigQuery**. A column's `OPTIONS(description = …)` becomes its description, `STRUCT<…>` and `ARRAY<…>` columns keep their types, and `` `project.dataset.table` `` names keep their dataset. `PARTITION BY`, `CLUSTER BY` and the table's other options are left out.
+Then run **ERD Studio: Import SQL DDL…** and choose **Google BigQuery**. A column's or table's `OPTIONS(description = …)` (also set later with `ALTER TABLE … SET OPTIONS`) becomes its description, `STRUCT<…>` and `ARRAY<…>` columns keep their types, and `` `project.dataset.table` `` names keep their dataset. `PARTITION BY`, `CLUSTER BY` and the table's other options are left out.
 
 ## Amazon Redshift
 
@@ -145,7 +145,7 @@ The `sqlite3` shell writes the schema of a database file:
 sqlite3 my.db .schema > schema.sql
 ```
 
-Then run **ERD Studio: Import SQL DDL…** and choose **SQLite**. Square-bracket names, `AUTOINCREMENT` and foreign keys inside the tables come across; a column without a type is imported as `unknown` (and listed), and virtual tables (`USING fts5` and the like) and triggers are left out.
+Then run **ERD Studio: Import SQL DDL…** and choose **SQLite**. Square-bracket names, `AUTOINCREMENT` and foreign keys inside the tables come across; a column without a type is imported as `unknown` (and listed), and virtual tables (`USING fts5` and the like), SQLite's own tables (`sqlite_sequence`, which `.schema` prints whenever a table uses `AUTOINCREMENT`) and triggers are left out.
 
 ## dbdiagram.io and other DBML tools
 

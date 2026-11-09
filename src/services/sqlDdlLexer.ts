@@ -86,6 +86,7 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
   /** Open `/*!` versioned comments (MySQL), read as code. */
   let versioned = 0;
   const oracle = dialect === 'oracle';
+  const bigquery = dialect === 'bigquery';
   /** Oracle: parentheses open, and whether the last token ended a statement (`;`, a `/` line): a SQL*Plus command may start there. */
   let parens = 0;
   const hashComments = HASH_COMMENTS.has(dialect);
@@ -166,6 +167,16 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
     if (versioned > 0 && c === '*' && text[i + 1] === '/') { versioned--; i += 2; continue; }
     const start = i;
     const startLine = line;
+    // Oracle's alternative quoting (`q'[It's]'`, `Nq'{…}'`) and BigQuery's triple-quoted, raw and bytes
+    // strings (`"""…"""`, `r'\d+'`, `b"…"`): one string token, prefix and all, whatever quotes they hold.
+    const special = oracle && 'nNqQ'.includes(c) ? oracleQuoted(text, i)
+      : bigquery && '\'"rRbB'.includes(c) ? bigQueryString(text, i) : undefined;
+    if (special) {
+      advanceLines(start, special.end);
+      i = special.end;
+      push({ kind: 'string', value: special.value, start, end: i, line: startLine });
+      continue;
+    }
     // Strings: '…' (and N'…' / E'…' prefixes, read as words followed by a string).
     if (c === "'") {
       let value = '';
@@ -249,6 +260,11 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
     if (/[A-Za-z_]/.test(c) || (c > '\u007f' && !/\s/.test(c))) {
       // A block's delimiter ends a word (`END$$`, `END//`); so does any Unicode space.
       while (i < n && (/[A-Za-z0-9_$@#]/.test(text[i]) || (text[i] > '\u007f' && !/\s/.test(text[i]))) && !(delimiter !== ';' && text.startsWith(delimiter, i))) i++;
+      // BigQuery: a project's name in a path may have dashes unquoted (`my-project.dataset.table`).
+      if (bigquery && text[i] === '-') {
+        const dashed = /^(?:-[A-Za-z0-9_]+)+(?=\.[A-Za-z_`])/.exec(text.slice(i, i + 128));
+        if (dashed) i += dashed[0].length;
+      }
       push({ kind: 'word', value: text.slice(start, i), start, end: i, line: startLine });
       continue;
     }
@@ -362,6 +378,64 @@ export function uncommentVersioned(text: string): string {
   return out.join('');
 }
 
+/** A string read at `offset`: its value and the offset after it. */
+interface SpecialString { value: string; end: number }
+
+/** Oracle q-quoting's closing character for each opening one (any other closes itself). */
+const Q_CLOSE: Readonly<Record<string, string>> = { '[': ']', '{': '}', '(': ')', '<': '>' };
+
+/**
+ * Oracle's alternative quoting at `offset`: `q'[…]'`, `Q'!…!'`, `nq'{…}'` (the
+ * text between the delimiters as written, apostrophes and all). Undefined when
+ * `offset` starts none, or it is not closed (then it is read as a word and a
+ * string, as before).
+ */
+export function oracleQuoted(text: string, offset: number): SpecialString | undefined {
+  let k = offset;
+  if ((text[k] === 'n' || text[k] === 'N') && (text[k + 1] === 'q' || text[k + 1] === 'Q')) k++;
+  if (!(text[k] === 'q' || text[k] === 'Q') || text[k + 1] !== "'") return undefined;
+  if (offset > 0 && /[A-Za-z0-9_$#]/.test(text[offset - 1])) return undefined;
+  const open = text[k + 2];
+  if (!open || /[\s']/.test(open)) return undefined;
+  const close = Q_CLOSE[open] ?? open;
+  const endAt = text.indexOf(`${close}'`, k + 3);
+  if (endAt < 0) return undefined;
+  return { value: text.slice(k + 3, endAt), end: endAt + 2 };
+}
+
+/**
+ * A BigQuery string literal that the plain `'…'` / `"…"` reading gets wrong,
+ * at `offset`: triple-quoted (`'''…'''`, `"""…"""`, over lines and holding
+ * either quote), or with a raw or bytes prefix (`r'\d+'`, `B"…"`, `rb'…'`;
+ * a raw string keeps its backslashes). Undefined otherwise.
+ */
+export function bigQueryString(text: string, offset: number): SpecialString | undefined {
+  const prefix = /^(?:[rR][bB]?|[bB][rR]?)?/.exec(text.slice(offset, offset + 2))![0];
+  if (prefix && offset > 0 && /[A-Za-z0-9_$@#]/.test(text[offset - 1])) return undefined;
+  const q = text[offset + prefix.length];
+  if (q !== "'" && q !== '"') return undefined;
+  const raw = /[rR]/.test(prefix);
+  const from = offset + prefix.length;
+  const triple = text[from + 1] === q && text[from + 2] === q;
+  if (!triple && !prefix) return undefined;
+  const fence = triple ? q.repeat(3) : q;
+  let value = '';
+  let k = from + fence.length;
+  while (k < text.length) {
+    if (text[k] === '\\' && k + 1 < text.length) {
+      value += raw ? text.slice(k, k + 2) : unescapeChar(text[k + 1]);
+      k += 2;
+      continue;
+    }
+    if (text.startsWith(fence, k)) return { value, end: k + fence.length };
+    // A one-quote string ends at its line's end when it is not closed there (as '…' does).
+    if (!triple && text[k] === '\n') return undefined;
+    value += text[k];
+    k++;
+  }
+  return undefined;
+}
+
 /** Whether the character at `offset` is a `/` alone on its line (Oracle's SQL*Plus runs the buffer: it ends a statement or a PL/SQL block). */
 export function isSlashLine(text: string, offset: number): boolean {
   if (text[offset] !== '/' || !isLineStart(text, offset)) return false;
@@ -426,6 +500,13 @@ export function splitStatements(text: string, dialect: SqlDialect): Statement[] 
     if (goLines.has(token.line) && token.kind === 'number' && current.length === 0) continue;
     // Oracle: a `/` alone on its line ends what came before it (a statement, or a PL/SQL unit).
     if (oracle && token.kind === 'punct' && token.value === '/' && isSlashLine(text, token.start)) { flushAll(); lastLine = token.line; continue; }
+    // Oracle: a PL/SQL unit whose `/` line is missing (a later unit's `/` is not its own): a line that
+    // starts CREATE … or ALTER TABLE after a `;` at the unit's outer level ends it. PL/SQL has no DDL of its
+    // own (it runs DDL from strings, `EXECUTE IMMEDIATE '…'`), so no unit's body holds such a line.
+    if (toSlash && blocks === 0 && depth <= 0 && token.kind === 'word' && isPunct(current[current.length - 1], ';')
+      && isLineStart(text, token.start) && startsDefinition(tokens, index)) {
+      flushAll();
+    }
     if (oracle && !routine && current.length === 0 && token.kind === 'word' && (upper(token) === 'DECLARE' || upper(token) === 'BEGIN') && slashAfter(token.start)) {
       routine = true;
       toSlash = true;

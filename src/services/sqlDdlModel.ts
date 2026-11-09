@@ -252,6 +252,7 @@ export const SKIP_LABELS = {
   query: ['query', 'queries'],
   ctas: ['CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)', 'CREATE TABLEs without a column list (AS SELECT, LIKE, CLONE)'],
   virtualTable: ['SQLite virtual table (USING fts4, fts5, rtree…: a search or index module, not design)', 'SQLite virtual tables (USING fts4, fts5, rtree…: search or index modules, not design)'],
+  internalTable: ['SQLite internal table (sqlite_sequence, sqlite_stat1…: the database\'s own bookkeeping, not design)', 'SQLite internal tables (sqlite_sequence, sqlite_stat1…: the database\'s own bookkeeping, not design)'],
   clientCommand: ['SQL*Plus command (PROMPT, SET, CONNECT, DEFINE, @file…)', 'SQL*Plus commands (PROMPT, SET, CONNECT, DEFINE, @file…)'],
   existing: ['CREATE TABLE IF NOT EXISTS of a table already defined', 'CREATE TABLE IF NOT EXISTS statements of tables already defined'],
   temporary: ['SQL Server temporary table (#name: a session\'s scratch table, not design)', 'SQL Server temporary tables (#name: a session\'s scratch tables, not design)'],

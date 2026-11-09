@@ -404,8 +404,13 @@ export const SQL_PARSE_FORMAT: Readonly<Record<SqlDialect, SqlParseFormat>> = Ob
 // Dialect detection
 // ---------------------------------------------------------------------------
 
-/** Signals per dialect: [pattern, weight]. Strong signals weigh 3, hints 1. */
-const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
+/**
+ * Signals per dialect: [pattern, weight, reads strings?]. Strong signals weigh
+ * 3, hints 1. Patterns test the text without its comments and without what its
+ * '…' strings hold (a row of data that says `Number` or `bool` is no type),
+ * unless the third element says the signal is a string (`FROM 's3://…'`).
+ */
+const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, boolean?]> = [
   ['sqlserver', /^[ \t]*GO[ \t]*$/im, 3],
   ['sqlserver', /\[\w+\]\s*\.\s*\[\w+\]/, 3],
   ['sqlserver', /\bsp_addextendedproperty\b/i, 3],
@@ -432,27 +437,50 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
   ['oracle', /\bSEGMENT\s+CREATION\b|\bPCTFREE\b|\bNOCOMPRESS\b|\bORGANIZATION\s+INDEX\b|\bNOCACHE\b|\bNOCYCLE\b|\bNOLOGGING\b/i, 2],
   ['oracle', /^[ \t]*\/[ \t]*$|^[ \t]*(?:PROMPT|REM|REMARK)\b/im, 2],
   ['oracle', /\bN?CLOB\b|\bBINARY_(?:FLOAT|DOUBLE)\b|\bSYSDATE\b|\bSYSTIMESTAMP\b|\bLONG\s+RAW\b|\bRAW\s*\(/i, 2],
-  ['oracle', /\bNUMBER\b/i, 1],
+  // A type, after a column's name (a column named `number` is no signal).
+  ['oracle', /[\w"\]`][ \t]+NUMBER\b/i, 1],
   ['bigquery', /\bINT64\b|\bFLOAT64\b|\bBIGNUMERIC\b|\bBIGDECIMAL\b/i, 3],
   ['bigquery', /\bOPTIONS\s*\(\s*(?:description|labels|expiration_timestamp|partition_expiration_days|require_partition_filter|friendly_name)\s*=/i, 3],
   ['bigquery', /\bPARTITION\s+BY\s+(?:DATE|DATE_TRUNC|TIMESTAMP_TRUNC|DATETIME_TRUNC|RANGE_BUCKET|_PARTITIONDATE)\b|@@(?:dataset_id|project_id)\b/i, 3],
-  ['bigquery', /`[A-Za-z][\w-]*\.[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?`/, 2],
-  ['bigquery', /\bGEOGRAPHY\b|\bBYTES\b|\bBOOL\b/i, 1],
-  ['redshift', /\bDISTSTYLE\s+(?:KEY|ALL|EVEN|AUTO)\b|\bDISTKEY\b|\bSORTKEY\b/i, 3],
+  // A whole path in one pair of backticks (`my-project.dataset.table`): Databricks and MySQL quote each part.
+  ['bigquery', /`[A-Za-z_][\w-]*(?:\.[\w-]+){1,2}`/, 3],
+  // BigQuery nests types as Databricks does (ARRAY<STRUCT<…>>).
+  ['bigquery', /\b(?:ARRAY|STRUCT)\s*</i, 3],
+  // A type after a column's name. (GEOGRAPHY and BOOL are PostgreSQL's too, PostGIS and an alias.)
+  ['bigquery', /[\w"\]`][ \t]+BYTES\b/i, 1],
+  // DISTKEY and SORTKEY as a clause (`DISTKEY (a)`, `COMPOUND SORTKEY`) or after a column's type (`a int DISTKEY`),
+  // never as a column's name (`sortkey varchar(50)`, `ORDER BY sortkey`).
+  ['redshift', /\bDISTSTYLE\s+(?:KEY|ALL|EVEN|AUTO)\b|\b(?:DISTKEY|SORTKEY)\s*\(|\b(?:COMPOUND|INTERLEAVED)\s+SORTKEY\b|\bSORTKEY\s+AUTO\b|(?<=[\w)])(?<!\b(?:BY|AS|ON|SET|TABLE|COLUMN|SELECT|DISTINCT))[ \t]+(?:DISTKEY|SORTKEY)\b(?=[ \t]*(?:[,)\r\n]|(?:NOT|NULL|PRIMARY|UNIQUE|REFERENCES|DEFAULT|ENCODE|DISTKEY|SORTKEY|IDENTITY|CONSTRAINT|COLLATE)\b))/i, 3],
   ['redshift', /\bENCODE\s+(?:RAW|AZ64|BYTEDICT|DELTA|DELTA32K|LZO|MOSTLY8|MOSTLY16|MOSTLY32|RUNLENGTH|TEXT255|TEXT32K|ZSTD|AUTO)\b/i, 3],
-  ['redshift', /\bBACKUP\s+(?:YES|NO)\b|\bFROM\s+'s3:\/\//i, 2],
+  ['redshift', /\bBACKUP\s+(?:YES|NO)\b/i, 2],
+  ['redshift', /\bFROM\s+'s3:\/\//i, 2, true],
   ['sqlite', /\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/i, 3],
   ['sqlite', /\bWITHOUT\s+ROWID\b|\bCREATE\s+VIRTUAL\s+TABLE\b|\bPRAGMA\b|\bsqlite_\w+|\)\s*STRICT\s*[;,]/i, 3],
   // Square brackets without SQL Server's batches, schemas or types: `[AlbumId] INTEGER` (SQLite's affinity name).
   ['sqlite', /\[\w+\]\s+INTEGER\b/i, 2],
 ];
 
-/** Each dialect's score from the text's signals (comments ignored). Never parses. */
+/** A '…' string on one line (a stray quote spoils one line only), for {@link dialectScores}. */
+const ONE_LINE_STRING = /'(?:[^'\\\n]|\\.|'')*'/g;
+
+/**
+ * Each dialect's score from the text's signals (comments and what strings hold
+ * ignored). A hint (weight 1) counts for Oracle, BigQuery, Redshift or SQLite
+ * only beside a stronger signal of the same dialect: a hint alone never makes
+ * one of them, read with another dialect's grammar, the pick. Never parses.
+ */
 function dialectScores(text: string): Map<SqlDialect, number> {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const bare = code.replace(ONE_LINE_STRING, "''");
   const scores = new Map<SqlDialect, number>();
-  for (const [dialect, pattern, weight] of DIALECT_SIGNALS) {
-    if (pattern.test(code)) scores.set(dialect, (scores.get(dialect) ?? 0) + weight);
+  const hints = new Map<SqlDialect, number>();
+  for (const [dialect, pattern, weight, strings] of DIALECT_SIGNALS) {
+    if (!pattern.test(strings ? code : bare)) continue;
+    const into = weight === 1 && isPreStepped(dialect) ? hints : scores;
+    into.set(dialect, (into.get(dialect) ?? 0) + weight);
+  }
+  for (const [dialect, weight] of hints) {
+    if (scores.has(dialect)) scores.set(dialect, scores.get(dialect)! + weight);
   }
   return scores;
 }
@@ -1003,6 +1031,8 @@ class Converter implements ConverterContext {
     // SQL Server's `#tmp` / `##global` scratch tables (the name reads after its `#`s).
     if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
+    // SQLite keeps its own bookkeeping in tables named `sqlite_…` (`.schema` prints `CREATE TABLE sqlite_sequence(name,seq)`).
+    if (name && this.dialect === 'sqlite' && /^sqlite_/i.test(name.parts[name.parts.length - 1])) { this.skip(file, 'internalTable'); return; }
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
     // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.
     if (ifNotExists && (this.findTable(this.qualify(name.parts)) || isChildWithoutTable(this, this.qualify(name.parts)))) { this.skip(file, 'existing'); return; }
@@ -1013,6 +1043,8 @@ class Converter implements ConverterContext {
       this.problems.push({ file, line: st.line, message: `CREATE TABLE ${name.parts.join('.')}: its column list has no closing parenthesis.`, kind: 'structure', table: name.parts.slice(-2).join('.') });
       return;
     }
+    // `CREATE TABLE x (LIKE y [INCLUDING …])` (PostgreSQL, Redshift): a copy of another table's columns, no list of its own.
+    if (upper(t[open + 1]) === 'LIKE' && splitTopLevel(t, open + 1, close).length === 1) { this.skip(file, 'ctas'); return; }
     // `CREATE TABLE x (a, b) AS SELECT` names columns without types.
     for (let k = close + 1; k < t.length; k++) {
       if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) { this.skip(file, 'ctas'); return; }
@@ -1717,7 +1749,7 @@ function parenDepth(t: readonly Token[], open: number, close: number): number {
 const OTHER_GRAMMARS: readonly SqlParseFormat[] = ['postgres', 'mssql', 'mysql', 'snowflake'];
 
 /** Skipped statements named in the log, one each (data, session and permission statements are only counted). */
-const NAMED_SKIPS: ReadonlySet<SkipKind> = new Set<SkipKind>(['view', 'index', 'routine', 'sequence', 'type', 'ctas', 'existing', 'alter', 'comment', 'schema', 'other']);
+const NAMED_SKIPS: ReadonlySet<SkipKind> = new Set<SkipKind>(['view', 'index', 'routine', 'sequence', 'type', 'ctas', 'internalTable', 'existing', 'alter', 'comment', 'schema', 'other']);
 /** At most this many skipped statements are named (a dump of thousands is counted). */
 const MAX_NAMED_SKIPS = 2000;
 
@@ -1736,7 +1768,8 @@ function skippedObject(st: Statement): { line: number; name?: string } {
     i = 2;
   }
   if (i < 0) return { line: st.line };
-  while (/^(IF|NOT|EXISTS|ONLY|ON|CONCURRENTLY)$/.test(upper(t[i]))) i++;
+  // `IF NOT EXISTS`, and Oracle's `PACKAGE BODY` / `TYPE BODY` (the body's name follows).
+  while (/^(IF|NOT|EXISTS|ONLY|ON|CONCURRENTLY|BODY)$/.test(upper(t[i])) && t[i + 1] && t[i + 1].kind !== 'punct') i++;
   const name = readName(t, i);
   return name ? { line: st.line, name: ledgerText(name.parts.join('.'), 64) } : { line: st.line };
 }

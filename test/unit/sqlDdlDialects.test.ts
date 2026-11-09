@@ -379,3 +379,242 @@ describe('the pre-steps change only what the dialect itself writes', () => {
     expect(oracle.ok && oracle.readWith?.grammar).toBe(0);
   });
 });
+
+/**
+ * The adversarial pass: real-world shapes that broke the first cut, each a
+ * failing test before its fix. Detection must not read a column name, a row
+ * of data or a type PostgreSQL shares as one of the four dialects; the
+ * lexers must read each dialect's own strings; and what an export tool
+ * writes (DBMS_METADATA, DB Browser for SQLite, Redshift's DDL view) reads
+ * with the grammar, not the repair ladder.
+ */
+describe('the adversarial pass', () => {
+  const quickOrder = (text: string): SqlDialect[] => {
+    const detected = detectSqlDialect(text);
+    return detected ? [detected, ...rankSqlDialects(text).filter((d) => d !== detected)] : rankSqlDialects(text);
+  };
+
+  describe('detection', () => {
+    it('a PostgreSQL script with a `bytes` column and a row that says "Number" is tried as PostgreSQL first (the quick path keeps the first whole reading)', () => {
+      const text = [
+        'CREATE TABLE track (track_id INT NOT NULL, name VARCHAR(200) NOT NULL, milliseconds INT NOT NULL,',
+        '    bytes INT, unit_price NUMERIC(10,2) NOT NULL, CONSTRAINT track_pkey PRIMARY KEY (track_id));',
+        "INSERT INTO track VALUES (1, 'The Number of The Beast', 1, 2, 0.99);",
+      ].join('\n');
+      expect(detectSqlDialect(text)).toBeUndefined();
+      expect(quickOrder(text)[0]).toBe('postgres');
+      expect(quickOrder(text).slice(0, 5)).not.toContain('bigquery');
+    });
+
+    it('PostGIS geography and bool columns are PostgreSQL\'s, not BigQuery\'s', () => {
+      const text = 'CREATE TABLE "places" ("id" integer PRIMARY KEY, "active" bool DEFAULT true, "geom" geography(Point,4326));';
+      expect(detectSqlDialect(text)).not.toBe('bigquery');
+      expect(quickOrder(text)[0]).toBe('postgres');
+    });
+
+    it('a column named number, bytes or sortkey is no signal; NUMBER and BYTES as types still are, beside a stronger one', () => {
+      expect(detectSqlDialect('CREATE TABLE invoice (id integer PRIMARY KEY, number varchar(20), sortkey varchar(50), distkey int);')).toBeUndefined();
+      expect(detectSqlDialect('CREATE TABLE t (id integer, x text);\nSELECT * FROM t ORDER BY sortkey;')).not.toBe('redshift');
+      expect(detectSqlDialect('CREATE TABLE t (id NUMBER(6), name VARCHAR2(20));')).toBe('oracle');
+      expect(detectSqlDialect('CREATE TABLE t (id int DISTKEY, a varchar(10) SORTKEY);')).toBe('redshift');
+      expect(detectSqlDialect('CREATE TABLE t (id int) DISTSTYLE ALL SORTKEY (id);')).toBe('redshift');
+    });
+
+    it('a BigQuery script with `project.dataset.table` paths and STRUCTs but no INT64 is BigQuery, and keeps its datasets', () => {
+      const text = [
+        'CREATE TABLE `my-project.crm.customers` (customer_id STRING NOT NULL, addresses ARRAY<STRUCT<street STRING, city STRING>>, created_at TIMESTAMP);',
+        'CREATE TABLE `my-project.crm.orders` (order_id STRING NOT NULL, customer_id STRING, amount NUMERIC);',
+      ].join('\n');
+      expect(detectSqlDialect(text)).toBe('bigquery');
+      const r = convert('bigquery', text);
+      expect(r.dbml).toMatch(/Table "crm"\."customers"/);
+      expect(r.notes).toEqual([]);
+    });
+  });
+
+  describe('Oracle', () => {
+    it('reads q-quoted strings (q\'[…]\', Q\'!…!\', nq\'{…}\'): the comments are kept and nothing after them is swallowed', () => {
+      const r = convert('oracle', [
+        'CREATE TABLE a (id NUMBER);',
+        "COMMENT ON TABLE a IS q'[It's; \"a\"]';",
+        'CREATE TABLE b (id NUMBER, s VARCHAR2(10) DEFAULT q\'[it\'s]\');',
+        "COMMENT ON TABLE b IS Q'!tab b!';",
+        "COMMENT ON COLUMN b.id IS nq'{id's}';",
+        'CREATE TABLE c (id NUMBER);',
+      ].join('\n'));
+      expect(r.tableCount).toBe(3);
+      expect(r.tablesFound).toBe(3);
+      expect(asWritten(r)).toBe(true);
+      expect(r.dbml).toContain("Note: 'It\\'s; \"a\"'");
+      expect(r.dbml).toContain("Note: 'tab b'");
+      expect(columns(r.dbml).get('b.id')).toContain("note: 'id\\'s'");
+      expect(columns(r.dbml).get('b.s')).toContain("default: 'it\\'s'");
+      expect(skippedKinds(r)).not.toContain('other statement');
+    });
+
+    it('a PL/SQL unit without its / line ends at the next CREATE: the tables after it are read, even when a later unit has a /', () => {
+      const r = convert('oracle', [
+        'CREATE TABLE emp (id NUMBER PRIMARY KEY, name VARCHAR2(50));',
+        'CREATE OR REPLACE TRIGGER emp_bi BEFORE INSERT ON emp FOR EACH ROW',
+        'BEGIN',
+        '  :new.name := UPPER(:new.name);',
+        'END;',
+        '',
+        'CREATE TABLE dept (id NUMBER PRIMARY KEY, emp_id NUMBER REFERENCES emp(id));',
+        'ALTER TABLE dept ADD CONSTRAINT dept_uk UNIQUE (emp_id);',
+        'CREATE OR REPLACE PROCEDURE p IS',
+        'BEGIN',
+        "  EXECUTE IMMEDIATE 'CREATE TABLE junk (x NUMBER)';",
+        'END;',
+        '/',
+        'CREATE TABLE loc (id NUMBER PRIMARY KEY);',
+      ].join('\n'));
+      expect(r.tableCount).toBe(3);
+      expect(r.tablesFound).toBe(3);
+      expect(r.refCount).toBe(1);
+      expect(columns(r.dbml).get('dept.emp_id')).toMatch(/unique/);
+      expect(r.ledger.filter((e) => e.what === 'function, procedure or trigger').map((e) => e.where?.table)).toEqual(['emp_bi', 'p']);
+    });
+
+    it('reads DBMS_METADATA\'s identity columns (sequence options without parentheses) with the grammar, as identities', () => {
+      const r = convert('oracle', [
+        '  CREATE TABLE "APP"."ORDERS" ',
+        '   (\t"ID" NUMBER(*,0) GENERATED BY DEFAULT ON NULL AS IDENTITY MINVALUE 1 MAXVALUE 9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER  NOCYCLE  NOKEEP  NOSCALE  NOT NULL ENABLE, ',
+        '\t"CODE" VARCHAR2(20 CHAR) COLLATE "USING_NLS_COMP" NOT NULL ENABLE, ',
+        '\t"SEQ" NUMBER GENERATED ALWAYS AS IDENTITY MINVALUE -5 MAXVALUE 99 INCREMENT BY 1 START WITH -5 NOCACHE ORDER CYCLE, ',
+        '\t PRIMARY KEY ("ID")',
+        '  USING INDEX  ENABLE',
+        '   )  DEFAULT COLLATION "USING_NLS_COMP" SEGMENT CREATION DEFERRED ',
+        '  TABLESPACE "USERS" ;',
+      ].join('\n'));
+      expect(asWritten(r)).toBe(true);
+      const cols = columns(r.dbml);
+      expect(cols.get('ORDERS.ID')).toMatch(/^"NUMBER\(\*,0\)" \[pk, increment\]/);
+      expect(cols.get('ORDERS.CODE')).toMatch(/^"VARCHAR2\(20 CHAR\)" \[not null\]/);
+      expect(cols.get('ORDERS.SEQ')).toMatch(/^NUMBER \[increment\]/);
+    });
+
+    it('names a skipped PACKAGE BODY by the package, not "BODY"', () => {
+      const r = convert('oracle', [
+        'CREATE TABLE t (id NUMBER);',
+        'CREATE OR REPLACE PACKAGE BODY emp_api AS',
+        '  PROCEDURE hire IS BEGIN NULL; END hire;',
+        'END emp_api;',
+        '/',
+      ].join('\n'));
+      expect(r.ledger.find((e) => e.what === 'function, procedure or trigger')?.where?.table).toBe('emp_api');
+    });
+  });
+
+  describe('BigQuery', () => {
+    it('reads triple-quoted, raw and bytes strings: descriptions exact, and the tables after them read', () => {
+      const r = convert('bigquery', [
+        'CREATE TABLE ds.a (',
+        '  id INT64 OPTIONS(description="""The "id"; unique"""),',
+        "  name STRING OPTIONS(description=r'raw\\d+'),",
+        "  note STRING DEFAULT '''multi",
+        "line'''",
+        ');',
+        "CREATE TABLE ds.b (id INT64, a_id INT64 OPTIONS(description='''it's a; \"ref\"'''));",
+        'CREATE TABLE ds.c (id INT64);',
+      ].join('\n'));
+      expect(r.tableCount).toBe(3);
+      expect(r.problems).toEqual([]);
+      const cols = columns(r.dbml);
+      expect(cols.get('a.id')).toContain("note: 'The \"id\"; unique'");
+      expect(cols.get('a.name')).toContain("note: 'raw\\\\d+'");
+      expect(cols.get('b.a_id')).toContain("note: 'it\\'s a; \"ref\"'");
+      // The value is `multi⏎line`, written as DBML's own multi-line string.
+      expect(r.dbml).toContain("\"note\" STRING [default: '''multi\nline''']");
+    });
+
+    it('reads # comments inside a column list, CURRENT_TIMESTAMP() defaults and an unquoted dashed project, with the grammar', () => {
+      const r = convert('bigquery', [
+        'CREATE TABLE `my-proj.raw_ds.events` (',
+        '  id INT64 NOT NULL, # the key',
+        '  ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),',
+        '  d DATE DEFAULT CURRENT_DATE()',
+        ');',
+        'CREATE TABLE my-proj.raw_ds.other (id INT64, e_id INT64 REFERENCES `my-proj.raw_ds.events`(id) NOT ENFORCED);',
+      ].join('\n'));
+      expect(asWritten(r)).toBe(true);
+      expect(r.tableCount).toBe(2);
+      expect(r.dbml).toContain('Ref: "raw_ds"."other"."e_id" > "raw_ds"."events"."id"');
+      expect(columns(r.dbml).get('events.ts')).toMatch(/default: `CURRENT_TIMESTAMP`/);
+    });
+
+    it('ALTER TABLE … ADD COLUMN x ARRAY<STRUCT<a, b>> adds one column, and SET OPTIONS (description = …) describes the table and its columns', () => {
+      const r = convert('bigquery', [
+        'CREATE TABLE `p.ds.t` (id INT64, misc STRING);',
+        'ALTER TABLE `p.ds.t` ADD COLUMN IF NOT EXISTS tags ARRAY<STRUCT<k STRING, v INT64>> OPTIONS(description="kv, pairs");',
+        'ALTER TABLE `p.ds.t` SET OPTIONS (description = "The t table", labels = [("env", "prod")]);',
+        'ALTER TABLE `p.ds.t` ALTER COLUMN misc SET OPTIONS (description = "Misc col");',
+      ].join('\n'));
+      expect([...columns(r.dbml).keys()]).toEqual(['t.id', 't.misc', 't.tags']);
+      expect(columns(r.dbml).get('t.tags')).toMatch(/^"ARRAY<STRUCT<k STRING, v INT64>>" \[note: 'kv, pairs'\]/);
+      expect(columns(r.dbml).get('t.misc')).toContain("note: 'Misc col'");
+      expect(r.dbml).toContain("Note: 'The t table'");
+      // The labels beside the description are a setting, said as one.
+      expect(skippedKinds(r)).toContain('ALTER TABLE setting (storage, triggers, tags, masks, row security…)');
+    });
+
+    it('a table function is a routine, not a CREATE TABLE named FUNCTION', () => {
+      const r = convert('bigquery', [
+        'CREATE TABLE FUNCTION ds.names_by_year(y INT64) AS (SELECT 1 AS x);',
+        'CREATE TABLE ds.real (id INT64);',
+      ].join('\n'));
+      expect(r.tableCount).toBe(1);
+      expect(r.ledger.find((e) => e.what === 'function, procedure or trigger')?.where?.table).toBe('ds.names_by_year');
+      expect(skippedKinds(r)).not.toContain('CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)');
+    });
+  });
+
+  describe('Amazon Redshift', () => {
+    it('reads the DDL view\'s identity (DEFAULT "identity"(…)) as an identity, and CREATE TABLE x (LIKE y) as a table without a column list, not a problem', () => {
+      const r = convert('redshift', [
+        'CREATE TABLE IF NOT EXISTS "public"."users"',
+        '(',
+        '\t"userid" BIGINT NOT NULL DEFAULT "identity"(105323, 0, \'1,1\'::text) ENCODE az64',
+        '\t,"username" CHAR(8)   ENCODE lzo',
+        '\t,PRIMARY KEY (userid)',
+        ')',
+        'DISTSTYLE KEY',
+        ' DISTKEY ("userid")',
+        ' SORTKEY (',
+        '\t"userid"',
+        '\t)',
+        ';',
+        'CREATE TABLE public.users_stage (LIKE public.users INCLUDING DEFAULTS);',
+      ].join('\n'));
+      expect(asWritten(r)).toBe(true);
+      expect(columns(r.dbml).get('users.userid')).toMatch(/^BIGINT \[pk, increment\]$/);
+      expect(r.problems).toEqual([]);
+      expect(r.ledger).toContainEqual(expect.objectContaining({ outcome: 'skipped', what: 'CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)', where: expect.objectContaining({ table: 'public.users_stage' }) }));
+    });
+  });
+
+  describe('SQLite', () => {
+    it('reads DB Browser for SQLite\'s PRIMARY KEY("id" AUTOINCREMENT) with the grammar, as an identity', () => {
+      const r = convert('sqlite', [
+        'CREATE TABLE "Book" (',
+        '\t"id"\tINTEGER,',
+        '\t"title"\tTEXT NOT NULL UNIQUE,',
+        '\tPRIMARY KEY("id" AUTOINCREMENT)',
+        ');',
+      ].join('\n'));
+      expect(asWritten(r)).toBe(true);
+      expect(columns(r.dbml).get('Book.id')).toMatch(/\[pk, increment\]/);
+    });
+
+    it('skips SQLite\'s own tables (sqlite_sequence, sqlite_stat1), named in the ledger', () => {
+      const r = convert('sqlite', [
+        'CREATE TABLE sqlite_sequence(name,seq);',
+        'CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT);',
+        'CREATE TABLE sqlite_stat1(tbl,idx,stat);',
+      ].join('\n'));
+      expect(r.tableCount).toBe(1);
+      expect(r.tablesFound).toBe(1);
+      expect(r.ledger.filter((e) => e.what.startsWith('SQLite internal table')).map((e) => e.where?.table)).toEqual(['sqlite_sequence', 'sqlite_stat1']);
+    });
+  });
+});

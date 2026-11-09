@@ -81,6 +81,15 @@ const USING_INDEX_END = new Set([
 /** Oracle's constraint states, set aside wherever they stand (one word each). */
 const ORACLE_STATE_WORDS = new Set(['ENABLE', 'DISABLE', 'VALIDATE', 'NOVALIDATE', 'RELY', 'NORELY']);
 
+/** The words of Oracle's identity (sequence) options, and the words their values follow. */
+const IDENTITY_OPTION_WORDS = new Set([
+  'START', 'WITH', 'LIMIT', 'VALUE', 'INCREMENT', 'BY', 'MINVALUE', 'NOMINVALUE', 'MAXVALUE', 'NOMAXVALUE', 'CACHE', 'NOCACHE',
+  'CYCLE', 'NOCYCLE', 'ORDER', 'NOORDER', 'KEEP', 'NOKEEP', 'SCALE', 'NOSCALE', 'EXTEND', 'NOEXTEND', 'SHARD', 'NOSHARD', 'SESSION', 'GLOBAL',
+]);
+
+/** SQL's clock and user keywords, which PostgreSQL's grammar reads without parentheses. */
+const SQL_CLOCK_KEYWORDS = new Set(['CURRENT_TIMESTAMP', 'CURRENT_DATE', 'CURRENT_TIME', 'LOCALTIME', 'LOCALTIMESTAMP', 'CURRENT_USER', 'SESSION_USER']);
+
 /** Oracle column attributes with no value (`INVISIBLE`, `SORT`). */
 const ORACLE_COLUMN_WORDS = new Set(['VISIBLE', 'INVISIBLE', 'SORT']);
 
@@ -161,6 +170,8 @@ export function rewriteDialectTable(
         const w = upper(t[k]);
         if (w === 'ASC' || w === 'DESC') blank(k, k);
         else if (w === 'COLLATE' && k + 1 < ct) { blank(k, k + 1); k++; }
+        // SQLite (DB Browser for SQLite writes it): `PRIMARY KEY("id" AUTOINCREMENT)`, the key's column an identity.
+        else if (sqlite && w === 'AUTOINCREMENT') { blank(k, k); identity.add(t[cf].value.toLowerCase()); }
       }
     }
     return end;
@@ -216,6 +227,11 @@ export function rewriteDialectTable(
       if (sqlite && w === 'AUTOINCREMENT') { blank(k, k); identity.add(column); continue; }
       if (redshift && w === 'ENCODE' && k + 1 < to) { blank(k, k + 1); k++; continue; }
       if (redshift && (w === 'DISTKEY' || w === 'SORTKEY')) { blank(k, k); continue; }
+      // Redshift's own DDL views (v_generate_tbl_ddl) write an identity column as `DEFAULT "identity"(id, 0, '1,1'::text)`.
+      if (redshift && w === 'DEFAULT' && (t[k + 1]?.kind === 'word' || t[k + 1]?.kind === 'ident') && t[k + 1].value.toLowerCase() === 'identity' && isPunct(t[k + 2], '(')) {
+        const m = matchParen(t, k + 2);
+        if (m > 0 && m < to) { blank(k, m); identity.add(column); k = m; continue; }
+      }
       if (redshift && w === 'IDENTITY') {
         let e = k;
         if (isPunct(t[k + 1], '(')) { const m = matchParen(t, k + 1); if (m > 0 && m < to) e = m; }
@@ -245,6 +261,9 @@ export function rewriteDialectTable(
           if (sqlite) continue;
           e = a + 1;
           if (isPunct(t[e + 1], '(')) { const m = matchParen(t, e + 1); if (m > 0 && m < to) e = m; }
+          // Oracle's DBMS_METADATA writes the sequence options without parentheses
+          // (`AS IDENTITY MINVALUE 1 MAXVALUE 999… INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER NOCYCLE`).
+          else if (oracle) while (e + 1 < to && (IDENTITY_OPTION_WORDS.has(upper(t[e + 1])) || t[e + 1].kind === 'number' || isPunct(t[e + 1], '-'))) e++;
           identity.add(column);
         } else if (isPunct(t[a + 1], '(')) {
           // Oracle's virtual columns and SQLite's generated ones; Redshift has neither.
@@ -288,10 +307,28 @@ export function rewriteDialectTable(
   }
 
   // Strings as the PostgreSQL grammar reads them: BigQuery's "…" and backslash escapes become '…' (a line break a space).
-  if (dialect === 'bigquery') {
+  // BigQuery's `#` comments (between tokens: the lexer has read them as comments) as `--`, which PostgreSQL reads.
+  if (bigquery) {
+    for (let k = 0; k <= t.length; k++) {
+      const from = k === 0 ? st.start : t[k - 1].end;
+      const to = k === t.length ? st.end : t[k].start;
+      for (let at = from; at < to; at++) if (text.charCodeAt(at) === 35) edits.push({ start: at, end: at + 1, text: '--' });
+    }
+  }
+  // BigQuery calls its clock functions with parentheses (`DEFAULT CURRENT_TIMESTAMP()`), where PostgreSQL's
+  // grammar reads them as keywords only: the empty `()` goes (the default is the same).
+  if (bigquery) {
+    for (let k = open + 1; k + 2 < close; k++) {
+      if (t[k].kind === 'word' && SQL_CLOCK_KEYWORDS.has(upper(t[k])) && isPunct(t[k + 1], '(') && isPunct(t[k + 2], ')')) blank(k + 1, k + 2);
+    }
+  }
+  // Oracle's q'[…]' too (its alternative quoting), as a plain '…'.
+  if (bigquery || oracle) {
     for (let k = open + 1; k < close; k++) {
       const tok = t[k];
-      const isString = tok.kind === 'string' || (tok.kind === 'ident' && tok.quote === '"');
+      const isString = bigquery
+        ? tok.kind === 'string' || (tok.kind === 'ident' && tok.quote === '"')
+        : tok.kind === 'string' && text[tok.start] !== "'";
       if (isString) edits.push({ start: tok.start, end: tok.end, text: `'${tok.value.replace(/'/g, "''").replace(/\r?\n/g, ' ')}'` });
     }
   }

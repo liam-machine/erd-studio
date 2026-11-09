@@ -39,6 +39,7 @@ import {
   isSqlPlusCommand,
   isPunct,
   matchParen,
+  optionsDescription,
   readColumnList,
   readName,
   splitTopLevel,
@@ -65,6 +66,7 @@ import {
 } from './sqlDdlModel';
 import { isConstraintItem } from './sqlDdlRepair';
 import { ANGLE_TYPE_DIALECTS } from './sqlDdlDialects';
+import { ledgerText } from './importLedger';
 
 export function readStatement(cx: ConverterContext, file: string, text: string, st: Statement): void {
   const state = readerState(cx);
@@ -158,6 +160,11 @@ export function readCreate(cx: ConverterContext, file: string, text: string, st:
   const what = upper(t[i]);
   // SQLite's `CREATE VIRTUAL TABLE x USING fts5(…)`: a search or index module over other tables, not one of the design's.
   if (what === 'TABLE' && t.slice(1, i).some((tok) => upper(tok) === 'VIRTUAL')) return cx.skip(file, 'virtualTable');
+  // BigQuery's `CREATE TABLE FUNCTION ds.f(…) AS …`: a routine that returns rows, not a table.
+  if (what === 'TABLE' && upper(t[i + 1]) === 'FUNCTION' && isName(t[i + 2])) {
+    const fn = readName(t, i + 2);
+    return cx.skip(file, 'routine', 1, { line: st.line, ...(fn ? { name: ledgerText(fn.parts.join('.'), 64) } : {}) });
+  }
   switch (what) {
     case 'TABLE': return readCreateTableStatement(cx, file, text, st, i + 1);
     case 'TYPE': {
@@ -635,7 +642,7 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
   let unhandledKind: SkipKind | undefined;
   const unhandled = (kind: SkipKind = 'alter'): void => { unhandledKind ??= kind; };
   let continues: Continues | undefined;
-  for (const [from, to] of splitTopLevel(t, name.next, t.length)) {
+  for (const [from, to] of splitTopLevel(t, name.next, t.length, ANGLE_TYPE_DIALECTS.has(cx.dialect))) {
     let k = from;
     const where: Origin = { file: origin.file, line: t[from]?.line ?? origin.line };
     if (upper(t[k]) === 'WITH' && (upper(t[k + 1]) === 'CHECK' || upper(t[k + 1]) === 'NOCHECK')) k += 2;
@@ -716,6 +723,12 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       // MySQL / Snowflake: ALTER TABLE t COMMENT [=] '…' is the table's description.
       cx.comments.push({ table: [...tableParts], text: (isPunct(t[k + 1], '=') ? t[k + 2] : t[k + 1]).value, origin: where });
       handled++;
+    } else if (action === 'SET' && setOptionsDescription(t, k, to) !== undefined) {
+      // BigQuery: ALTER TABLE t SET OPTIONS (description = '…'): the table's description.
+      cx.comments.push({ table: [...tableParts], text: setOptionsDescription(t, k, to)!, origin: where });
+      handled++;
+      // Other options beside it (labels, expiration…) are settings.
+      if (splitTopLevel(t, k + 3, matchParen(t, k + 2)).length > 1) unhandled('alterSetting');
     } else if (action === 'OWNER') {
       unhandled('alterOwner');
     } else if (SETTING_ACTIONS.has(action)) {
@@ -725,6 +738,13 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
     }
   }
   if ((unhandledKind || !handled) && !checkOnly) cx.skip(origin.file, unhandledKind ?? 'alter');
+}
+
+/** BigQuery's `SET OPTIONS (…, description = '…', …)` at `t[k]`, before `to`: the description, or undefined. */
+function setOptionsDescription(t: Token[], k: number, to: number): string | undefined {
+  if (upper(t[k]) !== 'SET' || upper(t[k + 1]) !== 'OPTIONS' || !isPunct(t[k + 2], '(')) return undefined;
+  const close = matchParen(t, k + 2);
+  return close > 0 && close < to ? optionsDescription(t, k + 2, close) : undefined;
 }
 
 /** Words that, after an ADD, start another thing added. */
@@ -897,6 +917,12 @@ function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[
     const value = isPunct(t[commentAt], '=') ? t[commentAt + 1] : t[commentAt];
     if (value?.kind !== 'string') return false;
     cx.comments.push({ table: [...tableParts], column, text: value.value, origin: where });
+    return true;
+  }
+  // BigQuery: ALTER COLUMN c SET OPTIONS (description = '…'): the column's description (any other option is a setting).
+  const described = setOptionsDescription(t, k, to);
+  if (described !== undefined) {
+    cx.comments.push({ table: [...tableParts], column, text: described, origin: where });
     return true;
   }
   // PostgreSQL (pg_dump): ALTER COLUMN id ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY (…).
