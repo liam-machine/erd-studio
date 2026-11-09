@@ -86,10 +86,14 @@ const TYPES: Readonly<Record<SqlDialect, Readonly<Record<'int' | 'varchar' | 'tz
   sqlserver: { int: 'int', varchar: 'nvarchar(100)', tz: 'datetimeoffset(7)', numeric: 'decimal(18, 2)', list: 'nvarchar(max)', text: 'nvarchar(max)' },
   snowflake: { int: 'NUMBER(38,0)', varchar: 'VARCHAR(100)', tz: 'TIMESTAMP_TZ(9)', numeric: 'NUMBER(10,2)', list: 'ARRAY', text: 'VARCHAR' },
   databricks: { int: 'BIGINT', varchar: 'STRING', tz: 'TIMESTAMP', numeric: 'DECIMAL(10,2)', list: 'ARRAY<STRING>', text: 'STRING' },
+  oracle: { int: 'NUMBER(10)', varchar: 'VARCHAR2(100 CHAR)', tz: 'TIMESTAMP(6) WITH TIME ZONE', numeric: 'NUMBER(10,2)', list: 'CLOB', text: 'CLOB' },
+  bigquery: { int: 'INT64', varchar: 'STRING(100)', tz: 'TIMESTAMP', numeric: 'NUMERIC(10, 2)', list: 'ARRAY<STRING>', text: 'STRING' },
+  redshift: { int: 'integer', varchar: 'varchar(100)', tz: 'timestamptz', numeric: 'numeric(10,2)', list: 'super', text: 'varchar(max)' },
+  sqlite: { int: 'INTEGER', varchar: 'VARCHAR(100)', tz: 'DATETIME', numeric: 'NUMERIC(10,2)', list: 'TEXT', text: 'TEXT' },
 };
 
 /** Whether the dialect writes FK actions (`ON DELETE …`) the grammar and the import read. */
-const ACTIONS: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['postgres', 'mysql', 'sqlserver']);
+const ACTIONS: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['postgres', 'mysql', 'sqlserver', 'sqlite']);
 
 export const TABLE_DESCRIPTION = 'It\'s the "customer"; one row each.';
 export const COLUMN_DESCRIPTION = 'Login; unique, case kept.';
@@ -177,7 +181,10 @@ export function fidelityTruth(knobs: FidelityKnobs): FidelityTruth {
 export function fidelitySupports(knobs: FidelityKnobs): boolean {
   const d = knobs.dialect;
   if (knobs.unique === 'mysqlKey' && d !== 'mysql') return false;
-  if (knobs.unique === 'index' && (d === 'snowflake' || d === 'databricks')) return false;
+  if (knobs.unique === 'index' && (d === 'snowflake' || d === 'databricks' || d === 'bigquery')) return false;
+  // BigQuery and SQLite name no schema to work in; SQLite has no descriptions.
+  if (knobs.schema === 'context' && (d === 'bigquery' || d === 'sqlite')) return false;
+  if (knobs.descriptions && d === 'sqlite') return false;
   if (knobs.procedural && !(d === 'postgres' || d === 'sqlserver' || d === 'snowflake')) return false;
   if (knobs.schema === 'context' && d === 'sqlserver') return false; // USE picks a database there, never a schema.
   if ((knobs.brackets || knobs.withCheck) && d !== 'sqlserver') return false;
@@ -205,13 +212,16 @@ export function fidelitySpecToDdl(knobs: FidelityKnobs): { files: SqlDdlFile[]; 
   const list = (cols: readonly string[]): string => cols.map(ident).join(', ');
   const tables = spec();
   const actions = ACTIONS.has(d);
+  // BigQuery's keys are informational: written NOT ENFORCED.
+  const enforced = d === 'bigquery' ? ` ${kw('NOT ENFORCED')}` : '';
   const fkClause = (fk: SpecFk): string =>
-    `${kw('CONSTRAINT')} ${ident(fk.name)} ${kw('FOREIGN KEY')} (${list(fk.columns)}) ${kw('REFERENCES')} ${tableName(fk.table)} (${list(fk.references)})${fk.onDelete && actions ? ` ${kw('ON DELETE')} ${kw(fk.onDelete.toUpperCase())}` : ''}`;
+    `${kw('CONSTRAINT')} ${ident(fk.name)} ${kw('FOREIGN KEY')} (${list(fk.columns)}) ${kw('REFERENCES')} ${tableName(fk.table)} (${list(fk.references)})${fk.onDelete && actions ? ` ${kw('ON DELETE')} ${kw(fk.onDelete.toUpperCase())}` : ''}${enforced}`;
   const uniqueClause = (u: { name: string; columns: string[] }): string => `${kw('CONSTRAINT')} ${ident(u.name)} ${kw('UNIQUE')} (${list(u.columns)})`;
 
   const head: string[] = [];
   if (context) {
-    if (d === 'postgres') head.push(`${kw('SET search_path TO')} shop, public;`);
+    if (d === 'postgres' || d === 'redshift') head.push(`${kw('SET search_path TO')} shop, public;`);
+    else if (d === 'oracle') head.push(`${kw('ALTER SESSION SET CURRENT_SCHEMA')} = shop;`);
     else if (d === 'snowflake') head.push(`${kw('USE DATABASE')} analytics;`, `${kw('USE SCHEMA')} shop;`);
     else head.push(`${kw('USE')} shop;`);
   }
@@ -223,13 +233,14 @@ export function fidelitySpecToDdl(knobs: FidelityKnobs): { files: SqlDdlFile[]; 
       let line = `  ${ident(c.name)} ${typeOf(c)}${c.notNull ? ` ${kw('NOT NULL')}` : ''}${inlineUnique ? ` ${kw('UNIQUE')}` : ''}`;
       if (knobs.descriptions && d === 'mysql' && t.name === 'customer' && c.name === 'email') line += ` ${kw('COMMENT')} '${COLUMN_DESCRIPTION.replace(/'/g, "''")}'`;
       if (knobs.descriptions && d === 'databricks' && t.name === 'customer' && c.name === 'email') line += ` ${kw('COMMENT')} '${COLUMN_DESCRIPTION.replace(/'/g, "\\'")}'`;
+      if (knobs.descriptions && d === 'bigquery' && t.name === 'customer' && c.name === 'email') line += ` ${kw('OPTIONS')}(description = "${COLUMN_DESCRIPTION.replace(/"/g, '\\"')}")`;
       lines.push(line);
     }
     // The stale FK the replay drops again.
     if (knobs.replay && t.name === 'orders') {
       if (d === 'postgres') lines[lines.length - 1] += ` ${kw('REFERENCES')} ${tableName('account')} (id)`; // PostgreSQL names it orders_old_ref_fkey
     }
-    lines.push(`  ${kw('CONSTRAINT')} ${ident(`pk_${t.name}`)} ${kw('PRIMARY KEY')} (${list(t.pk)})`);
+    lines.push(`  ${kw('CONSTRAINT')} ${ident(`pk_${t.name}`)} ${kw('PRIMARY KEY')} (${list(t.pk)})${enforced}`);
     if (uniqueStyle === 'table') for (const u of t.uniques) lines.push(`  ${kw('UNIQUE')} (${list(u.columns)})`);
     if (uniqueStyle === 'named') for (const u of t.uniques) lines.push(`  ${uniqueClause(u)}`);
     if (uniqueStyle === 'mysqlKey') for (const u of t.uniques) lines.push(`  ${kw('UNIQUE KEY')} ${ident(u.name)} (${list(u.columns)})`);
@@ -239,6 +250,7 @@ export function fidelitySpecToDdl(knobs: FidelityKnobs): { files: SqlDdlFile[]; 
     }
     let tail = '';
     if (knobs.descriptions && t.name === 'customer' && d === 'mysql') tail = ` ${kw('COMMENT')}='${TABLE_DESCRIPTION.replace(/'/g, "''")}'`;
+    if (knobs.descriptions && t.name === 'customer' && d === 'bigquery') tail = `${eol}${kw('OPTIONS')}(description = '${TABLE_DESCRIPTION.replace(/'/g, "\\'")}')`;
     creates.push(`${kw('CREATE TABLE')} ${tableName(t.name)} (${eol}${lines.join(`,${eol}`)}${eol})${tail};${go}`);
   }
 
@@ -298,7 +310,7 @@ export function fidelitySpecToDdl(knobs: FidelityKnobs): { files: SqlDdlFile[]; 
   }
   if (knobs.descriptions) {
     const customer = tableName('customer');
-    if (d === 'postgres' || d === 'snowflake') {
+    if (d === 'postgres' || d === 'snowflake' || d === 'oracle' || d === 'redshift') {
       later.push(`${kw('COMMENT ON TABLE')} ${customer} ${kw('IS')} '${TABLE_DESCRIPTION.replace(/'/g, "''")}';`);
       later.push(`${kw('COMMENT ON COLUMN')} ${customer}.email ${kw('IS')} ${d === 'postgres' ? `$$${COLUMN_DESCRIPTION}$$` : `'${COLUMN_DESCRIPTION}'`};`);
     } else if (ss) {

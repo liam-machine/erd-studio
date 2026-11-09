@@ -25,7 +25,7 @@
  * `dist/sqlImport.js`.
  */
 
-import { isEscapeStringPrefix, nonStandardStrings } from './sqlDdlLexer';
+import { isEscapeStringPrefix, lostQuote, nonStandardStrings } from './sqlDdlLexer';
 import type { SqlDialect } from './sqlDdlModel';
 
 export interface PlaceholderPass {
@@ -64,6 +64,7 @@ interface Match {
 /** The characters that quote a name (not a string) in each dialect. */
 const IDENT_QUOTES: Readonly<Record<SqlDialect, string>> = {
   postgres: '"', snowflake: '"', sqlserver: '"[', mysql: '`', databricks: '`',
+  oracle: '"', bigquery: '`', redshift: '"', sqlite: '"[`',
 };
 
 /** Characters that continue a plain name. */
@@ -72,7 +73,7 @@ const NAME_CHAR = /[A-Za-z0-9_$#\u0080-￿]/;
 const NAME_START = /[A-Za-z_\u0080-￿]/;
 
 /** Dialects whose `'…'` strings take backslash escapes (kept in step with the lexer's). */
-const BACKSLASH = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake']);
+const BACKSLASH = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake', 'bigquery']);
 
 /** A cheap first test: none of the syntaxes' opening characters means nothing to do. */
 const MAY_HOLD = /\$\{|\{\{|\{%|\{#|\$\(|@[A-Za-z_]\w*@|<%|%\(|&&?[A-Za-z_]\w*\./;
@@ -312,17 +313,17 @@ function findPlaceholders(text: string, dialect: SqlDialect, ambiguous?: Readonl
   while (i < n) {
     const c = text[i];
     if (c === '-' && text[i + 1] === '-') { i = lineEnd(text, i); continue; }
-    if (c === '#' && dialect === 'mysql' && text[i + 1] !== '}') { i = lineEnd(text, i); continue; }
+    if (c === '#' && (dialect === 'mysql' || dialect === 'bigquery') && text[i + 1] !== '}') { i = lineEnd(text, i); continue; }
     if (c === '/' && text[i + 1] === '*') {
       const close = text.indexOf('*/', i + 2);
       i = close < 0 ? lineEnd(text, i) : close + 2;
       continue;
     }
-    if (c === "'" || c === '"' || c === '`' || (c === '[' && dialect === 'sqlserver')) {
+    if (c === "'" || c === '"' || c === '`' || (c === '[' && (dialect === 'sqlserver' || dialect === 'sqlite'))) {
       const closeChar = c === '[' ? ']' : c;
       // PostgreSQL's E'…' reads backslash escapes whatever the dialect (the lexer's rule).
       const backslash = (c === "'" && (escapes || isEscapeStringPrefix(text, i) || nonStandardAt(i)))
-        || (c === '"' && (dialect === 'mysql' || dialect === 'databricks'));
+        || (c === '"' && (dialect === 'mysql' || dialect === 'databricks' || dialect === 'bigquery'));
       let j = i + 1;
       for (; j < n; j++) {
         if (backslash && text[j] === '\\') { j++; continue; }
@@ -335,8 +336,9 @@ function findPlaceholders(text: string, dialect: SqlDialect, ambiguous?: Readonl
         const quoted = quotedPlaceholders(text, i, j, closeChar, ambiguous);
         if (quoted) { out.push(quoted); i = j + 1; continue; }
       }
-      // Unterminated: only to the end of its line (the lexer reads it the same way).
-      i = j >= n ? lineEnd(text, i) : j + 1;
+      // Unterminated, or a quote lost: only to the end of its line (the lexer reads it the same way).
+      const string = c === "'" || backslash;
+      i = j >= n || lostQuote(text, i, j + 1, string ? 'string' : 'name') ? lineEnd(text, i) : j + 1;
       continue;
     }
     if (c === '$' && text[i + 1] !== '{' && text[i + 1] !== '(') {

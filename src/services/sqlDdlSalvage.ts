@@ -23,7 +23,7 @@
 import type { LedgerCause } from './importLedger';
 import { isName, isPunct, matchParen, readName, splitTopLevel, upper, type Statement, type Token } from './sqlDdlLexer';
 import type { RawSqlDatabase, RawSqlField, RawSqlIndex, RawSqlRef, RawSqlTable } from './sqlDdlModel';
-import { cleanTypeText, columnTypeSpan, isConstraintItem, strayTypeToken } from './sqlDdlRepair';
+import { cleanTypeText, columnTypeSpan, isConstraintItem, strayTypeToken, typeRunsIntoNextColumn } from './sqlDdlRepair';
 
 export type SalvageResult =
   | { ok: true; raw: RawSqlDatabase }
@@ -125,6 +125,9 @@ export function salvageCreateTable(
     const field: RawSqlField = { name: t[from].value };
     const span = columnTypeSpan(t, from, to);
     if (span.end > span.start) {
+      // A type that runs on into the next column (a comma missing): never read as one column.
+      const runsOn = typeRunsIntoNextColumn(t, from, span.start, span.end);
+      if (runsOn >= 0) return fail(runsOn, `a comma missing before ${shortWord(t[runsOn].value)} (after the column ${shortWord(field.name)})`);
       const stray = strayTypeToken(t, span.start, span.end);
       if (stray >= 0) return fail(stray, `unexpected "${shortWord(t[stray].value)}" after the type of ${shortWord(field.name)}`);
       const typeText = cleanTypeText(text.slice(t[span.start].start, t[span.end - 1].end));

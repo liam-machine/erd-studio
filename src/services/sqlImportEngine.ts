@@ -27,12 +27,14 @@ import {
   type SqlDdlToDbmlResult,
   type SqlParseEngine,
   type SqlParseFormat,
+  type DbmlCheck,
 } from './sqlDdlImport';
+import { readDbml } from './dbmlImportParse';
 
 export { detectSqlDialect, isSqlDialect, SQL_DIALECTS, SQL_DIALECT_LABELS };
 export type { SqlDdlFile, SqlDdlProblem, SqlDdlToDbmlInput, SqlDdlToDbmlResult, SqlDialect } from './sqlDdlImport';
 
-/** `@dbml/core` 11.0.0's statement parsers, by grammar. Oracle is not offered (and not bundled). */
+/** `@dbml/core` 11.0.0's statement parsers, by grammar. Its Oracle grammar is not bundled: Oracle, BigQuery, Redshift and SQLite read with the PostgreSQL one (`sqlDdlDialects.ts`). */
 export const dbmlCoreSqlEngine: SqlParseEngine = (sql: string, format: SqlParseFormat): RawSqlDatabase => {
   // ANTLR's default listener prints every token error (`line 16:13 token recognition error`) with
   // console.error; the parse throws its own diagnostics, so the print is only noise in the host's log
@@ -59,5 +61,16 @@ export const dbmlCoreSqlEngine: SqlParseEngine = (sql: string, format: SqlParseF
  * repair ladder and salvage off).
  */
 export function sqlDdlToDbml(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }): SqlDdlToDbmlResult {
-  return convertSqlDdl(input, dbmlCoreSqlEngine);
+  return convertSqlDdl(input, dbmlCoreSqlEngine, readsAsDbml);
 }
+
+/**
+ * The converted DBML read back as Import DBML reads it (`readDbml`, the same
+ * pinned parser): what it rejects is left out at its statement by the
+ * converter, so one table never fails the import.
+ */
+export const readsAsDbml: DbmlCheck = (dbml) => {
+  const read = readDbml(dbml);
+  // A parser that stopped says nothing about one line: nothing to leave out (the import says it then).
+  return read.ok || read.threw ? [] : read.diagnostics;
+};

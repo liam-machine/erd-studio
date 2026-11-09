@@ -711,10 +711,19 @@ models:
     expect(draft.undrawnLinks?.map((l) => [l.toModel, l.why])).toEqual([['raw.customers', 'source']]);
   });
 
-  it('a long list of sources names twenty and counts the rest', () => {
+  it('a long list of sources names as many as fit in 300 characters and counts the rest', () => {
     const many = Array.from({ length: 23 }, (_, i) => ({ name: `raw.t${String(i).padStart(2, '0')}`, columns: 0 }));
     const line = dbtSourcesLine(many);
-    expect(line).toMatch(/^23 dbt sources are not drawn: .* raw\.t19 and 3 more \(ERD Studio: Show Logs lists every one\)\.$/);
+    expect(line.length).toBeLessThanOrEqual(300);
+    expect(line).toMatch(/^23 dbt sources are not drawn: .* raw\.t00, raw\.t01, .* and \d+ more \(ERD Studio: Show Logs lists every one\)\.$/);
+    const shown = (line.match(/raw\.t\d\d/g) ?? []).length;
+    expect(shown + Number(/and (\d+) more/.exec(line)![1])).toBe(23);
+    // An uncompiled project's table name is still Jinja: not a name, so it is not given (Fivetran's packages).
+    const jinja = Array.from({ length: 75 }, (_, i) => ({ name: `hubspot.table_number_${i}`, identifier: `{{ var('hubspot_table_number_${i}_identifier', 'table_number_${i}')}}`, columns: 0 }));
+    const long = dbtSourcesLine(jinja);
+    expect(long.length).toBeLessThanOrEqual(300);
+    expect(long).not.toContain('{{');
+    expect(long).toContain('hubspot.table_number_0, hubspot.table_number_1');
     expect(dbtSourcesLine([{ name: 'raw.a', columns: 0 }])).toBe("1 dbt source is not drawn: Import from dbt draws models, and a source is a table dbt reads but doesn't build. It is raw.a.");
   });
 });

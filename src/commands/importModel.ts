@@ -64,7 +64,7 @@ export const IMPORT_PICK_FEATURES: Readonly<Record<ImportModelSource, TelemetryF
 /** What the picker shows for each source. */
 export const IMPORT_SOURCE_ITEMS: Readonly<Record<ImportModelSource, { label: string; detail: string }>> = {
   dbml: { label: '$(file-code) DBML file', detail: 'A .dbml file from dbdiagram.io or any DBML tool (an open format)' },
-  sqlDdl: { label: '$(database) SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake or Databricks' },
+  sqlDdl: { label: '$(database) SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite' },
   semanticModel: { label: '$(graph) Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder (TMDL or model.bim), or a Tabular Editor Save to Folder model' },
 };
 
@@ -182,7 +182,7 @@ const DETECT_DBML_FILES = 5;
  * {@link DETECT_SQL_FILES} `.sql` files, names that usually hold table
  * definitions first (`rankSqlFiles`), whose start holds a CREATE TABLE with a
  * column list by the converter's own reading (`sqlScriptTableCount`: never a
- * dbt macro, a Databricks notebook, Oracle DDL or a file larger than the
+ * dbt macro, a Databricks notebook or a file larger than the
  * import reads). A lookup that fails counts as nothing found. With
  * `countTables` (the start screen's look, which the start suggestion names a
  * count from) every one of those `.sql` files is read, not only up to the

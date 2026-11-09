@@ -1,0 +1,979 @@
+{
+ "sample": "mysql-sakila",
+ "engine": "MySQL 8.0.42",
+ "loaded": [
+  "mysql-sakila/sakila-schema.sql"
+ ],
+ "errors": [],
+ "tables": [
+  {
+   "pk": [
+    "actor_id"
+   ],
+   "name": "actor",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "actor_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "address_id"
+   ],
+   "name": "address",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "address_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "address",
+     "type": "varchar(50)",
+     "notNull": true
+    },
+    {
+     "name": "address2",
+     "type": "varchar(50)",
+     "notNull": false
+    },
+    {
+     "name": "district",
+     "type": "varchar(20)",
+     "notNull": true
+    },
+    {
+     "name": "city_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "postal_code",
+     "type": "varchar(10)",
+     "notNull": false
+    },
+    {
+     "name": "phone",
+     "type": "varchar(20)",
+     "notNull": true
+    },
+    {
+     "name": "location",
+     "srid": 0,
+     "type": "geometry",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "category_id"
+   ],
+   "name": "category",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "category_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "varchar(25)",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "city_id"
+   ],
+   "name": "city",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "city_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "city",
+     "type": "varchar(50)",
+     "notNull": true
+    },
+    {
+     "name": "country_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "country_id"
+   ],
+   "name": "country",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "country_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "country",
+     "type": "varchar(50)",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "customer_id"
+   ],
+   "name": "customer",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "customer_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "store_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "email",
+     "type": "varchar(50)",
+     "notNull": false
+    },
+    {
+     "name": "address_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "active",
+     "type": "tinyint(1)",
+     "notNull": true
+    },
+    {
+     "name": "create_date",
+     "type": "datetime",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": false
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "film_id"
+   ],
+   "name": "film",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "title",
+     "type": "varchar(128)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "release_year",
+     "type": "year",
+     "notNull": false
+    },
+    {
+     "name": "language_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "original_language_id",
+     "type": "tinyint unsigned",
+     "notNull": false
+    },
+    {
+     "name": "rental_duration",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "rental_rate",
+     "type": "decimal(4,2)",
+     "notNull": true
+    },
+    {
+     "name": "length",
+     "type": "smallint unsigned",
+     "notNull": false
+    },
+    {
+     "name": "replacement_cost",
+     "type": "decimal(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "rating",
+     "type": "enum('G','PG','PG-13','R','NC-17')",
+     "notNull": false
+    },
+    {
+     "name": "special_features",
+     "type": "set('Trailers','Commentaries','Deleted Scenes','Behind the Scenes')",
+     "notNull": false
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "actor_id",
+    "film_id"
+   ],
+   "name": "film_actor",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "actor_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "film_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "film_id",
+    "category_id"
+   ],
+   "name": "film_category",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "category_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "film_id"
+   ],
+   "name": "film_text",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "title",
+     "type": "varchar(255)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "inventory_id"
+   ],
+   "name": "inventory",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "inventory_id",
+     "type": "mediumint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "film_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "store_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "language_id"
+   ],
+   "name": "language",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "language_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "char(20)",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "payment_id"
+   ],
+   "name": "payment",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "int",
+     "notNull": false
+    },
+    {
+     "name": "amount",
+     "type": "decimal(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "datetime",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": false
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "rental_id"
+   ],
+   "name": "rental",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "rental_id",
+     "type": "int",
+     "notNull": true
+    },
+    {
+     "name": "rental_date",
+     "type": "datetime",
+     "notNull": true
+    },
+    {
+     "name": "inventory_id",
+     "type": "mediumint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "return_date",
+     "type": "datetime",
+     "notNull": false
+    },
+    {
+     "name": "staff_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "staff_id"
+   ],
+   "name": "staff",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "staff_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "varchar(45)",
+     "notNull": true
+    },
+    {
+     "name": "address_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "picture",
+     "type": "blob",
+     "notNull": false
+    },
+    {
+     "name": "email",
+     "type": "varchar(50)",
+     "notNull": false
+    },
+    {
+     "name": "store_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "active",
+     "type": "tinyint(1)",
+     "notNull": true
+    },
+    {
+     "name": "username",
+     "type": "varchar(16)",
+     "notNull": true
+    },
+    {
+     "name": "password",
+     "type": "varchar(40)",
+     "notNull": false
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  },
+  {
+   "pk": [
+    "store_id"
+   ],
+   "name": "store",
+   "schema": "sakila",
+   "columns": [
+    {
+     "name": "store_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "manager_staff_id",
+     "type": "tinyint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "address_id",
+     "type": "smallint unsigned",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp",
+     "notNull": true
+    }
+   ],
+   "comment": null
+  }
+ ],
+ "uniqueKeys": [
+  {
+   "kind": "constraint",
+   "name": "rental_date",
+   "table": "rental",
+   "schema": "sakila",
+   "columns": [
+    "rental_date",
+    "inventory_id",
+    "customer_id"
+   ],
+   "partial": false
+  },
+  {
+   "kind": "constraint",
+   "name": "idx_unique_manager",
+   "table": "store",
+   "schema": "sakila",
+   "columns": [
+    "manager_staff_id"
+   ],
+   "partial": false
+  }
+ ],
+ "foreignKeys": [
+  {
+   "name": "fk_address_city",
+   "table": "address",
+   "schema": "sakila",
+   "columns": [
+    "city_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "city",
+   "refSchema": "sakila",
+   "refColumns": [
+    "city_id"
+   ]
+  },
+  {
+   "name": "fk_city_country",
+   "table": "city",
+   "schema": "sakila",
+   "columns": [
+    "country_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "country",
+   "refSchema": "sakila",
+   "refColumns": [
+    "country_id"
+   ]
+  },
+  {
+   "name": "fk_customer_address",
+   "table": "customer",
+   "schema": "sakila",
+   "columns": [
+    "address_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "address",
+   "refSchema": "sakila",
+   "refColumns": [
+    "address_id"
+   ]
+  },
+  {
+   "name": "fk_customer_store",
+   "table": "customer",
+   "schema": "sakila",
+   "columns": [
+    "store_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "store",
+   "refSchema": "sakila",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "name": "fk_film_language",
+   "table": "film",
+   "schema": "sakila",
+   "columns": [
+    "language_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "language",
+   "refSchema": "sakila",
+   "refColumns": [
+    "language_id"
+   ]
+  },
+  {
+   "name": "fk_film_language_original",
+   "table": "film",
+   "schema": "sakila",
+   "columns": [
+    "original_language_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "language",
+   "refSchema": "sakila",
+   "refColumns": [
+    "language_id"
+   ]
+  },
+  {
+   "name": "fk_film_actor_actor",
+   "table": "film_actor",
+   "schema": "sakila",
+   "columns": [
+    "actor_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "actor",
+   "refSchema": "sakila",
+   "refColumns": [
+    "actor_id"
+   ]
+  },
+  {
+   "name": "fk_film_actor_film",
+   "table": "film_actor",
+   "schema": "sakila",
+   "columns": [
+    "film_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "film",
+   "refSchema": "sakila",
+   "refColumns": [
+    "film_id"
+   ]
+  },
+  {
+   "name": "fk_film_category_category",
+   "table": "film_category",
+   "schema": "sakila",
+   "columns": [
+    "category_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "category",
+   "refSchema": "sakila",
+   "refColumns": [
+    "category_id"
+   ]
+  },
+  {
+   "name": "fk_film_category_film",
+   "table": "film_category",
+   "schema": "sakila",
+   "columns": [
+    "film_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "film",
+   "refSchema": "sakila",
+   "refColumns": [
+    "film_id"
+   ]
+  },
+  {
+   "name": "fk_inventory_film",
+   "table": "inventory",
+   "schema": "sakila",
+   "columns": [
+    "film_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "film",
+   "refSchema": "sakila",
+   "refColumns": [
+    "film_id"
+   ]
+  },
+  {
+   "name": "fk_inventory_store",
+   "table": "inventory",
+   "schema": "sakila",
+   "columns": [
+    "store_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "store",
+   "refSchema": "sakila",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "name": "fk_payment_customer",
+   "table": "payment",
+   "schema": "sakila",
+   "columns": [
+    "customer_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "customer",
+   "refSchema": "sakila",
+   "refColumns": [
+    "customer_id"
+   ]
+  },
+  {
+   "name": "fk_payment_rental",
+   "table": "payment",
+   "schema": "sakila",
+   "columns": [
+    "rental_id"
+   ],
+   "onDelete": "SET NULL",
+   "onUpdate": "CASCADE",
+   "refTable": "rental",
+   "refSchema": "sakila",
+   "refColumns": [
+    "rental_id"
+   ]
+  },
+  {
+   "name": "fk_payment_staff",
+   "table": "payment",
+   "schema": "sakila",
+   "columns": [
+    "staff_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "staff",
+   "refSchema": "sakila",
+   "refColumns": [
+    "staff_id"
+   ]
+  },
+  {
+   "name": "fk_rental_customer",
+   "table": "rental",
+   "schema": "sakila",
+   "columns": [
+    "customer_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "customer",
+   "refSchema": "sakila",
+   "refColumns": [
+    "customer_id"
+   ]
+  },
+  {
+   "name": "fk_rental_inventory",
+   "table": "rental",
+   "schema": "sakila",
+   "columns": [
+    "inventory_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "inventory",
+   "refSchema": "sakila",
+   "refColumns": [
+    "inventory_id"
+   ]
+  },
+  {
+   "name": "fk_rental_staff",
+   "table": "rental",
+   "schema": "sakila",
+   "columns": [
+    "staff_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "staff",
+   "refSchema": "sakila",
+   "refColumns": [
+    "staff_id"
+   ]
+  },
+  {
+   "name": "fk_staff_address",
+   "table": "staff",
+   "schema": "sakila",
+   "columns": [
+    "address_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "address",
+   "refSchema": "sakila",
+   "refColumns": [
+    "address_id"
+   ]
+  },
+  {
+   "name": "fk_staff_store",
+   "table": "staff",
+   "schema": "sakila",
+   "columns": [
+    "store_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "store",
+   "refSchema": "sakila",
+   "refColumns": [
+    "store_id"
+   ]
+  },
+  {
+   "name": "fk_store_address",
+   "table": "store",
+   "schema": "sakila",
+   "columns": [
+    "address_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "address",
+   "refSchema": "sakila",
+   "refColumns": [
+    "address_id"
+   ]
+  },
+  {
+   "name": "fk_store_staff",
+   "table": "store",
+   "schema": "sakila",
+   "columns": [
+    "manager_staff_id"
+   ],
+   "onDelete": "RESTRICT",
+   "onUpdate": "CASCADE",
+   "refTable": "staff",
+   "refSchema": "sakila",
+   "refColumns": [
+    "staff_id"
+   ]
+  }
+ ]
+}

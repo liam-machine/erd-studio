@@ -1,0 +1,74 @@
+name: Import corpus
+
+# Scores ERD Studio's imports against the import corpus: 70+ public schemas
+# (pg_dump and mysqldump output, Rails and Django dumps, SQL Server projects,
+# Oracle, BigQuery, Redshift and SQLite DDL, TPC-H / TPC-DS, dbt projects,
+# Power BI models) pinned in scripts/corpus/manifest.json. Manual only; the
+# score table, the failure classes and every schema's result are uploaded as
+# the run's `import-corpus-scores` artifact.
+#
+#   gh workflow run import-corpus.yml
+#   gh workflow run import-corpus.yml -f only=pg-discourse,mysql-magento
+#
+# The schemas are downloaded into a cache in the runner's temp folder, checked
+# against their pinned SHA-256 and only ever read as data: nothing downloaded
+# is run. The source counter runs with `python -I`. See scripts/corpus/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Score only these schemas (comma-separated names from scripts/corpus/manifest.json; empty scores all)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: npm ci
+
+      - name: Install the source counter's pinned dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/corpus-venv"
+          "$RUNNER_TEMP/corpus-venv/bin/pip" install --quiet -r scripts/corpus/requirements.txt
+
+      - name: Fetch and score
+        env:
+          ONLY: ${{ inputs.only }}
+          IMPORT_CORPUS_DIR: ${{ runner.temp }}/import-corpus
+        run: |
+          args=(--jobs 2 --python "$RUNNER_TEMP/corpus-venv/bin/python")
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          node scripts/corpus/score.mjs "${args[@]}"
+          cat "$IMPORT_CORPUS_DIR/report/score-table.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the score table and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: import-corpus-scores
+          path: |
+            ${{ runner.temp }}/import-corpus/report
+            ${{ runner.temp }}/import-corpus/results
+            ${{ runner.temp }}/import-corpus/truth
+          if-no-files-found: warn

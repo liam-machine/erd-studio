@@ -1,0 +1,587 @@
+{
+ "sample": "sqlite-chinook",
+ "engine": "SQLite 3.53.2 (Python sqlite3)",
+ "loaded": [
+  "sqlite-chinook/DataSources/Chinook_Sqlite.sql"
+ ],
+ "errors": [],
+ "tables": [
+  {
+   "schema": null,
+   "name": "Album",
+   "comment": null,
+   "pk": [
+    "AlbumId"
+   ],
+   "columns": [
+    {
+     "name": "AlbumId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Title",
+     "type": "NVARCHAR(160)",
+     "notNull": true
+    },
+    {
+     "name": "ArtistId",
+     "type": "INTEGER",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Artist",
+   "comment": null,
+   "pk": [
+    "ArtistId"
+   ],
+   "columns": [
+    {
+     "name": "ArtistId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Name",
+     "type": "NVARCHAR(120)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Customer",
+   "comment": null,
+   "pk": [
+    "CustomerId"
+   ],
+   "columns": [
+    {
+     "name": "CustomerId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "FirstName",
+     "type": "NVARCHAR(40)",
+     "notNull": true
+    },
+    {
+     "name": "LastName",
+     "type": "NVARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "Company",
+     "type": "NVARCHAR(80)",
+     "notNull": false
+    },
+    {
+     "name": "Address",
+     "type": "NVARCHAR(70)",
+     "notNull": false
+    },
+    {
+     "name": "City",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "State",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "Country",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "PostalCode",
+     "type": "NVARCHAR(10)",
+     "notNull": false
+    },
+    {
+     "name": "Phone",
+     "type": "NVARCHAR(24)",
+     "notNull": false
+    },
+    {
+     "name": "Fax",
+     "type": "NVARCHAR(24)",
+     "notNull": false
+    },
+    {
+     "name": "Email",
+     "type": "NVARCHAR(60)",
+     "notNull": true
+    },
+    {
+     "name": "SupportRepId",
+     "type": "INTEGER",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Employee",
+   "comment": null,
+   "pk": [
+    "EmployeeId"
+   ],
+   "columns": [
+    {
+     "name": "EmployeeId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "LastName",
+     "type": "NVARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "FirstName",
+     "type": "NVARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "Title",
+     "type": "NVARCHAR(30)",
+     "notNull": false
+    },
+    {
+     "name": "ReportsTo",
+     "type": "INTEGER",
+     "notNull": false
+    },
+    {
+     "name": "BirthDate",
+     "type": "DATETIME",
+     "notNull": false
+    },
+    {
+     "name": "HireDate",
+     "type": "DATETIME",
+     "notNull": false
+    },
+    {
+     "name": "Address",
+     "type": "NVARCHAR(70)",
+     "notNull": false
+    },
+    {
+     "name": "City",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "State",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "Country",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "PostalCode",
+     "type": "NVARCHAR(10)",
+     "notNull": false
+    },
+    {
+     "name": "Phone",
+     "type": "NVARCHAR(24)",
+     "notNull": false
+    },
+    {
+     "name": "Fax",
+     "type": "NVARCHAR(24)",
+     "notNull": false
+    },
+    {
+     "name": "Email",
+     "type": "NVARCHAR(60)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Genre",
+   "comment": null,
+   "pk": [
+    "GenreId"
+   ],
+   "columns": [
+    {
+     "name": "GenreId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Name",
+     "type": "NVARCHAR(120)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Invoice",
+   "comment": null,
+   "pk": [
+    "InvoiceId"
+   ],
+   "columns": [
+    {
+     "name": "InvoiceId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "CustomerId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "InvoiceDate",
+     "type": "DATETIME",
+     "notNull": true
+    },
+    {
+     "name": "BillingAddress",
+     "type": "NVARCHAR(70)",
+     "notNull": false
+    },
+    {
+     "name": "BillingCity",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "BillingState",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "BillingCountry",
+     "type": "NVARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "BillingPostalCode",
+     "type": "NVARCHAR(10)",
+     "notNull": false
+    },
+    {
+     "name": "Total",
+     "type": "NUMERIC(10,2)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "InvoiceLine",
+   "comment": null,
+   "pk": [
+    "InvoiceLineId"
+   ],
+   "columns": [
+    {
+     "name": "InvoiceLineId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "InvoiceId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "TrackId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "UnitPrice",
+     "type": "NUMERIC(10,2)",
+     "notNull": true
+    },
+    {
+     "name": "Quantity",
+     "type": "INTEGER",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "MediaType",
+   "comment": null,
+   "pk": [
+    "MediaTypeId"
+   ],
+   "columns": [
+    {
+     "name": "MediaTypeId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Name",
+     "type": "NVARCHAR(120)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Playlist",
+   "comment": null,
+   "pk": [
+    "PlaylistId"
+   ],
+   "columns": [
+    {
+     "name": "PlaylistId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Name",
+     "type": "NVARCHAR(120)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "PlaylistTrack",
+   "comment": null,
+   "pk": [
+    "PlaylistId",
+    "TrackId"
+   ],
+   "columns": [
+    {
+     "name": "PlaylistId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "TrackId",
+     "type": "INTEGER",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": null,
+   "name": "Track",
+   "comment": null,
+   "pk": [
+    "TrackId"
+   ],
+   "columns": [
+    {
+     "name": "TrackId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Name",
+     "type": "NVARCHAR(200)",
+     "notNull": true
+    },
+    {
+     "name": "AlbumId",
+     "type": "INTEGER",
+     "notNull": false
+    },
+    {
+     "name": "MediaTypeId",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "GenreId",
+     "type": "INTEGER",
+     "notNull": false
+    },
+    {
+     "name": "Composer",
+     "type": "NVARCHAR(220)",
+     "notNull": false
+    },
+    {
+     "name": "Milliseconds",
+     "type": "INTEGER",
+     "notNull": true
+    },
+    {
+     "name": "Bytes",
+     "type": "INTEGER",
+     "notNull": false
+    },
+    {
+     "name": "UnitPrice",
+     "type": "NUMERIC(10,2)",
+     "notNull": true
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": null,
+   "table": "Album",
+   "name": null,
+   "columns": [
+    "ArtistId"
+   ],
+   "refSchema": null,
+   "refTable": "Artist",
+   "refColumns": [
+    "ArtistId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Customer",
+   "name": null,
+   "columns": [
+    "SupportRepId"
+   ],
+   "refSchema": null,
+   "refTable": "Employee",
+   "refColumns": [
+    "EmployeeId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Employee",
+   "name": null,
+   "columns": [
+    "ReportsTo"
+   ],
+   "refSchema": null,
+   "refTable": "Employee",
+   "refColumns": [
+    "EmployeeId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Invoice",
+   "name": null,
+   "columns": [
+    "CustomerId"
+   ],
+   "refSchema": null,
+   "refTable": "Customer",
+   "refColumns": [
+    "CustomerId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "InvoiceLine",
+   "name": null,
+   "columns": [
+    "InvoiceId"
+   ],
+   "refSchema": null,
+   "refTable": "Invoice",
+   "refColumns": [
+    "InvoiceId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "InvoiceLine",
+   "name": null,
+   "columns": [
+    "TrackId"
+   ],
+   "refSchema": null,
+   "refTable": "Track",
+   "refColumns": [
+    "TrackId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "PlaylistTrack",
+   "name": null,
+   "columns": [
+    "PlaylistId"
+   ],
+   "refSchema": null,
+   "refTable": "Playlist",
+   "refColumns": [
+    "PlaylistId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "PlaylistTrack",
+   "name": null,
+   "columns": [
+    "TrackId"
+   ],
+   "refSchema": null,
+   "refTable": "Track",
+   "refColumns": [
+    "TrackId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Track",
+   "name": null,
+   "columns": [
+    "AlbumId"
+   ],
+   "refSchema": null,
+   "refTable": "Album",
+   "refColumns": [
+    "AlbumId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Track",
+   "name": null,
+   "columns": [
+    "GenreId"
+   ],
+   "refSchema": null,
+   "refTable": "Genre",
+   "refColumns": [
+    "GenreId"
+   ]
+  },
+  {
+   "schema": null,
+   "table": "Track",
+   "name": null,
+   "columns": [
+    "MediaTypeId"
+   ],
+   "refSchema": null,
+   "refTable": "MediaType",
+   "refColumns": [
+    "MediaTypeId"
+   ]
+  }
+ ]
+}

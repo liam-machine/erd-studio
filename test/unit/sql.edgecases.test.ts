@@ -54,6 +54,7 @@ describe('template placeholders', () => {
   };
   const QUOTE: Record<SqlDialect, (s: string) => string> = {
     postgres: (s) => `"${s}"`, snowflake: (s) => `"${s}"`, sqlserver: (s) => `[${s}]`, mysql: (s) => `\`${s}\``, databricks: (s) => `\`${s}\``,
+    oracle: (s) => `"${s}"`, bigquery: (s) => `\`${s}\``, redshift: (s) => `"${s}"`, sqlite: (s) => `[${s}]`,
   };
 
   for (const dialect of SQL_DIALECTS) {
@@ -441,6 +442,10 @@ describe('trailing table options in any order', () => {
     mysql: ['ENGINE=InnoDB', 'DEFAULT CHARSET=utf8mb4', 'COLLATE=utf8mb4_bin', "COMMENT='tbl'", 'AUTO_INCREMENT=10', 'ROW_FORMAT=DYNAMIC', 'PARTITION BY HASH (id) PARTITIONS 4'],
     sqlserver: ['ON [PRIMARY]', 'TEXTIMAGE_ON [PRIMARY]', 'WITH (DATA_COMPRESSION = PAGE)', 'FILESTREAM_ON fs'],
     postgres: ['INHERITS (base)', 'TABLESPACE fast', 'WITH (fillfactor=70)', 'PARTITION BY RANGE (d)', 'USING heap'],
+    oracle: ['TABLESPACE users', 'PCTFREE 10', 'STORAGE (INITIAL 64K NEXT 1M)', 'ORGANIZATION HEAP', 'NOCOMPRESS', 'LOGGING', 'PARTITION BY RANGE (d) (PARTITION p1 VALUES LESS THAN (DATE \'2020-01-01\'), PARTITION p2 VALUES LESS THAN (MAXVALUE))', 'SEGMENT CREATION IMMEDIATE'],
+    bigquery: ['PARTITION BY d', 'CLUSTER BY id', "OPTIONS(description = 'tbl')", "OPTIONS(labels = [('a', 'b')])", 'DEFAULT COLLATE \'und:ci\''],
+    redshift: ['DISTSTYLE KEY', 'DISTKEY (id)', 'COMPOUND SORTKEY (id, d)', 'INTERLEAVED SORTKEY (d)', 'BACKUP NO', 'DISTSTYLE AUTO'],
+    sqlite: ['WITHOUT ROWID', 'STRICT'],
   };
   for (const dialect of SQL_DIALECTS) {
     it(`${dialect}: every pair of options, both orders, keeps both tables, the link and the table comment`, () => {
@@ -451,7 +456,7 @@ describe('trailing table options in any order', () => {
           if (a === b) continue;
           const text = `CREATE TABLE t (id int NOT NULL, d date${dialect === 'databricks' ? '' : ', PRIMARY KEY (id)'})\n${a}\n${b};\nCREATE TABLE u (id int, t_id int REFERENCES t(id));`;
           const r = sqlDdlToDbml({ dialect, files: [{ name: 'a.sql', text }] });
-          const comment = /COMMENT/.test(a + b);
+          const comment = /COMMENT|description/.test(a + b);
           if (!r.ok || r.tableCount !== 2 || r.refCount !== 1 || (comment && !/Note: 'tbl'/.test(r.dbml))) failures.push(`${a} + ${b}`);
         }
       }

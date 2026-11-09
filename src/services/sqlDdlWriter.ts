@@ -39,8 +39,9 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
   const seen = new Map<string, ResolvedRef>();
   for (const ref of c.refs) {
     const where = `${ref.origin.file} line ${ref.origin.line}`;
-    const fkLabel = `${ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
     const from = ref.fromTable ?? c.findTable(ref.from.parts);
+    // The FK table as the files leave it (a later RENAME TO), so what is said names a table the diagram has.
+    const fkLabel = `${from ? tableLabel(from) : ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
     const to = c.findTable(ref.to.parts);
     if (!from) { c.skippedLines.push(`${where}: foreign key ${fkLabel}: ${ref.from.parts.slice(-2).join('.')} is not in the files`); continue; }
     if (!to) { c.skippedLines.push(`${where}: foreign key ${fkLabel} → ${ref.to.parts.slice(-2).join('.')}: that table is not in the files`); continue; }
@@ -72,7 +73,13 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
     const oneToOne = cardinalityOf(resolved);
     const ledgerWhere = { file: ref.origin.file, line: ref.origin.line, table: tableLabel(from), column: resolved.fromColumns.join('+') };
     if (oneToOne === 'one-to-one') resolved.oneToOne = true;
-    else if (oneToOne === 'unwritable') {
+    else if (oneToOne === 'unwritable' && resolved.fromColumns.length === 1) {
+      // Declared on the FK column, which Import DBML stores it from; an inline reference has no settings.
+      resolved.oneToOne = true;
+      resolved.inline = true;
+      const actions = refSettings(resolved);
+      if (actions) c.ledger.lost('setting', 'noField', 'FK action', ledgerWhere, `not kept: ${actions.slice(2, -1)} (a one-to-one declared on its column has no place for it)`);
+    } else if (oneToOne === 'unwritable') {
       c.ledger.changed('relationship', 'other', 'one-to-one link', ledgerWhere, 'written as many-to-one: its FK columns are their table\'s key, but it references columns that are not');
     }
     if (ref.name) c.ledger.changed('constraint', 'notDesign', 'foreign key name', ledgerWhere, 'not kept: a constraint\'s name is the database\'s, not the design\'s');
@@ -158,7 +165,7 @@ export function dbmlExpression(expr: string): string {
   return `\`${expr.replace(/`/g, "'")}\``;
 }
 
-export function fieldSettings(field: ModelField): string {
+export function fieldSettings(field: ModelField, inlineRef?: string): string {
   const settings: string[] = [];
   if (field.pk) settings.push('pk');
   if (field.increment) settings.push('increment');
@@ -174,6 +181,7 @@ export function fieldSettings(field: ModelField): string {
   }
   for (const check of field.checks) settings.push(`check: ${dbmlExpression(check)}`);
   if (field.note) settings.push(`note: ${dbmlString(field.note)}`);
+  if (inlineRef) settings.push(`ref: ${inlineRef}`);
   return settings.length ? ` [${settings.join(', ')}]` : '';
 }
 
@@ -182,14 +190,58 @@ export function writeDbml(
   tables: readonly ModelTable[],
   refs: readonly ResolvedRef[],
 ): string {
+  return writeDbmlMapped(enums, tables, refs).dbml;
+}
+
+/** What wrote a line of the DBML: a table's block, a reference (its Ref line, or the column line declaring it), an enum. */
+export interface DbmlLineOwner {
+  /** 1-based, inclusive. */
+  from: number;
+  to: number;
+  table?: ModelTable;
+  ref?: ResolvedRef;
+  enum?: ModelEnum;
+}
+
+/**
+ * {@link writeDbml}, and which table, reference or enum wrote each line, so
+ * a line the DBML reader rejects can be traced to the statement in the user's
+ * files that gave it (the converter leaves that one out, not the import).
+ */
+export function writeDbmlMapped(
+  enums: readonly ModelEnum[],
+  tables: readonly ModelTable[],
+  refs: readonly ResolvedRef[],
+): { dbml: string; owners: DbmlLineOwner[] } {
   const blocks: string[] = [];
+  const owners: DbmlLineOwner[] = [];
+  let line = 1;
+  /** Adds a block (blank line between blocks) and returns its first line. */
+  const push = (block: string): number => {
+    const start = line;
+    blocks.push(block);
+    line += block.split('\n').length + 1;
+    return start;
+  };
   for (const e of enums) {
     const lines = e.values.map((v) => `  ${quoteIdent(v.name)}${v.note ? ` [note: ${dbmlString(v.note)}]` : ''}`);
-    blocks.push(`Enum ${dbmlTableName(e)} {\n${lines.join('\n')}\n}`);
+    const block = `Enum ${dbmlTableName(e)} {\n${lines.join('\n')}\n}`;
+    const start = push(block);
+    owners.push({ from: start, to: start + block.split('\n').length - 1, enum: e });
+  }
+  // One-to-ones declared on their FK column (one per column; any other is written as a Ref).
+  const inline = new Map<ModelField, string>();
+  const placed = new Set<ResolvedRef>();
+  for (const r of refs) {
+    if (!r.inline) continue;
+    const field = r.from.fields.find((f) => f.name === r.fromColumns[0]);
+    if (!field || inline.has(field)) continue;
+    inline.set(field, `- ${dbmlTableName(r.to)}.${quoteIdent(r.toColumns[0])}`);
+    placed.add(r);
   }
   for (const table of tables) {
     const header = table.alias ? ` [alias: ${dbmlString(table.alias)}]` : '';
-    const lines = table.fields.map((f) => `  ${quoteIdent(f.name)} ${dbmlType(f.type)}${fieldSettings(f)}`);
+    const lines = table.fields.map((f) => `  ${quoteIdent(f.name)} ${dbmlType(f.type)}${fieldSettings(f, inline.get(f))}`);
     const indexes: string[] = [];
     if (table.primaryKey) indexes.push(`    (${table.primaryKey.map(quoteIdent).join(', ')}) [pk]`);
     // A unique key over the primary key's columns, or one already written, says nothing more.
@@ -204,14 +256,36 @@ export function writeDbml(
       lines.push('', '  checks {', ...table.checks.map((c) => `    ${dbmlExpression(c.expression)}${c.name ? ` [name: ${dbmlString(c.name)}]` : ''}`), '  }');
     }
     if (table.note) lines.push('', `  Note: ${dbmlString(table.note)}`);
-    blocks.push(`Table ${dbmlTableName(table)}${header} {\n${lines.join('\n')}\n}`);
+    const block = `Table ${dbmlTableName(table)}${header} {\n${lines.join('\n')}\n}`;
+    const start = push(block);
+    // A column line declaring a one-to-one is the reference's; the rest of the block is the table's.
+    let at = start + 1;
+    table.fields.forEach((f, i) => {
+      const height = lines[i].split('\n').length;
+      const declared = inline.has(f) ? [...placed].find((r) => r.from === table && r.fromColumns[0] === f.name) : undefined;
+      if (declared) owners.push({ from: at, to: at + height - 1, ref: declared });
+      at += height;
+    });
+    owners.push({ from: start, to: start + block.split('\n').length - 1, table });
   }
-  if (refs.length) {
+  const blockRefs = refs.filter((r) => !placed.has(r));
+  if (blockRefs.length) {
     const end = (table: ModelTable, columns: string[]): string =>
       columns.length === 1 ? `${dbmlTableName(table)}.${quoteIdent(columns[0])}` : `${dbmlTableName(table)}.(${columns.map(quoteIdent).join(', ')})`;
-    blocks.push(refs.map((r) => (r.oneToOne
+    const start = push(blockRefs.map((r) => (r.oneToOne
       ? `Ref: ${end(r.to, r.toColumns)} - ${end(r.from, r.fromColumns)}${refSettings(r)}`
       : `Ref: ${end(r.from, r.fromColumns)} > ${end(r.to, r.toColumns)}${refSettings(r)}`)).join('\n'));
+    blockRefs.forEach((r, i) => owners.push({ from: start + i, to: start + i, ref: r }));
   }
-  return blocks.join('\n\n') + '\n';
+  return { dbml: blocks.join('\n\n') + '\n', owners };
+}
+
+/** The most specific owner of `line` (a reference's line before its table's block). */
+export function ownerOfLine(owners: readonly DbmlLineOwner[], line: number): DbmlLineOwner | undefined {
+  let best: DbmlLineOwner | undefined;
+  for (const o of owners) {
+    if (line < o.from || line > o.to) continue;
+    if (!best || o.to - o.from < best.to - best.from) best = o;
+  }
+  return best;
 }

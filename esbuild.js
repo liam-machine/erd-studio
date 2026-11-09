@@ -119,8 +119,9 @@ const cliConfig = {
 // SQL importer — `dist/sqlImport.js`, loaded by the host only when an Import
 // SQL DDL… runs (src/services/sqlImportLoader.ts), so @dbml/core's SQL
 // grammars (several MB) never enter dist/extension.js or dist/cli.js. The
-// Oracle grammar (about 8 MB on its own) is stubbed out: the import does not
-// offer Oracle (src/services/sqlDdlImport.ts, SQL_DIALECTS). No source map:
+// Oracle grammar is stubbed out: bundled it adds about 5.7 MB to the minified
+// file (10.1 MB → 15.8 MB), and the import reads Oracle with the PostgreSQL
+// grammar after Oracle's own pre-steps (src/services/sqlDdlDialects.ts). No source map:
 // the grammar tables dwarf the converter, which tests run from source.
 const ORACLE_GRAMMAR = /[\\/]ANTLR[\\/](parsers[\\/]oraclesql[\\/]|ASTGeneration[\\/]oraclesql[\\/])/;
 const stubOracleGrammarPlugin = {

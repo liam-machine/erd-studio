@@ -111,25 +111,35 @@ const TYPE_STOP = new Set([
   'ENFORCED', 'RELY', 'NORELY', 'CLUSTERED', 'NONCLUSTERED', 'COMPRESSION', 'STORAGE',
   // SQL Server's inline `int FOREIGN KEY REFERENCES t(id)`; Snowflake's policies without WITH; MySQL's column attributes.
   'FOREIGN', 'MASKING', 'PROJECTION', 'COLUMN_FORMAT', 'ENGINE_ATTRIBUTE', 'SECONDARY_ENGINE_ATTRIBUTE',
+  // BigQuery's column OPTIONS(…); Redshift's column DISTKEY / SORTKEY; Oracle's ENCRYPT.
+  'OPTIONS', 'DISTKEY', 'SORTKEY', 'ENCRYPT',
 ]);
 
 /** Whether the token at `k` ends a column's type (`ON UPDATE`, `CHARACTER SET`, `WITH (…)` and the {@link TYPE_STOP} words). */
 export function endsType(t: readonly Token[], k: number): boolean {
   const w = upper(t[k]);
   if (TYPE_STOP.has(w)) return true;
-  if (w === 'ON') return upper(t[k + 1]) === 'UPDATE';
+  // MySQL's `ON UPDATE CURRENT_TIMESTAMP`; SQLite's `ON CONFLICT REPLACE`.
+  if (w === 'ON') return upper(t[k + 1]) === 'UPDATE' || upper(t[k + 1]) === 'CONFLICT';
   if (w === 'CHARACTER') return upper(t[k + 1]) === 'SET';
   if (w === 'WITH') return !(upper(t[k + 1]) === 'TIME' || upper(t[k + 1]) === 'LOCAL');
   return false;
 }
 
 /** Whether the item `[from, to)` of a column list is a table constraint or index, not a column. */
+/** What follows a SQL Server inline index's name (`INDEX ix NONCLUSTERED (…)`). */
+const SQLSERVER_INDEX_WORDS = new Set(['CLUSTERED', 'NONCLUSTERED', 'COLUMNSTORE', 'HASH', 'UNIQUE']);
+
 export function isConstraintItem(t: readonly Token[], from: number, to: number): boolean {
   const head = upper(t[from]);
   if (!CONSTRAINT_HEADS.has(head) || t[from].kind !== 'word') return false;
   // `key varchar(10)`, `index int`: a column named like the word.
   // `KEY idx (a, b)` is an index; `key varchar(20)` (a number in the parentheses) a column.
-  if (head === 'KEY' || head === 'INDEX') return isPunct(t[from + 1], '(') || (isName(t[from + 1]) && isPunct(t[from + 2], '(') && t[from + 3]?.kind !== 'number' && upper(t[from + 3]) !== 'MAX');
+  if (head === 'KEY' || head === 'INDEX') {
+    // SQL Server's inline `INDEX ix [UNIQUE] CLUSTERED COLUMNSTORE | NONCLUSTERED (…) | HASH (…)`: no type is spelled so.
+    if (head === 'INDEX' && isName(t[from + 1]) && SQLSERVER_INDEX_WORDS.has(upper(t[from + 2]))) return true;
+    return isPunct(t[from + 1], '(') || (isName(t[from + 1]) && isPunct(t[from + 2], '(') && t[from + 3]?.kind !== 'number' && upper(t[from + 3]) !== 'MAX');
+  }
   if (head === 'LIKE') return from + 1 < to && isName(t[from + 1]) && !isPunct(t[from + 2], '(');
   if (head === 'PERIOD') return upper(t[from + 1]) === 'FOR';
   // `fulltext tsvector`, `spatial geometry`: columns; `FULLTEXT [KEY | INDEX] [name] (…)`: an index.
@@ -237,6 +247,41 @@ export function missingCommaAt(t: readonly Token[], start: number, end: number):
   return (tok.kind === 'word' && TYPE_TAIL_WORDS.has(upper(tok))) || (isName(tok) && tok.line > t[stray - 1].line) ? stray : -1;
 }
 
+/**
+ * Where a column's type `[start, end)` runs into the next column, whichever
+ * comes first: the {@link missingCommaAt} token, or a name outside any
+ * parentheses or `<…>` that starts a line and never continues a type (a
+ * comment is not a token, so `DATE -- note⏎ b INTEGER` is caught too).
+ * `start` itself when the item's first "type" token is a name on the line
+ * after the column's, followed on its line by more of a definition
+ * (`SPARSE⏎ b varchar(max)`: a column with no type, then the next one); a
+ * type written on the next line (`"A"⏎ NUMBER(10)`, `a⏎ varchar(10)`) is
+ * not. -1 when the type is whole.
+ *
+ * A dialect's pre-step (`sqlDdlDialects.ts`) and the repair ladder read a
+ * type behind a placeholder: one that ran on past a missing comma would hide
+ * the next column inside it, and the grammar would read the table without it.
+ */
+export function typeRunsIntoNextColumn(t: readonly Token[], from: number, start: number, end: number): number {
+  const comma = missingCommaAt(t, start, end);
+  let depth = 0;
+  for (let k = start; k < end && (comma < 0 || k < comma); k++) {
+    const tok = t[k];
+    if (isPunct(tok, '(') || isPunct(tok, '<')) { depth++; continue; }
+    if (isPunct(tok, ')') || isPunct(tok, '>')) { depth--; continue; }
+    if (depth !== 0 || !isName(tok)) continue;
+    if (tok.line <= (k === start ? t[from] : t[k - 1]).line) continue;
+    if (tok.kind === 'word' && TYPE_CONTINUATION_WORDS.has(upper(tok))) continue;
+    if (k === start) {
+      const next = t[k + 1];
+      if (tok.kind === 'word' && STRONG_TYPE_HEADS.has(upper(tok))) continue;
+      if (k + 1 >= end || !isName(next) || next.line !== tok.line || (next.kind === 'word' && TYPE_CONTINUATION_WORDS.has(upper(next)))) continue;
+    }
+    return k;
+  }
+  return comma > start ? comma : -1;
+}
+
 /** A comma missing between two column definitions: where it goes, and the two columns it separates (for the ledger). */
 export interface MissingComma {
   /** Offset in the file's text to insert `,` at: right after the first column's type, so no line moves. */
@@ -260,8 +305,8 @@ export function missingCommas(t: readonly Token[], open: number, close: number):
     if (from >= to || isConstraintItem(t, from, to) || !isName(t[from])) continue;
     const span = columnTypeSpan(t, from, to);
     if (span.end <= span.start) continue;
-    let at = missingCommaAt(t, span.start, span.end);
-    if (at <= span.start) at = nextColumnAfterConstraints(t, span.end, to);
+    let at = typeRunsIntoNextColumn(t, from, span.start, span.end);
+    if (at < 0) at = nextColumnAfterConstraints(t, span.end, to);
     if (at < 0) continue;
     found.push({ offset: t[at - 1].end, line: t[at].line, after: t[from].value, before: t[at].value });
   }
@@ -425,7 +470,11 @@ export function rewriteCreateTable(input: RewriteInput): Rewrite {
       if (phrases.length || comment) {
         repairs.push({
           rung: 'options', unit: 'table', cause: 'trailingOption', what: 'table options',
-          detail: `${phrases.length ? `set aside: ${phrases.slice(0, 4).join(', ')}${phrases.length > 4 ? '…' : ''}` : 'read'}${comment ? `${phrases.length ? '; ' : ''}COMMENT kept as the table note` : ''}`,
+          // `set aside: CLUSTER BY; COMMENT kept as the table note`, or the COMMENT alone (never `readCOMMENT …`).
+          detail: [
+            ...(phrases.length ? [`set aside: ${phrases.slice(0, 4).join(', ')}${phrases.length > 4 ? '…' : ''}`] : []),
+            ...(comment ? ['COMMENT kept as the table note'] : []),
+          ].join('; '),
           line: t[close + 1].line,
         });
       }
@@ -479,8 +528,9 @@ export function rewriteCreateTable(input: RewriteInput): Rewrite {
       const exotic = isExoticType(raw);
       const head = typeHead(raw);
       if (/^(SMALL|BIG)?SERIAL[248]?$/.test(head)) identity.add(column.toLowerCase());
-      // Never a type with a stray word in it: that is a syntax error, not a type the grammar lacks.
-      if (((rungs.has('types') && exotic) || rungs.has('allTypes')) && strayTypeToken(t, span.start, span.end) < 0) {
+      // Never a type with a stray word in it, or one that runs on into the next column: that is a syntax error,
+      // not a type the grammar lacks (a placeholder over it would hide the next column).
+      if (((rungs.has('types') && exotic) || rungs.has('allTypes')) && strayTypeToken(t, span.start, span.end) < 0 && typeRunsIntoNextColumn(t, from, span.start, span.end) < 0) {
         const placeholder = placeholderType(placeholders++);
         for (const key of placeholder.keys) types.set(key, cleanTypeText(raw));
         replace(span.start, span.end - 1, placeholder.sql);
@@ -552,7 +602,10 @@ export function rewriteCreateTable(input: RewriteInput): Rewrite {
     const head = upper(t[from]);
     const indexHead = head === 'INDEX' || head === 'KEY' || head === 'FULLTEXT' || head === 'SPATIAL';
     if (rungs.has('modifiers')) {
-      if (head === 'PERIOD' || head === 'EXCLUDE' || head === 'LIKE' || (indexHead && target !== 'mysql')) {
+      // SQL Server's `INDEX ix UNIQUE [NON]CLUSTERED (cols)` is a unique key: `UNIQUE [NON]CLUSTERED (cols)`.
+      const uniqueIndex = head === 'INDEX' && isName(t[from + 1]) && upper(t[from + 2]) === 'UNIQUE';
+      if (uniqueIndex) blank(from, from + 1);
+      else if (head === 'PERIOD' || head === 'EXCLUDE' || head === 'LIKE' || (indexHead && target !== 'mysql')) {
         dropped.add(index);
         if (indexHead) droppedIndexes++;
         else note(undefined, `${head === 'PERIOD' ? 'PERIOD FOR' : head} in the column list`, from);

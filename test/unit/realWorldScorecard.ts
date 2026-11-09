@@ -90,11 +90,18 @@ export interface TruthRelationship {
 export interface TruthSample {
   importer: 'sql' | 'dbml' | 'semanticModel' | 'dbt';
   /** `partitions`: the SQL import's choice for partitions (absent: fold them, the default and the one-click import's). */
-  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string; partitions?: SqlPartitionMode };
+  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string; partitions?: SqlPartitionMode; timeLimitMs?: number };
   counts: { tables: number; columns: number; primaryKeys: number; relationships: number };
   tables: TruthTable[];
   relationships: TruthRelationship[];
   uniqueKeys: Array<{ table: string; columns: string[]; index?: boolean }>;
+  /**
+   * Unique keys the source implies but does not declare (a Power BI
+   * relationship's "one" end, which the model requires to be unique): an
+   * import that adds one is not adding a key the source does not have, and
+   * gets no credit for it either (they are not counted in `uniqueKeys`).
+   */
+  impliedUniqueKeys?: Array<{ table: string; columns: string[] }>;
   /** Columns whose type carries a detail the import must keep: the imported type must match `expect` (a regex). */
   typeDetail?: Array<{ table: string; column: string; expect: string }>;
   /** Schemas the tables live in when the source does not qualify them (`schemasImplied`). */
@@ -146,6 +153,10 @@ export interface ImportRun {
   report?: { relationships: number; optionalRefs: number; requiredRefs: number };
   /** The import's loss ledger: the conversion's and the plan's own (`importLedger.ts`). */
   ledger?: LedgerEntry[];
+  /** dbt: the scope the draft drew (the default, top-ranked folder) and its models. */
+  scope?: { id: string; models: string[] };
+  /** SQL and Power BI: the DBML the import converted to, before Import DBML's flow read it (for the round trip). */
+  convertedDbml?: string;
 }
 
 const MAIN_LAYER: LayerConfig = { id: 'main', label: 'Main', abbreviation: 'MN', color: '#888888', creatable: true, order: 1 } as LayerConfig;
@@ -169,7 +180,7 @@ function draftStrings(draft: Draft): string[] {
 }
 
 /** Import DBML's flow for a fresh DBML project: one Main layer, every relationship in the library (D5). */
-function importDbmlFlow(
+export function importDbmlFlow(
   dbml: string,
   fileName: string,
   importSource: 'file' | 'sql' | 'semanticModel',
@@ -232,10 +243,10 @@ function importDbmlFlow(
   };
 }
 
-async function runSql(sample: TruthSample): Promise<ImportRun> {
+async function runSql(sample: TruthSample, root: string): Promise<ImportRun> {
   const sources = sample.input.folder
-    ? { folder: path.join(SAMPLES_ROOT, sample.input.folder) }
-    : { files: (sample.input.files ?? []).map((f) => path.join(SAMPLES_ROOT, f)) };
+    ? { folder: path.join(root, sample.input.folder) }
+    : { files: (sample.input.files ?? []).map((f) => path.join(root, f)) };
   const gathered = await gatherSqlFiles(sources, { readDirectory: fsDir, readFile: fsRead, fileSize: async (f) => fs.statSync(f).size });
   if ('message' in gathered) {
     return { ok: false, tables: [], relationships: [], problems: [{ message: gathered.message }], warnings: [], failureMessage: gathered.message, notes: [], leftOut: [], shown: [gathered.message], leftOutTables: [] };
@@ -244,7 +255,13 @@ async function runSql(sample: TruthSample): Promise<ImportRun> {
   const detected = sqlEngine.detectSqlDialect(gathered.files.map((f) => f.text).join('\n')) ?? null;
   const dialect = detected ?? sample.input.dialect ?? 'postgres';
   const label = SQL_DIALECT_LABELS[dialect];
-  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect, ...(sample.input.partitions ? { options: { partitions: sample.input.partitions } } : {}) });
+  // `timeLimitMs`: the extension's reading time limit (erdStudio.import.timeLimitSeconds), as its worker applies it.
+  const deadline = sample.input.timeLimitMs ? Date.now() + sample.input.timeLimitMs : undefined;
+  const options = {
+    ...(sample.input.partitions ? { partitions: sample.input.partitions } : {}),
+    ...(deadline ? { shouldStop: () => (Date.now() > deadline ? 'timeLimit' as const : undefined), timeLimitMs: sample.input.timeLimitMs } : {}),
+  };
+  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect, ...(Object.keys(options).length ? { options } : {}) });
   if (!result.ok) {
     const failureMessage = describeImportProblems(IMPORT_TITLES.sql, result.problems, `They were read as ${label}.`);
     return {
@@ -260,17 +277,17 @@ async function runSql(sample: TruthSample): Promise<ImportRun> {
     skipped: result.skipped,
     ledger: result.ledger,
   });
-  return { ...run, dialect, detectedDialect: detected };
+  return { ...run, dialect, detectedDialect: detected, convertedDbml: result.dbml };
 }
 
-async function runDbmlFile(sample: TruthSample): Promise<ImportRun> {
-  const file = path.join(SAMPLES_ROOT, sample.input.file!);
+async function runDbmlFile(sample: TruthSample, root: string): Promise<ImportRun> {
+  const file = path.join(root, sample.input.file!);
   const text = fs.readFileSync(file, 'utf-8').replace(/^\uFEFF/, '');
   return importDbmlFlow(text, path.basename(file), 'file');
 }
 
-async function runSemanticModel(sample: TruthSample): Promise<ImportRun> {
-  const folder = path.join(SAMPLES_ROOT, sample.input.folder!);
+async function runSemanticModel(sample: TruthSample, root: string): Promise<ImportRun> {
+  const folder = path.join(root, sample.input.folder!);
   const folderName = path.basename(folder);
   const walk = await walkSemanticModelFiles(folder, fsDir);
   const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
@@ -296,21 +313,24 @@ async function runSemanticModel(sample: TruthSample): Promise<ImportRun> {
     skipped: semanticModelSkippedSummary(converted.skippedCounts),
     ledger: converted.ledger,
   });
-  return { ...run, warnings };
+  return { ...run, warnings, convertedDbml: converted.dbml };
 }
 
-async function runDbt(sample: TruthSample): Promise<ImportRun> {
-  const projectRoot = path.join(SAMPLES_ROOT, sample.input.project!);
+async function runDbt(sample: TruthSample, root: string): Promise<ImportRun> {
+  const projectRoot = path.join(root, sample.input.project!);
   const ymlData = await new YmlParserService().loadYmlData(projectRoot);
   // The manifest `dbt parse` wrote, kept beside the sample (its target/ is not committed).
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-scorecard-'));
+  // Without one (the import corpus never runs dbt parse), the draft reads the yml alone.
   let manifest;
-  try {
-    fs.mkdirSync(path.join(tmp, 'target'));
-    fs.copyFileSync(path.join(SAMPLES_ROOT, sample.input.manifest!), path.join(tmp, 'target', 'manifest.json'));
-    manifest = await new ManifestService({ parseInProcess: true }).loadManifest(tmp);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+  if (sample.input.manifest) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-scorecard-'));
+    try {
+      fs.mkdirSync(path.join(tmp, 'target'));
+      fs.copyFileSync(path.join(root, sample.input.manifest), path.join(tmp, 'target', 'manifest.json'));
+      manifest = await new ManifestService({ parseInProcess: true }).loadManifest(tmp);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   }
   const layerIds = DEFAULT_LAYERS.map((l) => l.id);
   const source = { ymlData, manifest, projectRoot, modelPaths: ['models'], layerIds };
@@ -345,15 +365,35 @@ async function runDbt(sample: TruthSample): Promise<ImportRun> {
     shown: draftStrings(view),
     leftOutTables: draft.skipped.map((s) => s.name),
     ledger: [...draft.ledger],
+    scope: { id: scope.id, models: [...scope.modelNames] },
   };
 }
 
-export async function runSample(sample: TruthSample): Promise<ImportRun> {
+/**
+ * A dbt project's truth cut to the scope the import drew: for a folder scope
+ * (`folder:<path>`, the default), the models count_source.py places in that
+ * folder (each table's `folder`), and the relationships from them. Any other
+ * scope is not cut. Throws when the truth has no folders (an old count: run
+ * count_source.py again), so the importer's own list never sets what it is
+ * scored against.
+ */
+export function dbtTruthInScope(truth: Pick<TruthSample, 'tables' | 'relationships'>, scopeId: string): Pick<TruthSample, 'tables' | 'relationships'> {
+  if (!scopeId.startsWith('folder:')) return truth;
+  const folder = scopeId.slice('folder:'.length).toLowerCase();
+  const tables = truth.tables as Array<TruthSample['tables'][number] & { folder?: string }>;
+  if (tables.some((t) => typeof t.folder !== 'string')) throw new Error('the dbt truth has no model folders: run scripts/corpus/count_source.py again');
+  const kept = tables.filter((t) => t.folder!.toLowerCase() === folder);
+  const names = new Set(kept.map((t) => t.name.toLowerCase()));
+  return { tables: kept, relationships: truth.relationships.filter((r) => names.has(r.from.toLowerCase())) };
+}
+
+/** One sample through its import's pipeline; `root` is the folder its `input` paths are under (the import corpus passes its cache). */
+export async function runSample(sample: TruthSample, root: string = SAMPLES_ROOT): Promise<ImportRun> {
   switch (sample.importer) {
-    case 'sql': return runSql(sample);
-    case 'dbml': return runDbmlFile(sample);
-    case 'semanticModel': return runSemanticModel(sample);
-    case 'dbt': return runDbt(sample);
+    case 'sql': return runSql(sample, root);
+    case 'dbml': return runDbmlFile(sample, root);
+    case 'semanticModel': return runSemanticModel(sample, root);
+    case 'dbt': return runDbt(sample, root);
   }
 }
 
@@ -467,7 +507,7 @@ export interface SampleScore {
    * required references it claims (null when it gives none).
    */
   requiredFks: { source: number; keptNotNull: number; toldOptional: boolean; optionalNote?: string; noteClaims: number | null };
-  /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source does not have (e.g. dropped later). */
+  /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source neither declares nor implies (e.g. dropped later). */
   uniqueKeys: { source: number; kept: number; lost: number; extra: string[] };
   types: { checked: number; verbatim: number; detailSource: number; detailKept: number; detailLost: string[] };
   descriptions: { source: number; imported: number; exact: number; changed: number; missing: number };
@@ -566,8 +606,10 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     if (!got) continue;
     checkDesc(t.description, got.description);
     const gotCols = new Map((got.columns ?? []).map((c) => [canon(c.name), c]));
+    // The same name first: `name` and `_name` (Django) are one name by letters and digits.
+    const gotExact = new Map((got.columns ?? []).map((c) => [c.name.toLowerCase(), c]));
     for (const c of t.columns) {
-      const gc = gotCols.get(canon(c[0]));
+      const gc = gotExact.get(c[0].toLowerCase()) ?? gotCols.get(canon(c[0]));
       if (!gc) {
         colMissing++;
         if (mentioned(shown, t.name, c[0]) || mentioned(shown, `${t.name}.${c[0]}`)) colMissingReported++;
@@ -728,7 +770,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
 
   const uniqueExtra: string[] = [];
   {
-    const truthSets = new Set(truth.uniqueKeys.map((u) => `${canon(u.table)}:${u.columns.map(canon).sort().join(',')}`));
+    const truthSets = new Set([...truth.uniqueKeys, ...(truth.impliedUniqueKeys ?? [])].map((u) => `${canon(u.table)}:${u.columns.map(canon).sort().join(',')}`));
     for (const t of truth.tables) {
       const pk = t.pk.map(canon).sort().join(',');
       if (pk) truthSets.add(`${canon(t.name)}:${pk}`);
@@ -812,7 +854,8 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     conditions: { source: filteredLinks.length, shown: conditionsShown.length, reported: conditionsReported.length, silent: conditionsSilent },
     requiredFks: {
       source: requiredSource, keptNotNull: requiredKept, toldOptional: !!optionalNote, ...(optionalNote ? { optionalNote } : {}),
-      noteClaims: optionalNote ? Number(optionalNote.match(/(\d+) (?:references?|relationships?)[^.]*not optional|(\d+) required/i)?.slice(1).find(Boolean) ?? NaN) : null,
+      // Counts may be written with a thousands separator (`1,139 relationships`).
+      noteClaims: optionalNote ? Number((optionalNote.match(/(\d[\d,]*) (?:references?|relationships?)[^.]*not optional|(\d[\d,]*) required/i)?.slice(1).find(Boolean) ?? 'NaN').replace(/,/g, '')) : null,
     },
     uniqueKeys: { source: uniqueSource, kept: uniqueKept, lost: uniqueSource - uniqueKept, extra: uniqueExtra },
     types: { checked: typesChecked, verbatim: typesVerbatim, detailSource, detailKept, detailLost },

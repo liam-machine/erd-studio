@@ -21,6 +21,7 @@ import {
   SQL_DIALECT_FEATURES,
   TRY_ANOTHER_DIALECT_BUTTON,
   MAX_SQL_CHARS,
+  dialectPickRows,
   gatherSqlFiles,
   importSqlDdl,
   type ImportSqlDdlDeps,
@@ -180,8 +181,9 @@ describe('Import SQL DDL…', () => {
     // The detected dialect is offered first, marked; all five are offered.
     expect(sql.dialectPicks).toHaveLength(1);
     // Every dialect is labelled by how many of the tables it reads, the detected one marked first.
-    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected · reads all 4 tables' });
-    expect(sql.dialectPicks[0].map((i) => i.dialect).sort()).toEqual(['databricks', 'mysql', 'postgres', 'snowflake', 'sqlserver']);
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected · reads all 4 tables', detected: true });
+    expect(sql.dialectPicks[0].filter((i) => i.detected).map((i) => i.dialect)).toEqual(['postgres']);
+    expect(sql.dialectPicks[0].map((i) => i.dialect).sort()).toEqual(['bigquery', 'databricks', 'mysql', 'oracle', 'postgres', 'redshift', 'snowflake', 'sqlite', 'sqlserver']);
     // The name comes from the folder; the headline says what the tables came from.
     expect(ui.inputs).toEqual(['postgres']);
     expect(ui.confirms).toHaveLength(1);
@@ -257,6 +259,7 @@ describe('Import SQL DDL…', () => {
     expect(sql.pickOptions[0].placeHolder).toMatch(/^No dialect reads a table in the script \(broken\.sql line 4: CREATE TABLE t could not be read: an empty column definition/);
     expect(sql.dialectPicks[0].every((i) => /^reads none|^does not read/.test(String(i.description)))).toBe(true);
     expect(sql.dialectPicks[0].some((i) => /detected/.test(String(i.description)))).toBe(false);
+    expect(sql.dialectPicks[0].some((i) => i.detected)).toBe(false);
     expect(sql.errors).toHaveLength(1);
     expect(sql.errors[0].message).toMatch(/^Import SQL DDL: nothing was imported\. broken\.sql line 4: /);
     expect(sql.errors[0].message).toContain('They were read as PostgreSQL.');
@@ -429,11 +432,11 @@ describe('gatherSqlFiles', () => {
 
 describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide\'s SQL cards)', () => {
   it('accepts exactly { dialect: <a dialect it reads> }; anything else is the step-by-step flow, and { quick } wins', () => {
-    for (const dialect of ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'] as const) {
+    for (const dialect of ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite'] as const) {
       expect(sqlDialectOfImportArg({ dialect })).toBe(dialect);
     }
     for (const arg of [
-      undefined, null, 'databricks', ['databricks'], [{ dialect: 'databricks' }], {}, { dialect: 'oracle' }, { dialect: 'bigquery' },
+      undefined, null, 'databricks', ['databricks'], [{ dialect: 'databricks' }], {}, { dialect: 'db2' }, { dialect: 'teradata' },
       { dialect: 'Databricks' }, { dialect: 1 }, { dialect: { toString: () => 'mysql' } }, { quick: true }, { quick: true, dialect: 'mysql' },
     ]) {
       expect(sqlDialectOfImportArg(arg), JSON.stringify(arg)).toBeUndefined();
@@ -589,5 +592,33 @@ describe('Import SQL DDL… — partitions (fold them into their parents, or kee
       ['tables', 'read this way before · 2 more tables, each with its parent\'s columns'],
       ['fold', 'recommended · 2 partitions are the parent\'s rows'],
     ]);
+  });
+});
+
+describe('the dialect pick as shown (dialectPickRows)', () => {
+  const pg: SqlDialectItem = { label: 'PostgreSQL', description: 'detected · reads all 4 tables', dialect: 'postgres', detected: true };
+  const my: SqlDialectItem = { label: 'MySQL / MariaDB', description: 'reads 3 of 4 tables', dialect: 'mysql' };
+  const ms: SqlDialectItem = { label: 'SQL Server / Azure SQL', dialect: 'sqlserver' };
+  const SEPARATOR = -1; // vscode.QuickPickItemKind.Separator
+
+  it('the detected dialect first: a heading of its own, a check icon, then the others under theirs', () => {
+    const rows = dialectPickRows([pg, my, ms]);
+    expect(rows.map((r) => r.label)).toEqual(['Detected from your SQL', '$(pass-filled) PostgreSQL', 'Other dialects', 'MySQL / MariaDB', 'SQL Server / Azure SQL']);
+    expect(rows.map((r) => r.kind === SEPARATOR)).toEqual([true, false, true, false, false]);
+    // The description and the dialect are kept; the items passed in are not changed.
+    expect(rows[1]).toMatchObject({ dialect: 'postgres', description: 'detected · reads all 4 tables' });
+    expect(pg.label).toBe('PostgreSQL');
+  });
+
+  it('only the detected dialect: its heading and no empty "Other dialects"', () => {
+    expect(dialectPickRows([pg]).map((r) => r.label)).toEqual(['Detected from your SQL', '$(pass-filled) PostgreSQL']);
+  });
+
+  it('a dialect that reads more comes first: the detected one keeps its icon, no headings', () => {
+    expect(dialectPickRows([my, pg, ms]).map((r) => r.label)).toEqual(['MySQL / MariaDB', '$(pass-filled) PostgreSQL', 'SQL Server / Azure SQL']);
+  });
+
+  it('nothing detected: the items as they are', () => {
+    expect(dialectPickRows([my, ms])).toEqual([my, ms]);
   });
 });

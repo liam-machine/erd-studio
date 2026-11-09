@@ -8,8 +8,10 @@
  * button on each command), and the button that runs the right import with
  * the source preselected — Import SQL DDL… with its dialect, Import Semantic
  * Model…, Import DBML…, Import…, Import from dbt (its card only in a dbt
- * project) — and a **Not yet** card (Oracle, BigQuery, live connections)
- * whose Send Feedback lets people ask for theirs. The folder's suggested
+ * project) — and a **Not yet** card (live connections) whose Send Feedback
+ * lets people ask for theirs. Oracle, BigQuery, Redshift and SQLite scripts
+ * are read by Import SQL DDL… (the other-tools card's Import…); they have no
+ * card of their own yet, as each card's button is a telemetry key. The folder's suggested
  * start (`startIntentFor`) leads: a "Found in this folder" card for a direct
  * import, the dbt card in a dbt project; then the sources in the order
  * telemetry sees them.
@@ -157,7 +159,7 @@ export function isFoundIntent(intent: StartIntent | undefined): intent is FoundI
 }
 
 const FOUND_TEXT: Readonly<Record<FoundIntent, string>> = {
-  importSqlDdl: 'ERD Studio works out which SQL dialect they are written in: PostgreSQL, MySQL, SQL Server, Snowflake or Databricks.',
+  importSqlDdl: 'ERD Studio works out which SQL dialect they are written in: PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite.',
   importSemanticModel: 'Its tables, columns and relationships become a diagram; measures stay in Power BI.',
   importDbmlFile: 'Its tables and relationships become a diagram.',
 };
@@ -348,6 +350,7 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [{
       steps: [
         { text: 'Generate the DDL for PostgreSQL, MySQL, SQL Server, Snowflake or Databricks (or export DBML), save it in this folder, then pick it in Import….' },
+        { text: 'Oracle, BigQuery, Amazon Redshift and SQLite: save the CREATE TABLE scripts in this folder (a SQL*Plus script, `INFORMATION_SCHEMA.TABLES.ddl`, `SHOW TABLE` output, a `.schema` dump), then pick them in Import….' },
       ],
       action: 'otherTools',
     }],
@@ -358,8 +361,6 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     what: 'Some sources do not come in yet. Tell us which one you need.',
     sections: [{
       steps: [
-        { text: 'Oracle: the SQL importer does not read Oracle DDL yet.' },
-        { text: 'BigQuery: its DDL (`OPTIONS(…)` on columns and `project.dataset.table` names) does not read yet.' },
         { text: 'Live database connections: ERD Studio reads files you export, never a database.' },
       ],
       action: 'feedback',

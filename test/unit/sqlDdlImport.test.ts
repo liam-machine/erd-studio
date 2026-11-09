@@ -22,7 +22,6 @@ import {
   detectSqlDialect,
   isSqlDialect,
   looksLikeMigrationFile,
-  looksLikeOracleSql,
   withoutSqlData,
   type SqlDdlFile,
   type SqlDdlToDbmlResult,
@@ -228,6 +227,101 @@ const STARS: Record<SqlDialect, Star> = {
       'fct_order.amount': 'Order line amount in AUD',
     },
   },
+  oracle: {
+    dir: 'oracle',
+    schema: 'sales',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'NUMBER(10)',
+      'dim_customer.customer_name': 'VARCHAR2(200 CHAR)',
+      'dim_customer.created_at': 'TIMESTAMP(6) WITH LOCAL TIME ZONE',
+      'dim_customer.notes': 'CLOB',
+      'dim_product.product_name': 'VARCHAR2(100 BYTE)',
+      'dim_product.unit_price': 'NUMBER(10,2)',
+      'fct_order_line.raw_payload': 'RAW(16)',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      'dim_customer.customer_name': 'Name as the customer entered it',
+      'fct_order_line.amount': 'Line amount in AUD, after discounts',
+    },
+  },
+  bigquery: {
+    dir: 'bigquery',
+    schema: 'sales',
+    fact: 'fct_order',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_no'],
+    links: [
+      'fct_order.customer_id > dim_customer.customer_id',
+      'fct_order.date_key > dim_date.date_key',
+      'fct_order.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'INT64',
+      'dim_customer.emails': 'ARRAY<STRING>',
+      'dim_customer.address': 'STRUCT<street STRING, city STRING, postcode STRING>',
+      'dim_product.product_name': 'STRING(200)',
+      'dim_product.unit_price': 'NUMERIC(10,2)',
+      'fct_order.timestamp': 'TIMESTAMP',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      fct_order: 'One row per order line',
+      'dim_customer.customer_id': 'Surrogate key',
+      'fct_order.amount': 'Order line amount in AUD',
+    },
+  },
+  redshift: {
+    dir: 'redshift',
+    schema: 'sales',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'BIGINT',
+      'dim_customer.attributes': 'SUPER',
+      'dim_customer.created_at': 'TIMESTAMPTZ',
+      'dim_product.product_name': 'VARCHAR(MAX)',
+      'fct_order_line.amount': 'DOUBLE PRECISION',
+    },
+    descriptions: {
+      dim_customer: 'One row per customer',
+      'fct_order_line.amount': 'Line amount in AUD, after discounts',
+    },
+  },
+  sqlite: {
+    dir: 'sqlite',
+    schema: '',
+    fact: 'fct_order_line',
+    dims: ['dim_customer', 'dim_product', 'dim_date'],
+    factPk: ['order_id', 'line_number'],
+    links: [
+      'fct_order_line.customer_id > dim_customer.customer_id',
+      'fct_order_line.order_date_key > dim_date.date_key',
+      'fct_order_line.product_id > dim_product.product_id',
+    ],
+    types: {
+      'dim_customer.customer_id': 'INTEGER',
+      'dim_customer.extra': 'unknown',
+      'dim_product.big': 'UNSIGNED BIG INT',
+      'dim_product.unit_price': 'NUMERIC(10,2)',
+      'fct_order_line.amount': 'REAL',
+    },
+    descriptions: {},
+  },
 };
 
 describe.each(SQL_DIALECTS.map((d) => [d] as const))('the %s star schema', (dialect) => {
@@ -336,7 +430,7 @@ describe('dialect details', () => {
     const result = convert('sqlserver', fixtureFiles('sqlserver'));
     expect(result.dbml).toContain('"CustomerKey" int [pk, increment]');
     expect(result.dbml).not.toMatch(/IDENTITY|\[dbo\]/);
-    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 3 table options (ENGINE, CHARSET, ON [filegroup], USING, CLUSTER BY…: physical, not design), 1 index, 1 view']);
+    expect(result.skipped).toEqual(['warehouse.sql: skipped 3 session statements (SET, USE…), 3 table options (ENGINE, ON [filegroup], CLUSTER BY, DISTKEY, TABLESPACE…: physical, not design), 1 index, 1 view']);
   });
 
   it('snowflake: CREATE OR REPLACE TRANSIENT, database.schema.table names, CLUSTER BY and COMMENT =', () => {
@@ -528,11 +622,20 @@ describe('names', () => {
 // ---------------------------------------------------------------------------
 
 describe('dialects', () => {
-  it('lists five dialects with labels; sqlserver reads with the mssql grammar', () => {
-    expect([...SQL_DIALECTS]).toEqual(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks']);
+  it('lists nine dialects with labels; sqlserver reads with the mssql grammar, the four pre-stepped ones with the postgres one', () => {
+    expect([...SQL_DIALECTS]).toEqual(['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks', 'oracle', 'bigquery', 'redshift', 'sqlite']);
     for (const d of SQL_DIALECTS) expect(SQL_DIALECT_LABELS[d]).toBeTruthy();
     expect(isSqlDialect('sqlserver')).toBe(true);
-    expect(isSqlDialect('oracle')).toBe(false);
+    expect(isSqlDialect('oracle')).toBe(true);
+    expect(isSqlDialect('db2')).toBe(false);
+    for (const d of ['oracle', 'bigquery', 'redshift', 'sqlite'] as const) {
+      const used: string[] = [];
+      convertSqlDdl({ dialect: d, files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int)' }] }, (sql, format) => {
+        used.push(format);
+        return dbmlCoreSqlEngine(sql, format);
+      });
+      expect(used, d).toEqual(['postgres']);
+    }
     const formats: string[] = [];
     convertSqlDdl({ dialect: 'sqlserver', files: [{ name: 'a.sql', text: 'CREATE TABLE a (id int)' }] }, (sql, format) => {
       formats.push(format);
@@ -542,9 +645,9 @@ describe('dialects', () => {
   });
 
   it('an unknown dialect is a problem, not a throw', () => {
-    expect(convertSqlDdl({ dialect: 'oracle' as SqlDialect, files: [{ name: 'a.sql', text: '' }] }, dbmlCoreSqlEngine)).toEqual({
+    expect(convertSqlDdl({ dialect: 'db2' as SqlDialect, files: [{ name: 'a.sql', text: '' }] }, dbmlCoreSqlEngine)).toEqual({
       ok: false,
-      problems: [{ file: '', message: 'Unknown SQL dialect: oracle.' }],
+      problems: [{ file: '', message: 'Unknown SQL dialect: db2.' }],
     });
   });
 
@@ -556,6 +659,10 @@ describe('dialects', () => {
     expect(detectSqlDialect('CREATE TABLE t (id SERIAL, j JSONB);')).toBe('postgres');
     expect(detectSqlDialect('CREATE TABLE t (id int);')).toBeUndefined();
     expect(detectSqlDialect('-- USING DELTA in a comment\nCREATE TABLE t (id int);')).toBeUndefined();
+    // Data is not a signal: MySQL's Chinook has `names` and a string 'Emerson String Quartet' (once read as Databricks).
+    expect(detectSqlDialect("CREATE TABLE `Artist` (`ArtistId` INT NOT NULL, `Name` NVARCHAR(120));\nINSERT INTO `Artist` VALUES (1, N'Emerson String Quartet');")).toBe('mysql');
+    expect(detectSqlDialect("CREATE TABLE t (id int, note text);\nINSERT INTO t VALUES (1, 'USING DELTA ENGINE=x');")).toBe('postgres');
+    expect(detectSqlDialect('CREATE TABLE `s`.`t` (`id` BIGINT, `name` STRING);')).toBe('databricks');
   });
 
   it('a grammar crash is never thrown: the table is salvaged without the grammar', () => {
@@ -738,11 +845,13 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(countCreateTablesWithColumns("SELECT 'CREATE TABLE x (id int)';")).toBe(0);
     expect(countCreateTablesWithColumns('CREATE TABLE [dbo].[A]([Id] [int])\nGO\nCREATE TABLE `b` (`id` INT) ENGINE=InnoDB;')).toBe(2);
     expect(countCreateTablesWithColumns('CREATE TABLE IF NOT EXISTS "users" ("id" SERIAL PRIMARY KEY);')).toBe(1);
+    // A typed empty SELECT is a column list; a SELECT from a table is not.
+    expect(countCreateTablesWithColumns('CREATE TABLE p USING DELTA AS SELECT CAST(NULL AS int) AS id WHERE 1 = 0;\nCREATE TABLE q AS SELECT CAST(id AS int) AS id FROM p;')).toBe(1);
   });
 
   it('knows Oracle DDL, and not Snowflake\'s NUMBER', () => {
-    expect(looksLikeOracleSql('CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));')).toBe(true);
-    expect(looksLikeOracleSql('create or replace TABLE A.B.C (ID NUMBER(38,0), E VARCHAR(16777216));')).toBe(false);
+    expect(detectSqlDialect('CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));')).toBe('oracle');
+    expect(detectSqlDialect('create or replace TABLE A.B.C (ID NUMBER(38,0), E VARCHAR(16777216));')).toBe('snowflake');
   });
 
   it('takes pg_dump\'s COPY rows and a big dump\'s INSERTs out, keeping every line break and the statements to count', () => {
@@ -764,5 +873,75 @@ describe('what the folder looks count, and a dump without its data', () => {
     const converted = convert('mysql', [{ name: 'dump.sql', text: stripped.text }]);
     expect(converted.tableCount).toBe(2);
     expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
+  });
+
+  it('a folder with no CREATE TABLE in it says so for each file, at its first line', () => {
+    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'SELECT 1;' }, { name: 'keys/b.sql', text: 'CREATE VIEW v AS SELECT 1;' }] }, dbmlCoreSqlEngine);
+    expect(result.ok).toBe(false);
+    expect(result.ledger?.filter((e) => e.outcome === 'problem').map((e) => e.where)).toEqual([{ file: 'a.sql', line: 1 }, { file: 'keys/b.sql', line: 1 }]);
+  });
+
+  it('what the DBML reader rejects is left out at its statement, never the whole import', () => {
+    const files = [{ name: 'a.sql', text: 'CREATE TABLE a (id int PRIMARY KEY);\n\nCREATE TABLE b (\n  id int PRIMARY KEY,\n  a_id int REFERENCES a (id)\n);\nCREATE TABLE c (id int PRIMARY KEY, a_id int REFERENCES a (id));' }];
+    // The reader rejects b's block (any line of it), then nothing.
+    const rejectB = (dbml: string): Array<{ line: number; message: string }> => {
+      const lines = dbml.split('\n');
+      const at = lines.findIndex((l) => l.startsWith('Table "b"'));
+      return at < 0 ? [] : [{ line: at + 2, message: "No column named 'X' inside Table 'b'" }];
+    };
+    const r = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectB);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.dbml).not.toContain('Table "b"');
+    expect(r.dbml).toContain('Ref: "c"."a_id" > "a"."id"');
+    expect(r.problems).toEqual([expect.objectContaining({ file: 'a.sql', line: 3, table: 'b' })]);
+    expect(r.problems[0].message).toMatch(/^Table b could not be written as DBML \(No column named 'X' inside Table 'b'\), so it is left out\.$/);
+    expect(r.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', where: { file: 'a.sql', line: 3, table: 'b', column: 'a_id' } }));
+    // A rejected Ref line leaves out that reference only.
+    const rejectRef = (dbml: string): Array<{ line: number; message: string }> => {
+      const at = dbml.split('\n').findIndex((l) => l.startsWith('Ref: "c"'));
+      return at < 0 ? [] : [{ line: at + 1, message: 'bad ref' }];
+    };
+    const r2 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectRef);
+    expect(r2.ok && r2.tableCount).toBe(3);
+    expect(r2.ok && r2.dbml).not.toContain('Ref: "c"');
+    expect(r2.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', cause: 'parseError', where: { file: 'a.sql', line: 7, table: 'c', column: 'a_id' } }));
+    // Every table rejected: nothing imported, each said at its own line.
+    const r3 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, (dbml) => dbml.split('\n').flatMap((l, i) => (l.startsWith('Table') ? [{ line: i + 1, message: 'no' }] : [])));
+    expect(r3.ok).toBe(false);
+    expect(r3.problems.map((p) => [p.table, p.line])).toEqual([['a', 1], ['b', 3], ['c', 7]]);
+    // The engine reads its output back as Import DBML does: a clean file is unchanged.
+    const clean = sqlDdlToDbml({ dialect: 'postgres', files });
+    expect(clean.ok && clean.tableCount).toBe(3);
+    expect(clean.problems).toEqual([]);
+  });
+
+  it('splits a file\'s skipped summary into lines of at most 300 characters, every kind still counted', () => {
+    const sql = [
+      'SET x = 1;', 'CREATE VIEW v AS SELECT 1;', 'CREATE INDEX i ON a (id);', 'CREATE SEQUENCE s;', 'DROP TABLE IF EXISTS z;',
+      'CREATE SCHEMA k;', 'GRANT SELECT ON a TO u;', 'SELECT 1;', 'CREATE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;',
+      'CREATE TYPE r AS (a int);', 'COMMENT ON SCHEMA k IS \'x\';', 'ALTER TABLE a OWNER TO u;', 'ALTER TABLE a ENABLE ROW LEVEL SECURITY;',
+      'CREATE TABLE a (id int) WITH (fillfactor = 70);', 'CREATE TABLE b AS SELECT 1;', 'VACUUM a;',
+    ].join('\n');
+    const result = convert('postgres', [{ name: 'pagila-schema.sql', text: sql }]);
+    expect(result.skipped.length).toBeGreaterThan(1);
+    for (const line of result.skipped) expect(line.length).toBeLessThanOrEqual(300);
+    expect(result.skipped[0]).toMatch(/^pagila-schema\.sql: skipped /);
+    expect(result.skipped[1]).toMatch(/^pagila-schema\.sql: also skipped /);
+    const all = result.skipped.join(', ');
+    for (const kind of ['1 view', '1 index', '1 sequence', '1 DROP statement', '1 query', '1 CREATE TABLE without a column list']) expect(all).toContain(kind);
+  });
+
+  it('ends a big script\'s INSERT with no `;` at its GO line or the next statement, never at a `;` further on', () => {
+    // SQL Server install scripts (Northwind) write INSERTs with no `;`, batched by GO: a CREATE TABLE after them is kept.
+    const rows = Array.from({ length: 40_000 }, (_, i) => `Insert Into Region Values (${i},'Eastern')`).join('\n');
+    const big = `CREATE TABLE [dbo].[A] ([Id] [int] NOT NULL)\nGO\n${rows}\nGo\nCREATE TABLE [dbo].[B] ([Id] [int] NOT NULL)\nINSERT INTO B VALUES (1)\nCREATE TABLE [dbo].[C] ([Id] [int] NOT NULL);\nSELECT 1;\n`;
+    const stripped = withoutSqlData(big);
+    expect(stripped.text.split('\n')).toHaveLength(big.split('\n').length);
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[B]');
+    expect(stripped.text).toContain('CREATE TABLE [dbo].[C]');
+    expect(stripped.text).not.toContain('Eastern');
+    const converted = convert('sqlserver', [{ name: 'instnwnd.sql', text: stripped.text }]);
+    expect(converted.tableCount).toBe(3);
   });
 });

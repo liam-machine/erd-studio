@@ -36,8 +36,10 @@ import {
   CREATE_OBJECT_WORDS,
   isLineStart,
   isName,
+  isSqlPlusCommand,
   isPunct,
   matchParen,
+  optionsDescription,
   readColumnList,
   readName,
   splitTopLevel,
@@ -63,6 +65,8 @@ import {
   type SkipKind,
 } from './sqlDdlModel';
 import { isConstraintItem } from './sqlDdlRepair';
+import { ANGLE_TYPE_DIALECTS } from './sqlDdlDialects';
+import { ledgerText } from './importLedger';
 
 export function readStatement(cx: ConverterContext, file: string, text: string, st: Statement): void {
   const state = readerState(cx);
@@ -91,12 +95,19 @@ function continuesSchemaElements(text: string, st: Statement): boolean {
 function readOneStatement(cx: ConverterContext, file: string, text: string, st: Statement): void {
   const t = st.tokens;
   const origin: Origin = { file, line: st.line };
+  // An Oracle SQL*Plus command line (`PROMPT …`, `SET ECHO OFF`, `CONNECT …`, `@file`): the client's, not the schema's.
+  if (isSqlPlusCommand(t)) return cx.skip(file, 'clientCommand');
   const w0 = upper(t[0]);
   switch (w0) {
     case 'CREATE': return readCreate(cx, file, text, st);
     case 'ALTER':
       if (upper(t[1]) === 'TABLE') return readAlterTable(cx, text, st, origin);
       if (upper(t[1]) === 'INDEX' && readAlterIndex(cx, st)) return;
+      // Oracle: `ALTER SESSION SET CURRENT_SCHEMA = s`, the schema unqualified names are in from here on.
+      if (upper(t[1]) === 'SESSION') {
+        if (upper(t[2]) === 'SET' && upper(t[3]) === 'CURRENT_SCHEMA' && isPunct(t[4], '=') && isName(t[5])) setCurrentSchema(cx, t[5].value);
+        return cx.skip(file, 'session');
+      }
       return cx.skip(file, 'other');
     case 'RENAME': return upper(t[1]) === 'TABLE' ? readRenameTable(cx, st, origin) : cx.skip(file, 'other');
     case 'COMMENT': return upper(t[1]) === 'ON' || (upper(t[1]) === 'IF' && upper(t[2]) === 'EXISTS' && upper(t[3]) === 'ON') ? readCommentOn(cx, st, origin) : cx.skip(file, 'other');
@@ -147,6 +158,13 @@ export function readCreate(cx: ConverterContext, file: string, text: string, st:
     i++;
   }
   const what = upper(t[i]);
+  // SQLite's `CREATE VIRTUAL TABLE x USING fts5(…)`: a search or index module over other tables, not one of the design's.
+  if (what === 'TABLE' && t.slice(1, i).some((tok) => upper(tok) === 'VIRTUAL')) return cx.skip(file, 'virtualTable');
+  // BigQuery's `CREATE TABLE FUNCTION ds.f(…) AS …`: a routine that returns rows, not a table.
+  if (what === 'TABLE' && upper(t[i + 1]) === 'FUNCTION' && isName(t[i + 2])) {
+    const fn = readName(t, i + 2);
+    return cx.skip(file, 'routine', 1, { line: st.line, ...(fn ? { name: ledgerText(fn.parts.join('.'), 64) } : {}) });
+  }
   switch (what) {
     case 'TABLE': return readCreateTableStatement(cx, file, text, st, i + 1);
     case 'TYPE': {
@@ -176,7 +194,7 @@ export function readCreate(cx: ConverterContext, file: string, text: string, st:
     }
     case 'DATABASE': case 'CATALOG': return cx.skip(file, 'schema');
     case 'SEQUENCE': return cx.skip(file, 'sequence');
-    case 'FUNCTION': case 'PROCEDURE': case 'PROC': case 'TRIGGER': case 'EVENT': return cx.skip(file, 'routine');
+    case 'FUNCTION': case 'PROCEDURE': case 'PROC': case 'TRIGGER': case 'EVENT': case 'PACKAGE': return cx.skip(file, 'routine');
     default: return cx.skip(file, 'other');
   }
 }
@@ -322,7 +340,7 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
   const lines = readerState(cx).itemLines;
   const constraintLines: Array<{ kind: 'pk' | 'unique' | 'fk' | 'check'; columns: string[]; line: number }> = [];
   lines.set(table, constraintLines);
-  for (const [from, to] of splitTopLevel(t, open + 1, close, cx.dialect === 'databricks')) {
+  for (const [from, to] of splitTopLevel(t, open + 1, close, ANGLE_TYPE_DIALECTS.has(cx.dialect))) {
     if (from >= to) continue;
     if (isConstraintItem(t, from, to)) {
       const c = readTableConstraint(t, from, to);
@@ -494,7 +512,8 @@ export function readUniqueIndex(cx: ConverterContext, file: string, st: Statemen
   if (upper(t[i]) === 'USING' && isName(t[i + 1])) i += 2;
   if (upper(t[i]) !== 'ON') { cx.skip(file, 'index'); return; }
   i++;
-  if (upper(t[i]) === 'ONLY') i++;
+  const only = upper(t[i]) === 'ONLY';
+  if (only) i++;
   const target = readName(t, i);
   if (!target) { cx.skip(file, 'index'); return; }
   // A key on a partition stays the partition's until partitions are resolved (`sqlDdlPartitions.ts`).
@@ -526,7 +545,7 @@ export function readUniqueIndex(cx: ConverterContext, file: string, st: Statemen
     cx.ledger.lost('uniqueKey', 'noField', 'partial unique index', where, 'not kept: unique only WHERE its condition holds');
     return;
   }
-  cx.keys.push({ table: parts, kind: 'unique', columns, origin: { file, line: st.line }, ...(indexName ? { name: indexName } : {}) });
+  cx.keys.push({ table: parts, kind: 'unique', columns, origin: { file, line: st.line }, ...(indexName ? { name: indexName } : {}), ...(only ? { only: { partitionsBefore: readerState(cx).partitions.length } } : {}) });
 }
 
 /** An index item that is a column (`name`, `name DESC`, `name COLLATE "C" text_pattern_ops`), or undefined for an expression. */
@@ -606,9 +625,15 @@ type Continues = 'addColumn' | 'addConstraint' | 'dropColumn' | 'dropConstraint'
 export function readAlterTable(cx: ConverterContext, text: string, st: Statement, origin: Origin): void {
   const t = st.tokens;
   let i = 2;
-  while (upper(t[i]) === 'ONLY' || (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS')) i += upper(t[i]) === 'IF' ? 2 : 1;
+  let only = false;
+  while (upper(t[i]) === 'ONLY' || (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'EXISTS')) {
+    if (upper(t[i]) === 'ONLY') only = true;
+    i += upper(t[i]) === 'IF' ? 2 : 1;
+  }
   const name = readName(t, i);
   if (!name) { cx.skip(origin.file, 'alter'); return; }
+  // `ALTER TABLE ONLY t ADD PRIMARY KEY / UNIQUE`: t's own key, not given to the partitions it already has.
+  const keysBefore = cx.keys.length;
   // What the statement adds that waits for the end (keys, foreign keys, checks, comments, partitions) names the
   // table as written: a partition's are folded or kept with it (`sqlDdlPartitions.ts`). A change to the columns
   // of a child with no table yet (`PARTITION OF`, `() INHERITS`) waits too: it is replayed on the child's table
@@ -624,7 +649,7 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
   let unhandledKind: SkipKind | undefined;
   const unhandled = (kind: SkipKind = 'alter'): void => { unhandledKind ??= kind; };
   let continues: Continues | undefined;
-  for (const [from, to] of splitTopLevel(t, name.next, t.length)) {
+  for (const [from, to] of splitTopLevel(t, name.next, t.length, ANGLE_TYPE_DIALECTS.has(cx.dialect))) {
     let k = from;
     const where: Origin = { file: origin.file, line: t[from]?.line ?? origin.line };
     if (upper(t[k]) === 'WITH' && (upper(t[k + 1]) === 'CHECK' || upper(t[k + 1]) === 'NOCHECK')) k += 2;
@@ -705,6 +730,12 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       // MySQL / Snowflake: ALTER TABLE t COMMENT [=] '…' is the table's description.
       cx.comments.push({ table: [...tableParts], text: (isPunct(t[k + 1], '=') ? t[k + 2] : t[k + 1]).value, origin: where });
       handled++;
+    } else if (action === 'SET' && setOptionsDescription(t, k, to) !== undefined) {
+      // BigQuery: ALTER TABLE t SET OPTIONS (description = '…'): the table's description.
+      cx.comments.push({ table: [...tableParts], text: setOptionsDescription(t, k, to)!, origin: where });
+      handled++;
+      // Other options beside it (labels, expiration…) are settings.
+      if (splitTopLevel(t, k + 3, matchParen(t, k + 2)).length > 1) unhandled('alterSetting');
     } else if (action === 'OWNER') {
       unhandled('alterOwner');
     } else if (SETTING_ACTIONS.has(action)) {
@@ -713,7 +744,15 @@ export function readAlterTable(cx: ConverterContext, text: string, st: Statement
       unhandled();
     }
   }
+  if (only) for (let k = keysBefore; k < cx.keys.length; k++) cx.keys[k].only = { partitionsBefore: readerState(cx).partitions.length };
   if ((unhandledKind || !handled) && !checkOnly) cx.skip(origin.file, unhandledKind ?? 'alter');
+}
+
+/** BigQuery's `SET OPTIONS (…, description = '…', …)` at `t[k]`, before `to`: the description, or undefined. */
+function setOptionsDescription(t: Token[], k: number, to: number): string | undefined {
+  if (upper(t[k]) !== 'SET' || upper(t[k + 1]) !== 'OPTIONS' || !isPunct(t[k + 2], '(')) return undefined;
+  const close = matchParen(t, k + 2);
+  return close > 0 && close < to ? optionsDescription(t, k + 2, close) : undefined;
 }
 
 /** Words that, after an ADD, start another thing added. */
@@ -799,8 +838,21 @@ function readAddItem(
     // ADD [COLUMNS] (a INT, b STRING): MySQL, Databricks.
     const close = matchParen(t, k);
     if (close < 0) return undefined;
-    for (const [cf, ct] of splitTopLevel(t, k + 1, close, cx.dialect === 'databricks')) now(where, (parts) => alterAddColumns(cx, text, parts, t, cf, ct, where));
-    return 'columns';
+    // Oracle: `ADD ( CONSTRAINT a PRIMARY KEY (…), CONSTRAINT b FOREIGN KEY … )`, a list of constraints (or of both).
+    let constraints = 0;
+    let columns = 0;
+    for (const [cf, ct] of splitTopLevel(t, k + 1, close, ANGLE_TYPE_DIALECTS.has(cx.dialect))) {
+      if (cf >= ct) continue;
+      const item: Origin = { file: where.file, line: t[cf].line };
+      if (ADD_CONTINUES_WORDS.has(upper(t[cf])) && isConstraintItem(t, cf, ct)) {
+        if (readAddItem(cx, text, tableParts, t, cf, ct, item, now)) constraints++;
+        else cx.skip(where.file, 'alter', 1, { line: item.line, name: tableParts.slice(-2).join('.') });
+        continue;
+      }
+      columns++;
+      now(item, (parts) => alterAddColumns(cx, text, parts, t, cf, ct, item));
+    }
+    return columns > 0 ? 'columns' : constraints > 0 ? 'constraint' : undefined;
   }
   if (isName(t[k]) && !ADD_NOT_COLUMN_WORDS.has(kind)) {
     const from = k;
@@ -873,6 +925,12 @@ function readAlterColumn(cx: ConverterContext, text: string, tableParts: string[
     const value = isPunct(t[commentAt], '=') ? t[commentAt + 1] : t[commentAt];
     if (value?.kind !== 'string') return false;
     cx.comments.push({ table: [...tableParts], column, text: value.value, origin: where });
+    return true;
+  }
+  // BigQuery: ALTER COLUMN c SET OPTIONS (description = '…'): the column's description (any other option is a setting).
+  const described = setOptionsDescription(t, k, to);
+  if (described !== undefined) {
+    cx.comments.push({ table: [...tableParts], column, text: described, origin: where });
     return true;
   }
   // PostgreSQL (pg_dump): ALTER COLUMN id ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY (…).
@@ -1520,8 +1578,16 @@ export function readCommentOn(cx: ConverterContext, st: Statement, origin: Origi
   const textValue = value?.kind === 'string' ? value.value : upper(value) === 'NULL' ? '' : undefined;
   if (textValue === undefined) return;
   // A comment on a partition stays the partition's until partitions are resolved (`sqlDdlPartitions.ts`).
-  if (object === 'TABLE') cx.comments.push({ table: cx.qualify(name.parts), text: textValue, origin });
-  else if (name.parts.length >= 2) cx.comments.push({ table: cx.qualify(name.parts.slice(0, -1)), column: name.parts[name.parts.length - 1], text: textValue, origin });
+  const tableParts = cx.qualify(object === 'TABLE' ? name.parts : name.parts.slice(0, -1));
+  if (object === 'COLUMN' && name.parts.length < 2) return;
+  const target = cx.findTable(tableParts);
+  cx.comments.push({
+    table: tableParts,
+    ...(object === 'COLUMN' ? { column: name.parts[name.parts.length - 1] } : {}),
+    text: textValue,
+    origin,
+    ...(target ? { target } : {}),
+  });
 }
 
 /** One argument of an `EXEC` call `t[from, to)`: a string (`N'…'`), a quoted or bare name, a number; NULL is none. */
@@ -1655,7 +1721,7 @@ function rememberView(cx: ConverterContext, parts: readonly string[]): void {
   views.add(parts[parts.length - 1].toLowerCase());
 }
 
-function isView(cx: ConverterContext, parts: readonly string[]): boolean {
+export function isView(cx: ConverterContext, parts: readonly string[]): boolean {
   if (cx.findTable(parts)) return false;
   const views = readerState(cx).views;
   return views.has(viewKey(parts)) || (parts.length === 1 && views.has(parts[0].toLowerCase()));

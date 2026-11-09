@@ -47,7 +47,8 @@ const FLOORS: Record<string, Floor> = {
   // Pagila's truth folds payment's 55 partitions into payment (expected.json notes): every unit of the folded model is matched.
   'postgres-pagila': { tablesMatched: 16, columnsMatched: 94, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 5, typeDetailsKept: 23, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   // The same dump with 'Keep each partition as a table': the 71-table reading the scorecard held before folding became the default.
-  'postgres-pagila-partitions-kept': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 16, relationshipsMatched: 37, uniqueKeysKept: 5, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Each partition has payment's primary key and unique index, as PostgreSQL 18 reads it back (test/real-world-truth/).
+  'postgres-pagila-partitions-kept': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 71, relationshipsMatched: 37, uniqueKeysKept: 60, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'mysql-sakila': { tablesMatched: 16, columnsMatched: 90, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 2, typeDetailsKept: 60, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlserver-adventureworks': { tablesMatched: 71, columnsMatched: 486, primaryKeysMatched: 71, relationshipsMatched: 90, uniqueKeysKept: 58, typeDetailsKept: 69, descriptionsExact: 530, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'snowflake-grid-reliability': { tablesMatched: 18, columnsMatched: 237, primaryKeysMatched: 18, relationshipsMatched: 12, uniqueKeysKept: 0, typeDetailsKept: 176, descriptionsExact: 13, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
@@ -58,7 +59,14 @@ const FLOORS: Record<string, Floor> = {
   'dbt-synthea-omop': { tablesMatched: 15, columnsMatched: 247, primaryKeysMatched: 15, relationshipsMatched: 113, uniqueKeysKept: 0, typeDetailsKept: 57, descriptionsExact: 223, maxSilentLosses: 0, verdictAtLeast: 'With gaps', conditionsShown: 32 },
   // Added with the Power BI robustness track (Save to Folder, TMDL isolation, M merge sources).
   'powerbi-folder-spaceparts': { tablesMatched: 23, columnsMatched: 172, primaryKeysMatched: 1, relationshipsMatched: 22, uniqueKeysKept: 0, typeDetailsKept: 9, descriptionsExact: 7, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
-  'powerbi-tmdl-bc-purchase': { tablesMatched: 34, columnsMatched: 511, primaryKeysMatched: 8, relationshipsMatched: 55, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  // Clean once the truth lists the unique keys Power BI implies (a relationship's one end) apart from declared ones: Item(Type Key) is one.
+  'powerbi-tmdl-bc-purchase': { tablesMatched: 34, columnsMatched: 511, primaryKeysMatched: 8, relationshipsMatched: 55, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Added with the Oracle, BigQuery, Redshift and SQLite dialects (each read with the PostgreSQL grammar after its own pre-steps).
+  // One unique key (employees.email): its 6 CREATE UNIQUE INDEX statements are on exactly the primary keys (expected.json notes), never a key of their own.
+  'oracle-hr': { tablesMatched: 7, columnsMatched: 35, primaryKeysMatched: 7, relationshipsMatched: 10, uniqueKeysKept: 1, typeDetailsKept: 30, descriptionsExact: 42, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'bigquery-cloud-learning-platform': { tablesMatched: 11, columnsMatched: 129, primaryKeysMatched: 0, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 5, descriptionsExact: 54, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'redshift-tpch': { tablesMatched: 8, columnsMatched: 61, primaryKeysMatched: 8, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 38, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'sqlite-chinook': { tablesMatched: 11, columnsMatched: 64, primaryKeysMatched: 11, relationshipsMatched: 11, uniqueKeysKept: 0, typeDetailsKept: 37, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
 };
 const RANK: Record<SampleScore['verdict'], number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
 

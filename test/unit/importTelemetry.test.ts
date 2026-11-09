@@ -84,8 +84,13 @@ describe('sqlInvalidFeatures', () => {
     expect(sqlInvalidFeatures([{ kind: 'noFiles' }, {}], 'databricks')).toEqual(['importSqlFailDatabricks']);
   });
 
-  it('every dialect and clause has its allowlisted key', () => {
-    for (const d of SQL_DIALECTS) expect(features).toContain(SQL_FAIL_DIALECT_FEATURES[d]);
+  it('every dialect with a key and every clause has its allowlisted key (Oracle, BigQuery, Redshift and SQLite have none yet)', () => {
+    for (const d of SQL_DIALECTS) {
+      const key = SQL_FAIL_DIALECT_FEATURES[d];
+      if (['oracle', 'bigquery', 'redshift', 'sqlite'].includes(d)) expect(key, d).toBeUndefined();
+      else expect(features).toContain(key);
+    }
+    expect(sqlInvalidFeatures([{ kind: 'noCreateTable' }], 'oracle')).toEqual(['importSqlInvalidNoCreateTable']);
     for (const key of Object.values(SQL_CLAUSE_FEATURES)) expect(features).toContain(key);
   });
 });

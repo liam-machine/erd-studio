@@ -458,11 +458,18 @@ describe('markDraftKeys', () => {
     expect(col('amount').isPrimaryKey).toBeUndefined();
   });
 
-  it('marks no PK when a composite key exists', () => {
+  it('marks no PK when a composite key holds the unique column', () => {
     const y = shopYml();
     y.compositeUniqueGroups = new Map([['fct_orders', [['order_id', 'product_id']]]]);
     const marked = markDraftKeys(seedTableFromDbt('fct_orders', y)!, dbtTestsOf(y).unique, []);
     expect(marked.columns!.some((c) => c.isPrimaryKey)).toBe(false);
+  });
+
+  it('a sole unique column beside a composite key of other columns is the PK (a surrogate id and a grain: mrr playbook)', () => {
+    const y = shopYml();
+    y.compositeUniqueGroups = new Map([['fct_orders', [['customer_id', 'amount']]]]);
+    const marked = markDraftKeys(seedTableFromDbt('fct_orders', y)!, dbtTestsOf(y).unique, []);
+    expect(marked.columns!.filter((c) => c.isPrimaryKey).map((c) => c.name)).toEqual(['order_id']);
   });
 });
 

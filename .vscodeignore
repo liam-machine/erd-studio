@@ -66,6 +66,8 @@ media/demo.gif
 media/readme-workflow.png
 
 # Dev/local files
+# The import corpus cache (scripts/corpus/fetch.mjs), gitignored but not read by vsce.
+.cache/**
 .claude/**
 .env*
 dev-preview.html

@@ -75,6 +75,17 @@ describe('the import ledger', () => {
     expect(lines[1]).toMatch(/^1 column: UNSIGNED/);
   });
 
+  it('keeps a grouped line under 300 characters, giving fewer names when long ones would not fit', () => {
+    const ledger = createLedger();
+    const long = (i: number): string => `idx_custom_field_select_options_on_namespace_and_lower_name_${i}`;
+    for (let i = 0; i < 22; i++) {
+      ledger.lost('uniqueKey', 'noField', 'expression unique index', { file: 'structure.sql', line: i + 1, table: `custom_field_select_options_${i}`, column: long(i) }, 'not kept: a unique key is a list of columns, not an expression');
+    }
+    const [line] = ledgerLeftOut(ledger.entries);
+    expect(line.length).toBeLessThanOrEqual(300);
+    expect(line).toMatch(/^22 unique keys: expression unique index not kept: a unique key is a list of columns, not an expression \(.+ and \d+ more\)\.$/);
+  });
+
   it('caps the number of lines, the last one counting the rest', () => {
     const ledger = createLedger();
     for (let i = 0; i < 7; i++) ledger.lost('column', 'noField', `detail ${i}`);

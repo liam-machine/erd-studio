@@ -268,7 +268,7 @@ describe('Import SQL DDL… — the quick path', () => {
     await quickImportSqlDdl(sqlDeps(sql, dbmlUi()));
     expect(placeholders[0]).toMatch(/^No dialect reads a table in the script \(broken\.sql line 1: CREATE TABLE t could not be read: an empty column definition/);
     // Every dialect says it read none; none is "detected".
-    expect(sql.dialectPicks[0].map((i) => i.description)).toEqual(Array(5).fill('does not read the table'));
+    expect(sql.dialectPicks[0].map((i) => i.description)).toEqual(Array(9).fill('does not read the table'));
   });
 
   it('no CREATE TABLE script in the folder: the step-by-step flow (the file dialog), counted as a fall-back', async () => {
@@ -294,7 +294,7 @@ describe('Import SQL DDL… — the quick path', () => {
     expect((await findSqlDdlScripts(tmp, '.erd-studio', sql)).files).toEqual([]);
   });
 
-  it('takes exactly what the start screen\'s look offers: the same listing (hidden folders, .SQL, deeper than before) and the same test (never a dbt macro, a CTAS, a notebook or Oracle DDL)', async () => {
+  it('takes exactly what the start screen\'s look offers: the same listing (hidden folders, .SQL, deeper than before) and the same test (never a dbt macro, a CTAS or a notebook; Oracle DDL is taken)', async () => {
     const write = (rel: string, text: string | Buffer): string => {
       const file = path.join(tmp, rel);
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -305,11 +305,11 @@ describe('Import SQL DDL… — the quick path', () => {
       write('.devcontainer/initdb/01_schema.sql', 'CREATE TABLE a (id int);\n'),
       write('DDL/TABLES.SQL', 'CREATE TABLE b (id int);\n'),
       write('a/b/c/d/e/f/g/h/i/j/k/l/m/tables.sql', 'CREATE TABLE c (id int);\n'),
+      write('oracle/hr.sql', 'CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));\n'),
     ];
     write('macros/m.sql', '{% macro m() %}create or replace table {{ relation }} as ({{ sql }});{% endmacro %}\n');
     write('analyses/backfill.sql', 'create table tmp as (\n  select 1\n);\n');
     write('src/nb.sql', '-- Databricks notebook source\nCREATE TABLE gold.x (id INT);\n');
-    write('oracle/hr.sql', 'CREATE TABLE HR.E (ID NUMBER(6), EMAIL VARCHAR2(25 BYTE));\n');
     const found = await findSqlDdlScripts(tmp, '.erd-studio', sqlUi());
     expect(found).toEqual({ files: [...taken].sort((x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' })), truncated: false });
   });
