@@ -2,10 +2,10 @@
 // official logo (assets/logos/, LOGOS.md → "Compatibility wall"), all the same size in one grid,
 // in Liam's order: dbt, Databricks, Snowflake, Power BI, Fabric (row 1: the platforms), then the
 // SQL dialects PostgreSQL … SQLite and DBML (a text badge: DBML has no mark of its own).
-// `have`: the grid is there from the start as dim grey silhouettes. `list`: each tile lights in
-// its own colours as its name is said (wordAt). After the last one (DBML) nothing moves: the
-// wall is held still through `same` (≥ 4 s) so a viewer can pause on it, and it is the poster
-// frame (props.poster → thumb.mjs).
+// `list`: the grid is there from the start as dim grey silhouettes; each tile lights in its own
+// colours as the line plays (the named ones on their words, the SQL databases in a quick cascade). After the last one nothing moves for the
+// scene's last second (viewers can pause), and it is the secondary still (props.poster → thumb.mjs
+// --scene wall).
 import { easeOut, lerp, seg } from '../../lib.js';
 import { wordAt } from '../readme/story.js';
 
@@ -43,8 +43,18 @@ export function wallHtml(t, ats) {
 
 export default {
   render(t, { scene }) {
-    // Each tile a beat before its word (−0.15 s), so it is on screen as the name is heard.
-    const ats = WALL.map(([, name]) => wordAt(scene, 'list', name) - 0.15);
+    // The line names a few sources (dbt, Databricks, Snowflake, Power BI): each lights a beat
+    // before its word (−0.15 s), Fabric just after Power BI. The rest — the SQL databases and
+    // DBML — light in a quick cascade on "SQL databases".
+    const caption = scene.lines.find((l) => l.beat === 'list')?.caption ?? '';
+    const pbiAt = wordAt(scene, 'list', 'Power BI');
+    const sqlAt = wordAt(scene, 'list', 'SQL databases') - 0.3;
+    let k = 0;
+    const ats = WALL.map(([, name]) => {
+      if (caption.includes(name)) return wordAt(scene, 'list', name) - 0.15;
+      if (name === 'Fabric') return pbiAt + 0.2;
+      return sqlAt + 0.09 * k++;
+    });
     return wallHtml(t, ats);
   },
 };

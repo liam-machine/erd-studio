@@ -1,9 +1,9 @@
 // launch · 2 · problem — "Drawn for the business. Invisible to the code." The README cut's `why`
-// scene (readme/why.js) retold for the pro arc: a separate, light-themed modelling tool on top
-// (labelled generically, "Modelling tool", never a product a real company could own) with the
+// scene (readme/why.js) retold for the pro arc: another SaaS product, a light-themed modelling
+// app on top (labelled generically, "SaaS modelling app", never a vendor a real company could own) with the
 // diagram drawn for the business; the repo with the code that builds it below.
-//   drawn  the tool is there from the start; "for the business" tags it; "separate tool" lights
-//          its window.
+//   drawn  the app is there from the start; "for the business" tags it; "another SaaS product"
+//          lights its window.
 //   back   the repo arrives on "Developers"; on "backwards" a dashed arrow runs from the picture
 //          down into the code, "working backwards".
 //   drift  on "drifts" the link snaps (amber), the tool says "Last updated 14 months ago" and the
@@ -31,7 +31,7 @@ const people = (size = 22) => `<svg class="icon" width="${size}" height="${size}
 export default {
   render(t, { scene }) {
     const bizAt = wordAt(scene, 'drawn', 'business');
-    const toolAt = wordAt(scene, 'drawn', 'separate');
+    const toolAt = wordAt(scene, 'drawn', 'another');
     const devAt = wordAt(scene, 'back', 'Developers') - 0.15;
     const backAt = wordAt(scene, 'back', 'backwards');
     const driftAt = wordAt(scene, 'drift', 'drifts');
@@ -57,8 +57,8 @@ export default {
     }
     let html = card({
       x: X, y: TOP.y, w: W, h: TOP.h, dots: true,
-      tabs: [{ label: 'Modelling tool', on: true, icon: `<span style="color:var(--text-2)">${ICON.globe({ size: 22 })}</span>` }],
-      crumb: 'a separate tool', body,
+      tabs: [{ label: 'SaaS modelling app', on: true, icon: `<span style="color:var(--text-2)">${ICON.globe({ size: 22 })}</span>` }],
+      crumb: '', body,
       style: `${appear(t, 0.05, { dy: -20, dur: 0.4 })}box-shadow:0 0 0 ${(3 * lit).toFixed(2)}px rgba(244,180,44,${(0.8 * lit).toFixed(3)}),0 30px 80px #000a;`,
     });
     if (t >= driftAt) {

@@ -70,7 +70,8 @@ scenes:
     lines:
       - id: p_drawn
         beat: drawn
-        caption: We draw the logical model | for the business, | in a {separate tool}.
+        caption: We draw the logical model | for the business, | in {another SaaS product}.
+        say: "We draw the logical model for the business, in another sass product."   # Kokoro spells out S-A-A-S
       - id: p_back
         beat: back
         caption: Developers work backwards | from the picture,
@@ -79,7 +80,7 @@ scenes:
         caption: so the design {drifts}, | and nobody trusts the diagram.
 
   - id: ai
-    module: ai                       # the pro cut's: an assistant reads the SQL, finds no design, guesses
+    module: launch/ai                # the pro cut's ai scene + the lock-in chip: reads the SQL, can't reach the design, guesses
     chapter: 1
     minDur: 8
     accent: blue
@@ -91,21 +92,28 @@ scenes:
       - id: a_blind
         beat: blind
         caption: It could read every line of SQL, | but not the {design}.
+      - id: a_lock
+        beat: lock
+        caption: "It's locked in someone else's {SaaS}: | hard to reach, | with API and MCP access | that costs extra, | or might one day."
+        say: "It's locked in someone else's sass: hard to reach, with API and MCP access that costs extra, or might one day."   # "A P I" reads as "a pee eye"; plain API / MCP phonemize as letters; SaaS as "sass"
       - id: a_guess
         beat: guess
-        caption: What's the grain? | Which keys? | It had to {guess}.
+        caption: So it had to {guess} | the grain and the keys.
 
   # ---------------------------------------------------------------- THE FIX
   - id: flip
-    module: readme/flip
+    module: launch/flip              # readme/flip + the ownership chips
     chapter: 2
     minDur: 7
     accent: green
-    headline: ["So flip it.", "Keep it {in the repo}."]
+    headline: ["So flip it.", "Keep it {in your repo}."]
     lines:
       - id: f_repo
         beat: repo
-        caption: "So flip it. | Keep the model {in the repo}, | as DBML, an open format, | right next to the SQL."
+        caption: "So flip it. | Keep the model in {your own repo}, | as DBML, an open format, | right next to the SQL."
+      - id: f_own
+        beat: own
+        caption: No separate repo | to manage model changes, | and {you own} the data.
 
   - id: canvas
     module: readme/canvas
@@ -135,7 +143,7 @@ scenes:
   - id: scale
     module: launch/scale
     chapter: 2
-    minDur: 13.8          # the arrows keep flowing a moment after "to the many"
+    minDur: 12.3          # the arrows flow about 1 s past "to the many", no longer
     accent: blue
     props:
       poster: { beat: hover, offset: 3.4 }   # thumb.mjs: the poster, the hover's gold flowing lines
@@ -186,23 +194,16 @@ scenes:
   - id: wall
     module: launch/wall
     chapter: 3
-    minDur: 22
+    minDur: 13.55         # about 1 s on the full wall after the line ends (viewers can pause)
     accent: amber
     props:
-      poster: { beat: same, offset: 1.0 }    # thumb.mjs --scene wall: the secondary still
+      poster: { beat: list, offset: 12.6 }   # thumb.mjs --scene wall: the secondary still, every logo lit
     headline: ["Already have a model?", "{Bring it in}."]
     lines:
-      - id: w_have
-        beat: have
-        caption: "Already have a model? | Everyone's reverse-engineering | apps with AI: | start with {your data model}."
+      # Liam (2026-11-10): short, not every source read out; the tiles light as it plays.
       - id: w_list
         beat: list
-        caption: "Bring it in from dbt, Databricks, | Snowflake, Power BI and Fabric, | PostgreSQL, SQL Server, MySQL, | Oracle, BigQuery, Redshift, | MariaDB, SQLite, | or DBML."
-        say: "Bring it in from dbt, Databricks, Snowflake, Power BI and Fabric, PostgreSQL, SQL Server, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, or D B M L."
-      - id: w_same
-        beat: same
-        pause: 0.5
-        caption: Whichever you start from, | it lands as the same {DBML files}.
+        caption: "Already have a model? | Everyone's reverse-engineering | apps with AI, | so start with {yours}: | bring it in from dbt, Databricks, | Snowflake, Power BI | and the most popular {SQL databases}."
 
   - id: export
     module: launch/export
@@ -214,6 +215,7 @@ scenes:
       - id: x_one
         beat: one
         caption: "Getting it out is one step: | one query in {Snowflake}, | one command in {PostgreSQL}."
+        say: "Getting it out is one step: one query in Snowflake, one command in postgress cue ell."   # Kokoro reads PostgreSQL as "post-ger S-Q-L"; this phonemizes as /ˈpoʊstɡɹɛs kjˈuː ˈɛl/
       - id: x_whole
         beat: whole
         caption: A {whole schema} at a time, | in one .sql file.
