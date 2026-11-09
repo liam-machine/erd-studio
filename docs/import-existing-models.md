@@ -24,15 +24,9 @@ Every import works the same way once you have the files: you pick the files (or 
 
 ## Databricks (Unity Catalog)
 
-Export the `CREATE TABLE` statements of your tables. Declared `PRIMARY KEY` and `FOREIGN KEY` constraints become keys and relationships.
+Export the `CREATE TABLE` statements of a whole schema in one notebook cell. Declared `PRIMARY KEY` and `FOREIGN KEY` constraints become keys and relationships.
 
-One table: run this in a notebook or the SQL editor, and copy the result into a `.sql` file in your project folder.
-
-```sql
-SHOW CREATE TABLE <catalog>.<schema>.<table>;
-```
-
-A whole schema: run this in a Python notebook cell, then copy what it prints into `schema.sql`.
+Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in your project folder:
 
 ```python
 catalog, schema = "main", "sales"  # your catalog and schema
@@ -55,11 +49,7 @@ Snowflake writes the DDL of a whole schema in one call. Run this in a worksheet 
 SELECT GET_DDL('SCHEMA', '<database>.<schema>');
 ```
 
-Or a whole database:
-
-```sql
-SELECT GET_DDL('DATABASE', '<database>');
-```
+For a whole database, use `GET_DDL('DATABASE', '<database>')` instead.
 
 Then run **ERD Studio: Import SQL DDL…** and choose **Snowflake**. Anything in the output that is not a table (views, sequences and the like) is skipped and listed as not imported.
 
@@ -67,9 +57,11 @@ Then run **ERD Studio: Import SQL DDL…** and choose **Snowflake**. Anything in
 
 A report saved as a Power BI project keeps its semantic model in a `<Name>.SemanticModel` folder, which ERD Studio reads as TMDL or as `model.bim`. A model saved with Tabular Editor's **Save to Folder** (a `database.json` with a `tables/` folder of JSON files beside it) reads too: pick the folder it was saved to.
 
-1. In Power BI Desktop, choose **File → Save as**, pick **Power BI project files (`*.pbip`)**, and save it in your project folder.
-2. No such option? Turn on **Power BI Project (.pbip) save option** in **File → Options and settings → Options → Preview features**, then restart Power BI Desktop.
-3. Run **ERD Studio: Import Power BI or Fabric Semantic Model…** and pick the folder.
+In Power BI Desktop, choose **File → Save as**, pick **Power BI project files (`*.pbip`)**, and save it in your project folder.
+
+No such option? Turn on **Power BI Project (.pbip) save option** in **File → Options and settings → Options → Preview features**, then restart Power BI Desktop.
+
+Then run **ERD Studio: Import Power BI or Fabric Semantic Model…** and pick the folder.
 
 Tables, columns and relationships come across; DAX measures stay in Power BI. A file that does not read is left out and listed under **Not imported**, with the rest of the model imported.
 
@@ -119,10 +111,10 @@ Then run **ERD Studio: Import SQL DDL…** and choose **Oracle**. `VARCHAR2`, `N
 
 ## Google BigQuery
 
-BigQuery keeps each table's DDL. Run this in the BigQuery console for your dataset and save the `ddl` column, one statement after another, into a `.sql` file:
+BigQuery keeps each table's DDL. Run this in the BigQuery console with your project and dataset: it returns the DDL of every table in the dataset as one value. Save it into a `.sql` file:
 
 ```sql
-SELECT ddl FROM `my-project.my_dataset`.INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE';
+SELECT STRING_AGG(ddl, '\n') FROM `my-project.my_dataset`.INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE';
 ```
 
 Then run **ERD Studio: Import SQL DDL…** and choose **Google BigQuery**. A column's or table's `OPTIONS(description = …)` (also set later with `ALTER TABLE … SET OPTIONS`) becomes its description, `STRUCT<…>` and `ARRAY<…>` columns keep their types, and `` `project.dataset.table` `` names keep their dataset. `PARTITION BY`, `CLUSTER BY` and the table's other options are left out.

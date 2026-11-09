@@ -660,6 +660,14 @@ describe('dialects', () => {
     expect(detectSqlDialect('CREATE TABLE `t` (`a` int) ENGINE=InnoDB;')).toBe('mysql');
     expect(detectSqlDialect('CREATE OR REPLACE TRANSIENT TABLE t (a NUMBER(38,0));')).toBe('snowflake');
     expect(detectSqlDialect('CREATE TABLE t (id SERIAL, j JSONB);')).toBe('postgres');
+    // pg_dump --schema-only of plain integer / character varying tables has no PostgreSQL-only type: its header and ALTER TABLE ONLY say it.
+    const pgDump = [
+      '--', '-- PostgreSQL database dump', '--', '', 'SET statement_timeout = 0;', "SELECT pg_catalog.set_config('search_path', '', false);", '',
+      'CREATE TABLE public.a (', '    id integer NOT NULL,', '    name character varying(20) NOT NULL', ');', '',
+      'ALTER TABLE ONLY public.a', '    ADD CONSTRAINT a_pkey PRIMARY KEY (id);',
+    ].join('\n');
+    expect(detectSqlDialect(pgDump)).toBe('postgres');
+    expect(detectSqlDialect(pgDump.replace('-- PostgreSQL database dump', '--'))).toBe('postgres');
     expect(detectSqlDialect('CREATE TABLE t (id int);')).toBeUndefined();
     expect(detectSqlDialect('-- USING DELTA in a comment\nCREATE TABLE t (id int);')).toBeUndefined();
     // Data is not a signal: MySQL's Chinook has `names` and a string 'Emerson String Quartet' (once read as Databricks).

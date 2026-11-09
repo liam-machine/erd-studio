@@ -468,6 +468,9 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['postgres', /::\s*\w/, 3],
   ['postgres', /\bTIMESTAMPTZ\b|\bJSONB\b|\$\$/i, 3],
   ['postgres', /\bTEXT\b|\bCOMMENT\s+ON\b/i, 1],
+  // pg_dump's own output: its header comment, the session line it always writes, and `ALTER TABLE ONLY` for keys.
+  ['postgres', /^-- PostgreSQL database dump\b/m, 3, 'comments'],
+  ['postgres', /\bSELECT\s+pg_catalog\.set_config\s*\(|\bALTER\s+TABLE\s+ONLY\b/i, 3],
   ['oracle', /\bN?VARCHAR2\b/i, 3],
   ['oracle', /\(\s*\d+\s+(?:BYTE|CHAR)\s*\)/i, 3],
   ['oracle', /\bSEGMENT\s+CREATION\b|\bPCTFREE\b|\bNOCOMPRESS\b|\bORGANIZATION\s+INDEX\b|\bNOCACHE\b|\bNOCYCLE\b|\bNOLOGGING\b/i, 2],
