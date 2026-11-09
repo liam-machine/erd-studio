@@ -1,0 +1,1940 @@
+{
+ "sample": "snowflake-grid-reliability",
+ "engine": "fakesnow 0.12.1 (Snowflake emulator on DuckDB 2.0.0)",
+ "loaded": [
+  "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+  "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql"
+ ],
+ "statementsRun": 56,
+ "workarounds": [
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 300,
+   "engineError": "002043 (02000): Binder Error: Creating foreign keys across different schemas or catalogs is not supported",
+   "did": [
+    "foreign key (ASSET_ID) to RAW.ASSET_MASTER: another schema, which DuckDB cannot reference; read from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 67,
+   "engineError": "001003 (42000): Parser Error: Expected a constant as type modifier",
+   "did": [
+    "foreign key (ASSET_ID) to RAW.ASSET_MASTER: another schema, which DuckDB cannot reference; read from the parse",
+    "EMBEDDING VECTOR(FLOAT, 768): DuckDB has no VECTOR; created as ARRAY, declared type from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 115,
+   "engineError": "001003 (42000): Parser Error: Expected a constant as type modifier",
+   "did": [
+    "EMBEDDING VECTOR(FLOAT, 768): DuckDB has no VECTOR; created as ARRAY, declared type from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 150,
+   "engineError": "002043 (02000): Binder Error: Creating foreign keys across different schemas or catalogs is not supported",
+   "did": [
+    "foreign key (ASSET_ID) to RAW.ASSET_MASTER: another schema, which DuckDB cannot reference; read from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 180,
+   "engineError": "002043 (02000): Binder Error: Creating foreign keys across different schemas or catalogs is not supported",
+   "did": [
+    "foreign key (ASSET_ID) to RAW.ASSET_MASTER: another schema, which DuckDB cannot reference; read from the parse"
+   ]
+  }
+ ],
+ "errors": [
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 60,
+   "statement": "CREATE WAREHOUSE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"WAREHOUSE\" LINE 1: ...==================================================== */ CREATE WAREHOUSE IF NOT EXISTS GRID_RELIABILITY_WH ^^^^^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 497,
+   "statement": "CREATE ROLE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"ROLE\" LINE 1: CREATE ROLE IF NOT EXISTS GRID_ADMIN COMMENT = 'Full admin access... ^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 498,
+   "statement": "CREATE ROLE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"ROLE\" LINE 1: CREATE ROLE IF NOT EXISTS GRID_DATA_ENGINEER COMMENT = 'Data engin... ^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 499,
+   "statement": "CREATE ROLE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"ROLE\" LINE 1: CREATE ROLE IF NOT EXISTS GRID_ML_ENGINEER COMMENT = 'ML model... ^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 500,
+   "statement": "CREATE ROLE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"ROLE\" LINE 1: CREATE ROLE IF NOT EXISTS GRID_ANALYST COMMENT = 'Read-only analyst... ^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 501,
+   "statement": "CREATE ROLE IF",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"ROLE\" LINE 1: CREATE ROLE IF NOT EXISTS GRID_OPERATOR COMMENT = 'Operations team... ^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 504,
+   "statement": "GRANT ROLE GRID_ADMIN",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: ... to ACCOUNTADMIN (role hierarchy - makes roles visible) */ GRANT ROLE GRID_ADMIN TO ROLE ACCOUNTADMIN ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 505,
+   "statement": "GRANT ROLE GRID_DATA_ENGINEER",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_DATA_ENGINEER TO ROLE ACCOUNTADMIN ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 506,
+   "statement": "GRANT ROLE GRID_ML_ENGINEER",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_ML_ENGINEER TO ROLE ACCOUNTADMIN ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 507,
+   "statement": "GRANT ROLE GRID_ANALYST",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_ANALYST TO ROLE ACCOUNTADMIN ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 508,
+   "statement": "GRANT ROLE GRID_OPERATOR",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_OPERATOR TO ROLE ACCOUNTADMIN ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 513,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON DATABASE UTILITIES_GRID_RELIABILITY TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 514,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.RAW TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 515,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.FEATURES... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 516,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.ML TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 517,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.ANALYTICS... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 518,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.STAGING TO... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 521,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON DATABASE UTILITIES_GRID_RELIABILITY TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 522,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.RAW TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 523,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.STAGING TO... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 524,
+   "statement": "GRANT SELECT, INSERT,",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 527,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON DATABASE UTILITIES_GRID_RELIABILITY TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 528,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UTILITIES_GRID_RELIABILITY.RAW TO... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 529,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UTILITIES_GRID_RELIABILITY.FEATURES... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 530,
+   "statement": "GRANT ALL ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ALL ON SCHEMA UTILITIES_GRID_RELIABILITY.ML TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 531,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL TABLES IN SCHEMA UTILITIES_GRID_RELIABI... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 532,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UTILITIES_GRID_RELIABILITY... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 535,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON DATABASE UTILITIES_GRID_RELIABILITY TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 536,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UTILITIES_GRID_RELIABILITY.ANALYTICS... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 537,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UTILITIES_GRID_RELIABILITY... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 540,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON DATABASE UTILITIES_GRID_RELIABILITY TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 541,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UTILITIES_GRID_RELIABILITY.ANALYTICS... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 542,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UTILITIES_GRID_RELIABILITY... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 543,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON TABLE UTILITIES_GRID_RELIABILITY.ML.MODEL_P... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 546,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON WAREHOUSE GRID_RELIABILITY_WH TO ROLE GRID_A... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 547,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON WAREHOUSE GRID_RELIABILITY_WH TO ROLE GRID_D... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 548,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON WAREHOUSE GRID_RELIABILITY_WH TO ROLE GRID_M... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 549,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON WAREHOUSE GRID_RELIABILITY_WH TO ROLE GRID_A... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 550,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON WAREHOUSE GRID_RELIABILITY_WH TO ROLE GRID_O... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 554,
+   "statement": "GRANT ROLE GRID_ADMIN",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_ADMIN TO USER IDENTIFIER((SELECT CURRENT_USER... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 555,
+   "statement": "GRANT ROLE GRID_DATA_ENGINEER",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_DATA_ENGINEER TO USER IDENTIFIER((SELECT... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 556,
+   "statement": "GRANT ROLE GRID_ML_ENGINEER",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_ML_ENGINEER TO USER IDENTIFIER((SELECT CURR... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 557,
+   "statement": "GRANT ROLE GRID_ANALYST",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_ANALYST TO USER IDENTIFIER((SELECT CURRENT_... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/02_structured_data_schema.sql",
+   "line": 558,
+   "statement": "GRANT ROLE GRID_OPERATOR",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT ROLE GRID_OPERATOR TO USER IDENTIFIER((SELECT CURRENT... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 271,
+   "statement": "CREATE OR REPLACE",
+   "error": "002043 (02000): Binder Error: failed to bind function, either: Invalid LIST argument during lambda function binding! or: Referenced column \"x\" not found in FROM clause! Candidate bindings: \"ASSET_ID\""
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 315,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UNSTRUCTURED TO ROLE GRID_ANALYST... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 316,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UNSTRUCTURED TO ROLE GRID_DATA_ENGINE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 317,
+   "statement": "GRANT USAGE ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT USAGE ON SCHEMA UNSTRUCTURED TO ROLE GRID_ML_ENGINEER ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 320,
+   "statement": "GRANT READ, WRITE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT READ, WRITE ON STAGE MAINTENANCE_DOCS_STAGE TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 321,
+   "statement": "GRANT READ, WRITE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT READ, WRITE ON STAGE TECHNICAL_MANUALS_STAGE TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 322,
+   "statement": "GRANT READ, WRITE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT READ, WRITE ON STAGE VISUAL_INSPECTION_STAGE TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 324,
+   "statement": "GRANT READ ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT READ ON STAGE MAINTENANCE_DOCS_STAGE TO ROLE GRID_ANA... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 325,
+   "statement": "GRANT READ ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT READ ON STAGE TECHNICAL_MANUALS_STAGE TO ROLE GRID_AN... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 328,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: /* Grant table access */ GRANT SELECT ON ALL TABLES IN SCHEMA UNSTRUCTURED TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 329,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UNSTRUCTURED TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 331,
+   "statement": "GRANT SELECT, INSERT,",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 332,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UNSTRUCTURED TO ROLE... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 334,
+   "statement": "GRANT SELECT, INSERT",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA UNSTRUCTURED... ^^^^^"
+  },
+  {
+   "file": "snowflake-grid-reliability/scripts/03_unstructured_data_schema.sql",
+   "line": 335,
+   "statement": "GRANT SELECT ON",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"GRANT\" LINE 1: GRANT SELECT ON ALL VIEWS IN SCHEMA UNSTRUCTURED TO ROLE... ^^^^^"
+  }
+ ],
+ "tables": [
+  {
+   "schema": "ML",
+   "name": "FEATURE_IMPORTANCE",
+   "comment": "Feature importance scores for model explainability",
+   "pk": [
+    "IMPORTANCE_ID"
+   ],
+   "columns": [
+    {
+     "name": "IMPORTANCE_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "FEATURE_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": true
+    },
+    {
+     "name": "IMPORTANCE_SCORE",
+     "type": "NUMBER(10,6)",
+     "notNull": false
+    },
+    {
+     "name": "IMPORTANCE_RANK",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "COMPUTATION_DATE",
+     "type": "DATE",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "ML",
+   "name": "MODEL_PERFORMANCE",
+   "comment": "Model performance tracking and evaluation metrics",
+   "pk": [
+    "EVAL_ID"
+   ],
+   "columns": [
+    {
+     "name": "EVAL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "EVAL_DATE",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "DATASET_TYPE",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "ACCURACY",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "PRECISION",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "RECALL",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "F1_SCORE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "ROC_AUC",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "MAE",
+     "type": "NUMBER(10,4)",
+     "notNull": false
+    },
+    {
+     "name": "RMSE",
+     "type": "NUMBER(10,4)",
+     "notNull": false
+    },
+    {
+     "name": "R2_SCORE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "TRUE_POSITIVES",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "FALSE_POSITIVES",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "TRUE_NEGATIVES",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "FALSE_NEGATIVES",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "COST_WEIGHTED_ACCURACY",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "ML",
+   "name": "MODEL_PREDICTIONS",
+   "comment": "Real-time ML predictions and risk scores",
+   "pk": [
+    "PREDICTION_ID"
+   ],
+   "columns": [
+    {
+     "name": "PREDICTION_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "PREDICTION_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ANOMALY_SCORE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "FAILURE_PROBABILITY",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "PREDICTED_RUL_DAYS",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "RISK_SCORE",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "CONFIDENCE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "FEATURE_VALUES",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "ALERT_GENERATED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "ALERT_LEVEL",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "ML",
+   "name": "MODEL_REGISTRY",
+   "comment": "ML model registry with versions and metadata",
+   "pk": [
+    "MODEL_ID"
+   ],
+   "columns": [
+    {
+     "name": "MODEL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ALGORITHM",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "VERSION",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "TRAINING_DATE",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "MODEL_OBJECT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "MODEL_STAGE",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "FEATURE_SCHEMA",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "HYPERPARAMETERS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "TRAINING_METRICS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "STATUS",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_BY",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "DEPLOYED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "ML",
+   "name": "TRAINING_DATA",
+   "comment": "Labeled training data for supervised learning models",
+   "pk": [
+    "RECORD_ID"
+   ],
+   "columns": [
+    {
+     "name": "RECORD_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SNAPSHOT_DATE",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "FAILURE_WITHIN_30_DAYS",
+     "type": "BOOLEAN",
+     "notNull": true
+    },
+    {
+     "name": "DAYS_TO_FAILURE",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "FAILURE_TYPE",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "FEATURES",
+     "type": "VARIANT",
+     "notNull": true
+    },
+    {
+     "name": "TRAINING_SET",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "ASSET_MASTER",
+   "comment": "Master inventory of T&D and substation assets with location and criticality data",
+   "pk": [
+    "ASSET_ID"
+   ],
+   "columns": [
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_SUBTYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "MANUFACTURER",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "MODEL",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "SERIAL_NUMBER",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "INSTALL_DATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "EXPECTED_LIFE_YEARS",
+     "type": "NUMBER(3,0)",
+     "notNull": false
+    },
+    {
+     "name": "LOCATION_SUBSTATION",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "LOCATION_CITY",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "LOCATION_COUNTY",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "LOCATION_LAT",
+     "type": "NUMBER(10,6)",
+     "notNull": false
+    },
+    {
+     "name": "LOCATION_LON",
+     "type": "NUMBER(10,6)",
+     "notNull": false
+    },
+    {
+     "name": "VOLTAGE_RATING_KV",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "CAPACITY_MVA",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "CRITICALITY_SCORE",
+     "type": "NUMBER(3,0)",
+     "notNull": false
+    },
+    {
+     "name": "CUSTOMERS_AFFECTED",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "REPLACEMENT_COST_USD",
+     "type": "NUMBER(12,2)",
+     "notNull": false
+    },
+    {
+     "name": "LAST_MAINTENANCE_DATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "STATUS",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "UPDATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "METADATA",
+     "type": "VARIANT",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "FAILURE_EVENTS",
+   "comment": "Historical failure incidents with root cause and impact data",
+   "pk": [
+    "EVENT_ID"
+   ],
+   "columns": [
+    {
+     "name": "EVENT_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "FAILURE_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "FAILURE_TYPE",
+     "type": "VARCHAR(100)",
+     "notNull": true
+    },
+    {
+     "name": "ROOT_CAUSE",
+     "type": "VARCHAR(5000)",
+     "notNull": false
+    },
+    {
+     "name": "CUSTOMERS_AFFECTED",
+     "type": "NUMBER(10,0)",
+     "notNull": false
+    },
+    {
+     "name": "OUTAGE_DURATION_HOURS",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "REPAIR_COST_USD",
+     "type": "NUMBER(12,2)",
+     "notNull": false
+    },
+    {
+     "name": "REPLACEMENT_FLAG",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "PREVENTABLE_FLAG",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "ADVANCED_WARNING_DAYS",
+     "type": "NUMBER(5,0)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "FAILURE_TYPE_REFERENCE",
+   "comment": null,
+   "pk": [
+    "FAILURE_TYPE_CODE"
+   ],
+   "columns": [
+    {
+     "name": "FAILURE_TYPE_CODE",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "FAILURE_TYPE_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "DESCRIPTION",
+     "type": "VARCHAR(500)",
+     "notNull": false
+    },
+    {
+     "name": "TYPICAL_ROOT_CAUSES",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "AVG_REPAIR_COST_USD",
+     "type": "NUMBER(12,2)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "MAINTENANCE_HISTORY",
+   "comment": "Historical maintenance work orders and inspection records",
+   "pk": [
+    "MAINTENANCE_ID"
+   ],
+   "columns": [
+    {
+     "name": "MAINTENANCE_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "MAINTENANCE_DATE",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "MAINTENANCE_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "DESCRIPTION",
+     "type": "VARCHAR(5000)",
+     "notNull": false
+    },
+    {
+     "name": "TECHNICIAN",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "COST_USD",
+     "type": "NUMBER(12,2)",
+     "notNull": false
+    },
+    {
+     "name": "DOWNTIME_HOURS",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "OUTCOME",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "PARTS_REPLACED",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "FINDINGS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "SCADA_EVENTS",
+   "comment": "SCADA operational events and alarms",
+   "pk": [
+    "EVENT_ID"
+   ],
+   "columns": [
+    {
+     "name": "EVENT_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "EVENT_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "EVENT_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "EVENT_CODE",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "EVENT_DESCRIPTION",
+     "type": "VARCHAR(1000)",
+     "notNull": false
+    },
+    {
+     "name": "SEVERITY",
+     "type": "NUMBER(1,0)",
+     "notNull": false
+    },
+    {
+     "name": "ACKNOWLEDGED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "ACKNOWLEDGED_BY",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "ACKNOWLEDGED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "SENSOR_READINGS",
+   "comment": "Time-series sensor data from OT systems - high volume table",
+   "pk": [
+    "READING_ID"
+   ],
+   "columns": [
+    {
+     "name": "READING_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "READING_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "OIL_TEMPERATURE_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "WINDING_TEMPERATURE_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "AMBIENT_TEMP_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "BUSHING_TEMP_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "LOAD_CURRENT_A",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "LOAD_VOLTAGE_KV",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "POWER_FACTOR",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "PARTIAL_DISCHARGE_PC",
+     "type": "NUMBER(8,2)",
+     "notNull": false
+    },
+    {
+     "name": "HUMIDITY_PCT",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "VIBRATION_MM_S",
+     "type": "NUMBER(8,4)",
+     "notNull": false
+    },
+    {
+     "name": "ACOUSTIC_DB",
+     "type": "NUMBER(6,2)",
+     "notNull": false
+    },
+    {
+     "name": "DISSOLVED_H2_PPM",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "DISSOLVED_CO_PPM",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "DISSOLVED_CO2_PPM",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "DISSOLVED_CH4_PPM",
+     "type": "NUMBER(10,2)",
+     "notNull": false
+    },
+    {
+     "name": "TAP_POSITION",
+     "type": "NUMBER(3,0)",
+     "notNull": false
+    },
+    {
+     "name": "INGESTION_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "RAW",
+   "name": "WEATHER_DATA",
+   "comment": "Weather station data for environmental context",
+   "pk": [
+    "WEATHER_ID"
+   ],
+   "columns": [
+    {
+     "name": "WEATHER_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LOCATION_LAT",
+     "type": "NUMBER(10,6)",
+     "notNull": true
+    },
+    {
+     "name": "LOCATION_LON",
+     "type": "NUMBER(10,6)",
+     "notNull": true
+    },
+    {
+     "name": "OBSERVATION_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "TEMPERATURE_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "HUMIDITY_PCT",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "WIND_SPEED_MPS",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "PRECIPITATION_MM",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "SOLAR_RADIATION_WM2",
+     "type": "NUMBER(8,2)",
+     "notNull": false
+    },
+    {
+     "name": "HEAT_INDEX_C",
+     "type": "NUMBER(5,2)",
+     "notNull": false
+    },
+    {
+     "name": "CREATED_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "STAGING",
+   "name": "ASSET_STAGING",
+   "comment": "Staging table for asset master data updates",
+   "pk": [
+    "STAGING_ID"
+   ],
+   "columns": [
+    {
+     "name": "STAGING_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "RAW_DATA",
+     "type": "VARIANT",
+     "notNull": true
+    },
+    {
+     "name": "SOURCE_FILE",
+     "type": "VARCHAR(500)",
+     "notNull": false
+    },
+    {
+     "name": "INGESTION_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "PROCESSED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "ERROR_MESSAGE",
+     "type": "VARCHAR(5000)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "STAGING",
+   "name": "SENSOR_STAGING",
+   "comment": "Staging table for sensor data ingestion via Snowpipe",
+   "pk": [
+    "STAGING_ID"
+   ],
+   "columns": [
+    {
+     "name": "STAGING_ID",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "RAW_DATA",
+     "type": "VARIANT",
+     "notNull": true
+    },
+    {
+     "name": "SOURCE_FILE",
+     "type": "VARCHAR(500)",
+     "notNull": false
+    },
+    {
+     "name": "INGESTION_TS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "PROCESSED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "ERROR_MESSAGE",
+     "type": "VARCHAR(5000)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "name": "CV_DETECTIONS",
+   "comment": null,
+   "pk": [
+    "DETECTION_ID"
+   ],
+   "columns": [
+    {
+     "name": "DETECTION_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "INSPECTION_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "DETECTION_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "CONFIDENCE_SCORE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "BOUNDING_BOX",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "SEVERITY_LEVEL",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "REQUIRES_IMMEDIATE_ACTION",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "DETECTED_AT_COMPONENT",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "DESCRIPTION",
+     "type": "VARCHAR(1000)",
+     "notNull": false
+    },
+    {
+     "name": "MODEL_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "MODEL_VERSION",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "DETECTION_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "name": "MAINTENANCE_LOG_DOCUMENTS",
+   "comment": null,
+   "pk": [
+    "DOCUMENT_ID"
+   ],
+   "columns": [
+    {
+     "name": "DOCUMENT_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "DOCUMENT_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "DOCUMENT_DATE",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "TECHNICIAN_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "TECHNICIAN_ID",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "FILE_PATH",
+     "type": "VARCHAR(500)",
+     "notNull": true
+    },
+    {
+     "name": "FILE_SIZE_BYTES",
+     "type": "NUMBER(12,0)",
+     "notNull": false
+    },
+    {
+     "name": "FILE_FORMAT",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "UPLOAD_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "MAINTENANCE_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "DURATION_HOURS",
+     "type": "NUMBER(6,2)",
+     "notNull": false
+    },
+    {
+     "name": "COST_USD",
+     "type": "NUMBER(12,2)",
+     "notNull": false
+    },
+    {
+     "name": "FAILURE_OCCURRED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "DOCUMENT_TEXT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "SUMMARY",
+     "type": "VARCHAR(5000)",
+     "notNull": false
+    },
+    {
+     "name": "ROOT_CAUSE_KEYWORDS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "SEVERITY_LEVEL",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "RECOMMENDED_ACTIONS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "PARTS_MENTIONED",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "EMBEDDING",
+     "type": "VECTOR(FLOAT, 768)",
+     "typeVia": "sqlglot",
+     "notNull": false
+    },
+    {
+     "name": "SENTIMENT_SCORE",
+     "type": "NUMBER(5,4)",
+     "notNull": false
+    },
+    {
+     "name": "PROCESSED_BY_CORTEX",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "LAST_PROCESSED_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "name": "TECHNICAL_MANUALS",
+   "comment": null,
+   "pk": [
+    "MANUAL_ID"
+   ],
+   "columns": [
+    {
+     "name": "MANUAL_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "MANUAL_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "EQUIPMENT_TYPE",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "MANUFACTURER",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "MODEL",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "VERSION",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "PUBLICATION_DATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "FILE_PATH",
+     "type": "VARCHAR(500)",
+     "notNull": true
+    },
+    {
+     "name": "FILE_SIZE_BYTES",
+     "type": "NUMBER(12,0)",
+     "notNull": false
+    },
+    {
+     "name": "PAGE_COUNT",
+     "type": "NUMBER(6,0)",
+     "notNull": false
+    },
+    {
+     "name": "UPLOAD_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "DOCUMENT_TEXT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "TABLE_OF_CONTENTS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "KEY_SPECIFICATIONS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "EMBEDDING",
+     "type": "VECTOR(FLOAT, 768)",
+     "typeVia": "sqlglot",
+     "notNull": false
+    },
+    {
+     "name": "APPLICABLE_TO_ASSETS",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "LAST_UPDATED",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "name": "VISUAL_INSPECTIONS",
+   "comment": null,
+   "pk": [
+    "INSPECTION_ID"
+   ],
+   "columns": [
+    {
+     "name": "INSPECTION_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ASSET_ID",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "INSPECTION_DATE",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "INSPECTOR_NAME",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "INSPECTOR_ID",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "INSPECTION_METHOD",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "WEATHER_CONDITIONS",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "FILE_PATH",
+     "type": "VARCHAR(500)",
+     "notNull": true
+    },
+    {
+     "name": "FILE_TYPE",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "FILE_SIZE_BYTES",
+     "type": "NUMBER(12,0)",
+     "notNull": false
+    },
+    {
+     "name": "UPLOAD_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "RESOLUTION",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "GPS_LATITUDE",
+     "type": "NUMBER(10,7)",
+     "notNull": false
+    },
+    {
+     "name": "GPS_LONGITUDE",
+     "type": "NUMBER(10,7)",
+     "notNull": false
+    },
+    {
+     "name": "CV_PROCESSED",
+     "type": "BOOLEAN",
+     "notNull": false
+    },
+    {
+     "name": "CV_PROCESSING_TIMESTAMP",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": "ML",
+   "table": "FEATURE_IMPORTANCE",
+   "name": "FEATURE_IMPORTANCE_model_id_model_id_fkey",
+   "columns": [
+    "MODEL_ID"
+   ],
+   "refSchema": "ML",
+   "refTable": "MODEL_REGISTRY",
+   "refColumns": [
+    "MODEL_ID"
+   ]
+  },
+  {
+   "schema": "ML",
+   "table": "MODEL_PERFORMANCE",
+   "name": "MODEL_PERFORMANCE_model_id_model_id_fkey",
+   "columns": [
+    "MODEL_ID"
+   ],
+   "refSchema": "ML",
+   "refTable": "MODEL_REGISTRY",
+   "refColumns": [
+    "MODEL_ID"
+   ]
+  },
+  {
+   "schema": "ML",
+   "table": "MODEL_PREDICTIONS",
+   "name": "FK_PRED_ASSET",
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "ML",
+   "table": "MODEL_PREDICTIONS",
+   "name": "MODEL_PREDICTIONS_model_id_model_id_fkey",
+   "columns": [
+    "MODEL_ID"
+   ],
+   "refSchema": "ML",
+   "refTable": "MODEL_REGISTRY",
+   "refColumns": [
+    "MODEL_ID"
+   ]
+  },
+  {
+   "schema": "RAW",
+   "table": "FAILURE_EVENTS",
+   "name": "FAILURE_EVENTS_asset_id_asset_id_fkey",
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ]
+  },
+  {
+   "schema": "RAW",
+   "table": "MAINTENANCE_HISTORY",
+   "name": "MAINTENANCE_HISTORY_asset_id_asset_id_fkey",
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ]
+  },
+  {
+   "schema": "RAW",
+   "table": "SCADA_EVENTS",
+   "name": "SCADA_EVENTS_asset_id_asset_id_fkey",
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ]
+  },
+  {
+   "schema": "RAW",
+   "table": "SENSOR_READINGS",
+   "name": "SENSOR_READINGS_asset_id_asset_id_fkey",
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "table": "CV_DETECTIONS",
+   "name": null,
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "table": "CV_DETECTIONS",
+   "name": "CV_DETECTIONS_inspection_id_inspection_id_fkey",
+   "columns": [
+    "INSPECTION_ID"
+   ],
+   "refSchema": "UNSTRUCTURED",
+   "refTable": "VISUAL_INSPECTIONS",
+   "refColumns": [
+    "INSPECTION_ID"
+   ]
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "table": "MAINTENANCE_LOG_DOCUMENTS",
+   "name": null,
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "UNSTRUCTURED",
+   "table": "VISUAL_INSPECTIONS",
+   "name": null,
+   "columns": [
+    "ASSET_ID"
+   ],
+   "refSchema": "RAW",
+   "refTable": "ASSET_MASTER",
+   "refColumns": [
+    "ASSET_ID"
+   ],
+   "via": "sqlglot"
+  }
+ ]
+}

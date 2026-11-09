@@ -47,7 +47,8 @@ const FLOORS: Record<string, Floor> = {
   // Pagila's truth folds payment's 55 partitions into payment (expected.json notes): every unit of the folded model is matched.
   'postgres-pagila': { tablesMatched: 16, columnsMatched: 94, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 5, typeDetailsKept: 23, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   // The same dump with 'Keep each partition as a table': the 71-table reading the scorecard held before folding became the default.
-  'postgres-pagila-partitions-kept': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 16, relationshipsMatched: 37, uniqueKeysKept: 5, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Each partition has payment's primary key and unique index, as PostgreSQL 18 reads it back (test/real-world-truth/).
+  'postgres-pagila-partitions-kept': { tablesMatched: 71, columnsMatched: 479, primaryKeysMatched: 71, relationshipsMatched: 37, uniqueKeysKept: 60, typeDetailsKept: 133, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'mysql-sakila': { tablesMatched: 16, columnsMatched: 90, primaryKeysMatched: 16, relationshipsMatched: 22, uniqueKeysKept: 2, typeDetailsKept: 60, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlserver-adventureworks': { tablesMatched: 71, columnsMatched: 486, primaryKeysMatched: 71, relationshipsMatched: 90, uniqueKeysKept: 58, typeDetailsKept: 69, descriptionsExact: 530, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'snowflake-grid-reliability': { tablesMatched: 18, columnsMatched: 237, primaryKeysMatched: 18, relationshipsMatched: 12, uniqueKeysKept: 0, typeDetailsKept: 176, descriptionsExact: 13, maxSilentLosses: 0, verdictAtLeast: 'Clean' },

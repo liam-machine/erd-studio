@@ -50,7 +50,8 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
   'postgres-pagila-partitions-kept': {
     importer: 'sql',
     // Each of payment's 55 partitions a table of its own, as SOURCE.md counts them: the counts this scorecard held before folding became the default.
-    counts: { tables: 71, columns: 479, primaryKeys: 16, relationships: 37, descriptions: 0 },
+    // Each partition has payment's primary key: PostgreSQL 18 creates it on every partition it attaches (test/real-world-truth/), so 71, not SOURCE.md's 16.
+    counts: { tables: 71, columns: 479, primaryKeys: 71, relationships: 37, descriptions: 0 },
     provenance: "The postgres-pagila file and script, with the partitions kept: every top-level 'CREATE TABLE public.<name> (...)' block a table (16 base tables and the 55 payment_pYYYY_MM partitions, 7 columns each: 479 columns), 19 base FKs and the 18 declared on partitions 2022_01..06 (37). Source: as postgres-pagila (pagila-schema.sql sha256 071ee940a73c8f4fad2997185788065291607e2c55559e3747959e8275391536).",
   },
   // mysql-sakila: Sakila (MySQL)

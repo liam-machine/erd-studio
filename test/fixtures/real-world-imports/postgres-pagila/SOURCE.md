@@ -50,7 +50,7 @@ was checked again with `grep -c`.
 |---|---|
 | Tables (all `CREATE TABLE`) | **71** = 16 base tables + 55 monthly `payment` partitions |
 | Columns | **479** = 94 in base tables + 55 × 7 in partitions |
-| Primary keys | **16** (all on base tables; 3 are composite, each counted once; partitions declare none) |
+| Primary keys | **16** (all on base tables; 3 are composite, each counted once; partitions declare none). Read back from PostgreSQL 18, each partition has `payment`'s key too: PostgreSQL creates it, and the `(uuid, payment_date)` unique index, on every partition it attaches. So with partitions kept as tables, `expected.json` counts **71** (`test/real-world-truth/`, `docs/dev/real-world-truth.md`). |
 | Foreign keys | **37** = 19 on base tables + 18 on 6 partitions (`payment_p2022_01`..`06`, 3 each) |
 | Views | 7 views + 1 materialized view (not tables) |
 

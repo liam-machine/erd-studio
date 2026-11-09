@@ -517,11 +517,33 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
 
   it('SQL Server computed columns are typed computed with a note; IDENTITY seed, ROWGUIDCOL, SPARSE, NOT FOR REPLICATION are counted', () => {
     const r = convert('sqlserver', 'CREATE TABLE [Sales].[Customer] (\n  [CustomerID] int IDENTITY (100, 5) NOT FOR REPLICATION NOT NULL,\n  [AccountNumber] AS ISNULL(\'AW\' + [dbo].[ufnLeadingZeros](CustomerID), \'\'),\n  [Total] AS ([CustomerID] * 2) PERSISTED,\n  [rowguid] uniqueidentifier ROWGUIDCOL NOT NULL,\n  [Doc] nvarchar(max) SPARSE NULL\n) ON [PRIMARY]');
-    expect(r.dbml).toContain('"AccountNumber" computed [note: \'Computed column; its expression was not imported.\']');
-    expect(r.dbml).toContain('"Total" computed');
+    // ISNULL(…, '') is never null: SQL Server reads the column as NOT NULL.
+    expect(r.dbml).toContain('"AccountNumber" computed [not null, note: \'Computed column; its expression was not imported.\']');
+    expect(r.dbml).toContain('"Total" computed [note:');
     expect(r.dbml).toMatch(/"CustomerID" int \[[^\]]*increment/);
     expect(entries(r, 'computed column')).toHaveLength(2);
     expect(r.skipped.join('\n')).toMatch(/4 column settings/);
+  });
+
+  it('a SQL Server computed column of ISNULL(expr, constant) is NOT NULL, as sys.columns reads it; any other stays nullable', () => {
+    // AdventureWorks on SQL Server 2025: these read back is_nullable = 0 (test/real-world-truth/engine/sqlserver-adventureworks.json).
+    const r = convert('sqlserver', [
+      'CREATE TABLE t (',
+      '  [Qty] smallint NOT NULL, [Price] money NOT NULL, [Id] int NOT NULL, [Node] hierarchyid NULL, [N1] int NULL,',
+      '  [LineTotal] AS ISNULL([Qty] * [Price], 0.00),',
+      "  [Number] AS ISNULL(N'SO' + CONVERT(nvarchar(23), [Id]), N'*** ERROR ***'),",
+      '  [Wrapped] AS ((ISNULL([Qty] - 1, (0)))),',
+      '  [Level] AS [Node].GetLevel(),',
+      '  [Coalesced] AS COALESCE([Qty], 0),',
+      '  [NullFallback] AS ISNULL([Qty], NULL),',
+      '  [Inner] AS ISNULL([Qty], 0) + [Qty]',
+      "  [TextForNumber] AS ISNULL([N1], 'x'),",
+      ')',
+    ].join('\n'));
+    const line = (c: string): string => r.dbml.split('\n').find((l) => l.trim().startsWith(`"${c}"`))!;
+    for (const c of ['LineTotal', 'Number', 'Wrapped']) expect(line(c), c).toMatch(/\[not null/);
+    // SQL Server reads Coalesced and NullFallback as NOT NULL too ([Qty] is NOT NULL); the import does not follow column nullability, so they stay nullable.
+    for (const c of ['Level', 'Coalesced', 'NullFallback', 'Inner', 'TextForNumber']) expect(line(c), c).not.toMatch(/not null/);
   });
 
   it('CREATE DOMAIN and SQL Server alias types: columns keep the name; the ledger names the base and how many use it', () => {

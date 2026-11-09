@@ -56,6 +56,13 @@ function columnsOf(r: Converted, table: string): string[] {
   return m[1].split('\n').map((l) => l.trim()).filter((l) => l.startsWith('"')).map((l) => l.split(' ')[0].replace(/"/g, ''));
 }
 
+/** One DBML table block, up to its closing brace. */
+function blockOf(r: Converted, table: string): string {
+  const m = new RegExp(`Table "${table}" \\{\\n[\\s\\S]*?\\n\\}`).exec(r.dbml);
+  if (!m) throw new Error(`no table ${table} in\n${r.dbml}`);
+  return m[0];
+}
+
 const folded = (ledger: readonly LedgerEntry[]): LedgerEntry[] =>
   ledger.filter((e) => e.unit === 'table' && e.outcome === 'changed' && /^folded into /.test(e.detail ?? ''));
 const tableLosses = (ledger: readonly LedgerEntry[]): LedgerEntry[] => ledger.filter((e) => e.unit === 'table' && e.outcome === 'lost');
@@ -360,6 +367,61 @@ describe("partitions: 'tables' keeps each partition as a table", () => {
     const notes = ledgerNotes(r.ledger).join('\n');
     expect(notes).toMatch(/2 tables: partitions of p kept as tables of their own, as asked \(p_1, p_2\)/);
     expectConserved(r, text);
+  });
+
+  it("an ATTACHed partition (pg_dump) gets its parent's primary key, unique keys and foreign keys, as PostgreSQL gives every partition", () => {
+    // Pagila's payment: PostgreSQL 18 reads back each payment_p2022_xx with payment's primary key and
+    // unique index (test/real-world-truth/engine/postgres-pagila.json), though the dump writes neither on them.
+    const text = [
+      'CREATE TABLE customer (id int PRIMARY KEY);',
+      'CREATE TABLE payment (id int NOT NULL, at date NOT NULL, customer_id int NOT NULL, uuid uuid NOT NULL, PRIMARY KEY (at, id)) PARTITION BY RANGE (at);',
+      'CREATE TABLE payment_p1 (id int NOT NULL, at date NOT NULL, customer_id int NOT NULL, uuid uuid NOT NULL);',
+      "ALTER TABLE ONLY payment ATTACH PARTITION payment_p1 FOR VALUES FROM ('2022-01-01') TO ('2022-02-01');",
+      'CREATE UNIQUE INDEX payment_uuid ON payment USING btree (uuid, at);',
+      'CREATE UNIQUE INDEX payment_id_only ON ONLY payment USING btree (id, at, customer_id);',
+      'ALTER TABLE payment ADD CONSTRAINT payment_customer FOREIGN KEY (customer_id) REFERENCES customer (id);',
+    ].join('\n');
+    const r = convert(text, 'tables');
+    expect(tables(r)).toEqual(['customer', 'payment', 'payment_p1']);
+    expect(blockOf(r, 'payment_p1')).toMatch(/\("at", "id"\) \[pk\][\s\S]*\("uuid", "at"\) \[unique\]/);
+    // ON ONLY after the ATTACH: the parent's own index (pg_dump then attaches one written on each partition).
+    expect(blockOf(r, 'payment')).toMatch(/\("id", "at", "customer_id"\) \[unique\]/);
+    expect(blockOf(r, 'payment_p1')).not.toMatch(/customer_id"\) \[unique\]/);
+    expect(links(r)).toEqual(['payment.customer_id>customer.id', 'payment_p1.customer_id>customer.id']);
+    expectConserved(r, text);
+  });
+
+  it('an ONLY key goes to a partition attached after it, not to one attached before (as PostgreSQL 18 reads it back)', () => {
+    const r = convert([
+      'CREATE TABLE p (id int NOT NULL, at date NOT NULL, code text NOT NULL) PARTITION BY RANGE (at);',
+      'ALTER TABLE ONLY p ADD CONSTRAINT p_pkey PRIMARY KEY (id, at);',
+      'CREATE UNIQUE INDEX p_code ON ONLY p (code, at);',
+      'CREATE TABLE p1 (id int NOT NULL, at date NOT NULL, code text NOT NULL);',
+      "ALTER TABLE ONLY p ATTACH PARTITION p1 FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      'CREATE TABLE q (id int NOT NULL, at date NOT NULL) PARTITION BY RANGE (at);',
+      'CREATE TABLE q1 (id int NOT NULL, at date NOT NULL);',
+      "ALTER TABLE ONLY q ATTACH PARTITION q1 FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+      'ALTER TABLE ONLY q ADD CONSTRAINT q_pkey PRIMARY KEY (id, at);',
+    ].join('\n'), 'tables');
+    expect(blockOf(r, 'p1')).toMatch(/\("id", "at"\) \[pk\][\s\S]*\("code", "at"\) \[unique\]/);
+    expect(blockOf(r, 'q')).toMatch(/\[pk\]/);
+    expect(blockOf(r, 'q1')).not.toMatch(/\[pk\]/);
+  });
+
+  it("a partition of a partition gets its grandparent's key; an INHERITS child and a partition with its own key do not get another", () => {
+    const r = convert([
+      'CREATE TABLE s (id int NOT NULL, region text NOT NULL, PRIMARY KEY (id, region)) PARTITION BY LIST (region);',
+      "CREATE TABLE s_eu PARTITION OF s FOR VALUES IN ('eu') PARTITION BY HASH (id);",
+      'CREATE TABLE s_eu_0 (id int NOT NULL, region text NOT NULL);',
+      'ALTER TABLE s_eu ATTACH PARTITION s_eu_0 FOR VALUES WITH (MODULUS 2, REMAINDER 0);',
+      'CREATE TABLE s_us (id int NOT NULL, region text NOT NULL, CONSTRAINT s_us_pk PRIMARY KEY (id, region));',
+      "ALTER TABLE s ATTACH PARTITION s_us FOR VALUES IN ('us');",
+      'CREATE TABLE base (id int PRIMARY KEY, note text UNIQUE);',
+      'CREATE TABLE child (extra text) INHERITS (base);',
+    ].join('\n'), 'tables');
+    expect(blockOf(r, 's_eu_0')).toMatch(/\("id", "region"\) \[pk\]/);
+    expect(blockOf(r, 's_us').match(/\[pk\]/g)).toHaveLength(1);
+    expect(blockOf(r, 'child')).not.toMatch(/\bpk\b|unique/);
   });
 
   it('several levels kept: each child has its own parent\'s columns, its foreign keys its own', () => {

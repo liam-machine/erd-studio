@@ -25,6 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
 | Rendering the webview in Chrome | `docs/dev/webview-preview.md` |
+| The real-world import samples' truth, or the database read-back that checks it | `docs/dev/real-world-truth.md` |
 | The onboarding stories in `test/stories/` (user stories as code driving a real VS Code, filmed as captioned videos; `npm run stories`, `stories.yml`), or any first-run surface they cover (start links, walkthrough, empty Diagrams view, Open an Example) | `docs/dev/onboarding-stories.md` |
 | The on-disk file format (DBML tables, relationships and diagrams, `erd_layout`; legacy domain JSON and model yml; `layers.json`; `fields.yml`) | `docs/semantic-domain-json-reference.md` |
 | Context fields: the field catalogue and `fields.yml` (`packages/core/src/fields.ts`, `fieldsFile.ts`, `src/services/fieldsService.ts`), how a field is spelled in a table file (bare `<key>`, old `rationale_` / `meta_` / `meta_json`, reserved names), the Detail panel's Fields section, `doctor`'s `erd.fields`, the skill's Fields section | `docs/dev/fields.md` |

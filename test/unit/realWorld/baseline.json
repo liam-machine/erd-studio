@@ -104,14 +104,14 @@
       "expected": {
         "tables": 71,
         "columns": 479,
-        "primaryKeys": 16,
+        "primaryKeys": 71,
         "relationships": 37,
         "descriptions": 0
       },
       "imported": {
         "tables": 71,
         "columns": 479,
-        "primaryKeys": 16,
+        "primaryKeys": 71,
         "relationships": 37,
         "descriptions": 0
       },
