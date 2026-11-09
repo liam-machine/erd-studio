@@ -69,6 +69,8 @@ import {
   CREATE_OBJECT_WORDS,
   GO_LINE,
   isName,
+  isDoubleQuotedComment,
+  isExpectation,
   isPunct,
   leadingTableComment,
   matchParen,
@@ -428,6 +430,9 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['databricks', /\bTBLPROPERTIES\b/i, 3],
   ['databricks', /\b(ARRAY|MAP|STRUCT)\s*</i, 3],
   ['databricks', /\bPARTITIONED\s+BY\b|\bZORDER\b/i, 1],
+  // Lakeflow (Delta Live Tables) pipelines, and a column's own `CONSTRAINT n FOREIGN KEY REFERENCES t`.
+  ['databricks', /\bCREATE\s+OR\s+REFRESH\b|\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:STREAMING|LIVE)\s+TABLE\b|\bCONSTRAINT\s+\w+\s+EXPECT\s*\(/i, 3],
+  ['databricks', /\bFOREIGN\s+KEY\s+REFERENCES\b/i, 3],
   // STRING as a type, in a script that backquotes a name (one part each: a whole `a.b.c` path is BigQuery's).
   ['databricks', /^(?=[\s\S]*`[^`\n.]+`)[\s\S]*?[\w`][ \t]+STRING\b/i, 2],
   ['mysql', /\bENGINE\s*=/i, 3],
@@ -438,7 +443,14 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['snowflake', /\bCREATE\s+OR\s+REPLACE\s+TRANSIENT\b|\bTRANSIENT\s+TABLE\b/i, 3],
   ['snowflake', /\bVARIANT\b/i, 3],
   ['snowflake', /\bNUMBER\s*\(\s*38\b|\bVARCHAR\s*\(\s*16777216\s*\)/i, 3],
-  ['snowflake', /\bCREATE\s+OR\s+REPLACE\s+TABLE\b|\bTIMESTAMP_(NTZ|LTZ|TZ)\b/i, 1],
+  ['snowflake', /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i, 1],
+  // Snowflake's own timestamp types and objects (PostgreSQL shares its `::` casts and `$$` bodies).
+  ['snowflake', /\bTIMESTAMP_(NTZ|LTZ|TZ)\b/i, 3],
+  ['snowflake', /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:WAREHOUSE|STAGE|STREAM|TASK|PIPE|FILE\s+FORMAT|DYNAMIC\s+TABLE|HYBRID\s+TABLE|ICEBERG\s+TABLE)\b|\bUSE\s+(?:WAREHOUSE|ROLE)\b/i, 3],
+  // `::` casts and `$$` bodies are Snowflake's and Databricks' too: beside one of their own signals, theirs as much as PostgreSQL's.
+  ['snowflake', /::\s*\w/, 3, 'beside'],
+  ['snowflake', /\$\$/, 3, 'beside'],
+  ['databricks', /::\s*\w/, 3, 'beside'],
   ['postgres', /\b(BIG|SMALL)?SERIAL\b/i, 3],
   ['postgres', /::\s*\w/, 3],
   ['postgres', /\bTIMESTAMPTZ\b|\bJSONB\b|\$\$/i, 3],
@@ -455,6 +467,8 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['bigquery', /\bPARTITION\s+BY\s+(?:DATE|DATE_TRUNC|TIMESTAMP_TRUNC|DATETIME_TRUNC|RANGE_BUCKET|_PARTITIONDATE)\b|@@(?:dataset_id|project_id)\b/i, 3],
   // A whole path in one pair of backticks (`my-project.dataset.table`): Databricks and MySQL quote each part.
   ['bigquery', /`[A-Za-z_][\w-]*(?:\.[\w-]+){1,2}`/, 3],
+  // The same with template placeholders in it (`${project_id}.${dataset}.t`, `{project_id}.{dataset_id}.events_*`).
+  ['bigquery', /`(?:[\w-]|\$?\{\w+\})+(?:\.(?:[\w-]|\$?\{\w+\})+){1,2}\*?`/, 3],
   // BigQuery nests types as Databricks does (ARRAY<STRUCT<…>>): alone, the Databricks it was read as before.
   ['bigquery', /\b(?:ARRAY|STRUCT)\s*</i, 3, 'beside'],
   // A type after a column's name. (GEOGRAPHY and BOOL are PostgreSQL's too, PostGIS and an alias.)
@@ -1751,6 +1765,13 @@ class Converter implements ConverterContext {
     // The column list.
     for (const [from, to] of splitTopLevel(t, open + 1, close, true)) {
       const head = upper(t[from]);
+      // A Lakeflow expectation (`CONSTRAINT n EXPECT (…) [ON VIOLATION …]`): a pipeline's data-quality rule, not a
+      // constraint; it goes with the comma before it (or after it, when it comes first). afterCreateTable records it.
+      if (isExpectation(t, from)) {
+        if (isPunct(t[from - 1], ',')) blank(t[from - 1].start, t[to - 1].end);
+        else blank(t[from].start, isPunct(t[to], ',') && to < close ? t[to].end : t[to - 1].end);
+        continue;
+      }
       if (head === 'CONSTRAINT' || head === 'PRIMARY' || head === 'FOREIGN' || head === 'UNIQUE' || head === 'CHECK') {
         for (let k = from; k < to; k++) {
           const word = upper(t[k]);
@@ -1792,7 +1813,8 @@ class Converter implements ConverterContext {
       // Constraints.
       for (; k < to; k++) {
         const word = upper(t[k]);
-        if (word === 'COMMENT' && t[k + 1]?.kind === 'string') {
+        // Spark takes a double-quoted string too (`COMMENT "…"`).
+        if (word === 'COMMENT' && (t[k + 1]?.kind === 'string' || isDoubleQuotedComment(t[k + 1]))) {
           comments.set(columnName.toLowerCase(), t[k + 1].value);
           blank(t[k].start, t[k + 1].end);
           k++;

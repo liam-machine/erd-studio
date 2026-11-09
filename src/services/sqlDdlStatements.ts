@@ -37,6 +37,7 @@ import {
   isLineStart,
   isName,
   isSqlPlusCommand,
+  isExpectation,
   isPunct,
   leadingTableComment,
   matchParen,
@@ -345,6 +346,11 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
   lines.set(table, constraintLines);
   for (const [from, to] of splitTopLevel(t, open + 1, close, ANGLE_TYPE_DIALECTS.has(cx.dialect))) {
     if (from >= to) continue;
+    if (isExpectation(t, from)) {
+      cx.ledger.lost('constraint', 'noField', 'expectation', { file, line: t[from].line, table: label, column: t[from + 1].value },
+        'not kept: a pipeline\'s data-quality rule (EXPECT … ON VIOLATION), not a key or check');
+      continue;
+    }
     if (isConstraintItem(t, from, to)) {
       const c = readTableConstraint(t, from, to);
       if (!c) continue;

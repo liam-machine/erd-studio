@@ -627,6 +627,11 @@ export function leadingTableComment(t: readonly Token[], next: number): { from: 
   return { from: next, to: value, comment: t[value].value };
 }
 
+/** Whether the column-list item at `from` is a Lakeflow expectation: `CONSTRAINT name EXPECT (…)`. */
+export function isExpectation(t: readonly Token[], from: number): boolean {
+  return upper(t[from]) === 'CONSTRAINT' && isName(t[from + 1]) && upper(t[from + 2]) === 'EXPECT' && isPunct(t[from + 3], '(');
+}
+
 /** Whether only spaces precede `offset` on its line. */
 export function isLineStart(text: string, offset: number): boolean {
   for (let k = offset - 1; k >= 0; k--) {

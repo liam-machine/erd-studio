@@ -481,7 +481,16 @@ def on_create_table(m, e, dialect, where, written=None):
                 t['description'] = ident(p.args.get('value'))
 
 
-def on_alter(m, e, dialect, where):
+def written_alter_types(sql):
+    """Each added column's type as an ALTER TABLE … ADD [COLUMN] [IF NOT EXISTS] writes it (see written_types)."""
+    out = {}
+    for am in re.finditer(r'\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(' + IDENT + r')\s+([A-Za-z_]\w*(?:\s*\([^()]*\))?)', strip_comments(sql), re.I):
+        if am.group(2).split('(')[0].upper() not in ('CONSTRAINT', 'PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK'):
+            out[unquote(am.group(1)).lower()] = re.sub(r'\s+', ' ', am.group(2).strip())
+    return out
+
+
+def on_alter(m, e, dialect, where, written=None):
     tbl = e.this
     name = ident(tbl)
     t = m.table(name, schema_of(tbl), create=False)
@@ -491,7 +500,12 @@ def on_alter(m, e, dialect, where):
         items = a.expressions if isinstance(a, (exp.AddConstraint, exp.Schema)) else [a]
         for c in items:
             if isinstance(c, exp.ColumnDef):
+                # ADD COLUMN IF NOT EXISTS of a column the table has does nothing (and a plain one is refused).
+                if any(col[0].lower() == (ident(c.this) or '').lower() for col in t['columns']):
+                    continue
                 add_column(m, t, c, dialect)
+                if written and t['columns'] and t['columns'][-1][0].lower() in written and t['columns'][-1][1]:
+                    t['columns'][-1][1] = written[t['columns'][-1][0].lower()]
             else:
                 apply_constraint(m, t, c)
 
@@ -521,7 +535,7 @@ def on_comment(m, e):
 
 
 # A structural reader for a CREATE TABLE sqlglot cannot read: the name, and each top-level item of the column list.
-CREATE_RE = re.compile(r'CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG)\s+)*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[`"\[]?[^\s(`"\[\]]+[`"\]]?\s*\.\s*)*[`"\[]?[^\s(`"\[\]]+[`"\]]?)\s*(\(|PARTITION\s+OF|AS\b|LIKE\b|$)', re.I | re.S)
+CREATE_RE = re.compile(r'CREATE\s+(?:OR\s+(?:REPLACE|ALTER|REFRESH)\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[`"\[]?[^\s(`"\[\]]+[`"\]]?\s*\.\s*)*[`"\[]?[^\s(`"\[\]]+[`"\]]?)\s*(\(|PARTITION\s+OF|AS\b|LIKE\b|$)', re.I | re.S)
 IDENT = r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[\w$#@]+)'
 
 
@@ -596,7 +610,9 @@ def structural_create(m, sql, where):
     if not mm:
         return False
     full = mm.group(1)
-    parts = [unquote(p) for p in re.split(r'\s*\.\s*(?=(?:[^"`\]]|"[^"]*"|`[^`]*`|\[[^\]]*\])*$)', full)]
+    # A whole BigQuery path in one pair of backquotes (`project.dataset.table`) is three parts.
+    parts = [q for p in re.split(r'\s*\.\s*(?=(?:[^"`\]]|"[^"]*"|`[^`]*`|\[[^\]]*\])*$)', full)
+             for q in (unquote(p).split('.') if p.startswith('`') else [unquote(p)])]
     name = parts[-1]
     if name.startswith('#') or name.startswith('@'):
         return True
@@ -736,8 +752,8 @@ def count_sql(entry, base):
             kind = None
             if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up):
                 return  # a temporary table (in a procedure body) is not part of the schema
-            # Snowflake's HYBRID and ICEBERG tables and CREATE OR ALTER TABLE are tables too.
-            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER)\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG)\s+)*TABLE\b', up):
+            # Snowflake's HYBRID and ICEBERG tables, CREATE OR ALTER TABLE and Lakeflow's CREATE OR REFRESH STREAMING TABLE are tables too.
+            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\b', up):
                 kind = 'create'
             elif re.match(r'ALTER\s+TABLE\b', up):
                 kind = 'alter'
@@ -798,7 +814,7 @@ def count_sql(entry, base):
                     if kind == 'create' and isinstance(parsed, exp.Create) and (parsed.args.get('kind') or '').upper() == 'TABLE':
                         on_create_table(m, parsed, sg, where, written_types(body) if dialect == 'snowflake' else None); ok = True
                     elif kind == 'alter' and isinstance(parsed, exp.Alter):
-                        on_alter(m, parsed, sg, where); ok = True
+                        on_alter(m, parsed, sg, where, written_alter_types(body) if dialect == 'snowflake' else None); ok = True
                     elif kind == 'index' and isinstance(parsed, exp.Create):
                         on_index(m, parsed); ok = True
                     elif kind == 'comment' and isinstance(parsed, exp.Comment):

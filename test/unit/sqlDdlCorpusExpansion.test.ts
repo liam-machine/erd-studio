@@ -12,7 +12,7 @@
  *   of its own was only counted: the summary now names it.
  */
 import { describe, expect, it } from 'vitest';
-import type { SqlDdlToDbmlResult, SqlDialect } from '../../src/services/sqlDdlImport';
+import { detectSqlDialect, type SqlDdlToDbmlResult, type SqlDialect } from '../../src/services/sqlDdlImport';
 import { tokenize } from '../../src/services/sqlDdlLexer';
 import { neutralisePlaceholders } from '../../src/services/sqlDdlPlaceholders';
 import { sqlDdlToDbml } from '../../src/services/sqlImportEngine';
@@ -133,5 +133,45 @@ describe('template placeholders', () => {
     expect(tableNames(r.dbml)).toEqual(['redshift_schema_edl.student_profiles', 'stg_env']);
     expect(columnNames(r.dbml)).toEqual(['sid', 'feed', 'a']);
     expect(neutralisePlaceholders('SELECT { x } , {x} FROM t', 'snowflake').count).toBe(0);
+  });
+});
+
+describe('dialect detection', () => {
+  it.each<[string, SqlDialect]>([
+    // Snowflake's own types and objects outweigh the `::` casts and `$$` bodies it shares with PostgreSQL.
+    ['CREATE OR REPLACE WAREHOUSE wh;\nCREATE TABLE t (a VARIANT, ts TIMESTAMP_NTZ, d DATE DEFAULT \'2020-01-01\'::DATE);\nCREATE FUNCTION f() RETURNS INT AS $$ 1 $$;', 'snowflake'],
+    ['CREATE TABLE t (ts TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP()::TIMESTAMP_LTZ, n NUMBER);\nCREATE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS $$ BEGIN RETURN \'x\'; END $$;', 'snowflake'],
+    // BigQuery paths in one pair of backquotes, with template placeholders in them.
+    ['CREATE OR REPLACE TABLE `${project_id}.${dataset}.trips` (id STRING);', 'bigquery'],
+    ['CREATE OR REPLACE TABLE `{project_id}.{dataset_id}.{kind}_lookup` AS SELECT * FROM `{ga4_project}.{ga4_dataset}.events_*`;', 'bigquery'],
+    // Lakeflow pipelines, and a column's own CONSTRAINT … FOREIGN KEY REFERENCES.
+    ['CREATE OR REFRESH STREAMING TABLE rides (\n  ride_id STRING COMMENT "id",\n  CONSTRAINT ok EXPECT (ride_id IS NOT NULL) ON VIOLATION DROP ROW\n) AS SELECT * FROM STREAM(raw) WHERE x::int > 0;', 'databricks'],
+    ['CREATE OR REPLACE TABLE fact (\n  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n  store_id BIGINT NOT NULL CONSTRAINT store_fk FOREIGN KEY REFERENCES dim_store\n);', 'databricks'],
+  ])('%#: %s', (text, want) => {
+    expect(detectSqlDialect(text)).toBe(want);
+  });
+});
+
+describe('Lakeflow (Delta Live Tables) streaming tables', () => {
+  it('a streaming table with a typed column list imports; its expectations are recorded as not kept; COMMENT "…" is a description', () => {
+    const r = read('databricks', [
+      'CREATE OR REFRESH STREAMING TABLE rides (',
+      '  ride_id STRING COMMENT "Unique identifier for the ride.",',
+      '  start_time TIMESTAMP,',
+      '  CONSTRAINT valid_id EXPECT (ride_id IS NOT NULL) ON VIOLATION DROP ROW,',
+      '  CONSTRAINT logged EXPECT (start_time > \'2020-01-01\')',
+      ')',
+      'COMMENT "Processed rides."',
+      'AS SELECT ride_id, start_time FROM STREAM (rides_raw);',
+    ].join('\n'));
+    expect(columnNames(r.dbml)).toEqual(['ride_id', 'start_time']);
+    expect(r.dbml).toContain("[note: 'Unique identifier for the ride.']");
+    const expectations = (r.ledger ?? []).filter((e) => e.what === 'expectation');
+    expect(expectations.map((e) => [e.outcome, e.where?.line, e.where?.column])).toEqual([['lost', 4, 'valid_id'], ['lost', 5, 'logged']]);
+  });
+
+  it('an expectation first in the list goes with the comma after it', () => {
+    const r = read('databricks', 'CREATE OR REFRESH STREAMING TABLE t (\n  CONSTRAINT ok EXPECT (a > 0),\n  a INT\n) AS SELECT 1 AS a;');
+    expect(columnNames(r.dbml)).toEqual(['a']);
   });
 });
