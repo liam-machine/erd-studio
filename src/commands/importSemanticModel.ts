@@ -49,7 +49,9 @@ import {
   type DirEntries,
 } from '../services/importSources';
 import { log } from '../services/logger';
+import { ledgerLogLines } from '../services/importLedger';
 import {
+  decodeSemanticModelFile,
   findSemanticModels,
   readSemanticModel,
   semanticModelToDbml,
@@ -155,9 +157,13 @@ export async function importSemanticModel(
   const folder = quick?.folder ?? scope?.folder ?? await ui.pickFolder(deps.workspaceRoot || undefined);
   if (!folder) return cancelled();
   const folderName = path.basename(folder);
+  // The names paths are listed under: the picked folder's own (so a picked X.SemanticModel is still found),
+  // and its parent's too when the pick is a model's `definition/` folder (so X.SemanticModel names the model, not "definition").
+  const prefix = modelPathPrefix(folder);
   // Only model files count toward the bound: findSemanticModels reads nothing
   // else, and a big repo holding one model somewhere must still import from its root.
-  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
+  // Model files, and the files of formats this import does not read (only to say so by name when no model is found).
+  const walk = await walkFiles(folder, (f) => ui.readDirectory(f), { include: (f) => isSemanticModelFile(f) || isUnreadModelFile(f), limit: MAX_SEMANTIC_MODEL_FILES });
   // The quick path cannot take "the" model from a folder it could not list, or one with none: the step-by-step flow asks.
   if (quick && (walk.truncated || walk.files.length === 0)) {
     if (quiet) {
@@ -176,7 +182,7 @@ export async function importSemanticModel(
     return undefined;
   }
   // Paths under the picked folder (its own name included, so a picked X.SemanticModel is still found).
-  const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
+  const relative = (full: string): string => path.join(...prefix, path.relative(folder, full)).split(path.sep).join('/');
   const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
   const entries = findSemanticModels([...fullOf.keys()]);
   if (entries.length === 0 && quick) {
@@ -188,8 +194,9 @@ export async function importSemanticModel(
     return importSemanticModel(deps);
   }
   if (entries.length === 0) {
+    const unread = unreadModelFormat([...fullOf.keys()]);
     return invalid(
-      `${TITLE}: no semantic model found in ${folderName}. Pick the folder that holds <Name>.SemanticModel (saved as TMDL or as model.bim), or that folder itself.`,
+      `${TITLE}: no semantic model found in ${folderName}.${unread ? ` ${unread}` : ''} Pick the folder that holds <Name>.SemanticModel (saved as TMDL or as model.bim), or that folder itself.`,
       { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => importSemanticModel(deps) },
       'importSemanticModelNoModel',
     );
@@ -251,6 +258,9 @@ export async function importSemanticModel(
     }
     files.push({ path: file, text });
   }
+  // Fabric Git integration's `.platform` names the item (its displayName); optional, never an error.
+  const platform = await readPlatformFile(ui, folder, prefix, entry);
+  if (platform) files.push(platform);
   let read: ReturnType<typeof readSemanticModel>;
   let converted: ReturnType<typeof semanticModelToDbml>;
   try {
@@ -275,6 +285,7 @@ export async function importSemanticModel(
   }
   const warnings = [...read.warnings, ...converted.warnings];
   for (const line of [...converted.skipped, ...warnings]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
+  for (const line of ledgerLogLines(converted.ledger ?? [], TITLE)) log.info(`[ERD Studio] ${line}`);
 
   // 3. Import DBML's flow, with the converted DBML as its file.
   const renameNote = semanticModelRenameNote(converted.renamed);
@@ -286,9 +297,11 @@ export async function importSemanticModel(
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, converted.dbml),
     source: 'semanticModel' as const,
     origin: {
-      from: `from the semantic model ${entry.name}`,
+      // The model's own name (Fabric's displayName when it has one), as the Project note says it.
+      from: `from the semantic model ${read.model.name}`,
       notes: [...(renameNote ? [renameNote] : []), ...warnings],
       skipped: semanticModelSkippedSummary(converted.skippedCounts),
+      ledger: converted.ledger ?? [],
     },
   };
   if (!quick) return importDbml(importDeps, { filePath });
@@ -297,6 +310,38 @@ export async function importSemanticModel(
     ...importDeps,
     changeOptions: ({ layer, name }) => importDbml({ ...importDeps, ...changeOptionsDraft(importDeps.draft) }, { filePath, preferredLayer: layer, name }),
   }, { filePath, quick: true });
+}
+
+/**
+ * The model folder's Fabric `.platform` file, when it has one (`root` is
+ * relative to the picked folder, its own name first). Undefined when there
+ * is none or it does not read: the name then comes from the folder.
+ */
+async function readPlatformFile(ui: ImportSemanticModelUi, folder: string, prefix: readonly string[], entry: SemanticModelEntry): Promise<SemanticModelFile | undefined> {
+  const segments = entry.root.replace(/\\/g, '/').split('/').filter((s) => s !== '');
+  if (segments[0] !== prefix[0]) return undefined;
+  const relativePath = [...segments, '.platform'].join('/');
+  // `root` is relative to the folder `prefix.length` levels up from the picked one.
+  const base = prefix.length > 1 ? path.dirname(folder) : folder;
+  try {
+    const text = await ui.readFile(path.join(base, ...segments.slice(1), '.platform'));
+    return { path: relativePath, text };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The leading names of the paths a picked folder's files are listed under:
+ * its own name, and its parent's before it when it is a model's
+ * `definition` folder (TMDL's), so `Sales.SemanticModel/definition` is
+ * found as the model Sales rather than one named "definition".
+ */
+export function modelPathPrefix(folder: string): string[] {
+  const name = path.basename(folder);
+  const parent = path.basename(path.dirname(folder));
+  if (name.toLowerCase() === 'definition' && parent && path.dirname(folder) !== folder) return [parent, name];
+  return [name];
 }
 
 /** The quick path: the semantic model in the open folder itself (the pick only when it holds several). */
@@ -315,6 +360,29 @@ export function quietImportSemanticModelUi(base: ImportSemanticModelUi): ImportS
       return undefined;
     },
   };
+}
+
+/** A file of a model format this import does not read: a `.pbix` / `.pbit` (a zip), Tabular Editor 2's folder `database.json`. */
+export function isUnreadModelFile(name: string): boolean {
+  return /\.(pbix|pbit)$/i.test(name) || /(^|[\\/])database\.json$/i.test(name);
+}
+
+/**
+ * When a folder with no model holds one in a format this import does not
+ * read, what to do instead (names a file, never its contents); undefined
+ * when it holds none.
+ */
+export function unreadModelFormat(paths: readonly string[]): string | undefined {
+  const base = (p: string): string => p.replace(/\\/g, '/').split('/').pop() ?? p;
+  const desktop = paths.find((p) => /\.(pbix|pbit)$/i.test(p));
+  if (desktop) {
+    return `${base(desktop)} is a Power BI Desktop file, which this import does not read: in Power BI Desktop, use File › Save as and pick Power BI project (*.pbip), then import the folder it makes.`;
+  }
+  const folderModel = paths.find((p) => base(p).toLowerCase() === 'database.json');
+  if (folderModel) {
+    return `${folderModel} is a model saved by Tabular Editor's Save to Folder (JSON files), which this import does not read: open it in Tabular Editor and save it as TMDL or as one model.bim, then import that.`;
+  }
+  return undefined;
 }
 
 /** A file {@link findSemanticModels} can build a model from (`.tmdl` or `.bim`). */
@@ -339,7 +407,8 @@ export function vscodeImportSemanticModelUi(): ImportSemanticModelUi {
     readDirectory: async (folder) =>
       (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
         .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
-    readFile: async (filePath) => new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
+    // UTF-8, or UTF-16 by its BOM (older Visual Studio tooling saves model.bim so).
+    readFile: async (filePath) => decodeSemanticModelFile(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
     pickModel: async (items, options) => vscode.window.showQuickPick([...items], options),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),

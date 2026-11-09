@@ -329,3 +329,56 @@ describe('dbtProjectAboveOpenFolders', () => {
     expect(show.mock.calls[0][0]).toBe('ERD Studio found a dbt project in a folder above this one. Show its models as a diagram? Nothing is saved until you keep it.');
   });
 });
+
+describe('a late Show Me on a stale start notification (cross/9a: qut Bug 6, harbor Bug 6, dbt I2)', () => {
+  /** The notification stays up (VS Code 1.85 cannot dismiss it); a diagram is kept meanwhile, then Show Me is pressed. */
+  function lateClick(intent: StartIntent, keptMeanwhile: boolean) {
+    let diagrams = false;
+    let release: (choice: string | undefined) => void = () => {};
+    const h = harness({ intent });
+    h.deps.hasDiagrams = () => diagrams;
+    h.deps.show = (message, ...buttons) => {
+      h.calls.shows.push({ message, buttons });
+      return new Promise<string | undefined>((resolve) => { release = resolve; });
+    };
+    return {
+      h,
+      async run() {
+        const run = await runStartSuggestion(h.deps);
+        expect(run.shown).toBe(true);
+        // Keep (from the sidebar, the automatic draft or another import) while the notification is up.
+        diagrams = keptMeanwhile;
+        release(startSuggestion.startSuggestionPrimary(intent as startSuggestion.SuggestedStart));
+        await run.done;
+      },
+    };
+  }
+
+  it.each(['importDbmlFile', 'importSqlDdl', 'drawFromDbt', 'importSemanticModel'] as const)('%s after Keep: the Diagrams view, never a second draft', async (intent) => {
+    const { h, run } = lateClick(intent, true);
+    await run();
+    expect(h.calls.commands).toEqual([[startSuggestion.DIAGRAMS_VIEW_FOCUS_COMMAND]]);
+    expect(h.calls.infos).toEqual([startSuggestion.START_SUGGESTION_ALREADY_KEPT_MESSAGE]);
+    expect(h.stored().answered).toBe(true);
+  });
+
+  it('after Discard (or nothing kept): Show Me still opens the draft', async () => {
+    const { h, run } = lateClick('importDbmlFile', false);
+    await run();
+    expect(h.calls.commands).toHaveLength(1);
+    expect(h.calls.commands[0][0]).not.toBe(startSuggestion.DIAGRAMS_VIEW_FOCUS_COMMAND);
+    expect(h.calls.infos).toEqual([]);
+  });
+
+  it('Convert converts whatever diagrams the project has: unaffected', async () => {
+    const { h, run } = lateClick('convert', true);
+    await run();
+    expect(h.calls.commands).toHaveLength(1);
+    expect(h.calls.commands[0][0]).not.toBe(startSuggestion.DIAGRAMS_VIEW_FOCUS_COMMAND);
+  });
+
+  it('the focus command is the Diagrams view\'s own (erdStudio.domainTree in package.json)', () => {
+    const views = (packageJson.contributes as { views: Record<string, Array<{ id: string; name: string }>> }).views['erd-studio'];
+    expect(views.find((v) => v.name === 'Diagrams')?.id).toBe(startSuggestion.DIAGRAMS_VIEW_FOCUS_COMMAND.replace(/\.focus$/, ''));
+  });
+});

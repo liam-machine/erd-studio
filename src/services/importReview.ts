@@ -50,14 +50,24 @@ export interface ImportReviewOptions extends DescribeDbmlImportOptions {
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${thousands(n)} ${n === 1 ? one : many}`;
 
-/** A table's columns and keys in one short line: `12 columns · primary key id · 2 foreign keys`. */
-export function describeImportTable(table: SemanticTable, foreignKeys: number): string {
+/**
+ * A table's columns and keys in one short line: `12 columns · primary key id
+ * · 2 foreign keys`. `toUndrawn`: foreign keys to tables the diagram does not
+ * draw (a dbt draft's links out of its scope), counted in and said:
+ * `3 foreign keys (1 to a table not drawn)`.
+ */
+export function describeImportTable(table: SemanticTable, foreignKeys: number, toUndrawn = 0): string {
   const columns = table.columns ?? [];
   const parts = [plural(columns.length, 'column')];
   const pk = columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
   if (pk.length > 0) parts.push(`primary key ${pk.join(', ')}`);
   else parts.push('no primary key');
-  if (foreignKeys > 0) parts.push(plural(foreignKeys, 'foreign key'));
+  const undrawn = toUndrawn > 0 ? toUndrawn : 0;
+  const total = foreignKeys + undrawn;
+  if (total > 0) {
+    const out = undrawn === 0 ? '' : undrawn === total ? (total === 1 ? ' (to a table not drawn)' : ' (to tables not drawn)') : ` (${thousands(undrawn)} to ${undrawn === 1 ? 'a table' : 'tables'} not drawn)`;
+    parts.push(`${plural(total, 'foreign key')}${out}`);
+  }
   return parts.join(' · ');
 }
 

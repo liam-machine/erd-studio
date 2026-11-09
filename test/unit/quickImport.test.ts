@@ -250,6 +250,26 @@ describe('Import SQL DDL… — the quick path', () => {
     expect(features()).not.toContain('quickSqlNoDialect');
   });
 
+  it('the dialect that reads the most tables wins, not the first that reads every file: a partial read beats none', async () => {
+    // Only MySQL reads `#` comments; the detected PostgreSQL (SERIAL) reads none of the table.
+    fs.writeFileSync(path.join(tmp, 'shop.sql'), 'CREATE TABLE t (\n  id SERIAL, # the key (see docs\n  n int\n);\nCREATE TABLE u (id int);\n');
+    const result = await quickImportSqlDdl(sqlDeps(sqlUi(), dbmlUi(), { plain: true }));
+    expect(result?.plan.newTables.map((t) => t.name).sort()).toEqual(['t', 'u']);
+    expect(features()).toEqual(expect.arrayContaining(['importSqlDialectMysql', 'quickSqlDialectFallback']));
+  });
+
+  it('no dialect reads a table: the pick says why before it asks', async () => {
+    fs.writeFileSync(path.join(tmp, 'broken.sql'), 'CREATE TABLE t (id int,, x);\n');
+    const sql = sqlUi({ dialect: 'postgres' });
+    const placeholders: Array<string | undefined> = [];
+    const pick = sql.pickDialect;
+    sql.pickDialect = async (items, options) => { placeholders.push(options.placeHolder); return pick(items, options); };
+    await quickImportSqlDdl(sqlDeps(sql, dbmlUi()));
+    expect(placeholders[0]).toMatch(/^No dialect reads a table in the script \(broken\.sql line 1: CREATE TABLE t could not be read: an empty column definition/);
+    // Every dialect says it read none; none is "detected".
+    expect(sql.dialectPicks[0].map((i) => i.description)).toEqual(Array(5).fill('does not read the table'));
+  });
+
   it('no CREATE TABLE script in the folder: the step-by-step flow (the file dialog), counted as a fall-back', async () => {
     fs.writeFileSync(path.join(tmp, 'query.sql'), 'SELECT 1;\n');
     const sql = sqlUi();
@@ -338,7 +358,7 @@ describe('Import SQL DDL… — the quick path', () => {
     expect(sql.filePicks[0].slice(1).map((i) => [i.label, i.picked])).toEqual([
       ['database/01_tables.sql', true], ['database/02_constraints.sql', true], ['extra.sql', true],
     ]);
-    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: 'detected' });
+    expect(sql.dialectPicks[0][0]).toMatchObject({ dialect: 'postgres', description: expect.stringMatching(/^detected · read as this before · reads all 5 tables$/) });
     // silver and gold, no diagram yet: gold was chosen, so gold leads the pick; the name box offers the same name.
     expect(ui.picks[0][0]).toBe('gold');
     expect(ui.inputs).toEqual([ui.chooses[0].message.match(/diagram "([^"]+)"/)![1]]);
@@ -482,6 +502,21 @@ describe('Draft-first: the quick path ends in the draft (docs/dev/draft-first.md
       expect(fs.existsSync(erd())).toBe(false);
       expect(features()).toEqual(['importSqlDialectPostgres', 'importSqlDdlCancelled']);
     }
+  });
+
+  it('a table that does not read never stops the draft: the rest is drafted, the banner says how many were left out, Not imported names it', async () => {
+    fs.mkdirSync(path.join(tmp, 'db'));
+    fs.writeFileSync(path.join(tmp, 'db', 'schema.sql'), 'CREATE TABLE customer (id int PRIMARY KEY);\nCREATE TABLE orders (id int PRIMARY KEY, customer_id int REFERENCES customer (id));\n\nCREATE TABLE broken (\n  id int,,\n  x int\n);\n');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { preview, options } = draft(['keep']);
+    const kept = await quickImportSqlDdl({ ...sqlDeps(sqlUi(), dbmlUi(), { plain: true }), draft: options });
+    expect(kept?.plan.newTables.map((t) => t.name).sort()).toEqual(['customer', 'orders']);
+    const shown = preview.drafts[0];
+    expect(shown.banner.notice).toBe('1 of 3 tables could not be read; Show details lists it.');
+    expect(JSON.stringify(shown)).toMatch(/1 table: CREATE TABLE could not be read: a syntax error \(Show Logs has each line\) \(broken\)/);
+    // Logged with its file (named under the open folder, as every entry point names it) and line.
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringMatching(/db\/schema\.sql line 5: CREATE TABLE broken could not be read/));
+    expect(features()).toEqual(expect.arrayContaining(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse']));
   });
 
   it('Change options… runs the preselected step-by-step flow, which ends in a draft of its own (trigger changeOptions)', async () => {

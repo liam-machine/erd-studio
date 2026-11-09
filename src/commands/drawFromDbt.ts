@@ -35,6 +35,7 @@ import {
   buildDraftSubjectAreaDocument,
   listDraftModels,
   listDraftScopes,
+  modelsWithoutColumns,
   serializeDraftSubjectAreaDocument,
   suggestSubjectAreaName,
   type DbtDraft,
@@ -451,6 +452,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           libraryTable: (n) => tableLibraryService.getTable(n) ?? undefined,
           layers: layerService.getAllLayers(),
           changedTables: routed.changed,
+          modelsWithoutColumns: modelsWithoutColumns(source),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
         });
       } catch (err) {

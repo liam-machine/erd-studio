@@ -7,8 +7,14 @@
  * them (`workspace.fs`) → the dialect (a quick pick, the detected one first)
  * → convert to DBML with the lazily loaded SQL importer (`dist/sqlImport.js`,
  * `src/services/sqlImportLoader.ts`; `@dbml/core`'s grammars never enter
- * `dist/extension.js`) → scripts that do not read are reported with file and
- * line and an Open File button → the converted DBML goes through Import
+ * `dist/extension.js`) → a table that does not read never stops the rest:
+ * every problem goes to the log with its file and line, the draft's banner
+ * says how many tables were left out and its Not imported list names them;
+ * only when no table reads at all is it an error (file and line, Open File,
+ * Show Logs, and Try Another Dialect when another dialect reads more) → the
+ * dialect pick labels each dialect by the tables it reads (the scripts are
+ * read as each first, up to {@link RANK_ALL_DIALECTS_CHARS}) → the converted
+ * DBML goes through Import
  * DBML's own flow (`importDbml` with `source: 'sql'`): the user picks the
  * layer, names the diagram and confirms a dry run that says what the scripts
  * held and what was skipped (views, indexes, grants…, counted by kind).
@@ -17,9 +23,10 @@
  * **The quick path** (`quickImportSqlDdl`: the start screen's **Import your
  * SQL scripts** and the start suggestion) asks nothing it can answer: the
  * files are every `.sql` with a CREATE TABLE that the bounded walk finds in
- * the open folder, the dialect is the detected one (undetected or tied: the
- * most likely dialects in turn, the first that reads every file; the pick
- * only when none does), the layer and name are Import DBML's quick defaults,
+ * the open folder, the dialect is the one that reads the most tables (the
+ * detected one first, and the others only when it does not read them all as
+ * written; ties go to the detected one; the pick, saying why, only when none
+ * reads a table), the layer and name are Import DBML's quick defaults,
  * and the draft (the read-only preview, `docs/dev/draft-first.md` §5.1) is
  * the one question. Its **Change options…** is the step-by-step flow with
  * those answers preselected, ending in a draft too. On the automatic draft
@@ -47,6 +54,8 @@ import {
   compareNames,
   convertedFileName,
   describeImportProblems,
+  problemLabel,
+  PROBLEMS_SHOWN,
   isSqlScriptTaken,
   listImportFiles,
   rankSqlFiles,
@@ -57,16 +66,23 @@ import {
   type DirEntries,
 } from '../services/importSources';
 import { log } from '../services/logger';
+import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
 import {
   SQL_DIALECTS,
   SQL_DIALECT_LABELS,
   detectSqlDialect,
+  rankSqlDialectReadings,
   rankSqlDialects,
+  sqlDialectReading,
+  sqlDialectReadingLabel,
   withoutSqlData,
   type SqlDdlFile,
   type SqlDdlProblem,
+  type SqlDdlToDbmlResult,
   type SqlDialect,
+  type SqlDialectReading,
 } from '../services/sqlDdlImport';
+import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import { loadSqlImport, type SqlImportModule } from '../services/sqlImportLoader';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, sqlInvalidFeatures, type ImportInputLimit } from '../services/importTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
@@ -146,6 +162,8 @@ export interface ImportSqlDdlUi {
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   openFileAt(filePath: string, line?: number): Promise<void>;
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Opens the ERD Studio output channel (`erdStudio.showLogs`). Absent: no Show Logs button. */
+  showLogs?(): Promise<void>;
 }
 
 export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
@@ -165,6 +183,27 @@ export interface SqlResume {
   fullPaths: ReadonlyMap<string, string>;
   fileName: string;
   sourceLabel: string;
+  /** Each dialect's reading of the files, when already converted (the quick path's ranking): the pick reuses them. */
+  readings?: ReadonlyMap<SqlDialect, SqlDialectReading>;
+}
+
+/** Above this much SQL (characters) the dialect pick does not read the scripts in every dialect first (it would be slow). */
+export const RANK_ALL_DIALECTS_CHARS = 4 * 1024 * 1024;
+
+/**
+ * How long (ms) ranking the dialects may spend, all readings together: once a
+ * dialect reads a table, another is read only while the time spent plus the
+ * slowest reading so far stays within it. Each reading runs on the extension
+ * host, so five readings of a large script would block it five times over.
+ */
+export const RANK_DIALECTS_MS = 3000;
+
+/** How long each reading took (ms), for the budget of a later ranking that reuses it. */
+const readingMs = new WeakMap<SqlDialectReading, number>();
+
+/** The order dialects are read in: the detected one first, then by how likely each is. */
+function dialectOrder(text: string, detected: SqlDialect | undefined): SqlDialect[] {
+  return detected ? [detected, ...rankSqlDialects(text).filter((d) => d !== detected)] : rankSqlDialects(text);
 }
 
 /** Change Options…: the answers the quick path chose, preselected in the step-by-step flow. */
@@ -235,13 +274,107 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
     else void ui.showInformationMessage(gathered.message);
     return undefined;
   };
-  /** SQL that did not convert: `importSqlDdlInvalid`, then why (each problem kind, the rejected clause, the dialect). */
+  /**
+   * SQL that did not all convert: every problem to the log (with its file and
+   * line), then `importSqlDdlInvalid` and why (each problem kind, the rejected
+   * clause, the dialect).
+   */
   const invalid = (problems: readonly SqlDdlProblem[], dialect: SqlDialect): void => {
+    logProblems(problems, dialect);
     if (quiet) return;
     telemetry.feature('importSqlDdlInvalid');
     for (const key of sqlInvalidFeatures(problems, dialect)) telemetry.feature(key);
   };
   return { cancelled, showError, ours, gatherMessage, invalid };
+}
+
+/** Every problem of a conversion, one log line each with its file and line. */
+function logProblems(problems: readonly SqlDdlProblem[], dialect: SqlDialect): void {
+  for (const p of problems) log.warn(`[ERD Studio] ${TITLE} (${SQL_DIALECT_LABELS[dialect]}): ${problemLabel(p)}`);
+}
+
+/**
+ * The draft's banner for a conversion that left something out: `3 of 71
+ * tables could not be read; Show details lists them.` A table defined twice
+ * was read (its first definition is kept), so it is said apart, never counted
+ * as a table that could not be read.
+ */
+export function sqlPartialNotice(result: Extract<SqlDdlToDbmlResult, { ok: true }>): string | undefined {
+  const problems = result.problems ?? [];
+  if (!problems.length) return undefined;
+  const fmt = (n: number): string => n.toLocaleString('en-US');
+  const twice = problems.filter((p) => p.kind === 'duplicateTable').length;
+  const unread = problems.filter((p) => p.table !== undefined && p.kind !== 'duplicateTable').length;
+  const statements = problems.length - twice - unread;
+  // Each second definition is a CREATE TABLE counted in tablesFound, not another table.
+  const distinct = Math.max(result.tablesFound - twice, unread);
+  const parts: string[] = [];
+  if (unread > 0) parts.push(`${fmt(unread)} of ${fmt(distinct)} tables could not be read`);
+  if (twice > 0) parts.push(`${fmt(twice)} ${twice === 1 ? 'table is' : 'tables are'} defined twice (the first definition is kept)`);
+  if (statements > 0) parts.push(`${fmt(statements)} ${statements === 1 ? 'statement' : 'statements'} could not be read`);
+  const many = problems.length > 1;
+  return `${parts.join('; ')}; Show details lists ${many ? 'them' : 'it'}.`;
+}
+
+/** The ledger's log lines, without its problems: each problem is logged once, with its message, by {@link logProblems}. */
+function ledgerLogLinesWithoutProblems(ledger: readonly LedgerEntry[]): string[] {
+  return ledgerLogLines(ledger.filter((e) => e.outcome !== 'problem'), TITLE);
+}
+
+/**
+ * The scripts read as each dialect in `order` (every one when the SQL is at
+ * most {@link RANK_ALL_DIALECTS_CHARS}, else the first, and the next only
+ * while none reads every table as written), within {@link RANK_DIALECTS_MS}:
+ * until a dialect reads a table every one is tried (as one would be after
+ * the pick anyway), and after that another only while it fits the budget. A
+ * dialect whose conversion throws is left out (the conversion after the pick
+ * reports it).
+ */
+export function readAsDialects(
+  engine: SqlImportModule, files: SqlDdlFile[], order: readonly SqlDialect[], known?: ReadonlyMap<SqlDialect, SqlDialectReading>,
+  budget: { ms?: number; now?: () => number } = {},
+): Map<SqlDialect, SqlDialectReading> {
+  const readings = new Map<SqlDialect, SqlDialectReading>(known ?? []);
+  const chars = files.reduce((n, f) => n + f.text.length, 0);
+  const all = chars <= RANK_ALL_DIALECTS_CHARS;
+  const limit = budget.ms ?? RANK_DIALECTS_MS;
+  const now = budget.now ?? Date.now;
+  let spent = 0;
+  let slowest = 0;
+  for (const r of readings.values()) { const ms = readingMs.get(r) ?? 0; spent += ms; slowest = Math.max(slowest, ms); }
+  for (const dialect of order) {
+    if (!readings.has(dialect)) {
+      const readsATable = [...readings.values()].some((r) => r.tablesRead > 0);
+      if (readsATable && spent + slowest > limit) {
+        log.info(`[ERD Studio] ${TITLE}: the scripts were not read as every dialect first (${(spent / 1000).toFixed(1)} s spent; the rest would take longer than ${(limit / 1000).toFixed(0)} s).`);
+        break;
+      }
+      const started = now();
+      try {
+        const reading = sqlDialectReading(dialect, engine.sqlDdlToDbml({ files, dialect }));
+        readings.set(dialect, reading);
+        const ms = Math.max(0, now() - started);
+        readingMs.set(reading, ms);
+        spent += ms;
+        slowest = Math.max(slowest, ms);
+      } catch (err) {
+        spent += Math.max(0, now() - started);
+        log.warn(`[ERD Studio] ${TITLE}: reading the scripts as ${SQL_DIALECT_LABELS[dialect]} failed:`, err);
+        continue;
+      }
+    }
+    const r = readings.get(dialect)!;
+    if (!all && r.tablesRead === r.tablesFound && r.repaired === 0 && r.salvaged === 0) break;
+  }
+  return readings;
+}
+
+/** Why no dialect reads the scripts: the best reading's first problem, for the pick's placeholder and the log. */
+function noDialectReason(readings: ReadonlyMap<SqlDialect, SqlDialectReading>, detected?: SqlDialect): string | undefined {
+  const ranked = rankSqlDialectReadings([...readings.values()], detected);
+  if (ranked.length === 0 || ranked[0].tablesRead > 0) return undefined;
+  const first = ranked[0].result.problems?.[0];
+  return first ? problemLabel(first) : undefined;
 }
 
 /** The SQL importer, loaded on first use; undefined after saying it failed. */
@@ -269,55 +402,95 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   if (!read) {
     const sources = await ui.pickSources(deps.workspaceRoot || undefined);
     if (!sources) return cancelled();
-    const gathered = await gatherSqlFiles(sources, ui);
+    const gathered = await gatherSqlFiles(sources, ui, deps.workspaceRoot || undefined);
     if ('message' in gathered) return gatherMessage(gathered);
     read = gathered;
   }
   const { files, fullPaths } = read;
 
   // 2. The dialect: the one the user chose already (the import guide's card), else a pick
-  //    with the one chosen before (Change Options…), else the one the scripts look like, first.
+  //    with the one chosen before (Change Options…) first, then every dialect by how many
+  //    tables it reads (the scripts are read as each first, when they are not too big).
+  const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
+  let readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined = read.readings;
   let dialect: SqlDialect;
   if (preset.dialect && preset.dialectChosen) {
     dialect = preset.dialect;
   } else {
-    const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
-    const first = preset.dialect ?? detected;
-    const ordered = first ? [first, ...SQL_DIALECTS.filter((d) => d !== first)] : [...SQL_DIALECTS];
+    if (!readings || readings.size < SQL_DIALECTS.length) {
+      let early: SqlImportModule | undefined;
+      try { early = deps.loadSqlImport ? deps.loadSqlImport() : loadSqlImport(deps.extensionPath); } catch { early = undefined; }
+      if (early) readings = readAsDialects(early, files, dialectOrder(files.map((f) => f.text).join('\n'), detected), readings);
+    }
+    const ranked = readings && readings.size ? rankSqlDialectReadings([...readings.values()], detected).map((r) => r.dialect) : [];
+    const rest = [...ranked, ...SQL_DIALECTS.filter((d) => !ranked.includes(d))];
+    const first = preset.dialect ?? (ranked.length ? undefined : detected);
+    const ordered = first ? [first, ...rest.filter((d) => d !== first)] : rest;
+    const why = readings ? noDialectReason(readings, detected) : undefined;
+    if (why) log.info(`[ERD Studio] ${TITLE}: no dialect reads a table in the scripts: ${why}`);
+    const describe = (d: SqlDialect): string | undefined => {
+      const reading = readings?.get(d);
+      const parts: string[] = [];
+      // Never "detected" for a dialect that reads none of the tables.
+      if (d === detected && (!reading || reading.tablesRead > 0)) parts.push('detected');
+      if (d === preset.dialect) parts.push('read as this before');
+      if (reading) parts.push(sqlDialectReadingLabel(reading));
+      return parts.length ? parts.join(' · ') : undefined;
+    };
+    const these = files.length === 1 ? 'the script' : 'the scripts';
     const choice = await ui.pickDialect(
-      ordered.map((d) => ({
-        label: SQL_DIALECT_LABELS[d],
-        ...(d === detected ? { description: 'detected' } : d === preset.dialect ? { description: 'read as this before' } : {}),
-        dialect: d,
-      })),
-      { title: TITLE, placeHolder: `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`, ignoreFocusOut: true },
+      ordered.map((d) => {
+        const description = describe(d);
+        return { label: SQL_DIALECT_LABELS[d], ...(description ? { description } : {}), dialect: d };
+      }),
+      {
+        title: TITLE,
+        placeHolder: why
+          ? `No dialect reads a table in ${these} (${why.length > 120 ? `${why.slice(0, 119)}…` : why}). Which dialect ${files.length === 1 ? 'is it' : 'are they'} written in?`
+          : `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`,
+        ignoreFocusOut: true,
+      },
     );
     if (!choice) return cancelled();
     dialect = choice.dialect;
   }
   telemetry.feature(SQL_DIALECT_FEATURES[dialect]);
 
-  // 3. Convert, with the importer loaded only now.
-  const engine = loadEngine(deps, ours);
-  if (!engine) return undefined;
-  let result: ReturnType<SqlImportModule['sqlDdlToDbml']>;
-  try {
-    result = engine.sqlDdlToDbml({ files, dialect });
-  } catch (err) {
-    return ours('while converting the SQL', err);
+  // 3. Convert, with the importer loaded only now (or the pick's reading of this dialect).
+  let result: SqlDdlToDbmlResult;
+  const known = readings?.get(dialect);
+  if (known) {
+    result = known.result;
+  } else {
+    const engine = loadEngine(deps, ours);
+    if (!engine) return undefined;
+    try {
+      result = engine.sqlDdlToDbml({ files, dialect });
+    } catch (err) {
+      return ours('while converting the SQL', err);
+    }
   }
   if (!result.ok) {
     invalid(result.problems, dialect);
+    for (const line of ledgerLogLinesWithoutProblems(result.ledger ?? [])) log.info(`[ERD Studio] ${line}`);
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
-    actions[TRY_ANOTHER_DIALECT_BUTTON] = () => {
-      telemetry.feature('importSqlTryAnotherDialect');
-      return importSqlDdl(deps, read);
-    };
-    showError(describeImportProblems(TITLE, result.problems, `They were read as ${SQL_DIALECT_LABELS[dialect]}.`), actions);
+    if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
+    // Another dialect only when one reads more (or nobody has looked).
+    const mine = sqlDialectReading(dialect, result).tablesRead;
+    const better = !readings || [...readings.values()].some((r) => r.dialect !== dialect && r.tablesRead > mine);
+    if (better) {
+      actions[TRY_ANOTHER_DIALECT_BUTTON] = () => {
+        telemetry.feature('importSqlTryAnotherDialect');
+        return importSqlDdl(deps, { ...read, ...(readings ? { readings } : {}) });
+      };
+    }
+    showError(describeImportProblems(TITLE, result.problems, `They were read as ${SQL_DIALECT_LABELS[dialect]}.${result.problems.length > PROBLEMS_SHOWN ? ' Show Logs lists every one.' : ''}`), actions);
     return undefined;
   }
+  // Tables that did not read do not stop the rest: said in the log, the draft's banner and its Not imported list.
+  if (result.problems?.length) invalid(result.problems, dialect);
 
   // 4. Import DBML's flow, with the converted DBML as its file.
   return importConvertedSql(deps, read, dialect, result, {
@@ -336,6 +509,9 @@ function importConvertedSql(
   changeOptions?: (chosen: { layer: string; name: string }) => unknown,
 ): Promise<ImportDbmlResult | undefined> {
   for (const line of [...result.skipped, ...result.notes]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
+  // Every unit not brought across as written, with its file and line (`importLedger.ts`).
+  const ledger = result.ledger ?? [];
+  for (const line of ledgerLogLinesWithoutProblems(ledger)) log.info(`[ERD Studio] ${line}`);
   const dialectLabel = SQL_DIALECT_LABELS[dialect];
   // The name Import DBML suggests for the diagram: not `database` for a database/ folder.
   // The quick path names it after the tables' common schema first, else the folder.
@@ -351,6 +527,8 @@ function importConvertedSql(
       description: `Imported from ${read.sourceLabel} (${dialectLabel}).`,
       notes: result.notes,
       skipped: result.skipped,
+      ledger,
+      ...(sqlPartialNotice(result) ? { notice: sqlPartialNotice(result) } : {}),
     },
     ...(changeOptions ? { changeOptions } : {}),
   }, { filePath, ...resume });
@@ -395,9 +573,11 @@ export async function findSqlDdlScripts(
 }
 
 /**
- * The quick path: the found scripts, the dialect they read as, Import DBML's
- * quick layer and name, one confirm. Nothing found to take (no CREATE TABLE
- * script, or more `.sql` files than the walk lists): the step-by-step flow.
+ * The quick path: the found scripts, the dialect that reads the most of
+ * their tables, Import DBML's quick layer and name, one confirm. Tables that
+ * do not read are logged and listed in the draft; none reading at all asks
+ * the dialect, saying why. Nothing found to take (no CREATE TABLE script, or
+ * more `.sql` files than the walk lists): the step-by-step flow.
  */
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
@@ -424,37 +604,43 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     return gatherMessage(gathered);
   }
 
-  // The dialect: the detected one, else the most likely in turn; the first that reads every file.
+  // The dialect: the one that reads the most tables (the detected one first; every dialect
+  // only when it does not read them all as written), ties going to the detected one.
   const text = gathered.files.map((f) => f.text).join('\n');
   const detected = detectSqlDialect(text);
-  const order = detected ? [detected, ...rankSqlDialects(text).filter((d) => d !== detected)] : rankSqlDialects(text);
+  const order = dialectOrder(text, detected);
   const engine = loadEngine(deps, ours);
   if (!engine) return undefined;
-  let converted: { dialect: SqlDialect; result: Extract<ReturnType<SqlImportModule['sqlDdlToDbml']>, { ok: true }> } | undefined;
-  for (const dialect of order) {
-    let result: ReturnType<SqlImportModule['sqlDdlToDbml']>;
-    try {
-      result = engine.sqlDdlToDbml({ files: gathered.files, dialect });
-    } catch (err) {
-      return ours('while converting the SQL', err);
-    }
-    if (result.ok) { converted = { dialect, result }; break; }
-  }
-  // No dialect reads every file: ask which (the step-by-step flow's dialect step, which reports the problems).
-  if (!converted) {
+  const first = readAsDialects(engine, gathered.files, [order[0]]);
+  const firstReading = first.get(order[0]);
+  const whole = firstReading && firstReading.tablesRead === firstReading.tablesFound && firstReading.salvaged === 0 && firstReading.repaired === 0 && !firstReading.result.problems?.length;
+  const readings = whole ? first : readAsDialects(engine, gathered.files, order, first);
+  if (readings.size === 0) return ours('while converting the SQL', new Error('no dialect could convert the scripts'));
+  const best = rankSqlDialectReadings([...readings.values()], detected)[0];
+  // No dialect reads a table: ask which (the step-by-step flow's dialect step, which says why and reports the problems).
+  if (!best.result.ok) {
+    const why = noDialectReason(readings, detected);
+    log.info(`[ERD Studio] ${TITLE}: no dialect reads a table in the scripts${why ? `: ${why}` : ''}; asking which dialect.`);
     if (quiet) {
       log.info(`[ERD Studio] ${TITLE}: the scripts read as no one dialect (automatic draft dropped).`);
       dropQuietly(deps.draft, 'noDialect');
       return undefined;
     }
     telemetry.feature('quickSqlNoDialect');
-    return importSqlDdl(deps, gathered);
+    return importSqlDdl(deps, { ...gathered, readings });
   }
-  telemetry.feature(SQL_DIALECT_FEATURES[converted.dialect]);
-  // The first dialect tried did not read every file; a later one did.
-  if (!quiet && converted.dialect !== order[0]) telemetry.feature('quickSqlDialectFallback');
-  const chosenDialect = converted.dialect;
-  return importConvertedSql(deps, gathered, chosenDialect, converted.result, { quick: true },
+  const chosenDialect = best.dialect;
+  telemetry.feature(SQL_DIALECT_FEATURES[chosenDialect]);
+  // The first dialect tried was not the one that read the most.
+  if (!quiet && chosenDialect !== order[0]) telemetry.feature('quickSqlDialectFallback');
+  if (best.result.problems?.length) {
+    logProblems(best.result.problems, chosenDialect);
+    if (!quiet) {
+      telemetry.feature('importSqlDdlInvalid');
+      for (const key of sqlInvalidFeatures(best.result.problems, chosenDialect)) telemetry.feature(key);
+    }
+  }
+  return importConvertedSql(deps, gathered, chosenDialect, best.result, { quick: true },
     ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name }));
 }
 
@@ -497,6 +683,7 @@ export const TRY_ANOTHER_DIALECT_BUTTON = 'Try Another Dialect';
 export async function gatherSqlFiles(
   sources: SqlSources,
   ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'fileSize'>,
+  projectRoot?: string,
 ): Promise<SqlResume | { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }> {
   let entries: Array<{ name: string; fullPath: string }>;
   let fileName: string;
@@ -539,6 +726,11 @@ export async function gatherSqlFiles(
     sourceLabel = entries.length === 1 ? entries[0].name : `${entries.length} SQL files`;
   }
 
+  // One labelling rule for every entry point (the quick path, a folder, picked files): a file under
+  // the open folder is named by its path under it, so a problem names it the same way each time.
+  if (projectRoot && entries.length && entries.every((e) => isUnder(projectRoot, e.fullPath))) {
+    entries = entries.map((e) => ({ ...e, name: path.relative(projectRoot, e.fullPath).split(path.sep).join('/') }));
+  }
   const files: SqlDdlFile[] = [];
   const fullPaths = new Map<string, string>();
   let chars = 0;
@@ -564,6 +756,11 @@ export async function gatherSqlFiles(
     fullPaths.set(entry.name, entry.fullPath);
   }
   return { files, fullPaths, fileName, sourceLabel };
+}
+
+function isUnder(root: string, file: string): boolean {
+  const rel = path.relative(root, file);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /** A script larger than the import reads. */
@@ -624,5 +821,6 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    showLogs: async () => { await vscode.commands.executeCommand(SHOW_LOGS_COMMAND); },
   };
 }

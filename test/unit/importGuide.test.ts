@@ -395,12 +395,14 @@ describe('the evidence behind the cards (the SQL importer on what each source ex
     expect(result.dbml).toContain('Ref: "dbo"."fct_order"."customer_id" > "dbo"."dim_customer"."customer_id"');
   });
 
-  it('BigQuery: realistic INFORMATION_SCHEMA.TABLES.ddl reads as none of the dialects, so it is listed under Not yet', () => {
+  it('BigQuery: realistic INFORMATION_SCHEMA.TABLES.ddl reads whole in none of the dialects, so it is listed under Not yet', () => {
     const files = read('bigquery');
     for (const dialect of SQL_DIALECTS) {
       const result = convertSqlDdl({ dialect, files }, dbmlCoreSqlEngine);
-      // When this starts to pass, give BigQuery its own card and take it off Not yet.
-      expect(result.ok, dialect).toBe(false);
+      // The import is partial (one bad table never stops the rest), so a dialect may read some
+      // tables and report the others. BigQuery earns its own card only when a dialect reads every
+      // table with no problem; when this starts to fail, give it one and take it off Not yet.
+      expect(!result.ok || result.problems.length > 0, dialect).toBe(true);
     }
   });
 });

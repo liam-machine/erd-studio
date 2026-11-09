@@ -16,7 +16,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDocument, isSeq, isMap, isNode } from 'yaml';
+import { parseDocument, isAlias, isSeq, isMap, isNode } from 'yaml';
 import type { Document, YAMLMap, YAMLSeq } from 'yaml';
 
 import type {
@@ -25,6 +25,7 @@ import type {
   YmlModelInfo,
   YmlRelationshipTest,
   YmlResourceDoc,
+  YmlSourceRelationshipTest,
 } from '../types/ymlData';
 import type { CompositeForeignKey } from '../types/manifest';
 import { readMeta, type Meta } from '@erd-studio/core';
@@ -85,6 +86,16 @@ const RELATIONSHIP_TEST_KEYS = [
   'dbt_utils.relationships_where',
 ] as const;
 
+/**
+ * Column tests that require a value in every row they test, as `not_null`
+ * does: dbt's own, and dbt_expectations' (unless a `row_condition` limits it).
+ * Not `dbt_utils.not_null_proportion`, which allows some nulls.
+ */
+const NOT_NULL_TEST_KEYS = ['not_null', 'dbt_expectations.expect_column_values_to_not_be_null'] as const;
+
+/** Contract constraints that make a column required: `not_null`, and `primary_key` (a key is never null). */
+const REQUIRING_CONSTRAINTS = new Set(['not_null', 'primary_key']);
+
 /** What a disabled service answers: no models, tests, source files or docs. */
 function emptyYmlData(): YmlData {
   return {
@@ -95,6 +106,8 @@ function emptyYmlData(): YmlData {
     sourceFiles: new Map(),
     resourceDocs: new Map(),
     compositeForeignKeys: [],
+    notNullColumns: new Map(),
+    sourceRelationshipTests: [],
   };
 }
 
@@ -210,6 +223,8 @@ export class YmlParserService {
     const uniqueColumns = new Map<string, Set<string>>();
     const compositeUniqueGroups = new Map<string, string[][]>();
     const compositeForeignKeys: CompositeForeignKey[] = [];
+    const notNullColumns = new Map<string, Set<string>>();
+    const sourceRelationshipTests: YmlSourceRelationshipTest[] = [];
 
     // One walk finds both the schema .yml files and the source files that
     // define models, seeds and snapshots.
@@ -224,6 +239,8 @@ export class YmlParserService {
           uniqueColumns,
           compositeUniqueGroups,
           compositeForeignKeys,
+          notNullColumns,
+          sourceRelationshipTests,
         );
       } catch (err) {
         log.warn(
@@ -258,7 +275,7 @@ export class YmlParserService {
       sourceFiles.set(stem, path.relative(projectPath, filePath).replace(/\\/g, '/'));
     }
 
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs, compositeForeignKeys };
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs, compositeForeignKeys, notNullColumns, sourceRelationshipTests };
   }
 
   /**
@@ -401,11 +418,17 @@ export class YmlParserService {
     uniqueColumns: Map<string, Set<string>>,
     compositeUniqueGroups: Map<string, string[][]>,
     compositeForeignKeys: CompositeForeignKey[] = [],
+    notNullColumns: Map<string, Set<string>> = new Map(),
+    sourceRelationshipTests: YmlSourceRelationshipTest[] = [],
   ): void {
     const raw = fs.readFileSync(filePath, 'utf-8');
     // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Only
     // conversions through the document (meta) see it; `get()` lookups do not.
     const doc = parseDocument(raw, { merge: true });
+    // `tests: *key_tests`, `- relationships: *to_dim`: dbt reads an alias as the node it
+    // names. Resolved where a test is read ({@link deref}), never expanded in place, so an
+    // alias bomb costs only what is read.
+    this.aliasDoc = doc;
 
     const modelsNode = doc.get('models');
     if (!isSeq(modelsNode)) {
@@ -425,6 +448,8 @@ export class YmlParserService {
         uniqueColumns,
         compositeUniqueGroups,
         compositeForeignKeys,
+        notNullColumns,
+        sourceRelationshipTests,
       );
     }
   }
@@ -441,6 +466,8 @@ export class YmlParserService {
     uniqueColumns: Map<string, Set<string>>,
     compositeUniqueGroups: Map<string, string[][]>,
     compositeForeignKeys: CompositeForeignKey[],
+    notNullColumns: Map<string, Set<string>> = new Map(),
+    sourceRelationshipTests: YmlSourceRelationshipTest[] = [],
   ): void {
     const name = modelNode.get('name');
     if (typeof name !== 'string' || !name) {
@@ -452,9 +479,10 @@ export class YmlParserService {
     const columns: YmlColumn[] = [];
 
     // Parse columns and their tests
-    const columnsNode = modelNode.get('columns');
+    const columnsNode = this.deref(modelNode.get('columns'));
     if (isSeq(columnsNode)) {
-      for (const colItem of (columnsNode as YAMLSeq).items) {
+      for (const rawCol of (columnsNode as YAMLSeq).items) {
+        const colItem = this.deref(rawCol);
         if (!isMap(colItem)) {
           continue;
         }
@@ -479,11 +507,32 @@ export class YmlParserService {
           col,
           relationshipTests,
           uniqueColumns,
+          notNullColumns,
+          sourceRelationshipTests,
         );
+        // A contract's column constraint: `constraints: [{ type: not_null }]` (or `primary_key`, never null).
+        if (this.hasNotNullConstraint(this.deref(col.get('constraints')))) {
+          this.addColumn(name, colName, notNullColumns);
+        }
+      }
+    }
+    // A contract's model-level constraint: `constraints: [{ type: not_null, columns: [a, b] }]`
+    // (or `primary_key`: a key's columns are never null).
+    const modelConstraints = modelNode.get('constraints');
+    if (isSeq(modelConstraints)) {
+      for (const item of (modelConstraints as YAMLSeq).items) {
+        if (!isMap(item) || !REQUIRING_CONSTRAINTS.has(this.getString(item as YAMLMap, 'type'))) continue;
+        const cols = (item as YAMLMap).get('columns');
+        if (!isSeq(cols)) continue;
+        for (const c of (cols as YAMLSeq).items) {
+          const colName = this.resolveScalar(c);
+          if (colName) this.addColumn(name, colName, notNullColumns);
+        }
       }
     }
 
-    // Extract model-level tests (unique_combination_of_columns)
+    // Model-level tests that name a column (`column_name:`), then unique_combination_of_columns.
+    this.extractModelColumnTests(name, modelNode, relationshipTests, uniqueColumns, notNullColumns, sourceRelationshipTests);
     this.extractModelLevelTests(name, modelNode, compositeUniqueGroups);
     compositeForeignKeys.push(...this.extractCompositeForeignKeys(name, modelNode));
 
@@ -523,46 +572,198 @@ export class YmlParserService {
     colNode: YAMLMap,
     relationshipTests: YmlRelationshipTest[],
     uniqueColumns: Map<string, Set<string>>,
+    notNullColumns: Map<string, Set<string>> = new Map(),
+    sourceRelationshipTests: YmlSourceRelationshipTest[] = [],
   ): void {
     for (const listKey of TEST_LIST_KEYS) {
-      const testsNode = colNode.get(listKey);
+      const testsNode = this.deref(colNode.get(listKey));
       if (!isSeq(testsNode)) {
         continue;
       }
 
       for (const testItem of (testsNode as YAMLSeq).items) {
-        // Scalar test: `- unique` or `- not_null`
-        const scalarValue = this.resolveScalar(testItem);
-        if (scalarValue === 'unique') {
-          this.addUniqueColumn(modelName, columnName, uniqueColumns);
-          continue;
-        }
+        this.readColumnTest(modelName, columnName, testItem, relationshipTests, uniqueColumns, notNullColumns, sourceRelationshipTests);
+      }
+    }
+  }
 
-        if (!isMap(testItem)) {
-          continue;
-        }
+  /**
+   * A model's own `tests:` / `data_tests:` that name their column with
+   * `column_name:` (`- relationships: { column_name: customer_id, to: …, field: … }`,
+   * `- not_null: { column_name: id }`): read as the column's tests. A
+   * `column_name` that is an expression (`coalesce(a, b)`) names no column and is skipped.
+   */
+  private extractModelColumnTests(
+    modelName: string,
+    modelNode: YAMLMap,
+    relationshipTests: YmlRelationshipTest[],
+    uniqueColumns: Map<string, Set<string>>,
+    notNullColumns: Map<string, Set<string>>,
+    sourceRelationshipTests: YmlSourceRelationshipTest[],
+  ): void {
+    const keys: readonly string[] = ['unique', ...NOT_NULL_TEST_KEYS, ...RELATIONSHIP_TEST_KEYS];
+    for (const listKey of TEST_LIST_KEYS) {
+      const testsNode = this.deref(modelNode.get(listKey));
+      if (!isSeq(testsNode)) continue;
+      for (const rawItem of (testsNode as YAMLSeq).items) {
+        const testItem = this.deref(rawItem);
+        if (!isMap(testItem)) continue;
         const testMap = testItem as YAMLMap;
+        const testName = this.getString(testMap, 'test_name').trim();
+        const key = keys.find((k) => testName === k || testMap.has(k));
+        if (!key) continue;
+        const node = testName === key ? testMap : this.deref(testMap.get(key));
+        const columnName = this.testMaps(node).map((m) => this.getString(m, 'column_name').trim()).find(Boolean);
+        if (!columnName || !/^"?[A-Za-z_][\w$]*"?$/.test(columnName)) continue;
+        this.readColumnTest(modelName, columnName.replace(/^"|"$/g, ''), testItem, relationshipTests, uniqueColumns, notNullColumns, sourceRelationshipTests);
+      }
+    }
+  }
 
-        // Map-form unique test carrying config: `- unique:` / `- unique: { config: ... }`
-        if (testMap.has('unique')) {
-          this.addUniqueColumn(modelName, columnName, uniqueColumns);
+  /** One item of a column's test list (see {@link extractColumnTests}). */
+  private readColumnTest(
+    modelName: string,
+    columnName: string,
+    testItem: unknown,
+    relationshipTests: YmlRelationshipTest[],
+    uniqueColumns: Map<string, Set<string>>,
+    notNullColumns: Map<string, Set<string>>,
+    sourceRelationshipTests: YmlSourceRelationshipTest[],
+  ): void {
+    testItem = this.deref(testItem);
+    // Scalar test: `- unique` or `- not_null`
+    const scalarValue = this.resolveScalar(testItem);
+    if (scalarValue === 'unique') {
+      this.addUniqueColumn(modelName, columnName, uniqueColumns);
+      return;
+    }
+    if (scalarValue !== undefined && (NOT_NULL_TEST_KEYS as readonly string[]).includes(scalarValue)) {
+      this.addColumn(modelName, columnName, notNullColumns);
+      return;
+    }
+
+    if (!isMap(testItem)) {
+      return;
+    }
+    const testMap = testItem as YAMLMap;
+    // dbt's alternative format: `- name: my_test` + `test_name: not_null`, its
+    // arguments and `config:` beside them. Read as `- <test_name>: <the map>`.
+    const testName = this.getString(testMap, 'test_name').trim();
+    const testNode = (key: string): unknown => (testName === key ? testMap : this.deref(testMap.get(key)));
+    const declares = (key: string): boolean => testName === key || testMap.has(key);
+
+    // Map-form unique test carrying config: `- unique:` / `- unique: { config: ... }`
+    if (declares('unique')) {
+      this.addUniqueColumn(modelName, columnName, uniqueColumns);
+    }
+    // Map-form not_null (`- not_null:` / `- not_null: { config: { severity: warn } }`): required,
+    // unless a `where:` (or dbt_expectations' `row_condition:`) limits it to some rows or
+    // `enabled: false` turns it off.
+    if (NOT_NULL_TEST_KEYS.some((key) => declares(key) && this.testHoldsForEveryRow(testNode(key)) && this.testIsEnabled(testNode(key)))) {
+      this.addColumn(modelName, columnName, notNullColumns);
+    }
+
+    // Relationship tests (relationships, relationships_where, …)
+    for (const key of RELATIONSHIP_TEST_KEYS) {
+      const relNode = testNode(key);
+      if (isMap(relNode)) {
+        const target = this.relationshipTarget(relNode as YAMLMap);
+        if (target?.source) {
+          // `to: source('raw', 'customers')`: a source is not a model, so it is never drawn; kept to be said.
+          sourceRelationshipTests.push({ fromModel: modelName, fromColumn: columnName, source: target.source, toColumn: target.toColumn });
+          continue;
         }
-
-        // Relationship tests (relationships, relationships_where, …)
-        for (const key of RELATIONSHIP_TEST_KEYS) {
-          const relNode = testMap.get(key);
-          if (isMap(relNode)) {
-            const relTest = this.extractRelationshipTest(
-              modelName,
-              columnName,
-              relNode as YAMLMap,
-            );
-            if (relTest) {
-              relationshipTests.push(relTest);
-            }
-          }
+        const relTest = this.extractRelationshipTest(
+          modelName,
+          columnName,
+          relNode as YAMLMap,
+        );
+        if (relTest) {
+          // relationships_where holds for the rows its conditions pick; a where: config likewise.
+          // A disabled test still declares the link: it has no condition.
+          if (key !== 'relationships' || !this.testHoldsForEveryRow(relNode)) relTest.conditional = true;
+          relationshipTests.push(relTest);
         }
       }
+    }
+  }
+
+  /** Adds `columnName` to `modelName`'s set in `byModel`. */
+  private addColumn(modelName: string, columnName: string, byModel: Map<string, Set<string>>): void {
+    let cols = byModel.get(modelName);
+    if (!cols) {
+      cols = new Set<string>();
+      byModel.set(modelName, cols);
+    }
+    cols.add(columnName);
+  }
+
+  /**
+   * Whether a test's node (its kwargs map, or null for `- not_null:`) holds
+   * for every row: no `where:` (at the top, under `arguments:` or in
+   * `config:`) and no dbt_expectations `row_condition:`.
+   */
+  private testHoldsForEveryRow(node: unknown): boolean {
+    for (const m of this.testMaps(node)) {
+      for (const key of ['where', 'row_condition']) {
+        const where = m.get(key);
+        if (typeof where === 'string' && where.trim() !== '') return false;
+      }
+    }
+    return true;
+  }
+
+  /** Whether a test is on: not `enabled: false` (at the top or in `config:`). */
+  private testIsEnabled(node: unknown): boolean {
+    return !this.testMaps(node).some((m) => {
+      const enabled = m.get('enabled');
+      return enabled === false || (typeof enabled === 'string' && enabled.trim().toLowerCase() === 'false');
+    });
+  }
+
+  /** A test node's own map, its `arguments:` and its `config:` (the places dbt reads a setting from). */
+  private testMaps(node: unknown): YAMLMap[] {
+    if (!isMap(node)) return [];
+    const testNode = node as YAMLMap;
+    const nested = ['arguments', 'config'].map((k) => testNode.get(k)).filter((n): n is YAMLMap => isMap(n));
+    return [testNode, ...nested];
+  }
+
+  /** Whether a column's `constraints:` list holds a `type: not_null` or `type: primary_key`. */
+  private hasNotNullConstraint(node: unknown): boolean {
+    if (!isSeq(node)) return false;
+    return (node as YAMLSeq).items.some((item) => isMap(item) && REQUIRING_CONSTRAINTS.has(this.getString(item as YAMLMap, 'type')));
+  }
+
+  /**
+   * A relationship test's target: `source` (`raw.customers`) when `to:` is a
+   * `source('raw', 'customers')`, with the `field`; undefined otherwise (a
+   * `ref()` is {@link extractRelationshipTest}'s).
+   */
+  private relationshipTarget(relNode: YAMLMap): { source?: string; toColumn: string } | undefined {
+    const argsNode = relNode.get('arguments');
+    const kwargs = isMap(argsNode) ? (argsNode as YAMLMap) : relNode;
+    const to = this.getString(kwargs, 'to') || this.getString(relNode, 'to');
+    const toColumn = this.getString(kwargs, 'field') || this.getString(relNode, 'field');
+    const source = /\bsource\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/.exec(to);
+    if (!source || !toColumn) return undefined;
+    return { source: `${source[1]}.${source[2]}`, toColumn };
+  }
+
+  /** The schema file being read, for {@link deref}. */
+  private aliasDoc: Document | undefined;
+
+  /**
+   * A node, or the node an alias names (`tests: *key_tests`), once: what it
+   * names is read as written, so a nested alias is resolved only when it is
+   * read too. Undefined for an alias that names nothing.
+   */
+  private deref(node: unknown): unknown {
+    if (!isAlias(node)) return node;
+    try {
+      return this.aliasDoc ? node.resolve(this.aliasDoc) : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -807,6 +1008,12 @@ export class YmlParserService {
       resourceDocs: filteredResourceDocs,
       ...(data.compositeForeignKeys
         ? { compositeForeignKeys: data.compositeForeignKeys.filter((fk) => modelNames.has(fk.fromModel) && modelNames.has(fk.toModel)) }
+        : {}),
+      ...(data.notNullColumns
+        ? { notNullColumns: new Map([...data.notNullColumns].filter(([model]) => modelNames.has(model))) }
+        : {}),
+      ...(data.sourceRelationshipTests
+        ? { sourceRelationshipTests: data.sourceRelationshipTests.filter((t) => modelNames.has(t.fromModel)) }
         : {}),
     };
   }
