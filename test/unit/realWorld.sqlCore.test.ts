@@ -58,7 +58,7 @@ describe('the real-world SQL samples import every table', () => {
     for (const sample of SAMPLES) {
       const { files } = await gather(sample.source);
       const text = files.map((f) => f.text).join('\n');
-      const readings = readAsDialects(engine, files, rankSqlDialects(text));
+      const readings = await readAsDialects(engine, files, rankSqlDialects(text));
       expect(rankSqlDialectReadings([...readings.values()], detectSqlDialect(text))[0].dialect, sample.slug).toBe(sample.dialect);
     }
   }, 60000);

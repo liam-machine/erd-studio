@@ -29,7 +29,10 @@ export type LedgerUnit =
 export type LedgerCause =
   | 'parseError' | 'grammarGap' | 'templatePlaceholder' | 'unknownType' | 'reservedWord' | 'trailingOption'
   | 'unsupportedModifier' | 'proceduralBlock' | 'notInFiles' | 'droppedLater' | 'noField' | 'notDesign'
-  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate' | 'other';
+  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate'
+  // Not read because the import stopped first: the user cancelled it, or its time limit was reached.
+  | 'cancelled' | 'timeLimit'
+  | 'other';
 
 export interface LedgerWhere {
   file?: string;
@@ -180,6 +183,8 @@ const CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = {
   capped: 'over the limit',
   savedOptional: 'saved as optional',
   duplicate: 'defined twice',
+  cancelled: 'the import was cancelled before it was read',
+  timeLimit: 'the time limit was reached before it was read',
   other: '',
 };
 
@@ -284,7 +289,8 @@ export function ledgerLogLines(entries: readonly LedgerEntry[], title: string): 
     const name = nameOf(e.where);
     const count = e.count > 1 ? `${e.count} × ` : '';
     const detail = e.detail ? ` (${ledgerText(e.detail, MAX_DETAIL, true)})` : '';
-    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}: ${ledgerText(e.what, MAX_WHAT, true)}${detail}`);
+    const what = ledgerText(e.what, MAX_WHAT, true);
+    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}:${what ? ` ${what}` : ''}${detail}`);
   }
   return lines;
 }

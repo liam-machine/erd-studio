@@ -1476,6 +1476,12 @@
           "default": "prompt",
           "markdownDescription": "When you move or rename a `.dbml` file (or a folder of them) in the Explorer in a DBML project, update the diagrams and relationships files that point at it: their `use` lines, and the table's schema (`Table crm.fct_order`) when it lands in another schema folder. Renaming a table file renames the table everywhere, since its file name is its name. Each update is one step for **Edit > Undo**. **Move Table…** and **Move Diagram to Layer…** always update them, whatever this says."
         },
+        "erdStudio.import.timeLimitSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "markdownDescription": "How long **Import SQL DDL…** may spend reading your scripts, in seconds. Reading runs in the background with a progress notification you can cancel. When the time is up (or you press **Cancel**), the tables read so far are imported and the draft's **Not imported** list says where reading stopped in each file. `0` means no limit."
+        },
         "erdStudio.sidebar.rowDetails": {
           "type": "string",
           "enum": [

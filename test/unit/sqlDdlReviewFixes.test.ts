@@ -229,36 +229,36 @@ describe('the dialect ranking', () => {
     ? { ok: true, dbml: '', tableCount: tables, tablesFound: 1, relationshipCount: 0, skipped: [], notes: [], readWith: { grammar: 0, repaired: tables, salvaged: 0 } } as unknown as SqlDdlToDbmlResult
     : { ok: false, problems: [{ file: 'a.sql', message: 'no', table: 'a' }] } as unknown as SqlDdlToDbmlResult);
 
-  it('stops reading more dialects once one reads a table and the budget is spent', () => {
+  it('stops reading more dialects once one reads a table and the budget is spent', async () => {
     let clock = 0;
     const calls: string[] = [];
     const engine = { sqlDdlToDbml: ({ dialect }: { dialect: SqlDialect }) => { calls.push(dialect); clock += 2000; return reading(1); } } as unknown as SqlImportModule;
-    const readings = readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'], undefined, { ms: 3000, now: () => clock });
+    const readings = await readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'], undefined, { ms: 3000, now: () => clock });
     expect(calls).toEqual(['postgres']);
     expect(readings.size).toBe(1);
   });
 
-  it('keeps trying while no dialect reads a table (the user would be asked otherwise)', () => {
+  it('keeps trying while no dialect reads a table (the user would be asked otherwise)', async () => {
     let clock = 0;
     const calls: string[] = [];
     const engine = { sqlDdlToDbml: ({ dialect }: { dialect: SqlDialect }) => { calls.push(dialect); clock += 5000; return reading(dialect === 'snowflake' ? 1 : 0); } } as unknown as SqlImportModule;
-    readAsDialects(engine, files, ['postgres', 'mysql', 'snowflake', 'sqlserver', 'databricks'], undefined, { ms: 3000, now: () => clock });
+    await readAsDialects(engine, files, ['postgres', 'mysql', 'snowflake', 'sqlserver', 'databricks'], undefined, { ms: 3000, now: () => clock });
     expect(calls).toEqual(['postgres', 'mysql', 'snowflake']);
   });
 
-  it('reads every dialect when they are quick', () => {
+  it('reads every dialect when they are quick', async () => {
     const calls: string[] = [];
     const engine = { sqlDdlToDbml: ({ dialect }: { dialect: SqlDialect }) => { calls.push(dialect); return reading(1); } } as unknown as SqlImportModule;
-    readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'], undefined, { ms: 3000, now: () => 0 });
+    await readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver', 'snowflake', 'databricks'], undefined, { ms: 3000, now: () => 0 });
     expect(calls).toHaveLength(5);
   });
 
-  it('counts the time of readings it is given', () => {
+  it('counts the time of readings it is given', async () => {
     let clock = 0;
     const calls: string[] = [];
     const engine = { sqlDdlToDbml: ({ dialect }: { dialect: SqlDialect }) => { calls.push(dialect); clock += 2500; return reading(1); } } as unknown as SqlImportModule;
-    const first = readAsDialects(engine, files, ['postgres'], undefined, { ms: 3000, now: () => clock });
-    readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver'], first, { ms: 3000, now: () => clock });
+    const first = await readAsDialects(engine, files, ['postgres'], undefined, { ms: 3000, now: () => clock });
+    await readAsDialects(engine, files, ['postgres', 'mysql', 'sqlserver'], first, { ms: 3000, now: () => clock });
     expect(calls).toEqual(['postgres']);
   });
 });
