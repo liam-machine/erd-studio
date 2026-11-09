@@ -122,7 +122,7 @@ import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingComma
 import { salvageCreateTable } from './sqlDdlSalvage';
 import { ANGLE_TYPE_DIALECTS, isPreStepped, rewriteDialectTable } from './sqlDdlDialects';
 import { resolvePartitions } from './sqlDdlPartitions';
-import { isChildWithoutTable, isView, readStatement } from './sqlDdlStatements';
+import { isChildWithoutTable, isView, readStatement, replaceTable } from './sqlDdlStatements';
 import { ownerOfLine, quoteIdent, resolveRefs, writeDbmlMapped } from './sqlDdlWriter';
 
 export type {
@@ -416,11 +416,12 @@ export const SQL_PARSE_FORMAT: Readonly<Record<SqlDialect, SqlParseFormat>> = Ob
  * Signals per dialect: [pattern, weight, flag?]. Strong signals weigh 3, hints
  * 1. Patterns test the text without its comments and without what its '…'
  * strings hold (a row of data that says `Number` or `bool` is no type), unless
- * the flag is `strings` (the signal is a string: `FROM 's3://…'`). `beside`:
+ * the flag is `strings` (the signal is a string: `FROM 's3://…'`) or `comments`
+ * (the signal is a comment: a Databricks notebook's `-- COMMAND ----------`). `beside`:
  * the signal counts only beside another of the same dialect's (a syntax two
  * dialects share, which alone points to the one that had it first).
  */
-const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | 'beside')?]> = [
+const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | 'beside' | 'comments')?]> = [
   ['sqlserver', /^[ \t]*GO[ \t]*$/im, 3],
   ['sqlserver', /\[\w+\]\s*\.\s*\[\w+\]/, 3],
   ['sqlserver', /\bsp_addextendedproperty\b/i, 3],
@@ -430,9 +431,20 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['databricks', /\bTBLPROPERTIES\b/i, 3],
   ['databricks', /\b(ARRAY|MAP|STRUCT)\s*</i, 3],
   ['databricks', /\bPARTITIONED\s+BY\b|\bZORDER\b/i, 1],
-  // Lakeflow (Delta Live Tables) pipelines, and a column's own `CONSTRAINT n FOREIGN KEY REFERENCES t`.
+  // A Databricks notebook exported as SQL: its header, cell separators and `-- MAGIC` lines.
+  ['databricks', /^-- (?:Databricks notebook source|COMMAND -{5,}|MAGIC )/m, 3, 'comments'],
+  // Lakeflow (Delta Live Tables) pipelines.
   ['databricks', /\bCREATE\s+OR\s+REFRESH\b|\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:STREAMING|LIVE)\s+TABLE\b|\bCONSTRAINT\s+\w+\s+EXPECT\s*\(/i, 3],
-  ['databricks', /\bFOREIGN\s+KEY\s+REFERENCES\b/i, 3],
+  // Unity Catalog's catalogs (Snowflake has none: its CREATE CATALOG INTEGRATION is an Iceberg link).
+  ['databricks', /\bUSE\s+CATALOG\b|\bCREATE\s+CATALOG\b(?!\s+INTEGRATION\b)/i, 3],
+  // A column's own `[CONSTRAINT n] FOREIGN KEY REFERENCES t` is Databricks' and Snowflake's alike: beside one of their own signals.
+  ['databricks', /\bFOREIGN\s+KEY\s+REFERENCES\b/i, 3, 'beside'],
+  ['snowflake', /\bFOREIGN\s+KEY\s+REFERENCES\b/i, 3, 'beside'],
+  // An identity column written GENERATED … AS IDENTITY in a CREATE OR REPLACE TABLE: Databricks'. PostgreSQL and
+  // Oracle have no CREATE OR REPLACE TABLE, and Snowflake writes IDENTITY / AUTOINCREMENT.
+  ['databricks', /^(?=[\s\S]*\bCREATE\s+OR\s+REPLACE\s+TABLE\b)[\s\S]*\bGENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY\b/i, 3],
+  // TIMESTAMP_NTZ and TIMESTAMP_LTZ are Spark's types too (Databricks Runtime 13+); TIMESTAMP_TZ is Snowflake's alone.
+  ['databricks', /\bTIMESTAMP_(NTZ|LTZ)\b/i, 1],
   // STRING as a type, in a script that backquotes a name (one part each: a whole `a.b.c` path is BigQuery's).
   ['databricks', /^(?=[\s\S]*`[^`\n.]+`)[\s\S]*?[\w`][ \t]+STRING\b/i, 2],
   ['mysql', /\bENGINE\s*=/i, 3],
@@ -444,8 +456,9 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['snowflake', /\bVARIANT\b/i, 3],
   ['snowflake', /\bNUMBER\s*\(\s*38\b|\bVARCHAR\s*\(\s*16777216\s*\)/i, 3],
   ['snowflake', /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i, 1],
-  // Snowflake's own timestamp types and objects (PostgreSQL shares its `::` casts and `$$` bodies).
-  ['snowflake', /\bTIMESTAMP_(NTZ|LTZ|TZ)\b/i, 3],
+  // Snowflake's timestamp types and its own objects (PostgreSQL shares its `::` casts and `$$` bodies).
+  ['snowflake', /\bTIMESTAMP_TZ\b/i, 3],
+  ['snowflake', /\bTIMESTAMP_(NTZ|LTZ)\b/i, 2],
   ['snowflake', /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:WAREHOUSE|STAGE|STREAM|TASK|PIPE|FILE\s+FORMAT|DYNAMIC\s+TABLE|HYBRID\s+TABLE|ICEBERG\s+TABLE)\b|\bUSE\s+(?:WAREHOUSE|ROLE)\b/i, 3],
   // `::` casts and `$$` bodies are Snowflake's and Databricks' too: beside one of their own signals, theirs as much as PostgreSQL's.
   ['snowflake', /::\s*\w/, 3, 'beside'],
@@ -471,6 +484,8 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number, ('strings' | '
   ['bigquery', /`(?:[\w-]|\$?\{\w+\})+(?:\.(?:[\w-]|\$?\{\w+\})+){1,2}\*?`/, 3],
   // BigQuery nests types as Databricks does (ARRAY<STRUCT<…>>): alone, the Databricks it was read as before.
   ['bigquery', /\b(?:ARRAY|STRUCT)\s*</i, 3, 'beside'],
+  // STRING is BigQuery's type as much as Databricks': beside a BigQuery signal (INT64), a backquoted `offset STRING` is no Databricks.
+  ['bigquery', /[\w`][ \t]+STRING\b/i, 2, 'beside'],
   // A type after a column's name. (GEOGRAPHY and BOOL are PostgreSQL's too, PostGIS and an alias.)
   ['bigquery', /[\w"\]`][ \t]+BYTES\b/i, 1],
   // DISTKEY and SORTKEY as a clause (`DISTKEY (a)`, `COMPOUND SORTKEY`) or after a column's type (`a int DISTKEY`),
@@ -502,7 +517,7 @@ function dialectScores(text: string): Map<SqlDialect, number> {
   const scores = new Map<SqlDialect, number>();
   const hints = new Map<SqlDialect, number>();
   for (const [dialect, pattern, weight, flag] of DIALECT_SIGNALS) {
-    if (!pattern.test(flag === 'strings' ? code : bare)) continue;
+    if (!pattern.test(flag === 'comments' ? text : flag === 'strings' ? code : bare)) continue;
     const into = flag === 'beside' || (weight === 1 && isPreStepped(dialect)) ? hints : scores;
     into.set(dialect, (into.get(dialect) ?? 0) + weight);
   }
@@ -844,6 +859,17 @@ const MAX_DBML_CHECKS = 5;
 /** The longest a skipped-summary line runs before the file's next kinds go on a line of their own. */
 const SKIPPED_LINE_MAX = 300;
 
+/**
+ * A file's path as a skipped line names it: whole, or, when it would not leave
+ * `room` characters of the line for what follows it, its end after `…` (short
+ * enough, with its colon, that the shown line's cut of long runs leaves it whole).
+ */
+function skippedFileLabel(file: string, room: number): string {
+  if (file.length <= SKIPPED_LINE_MAX - room) return file;
+  const max = Math.max(24, Math.min(SKIPPED_LINE_MAX - room, MAX_SHOWN_RUN - 1));
+  return `…${file.slice(file.length - max + 1)}`;
+}
+
 /** Above this many characters a script's INSERT statements are taken out before it is read (a dump with its data). */
 export const STRIP_INSERTS_ABOVE_CHARS = 1024 * 1024;
 
@@ -1091,11 +1117,12 @@ class Converter implements ConverterContext {
       const byKind = this.skippedByFile.get(file);
       if (!byKind || byKind.size === 0) continue;
       const parts = [...byKind].map(([kind, count]) => `${count} ${SKIP_LABELS[kind][count === 1 ? 0 : 1]}`);
-      let line = `${file}: skipped ${parts[0]}`;
+      const where = skippedFileLabel(file, Math.max(...parts.map((p) => p.length)) + 16);
+      let line = `${where}: skipped ${parts[0]}`;
       for (const part of parts.slice(1)) {
         if (line.length + 2 + part.length > SKIPPED_LINE_MAX) {
           lines.push(line);
-          line = `${file}: also skipped ${part}`;
+          line = `${where}: also skipped ${part}`;
         } else {
           line += `, ${part}`;
         }
@@ -1106,17 +1133,21 @@ class Converter implements ConverterContext {
       if (named.length) {
         const shown = named.slice(0, MAX_NAMED_CTAS).map((item) => (item.line !== undefined ? `${item.name} (line ${item.line})` : item.name!));
         const more = named.length - shown.length;
-        // As the counts: lines of at most SKIPPED_LINE_MAX characters, the rest on `… also not imported …` lines.
-        let named0 = `${file}: not imported, made from a query or another table with no column list of its own: ${shown[0]}`;
+        const tail = more > 0 ? ` and ${more} more` : '';
+        // As the counts: lines of at most SKIPPED_LINE_MAX characters, the rest on `… also not imported …` lines
+        // (a path so long that a name would not fit beside it is shown by its end).
+        const head = ': not imported, made from a query or another table with no column list of its own: ';
+        const where = skippedFileLabel(file, head.length + Math.max(...shown.map((p) => p.length)) + tail.length);
+        let named0 = `${where}${head}${shown[0]}`;
         for (const part of shown.slice(1)) {
-          if (named0.length + 2 + part.length > SKIPPED_LINE_MAX) {
+          if (named0.length + 2 + part.length + tail.length > SKIPPED_LINE_MAX) {
             lines.push(named0);
-            named0 = `${file}: also not imported (made from a query or another table): ${part}`;
+            named0 = `${where}: also not imported (made from a query or another table): ${part}`;
           } else {
             named0 += `, ${part}`;
           }
         }
-        lines.push(more > 0 ? `${named0} and ${more} more` : named0);
+        lines.push(named0 + tail);
       }
     }
     return lines;
@@ -1250,7 +1281,7 @@ class Converter implements ConverterContext {
       const t = st.tokens;
       if (!isCreateTableWithColumns(t)) continue;
       const head = createTableName(t)!;
-      if (isTempTableName(t, head.at)) continue;
+      if (isTempTableName(t, head.at) || isSessionTable(t, head.at, this.dialect)) continue;
       const name = readName(t, head.at);
       if (!name) continue;
       const parts = this.qualify(name.parts);
@@ -1272,6 +1303,9 @@ class Converter implements ConverterContext {
     if (ifNotExists) i += 3;
     // SQL Server's `#tmp` / `##global` scratch tables (the name reads after its `#`s).
     if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
+    // `CREATE [LOCAL | GLOBAL] TEMP[ORARY] | VOLATILE TABLE`: a session's scratch table, gone when it ends (a
+    // procedure's work table). Oracle's GLOBAL TEMPORARY TABLE is a lasting definition (only its rows are not).
+    if (isSessionTable(t, at, this.dialect)) { this.skip(file, 'sessionTable'); return; }
     const name = readName(t, i);
     // SQLite keeps its own bookkeeping in tables named `sqlite_…` (`.schema` prints `CREATE TABLE sqlite_sequence(name,seq)`).
     if (name && this.dialect === 'sqlite' && /^sqlite_/i.test(name.parts[name.parts.length - 1])) { this.skip(file, 'internalTable'); return; }
@@ -1413,8 +1447,15 @@ class Converter implements ConverterContext {
     table.note = tailComment(t, close + 1) ?? noteText(rawTable.note);
     if (this.readingColumns === 0) {
       // A table defined twice: the first definition stays, the second is reported and read no further.
+      // CREATE OR REPLACE (OR ALTER, OR REFRESH) replaces it, as the database does: the later definition is the table.
       const first = this.findTable(qualified);
-      if (first && sameIdent(first.name, tableName) && sameSchema(first.schema, schema, this.dialect)) {
+      if (first && sameIdent(first.name, tableName) && sameSchema(first.schema, schema, this.dialect) && replacesTable(t)) {
+        replaceTable(this, first, upper(t[2]) === 'ALTER' ? table : undefined);
+        this.appliedChanges++;
+        this.ledger.changed('table', 'duplicate', 'CREATE OR REPLACE', { file, line: st.line, table: label }, upper(t[2]) === 'ALTER'
+          ? `changes the definition at ${first.origin.file}, line ${first.origin.line}, to this column list; its foreign keys stay, as the database does`
+          : `replaces the definition at ${first.origin.file}, line ${first.origin.line}, as the database does`);
+      } else if (first && sameIdent(first.name, tableName) && sameSchema(first.schema, schema, this.dialect)) {
         this.problems.push({
           file,
           line: st.line,
@@ -1632,14 +1673,16 @@ class Converter implements ConverterContext {
     const rewritten = applyEdits(text, st.start, st.end, edits);
     const newText = text.slice(0, st.start) + rewritten + text.slice(st.end);
     const tokens = tokenize(rewritten, this.dialect).map((tok) => ({ ...tok, start: tok.start + st.start, end: tok.end + st.start, line: tok.line + st.line - 1 }));
-    const tablesBefore = this.tables.length;
+    // The table this statement made (a CREATE OR REPLACE takes the old one out, so the count may not grow).
+    const lastBefore = this.tables[this.tables.length - 1];
     this.readingTypedSelect = true;
     try {
       this.readCreateTable(file, newText, { ...st, tokens, end: st.start + rewritten.length }, at);
     } finally {
       this.readingTypedSelect = false;
     }
-    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    const newest = this.tables[this.tables.length - 1];
+    const table = newest !== lastBefore ? newest : undefined;
     if (!table || this.readingColumns > 0) return;
     const label = tableLabel(table);
     this.ledger.changed('table', 'inferred', 'CREATE TABLE … AS SELECT', { file, line: st.line, table: label },
@@ -1663,14 +1706,16 @@ class Converter implements ConverterContext {
     const end = t[leading.to].end;
     const newText = text.slice(0, start) + text.slice(start, end).replace(/[^\n]/g, ' ') + text.slice(end);
     const tokens = [...t.slice(0, leading.from), ...t.slice(leading.to + 1)];
-    const tablesBefore = this.tables.length;
+    // The table this statement made (a CREATE OR REPLACE takes the old one out, so the count may not grow).
+    const lastBefore = this.tables[this.tables.length - 1];
     this.readingLeadingComment = true;
     try {
       this.readCreateTable(file, newText, { ...st, tokens }, at);
     } finally {
       this.readingLeadingComment = false;
     }
-    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    const newest = this.tables[this.tables.length - 1];
+    const table = newest !== lastBefore ? newest : undefined;
     if (table && table.note === undefined && leading.comment) table.note = leading.comment;
   }
 
@@ -1681,14 +1726,16 @@ class Converter implements ConverterContext {
    */
   private readColumnListOfQuery(file: string, text: string, st: Statement, at: number, as: number): void {
     const tokens = st.tokens.slice(0, as);
-    const tablesBefore = this.tables.length;
+    // The table this statement made (a CREATE OR REPLACE takes the old one out, so the count may not grow).
+    const lastBefore = this.tables[this.tables.length - 1];
     this.readingTypedSelect = true;
     try {
       this.readCreateTable(file, text, { ...st, tokens, end: tokens[tokens.length - 1].end }, at);
     } finally {
       this.readingTypedSelect = false;
     }
-    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    const newest = this.tables[this.tables.length - 1];
+    const table = newest !== lastBefore ? newest : undefined;
     if (!table || this.readingColumns > 0) return;
     this.ledger.changed('table', 'inferred', 'CREATE TABLE … AS SELECT', { file, line: st.line, table: tableLabel(table) },
       'its columns read from the typed column list; the query that fills it is not imported');
@@ -2136,6 +2183,23 @@ function shortName(name: string): string {
   return name.length > 32 ? `${name.slice(0, 31)}…` : name;
 }
 
+/** Whether the words between CREATE and the table's name (`t[1..at)`) make it a session's temporary table. */
+function isSessionTable(t: readonly Token[], at: number, dialect: SqlDialect): boolean {
+  let temporary = false;
+  let global = false;
+  for (let k = 1; k < at && k < 12; k++) {
+    const w = upper(t[k]);
+    if (w === 'TEMP' || w === 'TEMPORARY' || w === 'VOLATILE') temporary = true;
+    if (w === 'GLOBAL') global = true;
+  }
+  return temporary && !(global && dialect === 'oracle');
+}
+
+/** Whether a CREATE TABLE replaces a table of its name: `CREATE OR REPLACE | OR ALTER | OR REFRESH`. */
+function replacesTable(t: readonly Token[]): boolean {
+  return upper(t[0]) === 'CREATE' && upper(t[1]) === 'OR' && ['REPLACE', 'ALTER', 'REFRESH'].includes(upper(t[2]));
+}
+
 /**
  * Whether the column list `t(open, close)` declares a type for every column
  * (`(a INT, b STRING COMMENT 'x', PRIMARY KEY (a))`), not only names
@@ -2165,7 +2229,7 @@ function parenDepth(t: readonly Token[], open: number, close: number): number {
 const OTHER_GRAMMARS: readonly SqlParseFormat[] = ['postgres', 'mssql', 'mysql', 'snowflake'];
 
 /** Skipped statements named in the log, one each (data, session and permission statements are only counted). */
-const NAMED_SKIPS: ReadonlySet<SkipKind> = new Set<SkipKind>(['view', 'index', 'routine', 'sequence', 'type', 'ctas', 'internalTable', 'existing', 'alter', 'comment', 'schema', 'other']);
+const NAMED_SKIPS: ReadonlySet<SkipKind> = new Set<SkipKind>(['view', 'index', 'routine', 'sequence', 'type', 'ctas', 'internalTable', 'sessionTable', 'existing', 'alter', 'comment', 'schema', 'other']);
 /** At most this many tables made from a query are named in a file's skipped lines (the log names them all). */
 const MAX_NAMED_CTAS = 20;
 /** At most this many skipped statements are named (a dump of thousands is counted). */

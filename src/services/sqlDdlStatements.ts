@@ -233,13 +233,15 @@ function readCreateTableStatement(cx: ConverterContext, file: string, text: stri
       return;
     }
   }
-  const before = cx.tables.length;
+  // The table this statement made, if any (a CREATE OR REPLACE takes the old one out first, so the count may not grow).
+  const lastBefore = cx.tables[cx.tables.length - 1];
   cx.readCreateTable(file, text, st, at);
+  const made = cx.tables[cx.tables.length - 1];
   // The column list: after the name, or after a `COMMENT = '…'` written before it.
   const open = name ? (isPunct(t[name.next], '(') ? name.next : (leadingTableComment(t, name.next)?.to ?? -2) + 1) : -1;
-  if (cx.tables.length > before && open > 0) {
+  if (made && made !== lastBefore && open > 0) {
     const close = matchParen(t, open);
-    if (close > 0) afterCreateTable(cx, file, t, open, close, cx.tables[cx.tables.length - 1]);
+    if (close > 0) afterCreateTable(cx, file, t, open, close, made);
   }
 }
 
@@ -359,6 +361,7 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
       if (c.kind === 'fk') {
         const ref = ownRefs.find((r) => sameColumns(r.from.columns, c.columns) && !r.name) ?? ownRefs.find((r) => sameColumns(r.from.columns, c.columns));
         if (ref) nameRef(ref, c.name, readRefActions(t, from, to));
+        else unreadReference(cx, file, t, from, to, table, c.columns, c.name);
       }
       continue;
     }
@@ -373,11 +376,44 @@ export function afterCreateTable(cx: ConverterContext, file: string, t: Token[],
     if (refAt >= 0) {
       const ref = ownRefs.find((r) => sameColumns(r.from.columns, [field.name]) && !r.name) ?? ownRefs.find((r) => sameColumns(r.from.columns, [field.name]));
       if (ref) nameRef(ref, inline?.name, readRefActions(t, from + refAt, to));
+      else unreadReference(cx, file, t, from + refAt, to, table, [field.name], inline?.name);
     }
     recordColumnLosses(cx, field, where);
   }
   if (names.length === 0) delete table.constraintNames;
   recordTableOptions(cx, t, close, table, file);
+}
+
+/**
+ * A foreign key the grammar read no reference for (Snowflake's grammar drops
+ * `REFERENCES t` with no column list, and `MATCH …` after one): read from the
+ * file's own words — the table after REFERENCES, its column list or else its
+ * primary key — and recorded as read that way. One the words do not name is
+ * recorded as lost. Never dropped without a word.
+ */
+function unreadReference(cx: ConverterContext, file: string, t: Token[], from: number, to: number, table: ModelTable, columns: string[], name: string | undefined): void {
+  const where = { file, line: t[from].line, table: tableLabel(table), ...(columns.length === 1 ? { column: columns[0] } : {}) };
+  let at = from;
+  while (at < to && upper(t[at]) !== 'REFERENCES') at++;
+  const target = at < to ? readName(t, at + 1) : undefined;
+  if (!target || target.next > to || columns.length === 0) {
+    cx.ledger.lost('relationship', 'grammarGap', 'foreign key', where, 'not kept: its referenced table could not be read');
+    return;
+  }
+  const list = readColumnList(t, target.next);
+  const toColumns = list && list.next <= to ? list.columns : [];
+  const actions = readRefActions(t, at, to);
+  cx.refs.push({
+    from: { parts: [...(table.schema ? [table.schema] : []), table.name], columns },
+    to: { parts: cx.qualify(target.parts), columns: toColumns },
+    origin: { file, line: t[from].line },
+    fromTable: table,
+    ...(name ? { name } : {}),
+    ...(actions.onDelete ? { onDelete: actions.onDelete } : {}),
+    ...(actions.onUpdate ? { onUpdate: actions.onUpdate } : {}),
+  });
+  cx.ledger.repaired('relationship', 'grammarGap', 'foreign key', where,
+    toColumns.length ? 'read from the file: the grammar did not read it' : 'read from the file: no column list, so the referenced table\'s primary key');
 }
 
 /**
@@ -1347,6 +1383,27 @@ export function renameTable(cx: ConverterContext, parts: readonly string[], targ
 }
 
 /** A dropped table, and everything still pending that names it. */
+/**
+ * A table about to be made again by CREATE OR REPLACE: gone with what the files
+ * put on it (its own foreign keys, keys, comments and checks still waiting for
+ * it). Foreign keys from other tables into it stay: they name the table, which
+ * the new definition is. CREATE OR ALTER (`alteredTo`: the new definition)
+ * changes the table to the new column list and leaves the constraints it does
+ * not name: its own foreign keys stay, on the new definition.
+ */
+export function replaceTable(cx: ConverterContext, table: ModelTable, alteredTo?: ModelTable): void {
+  const own = (ref: PendingRef): boolean => (ref.fromTable ?? cx.findTable(ref.from.parts)) === table;
+  if (alteredTo) {
+    for (const ref of cx.refs) if (own(ref)) ref.fromTable = alteredTo;
+  } else {
+    removeWhere(cx.refs, own);
+  }
+  removeWhere(cx.keys, (key) => cx.findTable(key.table) === table);
+  removeWhere(cx.comments, (c) => cx.findTable(c.table) === table);
+  removeWhere(readerState(cx).checks, (c) => cx.findTable(c.table) === table);
+  cx.tables.splice(cx.tables.indexOf(table), 1);
+}
+
 export function removeTable(cx: ConverterContext, table: ModelTable): void {
   removeWhere(cx.refs, (ref) => (ref.fromTable ?? cx.findTable(ref.from.parts)) === table || cx.findTable(ref.to.parts) === table);
   removeWhere(cx.keys, (key) => cx.findTable(key.table) === table);

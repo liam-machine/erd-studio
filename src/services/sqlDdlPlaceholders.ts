@@ -3,7 +3,8 @@
  * text: `${catalog}.${schema}.orders` (Databricks bundles, Terraform),
  * `{{ schema }}` and `{{ var('schema') }}` (dbt, Jinja), `$(schema)`
  * (sqlcmd), `@schema@` (Ant, Maven), `<%= schema %>` (ERB), `%(schema)s` and
- * `{schema}.orders` (Python), `&schema.` (SQL*Plus). Real deployments fill them in; an import
+ * `{schema}.orders` (Python), `&schema.` (SQL*Plus), and Snowflake's and Databricks'
+ * `IDENTIFIER($schema)` / `IDENTIFIER(:t)` / `IDENTIFIER('s.orders')`. Real deployments fill them in; an import
  * reads the file as written, so each placeholder becomes the name inside it:
  *
  *  - a placeholder that is a whole catalog (the first part of a three-part
@@ -76,7 +77,27 @@ const NAME_START = /[A-Za-z_\u0080-￿]/;
 const BACKSLASH = new Set<SqlDialect>(['mysql', 'databricks', 'snowflake', 'bigquery']);
 
 /** A cheap first test: none of the syntaxes' opening characters means nothing to do. */
-const MAY_HOLD = /\$\{|\{\{|\{%|\{#|\{[A-Za-z_]\w*\}|\$\(|@[A-Za-z_]\w*@|<%|%\(|&&?[A-Za-z_]\w*\./;
+const MAY_HOLD = /\$\{|\{\{|\{%|\{#|\{[A-Za-z_]\w*\}|\$\(|@[A-Za-z_]\w*@|<%|%\(|&&?[A-Za-z_]\w*\.|\bIDENTIFIER\s*\(/i;
+
+/** Dialects with an `IDENTIFIER(…)` clause that names an object from a variable or a string (Snowflake, Databricks). */
+const IDENTIFIER_CLAUSE = new Set<SqlDialect>(['snowflake', 'databricks']);
+
+/**
+ * `IDENTIFIER($tbl)`, `IDENTIFIER(:tbl)` (a session variable or a bind parameter)
+ * and `IDENTIFIER('db.s.orders')` (a name in a string) at `i`: the variable's
+ * name, or the string's name, as for any other placeholder; a concatenation
+ * (`IDENTIFIER(:catalog || '.s.orders')`) reads as its parts joined. Anything
+ * else (an expression, a name that is not one) is left as written.
+ */
+function identifierClauseAt(text: string, i: number): Match | undefined {
+  if (i > 0 && NAME_CHAR.test(text[i - 1])) return undefined;
+  const m = /^IDENTIFIER\s*\(\s*((?:[$:][A-Za-z_]\w*|'[^'\n]{0,256}')(?:\s*\|\|\s*(?:[$:][A-Za-z_]\w*|'[^'\n]{0,256}'))*)\s*\)/i.exec(text.slice(i, i + 1024));
+  if (!m) return undefined;
+  // Each part as it reads: a variable its name, a string its text (`:catalog || '.s.orders'` → catalog.s.orders).
+  const name = [...m[1].matchAll(/[$:]([A-Za-z_]\w*)|'([^']*)'/g)].map((p) => p[1] ?? p[2]).join('');
+  if (!/^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*){0,2}$/.test(name)) return undefined;
+  return { start: i, end: i + m[0].length, name };
+}
 
 /** The placeholder starting at `i`, or undefined. */
 function placeholderAt(text: string, i: number): Match | undefined {
@@ -359,6 +380,10 @@ function findPlaceholders(text: string, dialect: SqlDialect, ambiguous?: Readonl
         i = close < 0 ? i + tag[0].length : close + tag[0].length;
         continue;
       }
+    }
+    if ((c === 'I' || c === 'i') && IDENTIFIER_CLAUSE.has(dialect)) {
+      const clause = identifierClauseAt(text, i);
+      if (clause) { out.push(clause); i = clause.end; continue; }
     }
     const match = placeholderAt(text, i);
     if (match) { out.push(match); i = match.end; continue; }

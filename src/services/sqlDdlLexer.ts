@@ -277,12 +277,14 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
       continue;
     }
     // A name that starts with a digit (`cat.340b_silver.t`, a column `3RD_PARTY_VENDOR`: Spark, MySQL
-    // and Hive accept it unquoted): a word, never the number 340 and a word b_silver. Only a name
-    // with an underscore, or a part of a dotted name: `10L`, `1e5` and `8K` stay numbers.
+    // and Hive accept it unquoted): a word, never the number 340 and a word b_silver. A name with an
+    // underscore, or a part of a dotted name; in Spark and MySQL, any (`2fa`, MySQL's `3d`). A number
+    // literal stays a number: `1e5`, `0x1F`, `0b101`, and Spark's `10L`, `3D`, `1BD`.
     if (/[0-9]/.test(c)) {
       const run = /^[0-9]+[A-Za-z_][A-Za-z0-9_$]*/.exec(text.slice(i, i + 256));
-      if (run && !/^[0-9]+(e[0-9]+|[LSYDF]|BD)$/i.test(run[0])
-        && (run[0].includes('_') || afterNamePart(tokens, start) || /^\.[A-Za-z_`"[]/.test(text.slice(i + run[0].length, i + run[0].length + 2)))) {
+      if (run && !NUMBER_WITH_LETTERS.test(run[0]) && !(dialect === 'databricks' && SPARK_NUMBER_SUFFIX.test(run[0]))
+        && (run[0].includes('_') || DIGIT_LED_NAMES.has(dialect) || afterNamePart(tokens, start)
+          || /^\.[A-Za-z_`"[]/.test(text.slice(i + run[0].length, i + run[0].length + 2)))) {
         i += run[0].length;
         push({ kind: 'word', value: run[0], start, end: i, line: startLine });
         continue;
@@ -607,6 +609,14 @@ function startsDefinition(tokens: readonly Token[], i: number): boolean {
   }
   return false;
 }
+
+/** Dialects whose unquoted names may start with a digit (`2fa`, `3d_model`): Spark (Databricks, Hive) and MySQL. */
+const DIGIT_LED_NAMES: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['databricks', 'mysql']);
+
+/** A number literal written with letters: an exponent (`1e5`, `1e`-`5`), hex and binary (`0x1F`, `0b101`). */
+const NUMBER_WITH_LETTERS = /^(?:[0-9]+e[0-9]*|0x[0-9a-f]+|0b[01]+)$/i;
+/** Spark's typed number literals (`10L`, `3D`, `1BD`, `1E10D`): numbers in Spark, though MySQL would read `3d` as a name. */
+const SPARK_NUMBER_SUFFIX = /^[0-9]+(?:e[0-9]*)?(?:[LSYDF]|BD)$/i;
 
 /** Whether a token starting at `offset` follows a name and a dot with no space between (`a.` before `340b`). */
 function afterNamePart(tokens: readonly Token[], offset: number): boolean {

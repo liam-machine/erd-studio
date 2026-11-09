@@ -270,6 +270,7 @@ export const SKIP_LABELS = {
   clientCommand: ['SQL*Plus command (PROMPT, SET, CONNECT, DEFINE, @file…)', 'SQL*Plus commands (PROMPT, SET, CONNECT, DEFINE, @file…)'],
   existing: ['CREATE TABLE IF NOT EXISTS of a table already defined', 'CREATE TABLE IF NOT EXISTS statements of tables already defined'],
   temporary: ['SQL Server temporary table (#name: a session\'s scratch table, not design)', 'SQL Server temporary tables (#name: a session\'s scratch tables, not design)'],
+  sessionTable: ['temporary table (TEMPORARY, TEMP, VOLATILE: a session\'s scratch table, not design)', 'temporary tables (TEMPORARY, TEMP, VOLATILE: a session\'s scratch tables, not design)'],
   alter: ['ALTER TABLE action ERD Studio does not read', 'ALTER TABLE actions ERD Studio does not read'],
   alterOwner: ['ALTER TABLE … OWNER TO (ownership, not design)', 'ALTER TABLE … OWNER TO statements (ownership, not design)'],
   alterSetting: ['ALTER TABLE setting (storage, triggers, tags, masks, row security…)', 'ALTER TABLE settings (storage, triggers, tags, masks, row security…)'],
