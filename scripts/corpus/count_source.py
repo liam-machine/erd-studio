@@ -247,10 +247,12 @@ class Model:
             self.order.append(k)
         return self.tables[k]
 
-    def create(self, name, schema, where):
+    def create(self, name, schema, where, keep_fks=False):
         """A CREATE TABLE: the table, new, and its key. Created again in the same schema (CREATE OR
         REPLACE; the callers leave out a plain CREATE of a table still defined, which the engine refuses),
-        the later one counts; a table of the same name in another schema is another table, kept beside
+        the later one counts, and the old one's own foreign keys go with it (the engine drops the table),
+        unless `keep_fks` (CREATE OR ALTER changes the table to the new column list; constraints it does
+        not name stay); a table of the same name in another schema is another table, kept beside
         it under schema.name."""
         k = name.lower()
         old = self.tables.get(k)
@@ -258,8 +260,11 @@ class Model:
             k = f'{schema}.{name}'.lower()
             self.approx.append(f"{where}: {name} is in schemas {old['schema']} and {schema}: both counted; keys, references and comments naming it without a schema are read as the first one's")
         if k in self.tables:
+            old_schema = (self.tables[k].get('schema') or '').lower()
             self.order.remove(k)
             del self.tables[k]
+            if not keep_fks:
+                self.fks[:] = [fk for fk in self.fks if not (fk[0].lower() == name.lower() and (not fk[5] or not old_schema or fk[5].lower() == old_schema))]
         self.tables[k] = {'name': name, 'schema': schema, 'columns': [], 'pk': [], 'description': None}
         self.order.append(k)
         return self.tables[k], k
@@ -388,8 +393,10 @@ def add_column(m, table, cd, dialect):
         elif isinstance(k, exp.UniqueColumnConstraint):
             flags += 'U'
             m.uniques.append((table['name'], [name], False))
-        elif isinstance(k, exp.Reference):
-            to, _s, to_cols = ref_target(k)
+        elif isinstance(k, exp.Reference) or (isinstance(k, exp.ForeignKey) and isinstance(k.args.get('reference'), exp.Reference)):
+            # `c INT REFERENCES t (id)`, and a column's own `[CONSTRAINT n] FOREIGN KEY REFERENCES t` (Databricks,
+            # Snowflake); with no column list the reference is to t's primary key.
+            to, _s, to_cols = ref_target(k if isinstance(k, exp.Reference) else k.args['reference'])
             m.fks.append((table['name'], [name], to, to_cols, None, table.get('schema'), _s or table.get('schema')))
         elif isinstance(k, exp.CommentColumnConstraint):
             desc = ident(k.this)
@@ -438,7 +445,7 @@ def written_types(sql):
     return out
 
 
-def on_create_table(m, e, dialect, where, written=None):
+def on_create_table(m, e, dialect, where, written=None, or_alter=False):
     target = e.this
     tbl = target.this if isinstance(target, exp.Schema) else target
     name = ident(tbl)
@@ -457,7 +464,7 @@ def on_create_table(m, e, dialect, where, written=None):
     # refused: the first definition stays. Only CREATE OR REPLACE (or a DROP before it) replaces it.
     if not e.args.get('replace') and m.defined(name, schema_of(tbl)):
         return
-    t, key = m.create(name, schema_of(tbl), where)
+    t, key = m.create(name, schema_of(tbl), where, keep_fks=or_alter)
     if not isinstance(target, exp.Schema):
         q = e.args.get('expression')
         # SELECT * (or t.*) names no columns: the source table's, which may not be in the files.
@@ -629,9 +636,9 @@ def structural_create(m, sql, where):
         if pm:
             m.parent[name.lower()] = idents(pm.group(1))[-1]
         return True
-    if not re.search(r'\bOR\s+(?:REPLACE|REFRESH)\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
+    if not re.search(r'\bOR\s+(?:REPLACE|REFRESH|ALTER)\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
         return True
-    t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where)
+    t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where, keep_fks=bool(re.search(r'\bOR\s+ALTER\b', s[:mm.start(1)], re.I)))
     if mm.group(2) != '(':
         m.drop(key)
         m.approx.append(f'{where}: {name} has no column list (CREATE TABLE ... AS / LIKE): not counted')
@@ -761,8 +768,11 @@ def count_sql(entry, base):
                     m.comments.append((em.group(2), em.group(3), em.group(1).replace("''", "'")))
                 return
             kind = None
-            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up):
-                return  # a temporary table (in a procedure body) is not part of the schema
+            # A temporary table (in a procedure body) is not part of the schema; Oracle's GLOBAL TEMPORARY
+            # TABLE is (a lasting definition whose rows are the session's).
+            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up) \
+                    and not (dialect == 'oracle' and re.match(r'CREATE\s+GLOBAL\s+TEMPORARY\s', up)):
+                return
             # Snowflake's HYBRID and ICEBERG tables, CREATE OR ALTER TABLE and Lakeflow's CREATE OR REFRESH STREAMING TABLE are tables too.
             if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\b', up):
                 kind = 'create'
@@ -834,7 +844,8 @@ def count_sql(entry, base):
                 snapshot = (list(m.order), {k: dict(v, columns=list(v['columns']), pk=list(v['pk'])) for k, v in m.tables.items()}, len(m.fks), len(m.uniques), set(m.partitions), dict(m.parent))
                 try:
                     if kind == 'create' and isinstance(parsed, exp.Create) and (parsed.args.get('kind') or '').upper() == 'TABLE':
-                        on_create_table(m, parsed, sg, where, written_types(body) if dialect == 'snowflake' else None); ok = True
+                        on_create_table(m, parsed, sg, where, written_types(body) if dialect == 'snowflake' else None,
+                                        or_alter=bool(re.match(r'CREATE\s+OR\s+ALTER\b', body, re.I))); ok = True
                     elif kind == 'alter' and isinstance(parsed, exp.Alter):
                         on_alter(m, parsed, sg, where, written_alter_types(body) if dialect == 'snowflake' else None); ok = True
                     elif kind == 'index' and isinstance(parsed, exp.Create):

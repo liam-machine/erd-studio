@@ -118,6 +118,19 @@ describe('a primary key chosen differently from the source', () => {
     expect(s.silentLosses.primaryKeys).toBe(1);
     expect(s.verdict).toBe('With problems');
   });
+
+  it('is a silent loss when the words are only scattered over lines that say nothing of the choice', () => {
+    // A table named as its key column (Date.Date): `date_key` alone names the table and a key, and any line names Date.
+    const dated = {
+      ...truth,
+      tables: [{ name: 'Date', pk: ['Date'], columns: [['Date', 'DATE', 'PN'], ['DateKey', 'INT', '']] }],
+    } as unknown as TruthSample;
+    const given = run(['date: 2 columns · primary key date_key', 'sales.order_date_key → date.date_key']);
+    given.tables[0].name = 'Date';
+    const s = scoreSample('s', dated, given);
+    expect(s.primaryKeys.wrongReported).toBe(0);
+    expect(s.silentLosses.primaryKeys).toBe(1);
+  });
 });
 
 describe('scorecard harness rules', () => {

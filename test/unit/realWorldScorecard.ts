@@ -477,6 +477,24 @@ function mentioned(shown: readonly string[], ...names: string[]): boolean {
   return texts.some((s) => res.every((re) => re.test(s)));
 }
 
+/**
+ * Whether one shown line names every one of `names` as its own word (`date_key` and `DateKey` are one
+ * word), each as often as `names` lists it: a table named as its key column (Date.Date) needs `date`
+ * twice, so a line that names the table once (`date: 8 columns · primary key date_key`) says nothing of
+ * its key.
+ */
+function namedTogether(shown: readonly string[], names: readonly string[]): boolean {
+  const need = new Map<string, number>();
+  for (const n of names) need.set(canon(n), (need.get(canon(n)) ?? 0) + 1);
+  return shown.some((line) => {
+    const have = new Map<string, number>();
+    for (const w of line.replace(/\S+\.(sql|dbml|tmdl|bim|ya?ml|json)\b/gi, ' ').split(/[^A-Za-z0-9_]+/)) {
+      if (w) have.set(canon(w), (have.get(canon(w)) ?? 0) + 1);
+    }
+    return [...need].every(([w, n]) => (have.get(w) ?? 0) >= n);
+  });
+}
+
 export type Verdict = 'Failed' | 'With problems' | 'With gaps' | 'Clean';
 
 export interface SampleScore {
@@ -689,8 +707,10 @@ export function scoreSample(slug: string, sourceTruth: TruthSample, given: Impor
     if (have.join(',') === want.join(',')) { pkMatched++; if (want.length > 1) pkComposite++; continue; }
     if (have.length === 0) { pkMissing++; if (!mentioned(shown, t.name, 'key')) pkSilent++; continue; }
     pkWrong.push(`${t.name}: (${have.join(', ')}) instead of (${want.join(', ')})`);
-    // A key chosen on purpose and said (a Power BI date table's: every relationship joins DateKey, Date stays unique) is a gap, not a silent change.
-    if (mentioned(shown, t.name, 'key') && t.pk.every((c) => mentioned(shown, t.name, c))) pkWrongReported++;
+    // A key chosen on purpose and said (a Power BI date table's: every relationship joins DateKey, Date stays unique) is a gap,
+    // not a silent change: one line names the table, a key, the key chosen and the source's.
+    const chosen = (got.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name);
+    if (namedTogether(shown, [t.name, 'key', ...chosen, ...t.pk])) pkWrongReported++;
     else pkSilent++;
   }
   const pkImported = run.tables.filter((t) => pkOf(t).length > 0).length;
