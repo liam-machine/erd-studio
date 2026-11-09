@@ -190,10 +190,44 @@ export function writeDbml(
   tables: readonly ModelTable[],
   refs: readonly ResolvedRef[],
 ): string {
+  return writeDbmlMapped(enums, tables, refs).dbml;
+}
+
+/** What wrote a line of the DBML: a table's block, a reference (its Ref line, or the column line declaring it), an enum. */
+export interface DbmlLineOwner {
+  /** 1-based, inclusive. */
+  from: number;
+  to: number;
+  table?: ModelTable;
+  ref?: ResolvedRef;
+  enum?: ModelEnum;
+}
+
+/**
+ * {@link writeDbml}, and which table, reference or enum wrote each line, so
+ * a line the DBML reader rejects can be traced to the statement in the user's
+ * files that gave it (the converter leaves that one out, not the import).
+ */
+export function writeDbmlMapped(
+  enums: readonly ModelEnum[],
+  tables: readonly ModelTable[],
+  refs: readonly ResolvedRef[],
+): { dbml: string; owners: DbmlLineOwner[] } {
   const blocks: string[] = [];
+  const owners: DbmlLineOwner[] = [];
+  let line = 1;
+  /** Adds a block (blank line between blocks) and returns its first line. */
+  const push = (block: string): number => {
+    const start = line;
+    blocks.push(block);
+    line += block.split('\n').length + 1;
+    return start;
+  };
   for (const e of enums) {
     const lines = e.values.map((v) => `  ${quoteIdent(v.name)}${v.note ? ` [note: ${dbmlString(v.note)}]` : ''}`);
-    blocks.push(`Enum ${dbmlTableName(e)} {\n${lines.join('\n')}\n}`);
+    const block = `Enum ${dbmlTableName(e)} {\n${lines.join('\n')}\n}`;
+    const start = push(block);
+    owners.push({ from: start, to: start + block.split('\n').length - 1, enum: e });
   }
   // One-to-ones declared on their FK column (one per column; any other is written as a Ref).
   const inline = new Map<ModelField, string>();
@@ -222,15 +256,36 @@ export function writeDbml(
       lines.push('', '  checks {', ...table.checks.map((c) => `    ${dbmlExpression(c.expression)}${c.name ? ` [name: ${dbmlString(c.name)}]` : ''}`), '  }');
     }
     if (table.note) lines.push('', `  Note: ${dbmlString(table.note)}`);
-    blocks.push(`Table ${dbmlTableName(table)}${header} {\n${lines.join('\n')}\n}`);
+    const block = `Table ${dbmlTableName(table)}${header} {\n${lines.join('\n')}\n}`;
+    const start = push(block);
+    // A column line declaring a one-to-one is the reference's; the rest of the block is the table's.
+    let at = start + 1;
+    table.fields.forEach((f, i) => {
+      const height = lines[i].split('\n').length;
+      const declared = inline.has(f) ? [...placed].find((r) => r.from === table && r.fromColumns[0] === f.name) : undefined;
+      if (declared) owners.push({ from: at, to: at + height - 1, ref: declared });
+      at += height;
+    });
+    owners.push({ from: start, to: start + block.split('\n').length - 1, table });
   }
   const blockRefs = refs.filter((r) => !placed.has(r));
   if (blockRefs.length) {
     const end = (table: ModelTable, columns: string[]): string =>
       columns.length === 1 ? `${dbmlTableName(table)}.${quoteIdent(columns[0])}` : `${dbmlTableName(table)}.(${columns.map(quoteIdent).join(', ')})`;
-    blocks.push(blockRefs.map((r) => (r.oneToOne
+    const start = push(blockRefs.map((r) => (r.oneToOne
       ? `Ref: ${end(r.to, r.toColumns)} - ${end(r.from, r.fromColumns)}${refSettings(r)}`
       : `Ref: ${end(r.from, r.fromColumns)} > ${end(r.to, r.toColumns)}${refSettings(r)}`)).join('\n'));
+    blockRefs.forEach((r, i) => owners.push({ from: start + i, to: start + i, ref: r }));
   }
-  return blocks.join('\n\n') + '\n';
+  return { dbml: blocks.join('\n\n') + '\n', owners };
+}
+
+/** The most specific owner of `line` (a reference's line before its table's block). */
+export function ownerOfLine(owners: readonly DbmlLineOwner[], line: number): DbmlLineOwner | undefined {
+  let best: DbmlLineOwner | undefined;
+  for (const o of owners) {
+    if (line < o.from || line > o.to) continue;
+    if (!best || o.to - o.from < best.to - best.from) best = o;
+  }
+  return best;
 }

@@ -93,6 +93,7 @@ import {
   type ConverterContext,
   type ModelEnum,
   type ModelTable,
+  type ResolvedRef,
   type Origin,
   type PendingComment,
   type PendingKey,
@@ -117,7 +118,7 @@ import { ALL_RUNGS, REPAIR_LADDER, columnNamesOf, isConstraintItem, missingComma
 import { salvageCreateTable } from './sqlDdlSalvage';
 import { resolvePartitions } from './sqlDdlPartitions';
 import { isChildWithoutTable, readStatement } from './sqlDdlStatements';
-import { quoteIdent, resolveRefs, writeDbml } from './sqlDdlWriter';
+import { ownerOfLine, quoteIdent, resolveRefs, writeDbmlMapped } from './sqlDdlWriter';
 
 export type {
   RawSqlCheck,
@@ -712,6 +713,9 @@ function tablePrimaryKeyItem(t: Token[], open: number, close: number): string[] 
 function spelledAsColumns(table: ModelTable, columns: readonly string[]): string[] {
   return columns.map((c) => table.fields.find((f) => f.name === c)?.name ?? table.fields.find((f) => sameIdent(f.name, c))?.name ?? c);
 }
+
+/** How many times a converted DBML file is read back and what it rejects left out (each pass leaves out at least one statement). */
+const MAX_DBML_CHECKS = 5;
 
 /** The longest a skipped-summary line runs before the file's next kinds go on a line of their own. */
 const SKIPPED_LINE_MAX = 300;
@@ -1958,8 +1962,16 @@ function isWarehouseName(name: string): boolean {
  * not read (each also a `problem` ledger entry). `ok: false` only when there
  * are no files, or no table read at all.
  */
-export function convertSqlDdl(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }, engine: SqlParseEngine): SqlDdlToDbmlResult {
-  const result = convertFiles(input, engine);
+/**
+ * Reads a converted DBML file as Import DBML will (`readDbml`): the lines it
+ * rejects, 1-based. `sqlImportEngine.ts` passes one, so a table or reference
+ * the converter wrote but DBML cannot read is left out and said, never the
+ * reason the whole import fails.
+ */
+export type DbmlCheck = (dbml: string) => ReadonlyArray<{ line: number; message: string }>;
+
+export function convertSqlDdl(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }, engine: SqlParseEngine, check?: DbmlCheck): SqlDdlToDbmlResult {
+  const result = convertFiles(input, engine, check);
   const safe = safeShownText((input.files ?? []).map((f) => f.name));
   const problems = result.problems.map((p) => ({ ...p, message: safe(p.message) }));
   return result.ok
@@ -1994,7 +2006,7 @@ function safeShownText(fileNames: readonly string[]): (text: string) => string {
   };
 }
 
-function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }, engine: SqlParseEngine): SqlDdlToDbmlResult {
+function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }, engine: SqlParseEngine, check?: DbmlCheck): SqlDdlToDbmlResult {
   if (!isSqlDialect(input.dialect)) {
     return { ok: false, problems: [{ file: '', message: `Unknown SQL dialect: ${String(input.dialect)}.` }] };
   }
@@ -2027,7 +2039,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     return { ok: false, problems: [problem], ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith };
   }
   converter.applyDeferred();
-  const refs = resolveRefs(converter);
+  let refs = resolveRefs(converter);
   if (converter.appliedChanges > 0) {
     converter.notes.push(`${converter.appliedChanges} later schema ${converter.appliedChanges === 1 ? 'change was' : 'changes were'} applied in file order (columns added, renamed, changed or dropped; keys dropped; tables renamed or dropped).`);
   }
@@ -2039,6 +2051,42 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     })),
   );
   const unusedEnums = converter.enums.length - usedEnums.length;
+  let written = writeDbmlMapped(usedEnums, converter.tables, refs);
+  // What DBML cannot read is left out at its statement, never the whole import (a key naming a column
+  // the table spells otherwise once failed every table, pointing into the converted file).
+  for (let pass = 0; check && pass < MAX_DBML_CHECKS; pass++) {
+    const diagnostics = check(written.dbml);
+    if (diagnostics.length === 0) break;
+    const tables = new Map<ModelTable, string>();
+    const badRefs = new Map<ResolvedRef, string>();
+    for (const d of diagnostics) {
+      const owner = ownerOfLine(written.owners, d.line);
+      if (owner?.ref && !badRefs.has(owner.ref)) badRefs.set(owner.ref, d.message);
+      else if (owner?.table && !owner.ref && !tables.has(owner.table)) tables.set(owner.table, d.message);
+    }
+    if (tables.size === 0 && badRefs.size === 0) break;
+    for (const [table, message] of tables) {
+      converter.tables.splice(converter.tables.indexOf(table), 1);
+      converter.problems.push({
+        file: table.origin.file, line: table.origin.line, kind: 'structure', table: tableLabel(table),
+        message: `Table ${tableLabel(table)} could not be written as DBML (${ledgerText(cleanDiagnostic(message), 120, true)}), so it is left out.`,
+      });
+    }
+    refs = refs.filter((r) => {
+      const dropped = tables.has(r.from) || tables.has(r.to);
+      const message = badRefs.get(r);
+      if (!dropped && message === undefined) return true;
+      const origin = r.pending?.origin;
+      converter.ledger.lost('relationship', 'parseError', 'foreign key',
+        { ...(origin ? { file: origin.file, line: origin.line } : {}), table: tableLabel(r.from), column: r.fromColumns.join('+') },
+        dropped ? `not kept: ${tableLabel(tables.has(r.from) ? r.from : r.to)} is left out` : `not kept: it could not be written as DBML (${ledgerText(cleanDiagnostic(message ?? ''), 80, true)})`);
+      return false;
+    });
+    if (converter.tables.length === 0) {
+      return { ok: false, problems: converter.problems, ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith, ...stopped };
+    }
+    written = writeDbmlMapped(usedEnums, converter.tables, refs);
+  }
   const partitions = readerState(converter).partitionsResolved;
   const skipped = [
     ...unused.map((name) => `${name}: no tables, keys or comments in it`),
@@ -2048,7 +2096,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
   ];
   return {
     ok: true,
-    dbml: writeDbml(usedEnums, converter.tables, refs),
+    dbml: written.dbml,
     tableCount: converter.tables.length,
     refCount: refs.length,
     skipped,

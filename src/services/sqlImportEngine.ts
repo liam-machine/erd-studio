@@ -27,7 +27,9 @@ import {
   type SqlDdlToDbmlResult,
   type SqlParseEngine,
   type SqlParseFormat,
+  type DbmlCheck,
 } from './sqlDdlImport';
+import { readDbml } from './dbmlImportParse';
 
 export { detectSqlDialect, isSqlDialect, SQL_DIALECTS, SQL_DIALECT_LABELS };
 export type { SqlDdlFile, SqlDdlProblem, SqlDdlToDbmlInput, SqlDdlToDbmlResult, SqlDialect } from './sqlDdlImport';
@@ -59,5 +61,16 @@ export const dbmlCoreSqlEngine: SqlParseEngine = (sql: string, format: SqlParseF
  * repair ladder and salvage off).
  */
 export function sqlDdlToDbml(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOptions }): SqlDdlToDbmlResult {
-  return convertSqlDdl(input, dbmlCoreSqlEngine);
+  return convertSqlDdl(input, dbmlCoreSqlEngine, readsAsDbml);
 }
+
+/**
+ * The converted DBML read back as Import DBML reads it (`readDbml`, the same
+ * pinned parser): what it rejects is left out at its statement by the
+ * converter, so one table never fails the import.
+ */
+export const readsAsDbml: DbmlCheck = (dbml) => {
+  const read = readDbml(dbml);
+  // A parser that stopped says nothing about one line: nothing to leave out (the import says it then).
+  return read.ok || read.threw ? [] : read.diagnostics;
+};

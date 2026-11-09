@@ -778,6 +778,41 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(result.ledger?.filter((e) => e.outcome === 'problem').map((e) => e.where)).toEqual([{ file: 'a.sql', line: 1 }, { file: 'keys/b.sql', line: 1 }]);
   });
 
+  it('what the DBML reader rejects is left out at its statement, never the whole import', () => {
+    const files = [{ name: 'a.sql', text: 'CREATE TABLE a (id int PRIMARY KEY);\n\nCREATE TABLE b (\n  id int PRIMARY KEY,\n  a_id int REFERENCES a (id)\n);\nCREATE TABLE c (id int PRIMARY KEY, a_id int REFERENCES a (id));' }];
+    // The reader rejects b's block (any line of it), then nothing.
+    const rejectB = (dbml: string): Array<{ line: number; message: string }> => {
+      const lines = dbml.split('\n');
+      const at = lines.findIndex((l) => l.startsWith('Table "b"'));
+      return at < 0 ? [] : [{ line: at + 2, message: "No column named 'X' inside Table 'b'" }];
+    };
+    const r = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectB);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.dbml).not.toContain('Table "b"');
+    expect(r.dbml).toContain('Ref: "c"."a_id" > "a"."id"');
+    expect(r.problems).toEqual([expect.objectContaining({ file: 'a.sql', line: 3, table: 'b' })]);
+    expect(r.problems[0].message).toMatch(/^Table b could not be written as DBML \(No column named 'X' inside Table 'b'\), so it is left out\.$/);
+    expect(r.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', where: { file: 'a.sql', line: 3, table: 'b', column: 'a_id' } }));
+    // A rejected Ref line leaves out that reference only.
+    const rejectRef = (dbml: string): Array<{ line: number; message: string }> => {
+      const at = dbml.split('\n').findIndex((l) => l.startsWith('Ref: "c"'));
+      return at < 0 ? [] : [{ line: at + 1, message: 'bad ref' }];
+    };
+    const r2 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, rejectRef);
+    expect(r2.ok && r2.tableCount).toBe(3);
+    expect(r2.ok && r2.dbml).not.toContain('Ref: "c"');
+    expect(r2.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'relationship', cause: 'parseError', where: { file: 'a.sql', line: 7, table: 'c', column: 'a_id' } }));
+    // Every table rejected: nothing imported, each said at its own line.
+    const r3 = convertSqlDdl({ dialect: 'postgres', files }, dbmlCoreSqlEngine, (dbml) => dbml.split('\n').flatMap((l, i) => (l.startsWith('Table') ? [{ line: i + 1, message: 'no' }] : [])));
+    expect(r3.ok).toBe(false);
+    expect(r3.problems.map((p) => [p.table, p.line])).toEqual([['a', 1], ['b', 3], ['c', 7]]);
+    // The engine reads its output back as Import DBML does: a clean file is unchanged.
+    const clean = sqlDdlToDbml({ dialect: 'postgres', files });
+    expect(clean.ok && clean.tableCount).toBe(3);
+    expect(clean.problems).toEqual([]);
+  });
+
   it('splits a file\'s skipped summary into lines of at most 300 characters, every kind still counted', () => {
     const sql = [
       'SET x = 1;', 'CREATE VIEW v AS SELECT 1;', 'CREATE INDEX i ON a (id);', 'CREATE SEQUENCE s;', 'DROP TABLE IF EXISTS z;',
