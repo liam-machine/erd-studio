@@ -1361,7 +1361,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // The crash screen's Send Feedback: the canvas-less flow (a draft tab is no canvas).
       (prefill) => vscode.commands.executeCommand('erdStudio.reportBug', prefill),
       // The banner's Show Import Report: the import's report (in memory, read-only).
-      () => vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND),
+      (reportId?: number) => (reportId === undefined
+        ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND)
+        : vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId)),
     )),
     {
       // The first draft's quality flags, counted off the onboarding trail.
@@ -3733,7 +3735,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Show Import Report: the last import's ledger, grouped and counted, read-only
     // (src/services/importReport.ts). Linked from the draft's banner, the toast
     // after a Keep that left tables out and the imports' failure messages.
-    vscode.commands.registerCommand(SHOW_IMPORT_REPORT_COMMAND, () => showImportReport()),
+    vscode.commands.registerCommand(SHOW_IMPORT_REPORT_COMMAND, (arg?: unknown) => showImportReport(arg)),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
       async (layerArg?: Layer | { type: 'layer'; layer: Layer }) => {

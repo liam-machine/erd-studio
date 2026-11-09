@@ -219,8 +219,8 @@ export interface ImportDbmlUi {
   addLayer(): Promise<void>;
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
-  /** Run Show Import Report (`erdStudio.showImportReport`). Absent (a test's fake): no such button. */
-  showImportReport?(): Promise<void>;
+  /** Run Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent (a test's fake): no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 export interface ImportDbmlDeps {
@@ -543,19 +543,17 @@ async function runImportDbml(
     // with use lines has one problem, said in full: no report.
     const reportSource = IMPORT_REPORT_SOURCES[source];
     const reported = !quiet && !read.importsOtherFiles && reportSource !== undefined && ui.showImportReport !== undefined;
-    if (reported) {
-      recordImportReport({
-        source: reportSource!,
-        title,
-        from: `from ${fileName}`,
-        status: 'failed',
-        ledger: problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML'),
-        files: { [fileName]: filePath },
-      });
-    }
+    const failedReportId = !reported ? undefined : recordImportReport({
+      source: reportSource!,
+      title,
+      from: `from ${fileName}`,
+      status: 'failed',
+      ledger: problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML'),
+      files: { [fileName]: filePath },
+    });
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
-      ...(reported ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!() } : {}),
+      ...(failedReportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(failedReportId) } : {}),
     });
     return undefined;
   }
@@ -843,7 +841,7 @@ async function runImportDbml(
           changeOptions: changeOptions !== undefined,
           ...(draftOptions.scopes ? { scopes: draftOptions.scopes } : {}),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : deps.origin?.notice ? { notice: deps.origin.notice } : {}),
-          ...(reportId !== undefined ? { importReport: true } : {}),
+          ...(reportId !== undefined ? { importReportId: reportId } : {}),
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
@@ -965,7 +963,7 @@ async function runImportDbml(
     const partial = reportId !== undefined && ui.showImportReport ? partialImportMessage(title, reportLedger) : undefined;
     if (partial) {
       void Promise.resolve(ui.showInformationMessage(partial, SHOW_IMPORT_REPORT_LABEL))
-        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.() : undefined))
+        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.(reportId) : undefined))
         .catch((err: unknown) => log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
     }
     return { domainPath, plan };
@@ -1178,6 +1176,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     },
     addLayer: async () => { await vscode.commands.executeCommand('erdStudio.addLayer'); },
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
-    showImportReport: async () => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

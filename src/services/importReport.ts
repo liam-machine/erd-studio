@@ -18,8 +18,17 @@
  * that names a file the import read carries a link: the page posts the
  * link's index ({@link parseImportReportToHost}), and the host opens the
  * file at that line from its own table ({@link ImportReportView.links}). No
- * path the page sends is ever opened, and nothing is written anywhere: the
- * report lives in memory until the next import replaces it.
+ * path the page sends is ever opened (a click carries the token of the page
+ * it came from, so one from a page a newer report replaced opens nothing),
+ * and nothing is written anywhere: the reports live in memory
+ * (`importReportStore.ts`, the last few imports, by id).
+ *
+ * A ledger crosses bundle and worker boundaries as plain data, so an
+ * outcome, unit or cause this build does not know is reported (as `lost`,
+ * an `item`, `Other`), never thrown on or dropped; a file named by its
+ * absolute path (read from outside the open folder) is shown by its folder
+ * and name only; and a huge ledger lists at most {@link MAX_ITEMS_LISTED}
+ * entries on the page, counting the rest exactly.
  *
  * Nonce-only CSP, no remote resource, `--vscode-*` colours only, BEM class
  * names. Every string from the ledger is cut to one short line
@@ -181,6 +190,14 @@ export interface ImportReportView {
 
 /** At most this many entries are listed per cause; the rest are counted (Show Logs lists every one). */
 export const MAX_ITEMS_PER_GROUP = 200;
+/**
+ * At most this many entries are listed on the whole page, however many
+ * causes the ledger spreads over: each cause lists an even share (at least
+ * {@link MIN_ITEMS_PER_GROUP}, at most {@link MAX_ITEMS_PER_GROUP}) and
+ * counts the rest, so a huge import's report stays quick to open.
+ */
+export const MAX_ITEMS_LISTED = 1000;
+const MIN_ITEMS_PER_GROUP = 5;
 
 const MAX_NAME = 80;
 const MAX_WHAT = 60;
@@ -204,14 +221,57 @@ function statusSentence(record: Pick<ImportReportRecord, 'status' | 'diagram'>):
 
 const fmt = (n: number): string => n.toLocaleString('en-US');
 
+/**
+ * `table[key]` only for the table's own keys: a ledger crosses bundle and
+ * worker boundaries as plain data, so an outcome, unit or cause this build
+ * does not know (or one named like `constructor`) reads as absent, never as
+ * an inherited Object property.
+ */
+function own<T>(table: Readonly<Record<string, T>>, key: unknown): T | undefined {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+/** A unit's nouns; one this build does not know is an `item`. */
+function nounsOf(unit: unknown): readonly [string, string] {
+  return own(LEDGER_UNIT_NOUNS, unit) ?? ['item', 'items'];
+}
+
 function unitsOf(entry: LedgerEntry): string {
-  const [one, many] = LEDGER_UNIT_NOUNS[entry.unit];
+  const [one, many] = nounsOf(entry.unit);
   return `${fmt(entry.count)} ${entry.count === 1 ? one : many}`;
 }
 
+/** A cause this build knows, else `other` (so it groups, and an attribute never carries its text). */
+function knownCause(cause: unknown): LedgerCause {
+  return own(LEDGER_CAUSE_PHRASES, cause) !== undefined ? (cause as LedgerCause) : 'other';
+}
+
+/** An outcome this build knows, else `lost` (reported under Not imported, so it is never dropped). */
+function knownOutcome(outcome: unknown): LedgerOutcome {
+  return own(IMPORT_REPORT_SECTION_OF, outcome) !== undefined ? (outcome as LedgerOutcome) : 'lost';
+}
+
 function causeHeading(cause: LedgerCause): string {
-  const phrase = LEDGER_CAUSE_PHRASES[cause];
+  const phrase = own(LEDGER_CAUSE_PHRASES, cause);
   return phrase ? phrase.charAt(0).toUpperCase() + phrase.slice(1) : 'Other';
+}
+
+/** A usable count: a positive finite number (anything else is not an entry). */
+function countOf(entry: LedgerEntry): number {
+  const n = entry.count;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * A ledger file name as the page shows it. Names are normally relative (to
+ * the open folder, or the picked folder); a file read from outside the open
+ * folder can be named by its absolute path, which the page never shows: only
+ * its folder and name (`…/clientA/schema.sql`).
+ */
+export function shownFileName(name: string): string {
+  if (!/^(?:[\\/]|[A-Za-z]:[\\/])/.test(name)) return name;
+  const parts = name.split(/[\\/]+/).filter((p) => p !== '' && !/^[A-Za-z]:$/.test(p));
+  return `…/${parts.slice(-2).join('/')}`;
 }
 
 /** `24 tables and 31 relationships in the draft.` */
@@ -236,7 +296,8 @@ export function buildImportReportView(record: ImportReportRecord): ImportReportV
     if (!name || !Object.prototype.hasOwnProperty.call(files, name)) return undefined;
     const file = files[name];
     if (typeof file !== 'string' || file === '') return undefined;
-    const line = entry.where?.line;
+    const raw = entry.where?.line;
+    const line = typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
     const key = `${file}\u0000${line ?? ''}`;
     let index = linkIndex.get(key);
     if (index === undefined) {
@@ -247,47 +308,59 @@ export function buildImportReportView(record: ImportReportRecord): ImportReportV
     return index;
   };
 
-  type Building = { group: ImportReportGroup; first: number };
+  // First pass: every entry into its section and cause (counts are exact whatever is listed).
+  type Building = { group: ImportReportGroup; first: number; entries: LedgerEntry[] };
   const bySection = new Map<ImportReportSectionId, Map<LedgerCause, Building>>();
   record.ledger.forEach((entry, order) => {
-    if (!(entry.count > 0)) return;
-    const sectionId = IMPORT_REPORT_SECTION_OF[entry.outcome];
-    if (!sectionId) return;
+    const count = countOf(entry);
+    if (count === 0) return;
+    const outcome = knownOutcome(entry.outcome);
+    const sectionId = IMPORT_REPORT_SECTION_OF[outcome];
+    const cause = knownCause(entry.cause);
     let causes = bySection.get(sectionId);
     if (!causes) { causes = new Map(); bySection.set(sectionId, causes); }
-    let building = causes.get(entry.cause);
+    let building = causes.get(cause);
     if (!building) {
-      building = { group: { cause: entry.cause, heading: causeHeading(entry.cause), count: 0, items: [], more: 0 }, first: order };
-      causes.set(entry.cause, building);
+      building = { group: { cause, heading: causeHeading(cause), count: 0, items: [], more: 0 }, first: order, entries: [] };
+      causes.set(cause, building);
     }
-    const { group } = building;
-    group.count += entry.count;
-    if (group.items.length >= MAX_ITEMS_PER_GROUP) {
-      group.more += 1;
-      return;
-    }
-    const where = entry.where;
-    const name = where?.table ? ledgerText(where.column ? `${where.table}.${where.column}` : where.table, MAX_NAME) : undefined;
-    const place = where?.file
-      ? `${ledgerText(where.file, MAX_FILE)}${where.line !== undefined ? ` line ${where.line}` : ''}`
-      : undefined;
-    const link = linkFor(entry);
-    group.items.push({
-      outcome: entry.outcome,
-      units: unitsOf(entry),
-      ...(name ? { name } : {}),
-      what: ledgerText(entry.what, MAX_WHAT, true),
-      detail: entry.detail ? ledgerText(entry.detail, MAX_DETAIL, true) : LEDGER_OUTCOME_PHRASES[entry.outcome],
-      ...(place ? { place } : {}),
-      ...(link !== undefined ? { link } : {}),
-    });
+    building.group.count += count;
+    building.entries.push(outcome === entry.outcome && count === entry.count ? entry : { ...entry, outcome, count });
   });
 
+  // Second pass, in the page's order: each cause lists its share, and counts the rest.
+  const ordered = IMPORT_REPORT_SECTIONS.map((id) => [id, [...(bySection.get(id)?.values() ?? [])]
+    .sort((a, b) => b.group.count - a.group.count || a.first - b.first)] as const);
+  const groupCount = ordered.reduce((n, [, groups]) => n + groups.length, 0);
+  const share = Math.min(MAX_ITEMS_PER_GROUP, Math.max(MIN_ITEMS_PER_GROUP, Math.floor(MAX_ITEMS_LISTED / Math.max(groupCount, 1))));
+  for (const [, groups] of ordered) {
+    for (const { group, entries } of groups) {
+      const listed = entries.slice(0, share);
+      group.more = entries.length - listed.length;
+      for (const entry of listed) {
+        const where = entry.where;
+        const name = where?.table ? ledgerText(where.column ? `${where.table}.${where.column}` : where.table, MAX_NAME) : undefined;
+        const line = typeof where?.line === 'number' && Number.isFinite(where.line) ? where.line : undefined;
+        const place = where?.file
+          ? `${ledgerText(shownFileName(String(where.file)), MAX_FILE)}${line !== undefined ? ` line ${line}` : ''}`
+          : undefined;
+        const link = linkFor(entry);
+        group.items.push({
+          outcome: entry.outcome,
+          units: unitsOf(entry),
+          ...(name ? { name } : {}),
+          what: ledgerText(String(entry.what ?? ''), MAX_WHAT, true),
+          detail: entry.detail ? ledgerText(String(entry.detail), MAX_DETAIL, true) : own(LEDGER_OUTCOME_PHRASES, entry.outcome) ?? '',
+          ...(place ? { place } : {}),
+          ...(link !== undefined ? { link } : {}),
+        });
+      }
+    }
+  }
+
   const sections: ImportReportSection[] = [];
-  for (const id of IMPORT_REPORT_SECTIONS) {
-    const groups = [...(bySection.get(id)?.values() ?? [])]
-      .sort((a, b) => b.group.count - a.group.count || a.first - b.first)
-      .map((b) => b.group);
+  for (const [id, building] of ordered) {
+    const groups = building.map((b) => b.group);
     const drew = id === 'imported' && record.imported !== undefined;
     if (groups.length === 0 && !drew) continue;
     sections.push({
@@ -331,11 +404,14 @@ export function importReportCounts(view: ImportReportView): Record<ImportReportS
 export function partialImportMessage(title: string, entries: readonly LedgerEntry[]): string | undefined {
   const byUnit = new Map<LedgerUnit, number>();
   for (const e of entries) {
-    if (e.outcome !== 'problem' || e.cause === 'duplicate' || !(e.count > 0)) continue;
-    byUnit.set(e.unit, (byUnit.get(e.unit) ?? 0) + e.count);
+    const count = countOf(e);
+    if (e.outcome !== 'problem' || e.cause === 'duplicate' || count === 0) continue;
+    // A unit this build does not know counts as an item (never `undefined`, never an inherited key).
+    const unit = (own(LEDGER_UNIT_NOUNS, e.unit) !== undefined ? e.unit : 'item') as LedgerUnit;
+    byUnit.set(unit, (byUnit.get(unit) ?? 0) + count);
   }
   if (byUnit.size === 0) return undefined;
-  const parts = [...byUnit].map(([unit, n]) => `${fmt(n)} ${n === 1 ? LEDGER_UNIT_NOUNS[unit][0] : LEDGER_UNIT_NOUNS[unit][1]}`);
+  const parts = [...byUnit].map(([unit, n]) => `${fmt(n)} ${n === 1 ? nounsOf(unit)[0] : nounsOf(unit)[1]}`);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
   const one = [...byUnit.values()].reduce((a, b) => a + b, 0) === 1;
   return `${title}: ${list} could not be read, so the diagram leaves ${one ? 'it' : 'them'} out. ` +
@@ -365,14 +441,23 @@ export function problemLedger(
 // The page's protocol
 // ---------------------------------------------------------------------------
 
-/** Page → host: open link `link` (an index into the host's own table). The only message. */
+/**
+ * Page → host: open link `link` (an index into the host's own table) of the
+ * page `view` (the token the host drew that page with). The only message.
+ */
 export type ImportReportToHost = { type: 'open'; link: number };
 
-/** A message from the page, or undefined for anything else (a link the report on show does not have). */
-export function parseImportReportToHost(raw: unknown, linkCount: number): ImportReportToHost | undefined {
+/**
+ * A message from the page on show, or undefined for anything else: a link
+ * the report on show does not have, or a click from a page a newer report
+ * has since replaced (its `view` is not the one on show, so its index would
+ * name another import's file).
+ */
+export function parseImportReportToHost(raw: unknown, linkCount: number, view: string): ImportReportToHost | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
-  const msg = raw as { type?: unknown; link?: unknown };
+  const msg = raw as { type?: unknown; link?: unknown; view?: unknown };
   if (msg.type !== 'open') return undefined;
+  if (typeof msg.view !== 'string' || msg.view !== view) return undefined;
   const link = msg.link;
   if (typeof link !== 'number' || !Number.isInteger(link) || link < 0 || link >= linkCount) return undefined;
   return { type: 'open', link };
@@ -383,7 +468,7 @@ export function parseImportReportToHost(raw: unknown, linkCount: number): Import
 // ---------------------------------------------------------------------------
 
 export const IMPORT_REPORT_NOTE =
-  'Read-only: this report changes nothing and is not saved. It shows the last import in this window; ERD Studio: Show Logs has the same lines.';
+  'Read-only: this report changes nothing and is not saved. ERD Studio: Show Logs has the same lines.';
 
 export function buildImportReportCsp(nonce: string): string {
   return ["default-src 'none'", `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
@@ -441,11 +526,13 @@ body {
 const SCRIPT = `
 (function () {
   var vscode = acquireVsCodeApi();
+  var main = document.querySelector('[data-view]');
+  var view = main ? main.getAttribute('data-view') : '';
   document.addEventListener('click', function (event) {
     var el = event.target instanceof Element ? event.target.closest('[data-link]') : null;
     if (!el) { return; }
     var link = Number(el.getAttribute('data-link'));
-    if (Number.isInteger(link)) { vscode.postMessage({ type: 'open', link: link }); }
+    if (Number.isInteger(link)) { vscode.postMessage({ type: 'open', link: link, view: view }); }
   });
 })();
 `;
@@ -459,7 +546,7 @@ function renderItem(item: ImportReportItem): string {
     : item.link !== undefined
       ? ` <button class="ir-item__link" type="button" data-link="${item.link}" title="Open the file at this line">${escapeHtml(item.place)}</button>`
       : ` <span class="ir-item__place">(${escapeHtml(item.place)})</span>`;
-  return `<li class="ir-item ir-item--${item.outcome}"><span class="ir-item__units">${escapeHtml(item.units)}</span>${name}${what}${detail}${place}</li>`;
+  return `<li class="ir-item ir-item--${escapeHtml(item.outcome)}"><span class="ir-item__units">${escapeHtml(item.units)}</span>${name}${what}${detail}${place}</li>`;
 }
 
 function renderGroup(group: ImportReportGroup, open: boolean): string {
@@ -467,7 +554,7 @@ function renderGroup(group: ImportReportGroup, open: boolean): string {
     ? `<p class="ir-group__more">And ${fmt(group.more)} more: ERD Studio: Show Logs lists every one.</p>`
     : '';
   return `
-      <details class="ir-group" data-cause="${group.cause}"${open ? ' open' : ''}>
+      <details class="ir-group" data-cause="${escapeHtml(group.cause)}"${open ? ' open' : ''}>
         <summary class="ir-group__summary">${escapeHtml(group.heading)} <span class="ir-group__count">(${fmt(group.count)})</span></summary>
         <ul class="ir-items">${group.items.map(renderItem).join('')}</ul>${more}
       </details>`;
@@ -493,16 +580,25 @@ function renderTotals(view: ImportReportView): string {
   return `<ul class="ir__totals">${items.join('')}</ul>`;
 }
 
-/** The page for `view`, or the no-import page when there is none. */
-export function buildImportReportHtml(view: ImportReportView | undefined, nonce: string): string {
+/** Said when an import that stopped or failed recorded nothing to list. */
+export const IMPORT_REPORT_NOTHING_RECORDED = 'The import recorded nothing more to list.';
+
+/**
+ * The page for `view`, or the no-import page when there is none. `viewToken`
+ * names this drawing of the page: its link clicks carry it back, and the
+ * host accepts only the one on show ({@link parseImportReportToHost}).
+ */
+export function buildImportReportHtml(view: ImportReportView | undefined, nonce: string, viewToken = ''): string {
   const n = escapeHtml(nonce);
+  const listed = view ? view.sections.some((sec) => sec.groups.length > 0) : false;
   const body = view
     ? `
   <p class="ir__headline">${escapeHtml(view.headline)}</p>
   <p class="ir__status">${escapeHtml(view.status)}</p>
   <p class="ir__note">${escapeHtml(IMPORT_REPORT_NOTE)}</p>
-  ${renderTotals(view)}${view.sections.map(renderSection).join('')}${view.sections.length === 0 && view.complete ? `
-  <p class="ir__empty">Nothing to report: everything was brought across as written.</p>` : ''}`
+  ${renderTotals(view)}${view.sections.map(renderSection).join('')}${listed ? '' : view.complete ? `
+  <p class="ir__empty">Nothing to report: everything was brought across as written.</p>` : `
+  <p class="ir__empty">${escapeHtml(IMPORT_REPORT_NOTHING_RECORDED)}</p>`}`
     : `
   <p class="ir__empty">${escapeHtml(NO_IMPORT_REPORT_MESSAGE)}</p>`;
   return `<!DOCTYPE html>
@@ -515,7 +611,7 @@ export function buildImportReportHtml(view: ImportReportView | undefined, nonce:
 <style nonce="${n}">${IMPORT_REPORT_STYLE}</style>
 </head>
 <body>
-<main class="ir">
+<main class="ir" data-view="${escapeHtml(viewToken)}">
   <h1 class="ir__heading">${escapeHtml(IMPORT_REPORT_TITLE)}</h1>${body}
 </main>
 <script nonce="${n}">${SCRIPT}</script>

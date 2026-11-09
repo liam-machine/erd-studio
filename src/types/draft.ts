@@ -246,11 +246,17 @@ export type DraftKeep =
 export interface Draft extends DraftView {
   keep: DraftKeep;
   trigger: DraftTrigger;
+  /**
+   * The import whose report the banner's Show Import Report link opens
+   * (`importReportStore.ts`): host only, so a draft still open after another
+   * import ran shows its own report, never the newer one.
+   */
+  importReportId?: number;
 }
 
 /** The part of a draft the page may see. */
 export function toDraftView(draft: Draft): DraftView {
-  const { keep: _keep, trigger: _trigger, ...view } = draft;
+  const { keep: _keep, trigger: _trigger, importReportId: _importReportId, ...view } = draft;
   return view;
 }
 
@@ -519,8 +525,8 @@ export interface DraftGuideStart {
 export interface DraftPreviewEvents {
   detailsOpened(source: DraftSource): void;
   layoutFailed(source: DraftSource): void;
-  /** The banner's Show Import Report link (optional: older wiring has none). */
-  importReport?(source: DraftSource): void;
+  /** The banner's Show Import Report link, with the draft's import (optional: older wiring has none). */
+  importReport?(source: DraftSource, reportId?: number): void;
   /** The page said ready (`slow`: more than 10 s after it was shown; optional, 2.0 B13). */
   pageReady?(source: DraftSource, slow: boolean): void;
   /** The page stayed visible 30 s without saying ready (optional, 2.0 B13). */

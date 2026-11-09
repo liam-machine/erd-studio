@@ -18,15 +18,29 @@ import {
   SHOW_IMPORT_REPORT_COMMAND,
   SHOW_IMPORT_REPORT_LABEL,
 } from '../services/importReport';
-import { latestImportReport } from '../services/importReportStore';
+import { importReportById, importReportIdOf, latestImportReport } from '../services/importReportStore';
 import { openTableFileAt } from './openModelFile';
 
 export { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL };
 
-/** Run the command: the report tab, or the no-import line. */
-export function showImportReport(): void {
+/** Said when an import's own link asks for a report a long session no longer holds. */
+export const IMPORT_REPORT_GONE_MESSAGE =
+  'That import\'s report is no longer held: only the last few imports in this window keep one. Show Import Report shows the latest.';
+
+/**
+ * Run the command: the report of the import `arg` names (its draft's banner,
+ * its toast or failure message pass its id), else the latest; or the
+ * no-import line. Any other argument (the palette passes none) means the latest.
+ */
+export function showImportReport(arg?: unknown): void {
   if (!latestImportReport()) {
     void vscode.window.showInformationMessage(NO_IMPORT_REPORT_MESSAGE);
+    return;
+  }
+  const reportId = importReportIdOf(arg);
+  if (reportId !== undefined && !importReportById(reportId)) {
+    // Never another import's report in its place.
+    void vscode.window.showInformationMessage(IMPORT_REPORT_GONE_MESSAGE);
     return;
   }
   ImportReportPanel.createOrShow({
@@ -36,10 +50,14 @@ export function showImportReport(): void {
         `${IMPORT_REPORT_TITLE}: couldn't open ${path.basename(file)}. It may have been moved or deleted since the import.`,
       );
     },
-  });
+  }, reportId);
 }
 
-/** The button a toast or failure message adds: Show Import Report, running the command. */
-export function importReportAction(): Record<string, () => unknown> {
-  return { [SHOW_IMPORT_REPORT_LABEL]: () => vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND) };
+/** The button a toast or failure message adds: Show Import Report for import `reportId`, running the command. */
+export function importReportAction(reportId?: number): Record<string, () => unknown> {
+  return {
+    [SHOW_IMPORT_REPORT_LABEL]: () => (reportId === undefined
+      ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND)
+      : vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId)),
+  };
 }

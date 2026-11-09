@@ -348,7 +348,8 @@ export class DraftPreviewPanel {
         return;
       case 'importReport':
         try {
-          this.events.importReport?.(this.view.source);
+          // The draft's own import (host only), never one the page names.
+          this.events.importReport?.(this.view.source, this.draft.importReportId);
         } catch (err) {
           log.warn('The draft preview\'s Show Import Report failed:', err instanceof Error ? err.message : String(err));
         }

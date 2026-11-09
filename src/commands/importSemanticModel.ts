@@ -108,8 +108,8 @@ export interface ImportSemanticModelUi {
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   openFileAt(filePath: string, line?: number): Promise<void>;
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
-  /** Runs Show Import Report (`erdStudio.showImportReport`). Absent: no such button. */
-  showImportReport?(): Promise<void>;
+  /** Runs Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent: no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
@@ -273,21 +273,19 @@ export async function importSemanticModel(
       const first = read.problems.find((p) => fullOf.has(p.file));
       // The report lists every problem with its file and line (the message names the first few).
       const reported = !quiet && ui.showImportReport !== undefined;
-      if (reported) {
-        recordImportReport({
-          source: 'semanticModel',
-          title: TITLE,
-          from: `from the semantic model ${entry.name}`,
-          status: 'failed',
-          ledger: problemLedger(read.problems, 'file', 'model file'),
-          files: modelFiles(entry.files, fullOf),
-        });
-      }
+      const reportId = !reported ? undefined : recordImportReport({
+        source: 'semanticModel',
+        title: TITLE,
+        from: `from the semantic model ${entry.name}`,
+        status: 'failed',
+        ledger: problemLedger(read.problems, 'file', 'model file'),
+        files: modelFiles(entry.files, fullOf),
+      });
       return invalid(
         describeImportProblems(TITLE, read.problems),
         {
           ...(first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {}),
-          ...(reported ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!() } : {}),
+          ...(reportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(reportId) } : {}),
         },
         entry.kind === 'tmdl' ? 'importSemanticModelParseTmdl' : 'importSemanticModelParseBim',
       );
@@ -439,6 +437,6 @@ export function vscodeImportSemanticModelUi(): ImportSemanticModelUi {
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
-    showImportReport: async () => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

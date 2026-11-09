@@ -166,8 +166,8 @@ export interface ImportSqlDdlUi {
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
   /** Opens the ERD Studio output channel (`erdStudio.showLogs`). Absent: no Show Logs button. */
   showLogs?(): Promise<void>;
-  /** Runs Show Import Report (`erdStudio.showImportReport`). Absent: no such button. */
-  showImportReport?(): Promise<void>;
+  /** Runs Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent: no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
@@ -482,7 +482,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
     // The report lists every problem with its file and line (the message names the first few).
     if (ui.showImportReport && deps.draft?.quiet !== true) {
-      recordImportReport({
+      const reportId = recordImportReport({
         source: 'sql',
         title: TITLE,
         from: sqlOriginPhrase(files.length, SQL_DIALECT_LABELS[dialect]),
@@ -490,7 +490,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
         ledger: result.ledger ?? [],
         files: Object.fromEntries(fullPaths),
       });
-      actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!();
+      actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!(reportId);
     }
     if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
     // Another dialect only when one reads more (or nobody has looked).
@@ -840,6 +840,6 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
     showLogs: async () => { await vscode.commands.executeCommand(SHOW_LOGS_COMMAND); },
-    showImportReport: async () => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

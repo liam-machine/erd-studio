@@ -469,7 +469,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
           changedTables: routed.changed,
           modelsWithoutColumns: modelsWithoutColumns(source),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
-          importReport: true,
+          importReportId: reportId,
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
@@ -582,7 +582,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume?: DrawFromDbtResume)
     if (notice) {
       // What was left out, with the report that lists every one.
       void Promise.resolve(vscode.window.showInformationMessage(notice, SHOW_IMPORT_REPORT_LABEL))
-        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND) : undefined))
+        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId) : undefined))
         .then(undefined, (err: unknown) => log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
     }
     return { domainPath, draft };

@@ -166,16 +166,17 @@ describe('Import report: file:line links', () => {
     expect(view.links).toEqual([]);
   });
 
-  it('accepts only an open message for a link the report has', () => {
-    expect(parseImportReportToHost({ type: 'open', link: 2 }, 3)).toEqual({ type: 'open', link: 2 });
+  it('accepts only an open message for a link the report on show has', () => {
+    expect(parseImportReportToHost({ type: 'open', link: 2, view: 'v' }, 3, 'v')).toEqual({ type: 'open', link: 2 });
     for (const bad of [
-      { type: 'open', link: 3 }, { type: 'open', link: -1 }, { type: 'open', link: 1.5 }, { type: 'open', link: '1' },
-      { type: 'open', file: '/etc/passwd', line: 1 }, { type: 'run', command: 'x' }, null, [], 'open',
+      { type: 'open', link: 3, view: 'v' }, { type: 'open', link: -1, view: 'v' }, { type: 'open', link: 1.5, view: 'v' }, { type: 'open', link: '1', view: 'v' },
+      { type: 'open', file: '/etc/passwd', line: 1, view: 'v' }, { type: 'run', command: 'x' }, null, [], 'open',
+      { type: 'open', link: 0 }, { type: 'open', link: 0, view: 'other' }, { type: 'open', link: 0, view: 1 },
     ]) {
-      expect(parseImportReportToHost(bad, 3)).toBeUndefined();
+      expect(parseImportReportToHost(bad, 3, 'v')).toBeUndefined();
     }
     // Extra fields are dropped: what comes back is rebuilt from the index alone.
-    expect(parseImportReportToHost({ type: 'open', link: 0, file: '/etc/passwd' }, 1)).toEqual({ type: 'open', link: 0 });
+    expect(parseImportReportToHost({ type: 'open', link: 0, file: '/etc/passwd', view: 'v' }, 1, 'v')).toEqual({ type: 'open', link: 0 });
   });
 });
 
@@ -240,14 +241,14 @@ describe('Import report: what the imports say with it', () => {
 describe('Import report: the store', () => {
   beforeEach(() => _resetImportReports());
 
-  it('keeps the last import only, moves it on by id, and ignores an update for a replaced one', () => {
+  it('shows the last import, moves each on by id, and an older import\'s update leaves the latest alone', () => {
     expect(latestImportReport()).toBeUndefined();
     const first = recordImportReport({ ...record(), at: 5 });
     expect(latestImportReport()?.at).toBe(5);
     expect(updateImportReport(first, { status: 'kept', diagram: 'main/a' })).toBe(true);
     expect(latestImportReport()).toMatchObject({ status: 'kept', diagram: 'main/a' });
     const second = recordImportReport({ ...record(), source: 'dbt', title: 'Import from dbt' });
-    expect(updateImportReport(first, { status: 'notKept' })).toBe(false);
+    expect(updateImportReport(first, { status: 'notKept' })).toBe(true);
     expect(latestImportReport()).toMatchObject({ source: 'dbt', status: 'draft' });
     expect(updateImportReport(undefined, { status: 'notKept' })).toBe(false);
     expect(second).toBeGreaterThan(first);
@@ -275,6 +276,8 @@ describe('Import report: the store', () => {
 });
 
 type MockPanel = ReturnType<typeof import('../__mocks__/vscode').createMockWebviewPanel>;
+/** The token of the page on show, as its script sends it back with a click. */
+const viewOf = (panel: MockPanel): string => /data-view="([^"]+)"/.exec(panel.webview.html)![1];
 const panels = (): MockPanel[] => (vscode.window as unknown as { _webviewPanels: MockPanel[] })._webviewPanels
   .filter((p) => (p as unknown as { viewType: string }).viewType === IMPORT_REPORT_VIEW_TYPE);
 
@@ -320,11 +323,11 @@ describe('Import report: the panel and the command', () => {
 
     const view = buildImportReportView(latestImportReport()!);
     const target = view.links.findIndex((l) => l.line === 40);
-    await panel._simulateMessage({ type: 'open', link: target });
+    await panel._simulateMessage({ type: 'open', link: target, view: viewOf(panel) });
     expect(opened).toEqual([['/proj/sql/01_tables.sql', 40]]);
     // Anything else is dropped: a path from the page is never opened.
-    await panel._simulateMessage({ type: 'open', link: 999 });
-    await panel._simulateMessage({ type: 'open', file: '/etc/passwd' });
+    await panel._simulateMessage({ type: 'open', link: 999, view: viewOf(panel) });
+    await panel._simulateMessage({ type: 'open', file: '/etc/passwd', view: viewOf(panel) });
     expect(opened).toHaveLength(1);
 
     // A new import replaces it in the open tab; a second command reuses the tab.
@@ -338,7 +341,7 @@ describe('Import report: the panel and the command', () => {
     recordImportReport(record());
     const missing: string[] = [];
     ImportReportPanel.createOrShow({ openFileAt: async () => { throw new Error('ENOENT'); }, couldNotOpen: (f) => missing.push(f) });
-    await panels()[0]._simulateMessage({ type: 'open', link: 0 });
+    await panels()[0]._simulateMessage({ type: 'open', link: 0, view: viewOf(panels()[0]) });
     expect(missing).toEqual(['/proj/sql/01_tables.sql']);
   });
 
@@ -361,7 +364,7 @@ describe('Import report: the panel and the command', () => {
     vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({ lineCount: 1 } as unknown as vscode.TextDocument);
 
     showImportReport();
-    await panels()[0]._simulateMessage({ type: 'open', link: 0 });
+    await panels()[0]._simulateMessage({ type: 'open', link: 0, view: viewOf(panels()[0]) });
 
     expect(show).toHaveBeenCalledTimes(1);
     for (const w of writes) expect(w).not.toHaveBeenCalled();
