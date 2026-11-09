@@ -21,6 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | The Draft-first start: the draft preview (`src/providers/DraftPreviewPanel.ts`, `webview-draft/`), the draft services (`src/services/draft*.ts`), `src/types/draft.ts`, the automatic draft on the empty Diagrams view, the start suggestion, or any import's dry run (now the draft) | `docs/dev/draft-first.md` |
 | The README or a user guide (`docs/dbt.md`, `docs/faq.md`, `docs/ai-assistants.md`, `docs/project-folder.md`, `docs/modelling-patterns.md`, `docs/import-existing-models.md`), Marketplace copy, walkthrough or welcome-view text | the wording rules in `docs/dev/onboarding-and-cli.md` |
 | DBML storage, import and export: `packages/core/src/dbml/`, the subject-area codec, `planDbmlLibraryWrites`, `applyFileWrites`, Convert Project to DBML, the `erd_layout` codec, Ref placement and diagram imports, the rich export, Export All Diagrams, Import DBML (parser pin, property names, `meta.dbml`) | `docs/dev/dbml.md` |
+| The generated (fast-check) tests of the importers and the DBML round trip, `FC_RUNS` | `docs/dev/generated-tests.md` |
 | Native DBML storage: the decisions (D1–D33), the normative format, the stages and their review log | `docs/plans/native-dbml-storage.md` |
 | `SCHEMA_CONTENT`, harness generators, the `/erd-studio-setup` skill | `src/harness/CLAUDE.md` |
 | Releases, package publishing, manual publish | `docs/dev/releasing.md` |
