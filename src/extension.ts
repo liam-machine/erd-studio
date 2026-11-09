@@ -103,8 +103,21 @@ import {
   TRY_AGAIN_BUTTON,
   diagramNameTakenMessage,
   feedbackPrefill,
+  oursMessage,
   showErrorWithActions,
 } from './services/commandErrors';
+import {
+  REFRESH_MANIFEST_TITLE,
+  RUN_DBT_PARSE_BUTTON,
+  SHOW_MODIFIED_FILES_BUTTON,
+  SHOW_SKIPPED_FILES_BUTTON,
+  STRIP_LEGACY_TAGS_TITLE,
+  manifestStaleNotice,
+  manifestTimeoutFeedbackPrefill,
+  skippedFileItems,
+  stripTagsSummary,
+  type MaintenanceNotice,
+} from './services/dbtMaintenanceMessages';
 import {
   MANIFEST_RETRY_FAILED_MESSAGE,
   MANIFEST_STILL_WRITING_MESSAGE,
@@ -2980,6 +2993,79 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     return true;
   };
 
+  /** Show a dbt maintenance notice at its level, with its buttons; resolves to the one picked. */
+  const showMaintenanceNotice = (notice: MaintenanceNotice): Thenable<string | undefined> => {
+    if (notice.level === 'error') return vscode.window.showErrorMessage(notice.message, ...notice.buttons);
+    if (notice.level === 'warning') return vscode.window.showWarningMessage(notice.message, ...notice.buttons);
+    return vscode.window.showInformationMessage(notice.message, ...notice.buttons);
+  };
+
+  /**
+   * Refresh Manifest (#263). `retried` is true on the Try Again a first
+   * "dbt is still writing it" answer offered, so a manifest that stays
+   * unreadable is then said to be the file's problem, with Run dbt parse.
+   * A throw while reading is ERD Studio's: Send Feedback and Try Again.
+   */
+  const refreshManifest = async (retried: boolean): Promise<void> => {
+    const tryAgain = () => refreshManifest(true);
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Refreshing dbt manifest...',
+          cancellable: false,
+        },
+        async () => {
+          manifestService.invalidate();
+          ymlParserService.invalidate();
+          // The catalog caches its "there isn't one" answer too, so a catalog
+          // generated after activation is only ever picked up by an invalidate.
+          catalogService.invalidate();
+          await manifestService.loadManifest(workspaceRoot);
+          await ymlParserService.loadYmlData(workspaceRoot);
+          await editorProvider.refreshAllOpenSubjectAreas();
+        },
+      );
+    } catch (err) {
+      log.error(`[ERD Studio] ${REFRESH_MANIFEST_TITLE} failed:`, err);
+      const doing = 'while reading the dbt files';
+      showCommandFailure({
+        title: REFRESH_MANIFEST_TITLE,
+        message: oursMessage(REFRESH_MANIFEST_TITLE, doing, "your files haven't changed"),
+        buttons: [SEND_FEEDBACK_BUTTON, TRY_AGAIN_BUTTON],
+        doing,
+      }, err, { retry: tryAgain });
+      return;
+    }
+    const shown = manifestDisplayPath(workspaceRoot, dbtConfig);
+    if (manifestService.isMissing) {
+      telemetry.featureOnce('manifestMissingRefresh');
+      void vscode.window.showWarningMessage(
+        `No dbt manifest yet (${shown}) — dbt hasn't been run in this project. ` +
+          'Your dbt models and relationships still come from your schema .yml files. ' +
+          'Run dbt parse to read columns and tests, or dbt docs generate for warehouse types.',
+        RUN_DBT_PARSE_ACTION,
+      ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
+      return;
+    }
+    const reason = manifestService.staleReason;
+    if (!manifestService.isStale || !reason) {
+      void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest dbt model data.');
+      return;
+    }
+    const notice = manifestStaleNotice(reason, { shown, hasLastKnownGood: manifestService.hasLastKnownGood, retried });
+    const actions: Record<string, () => unknown> = {
+      [TRY_AGAIN_BUTTON]: tryAgain,
+      [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', manifestTimeoutFeedbackPrefill()),
+      [RUN_DBT_PARSE_BUTTON]: () => runDbtParse(workspaceRoot),
+      [OPEN_FILE_BUTTON]: () => vscode.window.showTextDocument(vscode.Uri.file(resolveManifestPath(workspaceRoot, dbtConfig)), { preview: true }),
+    };
+    void showMaintenanceNotice(notice).then((pick) => {
+      const action = pick ? actions[pick] : undefined;
+      if (action) void Promise.resolve().then(action).catch((err: unknown) => log.error(`[ERD Studio] ${REFRESH_MANIFEST_TITLE}: "${pick}" failed:`, err));
+    });
+  };
+
   context.subscriptions.push(
     activationCheckpoint('Views'),
     { dispose() { clearTimeout(manifestRetryTimeout); } },
@@ -4007,38 +4093,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
         return;
       }
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Refreshing dbt manifest...',
-          cancellable: false,
-        },
-        async () => {
-          manifestService.invalidate();
-          ymlParserService.invalidate();
-          // The catalog caches its "there isn't one" answer too, so a catalog
-          // generated after activation is only ever picked up by an invalidate.
-          catalogService.invalidate();
-          await manifestService.loadManifest(workspaceRoot);
-          await ymlParserService.loadYmlData(workspaceRoot);
-          await editorProvider.refreshAllOpenSubjectAreas();
-          if (manifestService.isMissing) {
-            telemetry.featureOnce('manifestMissingRefresh');
-            void vscode.window.showWarningMessage(
-              `No dbt manifest yet (${manifestDisplayPath(workspaceRoot, dbtConfig)}) — dbt hasn't been run in this project. ` +
-                'Your dbt models and relationships still come from your schema .yml files. ' +
-                'Run dbt parse to read columns and tests, or dbt docs generate for warehouse types.',
-              RUN_DBT_PARSE_ACTION,
-            ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
-          } else if (manifestService.isStale) {
-            void vscode.window.showWarningMessage(
-              'dbt manifest could not be parsed (it may be mid-write) — diagrams show the last good data. Try again shortly.',
-            );
-          } else {
-            void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest dbt model data.');
-          }
-        },
-      );
+      await refreshManifest(false);
     }),
     // Regenerate the root selectors.yml from current domain files.
     // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
@@ -4104,27 +4159,28 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           cancellable: false,
         },
         async () => {
-          const result = legacyTagCleanupService.stripAll();
-
-          if (result.errors.length > 0) {
-            for (const err of result.errors) {
-              log.warn(`[LegacyTagCleanup] ${err}`);
-            }
-          }
-
-          if (result.tagsRemoved === 0) {
-            void vscode.window.showInformationMessage(
-              `No legacy domain tags found. Scanned ${result.filesScanned} YAML file(s).`,
-            );
+          let result: ReturnType<typeof legacyTagCleanupService.stripAll>;
+          try {
+            result = legacyTagCleanupService.stripAll();
+          } catch (err) {
+            log.error(`[ERD Studio] ${STRIP_LEGACY_TAGS_TITLE} failed:`, err);
+            const doing = 'while scanning your dbt model files';
+            showCommandFailure({
+              title: STRIP_LEGACY_TAGS_TITLE,
+              message: oursMessage(STRIP_LEGACY_TAGS_TITLE, doing, 'it may have stopped part-way. Review the diff before committing'),
+              buttons: [SEND_FEEDBACK_BUTTON],
+              doing,
+            }, err);
             return;
           }
+          for (const err of result.errors) {
+            log.warn(`[LegacyTagCleanup] ${err}`);
+          }
 
-          const choice = await vscode.window.showInformationMessage(
-            `Removed ${result.tagsRemoved} tag(s) from ${result.filesModified} file(s). Scanned ${result.filesScanned}. Review the diff before committing.` +
-              (result.errors.length > 0 ? ` (${result.errors.length} file(s) skipped — see Output.)` : ''),
-            'Show Modified Files',
-          );
-          if (choice === 'Show Modified Files') {
+          // #263: the skipped files are listed with why, not left in the log.
+          const summary = stripTagsSummary(result);
+          const choice = await showMaintenanceNotice(summary);
+          if (choice === SHOW_MODIFIED_FILES_BUTTON) {
             const items = result.modifiedPaths.map((p) => ({
               label: path.relative(workspaceRoot, p),
               description: '',
@@ -4132,6 +4188,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }));
             const picked = await vscode.window.showQuickPick(items, {
               placeHolder: 'Open a modified file to review',
+            });
+            if (picked) {
+              await vscode.window.showTextDocument(vscode.Uri.file(picked.fullPath), { preview: true });
+            }
+          } else if (choice === SHOW_SKIPPED_FILES_BUTTON) {
+            const picked = await vscode.window.showQuickPick(skippedFileItems(result.skipped, workspaceRoot), {
+              placeHolder: 'These files were left as they were. Open one to see why.',
+              matchOnDescription: true,
             });
             if (picked) {
               await vscode.window.showTextDocument(vscode.Uri.file(picked.fullPath), { preview: true });

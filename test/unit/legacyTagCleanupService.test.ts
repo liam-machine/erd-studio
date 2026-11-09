@@ -212,6 +212,8 @@ describe('LegacyTagCleanupService', () => {
     expect(result.filesModified).toBe(0);
     expect(result.errors.some((e) => e.includes('dim_broken.yml'))).toBe(true);
     expect(fs.readFileSync(filePath, 'utf-8')).toBe(broken);
+    // #263: Show Skipped Files lists it, with why.
+    expect(result.skipped).toEqual([{ path: filePath, reason: 'parse' }]);
   });
 
   it('only scans dbt model-paths (default models/), leaving other YAML untouched', () => {
