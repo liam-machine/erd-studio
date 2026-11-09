@@ -250,7 +250,10 @@ def cols_of(exprs):
         # A key's column without its order, operator class or collation (`name text_pattern_ops DESC`).
         while isinstance(e, (exp.Ordered, exp.Opclass, exp.Collate)) and isinstance(e.this, (exp.Ordered, exp.Opclass, exp.Collate, exp.Column, exp.Identifier)):
             e = e.this
-        if isinstance(e, (exp.Ordered, exp.Column, exp.Identifier)):
+        prefix = re.match(r'^[`"\[]?(\w+)[`"\]]?\s*\(\s*\d+\s*\)$', e.sql()) if not isinstance(e, (exp.Ordered, exp.Column, exp.Identifier)) else None
+        if prefix:
+            out.append(prefix.group(1))  # MySQL's key on a column's prefix, `plan`(20): that column
+        elif isinstance(e, (exp.Ordered, exp.Column, exp.Identifier)):
             out.append(ident(e))
         elif isinstance(e, exp.Paren):
             out.append(e.sql())
@@ -306,6 +309,9 @@ def apply_constraint(m, table, c, name=None):
 def add_column(m, table, cd, dialect):
     name = ident(cd.this)
     kind = cd.args.get('kind')
+    # sqlglot reads SQL Server's inline `INDEX [ix] NONCLUSTERED ([c])` as a column INDEX of type ix: an index.
+    if not cd.this.args.get('quoted') and name.upper() == 'INDEX' and kind is not None and kind.this == exp.DataType.Type.USERDEFINED:
+        return
     typ = kind.sql(dialect=dialect) if kind is not None else ''
     if re.match(r'(ENUM|SET)\s*\(', typ, re.I):
         typ = typ.split('(')[0].strip().upper()  # its values are not a size: compared as the bare type
@@ -565,7 +571,7 @@ def structural_create(m, sql, where):
             if inside:
                 m.uniques.append((name, [c for c in idents(inside.group(1)) if c.upper() not in ('ASC', 'DESC')], False))
             continue
-        if cm or re.match(r'((FULLTEXT|SPATIAL|UNIQUE)\s+)?(KEY|INDEX)\s*(' + IDENT + r'\s*)?\(|CHECK\s*\(|PERIOD\s+FOR\b|EXCLUDE\s|LIKE\s', item, re.I):
+        if cm or re.match(r'((FULLTEXT|SPATIAL|UNIQUE)\s+)?(KEY|INDEX)\s*(' + IDENT + r'\s*)?\(|INDEX\s+' + IDENT + r'\s+(UNIQUE|CLUSTERED|NONCLUSTERED|COLUMNSTORE|HASH)\b|CHECK\s*\(|PERIOD\s+FOR\b|EXCLUDE\s|LIKE\s', item, re.I):
             continue
         cmatch = re.match(r'(' + IDENT + r')\s*(.*)$', item, re.S)
         if not cmatch:
