@@ -26,7 +26,9 @@ grammars):
   relationships and relationships_where tests); each model's folder is its
   .sql file's under models/ (else its yml's), which the scorer cuts the
   truth to (dbt's default scope is one folder).
-- Power BI: TMDL (table / column / relationship blocks) or model.bim JSON.
+- Power BI: TMDL (table / column / relationship blocks), model.bim JSON, or a
+  Tabular Editor Save to Folder (database.json plus one JSON file per object,
+  put back together into the model.bim shape first).
   A relationship's "one" end must be unique, which the model implies but
   does not declare: `impliedUniqueKeys`, apart from `uniqueKeys`.
 - Rails schema.rb: create_table / t.<type> / add_foreign_key, by regex.
@@ -53,9 +55,12 @@ except ImportError:
 
 logging.getLogger('sqlglot').setLevel(logging.ERROR)
 HERE = os.path.dirname(os.path.abspath(__file__))
+BACKSLASH_DIALECTS = ('mysql', 'databricks', 'hive', 'bigquery')
+
 SQLGLOT_DIALECT = {
     'postgres': 'postgres', 'mysql': 'mysql', 'sqlserver': 'tsql', 'oracle': 'oracle', 'bigquery': 'bigquery',
     'redshift': 'redshift', 'sqlite': 'sqlite', 'snowflake': 'snowflake', 'databricks': 'databricks', 'ansi': 'postgres',
+    'hive': 'hive',
 }
 
 
@@ -106,6 +111,9 @@ def preprocess(text, dialect):
     # Template placeholders: @cdmDatabaseSchema.person → cdmDatabaseSchema.person, ${catalog} → catalog.
     text = re.sub(r'@(\w+)\.', r' \1.', text)
     text = re.sub(r'\$\{(\w+)\}', r'\1', text)
+    # Jinja names: {{ schema }}, {{ target.schema }}, {{ params['schema'] }} → schema.
+    text = re.sub(r'\{\{-?\s*(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*-?\}\}', r'\1', text)
+    text = re.sub(r'\{\{-?\s*[A-Za-z_][\w.]*\s*\[\s*[\'"]([A-Za-z_]\w*)[\'"]\s*\]\s*-?\}\}', r'\1', text)
     return text
 
 
@@ -116,6 +124,8 @@ def split_statements(text, dialect):
     start, line, start_line = 0, 1, 1
     depth = 0
     mysql = dialect in ('mysql',)
+    # Backslash escapes inside string literals: MySQL, and Spark / Databricks, Hive and BigQuery.
+    backslash = dialect in ('mysql', 'databricks', 'hive', 'bigquery')
     buf_has_code = False
 
     def push(end):
@@ -161,7 +171,7 @@ def split_statements(text, dialect):
             close = ']' if c == '[' else c
             j = i + 1
             while j < n:
-                if text[j] == '\\' and mysql and c != '`':
+                if text[j] == '\\' and backslash and c != '`':
                     j += 2
                     continue
                 if text[j] == close:
@@ -214,7 +224,7 @@ class Model:
     def __init__(self):
         self.tables = {}  # key (lower name) → dict
         self.order = []
-        self.fks = []  # (from, [cols], to, [cols] or None, name)
+        self.fks = []  # (from, [cols], to, [cols] or None, name, from schema, to schema): the schemas when known
         self.uniques = []  # (table, [cols], index)
         self.partitions = set()
         self.parent = {}  # partition (lower) → its parent's name
@@ -227,6 +237,9 @@ class Model:
         if schema and f'{schema}.{name}'.lower() in self.tables:
             return self.tables[f'{schema}.{name}'.lower()]
         k = name.lower()
+        # Looking one up (an ALTER, a key): a table of this name in another schema is not it.
+        if not create and k in self.tables and schema and self.tables[k].get('schema') and self.tables[k]['schema'].lower() != schema.lower():
+            return None
         if k not in self.tables:
             if not create:
                 return None
@@ -234,21 +247,37 @@ class Model:
             self.order.append(k)
         return self.tables[k]
 
-    def create(self, name, schema, where):
-        """A CREATE TABLE: the table, new, and its key. Created again in the same schema (a dump's
-        DROP/CREATE, a migration), the later one counts; a table of the same name in another schema
-        is another table, kept beside it under schema.name."""
+    def create(self, name, schema, where, keep_fks=False):
+        """A CREATE TABLE: the table, new, and its key. Created again in the same schema (CREATE OR
+        REPLACE; the callers leave out a plain CREATE of a table still defined, which the engine refuses),
+        the later one counts, and the old one's own foreign keys go with it (the engine drops the table),
+        unless `keep_fks` (CREATE OR ALTER changes the table to the new column list; constraints it does
+        not name stay); a table of the same name in another schema is another table, kept beside
+        it under schema.name."""
         k = name.lower()
         old = self.tables.get(k)
         if old is not None and schema and old.get('schema') and old['schema'].lower() != schema.lower():
             k = f'{schema}.{name}'.lower()
             self.approx.append(f"{where}: {name} is in schemas {old['schema']} and {schema}: both counted; keys, references and comments naming it without a schema are read as the first one's")
         if k in self.tables:
+            old_schema = (self.tables[k].get('schema') or '').lower()
             self.order.remove(k)
             del self.tables[k]
+            if not keep_fks:
+                self.fks[:] = [fk for fk in self.fks if not (fk[0].lower() == name.lower() and (not fk[5] or not old_schema or fk[5].lower() == old_schema))]
         self.tables[k] = {'name': name, 'schema': schema, 'columns': [], 'pk': [], 'description': None}
         self.order.append(k)
         return self.tables[k], k
+
+    def defined(self, name, schema):
+        """Whether a table of this name is already in the same schema (or either has none): what a
+        CREATE TABLE IF NOT EXISTS of it finds, so the statement does nothing."""
+        if schema and f'{schema}.{name}'.lower() in self.tables:
+            return True
+        old = self.tables.get(name.lower())
+        if old is None:
+            return False
+        return not (schema and old.get('schema') and old['schema'].lower() != schema.lower())
 
     def drop(self, key):
         self.order.remove(key)
@@ -321,7 +350,7 @@ def apply_constraint(m, table, c, name=None):
         ref = c.args.get('reference')
         if ref is not None:
             to, _s, to_cols = ref_target(ref)
-            m.fks.append((table['name'], cols_of(c.expressions), to, to_cols, name))
+            m.fks.append((table['name'], cols_of(c.expressions), to, to_cols, name, table.get('schema'), _s or table.get('schema')))
     elif isinstance(c, exp.UniqueColumnConstraint):
         if isinstance(c.this, (exp.ClusteredColumnConstraint, exp.NonClusteredColumnConstraint)) and isinstance(c.this.this, list):
             cols = cols_of(c.this.this)  # SQL Server: UNIQUE NONCLUSTERED ([a] ASC, [b] ASC)
@@ -364,9 +393,11 @@ def add_column(m, table, cd, dialect):
         elif isinstance(k, exp.UniqueColumnConstraint):
             flags += 'U'
             m.uniques.append((table['name'], [name], False))
-        elif isinstance(k, exp.Reference):
-            to, _s, to_cols = ref_target(k)
-            m.fks.append((table['name'], [name], to, to_cols, None))
+        elif isinstance(k, exp.Reference) or (isinstance(k, exp.ForeignKey) and isinstance(k.args.get('reference'), exp.Reference)):
+            # `c INT REFERENCES t (id)`, and a column's own `[CONSTRAINT n] FOREIGN KEY REFERENCES t` (Databricks,
+            # Snowflake); with no column list the reference is to t's primary key.
+            to, _s, to_cols = ref_target(k if isinstance(k, exp.Reference) else k.args['reference'])
+            m.fks.append((table['name'], [name], to, to_cols, None, table.get('schema'), _s or table.get('schema')))
         elif isinstance(k, exp.CommentColumnConstraint):
             desc = ident(k.this)
         elif isinstance(k, exp.ComputedColumnConstraint):
@@ -385,7 +416,36 @@ def schema_of(tbl):
     return tbl.args.get('db').name if isinstance(tbl, exp.Table) and tbl.args.get('db') else None
 
 
-def on_create_table(m, e, dialect, where):
+def written_types(sql):
+    """Each column's type as the CREATE TABLE writes it, by name (lower case). sqlglot renders
+    Snowflake's NUMBER as DECIMAL(38, 0), TIMESTAMP_TZ as TIMESTAMPTZ and STRING as VARCHAR; the
+    truth keeps the type the source wrote."""
+    out = {}
+    s = strip_comments(sql)
+    mm = CREATE_RE.search(s)
+    if not mm or mm.group(2) != '(':
+        return out
+    start = mm.end() - 1
+    depth, j = 0, start
+    while j < len(s):
+        if s[j] == '(':
+            depth += 1
+        elif s[j] == ')':
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    for item in split_top(s[start + 1:j]):
+        cmatch = re.match(r'(' + IDENT + r')\s+(.*)$', item, re.S)
+        if not cmatch or re.match(r'(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE)\b', item, re.I):
+            continue
+        tm = re.match(r'([A-Za-z_][\w]*(?:\s*\([^()]*\))?)', cmatch.group(2))
+        if tm and tm.group(1).split('(')[0].upper() not in ('NOT', 'NULL', 'PRIMARY', 'DEFAULT', 'REFERENCES', 'CONSTRAINT', 'GENERATED', 'AS', 'COMMENT', 'AUTOINCREMENT', 'IDENTITY'):
+            out[unquote(cmatch.group(1)).lower()] = re.sub(r'\s+', ' ', tm.group(1).strip())
+    return out
+
+
+def on_create_table(m, e, dialect, where, written=None, or_alter=False):
     target = e.this
     tbl = target.this if isinstance(target, exp.Schema) else target
     name = ident(tbl)
@@ -400,10 +460,15 @@ def on_create_table(m, e, dialect, where):
                 return
             if isinstance(p, exp.SchemaCommentProperty):
                 pass
-    t, key = m.create(name, schema_of(tbl), where)
+    # CREATE TABLE IF NOT EXISTS of a table already defined does nothing, and a plain CREATE TABLE of one is
+    # refused: the first definition stays. Only CREATE OR REPLACE (or a DROP before it) replaces it.
+    if not e.args.get('replace') and m.defined(name, schema_of(tbl)):
+        return
+    t, key = m.create(name, schema_of(tbl), where, keep_fks=or_alter)
     if not isinstance(target, exp.Schema):
         q = e.args.get('expression')
-        if isinstance(q, exp.Select):
+        # SELECT * (or t.*) names no columns: the source table's, which may not be in the files.
+        if isinstance(q, exp.Select) and not any(isinstance(p, exp.Star) or (isinstance(p, exp.Column) and isinstance(p.this, exp.Star)) for p in q.expressions):
             # CREATE TABLE ... AS SELECT CAST(NULL AS integer) AS person_id, ...: the projections are the columns.
             for p in q.expressions:
                 inner = p.this if isinstance(p, exp.Alias) else p
@@ -418,6 +483,8 @@ def on_create_table(m, e, dialect, where):
     for item in target.expressions:
         if isinstance(item, exp.ColumnDef):
             add_column(m, t, item, dialect)
+            if written and t['columns'] and t['columns'][-1][0].lower() in written and t['columns'][-1][1]:
+                t['columns'][-1][1] = written[t['columns'][-1][0].lower()]
         else:
             apply_constraint(m, t, item)
     if props is not None:
@@ -428,7 +495,16 @@ def on_create_table(m, e, dialect, where):
                 t['description'] = ident(p.args.get('value'))
 
 
-def on_alter(m, e, dialect, where):
+def written_alter_types(sql):
+    """Each added column's type as an ALTER TABLE … ADD [COLUMN] [IF NOT EXISTS] writes it (see written_types)."""
+    out = {}
+    for am in re.finditer(r'\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(' + IDENT + r')\s+([A-Za-z_]\w*(?:\s*\([^()]*\))?)', strip_comments(sql), re.I):
+        if am.group(2).split('(')[0].upper() not in ('CONSTRAINT', 'PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK'):
+            out[unquote(am.group(1)).lower()] = re.sub(r'\s+', ' ', am.group(2).strip())
+    return out
+
+
+def on_alter(m, e, dialect, where, written=None):
     tbl = e.this
     name = ident(tbl)
     t = m.table(name, schema_of(tbl), create=False)
@@ -438,7 +514,12 @@ def on_alter(m, e, dialect, where):
         items = a.expressions if isinstance(a, (exp.AddConstraint, exp.Schema)) else [a]
         for c in items:
             if isinstance(c, exp.ColumnDef):
+                # ADD COLUMN IF NOT EXISTS of a column the table has does nothing (and a plain one is refused).
+                if any(col[0].lower() == (ident(c.this) or '').lower() for col in t['columns']):
+                    continue
                 add_column(m, t, c, dialect)
+                if written and t['columns'] and t['columns'][-1][0].lower() in written and t['columns'][-1][1]:
+                    t['columns'][-1][1] = written[t['columns'][-1][0].lower()]
             else:
                 apply_constraint(m, t, c)
 
@@ -468,7 +549,7 @@ def on_comment(m, e):
 
 
 # A structural reader for a CREATE TABLE sqlglot cannot read: the name, and each top-level item of the column list.
-CREATE_RE = re.compile(r'CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET)\s+)*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[`"\[]?[^\s(`"\[\]]+[`"\]]?\s*\.\s*)*[`"\[]?[^\s(`"\[\]]+[`"\]]?)\s*(\(|PARTITION\s+OF|AS\b|LIKE\b|$)', re.I | re.S)
+CREATE_RE = re.compile(r'CREATE\s+(?:OR\s+(?:REPLACE|ALTER|REFRESH)\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[`"\[]?[^\s(`"\[\]]+[`"\]]?\s*\.\s*)*[`"\[]?[^\s(`"\[\]]+[`"\]]?)\s*(\(|PARTITION\s+OF|AS\b|LIKE\b|$)', re.I | re.S)
 IDENT = r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[\w$#@]+)'
 
 
@@ -543,7 +624,9 @@ def structural_create(m, sql, where):
     if not mm:
         return False
     full = mm.group(1)
-    parts = [unquote(p) for p in re.split(r'\s*\.\s*(?=(?:[^"`\]]|"[^"]*"|`[^`]*`|\[[^\]]*\])*$)', full)]
+    # A whole BigQuery path in one pair of backquotes (`project.dataset.table`) is three parts.
+    parts = [q for p in re.split(r'\s*\.\s*(?=(?:[^"`\]]|"[^"]*"|`[^`]*`|\[[^\]]*\])*$)', full)
+             for q in (unquote(p).split('.') if p.startswith('`') else [unquote(p)])]
     name = parts[-1]
     if name.startswith('#') or name.startswith('@'):
         return True
@@ -553,7 +636,9 @@ def structural_create(m, sql, where):
         if pm:
             m.parent[name.lower()] = idents(pm.group(1))[-1]
         return True
-    t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where)
+    if not re.search(r'\bOR\s+(?:REPLACE|REFRESH|ALTER)\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
+        return True
+    t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where, keep_fks=bool(re.search(r'\bOR\s+ALTER\b', s[:mm.start(1)], re.I)))
     if mm.group(2) != '(':
         m.drop(key)
         m.approx.append(f'{where}: {name} has no column list (CREATE TABLE ... AS / LIKE): not counted')
@@ -583,7 +668,8 @@ def structural_create(m, sql, where):
         if rup.startswith('FOREIGN KEY'):
             fm = re.match(r'FOREIGN\s+KEY\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)\s*REFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', rest, re.I | re.S)
             if fm:
-                m.fks.append((name, idents(fm.group(1)), idents(fm.group(2))[-1], idents(fm.group(3)) if fm.group(3) else None, None))
+                to_parts = idents(fm.group(2))
+                m.fks.append((name, idents(fm.group(1)), to_parts[-1], idents(fm.group(3)) if fm.group(3) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
             continue
         if re.match(r'UNIQUE\b', rup):  # not a column named unique_device_id
             inside = re.search(r'\(([^)]*)\)', rest)
@@ -609,7 +695,8 @@ def structural_create(m, sql, where):
             t['pk'] = [cname]
         rm = re.search(r'\bREFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', tail, re.I)
         if rm:
-            m.fks.append((name, [cname], idents(rm.group(1))[-1], idents(rm.group(2)) if rm.group(2) else None, None))
+            to_parts = idents(rm.group(1))
+            m.fks.append((name, [cname], to_parts[-1], idents(rm.group(2)) if rm.group(2) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
         dm = re.search(r"\bCOMMENT\s+'((?:[^']|'')*)'", tail, re.I)
         t['columns'].append([cname, typ, flags, dm.group(1).replace("''", "'") if dm else None])
     m.approx.append(f'{where}: {name} read structurally (sqlglot could not)')
@@ -619,12 +706,14 @@ def structural_create(m, sql, where):
 ALTER_ADD_RE = re.compile(r'ALTER\s+TABLE\s+(?:ONLY\s+|IF\s+EXISTS\s+)*((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')(.*)$', re.I | re.S)
 
 
-def structural_alter(m, sql, where):
+def structural_alter(m, sql, where, dialect=None):
+    # BigQuery quotes a whole `project.dataset.table` path in one pair of backticks.
+    last = (lambda n: idents(n)[-1].split('.')[-1]) if dialect == 'bigquery' else (lambda n: idents(n)[-1])
     s = strip_comments(sql)
     am = ALTER_ADD_RE.search(s)
     if not am:
         return False
-    name = idents(am.group(1))[-1]
+    name = last(am.group(1))
     rest = am.group(2)
     pm = re.search(r'ATTACH\s+PARTITION\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')', rest, re.I)
     if pm:
@@ -632,11 +721,13 @@ def structural_alter(m, sql, where):
         m.partitions.add(child.lower())
         m.parent[child.lower()] = name
         return True
-    t = m.table(name, None, create=False)
+    name_parts = idents(am.group(1))
+    t = m.table(name, name_parts[-2] if len(name_parts) > 1 else None, create=False)
     if t is None:
         return True
     for fm in re.finditer(r'FOREIGN\s+KEY\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)\s*REFERENCES\s+((?:' + IDENT + r'\s*\.\s*)*' + IDENT + r')\s*(?:\(([^)]*)\))?', rest, re.I):
-        m.fks.append((name, idents(fm.group(1)), idents(fm.group(2))[-1], idents(fm.group(3)) if fm.group(3) else None, None))
+        to_parts = idents(fm.group(2))
+        m.fks.append((name, idents(fm.group(1)), last(fm.group(2)), idents(fm.group(3)) if fm.group(3) else None, None, t['schema'], to_parts[-2] if len(to_parts) > 1 else t['schema']))
     for pk in re.finditer(r'PRIMARY\s+KEY\s*(?:CLUSTERED|NONCLUSTERED)?\s*\(([^)]*)\)', rest, re.I):
         t['pk'] = [c for c in idents(pk.group(1)) if c.upper() not in ('ASC', 'DESC')]
     for uq in re.finditer(r'\bUNIQUE\s*(?:KEY|INDEX|CLUSTERED|NONCLUSTERED)?\s*(?:' + IDENT + r'\s*)?\(([^)]*)\)', rest, re.I):
@@ -677,9 +768,15 @@ def count_sql(entry, base):
                     m.comments.append((em.group(2), em.group(3), em.group(1).replace("''", "'")))
                 return
             kind = None
-            if re.match(r'CREATE\s+(OR\s+REPLACE\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up):
-                return  # a temporary table (in a procedure body) is not part of the schema
-            if re.match(r'CREATE\s+(OR\s+REPLACE\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET)\s+)*TABLE\b', up):
+            # A temporary table (in a procedure body) is not part of the schema; Oracle's GLOBAL TEMPORARY
+            # TABLE is (a lasting definition whose rows are the session's), and so is Lakeflow's TEMPORARY
+            # LIVE / STREAMING TABLE (a pipeline's dataset that is not published).
+            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((UNLOGGED|EXTERNAL|TRANSIENT|MULTISET|SET)\s+)*(TEMP|TEMPORARY|VOLATILE)\s', up) \
+                    and not (dialect == 'oracle' and re.match(r'CREATE\s+GLOBAL\s+TEMPORARY\s', up)) \
+                    and not re.match(r'CREATE\s+(OR\s+\w+\s+)?(\w+\s+)*?(LIVE|STREAMING)\s+TABLE\b', up):
+                return
+            # Snowflake's HYBRID and ICEBERG tables, CREATE OR ALTER TABLE and Lakeflow's CREATE OR REFRESH STREAMING TABLE are tables too.
+            if re.match(r'CREATE\s+(OR\s+(REPLACE|ALTER|REFRESH)\s+)?((GLOBAL|LOCAL)\s+)?((TEMP|TEMPORARY|UNLOGGED|EXTERNAL|TRANSIENT|VOLATILE|MULTISET|SET|HYBRID|ICEBERG|STREAMING|LIVE)\s+)*TABLE\b', up):
                 kind = 'create'
             elif re.match(r'ALTER\s+TABLE\b', up):
                 kind = 'alter'
@@ -700,11 +797,15 @@ def count_sql(entry, base):
             if kind == 'alter':
                 am = ALTER_ADD_RE.search(body)
                 target = idents(am.group(1))[-1] if am else ''
-                if target.lower() not in m.tables:
+                if dialect == 'bigquery':
+                    target = target.split('.')[-1]  # `project.dataset.table` is one quoted path
+                target_parts = idents(am.group(1)) if am else []
+                target_schema = target_parts[-2] if len(target_parts) > 1 and dialect != 'bigquery' else None
+                if m.table(target, target_schema, create=False) is None:
                     if first:
                         deferred.append((f, line, stmt))  # a keys or FK file may sort before the tables file
                     return
-                t = m.tables[target.lower()]
+                t = m.table(target, target_schema, create=False)
                 rest = am.group(2)
                 rn = re.match(r'\s*RENAME\s+TO\s+(' + IDENT + r')', rest, re.I)
                 if rn:
@@ -717,6 +818,15 @@ def count_sql(entry, base):
                     m.fks[:] = [(new if fk[0].lower() == target.lower() else fk[0],) + fk[1:] for fk in m.fks]
                     # A comment made before the rename is on the renamed table (one made after names the new one).
                     m.comments[:] = [(new if c[0].lower() == target.lower() else c[0],) + tuple(c[1:]) for c in m.comments]
+                    return
+                # RENAME COLUMN a TO b: the column keeps its place, type and flags under its new name.
+                rc = re.match(r'\s*RENAME\s+COLUMN\s+(' + IDENT + r')\s+TO\s+(' + IDENT + r')\s*;?\s*$', rest, re.I)
+                if rc:
+                    old_c, new_c = unquote(rc.group(1)), unquote(rc.group(2))
+                    for c in t['columns']:
+                        if c[0].lower() == old_c.lower():
+                            c[0] = new_c
+                    t['pk'] = [new_c if p.lower() == old_c.lower() else p for p in t['pk']]
                     return
                 drops = re.findall(r'DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(' + IDENT + r')', rest, re.I)
                 drops = [unquote(d) for d in drops if unquote(d).upper() not in ('CONSTRAINT', 'INDEX', 'DEFAULT', 'NOT', 'PRIMARY', 'FOREIGN')]
@@ -736,9 +846,10 @@ def count_sql(entry, base):
                 snapshot = (list(m.order), {k: dict(v, columns=list(v['columns']), pk=list(v['pk'])) for k, v in m.tables.items()}, len(m.fks), len(m.uniques), set(m.partitions), dict(m.parent))
                 try:
                     if kind == 'create' and isinstance(parsed, exp.Create) and (parsed.args.get('kind') or '').upper() == 'TABLE':
-                        on_create_table(m, parsed, sg, where); ok = True
+                        on_create_table(m, parsed, sg, where, written_types(body) if dialect == 'snowflake' else None,
+                                        or_alter=bool(re.match(r'CREATE\s+OR\s+ALTER\b', body, re.I))); ok = True
                     elif kind == 'alter' and isinstance(parsed, exp.Alter):
-                        on_alter(m, parsed, sg, where); ok = True
+                        on_alter(m, parsed, sg, where, written_alter_types(body) if dialect == 'snowflake' else None); ok = True
                     elif kind == 'index' and isinstance(parsed, exp.Create):
                         on_index(m, parsed); ok = True
                     elif kind == 'comment' and isinstance(parsed, exp.Comment):
@@ -754,7 +865,7 @@ def count_sql(entry, base):
                 return
             if kind == 'create' and structural_create(m, body, where):
                 stats['structural'] += 1
-            elif kind == 'alter' and structural_alter(m, body, where):
+            elif kind == 'alter' and structural_alter(m, body, where, dialect):
                 stats['structural'] += 1
             elif kind == 'index' and re.search(r'\)\s*(?:INCLUDE\s*\([^)]*\)\s*)?(?:NULLS\s+(?:NOT\s+)?DISTINCT\s*)?(?:WITH\s*\([^)]*\)\s*)?WHERE\s', body, re.I):
                 m.partial_uniques += 1
@@ -810,6 +921,9 @@ def finish_sql(entry, m, stats):
         pkl = {c.lower() for c in pk}
         cols = []
         for name, typ, flags, desc in t['columns']:
+            # Spark, Hive, MySQL and BigQuery read a backslash escape in a string: `'a \" b'` holds a quote.
+            if desc and entry.get('dialect') in BACKSLASH_DIALECTS:
+                desc = re.sub(r'\\(["\'])', r'\1', desc)
             fl = ''.join(sorted(set(flags + ('P' if name.lower() in pkl else '') + ('N' if name.lower() in pkl else '')), key='PNUC'.index))
             col = [name, typ or '', fl]
             if desc:
@@ -829,22 +943,29 @@ def finish_sql(entry, m, stats):
             seen_p.add(name.lower())
             name = m.parent[name.lower()]
         return name
-    for i, (frm, fcols, to, tcols, cname) in enumerate(m.fks):
+    for i, fk in enumerate(m.fks):
+        frm, fcols, to, tcols, cname = fk[:5]
+        fs, ts = (tuple(fk[5:7]) + (None, None))[:2]
         frm, to = folded(frm), folded(to)
         if frm.lower() in m.partitions or to.lower() in m.partitions:
             continue
         if not tcols:
-            target = m.tables.get(to.lower())
+            target = (m.tables.get(f'{ts}.{to}'.lower()) if ts else None) or m.tables.get(to.lower())
             tcols = target['pk'] if target else []
         if not tcols or len(tcols) != len(fcols):
             continue
-        key = (frm.lower(), tuple(c.lower() for c in fcols), to.lower(), tuple(c.lower() for c in tcols))
+        key = ((fs or '').lower(), frm.lower(), tuple(c.lower() for c in fcols), (ts or '').lower(), to.lower(), tuple(c.lower() for c in tcols))
         if key in seen:
             continue
         seen.add(key)
         comp = f'fk{i}' if len(fcols) > 1 else None
         for fc, tc in zip(fcols, tcols):
             r = {'from': frm, 'fromColumn': fc, 'to': to, 'toColumn': tc}
+            # The ends' schemas: the scorer places an end on a table another schema also has (qualifySameNames).
+            if fs:
+                r['fromSchema'] = fs
+            if ts:
+                r['toSchema'] = ts
             if comp:
                 r['composite'] = comp
             rels.append(r)
@@ -894,7 +1015,8 @@ def test_name(t):
 def ref_name(s):
     if not isinstance(s, str):
         return None
-    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*['\"]([^'\"]+)['\"])?\s*\)", s)
+    # ref('model'), ref('package', 'model'), and a versioned ref('model', v=1) / ref('model', version='2').
+    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*['\"]([^'\"]+)['\"])?\s*(?:,\s*(?:v|version)\s*=\s*[^)]*)?\)", s)
     if m:
         return m.group(2) or m.group(1)
     m = re.search(r"source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", s)
@@ -970,6 +1092,18 @@ def count_dbt(entry, base):
                 if isinstance(desc, str) and desc.strip() and '{{' not in desc:
                     col.append(desc)
                 out_cols.append(col)
+            # A column listed twice in one model is one column, as dbt's parser keeps it: its tests from
+            # both listings, its description and data_type from the last (ParserRef.add overwrites).
+            merged = {}
+            for col in out_cols:
+                k = col[0].lower()
+                if k in merged:
+                    flags = ''.join(f for f in 'PNUC' if f in merged[k][2] + col[2])
+                    merged[k] = [merged[k][0], col[1], flags] + col[3:]
+                else:
+                    merged[k] = col
+            out_cols = list(merged.values())
+            pk = list({c.lower(): c for c in pk}.values())
             if len(pk) > 1:
                 pk = []  # several single-column unique keys, not one composite key
             for col in out_cols:
@@ -1107,33 +1241,86 @@ def count_bim(entry, base):
             continue
         with open(os.path.join(base, f['path']), encoding='utf-8-sig') as fh:
             doc = json.load(fh)
-        model = doc.get('model', doc)
-        for t in model.get('tables') or []:
-            cols = []
-            pk = []
-            for c in t.get('columns') or []:
-                if c.get('type') == 'rowNumber':
-                    continue
-                flags = 'C' if c.get('type') in ('calculated', 'calculatedTableColumn') and t.get('partitions', [{}])[0].get('source', {}).get('type') != 'calculated' else ''
-                if c.get('isKey'):
-                    pk = [c['name']]; flags = 'P' + flags
-                col = [c['name'], c.get('dataType', ''), flags]
-                if c.get('description'):
-                    col.append(c['description'] if isinstance(c['description'], str) else '\n'.join(c['description']))
-                cols.append(col)
-            o = {'name': t['name'], 'pk': pk, 'columns': cols}
-            if t.get('calculationGroup'):
-                o['calculationGroup'] = True
-            if any((p.get('source') or {}).get('type') == 'calculated' for p in t.get('partitions') or []):
-                o['calculatedTable'] = True
-            tables.append(o)
-        for r in model.get('relationships') or []:
-            o = {'from': r['fromTable'], 'fromColumn': r['fromColumn'], 'to': r['toTable'], 'toColumn': r['toColumn']}
-            if r.get('isActive') is False:
-                o['inactive'] = True
-            rels.append(o)
-            uniques.extend(one_side_uniques(r['fromTable'], r['fromColumn'], r.get('fromCardinality'), r['toTable'], r['toColumn'], r.get('toCardinality')))
+        bim_model(doc.get('model', doc), tables, rels, uniques)
     return tables, rels, uniques, 'model.bim JSON: model.tables[].columns[] (rowNumber aside), isKey, relationships[]', [], []
+
+
+def te_folder_model(base, files):
+    """A Tabular Editor Save to Folder put back into the model.bim shape: database.json holds the
+    model, each table is tables/<folder>/<folder>.json with its columns, partitions (and, with
+    LocalRelationships, relationships) one file each in sub-folders; the model's relationships are
+    relationships/*.json. Files are read in path order; a table's identity is its JSON name."""
+    def load(p):
+        with open(os.path.join(base, p), encoding='utf-8-sig') as fh:
+            return json.load(fh)
+    roots = sorted({p[:-len('database.json')] for p in files if p == 'database.json' or p.endswith('/database.json')})
+    if not roots:
+        raise RuntimeError('no database.json')
+    root = roots[0]
+    model = load(root + 'database.json').get('model', {})
+    tables = {}
+    rels = list(model.get('relationships') or [])
+    for p in sorted(files):
+        if not p.startswith(root) or not p.endswith('.json'):
+            continue
+        parts = p[len(root):].split('/')
+        if parts[0] == 'relationships' and len(parts) == 2:
+            rels.append(load(p))
+        elif parts[0] == 'tables' and len(parts) == 3 and parts[2] == parts[1] + '.json':
+            t = load(p)
+            tables.setdefault(parts[1], {}).update({k: v for k, v in t.items() if k not in ('columns', 'partitions', 'relationships')})
+            tables[parts[1]].setdefault('columns', []).extend(t.get('columns') or [])
+            tables[parts[1]].setdefault('partitions', []).extend(t.get('partitions') or [])
+            rels.extend(t.get('relationships') or [])
+            # LocalRelationships: the table's relationships ride in an annotation, a JSON array (split into lines).
+            for a in t.get('annotations') or []:
+                if a.get('name') == 'TabularEditor_Relationships':
+                    v = a.get('value')
+                    rels.extend(json.loads('\n'.join(v) if isinstance(v, list) else v))
+        elif parts[0] == 'tables' and len(parts) == 4 and parts[2] in ('columns', 'partitions', 'relationships'):
+            o = load(p)
+            if parts[2] == 'relationships':
+                rels.append(o)
+            else:
+                tables.setdefault(parts[1], {}).setdefault(parts[2], []).append(o)
+    model = dict(model)
+    model['tables'] = [dict(t, columns=t.get('columns', []), partitions=t.get('partitions', [])) for t in tables.values() if 'name' in t]
+    model['relationships'] = rels
+    return model
+
+
+def count_te_folder(entry, base):
+    tables = []; rels = []; uniques = []
+    bim_model(te_folder_model(base, [f['path'] for f in entry['files']]), tables, rels, uniques)
+    return tables, rels, uniques, 'Tabular Editor Save to Folder: database.json + tables/<T>/<T>.json, columns/, partitions/, relationships/ put back into model.bim JSON, then read as model.bim', [], []
+
+
+def bim_model(model, tables, rels, uniques):
+    for t in model.get('tables') or []:
+        cols = []
+        pk = []
+        for c in t.get('columns') or []:
+            if c.get('type') == 'rowNumber':
+                continue
+            flags = 'C' if c.get('type') in ('calculated', 'calculatedTableColumn') and ((t.get('partitions') or [{}])[0].get('source') or {}).get('type') != 'calculated' else ''
+            if c.get('isKey'):
+                pk = [c['name']]; flags = 'P' + flags
+            col = [c['name'], c.get('dataType', ''), flags]
+            if c.get('description'):
+                col.append(c['description'] if isinstance(c['description'], str) else '\n'.join(c['description']))
+            cols.append(col)
+        o = {'name': t['name'], 'pk': pk, 'columns': cols}
+        if t.get('calculationGroup'):
+            o['calculationGroup'] = True
+        if any((p.get('source') or {}).get('type') == 'calculated' for p in t.get('partitions') or []):
+            o['calculatedTable'] = True
+        tables.append(o)
+    for r in model.get('relationships') or []:
+        o = {'from': r['fromTable'], 'fromColumn': r['fromColumn'], 'to': r['toTable'], 'toColumn': r['toColumn']}
+        if r.get('isActive') is False:
+            o['inactive'] = True
+        rels.append(o)
+        uniques.extend(one_side_uniques(r['fromTable'], r['fromColumn'], r.get('fromCardinality'), r['toTable'], r['toColumn'], r.get('toCardinality')))
 
 
 # ---------------------------------------------------------------------------
@@ -1223,7 +1410,9 @@ def count(entry, base):
     if imp == 'semanticModel':
         if any(f['path'].endswith('.tmdl') for f in entry['files']):
             return count_tmdl(entry, base)
-        return count_bim(entry, base)
+        if any(f['path'].lower().endswith('.bim') for f in entry['files']):
+            return count_bim(entry, base)
+        return count_te_folder(entry, base)
     if entry.get('kind', '').startswith('Rails schema.rb'):
         return count_schema_rb(entry, base)
     raise RuntimeError(f"no counter for {entry['name']}")

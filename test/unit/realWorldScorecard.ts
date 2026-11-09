@@ -81,6 +81,9 @@ export interface TruthRelationship {
   toColumn: string;
   /** Pairs of one composite FK share this. */
   composite?: string;
+  /** The end's schema, given when another schema has a table of the same name (see qualifySameNames). */
+  fromSchema?: string;
+  toSchema?: string;
   /** Written one-to-one in the source (a DBML `-`). */
   oneToOne?: boolean;
   inactive?: boolean;
@@ -474,6 +477,24 @@ function mentioned(shown: readonly string[], ...names: string[]): boolean {
   return texts.some((s) => res.every((re) => re.test(s)));
 }
 
+/**
+ * Whether one shown line names every one of `names` as its own word (`date_key` and `DateKey` are one
+ * word), each as often as `names` lists it: a table named as its key column (Date.Date) needs `date`
+ * twice, so a line that names the table once (`date: 8 columns · primary key date_key`) says nothing of
+ * its key.
+ */
+function namedTogether(shown: readonly string[], names: readonly string[]): boolean {
+  const need = new Map<string, number>();
+  for (const n of names) need.set(canon(n), (need.get(canon(n)) ?? 0) + 1);
+  return shown.some((line) => {
+    const have = new Map<string, number>();
+    for (const w of line.replace(/\S+\.(sql|dbml|tmdl|bim|ya?ml|json)\b/gi, ' ').split(/[^A-Za-z0-9_]+/)) {
+      if (w) have.set(canon(w), (have.get(canon(w)) ?? 0) + 1);
+    }
+    return [...need].every(([w, n]) => (have.get(w) ?? 0) >= n);
+  });
+}
+
 export type Verdict = 'Failed' | 'With problems' | 'With gaps' | 'Clean';
 
 export interface SampleScore {
@@ -486,7 +507,8 @@ export interface SampleScore {
   reasons: string[];
   tables: { source: number; imported: number; matched: number; missing: number; missingReported: number; extra: string[] };
   columns: { source: number; imported: number; matched: number; missing: number; missingReported: number; extra: number };
-  primaryKeys: { source: number; imported: number; matched: number; composite: number; missing: number; wrong: string[]; extra: number };
+  /** `wrongReported`: of `wrong`, the keys a shown note names with the table and the source's key columns (a choice said, not a silent change). */
+  primaryKeys: { source: number; imported: number; matched: number; composite: number; missing: number; wrong: string[]; wrongReported?: number; extra: number };
   relationships: {
     source: number; imported: number; matched: number;
     missing: number; missingReported: number; missingSilent: string[];
@@ -510,7 +532,8 @@ export interface SampleScore {
   /** Unique keys on imported tables (expression indexes aside); `extra`: imported unique keys the source neither declares nor implies (e.g. dropped later). */
   uniqueKeys: { source: number; kept: number; lost: number; extra: string[] };
   types: { checked: number; verbatim: number; detailSource: number; detailKept: number; detailLost: string[] };
-  descriptions: { source: number; imported: number; exact: number; changed: number; missing: number };
+  /** `notExact`: the first few descriptions missing or changed (`table.column`), for diagnosis. */
+  descriptions: { source: number; imported: number; exact: number; changed: number; missing: number; notExact?: string[] };
   schemas: { source: string[]; imported: string[]; kept: number; lostSilently: string[] };
   /** Blocking problems (failed imports): how many name a cause and a file + line, how many the message shows (3) or hides. */
   problems: { warnings: number; count: number; withCause: number; withLocation: number; shown: number; hidden: number; longest: number; messages: string[] };
@@ -567,7 +590,29 @@ export function withSourceNames(run: ImportRun): ImportRun {
   return { ...run, tables, relationships };
 }
 
-export function scoreSample(slug: string, truth: TruthSample, given: ImportRun): SampleScore {
+/**
+ * Tables of one name in two schemas (core.orders and raw_web.orders) are two tables. The import keeps
+ * both and names each `{schema}_{name}` (as Import DBML's table naming does, with the rename in the
+ * ledger), so the truth is compared under those names: the same tables spelled the way a diagram can
+ * hold them. A relationship end on such a table names its schema (`fromSchema` / `toSchema`).
+ */
+export function qualifySameNames(truth: TruthSample): TruthSample {
+  const count = new Map<string, number>();
+  for (const t of truth.tables) count.set(canon(t.name), (count.get(canon(t.name)) ?? 0) + 1);
+  const shared = (name: string): boolean => (count.get(canon(name)) ?? 0) > 1;
+  if (![...count.values()].some((n) => n > 1)) return truth;
+  // A model name starts with a letter: Import DBML puts `t_` before one that does not (`340b_x_t` → `t_340b_x_t`).
+  const asModelName = (name: string): string => (/^[A-Za-z]/.test(name) ? name : `t_${name}`);
+  const qualified = (schema: string | undefined, name: string): string => (schema && shared(name) ? asModelName(`${schema}_${name}`) : name);
+  return {
+    ...truth,
+    tables: truth.tables.map((t) => (shared(t.name) && t.schema ? { ...t, name: qualified(t.schema, t.name) } : t)),
+    relationships: truth.relationships.map((r) => ({ ...r, from: qualified(r.fromSchema, r.from), to: qualified(r.toSchema, r.to) })),
+  };
+}
+
+export function scoreSample(slug: string, sourceTruth: TruthSample, given: ImportRun): SampleScore {
+  const truth = qualifySameNames(sourceTruth);
   const run = truth.importer === 'semanticModel' ? withSourceNames(given) : given;
   const shown = run.shown;
   const failed = !run.ok || run.tables.length === 0;
@@ -591,20 +636,22 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
   const detailLost: string[] = [];
   let descSource = 0; let descImported = 0; let descExact = 0; let descChanged = 0; let descMissing = 0;
   const descNorm = (s: string | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
-  const checkDesc = (src: string | undefined, got: string | undefined): void => {
+  const descNotExact: string[] = [];
+  const checkDesc = (src: string | undefined, got: string | undefined, label = ''): void => {
     if (!descNorm(src)) return;
     descSource++;
     if (descNorm(got)) descImported++;
-    if (descNorm(src) === descNorm(got)) descExact++;
-    else if (descNorm(got)) descChanged++;
+    if (descNorm(src) === descNorm(got)) { descExact++; return; }
+    if (descNorm(got)) descChanged++;
     else descMissing++;
+    if (descNotExact.length < 20) descNotExact.push(`${label}: ${descNorm(got) ? 'changed' : 'missing'}`);
   };
   const typeDetailWanted = new Map((truth.typeDetail ?? []).map((d) => [`${canon(d.table)}.${canon(d.column)}`, new RegExp(d.expect, 'i')]));
   for (const t of truth.tables) {
     colSource += t.columns.length;
     const got = importedByCanon.get(canon(t.name));
     if (!got) continue;
-    checkDesc(t.description, got.description);
+    checkDesc(t.description, got.description, t.name);
     const gotCols = new Map((got.columns ?? []).map((c) => [canon(c.name), c]));
     // The same name first: `name` and `_name` (Django) are one name by letters and digits.
     const gotExact = new Map((got.columns ?? []).map((c) => [c.name.toLowerCase(), c]));
@@ -616,7 +663,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
         continue;
       }
       colMatched++;
-      checkDesc(c[3], gc.description);
+      checkDesc(c[3], gc.description, `${t.name}.${c[0]}`);
       const wanted = typeDetailWanted.get(`${canon(t.name)}.${canon(c[0])}`);
       if (truth.importer === 'semanticModel') {
         if (wanted) {
@@ -650,6 +697,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
   let pkMatched = 0; let pkMissing = 0; let pkExtra = 0; let pkComposite = 0;
   const pkWrong: string[] = [];
   let pkSilent = 0;
+  let pkWrongReported = 0;
   for (const t of truth.tables) {
     const got = importedByCanon.get(canon(t.name));
     if (!got) continue;
@@ -659,7 +707,11 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     if (have.join(',') === want.join(',')) { pkMatched++; if (want.length > 1) pkComposite++; continue; }
     if (have.length === 0) { pkMissing++; if (!mentioned(shown, t.name, 'key')) pkSilent++; continue; }
     pkWrong.push(`${t.name}: (${have.join(', ')}) instead of (${want.join(', ')})`);
-    pkSilent++;
+    // A key chosen on purpose and said (a Power BI date table's: every relationship joins DateKey, Date stays unique) is a gap,
+    // not a silent change: one line names the table, a key, the key chosen and the source's.
+    const chosen = (got.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name);
+    if (namedTogether(shown, [t.name, 'key', ...chosen, ...t.pk])) pkWrongReported++;
+    else pkSilent++;
   }
   const pkImported = run.tables.filter((t) => pkOf(t).length > 0).length;
 
@@ -844,7 +896,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     reasons,
     tables: { source: truth.tables.length, imported: run.tables.length, matched: truth.tables.length - missingTables.length, missing: missingTables.length, missingReported: missingTablesReported.length, extra: extraTables },
     columns: { source: colSource, imported: colImported, matched: colMatched, missing: colMissing, missingReported: colMissingReported, extra: colExtra },
-    primaryKeys: { source: truth.tables.filter((t) => t.pk.length > 0).length, imported: pkImported, matched: pkMatched, composite: pkComposite, missing: pkMissing, wrong: pkWrong, extra: pkExtra },
+    primaryKeys: { source: truth.tables.filter((t) => t.pk.length > 0).length, imported: pkImported, matched: pkMatched, composite: pkComposite, missing: pkMissing, wrong: pkWrong, wrongReported: pkWrongReported, extra: pkExtra },
     relationships: {
       source: truthLinks.length, imported: importedLinks.length, matched: matchedLinks.length,
       missing: missingLinks.length, missingReported: missingReported.length, missingSilent,
@@ -859,7 +911,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
     },
     uniqueKeys: { source: uniqueSource, kept: uniqueKept, lost: uniqueSource - uniqueKept, extra: uniqueExtra },
     types: { checked: typesChecked, verbatim: typesVerbatim, detailSource, detailKept, detailLost },
-    descriptions: { source: descSource, imported: descImported, exact: descExact, changed: descChanged, missing: descMissing },
+    descriptions: { source: descSource, imported: descImported, exact: descExact, changed: descChanged, missing: descMissing, notExact: descNotExact },
     schemas: { source: sourceSchemas, imported: importedSchemas, kept: schemaKept, lostSilently: schemasLostSilently },
     problems,
     notes: run.notes,
@@ -878,6 +930,7 @@ export function scoreSample(slug: string, truth: TruthSample, given: ImportRun):
  *   relationship, a relationship the wrong way round, or a one-to-one drawn as
  *   many-to-one.
  * - With gaps: the structure is right, but something is left out (and said),
+ *   or a key is chosen differently from the source's and a note says so,
  *   or a detail is lost silently (type detail, description, unique key,
  *   NOT NULL, schema, a relationship's condition), or the draft says nothing was lost when it was, or
  *   required relationships are saved optional (D18) with no note.
@@ -907,6 +960,7 @@ export function verdictOf(s: SampleScore, failed: boolean, reasons: string[]): V
   if (L.requiredFks) gap.push(`${L.requiredFks} required FK(s) lost`);
   if (L.schemas) gap.push(`schema(s) ${s.schemas.lostSilently.join(', ')} lost`);
   if (L.conditions) gap.push(`${L.conditions} relationship condition(s) lost silently`);
+  if (s.primaryKeys.wrongReported) gap.push(`${s.primaryKeys.wrongReported} primary key(s) chosen differently and said`);
   if (s.falseNotLostNote) gap.push('a note says details are not lost');
   if (s.requiredFks.source > 0 && !s.requiredFks.toldOptional) gap.push(`${s.requiredFks.source} required relationship(s) saved optional with no note`);
   const claims = s.requiredFks.noteClaims;

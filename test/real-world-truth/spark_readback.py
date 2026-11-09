@@ -2,7 +2,10 @@
 that has pyspark installed (4.3.0 here; the parser needs table-constraint support) (RWT_SPARK_PYTHON).
 Prints one JSON object.
 
-    <python> -I spark_readback.py <samples root> databricks-open-retail-data-model
+    <python> -I spark_readback.py <samples root> <sample> [file ...]
+
+The files (paths under the sample's folder) are read in the order given; with none, every
+.sql file under the sample's canonical-core/ folder.
 
 Why the parser and not a catalog: open-source Spark's session catalog cannot hold
 PRIMARY KEY / FOREIGN KEY constraints (they are Unity Catalog's), and Delta tables need
@@ -82,7 +85,7 @@ def first_line(msg: str) -> str:
     return 'parse error'
 
 
-def main(root: str, sample: str) -> None:
+def main(root: str, sample: str, wanted: list[str]) -> None:
     from pyspark.sql import SparkSession
 
     spark = (SparkSession.builder.master('local[1]').appName('rwt')
@@ -92,7 +95,7 @@ def main(root: str, sample: str) -> None:
     substitution = spark._jvm.org.apache.spark.sql.internal.VariableSubstitution()
 
     root_path = Path(root)
-    files = sorted((root_path / sample / 'canonical-core').rglob('*.sql'))
+    files = [root_path / sample / w for w in wanted] if wanted else sorted((root_path / sample / 'canonical-core').rglob('*.sql'))
     statements = []
     for f in files:
         text = f.read_text(encoding='utf-8')
@@ -191,4 +194,4 @@ def main(root: str, sample: str) -> None:
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3:])

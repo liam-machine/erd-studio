@@ -411,6 +411,99 @@ models:
   });
 });
 
+describe('YAML aliases on descriptions and data types', () => {
+  it('description: *anchor and data_type: *anchor read as the string the anchor names (model, column, seed)', async () => {
+    const data = await load(`version: 2
+models:
+  - name: dim
+    description: &model_desc Trips, one row each.
+    columns:
+      - name: start_time
+        data_type: &time_type STRING
+        description: &start_desc |
+          The trip's start time,
+          as the feed writes it.
+  - name: fct
+    description: *model_desc
+    columns:
+      - name: vp_start_time
+        data_type: *time_type
+        description: *start_desc
+seeds:
+  - name: lookup
+    description: *model_desc
+`);
+    const fct = data.models.get('fct')!;
+    expect(fct.description).toBe('Trips, one row each.');
+    expect(fct.columns[0]).toMatchObject({ name: 'vp_start_time', dataType: 'STRING', description: "The trip's start time,\nas the feed writes it.\n" });
+    expect(data.resourceDocs.get('lookup')?.description).toBe('Trips, one row each.');
+  });
+
+  it('aliases resolve in time linear in the file: 600 models x 10 columns, every description and data_type an alias', async () => {
+    // Each alias used to walk the whole document again (yaml's Alias.resolve without a
+    // cache), so 6,000 aliases cost aliases x nodes: about 70 s here.
+    const lines = ['version: 2', 'models:', '  - name: m0', '    description: &d Shared.', '    columns:', '      - name: c0', '        data_type: &t VARCHAR'];
+    for (let m = 1; m <= 600; m++) {
+      lines.push(`  - name: m${m}`, '    description: *d', '    columns:');
+      for (let c = 0; c < 10; c++) lines.push(`      - name: c${c}`, '        description: *d', '        data_type: *t');
+    }
+    const started = Date.now();
+    const data = await load(lines.join('\n') + '\n');
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(data.models.size).toBe(601);
+    expect(data.models.get('m600')!.columns[9]).toMatchObject({ name: 'c9', description: 'Shared.', dataType: 'VARCHAR' });
+  });
+
+  it('an alias names the last anchor of that name before it, as YAML reads it', async () => {
+    const data = await load(`version: 2
+models:
+  - name: a
+    description: &d First.
+  - name: b
+    description: *d
+  - name: c
+    description: &d Second.
+  - name: e
+    description: *d
+`);
+    expect(data.models.get('b')!.description).toBe('First.');
+    expect(data.models.get('e')!.description).toBe('Second.');
+  });
+
+  it('seeds and snapshots read YAML 1.1 merges and aliased lists as models do (`<<: *defaults`, `columns: *cols`)', async () => {
+    const data = await load(`version: 2
+x-defaults: &col_defaults
+  description: Shared description
+  data_type: VARCHAR
+seeds:
+  - name: lookup
+    columns: &lookup_cols
+      - name: code
+        <<: *col_defaults
+      - name: label
+        description: The label
+  - name: lookup2
+    columns: *lookup_cols
+  - <<: &seed_base
+      description: Base seed description
+    name: lookup3
+snapshots:
+  - name: snap
+    <<: *seed_base
+    columns: *lookup_cols
+`);
+    const doc = (n: string) => data.resourceDocs.get(n);
+    expect(doc('lookup')?.columns).toEqual([
+      { name: 'code', description: 'Shared description', dataType: 'VARCHAR' },
+      { name: 'label', description: 'The label', dataType: null },
+    ]);
+    expect(doc('lookup2')?.columns.map((c) => c.name)).toEqual(['code', 'label']);
+    expect(doc('lookup3')?.description).toBe('Base seed description');
+    expect(doc('snap')).toMatchObject({ resourceType: 'snapshot', description: 'Base seed description' });
+    expect(doc('snap')?.columns).toHaveLength(2);
+  });
+});
+
 describe('dbt relationship tests that leave the draft are never dropped without a word', () => {
   it('a relationships test to a source() is named in Not drawn', async () => {
     const data = await load(`version: 2

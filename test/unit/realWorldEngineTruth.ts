@@ -67,6 +67,10 @@ export const ENGINE_PAIRS: ReadonlyArray<{ truth: string; engine: string; dialec
   { truth: 'databricks-open-retail-data-model', engine: 'databricks-open-retail-data-model', dialect: 'databricks' },
   { truth: 'migrations-harbor', engine: 'migrations-harbor', dialect: 'postgres' },
   { truth: 'sqlite-chinook', engine: 'sqlite-chinook', dialect: 'sqlite' },
+  { truth: 'snowflake-realtime-datavault', engine: 'snowflake-realtime-datavault', dialect: 'snowflake' },
+  { truth: 'snowflake-sqldbm-adventureworksdw', engine: 'snowflake-sqldbm-adventureworksdw', dialect: 'snowflake' },
+  { truth: 'databricks-uc-catalog-as-code', engine: 'databricks-uc-catalog-as-code', dialect: 'databricks' },
+  { truth: 'databricks-adidas-table-manager', engine: 'databricks-adidas-table-manager', dialect: 'databricks' },
   { truth: 'oracle-hr', engine: 'oracle-hr', dialect: 'oracle' },
 ];
 
@@ -79,6 +83,7 @@ export const ENGINE_PAIRS: ReadonlyArray<{ truth: string; engine: string; dialec
 export const NOT_ENGINE_VERIFIED: Readonly<Record<string, string>> = {
   'bigquery-cloud-learning-platform': 'BigQuery has no local engine (its DDL needs the cloud service)',
   'redshift-tpch': 'Amazon Redshift has no local engine (its DDL needs a cluster)',
+  'bigquery-shibarium': 'BigQuery has no local engine (its DDL needs the cloud service); the open-source goccy/bigquery-emulator 0.6.6 refuses its keys ("NOT ENFORCED primary key table constraints are unsupported", and ALTER TABLE: "Statement not supported"), which are what this sample adds',
 };
 
 export function loadReadback(sample: string): EngineReadback | null {
@@ -145,6 +150,8 @@ export function canonType(dialect: Dialect, raw: string): string {
       t = t.replace(/^(text|string|varchar|character varying|char varying|nvarchar|nvarchar2|char|character)(?=\(|$)/, 'varchar');
       if (t === 'varchar') t = 'varchar(16777216)';
       t = t.replace(/^(double|double precision|real|float4|float8)$/, 'float').replace(/^(timestamp|datetime)$/, 'timestamp_ntz');
+      // Nanoseconds (9) is every TIMESTAMP_* type's default precision: TIMESTAMP_NTZ(9) is TIMESTAMP_NTZ.
+      t = t.replace(/^(timestamp_(?:ntz|ltz|tz))\(9\)$/, '$1');
       return t.replace(/^vector\((float|double)/, 'vector(float');
     }
     case 'sqlite':

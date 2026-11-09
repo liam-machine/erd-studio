@@ -274,6 +274,38 @@
    "engine": "canonical (integer, character varying(30), int, nvarchar(60), NUMBER(12,0), string, long …)",
    "importer": "as written",
    "reason": "One type spelled two ways: canonType (test/unit/realWorldEngineTruth.ts) brings each dialect's aliases to one form before comparing; anything else that differs is a difference."
+  },
+  {
+   "sample": "snowflake-sqldbm-adventureworksdw",
+   "item": "DimScenario.CreatedDate, DimScenario.UpdatedDate",
+   "truth": "TIMESTAMP_NTZ(9)",
+   "engine": "TIMESTAMP_NTZ",
+   "importer": "TIMESTAMP_NTZ(9)",
+   "reason": "9 (nanoseconds) is the default precision of Snowflake's TIMESTAMP types, which fakesnow does not keep: the same type (canonType drops a (9))."
+  },
+  {
+   "sample": "snowflake-sqldbm-adventureworksdw",
+   "item": "36 foreign keys",
+   "truth": "DimCustomer.GeographyKey -> DimGeography.GeographyKey",
+   "engine": "refColumns GEOGRAPHYKEY",
+   "importer": "GeographyKey",
+   "reason": "SqlDBM quotes every name but writes the referenced column unquoted, which Snowflake folds to upper case. The comparison matches names case-insensitively, as ERD Studio does, so both name the quoted column the key is on."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "item": "6 foreign keys with no column list",
+   "truth": "the referenced table's primary key column",
+   "engine": "DuckDB's referenced column (its primary key); the forward or cross-schema one from the parse, filled from the referenced table's primary key",
+   "importer": "the primary key column",
+   "reason": "REFERENCES hub_customer with no column list names the referenced table's primary key."
+  },
+  {
+   "sample": "databricks-adidas-table-manager",
+   "item": "6 column descriptions with \\\" in a string",
+   "truth": "the unescaped text (\")",
+   "engine": "Spark's parse (\")",
+   "importer": "\"",
+   "reason": "Spark SQL reads a backslash escape inside a string literal; the description holds the quote, not the backslash."
   }
  ],
  "modellingChoices": [
@@ -372,6 +404,66 @@
    "match": "7601: Cannot use a CONTAINS or FREETEXT",
    "count": 1,
    "reason": "A procedure using full-text search (as above)."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"WAREHOUSE\"",
+   "count": 2,
+   "reason": "Compute (CREATE WAREHOUSE): fakesnow has none; not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"STREAM\"",
+   "count": 3,
+   "reason": "Streams (change tracking on a table): fakesnow has none; not tables."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"PIPE\"",
+   "count": 2,
+   "reason": "Snowpipe: fakesnow has none; loading, not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"TASK\"",
+   "count": 3,
+   "reason": "Tasks (scheduled MERGE bodies): fakesnow has none; not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^ALTER TASK ",
+   "count": 5,
+   "reason": "Resuming and suspending the tasks above: not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^ALTER PIPE ",
+   "count": 4,
+   "reason": "Refreshing the pipes above: not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^COPY INTO @",
+   "count": 4,
+   "reason": "Unloading sample rows to a stage (INCLUDE_QUERY_ID, which fakesnow does not know): data, not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*Table with name STG_(CUSTOMER|ORDERS)_STRM does not exist",
+   "count": 2,
+   "reason": "The two outbound views read the streams, which fakesnow could not create: views, not tables."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^SELECT ",
+   "count": 7,
+   "reason": "Queries the walkthrough runs to look at the data (over streams, views, a stage and task history): not schema."
+  },
+  {
+   "sample": "databricks-uc-catalog-as-code",
+   "match": "^ALTER (SCHEMA|TABLE) .*near 'TAGS'",
+   "count": 16,
+   "reason": "SET TAGS (on schemas, tables and columns) is Databricks SQL, which open-source Spark's parser does not have: governance metadata, not schema."
   }
  ]
 }

@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import { canon, loadTruth, normaliseType, runSample, scoreSample, scorecardTable, totalsOf, typeDetails, type ImportRun, type SampleScore, type Scorecard, type TruthSample } from './realWorldScorecard';
+import { canon, loadTruth, normaliseType, qualifySameNames, runSample, scoreSample, scorecardTable, totalsOf, typeDetails, type ImportRun, type SampleScore, type Scorecard, type TruthSample } from './realWorldScorecard';
 import { SEMANTIC_MODEL_META } from '../../src/services/semanticModelImport';
 
 const truth = loadTruth();
@@ -67,6 +67,18 @@ const FLOORS: Record<string, Floor> = {
   'bigquery-cloud-learning-platform': { tablesMatched: 11, columnsMatched: 129, primaryKeysMatched: 0, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 5, descriptionsExact: 54, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'redshift-tpch': { tablesMatched: 8, columnsMatched: 61, primaryKeysMatched: 8, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 38, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
   'sqlite-chinook': { tablesMatched: 11, columnsMatched: 64, primaryKeysMatched: 11, relationshipsMatched: 11, uniqueKeysKept: 0, typeDetailsKept: 37, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // Added from the import corpus (scripts/corpus/), at the numbers they scored when added; truth from the engine read-backs.
+  // The Data Vault's three CREATE TABLE ... AS SELECT tables with a typed column list (ref_region, ref_nation, sat_order_bv) are
+  // read from it, with their keys and 2 relationships; stg_nation and stg_region (SELECT src.*, …) have no column list of their
+  // own and are left out by name ("not imported, made from a query …").
+  'snowflake-realtime-datavault': { tablesMatched: 10, columnsMatched: 76, primaryKeysMatched: 8, relationshipsMatched: 6, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 0, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
+  'snowflake-sqldbm-adventureworksdw': { tablesMatched: 23, columnsMatched: 284, primaryKeysMatched: 15, relationshipsMatched: 36, uniqueKeysKept: 0, typeDetailsKept: 264, descriptionsExact: 25, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // orders and refunds are each in two schemas: compared as {schema}_{name} (qualifySameNames), the names the import gives them.
+  'databricks-uc-catalog-as-code': { tablesMatched: 22, columnsMatched: 118, primaryKeysMatched: 21, relationshipsMatched: 16, uniqueKeysKept: 0, typeDetailsKept: 20, descriptionsExact: 140, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  'databricks-adidas-table-manager': { tablesMatched: 3, columnsMatched: 24, primaryKeysMatched: 0, relationshipsMatched: 0, uniqueKeysKept: 0, typeDetailsKept: 0, descriptionsExact: 16, maxSilentLosses: 0, verdictAtLeast: 'Clean' },
+  // 4 of the 23 foreign keys are left out and said: each is the reverse of one kept (receipts and function_calls with transactions on
+  // transaction_hash, decoded_events with logs on their two-column key), which DBML cannot hold twice ("References with same endpoints exist").
+  'bigquery-shibarium': { tablesMatched: 8, columnsMatched: 87, primaryKeysMatched: 8, relationshipsMatched: 19, uniqueKeysKept: 0, typeDetailsKept: 3, descriptionsExact: 95, maxSilentLosses: 0, verdictAtLeast: 'With gaps' },
 };
 const RANK: Record<SampleScore['verdict'], number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
 
@@ -187,6 +199,34 @@ describe('scorecard rules', () => {
     expect(s.silentLosses.total).toBe(0);
     expect(s.requiredFks.noteClaims).toBe(2);
     expect(s.verdict).toBe('With gaps');
+  });
+
+  it('compares two tables of one name in two schemas as {schema}_{name}, the names the import gives them', () => {
+    const two: TruthSample = {
+      importer: 'sql', input: {}, counts: { tables: 3, columns: 3, primaryKeys: 2, relationships: 1 },
+      tables: [
+        { name: 'orders', schema: 'core', pk: ['id'], columns: [['id', 'int', 'PN']] },
+        { name: 'orders', schema: 'raw', pk: ['id'], columns: [['id', 'int', 'PN']] },
+        { name: 'lines', schema: 'core', pk: [], columns: [['order_id', 'int', '']] },
+      ],
+      relationships: [{ from: 'lines', fromColumn: 'order_id', to: 'orders', toSchema: 'core', toColumn: 'id' }],
+      uniqueKeys: [],
+    };
+    const q = qualifySameNames(two);
+    expect(q.tables.map((t) => t.name)).toEqual(['core_orders', 'raw_orders', 'lines']);
+    expect(q.relationships[0]).toMatchObject({ from: 'lines', to: 'core_orders' });
+    const s = scoreSample('t', two, run({
+      tables: [
+        { name: 'core_orders', schema: 'core', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] },
+        { name: 'raw_orders', schema: 'raw', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] },
+        { name: 'lines', schema: 'core', columns: [{ name: 'order_id', dataType: 'int', description: '' }] },
+      ],
+      relationships: [{ fromModel: 'lines', fromColumn: 'order_id', toModel: 'core_orders', toColumn: 'id', cardinality: 'many-to-one' }],
+    }));
+    expect(s.tables).toMatchObject({ matched: 3, missing: 0, extra: [] });
+    expect(s.relationships).toMatchObject({ matched: 1, extra: [] });
+    // A truth with no shared name is left as it is.
+    expect(qualifySameNames(sample)).toBe(sample);
   });
 
   it('a semantic model is compared by the Power BI names the import keeps in meta, not the snake_case ones', () => {

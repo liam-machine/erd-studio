@@ -1,0 +1,2176 @@
+{
+ "sample": "snowflake-sqldbm-adventureworksdw",
+ "engine": "fakesnow 0.12.1 (Snowflake emulator on DuckDB 2.0.0)",
+ "loaded": [
+  "snowflake-sqldbm-adventureworksdw/assets/sample_schema.sql"
+ ],
+ "setup": [
+  "create database ADVENTUREWORKSDW"
+ ],
+ "statementsRun": 26,
+ "workarounds": [
+  {
+   "file": "snowflake-sqldbm-adventureworksdw/assets/sample_schema.sql",
+   "line": 25,
+   "engineError": "002003 (42S02): Catalog Error: Table with name DimGeography does not exist!",
+   "did": [
+    "foreign key (GeographyKey) to EDW.DimGeography: a table created later, which DuckDB cannot reference yet; read from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-sqldbm-adventureworksdw/assets/sample_schema.sql",
+   "line": 89,
+   "engineError": "002003 (42S02): Catalog Error: Table with name DimSalesTerritory does not exist!",
+   "did": [
+    "foreign key (ParentEmployeeKey) to EDW.DimEmployee: a table created later, which DuckDB cannot reference yet; read from the parse",
+    "foreign key (SalesTerritoryKey) to EDW.DimSalesTerritory: a table created later, which DuckDB cannot reference yet; read from the parse"
+   ]
+  },
+  {
+   "file": "snowflake-sqldbm-adventureworksdw/assets/sample_schema.sql",
+   "line": 148,
+   "engineError": "002003 (42S02): Catalog Error: Table with name DimProductSubcategory does not exist!",
+   "did": [
+    "foreign key (ProductSubcategoryKey) to EDW.DimProductSubcategory: a table created later, which DuckDB cannot reference yet; read from the parse"
+   ]
+  }
+ ],
+ "errors": [],
+ "tables": [
+  {
+   "schema": "EDW",
+   "name": "DimAccount",
+   "comment": "Holds all Account information",
+   "pk": [
+    "AccountKey"
+   ],
+   "columns": [
+    {
+     "name": "AccountKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true,
+     "comment": "Unique Identifier of the Account data",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "ParentAccountKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false,
+     "comment": "Identifier of parent Account",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "AccountCodeAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ParentAccountCodeAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "AccountDescription",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "AccountType",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "Operator",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "CustomMembers",
+     "type": "VARCHAR(300)",
+     "notNull": false
+    },
+    {
+     "name": "ValueType",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "CustomMemberOptions",
+     "type": "VARCHAR(200)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimCurrency",
+   "comment": "Dimension for Currency Data",
+   "pk": [
+    "CurrencyKey"
+   ],
+   "columns": [
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true,
+     "comment": "Currency Identifier",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "CurrencyAlternateKey",
+     "type": "VARCHAR(3)",
+     "notNull": true,
+     "comment": "Alternate Currency Identifier",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "CurrencyName",
+     "type": "VARCHAR(50)",
+     "notNull": true,
+     "comment": "Name of the Currency",
+     "commentVia": "sqlglot"
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimCustomer",
+   "comment": "Dimension for Customer Data",
+   "pk": [
+    "CustomerKey"
+   ],
+   "columns": [
+    {
+     "name": "CustomerKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true,
+     "comment": "Customer Identifier",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "GeographyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false,
+     "comment": "Geographic informatio",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "CustomerAlternateKey",
+     "type": "VARCHAR(15)",
+     "notNull": true,
+     "comment": "Alternate Key",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "Title",
+     "type": "VARCHAR(8)",
+     "notNull": false,
+     "comment": "Title of the Customer",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "FirstName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "MiddleName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "LastName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "NameStyle",
+     "type": "VARCHAR(5)",
+     "notNull": false
+    },
+    {
+     "name": "BirthDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "MaritalStatus",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "Suffix",
+     "type": "VARCHAR(10)",
+     "notNull": false
+    },
+    {
+     "name": "Gender",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "EmailAddress",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "YearlyIncome",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "TotalChildren",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "NumberChildrenAtHome",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishEducation",
+     "type": "VARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishEducation",
+     "type": "VARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchEducation",
+     "type": "VARCHAR(40)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishOccupation",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishOccupation",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchOccupation",
+     "type": "VARCHAR(100)",
+     "notNull": false
+    },
+    {
+     "name": "HouseOwnerFlag",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "NumberCarsOwned",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "AddressLine",
+     "type": "VARCHAR(120)",
+     "notNull": false
+    },
+    {
+     "name": "AddressLine2",
+     "type": "VARCHAR(120)",
+     "notNull": false
+    },
+    {
+     "name": "Phone",
+     "type": "VARCHAR(20)",
+     "notNull": false
+    },
+    {
+     "name": "DateFirstPurchase",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "CommuteDistance",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimDate",
+   "comment": "Dimension for Date time",
+   "pk": [
+    "DateKey"
+   ],
+   "columns": [
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "FullDateAlternateKey",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "DayNumberOfWeek",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EnglishDayNameOfWeek",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "SpanishDayNameOfWeek",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "FrenchDayNameOfWeek",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "DayNumberOfMonth",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DayNumberOfYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "WeekNumberOfYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EnglishMonthName",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "SpanishMonthName",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "FrenchMonthName",
+     "type": "VARCHAR(10)",
+     "notNull": true
+    },
+    {
+     "name": "MonthNumberOfYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CalendarQuarter",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CalendarYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CalendarSemester",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "FiscalQuarter",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "FiscalYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "FiscalSemester",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimDepartmentGroup",
+   "comment": "Dimension for Department groups",
+   "pk": [
+    "DepartmentGroupKey"
+   ],
+   "columns": [
+    {
+     "name": "DepartmentGroupKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ParentDepartmentGroupKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "DepartmentGroupName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimEmployee",
+   "comment": "This table holds all Employee Information",
+   "pk": [
+    "EmployeeKey"
+   ],
+   "columns": [
+    {
+     "name": "EmployeeKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ParentEmployeeKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "EmployeeNationalIDAlternateKey",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    },
+    {
+     "name": "ParentEmployeeNationalIDAlternateKey",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    },
+    {
+     "name": "SalesTerritoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "FirstName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "LastName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "MiddleName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "NameStyle",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "Title",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "HireDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "BirthDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "LoginID",
+     "type": "VARCHAR(256)",
+     "notNull": false
+    },
+    {
+     "name": "EmailAddress",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "Phone",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "MaritalStatus",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "EmergencyContactName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "EmergencyContactPhone",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "SalariedFlag",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "Gender",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "PayFrequency",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "BaseRate",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "VacationHours",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "SickLeaveHours",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "CurrentFlag",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesPersonFlag",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DepartmentName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "StartDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "EndDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "Status",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimGeography",
+   "comment": null,
+   "pk": [
+    "GeographyKey"
+   ],
+   "columns": [
+    {
+     "name": "GeographyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "City",
+     "type": "VARCHAR(30)",
+     "notNull": false
+    },
+    {
+     "name": "StateProvinceCode",
+     "type": "VARCHAR(3)",
+     "notNull": false
+    },
+    {
+     "name": "StateProvinceName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "CountryRegionCode",
+     "type": "VARCHAR(3)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishCountryRegionName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishCountryRegionName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchCountryRegionName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "PostalCode",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    },
+    {
+     "name": "SalesTerritoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "IpAddressLocator",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimOrganization",
+   "comment": "Dimension for Organizational Data",
+   "pk": [
+    "OrganizationKey"
+   ],
+   "columns": [
+    {
+     "name": "OrganizationKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ParentOrganizationKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "PercentageOfOwnership",
+     "type": "VARCHAR(16)",
+     "notNull": false
+    },
+    {
+     "name": "OrganizationName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimProduct",
+   "comment": null,
+   "pk": [
+    "ProductKey"
+   ],
+   "columns": [
+    {
+     "name": "ProductKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ProductAlternateKey",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "ProductSubcategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "WeightUnitMeasureCode",
+     "type": "VARCHAR(3)",
+     "notNull": false
+    },
+    {
+     "name": "SizeUnitMeasureCode",
+     "type": "VARCHAR(3)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishProductName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SpanishProductName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchProductName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "StandardCost",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "FinishedGoodsFlag",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "Color",
+     "type": "VARCHAR(15)",
+     "notNull": true
+    },
+    {
+     "name": "SafetyStockLevel",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ReorderPoint",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ListPrice",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "Size",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "SizeRange",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "Weight",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "DaysToManufacture",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ProductLine",
+     "type": "VARCHAR(2)",
+     "notNull": false
+    },
+    {
+     "name": "DealerPrice",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "Class",
+     "type": "VARCHAR(2)",
+     "notNull": false
+    },
+    {
+     "name": "Style",
+     "type": "VARCHAR(2)",
+     "notNull": false
+    },
+    {
+     "name": "ModelName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "ChineseDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "ArabicDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "HebrewDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "ThaiDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "GermanDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "JapaneseDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "TurkishDescription",
+     "type": "VARCHAR(400)",
+     "notNull": false
+    },
+    {
+     "name": "Status",
+     "type": "VARCHAR(7)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimProductCategory",
+   "comment": null,
+   "pk": [
+    "ProductCategoryKey"
+   ],
+   "columns": [
+    {
+     "name": "ProductCategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ProductCategoryAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishProductCategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SpanishProductCategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "FrenchProductCategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimProductSubcategory",
+   "comment": null,
+   "pk": [
+    "ProductSubcategoryKey"
+   ],
+   "columns": [
+    {
+     "name": "ProductSubcategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ProductSubcategoryAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishProductSubcategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SpanishProductSubcategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "FrenchProductSubcategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ProductCategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimPromotion",
+   "comment": null,
+   "pk": [
+    "PromotionKey"
+   ],
+   "columns": [
+    {
+     "name": "PromotionKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "PromotionAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishPromotionName",
+     "type": "VARCHAR(255)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishPromotionName",
+     "type": "VARCHAR(255)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchPromotionName",
+     "type": "VARCHAR(255)",
+     "notNull": false
+    },
+    {
+     "name": "DiscountPct",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "EnglishPromotionType",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishPromotionType",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchPromotionType",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "EnglishPromotionCategory",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "SpanishPromotionCategory",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "FrenchPromotionCategory",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "MinQty",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "MaxQty",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimReseller",
+   "comment": null,
+   "pk": [
+    "ResellerKey"
+   ],
+   "columns": [
+    {
+     "name": "ResellerKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "GeographyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ResellerAlternateKey",
+     "type": "VARCHAR(15)",
+     "notNull": false
+    },
+    {
+     "name": "Phone",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "BusinessType",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "ResellerName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "NumberEmployees",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "OrderFrequency",
+     "type": "VARCHAR(1)",
+     "notNull": false
+    },
+    {
+     "name": "OrderMonth",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "FirstOrderYear",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "LastOrderYear",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ProductLine",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "AddressLine1",
+     "type": "VARCHAR(60)",
+     "notNull": false
+    },
+    {
+     "name": "AddressLine2",
+     "type": "VARCHAR(60)",
+     "notNull": false
+    },
+    {
+     "name": "AnnualSales",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "BankName",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    },
+    {
+     "name": "MinPaymentType",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "MinPaymentAmount",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "AnnualRevenue",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "YearOpened",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimSalesTerritory",
+   "comment": "Sales Territory data",
+   "pk": [
+    "SalesTerritoryKey"
+   ],
+   "columns": [
+    {
+     "name": "SalesTerritoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesTerritoryAlternateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "SalesTerritoryRegion",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SalesTerritoryCountry",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "SalesTerritoryGroup",
+     "type": "VARCHAR(50)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "DimScenario",
+   "comment": "Dimension Scenario",
+   "pk": [
+    "ScenarioKey"
+   ],
+   "columns": [
+    {
+     "name": "ScenarioKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true,
+     "comment": "Scenario Identifier",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "ScenarioName",
+     "type": "VARCHAR(50)",
+     "notNull": false,
+     "comment": "Name of the Scenario",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "CreatedBy",
+     "type": "VARCHAR(50)",
+     "notNull": true,
+     "comment": "Who Created this Scenario",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "CreatedDate",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true,
+     "comment": "Scenario Creation Date",
+     "commentVia": "sqlglot"
+    },
+    {
+     "name": "UpdatedDate",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "UpdatedBy",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "TestCol",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactCurrencyRate",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "AverageRate",
+     "type": "FLOAT",
+     "notNull": true
+    },
+    {
+     "name": "EndOfDayRate",
+     "type": "FLOAT",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactFinance",
+   "comment": "Facts for Finance",
+   "pk": null,
+   "columns": [
+    {
+     "name": "FinanceKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "OrganizationKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DepartmentGroupKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ScenarioKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "AccountKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "Amount",
+     "type": "FLOAT",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactInternetSales",
+   "comment": "Fact table to hold Currency Data",
+   "pk": null,
+   "columns": [
+    {
+     "name": "ProductKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "OrderDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DueDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ShipDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CustomerKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "PromotionKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesTerritoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesOrderNumber",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "SalesOrderLineNumber",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "RevisionNumber",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "OrderQuantity",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "UnitPrice",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ExtendedAmount",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "UnitPriceDiscountPct",
+     "type": "FLOAT",
+     "notNull": true
+    },
+    {
+     "name": "DiscountAmount",
+     "type": "FLOAT",
+     "notNull": true
+    },
+    {
+     "name": "ProductStandardCost",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "TotalProductCost",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesAmount",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "TaxAmt",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "Freight",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CarrierTrackingNumber",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "CustomerPONumber",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactProductInventory",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "ProductKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "MovementDate",
+     "type": "DATE",
+     "notNull": true
+    },
+    {
+     "name": "UnitCost",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "UnitsIn",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "UnitsOut",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "UnitsBalance",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactResellerSales",
+   "comment": "Fact data of Reseller Sales",
+   "pk": null,
+   "columns": [
+    {
+     "name": "ProductKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "OrderDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DueDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ShipDateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ResellerKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EmployeeKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "PromotionKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesTerritoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesOrderNumber",
+     "type": "VARCHAR(20)",
+     "notNull": true
+    },
+    {
+     "name": "SalesOrderLineNumber",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "RevisionNumber",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "OrderQuantity",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "UnitPrice",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "ExtendedAmount",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "UnitPriceDiscountPct",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "DiscountAmount",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "ProductStandardCost",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "TotalProductCost",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "SalesAmount",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "TaxAmt",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "Freight",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "CarrierTrackingNumber",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    },
+    {
+     "name": "CustomerPONumber",
+     "type": "VARCHAR(25)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactSalesQuota",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "SalesQuotaKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EmployeeKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CalendarYear",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CalendarQuarter",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "SalesAmountQuota",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "FactSurveyResponse",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "SurveyResponseKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "CustomerKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "ProductCategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EnglishProductCategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    },
+    {
+     "name": "ProductSubcategoryKey",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "EnglishProductSubcategoryName",
+     "type": "VARCHAR(50)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "EDW",
+   "name": "NewFactCurrencyRate",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "AverageRate",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "CurrencyID",
+     "type": "VARCHAR(3)",
+     "notNull": false
+    },
+    {
+     "name": "CurrencyDate",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "EndOfDayRate",
+     "type": "FLOAT",
+     "notNull": false
+    },
+    {
+     "name": "CurrencyKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "DateKey",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": "EDW",
+   "table": "DimCustomer",
+   "name": "FK_DimCustomer_401",
+   "columns": [
+    "GeographyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimGeography",
+   "refColumns": [
+    "GEOGRAPHYKEY"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "EDW",
+   "table": "DimEmployee",
+   "name": "FK_DimEmployee_403",
+   "columns": [
+    "ParentEmployeeKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimEmployee",
+   "refColumns": [
+    "EMPLOYEEKEY"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "EDW",
+   "table": "DimEmployee",
+   "name": "FK_DimEmployee_405",
+   "columns": [
+    "SalesTerritoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimSalesTerritory",
+   "refColumns": [
+    "SALESTERRITORYKEY"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "EDW",
+   "table": "DimProduct",
+   "name": "FK_DimProduct_407",
+   "columns": [
+    "ProductSubcategoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimProductSubcategory",
+   "refColumns": [
+    "PRODUCTSUBCATEGORYKEY"
+   ],
+   "via": "sqlglot"
+  },
+  {
+   "schema": "EDW",
+   "table": "DimProductSubcategory",
+   "name": "DimProductSubcategory_productcategorykey_productcategorykey_fkey",
+   "columns": [
+    "ProductCategoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimProductCategory",
+   "refColumns": [
+    "PRODUCTCATEGORYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "DimReseller",
+   "name": "DimReseller_geographykey_geographykey_fkey",
+   "columns": [
+    "GeographyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimGeography",
+   "refColumns": [
+    "GEOGRAPHYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactCurrencyRate",
+   "name": "FactCurrencyRate_currencykey_currencykey_fkey",
+   "columns": [
+    "CurrencyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimCurrency",
+   "refColumns": [
+    "CURRENCYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactCurrencyRate",
+   "name": "FactCurrencyRate_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactFinance",
+   "name": "FactFinance_accountkey_accountkey_fkey",
+   "columns": [
+    "AccountKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimAccount",
+   "refColumns": [
+    "ACCOUNTKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactFinance",
+   "name": "FactFinance_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactFinance",
+   "name": "FactFinance_departmentgroupkey_departmentgroupkey_fkey",
+   "columns": [
+    "DepartmentGroupKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDepartmentGroup",
+   "refColumns": [
+    "DEPARTMENTGROUPKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactFinance",
+   "name": "FactFinance_organizationkey_organizationkey_fkey",
+   "columns": [
+    "OrganizationKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimOrganization",
+   "refColumns": [
+    "ORGANIZATIONKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactFinance",
+   "name": "FactFinance_scenariokey_scenariokey_fkey",
+   "columns": [
+    "ScenarioKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimScenario",
+   "refColumns": [
+    "SCENARIOKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_currencykey_currencykey_fkey",
+   "columns": [
+    "CurrencyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimCurrency",
+   "refColumns": [
+    "CURRENCYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_customerkey_customerkey_fkey",
+   "columns": [
+    "CustomerKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimCustomer",
+   "refColumns": [
+    "CUSTOMERKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_duedatekey_datekey_fkey",
+   "columns": [
+    "DueDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_orderdatekey_datekey_fkey",
+   "columns": [
+    "OrderDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_productkey_productkey_fkey",
+   "columns": [
+    "ProductKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimProduct",
+   "refColumns": [
+    "PRODUCTKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_promotionkey_promotionkey_fkey",
+   "columns": [
+    "PromotionKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimPromotion",
+   "refColumns": [
+    "PROMOTIONKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_salesterritorykey_salesterritorykey_fkey",
+   "columns": [
+    "SalesTerritoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimSalesTerritory",
+   "refColumns": [
+    "SALESTERRITORYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactInternetSales",
+   "name": "FactInternetSales_shipdatekey_datekey_fkey",
+   "columns": [
+    "ShipDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactProductInventory",
+   "name": "FactProductInventory_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_currencykey_currencykey_fkey",
+   "columns": [
+    "CurrencyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimCurrency",
+   "refColumns": [
+    "CURRENCYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_duedatekey_datekey_fkey",
+   "columns": [
+    "DueDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_employeekey_employeekey_fkey",
+   "columns": [
+    "EmployeeKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimEmployee",
+   "refColumns": [
+    "EMPLOYEEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_orderdatekey_datekey_fkey",
+   "columns": [
+    "OrderDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_productkey_productkey_fkey",
+   "columns": [
+    "ProductKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimProduct",
+   "refColumns": [
+    "PRODUCTKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_promotionkey_promotionkey_fkey",
+   "columns": [
+    "PromotionKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimPromotion",
+   "refColumns": [
+    "PROMOTIONKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_resellerkey_resellerkey_fkey",
+   "columns": [
+    "ResellerKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimReseller",
+   "refColumns": [
+    "RESELLERKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_salesterritorykey_salesterritorykey_fkey",
+   "columns": [
+    "SalesTerritoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimSalesTerritory",
+   "refColumns": [
+    "SALESTERRITORYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactResellerSales",
+   "name": "FactResellerSales_shipdatekey_datekey_fkey",
+   "columns": [
+    "ShipDateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactSalesQuota",
+   "name": "FactSalesQuota_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactSurveyResponse",
+   "name": "FactSurveyResponse_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "FactSurveyResponse",
+   "name": "FactSurveyResponse_productcategorykey_productcategorykey_fkey",
+   "columns": [
+    "ProductCategoryKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimProductCategory",
+   "refColumns": [
+    "PRODUCTCATEGORYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "NewFactCurrencyRate",
+   "name": "NewFactCurrencyRate_currencykey_currencykey_fkey",
+   "columns": [
+    "CurrencyKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimCurrency",
+   "refColumns": [
+    "CURRENCYKEY"
+   ]
+  },
+  {
+   "schema": "EDW",
+   "table": "NewFactCurrencyRate",
+   "name": "NewFactCurrencyRate_datekey_datekey_fkey",
+   "columns": [
+    "DateKey"
+   ],
+   "refSchema": "EDW",
+   "refTable": "DimDate",
+   "refColumns": [
+    "DATEKEY"
+   ]
+  }
+ ]
+}

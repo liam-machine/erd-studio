@@ -5,8 +5,8 @@
  * import command's own pure pipeline (`scorecardHarness.ts`) and is held to
  * conservation: source = imported + reported + silent loss. The test fails
  * when any sample imports less, or loses more without a word, than
- * `baseline.json` records; an improvement passes (refresh the baseline in
- * the same change so it ratchets).
+ * `baseline.json` records, and when it does better than the baseline records
+ * (refresh the baseline in the same change, so it ratchets).
  *
  *   npx vitest run test/unit/realWorldScorecard.test.ts                      # check, print before/after
  *   ERD_SCORECARD_OUT=/tmp/after.json npx vitest run test/unit/realWorldScorecard.test.ts
@@ -16,8 +16,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED, SAMPLE_SLUGS } from './realWorld/expected';
-import { COUNT_KEYS, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
-import { SAMPLES_ROOT, loadTruth } from './realWorldScorecard';
+import { COUNT_KEYS, improvements, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
+import { SAMPLES_ROOT, loadTruth, qualifySameNames, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 
 const BASELINE = path.join(__dirname, 'realWorld', 'baseline.json');
 
@@ -77,6 +77,73 @@ describe('real-world scorecard against its baseline', () => {
       return;
     }
     expect(regressions(baseline.samples, ordered)).toEqual([]);
+    // The ratchet holds only at the level the baseline records: an improvement left out of it
+    // would let a later change fall back to the old numbers unnoticed.
+    expect(improvements(baseline.samples, ordered), 'improved: refresh the baseline with UPDATE_BASELINE=1').toEqual([]);
+  });
+
+  it('finds an improvement the baseline does not record (the mirror of a regression)', () => {
+    const b = baseline.samples[0];
+    const better: SampleScore = { ...b, imported: { ...b.imported, tables: b.imported.tables + 1 }, silentLoss: { ...b.silentLoss, tables: b.silentLoss.tables + 0 } };
+    expect(improvements([b], [b])).toEqual([]);
+    expect(improvements([b], [better])).toEqual([`${b.slug}: tables imported ${b.imported.tables} → ${b.imported.tables + 1}`]);
+    const quieter: SampleScore = { ...b, silentLoss: { ...b.silentLoss, columns: b.silentLoss.columns + 2 } };
+    expect(improvements([quieter], [b])).toEqual([`${b.slug}: columns lost silently ${b.silentLoss.columns + 2} → ${b.silentLoss.columns}`]);
+    const upgraded: SampleScore = { ...b, verdict: 'Failed' };
+    expect(improvements([upgraded], [b])).toEqual(b.verdict === 'Failed' ? [] : [`${b.slug}: verdict Failed → ${b.verdict}`]);
+  });
+});
+
+describe('same-name tables in two schemas', () => {
+  it('are scored as Import DBML names them: schema_name, with t_ before a name that starts with a digit', () => {
+    const table = (schema: string, name: string) => ({ schema, name, pk: [], columns: [['id', 'INT', '']] });
+    const truth = {
+      importer: 'sql', input: {}, counts: { tables: 3, columns: 3, primaryKeys: 0, relationships: 1 },
+      tables: [table('sales', 'customer'), table('340b_slvr', 'customer'), table('sales', 'orders')],
+      relationships: [{ from: 'orders', fromSchema: 'sales', fromColumn: 'id', to: 'customer', toSchema: '340b_slvr', toColumn: 'id' }],
+      uniqueKeys: [],
+    } as unknown as TruthSample;
+    const q = qualifySameNames(truth);
+    expect(q.tables.map((t) => t.name)).toEqual(['sales_customer', 't_340b_slvr_customer', 'orders']);
+    expect(q.relationships[0].to).toBe('t_340b_slvr_customer');
+  });
+});
+
+describe('a primary key chosen differently from the source', () => {
+  const truth = {
+    importer: 'sql', input: {}, counts: { tables: 1, columns: 2, primaryKeys: 1, relationships: 0 },
+    tables: [{ name: 'DimDate', pk: ['Date'], columns: [['Date', 'DATE', 'PN'], ['DateKey', 'INT', '']] }],
+    relationships: [], uniqueKeys: [],
+  } as unknown as TruthSample;
+  const run = (shown: string[]): ImportRun => ({
+    ok: true, tables: [{ name: 'DimDate', columns: [{ name: 'Date', dataType: 'DATE' }, { name: 'DateKey', dataType: 'INT', isPrimaryKey: true }] }] as ImportRun['tables'],
+    relationships: [], problems: [], warnings: [], notes: [], leftOut: [], shown, leftOutTables: [],
+  });
+
+  it('is a gap when a shown note names the table, the key and the source\'s key columns', () => {
+    const s = scoreSample('s', truth, run(['DimDate: every relationship joins DateKey, so it is the key; Date, which Mark as date table flags isKey, is marked unique.']));
+    expect(s.primaryKeys.wrongReported).toBe(1);
+    expect(s.silentLosses.primaryKeys).toBe(0);
+    expect(s.verdict).toBe('With gaps');
+  });
+
+  it('is a silent loss when nothing says so', () => {
+    const s = scoreSample('s', truth, run(['DimDate: 2 columns']));
+    expect(s.silentLosses.primaryKeys).toBe(1);
+    expect(s.verdict).toBe('With problems');
+  });
+
+  it('is a silent loss when the words are only scattered over lines that say nothing of the choice', () => {
+    // A table named as its key column (Date.Date): `date_key` alone names the table and a key, and any line names Date.
+    const dated = {
+      ...truth,
+      tables: [{ name: 'Date', pk: ['Date'], columns: [['Date', 'DATE', 'PN'], ['DateKey', 'INT', '']] }],
+    } as unknown as TruthSample;
+    const given = run(['date: 2 columns · primary key date_key', 'sales.order_date_key → date.date_key']);
+    given.tables[0].name = 'Date';
+    const s = scoreSample('s', dated, given);
+    expect(s.primaryKeys.wrongReported).toBe(0);
+    expect(s.silentLosses.primaryKeys).toBe(1);
   });
 });
 

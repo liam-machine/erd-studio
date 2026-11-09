@@ -16,8 +16,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { LineCounter, parseDocument, isAlias, isScalar, isSeq, isMap, isNode, YAMLMap } from 'yaml';
-import type { Document, Pair, YAMLSeq } from 'yaml';
+import { LineCounter, parseDocument, isAlias, isScalar, isSeq, isMap, isNode, visit, YAMLMap } from 'yaml';
+import type { Alias, Document, Pair, YAMLSeq } from 'yaml';
 
 import type {
   YmlColumn,
@@ -310,13 +310,28 @@ export class YmlParserService {
     if (!/^(seeds|snapshots)\s*:/m.test(raw)) {
       return; // cheap pre-check: most model schema files have neither key
     }
-    const doc = parseDocument(raw);
+    // Read as a models file is: YAML 1.1 merges (`<<: *defaults`) and aliases (`columns: *cols`,
+    // `description: *anchor`) resolved in this file, never in the last one read.
+    const doc = parseDocument(raw, { merge: true });
+    const before = { aliasDoc: this.aliasDoc, merged: this.merged };
+    this.aliasDoc = doc;
+    this.merged = new WeakMap();
+    try {
+      this.readResourceDocs(doc, filePath, resourceDocs);
+    } finally {
+      this.aliasDoc = before.aliasDoc;
+      this.merged = before.merged;
+    }
+  }
+
+  private readResourceDocs(doc: Document, filePath: string, resourceDocs: Map<string, YmlResourceDoc>): void {
     for (const [key, resourceType] of [['seeds', 'seed'], ['snapshots', 'snapshot']] as const) {
-      const seq = doc.get(key);
+      const seq = this.deref(doc.get(key));
       if (!isSeq(seq)) {
         continue;
       }
-      for (const item of (seq as YAMLSeq).items) {
+      for (const rawItem of (seq as YAMLSeq).items) {
+        const item = this.deref(rawItem);
         if (!isMap(item)) {
           continue;
         }
@@ -326,9 +341,10 @@ export class YmlParserService {
           continue; // first declaration wins, as for source files
         }
         const columns: YmlColumn[] = [];
-        const columnsNode = node.get('columns');
+        const columnsNode = this.deref(node.get('columns'));
         if (isSeq(columnsNode)) {
-          for (const colItem of (columnsNode as YAMLSeq).items) {
+          for (const rawCol of (columnsNode as YAMLSeq).items) {
+            const colItem = this.deref(rawCol);
             if (!isMap(colItem)) {
               continue;
             }
@@ -938,14 +954,39 @@ export class YmlParserService {
   private deref(node: unknown, depth = 0): unknown {
     let resolved: unknown = node;
     if (isAlias(node)) {
-      try {
-        resolved = this.aliasDoc ? node.resolve(this.aliasDoc) : undefined;
-      } catch {
-        return undefined;
-      }
+      resolved = this.aliasTarget(node);
     }
     return isMap(resolved) ? this.withMerges(resolved as YAMLMap, depth) : resolved;
   }
+
+  /**
+   * The node an alias names in {@link aliasDoc}: the last node anchored with its
+   * name before it, as YAML reads it (yaml's `Alias.resolve`). Every alias's
+   * target is found in one walk of the document, built the first time one is
+   * asked for: `Alias.resolve` without a cache walks the whole document per
+   * alias, so a file sharing descriptions through anchors cost aliases x nodes.
+   */
+  private aliasTarget(alias: Alias): unknown {
+    const doc = this.aliasDoc;
+    if (!doc) return undefined;
+    let targets = this.aliasTargets.get(doc);
+    if (!targets) {
+      targets = new Map();
+      const last = new Map<string, unknown>();
+      const found = targets;
+      visit(doc, {
+        Node: (_key, node) => {
+          if (isAlias(node)) found.set(node, last.get(node.source));
+          else if (node.anchor) last.set(node.anchor, node);
+        },
+      });
+      this.aliasTargets.set(doc, targets);
+    }
+    return targets.get(alias);
+  }
+
+  /** Each document's aliases with the node each names ({@link aliasTarget}). */
+  private aliasTargets = new WeakMap<Document, Map<Alias, unknown>>();
 
   /**
    * A map with its YAML 1.1 merge keys applied (`<<: *defaults`,
@@ -1298,14 +1339,20 @@ export class YmlParserService {
 
   /** Get a string value from a YAML map, defaulting to ''. */
   private getString(node: YAMLMap, key: string): string {
-    const val = node.get(key);
-    return typeof val === 'string' ? val : '';
+    return this.stringValue(node.get(key)) ?? '';
   }
 
   /** Get a string value from a YAML map, or null if missing/non-string. */
   private getStringOrNull(node: YAMLMap, key: string): string | null {
-    const val = node.get(key);
-    return typeof val === 'string' ? val : null;
+    return this.stringValue(node.get(key)) ?? null;
+  }
+
+  /** A value as a string: `description: *shared_desc` is the string its anchor names, as dbt reads it. */
+  private stringValue(val: unknown): string | undefined {
+    if (typeof val === 'string') return val;
+    if (!isAlias(val)) return undefined;
+    const resolved = this.deref(val);
+    return isScalar(resolved) && typeof resolved.value === 'string' ? resolved.value : undefined;
   }
 
   /**

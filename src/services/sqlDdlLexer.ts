@@ -276,7 +276,24 @@ export function tokenize(text: string, dialect: SqlDialect): Token[] {
       push({ kind: 'word', value: text.slice(start, i), start, end: i, line: startLine });
       continue;
     }
-    if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(text[i + 1] ?? ''))) {
+    // A name that starts with a digit (`cat.340b_silver.t`, a column `3RD_PARTY_VENDOR`: Spark, MySQL
+    // and Hive accept it unquoted): a word, never the number 340 and a word b_silver. A name with an
+    // underscore, or a part of a dotted name; in Spark and MySQL, any (`2fa`, MySQL's `3d`). A number
+    // literal stays a number: `1e5`, `0x1F`, `0b101`, and Spark's `10L`, `3D`, `1BD`.
+    if (/[0-9]/.test(c)) {
+      const run = /^[0-9]+[A-Za-z_][A-Za-z0-9_$]*/.exec(text.slice(i, i + 256));
+      if (run && !NUMBER_WITH_LETTERS.test(run[0]) && !(dialect === 'databricks' && SPARK_NUMBER_SUFFIX.test(run[0]))
+        && (run[0].includes('_') || DIGIT_LED_NAMES.has(dialect) || afterNamePart(tokens, start)
+          || /^\.[A-Za-z_`"[]/.test(text.slice(i + run[0].length, i + run[0].length + 2)))) {
+        i += run[0].length;
+        push({ kind: 'word', value: run[0], start, end: i, line: startLine });
+        continue;
+      }
+    }
+    // `.5` is a number, but the dot in `cat.340b_x` joins two name parts.
+    const nameDot = c === '.' && /^\.[0-9]+[A-Za-z_]/.test(text.slice(i, i + 64)) && tokens.length > 0
+      && (tokens[tokens.length - 1].kind === 'word' || tokens[tokens.length - 1].kind === 'ident') && tokens[tokens.length - 1].end === i;
+    if (/[0-9]/.test(c) || (c === '.' && !nameDot && /[0-9]/.test(text[i + 1] ?? ''))) {
       while (i < n && /[0-9.eE]/.test(text[i])) i++;
       push({ kind: 'number', value: text.slice(start, i), start, end: i, line: startLine });
       continue;
@@ -591,6 +608,38 @@ function startsDefinition(tokens: readonly Token[], i: number): boolean {
     if (CREATE_OBJECT_WORDS.has(upper(tokens[k]))) return true;
   }
   return false;
+}
+
+/** Dialects whose unquoted names may start with a digit (`2fa`, `3d_model`): Spark (Databricks, Hive) and MySQL. */
+const DIGIT_LED_NAMES: ReadonlySet<SqlDialect> = new Set<SqlDialect>(['databricks', 'mysql']);
+
+/** A number literal written with letters: an exponent (`1e5`, `1e`-`5`), hex and binary (`0x1F`, `0b101`). */
+const NUMBER_WITH_LETTERS = /^(?:[0-9]+e[0-9]*|0x[0-9a-f]+|0b[01]+)$/i;
+/** Spark's typed number literals (`10L`, `3D`, `1BD`, `1E10D`): numbers in Spark, though MySQL would read `3d` as a name. */
+const SPARK_NUMBER_SUFFIX = /^[0-9]+(?:e[0-9]*)?(?:[LSYDF]|BD)$/i;
+
+/** Whether a token starting at `offset` follows a name and a dot with no space between (`a.` before `340b`). */
+function afterNamePart(tokens: readonly Token[], offset: number): boolean {
+  const dot = tokens[tokens.length - 1];
+  const before = tokens[tokens.length - 2];
+  return !!dot && dot.kind === 'punct' && dot.value === '.' && dot.end === offset
+    && !!before && (before.kind === 'word' || before.kind === 'ident') && before.end === dot.start;
+}
+
+/**
+ * A `COMMENT [=] '…'` between a CREATE TABLE's name (`next`: the token after
+ * it) and its column list: the clause's first and last token, and the text.
+ */
+export function leadingTableComment(t: readonly Token[], next: number): { from: number; to: number; comment: string } | undefined {
+  if (upper(t[next]) !== 'COMMENT') return undefined;
+  const value = isPunct(t[next + 1], '=') ? next + 2 : next + 1;
+  if (t[value]?.kind !== 'string' || !isPunct(t[value + 1], '(')) return undefined;
+  return { from: next, to: value, comment: t[value].value };
+}
+
+/** Whether the column-list item at `from` is a Lakeflow expectation: `CONSTRAINT name EXPECT (…)`. */
+export function isExpectation(t: readonly Token[], from: number): boolean {
+  return upper(t[from]) === 'CONSTRAINT' && isName(t[from + 1]) && upper(t[from + 2]) === 'EXPECT' && isPunct(t[from + 3], '(');
 }
 
 /** Whether only spaces precede `offset` on its line. */

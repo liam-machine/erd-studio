@@ -1,0 +1,873 @@
+{
+ "sample": "snowflake-realtime-datavault",
+ "engine": "fakesnow 0.12.1 (Snowflake emulator on DuckDB 2.0.0)",
+ "loaded": [
+  "snowflake-realtime-datavault/environment_setup.sql",
+  "snowflake-realtime-datavault/staging.sql",
+  "snowflake-realtime-datavault/raw_data_vault.sql",
+  "snowflake-realtime-datavault/business_data_vault.sql",
+  "snowflake-realtime-datavault/information_delivery.sql"
+ ],
+ "setup": [
+  "create database SNOWFLAKE_SAMPLE_DATA",
+  "create schema SNOWFLAKE_SAMPLE_DATA.TPCH_SF10",
+  "create table SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.NATION (N_NATIONKEY NUMBER(38,0) NOT NULL, N_NAME VARCHAR(25) NOT NULL, N_REGIONKEY NUMBER(38,0) NOT NULL, N_COMMENT VARCHAR(152))",
+  "create table SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.REGION (R_REGIONKEY NUMBER(38,0) NOT NULL, R_NAME VARCHAR(25) NOT NULL, R_COMMENT VARCHAR(152))"
+ ],
+ "statementsRun": 48,
+ "workarounds": [
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 79,
+   "engineError": "002026 (42601): SQL compilation error: Invalid column definition list",
+   "did": [
+    "CREATE TABLE (column list) AS SELECT: DuckDB cannot take a column list with a query; created from the column list (the query is data)"
+   ]
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 98,
+   "engineError": "002026 (42601): SQL compilation error: Invalid column definition list",
+   "did": [
+    "CREATE TABLE (column list) AS SELECT: DuckDB cannot take a column list with a query; created from the column list (the query is data)"
+   ]
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 29,
+   "engineError": "002026 (42601): SQL compilation error: Invalid column definition list",
+   "did": [
+    "foreign key (sha1_hub_order) to L10_RDV.HUB_ORDER: another schema, which DuckDB cannot reference; read from the parse",
+    "CREATE TABLE (column list) AS SELECT: DuckDB cannot take a column list with a query; created from the column list (the query is data)"
+   ]
+  }
+ ],
+ "errors": [
+  {
+   "file": "snowflake-realtime-datavault/environment_setup.sql",
+   "line": 10,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"WAREHOUSE\" LINE 1: CREATE OR REPLACE WAREHOUSE DV_LAB_WH ^^^^^^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/environment_setup.sql",
+   "line": 11,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"WAREHOUSE\" LINE 1: CREATE OR REPLACE WAREHOUSE DV_RDV_WH ^^^^^^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 55,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"STREAM\" LINE 1: CREATE OR REPLACE STREAM stg_customer_strm ON TABLE stg_customer ^^^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 56,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"STREAM\" LINE 1: CREATE OR REPLACE STREAM stg_orders_strm ON TABLE stg_orders ^^^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 62,
+   "statement": "COPY INTO @customer_data",
+   "error": "Unknown copy parameter: INCLUDE_QUERY_ID"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 70,
+   "statement": "COPY INTO @orders_data",
+   "error": "Unknown copy parameter: INCLUDE_QUERY_ID"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 79,
+   "statement": "SELECT METADATA$FILENAME, $1",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"@\" LINE 1: SELECT METADATA$FILENAME, $1 FROM @customer_data ^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 82,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: CREATE OR REPLACE PIPE stg_orders_pp ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 95,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: CREATE OR REPLACE PIPE stg_customer_pp ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 108,
+   "statement": "ALTER PIPE stg_customer_pp",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: ALTER PIPE stg_customer_pp REFRESH ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 109,
+   "statement": "ALTER PIPE stg_orders_pp",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: ALTER PIPE stg_orders_pp REFRESH ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 111,
+   "statement": "SELECT 'stg_customer', count(1)",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_ORDERS_STRM does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 120,
+   "statement": "CREATE OR REPLACE",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_CUSTOMER_STRM does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 142,
+   "statement": "SELECT * FROM",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_CUSTOMER_STRM_OUTBOUND does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 144,
+   "statement": "CREATE OR REPLACE",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_ORDERS_STRM does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/staging.sql",
+   "line": 162,
+   "statement": "SELECT * FROM",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_ORDER_STRM_OUTBOUND does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 122,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ... DV_LAB.L10_RDV.REF_NATION; */ /* tasks */ CREATE OR REPLACE TASK customer_strm_tsk ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 191,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: CREATE OR REPLACE TASK order_strm_tsk ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 273,
+   "statement": "ALTER TASK dv_lab.l10_rdv.customer_strm_tsk",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ALTER TASK dv_lab.l10_rdv.customer_strm_tsk RESUME ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 274,
+   "statement": "ALTER TASK dv_lab.l10_rdv.order_strm_tsk",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ALTER TASK dv_lab.l10_rdv.order_strm_tsk RESUME ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 277,
+   "statement": "SELECT * FROM",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TABLE\" LINE 1: ..., lets have a look at task execution history */ SELECT * FROM TABLE(INFORMATION_SCHEMA.task_history()) ORDER BY SCHEDULED... ^…"
+  },
+  {
+   "file": "snowflake-realtime-datavault/raw_data_vault.sql",
+   "line": 282,
+   "statement": "SELECT 'hub_customer', count(1)",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_CUSTOMER_STRM_OUTBOUND does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 71,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"STREAM\" LINE 1: ... once the parent task is completed. */ CREATE OR REPLACE STREAM dv_lab.l10_rdv.sat_order_strm ON TABLE dv_lab.l10_rdv... ^^^^…"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 73,
+   "statement": "ALTER TASK l10_rdv.order_strm_tsk",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ALTER TASK l10_rdv.order_strm_tsk SUSPEND ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 75,
+   "statement": "CREATE OR REPLACE",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: CREATE OR REPLACE TASK l10_rdv.hub_order_strm_sat_order_bv_tsk ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 99,
+   "statement": "ALTER TASK l10_rdv.hub_order_strm_sat_order_bv_tsk",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ALTER TASK l10_rdv.hub_order_strm_sat_order_bv_tsk RESUME ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 100,
+   "statement": "ALTER TASK l10_rdv.order_strm_tsk",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"TASK\" LINE 1: ALTER TASK l10_rdv.order_strm_tsk RESUME ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 106,
+   "statement": "COPY INTO @orders_data",
+   "error": "Unknown copy parameter: INCLUDE_QUERY_ID"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 113,
+   "statement": "ALTER PIPE stg_orders_pp",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: ALTER PIPE stg_orders_pp REFRESH ^^^^"
+  },
+  {
+   "file": "snowflake-realtime-datavault/business_data_vault.sql",
+   "line": 115,
+   "statement": "SELECT 'l00_stg.stg_orders', count(1)",
+   "error": "002003 (42S02): Catalog Error: Table with name STG_ORDERS_STRM does not exist!"
+  },
+  {
+   "file": "snowflake-realtime-datavault/information_delivery.sql",
+   "line": 87,
+   "statement": "COPY INTO @customer_data",
+   "error": "Unknown copy parameter: INCLUDE_QUERY_ID"
+  },
+  {
+   "file": "snowflake-realtime-datavault/information_delivery.sql",
+   "line": 95,
+   "statement": "ALTER PIPE stg_customer_pp",
+   "error": "001003 (42000): Parser Error: syntax error at or near \"PIPE\" LINE 1: ALTER PIPE stg_customer_pp REFRESH ^^^^"
+  }
+ ],
+ "tables": [
+  {
+   "schema": "L00_STG",
+   "name": "STG_CUSTOMER",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "RAW_JSON",
+     "type": "VARIANT",
+     "notNull": false
+    },
+    {
+     "name": "FILENAME",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "FILE_ROW_SEQ",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L00_STG",
+   "name": "STG_NATION",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "N_NATIONKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "N_NAME",
+     "type": "TEXT",
+     "notNull": false
+    },
+    {
+     "name": "N_REGIONKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "N_COMMENT",
+     "type": "TEXT",
+     "notNull": false
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_TZ",
+     "notNull": false
+    },
+    {
+     "name": "RSCR",
+     "type": "TEXT",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "L00_STG",
+   "name": "STG_ORDERS",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "O_ORDERKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_CUSTKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERSTATUS",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_TOTALPRICE",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERDATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERPRIORITY",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_CLERK",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_SHIPPRIORITY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "FILENAME",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "FILE_ROW_SEQ",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L00_STG",
+   "name": "STG_REGION",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "R_REGIONKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "R_NAME",
+     "type": "TEXT",
+     "notNull": false
+    },
+    {
+     "name": "R_COMMENT",
+     "type": "TEXT",
+     "notNull": false
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_TZ",
+     "notNull": false
+    },
+    {
+     "name": "RSCR",
+     "type": "TEXT",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "HUB_CUSTOMER",
+   "comment": null,
+   "pk": [
+    "SHA1_HUB_CUSTOMER"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_HUB_CUSTOMER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "C_CUSTKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "HUB_ORDER",
+   "comment": null,
+   "pk": [
+    "SHA1_HUB_ORDER"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_HUB_ORDER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "O_ORDERKEY",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "LNK_CUSTOMER_ORDER",
+   "comment": null,
+   "pk": [
+    "SHA1_LNK_CUSTOMER_ORDER"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_LNK_CUSTOMER_ORDER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "SHA1_HUB_CUSTOMER",
+     "type": "BINARY",
+     "notNull": false
+    },
+    {
+     "name": "SHA1_HUB_ORDER",
+     "type": "BINARY",
+     "notNull": false
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "REF_NATION",
+   "comment": null,
+   "pk": [
+    "NATIONCODE"
+   ],
+   "columns": [
+    {
+     "name": "NATIONCODE",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "REGIONCODE",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "N_NAME",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "N_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "REF_REGION",
+   "comment": null,
+   "pk": [
+    "REGIONCODE"
+   ],
+   "columns": [
+    {
+     "name": "REGIONCODE",
+     "type": "NUMBER(38,0)",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": false
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "R_NAME",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "R_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "SAT_CUSTOMER",
+   "comment": null,
+   "pk": [
+    "SHA1_HUB_CUSTOMER",
+    "LDTS"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_HUB_CUSTOMER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "C_NAME",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "C_ADDRESS",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "C_PHONE",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "C_ACCTBAL",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "C_MKTSEGMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "C_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "NATIONCODE",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "HASH_DIFF",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "name": "SAT_ORDER",
+   "comment": null,
+   "pk": [
+    "SHA1_HUB_ORDER",
+    "LDTS"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_HUB_ORDER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "O_ORDERSTATUS",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_TOTALPRICE",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERDATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERPRIORITY",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_CLERK",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_SHIPPRIORITY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "HASH_DIFF",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "L20_BDV",
+   "name": "SAT_ORDER_BV",
+   "comment": null,
+   "pk": [
+    "SHA1_HUB_ORDER",
+    "LDTS"
+   ],
+   "columns": [
+    {
+     "name": "SHA1_HUB_ORDER",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "LDTS",
+     "type": "TIMESTAMP_NTZ",
+     "notNull": true
+    },
+    {
+     "name": "O_ORDERSTATUS",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_TOTALPRICE",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERDATE",
+     "type": "DATE",
+     "notNull": false
+    },
+    {
+     "name": "O_ORDERPRIORITY",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_CLERK",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "O_SHIPPRIORITY",
+     "type": "NUMBER(38,0)",
+     "notNull": false
+    },
+    {
+     "name": "O_COMMENT",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    },
+    {
+     "name": "HASH_DIFF",
+     "type": "BINARY",
+     "notNull": true
+    },
+    {
+     "name": "RSCR",
+     "type": "VARCHAR(16777216)",
+     "notNull": true
+    },
+    {
+     "name": "ORDER_PRIORITY_BUCKET",
+     "type": "VARCHAR(16777216)",
+     "notNull": false
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": "L10_RDV",
+   "table": "LNK_CUSTOMER_ORDER",
+   "name": "LNK_CUSTOMER_ORDER_sha1_hub_customer_sha1_hub_customer_fkey",
+   "columns": [
+    "SHA1_HUB_CUSTOMER"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "HUB_CUSTOMER",
+   "refColumns": [
+    "SHA1_HUB_CUSTOMER"
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "table": "LNK_CUSTOMER_ORDER",
+   "name": "LNK_CUSTOMER_ORDER_sha1_hub_order_sha1_hub_order_fkey",
+   "columns": [
+    "SHA1_HUB_ORDER"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "HUB_ORDER",
+   "refColumns": [
+    "SHA1_HUB_ORDER"
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "table": "REF_NATION",
+   "name": "REF_NATION_regioncode_regioncode_fkey",
+   "columns": [
+    "REGIONCODE"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "REF_REGION",
+   "refColumns": [
+    "REGIONCODE"
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "table": "SAT_CUSTOMER",
+   "name": "SAT_CUSTOMER_sha1_hub_customer_sha1_hub_customer_fkey",
+   "columns": [
+    "SHA1_HUB_CUSTOMER"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "HUB_CUSTOMER",
+   "refColumns": [
+    "SHA1_HUB_CUSTOMER"
+   ]
+  },
+  {
+   "schema": "L10_RDV",
+   "table": "SAT_ORDER",
+   "name": "SAT_ORDER_sha1_hub_order_sha1_hub_order_fkey",
+   "columns": [
+    "SHA1_HUB_ORDER"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "HUB_ORDER",
+   "refColumns": [
+    "SHA1_HUB_ORDER"
+   ]
+  },
+  {
+   "schema": "L20_BDV",
+   "table": "SAT_ORDER_BV",
+   "name": "fk_sat_order",
+   "columns": [
+    "SHA1_HUB_ORDER"
+   ],
+   "refSchema": "L10_RDV",
+   "refTable": "HUB_ORDER",
+   "refColumns": [
+    "SHA1_HUB_ORDER"
+   ],
+   "via": "sqlglot"
+  }
+ ]
+}

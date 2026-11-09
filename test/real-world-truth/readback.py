@@ -412,12 +412,15 @@ def sakila() -> dict:
 # Snowflake (fakesnow) and Databricks (Spark), each in its own Python
 # ---------------------------------------------------------------------------
 
-def in_python(env_var: str, helper: str, sample: str) -> dict:
+def in_python(env_var: str, helper: str, sample: str, files: tuple[str, ...] = (), setup: tuple[str, ...] = ()) -> dict:
+    """Runs a helper in the emulator's Python: the sample's files (paths under its folder, in load
+    order; none: the helper's default) and setup statements run before them (--setup, each one)."""
     py = os.environ.get(env_var)
     if not py:
         raise RuntimeError(f'set {env_var} to a Python that has the emulator installed (see docs/dev/real-world-truth.md)')
     env = {**os.environ, 'SPARK_LOCAL_IP': os.environ.get('SPARK_LOCAL_IP', '127.0.0.1')}
-    r = run([py, '-I', str(HERE / helper), str(SAMPLES), sample], env=env)
+    args = [a for stmt in setup for a in ('--setup', stmt)] + list(files)
+    r = run([py, '-I', str(HERE / helper), str(SAMPLES), sample, *args], env=env)
     if r.returncode != 0:
         raise RuntimeError(short(r.stderr[-2000:], 1000))
     # The JSON is the last line (an engine may print its own notices first).
@@ -430,6 +433,40 @@ def snowflake() -> dict:
 
 def databricks() -> dict:
     return in_python('RWT_SPARK_PYTHON', 'spark_readback.py', 'databricks-open-retail-data-model')
+
+
+def realtime_datavault() -> dict:
+    # The upstream README gives no order; this is the Data Vault's own: the environment (database and
+    # schemas), staging, the raw vault, the business vault (built on the raw vault), the delivery views.
+    # Staging copies NATION and REGION from the SNOWFLAKE_SAMPLE_DATA share every account has: they are
+    # created first, as the share defines them (TPCH_SF10), with no rows.
+    share = (
+        'create database SNOWFLAKE_SAMPLE_DATA', 'create schema SNOWFLAKE_SAMPLE_DATA.TPCH_SF10',
+        'create table SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.NATION (N_NATIONKEY NUMBER(38,0) NOT NULL, N_NAME VARCHAR(25) NOT NULL, '
+        'N_REGIONKEY NUMBER(38,0) NOT NULL, N_COMMENT VARCHAR(152))',
+        'create table SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.REGION (R_REGIONKEY NUMBER(38,0) NOT NULL, R_NAME VARCHAR(25) NOT NULL, '
+        'R_COMMENT VARCHAR(152))',
+    )
+    return in_python('RWT_SNOWFLAKE_PYTHON', 'snowflake_readback.py', 'snowflake-realtime-datavault',
+                     ('environment_setup.sql', 'staging.sql', 'raw_data_vault.sql', 'business_data_vault.sql', 'information_delivery.sql'),
+                     share)
+
+
+def sqldbm_adventureworksdw() -> dict:
+    # SqlDBM's script creates the schema in a database it expects to exist: the account's ADVENTUREWORKSDW.
+    return in_python('RWT_SNOWFLAKE_PYTHON', 'snowflake_readback.py', 'snowflake-sqldbm-adventureworksdw',
+                     ('assets/sample_schema.sql',), ('create database ADVENTUREWORKSDW',))
+
+
+def uc_catalog_as_code() -> dict:
+    folder = SAMPLES / 'databricks-uc-catalog-as-code'
+    files = tuple(p.relative_to(folder).as_posix() for p in sorted((folder / 'atlas_demo' / 'src').rglob('*.sql')))
+    return in_python('RWT_SPARK_PYTHON', 'spark_readback.py', 'databricks-uc-catalog-as-code', files)
+
+
+def adidas_table_manager() -> dict:
+    return in_python('RWT_SPARK_PYTHON', 'spark_readback.py', 'databricks-adidas-table-manager',
+                     ('table/test_table_complex_default_scenario.sql', 'table/test_table_simple_split_scenario.sql'))
 
 
 # ---------------------------------------------------------------------------
@@ -802,6 +839,10 @@ READERS = {
     'migrations-harbor': harbor,
     'snowflake-grid-reliability': snowflake,
     'databricks-open-retail-data-model': databricks,
+    'snowflake-realtime-datavault': realtime_datavault,
+    'snowflake-sqldbm-adventureworksdw': sqldbm_adventureworksdw,
+    'databricks-uc-catalog-as-code': uc_catalog_as_code,
+    'databricks-adidas-table-manager': adidas_table_manager,
     'sqlserver-adventureworks': sqlserver,
     'sqlite-chinook': chinook,
     'oracle-hr': oracle_hr,

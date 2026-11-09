@@ -139,3 +139,23 @@ export function regressions(before: readonly SampleScore[], after: readonly Samp
   }
   return out;
 }
+
+/**
+ * Where `after` does better than `before` records: a verdict up, more imported,
+ * less lost silently (the mirror of {@link regressions}). The baseline is
+ * refreshed in the change that improves it, so this is empty on a committed run.
+ */
+export function improvements(before: readonly SampleScore[], after: readonly SampleScore[]): string[] {
+  const out: string[] = [];
+  const rank: Record<Verdict, number> = { Failed: 0, 'With problems': 1, 'With gaps': 2, Clean: 3 };
+  for (const b of before) {
+    const a = after.find((s) => s.slug === b.slug);
+    if (!a) continue;
+    if (rank[a.verdict] > rank[b.verdict]) out.push(`${b.slug}: verdict ${b.verdict} → ${a.verdict}`);
+    for (const k of COUNT_KEYS) {
+      if (a.imported[k] > b.imported[k]) out.push(`${b.slug}: ${k} imported ${b.imported[k]} → ${a.imported[k]}`);
+      if (a.silentLoss[k] < b.silentLoss[k]) out.push(`${b.slug}: ${k} lost silently ${b.silentLoss[k]} → ${a.silentLoss[k]}`);
+    }
+  }
+  return out;
+}

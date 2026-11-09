@@ -137,6 +137,36 @@ export const EXPECTED: Readonly<Record<string, ExpectedSample>> = {
     importer: 'sql',
     counts: { tables: 11, columns: 64, primaryKeys: 11, relationships: 11, descriptions: 0 },
     provenance: "Counted by sqlglot 27.29 (sqlite) over the upstream file, never through ERD Studio (11 of 11 CREATE TABLEs; types re-read as written), every foreign key inside its table. Source: https://github.com/lerocha/chinook-database/blob/4a944a942426e1f3263fe539155fb7ef92b04b4a/ChinookDatabase/DataSources/Chinook_Sqlite.sql @ 4a944a942426e1f3263fe539155fb7ef92b04b4a (tag v1.4.5); SHA-256 fdcb271b3e9c840216b09168752bddca973ed3917b40e49b603b15831114aea1 (611,447 bytes).",
+  },  // The samples below were promoted from the import corpus (scripts/corpus/manifest.json, pinned 2026-11-09).
+  // snowflake-realtime-datavault: a real-time Data Vault on Snowflake (dandekarp/RealTime-DataVault_Snowflake)
+  'snowflake-realtime-datavault': {
+    importer: 'sql',
+    counts: { tables: 12, columns: 87, primaryKeys: 8, relationships: 6, descriptions: 0 },
+    provenance: "Read back from fakesnow 0.12.1 (test/real-world-truth/engine/snowflake-realtime-datavault.json), never through ERD Studio; cross-checked with scripts/corpus/count_source.py (the same 12 tables and keys). Source: https://github.com/dandekarp/RealTime-DataVault_Snowflake/tree/d6a29ab7aaaec811d5fb28758e35529a8ce87ee1 (five .sql files; SHA-256 each in SOURCE.md).",
+  },
+  // snowflake-sqldbm-adventureworksdw: AdventureWorksDW as SqlDBM forward-engineers it (Snowflake-Labs/sfquickstarts)
+  'snowflake-sqldbm-adventureworksdw': {
+    importer: 'sql',
+    counts: { tables: 23, columns: 284, primaryKeys: 15, relationships: 36, descriptions: 25 },
+    provenance: "Read back from fakesnow 0.12.1 (test/real-world-truth/engine/snowflake-sqldbm-adventureworksdw.json), never through ERD Studio; cross-checked with scripts/corpus/count_source.py (23 tables, 284 columns, 15 keys, 36 foreign keys). Source: https://github.com/Snowflake-Labs/sfquickstarts/blob/4816f22b2e9fba6de36d1bd02dff79996a556a6d/site/sfguides/src/database-modeling-with-sqldbm/assets/sample_schema.sql; SHA-256 df3722567a6a699970e18db248c0e797ee9e8f019226896586b196031b15ce81 (19,461 bytes).",
+  },
+  // databricks-uc-catalog-as-code: a Unity Catalog kept as one file per object (taslater/databricks-catalog-as-code)
+  'databricks-uc-catalog-as-code': {
+    importer: 'sql',
+    counts: { tables: 22, columns: 118, primaryKeys: 21, relationships: 16, descriptions: 140 },
+    provenance: "Read back with Apache Spark 4.3's SQL parser (test/real-world-truth/engine/databricks-uc-catalog-as-code.json), never through ERD Studio; cross-checked with scripts/corpus/count_source.py (the same 22 tables, 118 columns, 21 keys, 16 foreign keys). Source: https://github.com/taslater/databricks-catalog-as-code/tree/6f46fd8605ca10a639dd315832c957fee735e721/packages/ucatlas/tests/atlas_demo/src (35 files; SHA-256 each in SOURCE.md).",
+  },
+  // databricks-adidas-table-manager: adidas lakehouse-engine's DDL splitter test files
+  'databricks-adidas-table-manager': {
+    importer: 'sql',
+    counts: { tables: 3, columns: 24, primaryKeys: 0, relationships: 0, descriptions: 16 },
+    provenance: "Read back with Apache Spark 4.3's SQL parser (test/real-world-truth/engine/databricks-adidas-table-manager.json), never through ERD Studio, and checked by reading both files. Source: https://github.com/adidas/lakehouse-engine/tree/7d543c5ae3a3427870722cec19ab36d5306217d2/tests/resources/feature/table_manager/create/table (2 files; SHA-256 each in SOURCE.md).",
+  },
+  // bigquery-shibarium: the Shibarium blockchain ETL's BigQuery tables (K9-Finance-DAO/shibarium-bigquery-dune-etl-OSS)
+  'bigquery-shibarium': {
+    importer: 'sql',
+    counts: { tables: 8, columns: 87, primaryKeys: 8, relationships: 23, descriptions: 95 },
+    provenance: "Counted by scripts/corpus/count_source.py (sqlglot 27.29, bigquery) over the upstream file, never through ERD Studio, and checked by hand: 8 CREATE TABLEs, 8 ADD PRIMARY KEY and 23 ADD FOREIGN KEY (NOT ENFORCED). No local engine (NOT_ENGINE_VERIFIED). Source: https://github.com/K9-Finance-DAO/shibarium-bigquery-dune-etl-OSS/blob/267d25207702a7f532d8d0ed0cbcb1f5e76929df/bigquery/shibarium/create_tables.sql; SHA-256 3f11794698db2d73d1b9b4dc87704906f132f12384cbbad12b91bbf4aa401690 (26,329 bytes).",
   },
 };
 

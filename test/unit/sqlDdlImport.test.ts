@@ -562,10 +562,13 @@ describe('skips', () => {
     expect(plan.relationships.map((r) => [r.fromColumn, r.toColumn, !!r.compositeKey])).toEqual([['x', 'a', true], ['y', 'b', true]]);
   });
 
-  it('CREATE TABLE … AS SELECT has no column list and is skipped', () => {
+  it('CREATE TABLE … AS SELECT has no column list and is skipped, by name', () => {
     const result = convert('snowflake', [{ name: 'a.sql', text: 'create table a (id number);\ncreate or replace table b as select * from a;\ncreate table c clone a;' }]);
     expect(result.tableCount).toBe(1);
-    expect(result.skipped).toEqual(['a.sql: skipped 2 CREATE TABLEs without a column list (AS SELECT, LIKE, CLONE)']);
+    expect(result.skipped).toEqual([
+      'a.sql: skipped 2 CREATE TABLEs without a column list (AS SELECT, LIKE, CLONE)',
+      'a.sql: not imported, made from a query or another table with no column list of its own: b (line 2), c (line 3)',
+    ]);
   });
 
   it('a file that gives nothing says so', () => {
