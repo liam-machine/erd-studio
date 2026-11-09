@@ -738,6 +738,8 @@ describe('what the folder looks count, and a dump without its data', () => {
     expect(countCreateTablesWithColumns("SELECT 'CREATE TABLE x (id int)';")).toBe(0);
     expect(countCreateTablesWithColumns('CREATE TABLE [dbo].[A]([Id] [int])\nGO\nCREATE TABLE `b` (`id` INT) ENGINE=InnoDB;')).toBe(2);
     expect(countCreateTablesWithColumns('CREATE TABLE IF NOT EXISTS "users" ("id" SERIAL PRIMARY KEY);')).toBe(1);
+    // A typed empty SELECT is a column list; a SELECT from a table is not.
+    expect(countCreateTablesWithColumns('CREATE TABLE p USING DELTA AS SELECT CAST(NULL AS int) AS id WHERE 1 = 0;\nCREATE TABLE q AS SELECT CAST(id AS int) AS id FROM p;')).toBe(1);
   });
 
   it('knows Oracle DDL, and not Snowflake\'s NUMBER', () => {
@@ -764,6 +766,12 @@ describe('what the folder looks count, and a dump without its data', () => {
     const converted = convert('mysql', [{ name: 'dump.sql', text: stripped.text }]);
     expect(converted.tableCount).toBe(2);
     expect(converted.skipped).toContain('dump.sql: skipped 30000 data statements (INSERT, UPDATE…)');
+  });
+
+  it('a folder with no CREATE TABLE in it says so for each file, at its first line', () => {
+    const result = convertSqlDdl({ dialect: 'postgres', files: [{ name: 'a.sql', text: 'SELECT 1;' }, { name: 'keys/b.sql', text: 'CREATE VIEW v AS SELECT 1;' }] }, dbmlCoreSqlEngine);
+    expect(result.ok).toBe(false);
+    expect(result.ledger?.filter((e) => e.outcome === 'problem').map((e) => e.where)).toEqual([{ file: 'a.sql', line: 1 }, { file: 'keys/b.sql', line: 1 }]);
   });
 
   it('splits a file\'s skipped summary into lines of at most 300 characters, every kind still counted', () => {

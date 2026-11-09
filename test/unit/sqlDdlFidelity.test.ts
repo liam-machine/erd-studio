@@ -600,6 +600,34 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
 });
 
 describe('more places a schema says structure', () => {
+  it('CREATE TABLE … AS SELECT CAST(NULL AS type) AS column, with no FROM, is an empty table of those columns (OMOP CDM for Spark)', () => {
+    const sql = [
+      'CREATE TABLE @cdmDatabaseSchema.person  ',
+      'USING DELTA',
+      'AS',
+      'SELECT',
+      'CAST(NULL AS integer) AS person_id,',
+      '\tCAST(NULL AS TIMESTAMP) AS birth_datetime,',
+      '\tCAST(NULL AS STRING) AS person_source_value,',
+      "\tIF(try_cast(NULL  AS DATE) IS NULL, to_date(cast(NULL  AS STRING), 'yyyyMMdd'), try_cast(NULL  AS DATE)) AS birth_date,",
+      '\tCAST(NULL AS decimal(10, 2)) AS amount  WHERE 1 = 0;',
+      'OPTIMIZE @cdmDatabaseSchema.person   ZORDER BY person_id;',
+      'CREATE TABLE @cdmDatabaseSchema.copy USING DELTA AS SELECT CAST(person_id AS bigint) AS id FROM @cdmDatabaseSchema.person;',
+      'ALTER TABLE @cdmDatabaseSchema.person ADD CONSTRAINT xpk_person PRIMARY KEY (person_id);',
+    ].join('\n');
+    const r = convert('databricks', sql);
+    const t = plan(r.dbml).newTables;
+    expect(t.map((x) => x.name)).toEqual(['person']);
+    expect(t[0].columns!.map((c) => [c.name, c.dataType, !!c.isPrimaryKey])).toEqual([
+      ['person_id', 'integer', true], ['birth_datetime', 'TIMESTAMP', false], ['person_source_value', 'STRING', false],
+      ['birth_date', 'DATE', false], ['amount', 'decimal(10,2)', false],
+    ]);
+    // Each column at its own line; the type read from inside an expression is said; the real CTAS is still skipped.
+    expect(entries(r, 'CREATE TABLE … AS SELECT').map((e) => [e.where?.file, e.where?.line, e.where?.table?.replace(/^.*\./, '')])).toEqual([['schema.sql', 1, 'person']]);
+    expect(entries(r, 'type from an expression').map((e) => [e.where?.line, e.where?.column])).toEqual([[8, 'birth_date']]);
+    expect(r.skipped.join('\n')).toContain('1 CREATE TABLE without a column list');
+  });
+
   it('pg_dump: ALTER COLUMN … ADD GENERATED AS IDENTITY makes the column an identity', () => {
     const r = convert('postgres', 'CREATE TABLE public.t (id integer NOT NULL, n text);\nALTER TABLE public.t ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (\n    SEQUENCE NAME public.t_id_seq\n    START WITH 1\n);');
     expect(r.dbml).toMatch(/"id" integer \[increment, not null\]/);

@@ -594,11 +594,82 @@ function isTempTableName(t: Token[], i: number): boolean {
   return isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'));
 }
 
+/** One column of a typed empty SELECT ({@link typedSelectColumns}): its item's span, name and type. */
+interface TypedSelectColumn {
+  /** The item's first and last token. */
+  first: number;
+  last: number;
+  name: string;
+  /** The type as written (`decimal(10, 2)`). */
+  type: string;
+  /** The type is a CAST inside a larger expression (`IF(try_cast(NULL AS DATE) …)`), not the whole item. */
+  inner: boolean;
+  line: number;
+}
+
+const CAST_WORDS = new Set(['CAST', 'TRY_CAST', 'SAFE_CAST']);
+
+/**
+ * `[USING x …] AS SELECT CAST(NULL AS integer) AS person_id, … [WHERE 1 = 0]`
+ * after a CREATE TABLE's name (`at`): a SELECT with no FROM whose every item
+ * is `<expression> AS <name>` with a CAST in it, the idiom generators use for
+ * an empty table of typed columns (OHDSI's SqlRender for Spark). Its columns,
+ * or undefined for any other statement (a CTAS reading a table stays a CTAS).
+ */
+function typedSelectColumns(t: Token[], text: string | undefined, at: number): { select: number; end: number; columns: TypedSelectColumn[] } | undefined {
+  let k = at;
+  while (k < t.length && !(upper(t[k]) === 'AS' && upper(t[k + 1]) === 'SELECT')) {
+    if (isPunct(t[k], '(') || isPunct(t[k], ';')) return undefined;
+    k++;
+  }
+  if (k >= t.length) return undefined;
+  const select = k + 1;
+  // The list ends at a top-level WHERE / LIMIT, or the statement's end; a FROM anywhere at the top is a real CTAS.
+  let end = t.length;
+  let depth = 0;
+  for (let j = select + 1; j < t.length; j++) {
+    if (isPunct(t[j], '(')) depth++;
+    else if (isPunct(t[j], ')')) depth--;
+    else if (depth === 0 && t[j].kind === 'word') {
+      const w = upper(t[j]);
+      if (w === 'FROM' || w === 'UNION' || w === 'JOIN') return undefined;
+      if (w === 'WHERE' || w === 'LIMIT') { end = j; break; }
+    } else if (depth === 0 && isPunct(t[j], ';')) { end = j; break; }
+  }
+  const columns: TypedSelectColumn[] = [];
+  for (const [from, to] of splitTopLevel(t, select + 1, end)) {
+    const last = to - 1;
+    if (last - from < 2 || upper(t[last - 1]) !== 'AS' || !isName(t[last])) return undefined;
+    const exprEnd = last - 1;
+    let type: string | undefined;
+    let inner = true;
+    for (let j = from; j < exprEnd && type === undefined; j++) {
+      if (t[j].kind !== 'word' || !CAST_WORDS.has(upper(t[j])) || !isPunct(t[j + 1], '(')) continue;
+      const close = matchParen(t, j + 1);
+      if (close < 0 || close >= exprEnd) return undefined;
+      let d = 0;
+      for (let m = j + 2; m < close; m++) {
+        if (isPunct(t[m], '(')) d++;
+        else if (isPunct(t[m], ')')) d--;
+        else if (d === 0 && upper(t[m]) === 'AS' && m + 1 < close) {
+          type = (text !== undefined ? text.slice(t[m + 1].start, t[close - 1].end) : t.slice(m + 1, close).map((x) => x.value).join(' ')).replace(/\s+/g, ' ').trim();
+          inner = !(j === from && close === exprEnd - 1);
+          break;
+        }
+      }
+    }
+    if (!type) return undefined;
+    columns.push({ first: from, last, name: t[last].value, type, inner, line: t[from].line });
+  }
+  return columns.length ? { select, end, columns } : undefined;
+}
+
 /** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
 function isCreateTableWithColumns(t: Token[]): boolean {
   const head = createTableName(t);
   if (!head) return false;
   const name = readName(t, head.at);
+  if (name && !isPunct(t[name.next], '(') && typedSelectColumns(t, undefined, name.next)) return true;
   if (!name || !isPunct(t[name.next], '(')) return false;
   const close = matchParen(t, name.next);
   if (close < 0 || close === name.next + 1) return false;
@@ -1052,6 +1123,11 @@ class Converter implements ConverterContext {
     // SQL Server's `#tmp` / `##global` scratch tables (the name reads after its `#`s).
     if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
+    if (name && !isPunct(t[name.next], '(') && !this.readingTypedSelect) {
+      // `CREATE TABLE x AS SELECT CAST(NULL AS int) AS a, … WHERE 1 = 0`: read as the column list it means.
+      const typed = typedSelectColumns(t, text, name.next);
+      if (typed) { this.readTypedSelect(file, text, st, at, name.next, typed); return; }
+    }
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
     // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.
     if (ifNotExists && (this.findTable(this.qualify(name.parts)) || isChildWithoutTable(this, this.qualify(name.parts)))) { this.skip(file, 'existing'); return; }
@@ -1333,6 +1409,43 @@ class Converter implements ConverterContext {
    * Commas go right after a type, so every line keeps its number; a few
    * passes catch several missing in one run of columns.
    */
+  /** Set while a typed empty SELECT is read as its column list ({@link readTypedSelect}): never twice. */
+  private readingTypedSelect = false;
+
+  /**
+   * A CREATE TABLE whose SELECT is a typed empty table ({@link typedSelectColumns})
+   * read as `CREATE TABLE x (a type, …)`: the rewrite keeps every line break,
+   * so each column is at its own line; the reading, and each type taken from
+   * inside an expression, are in the ledger.
+   */
+  private readTypedSelect(file: string, text: string, st: Statement, at: number, nameEnd: number, typed: NonNullable<ReturnType<typeof typedSelectColumns>>): void {
+    const t = st.tokens;
+    const cols = typed.columns;
+    const edits = [
+      { start: t[nameEnd].start, end: t[cols[0].first].start, text: '(' },
+      ...cols.map((c) => ({ start: t[c.first].start, end: t[c.last].end, text: `${text.slice(t[c.last].start, t[c.last].end)} ${c.type}` })),
+      { start: t[cols[cols.length - 1].last].end, end: st.end, text: ')' },
+    ];
+    const rewritten = applyEdits(text, st.start, st.end, edits);
+    const newText = text.slice(0, st.start) + rewritten + text.slice(st.end);
+    const tokens = tokenize(rewritten, this.dialect).map((tok) => ({ ...tok, start: tok.start + st.start, end: tok.end + st.start, line: tok.line + st.line - 1 }));
+    const tablesBefore = this.tables.length;
+    this.readingTypedSelect = true;
+    try {
+      this.readCreateTable(file, newText, { ...st, tokens, end: st.start + rewritten.length }, at);
+    } finally {
+      this.readingTypedSelect = false;
+    }
+    const table = this.tables.length > tablesBefore ? this.tables[this.tables.length - 1] : undefined;
+    if (!table || this.readingColumns > 0) return;
+    const label = tableLabel(table);
+    this.ledger.changed('table', 'inferred', 'CREATE TABLE … AS SELECT', { file, line: st.line, table: label },
+      'its columns read from a SELECT of typed values with no FROM (an empty table of those types)');
+    for (const c of cols) {
+      if (c.inner) this.ledger.changed('type', 'inferred', 'type from an expression', { file, line: c.line, table: label, column: c.name }, 'the type of the CAST inside it');
+    }
+  }
+
   private withMissingCommas(text: string, st: Statement, open: number): { text: string; st: Statement; commas: MissingComma[] } | undefined {
     const commas: MissingComma[] = [];
     let curText = text;
@@ -1906,7 +2019,8 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
       return { ok: false, problems: converter.problems, ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith, ...stopped };
     }
     const problem: SqlDdlProblem = { file: input.files.length === 1 ? input.files[0].name : '', message: `No CREATE TABLE statements with a column list were found in ${input.files.length === 1 ? 'the file' : 'the files'}.`, kind: 'noCreateTable' };
-    converter.ledger.problem('file', 'other', 'no CREATE TABLE with a column list', problem.file ? { file: problem.file } : undefined, undefined, input.files.length);
+    // One entry per file, each where the report and the log can point (its first line).
+    for (const file of input.files) converter.ledger.problem('file', 'other', 'no CREATE TABLE with a column list', { file: file.name, line: 1 });
     return { ok: false, problems: [problem], ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith };
   }
   converter.applyDeferred();
