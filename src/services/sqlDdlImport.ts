@@ -399,10 +399,12 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
   ['databricks', /\bTBLPROPERTIES\b/i, 3],
   ['databricks', /\b(ARRAY|MAP|STRUCT)\s*</i, 3],
   ['databricks', /\bPARTITIONED\s+BY\b|\bZORDER\b/i, 1],
-  ['databricks', /`[^`\n]+`[\s\S]*\bSTRING\b/i, 2],
+  ['databricks', /`[^`\n]+`\s+STRING\b/i, 2],
   ['mysql', /\bENGINE\s*=/i, 3],
   ['mysql', /\bAUTO_INCREMENT\b/i, 3],
-  ['mysql', /`/, 1],
+  // Backquoted names: MySQL's (or Databricks', whose other signals then decide); never SQL Server's.
+  ['mysql', /`/, 2],
+  ['databricks', /`/, 1],
   ['snowflake', /\bCREATE\s+OR\s+REPLACE\s+TRANSIENT\b|\bTRANSIENT\s+TABLE\b/i, 3],
   ['snowflake', /\bVARIANT\b/i, 3],
   ['snowflake', /\bNUMBER\s*\(\s*38\b|\bVARCHAR\s*\(\s*16777216\s*\)/i, 3],
@@ -415,7 +417,8 @@ const DIALECT_SIGNALS: ReadonlyArray<[SqlDialect, RegExp, number]> = [
 
 /** Each dialect's score from the text's signals (comments ignored). Never parses. */
 function dialectScores(text: string): Map<SqlDialect, number> {
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  // Comments and string literals (a dump's data: 'String Quartet', 'USING DELTA') say nothing about the dialect.
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').replace(/'(?:[^'\\\n]|''|\\.)*'/g, "''");
   const scores = new Map<SqlDialect, number>();
   for (const [dialect, pattern, weight] of DIALECT_SIGNALS) {
     if (pattern.test(code)) scores.set(dialect, (scores.get(dialect) ?? 0) + weight);

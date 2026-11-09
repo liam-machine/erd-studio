@@ -556,6 +556,10 @@ describe('dialects', () => {
     expect(detectSqlDialect('CREATE TABLE t (id SERIAL, j JSONB);')).toBe('postgres');
     expect(detectSqlDialect('CREATE TABLE t (id int);')).toBeUndefined();
     expect(detectSqlDialect('-- USING DELTA in a comment\nCREATE TABLE t (id int);')).toBeUndefined();
+    // Data is not a signal: MySQL's Chinook has `names` and a string 'Emerson String Quartet' (once read as Databricks).
+    expect(detectSqlDialect("CREATE TABLE `Artist` (`ArtistId` INT NOT NULL, `Name` NVARCHAR(120));\nINSERT INTO `Artist` VALUES (1, N'Emerson String Quartet');")).toBe('mysql');
+    expect(detectSqlDialect("CREATE TABLE t (id int, note text);\nINSERT INTO t VALUES (1, 'USING DELTA ENGINE=x');")).toBe('postgres');
+    expect(detectSqlDialect('CREATE TABLE `s`.`t` (`id` BIGINT, `name` STRING);')).toBe('databricks');
   });
 
   it('a grammar crash is never thrown: the table is salvaged without the grammar', () => {
