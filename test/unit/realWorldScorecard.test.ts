@@ -17,7 +17,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED, SAMPLE_SLUGS } from './realWorld/expected';
 import { COUNT_KEYS, regressions, runSample, scorecardMarkdown, type SampleScore } from './realWorld/scorecardHarness';
-import { SAMPLES_ROOT, loadTruth, qualifySameNames, type TruthSample } from './realWorldScorecard';
+import { SAMPLES_ROOT, loadTruth, qualifySameNames, scoreSample, type ImportRun, type TruthSample } from './realWorldScorecard';
 
 const BASELINE = path.join(__dirname, 'realWorld', 'baseline.json');
 
@@ -92,6 +92,31 @@ describe('same-name tables in two schemas', () => {
     const q = qualifySameNames(truth);
     expect(q.tables.map((t) => t.name)).toEqual(['sales_customer', 't_340b_slvr_customer', 'orders']);
     expect(q.relationships[0].to).toBe('t_340b_slvr_customer');
+  });
+});
+
+describe('a primary key chosen differently from the source', () => {
+  const truth = {
+    importer: 'sql', input: {}, counts: { tables: 1, columns: 2, primaryKeys: 1, relationships: 0 },
+    tables: [{ name: 'DimDate', pk: ['Date'], columns: [['Date', 'DATE', 'PN'], ['DateKey', 'INT', '']] }],
+    relationships: [], uniqueKeys: [],
+  } as unknown as TruthSample;
+  const run = (shown: string[]): ImportRun => ({
+    ok: true, tables: [{ name: 'DimDate', columns: [{ name: 'Date', dataType: 'DATE' }, { name: 'DateKey', dataType: 'INT', isPrimaryKey: true }] }] as ImportRun['tables'],
+    relationships: [], problems: [], warnings: [], notes: [], leftOut: [], shown, leftOutTables: [],
+  });
+
+  it('is a gap when a shown note names the table, the key and the source\'s key columns', () => {
+    const s = scoreSample('s', truth, run(['DimDate: every relationship joins DateKey, so it is the key; Date, which Mark as date table flags isKey, is marked unique.']));
+    expect(s.primaryKeys.wrongReported).toBe(1);
+    expect(s.silentLosses.primaryKeys).toBe(0);
+    expect(s.verdict).toBe('With gaps');
+  });
+
+  it('is a silent loss when nothing says so', () => {
+    const s = scoreSample('s', truth, run(['DimDate: 2 columns']));
+    expect(s.silentLosses.primaryKeys).toBe(1);
+    expect(s.verdict).toBe('With problems');
   });
 });
 
