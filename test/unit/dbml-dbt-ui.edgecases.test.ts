@@ -438,6 +438,39 @@ seeds:
     expect(fct.columns[0]).toMatchObject({ name: 'vp_start_time', dataType: 'STRING', description: "The trip's start time,\nas the feed writes it.\n" });
     expect(data.resourceDocs.get('lookup')?.description).toBe('Trips, one row each.');
   });
+
+  it('seeds and snapshots read YAML 1.1 merges and aliased lists as models do (`<<: *defaults`, `columns: *cols`)', async () => {
+    const data = await load(`version: 2
+x-defaults: &col_defaults
+  description: Shared description
+  data_type: VARCHAR
+seeds:
+  - name: lookup
+    columns: &lookup_cols
+      - name: code
+        <<: *col_defaults
+      - name: label
+        description: The label
+  - name: lookup2
+    columns: *lookup_cols
+  - <<: &seed_base
+      description: Base seed description
+    name: lookup3
+snapshots:
+  - name: snap
+    <<: *seed_base
+    columns: *lookup_cols
+`);
+    const doc = (n: string) => data.resourceDocs.get(n);
+    expect(doc('lookup')?.columns).toEqual([
+      { name: 'code', description: 'Shared description', dataType: 'VARCHAR' },
+      { name: 'label', description: 'The label', dataType: null },
+    ]);
+    expect(doc('lookup2')?.columns.map((c) => c.name)).toEqual(['code', 'label']);
+    expect(doc('lookup3')?.description).toBe('Base seed description');
+    expect(doc('snap')).toMatchObject({ resourceType: 'snapshot', description: 'Base seed description' });
+    expect(doc('snap')?.columns).toHaveLength(2);
+  });
 });
 
 describe('dbt relationship tests that leave the draft are never dropped without a word', () => {

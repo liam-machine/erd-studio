@@ -310,24 +310,28 @@ export class YmlParserService {
     if (!/^(seeds|snapshots)\s*:/m.test(raw)) {
       return; // cheap pre-check: most model schema files have neither key
     }
-    const doc = parseDocument(raw);
-    // A `description: *anchor` here resolves in this file, never in the last one read.
-    const before = this.aliasDoc;
+    // Read as a models file is: YAML 1.1 merges (`<<: *defaults`) and aliases (`columns: *cols`,
+    // `description: *anchor`) resolved in this file, never in the last one read.
+    const doc = parseDocument(raw, { merge: true });
+    const before = { aliasDoc: this.aliasDoc, merged: this.merged };
     this.aliasDoc = doc;
+    this.merged = new WeakMap();
     try {
       this.readResourceDocs(doc, filePath, resourceDocs);
     } finally {
-      this.aliasDoc = before;
+      this.aliasDoc = before.aliasDoc;
+      this.merged = before.merged;
     }
   }
 
   private readResourceDocs(doc: Document, filePath: string, resourceDocs: Map<string, YmlResourceDoc>): void {
     for (const [key, resourceType] of [['seeds', 'seed'], ['snapshots', 'snapshot']] as const) {
-      const seq = doc.get(key);
+      const seq = this.deref(doc.get(key));
       if (!isSeq(seq)) {
         continue;
       }
-      for (const item of (seq as YAMLSeq).items) {
+      for (const rawItem of (seq as YAMLSeq).items) {
+        const item = this.deref(rawItem);
         if (!isMap(item)) {
           continue;
         }
@@ -337,9 +341,10 @@ export class YmlParserService {
           continue; // first declaration wins, as for source files
         }
         const columns: YmlColumn[] = [];
-        const columnsNode = node.get('columns');
+        const columnsNode = this.deref(node.get('columns'));
         if (isSeq(columnsNode)) {
-          for (const colItem of (columnsNode as YAMLSeq).items) {
+          for (const rawCol of (columnsNode as YAMLSeq).items) {
+            const colItem = this.deref(rawCol);
             if (!isMap(colItem)) {
               continue;
             }
