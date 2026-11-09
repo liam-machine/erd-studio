@@ -1,0 +1,14 @@
+{
+  "name": "Station",
+  "dataType": "string",
+  "sourceColumn": "station",
+  "displayFolder": "1. Region Hierarchy",
+  "lineageTag": "448ce04b-4b37-4836-a906-9cbeed4310be",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Total Net Order Quantity",
+  "expression": [
+    "",
+    "SUM ( 'Orders'[Net Order Quantity] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "2. Quantity",
+  "lineageTag": "880c9c1a-af07-4b22-b4e8-28a116f6a170",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

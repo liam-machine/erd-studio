@@ -1,0 +1,14 @@
+{
+  "name": "Color",
+  "dataType": "string",
+  "sourceColumn": "color",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "d09831f4-99c0-40cd-b760-3fde292b3c21",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

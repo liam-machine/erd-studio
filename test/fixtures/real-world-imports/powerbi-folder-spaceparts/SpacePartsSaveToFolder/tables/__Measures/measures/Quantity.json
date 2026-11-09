@@ -1,0 +1,16 @@
+{
+  "name": "Quantity",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT ('1) Selected Metric'[Select a Measure]),",
+    "        'Z01CG1 - Quantity'[Measure])",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Total\\Actuals",
+  "lineageTag": "c68488fd-5631-4b9f-a9c3-7f17d7f6a2ef"
+}

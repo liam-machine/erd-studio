@@ -65,7 +65,7 @@ export const IMPORT_PICK_FEATURES: Readonly<Record<ImportModelSource, TelemetryF
 export const IMPORT_SOURCE_ITEMS: Readonly<Record<ImportModelSource, { label: string; detail: string }>> = {
   dbml: { label: '$(file-code) DBML file', detail: 'A .dbml file from dbdiagram.io or any DBML tool (an open format)' },
   sqlDdl: { label: '$(database) SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake or Databricks' },
-  semanticModel: { label: '$(graph) Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder, saved as TMDL or as model.bim' },
+  semanticModel: { label: '$(graph) Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder (TMDL or model.bim), or a Tabular Editor Save to Folder model' },
 };
 
 /** The description of a source the folder seems to hold. */
@@ -148,9 +148,6 @@ export interface DetectImportIo {
   /** The look was cancelled: stop listing and opening files. Absent: never. */
   cancelled?(): boolean;
 }
-
-/** A file every semantic model Import Semantic Model… can read holds (`findSemanticModels`). */
-export const SEMANTIC_MODEL_GLOB = '**/{*.bim,definition.pbism,model.tmdl,database.tmdl}';
 
 export { readFileStart };
 

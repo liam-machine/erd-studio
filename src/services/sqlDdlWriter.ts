@@ -21,6 +21,7 @@ import {
   type ModelEnum,
   type ModelField,
   type ModelTable,
+  type PendingRef,
   type ResolvedRef,
 } from './sqlDdlModel';
 
@@ -35,7 +36,7 @@ import {
 export function resolveRefs(c: ConverterContext): ResolvedRef[] {
   finishReading(c);
   const out: ResolvedRef[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, ResolvedRef>();
   for (const ref of c.refs) {
     const where = `${ref.origin.file} line ${ref.origin.line}`;
     const fkLabel = `${ref.from.parts.slice(-2).join('.')}(${ref.from.columns.join(', ')})`;
@@ -56,9 +57,18 @@ export function resolveRefs(c: ConverterContext): ResolvedRef[] {
       continue;
     }
     const key = [tableKey(from, c.dialect), ...fromColumns.map((col) => (col as string).toLowerCase()), '>', tableKey(to, c.dialect), ...toColumns.map((col) => (col as string).toLowerCase())].join('\u0000');
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const kept = seen.get(key);
+    if (kept) {
+      // The same link written twice (a partition's copy, folded into its parent): one is kept; a different action is said.
+      const differs = actionDifferences(kept.pending, ref);
+      if (differs.length) {
+        c.ledger.lost('setting', 'other', 'FK action', { file: ref.origin.file, line: ref.origin.line, table: tableLabel(from), column: (fromColumns as string[]).join('+') },
+          `not kept: ${differs.join(', ')}; the same link at ${kept.pending?.origin.file ?? ''} line ${kept.pending?.origin.line ?? '?'} is kept`);
+      }
+      continue;
+    }
     const resolved: ResolvedRef = { from, fromColumns: fromColumns as string[], to, toColumns: toColumns as string[], pending: ref };
+    seen.set(key, resolved);
     const oneToOne = cardinalityOf(resolved);
     const ledgerWhere = { file: ref.origin.file, line: ref.origin.line, table: tableLabel(from), column: resolved.fromColumns.join('+') };
     if (oneToOne === 'one-to-one') resolved.oneToOne = true;
@@ -97,13 +107,26 @@ export function cardinalityOf(r: Pick<ResolvedRef, 'from' | 'fromColumns' | 'to'
 /** DBML's `ON DELETE` / `ON UPDATE` values. */
 const REF_ACTIONS = new Set(['cascade', 'restrict', 'set null', 'set default', 'no action']);
 
+/** A written action as DBML says it, or undefined (none written, or one DBML has no word for). */
+function refAction(a: string | undefined): string | undefined {
+  const v = a?.replace(/\s+/g, ' ').trim().toLowerCase();
+  return v && REF_ACTIONS.has(v) ? v : undefined;
+}
+
+/** What a second copy of a link says that the kept one does not (`ON DELETE SET NULL`); none written is NO ACTION. */
+function actionDifferences(kept: PendingRef | undefined, other: PendingRef): string[] {
+  const out: string[] = [];
+  for (const [label, k, o] of [['ON DELETE', kept?.onDelete, other.onDelete], ['ON UPDATE', kept?.onUpdate, other.onUpdate]] as const) {
+    const a = refAction(k) ?? 'no action';
+    const b = refAction(o) ?? 'no action';
+    if (a !== b) out.push(`${label} ${b.toUpperCase()}`);
+  }
+  return out;
+}
+
 function refSettings(r: ResolvedRef): string {
-  const norm = (a: string | undefined): string | undefined => {
-    const v = a?.replace(/\s+/g, ' ').trim().toLowerCase();
-    return v && REF_ACTIONS.has(v) ? v : undefined;
-  };
-  const del = norm(r.pending?.onDelete);
-  const upd = norm(r.pending?.onUpdate);
+  const del = refAction(r.pending?.onDelete);
+  const upd = refAction(r.pending?.onUpdate);
   const settings = [del ? `delete: ${del}` : '', upd ? `update: ${upd}` : ''].filter(Boolean);
   return settings.length ? ` [${settings.join(', ')}]` : '';
 }

@@ -1,0 +1,14 @@
+{
+  "name": "Account Manager",
+  "dataType": "string",
+  "sourceColumn": "account_manager",
+  "displayFolder": "3. Managers",
+  "lineageTag": "67fe957e-20ff-43ea-ae81-6e377ee37f71",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

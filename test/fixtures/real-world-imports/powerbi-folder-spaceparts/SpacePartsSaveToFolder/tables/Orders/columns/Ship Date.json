@@ -1,0 +1,31 @@
+{
+  "name": "Ship Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "ship_date",
+  "formatString": "Long Date",
+  "displayFolder": "Columns\\3. Keys\\Dates",
+  "lineageTag": "9792bfa7-8c8a-434d-8cad-919bc7f9ecb8",
+  "summarizeBy": "none",
+  "variations": [
+    {
+      "name": "Variation",
+      "relationship": "1c1cd679-d959-4344-a9d3-e592ae111e42",
+      "defaultHierarchy": {
+        "table": "LocalDateTable_4ad7e833-9e3a-4bd3-9873-535c2d4d4285",
+        "hierarchy": "Date Hierarchy"
+      },
+      "isDefault": true
+    }
+  ],
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

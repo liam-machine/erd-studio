@@ -1,0 +1,20 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "OTD Indicator",
+  "dataType": "boolean",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "Invoices[OTD Indicator]",
+  "formatString": "\"TRUE\";\"TRUE\";\"FALSE\"",
+  "sortByColumn": "OTD Sort Order",
+  "displayFolder": "Columns\\2. Keys",
+  "lineageTag": "705b4fb2-c9bb-4915-8cb4-b7dac943d875",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

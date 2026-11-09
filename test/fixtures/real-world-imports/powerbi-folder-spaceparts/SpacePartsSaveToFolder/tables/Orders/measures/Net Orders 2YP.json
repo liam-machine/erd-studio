@@ -1,0 +1,18 @@
+{
+  "name": "Net Orders 2YP",
+  "description": "Net orders exclude cancellation document types",
+  "expression": [
+    "",
+    "CALCULATE ( [Net Orders], DATEADD('Date'[Date], -2, YEAR ))"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\iii. 2YP",
+  "lineageTag": "4ace6187-dbc5-4132-a957-a2c2d78d7c0e",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

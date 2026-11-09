@@ -1,0 +1,15 @@
+{
+  "name": "% Workdays MTD",
+  "expression": [
+    "IF (",
+    "    HASONEVALUE ('Date'[Calendar Month Year (ie Jan 21)]),",
+    "    MROUND (",
+    "        DIVIDE ([# Workdays MTD], [# Workdays in Selected Month]),",
+    "        0.01",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0%",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "68e3c8f6-6e44-4191-9e86-90afb7ddf261"
+}

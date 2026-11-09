@@ -1,0 +1,17 @@
+{
+  "name": "Sales Target MTD vs. Actuals (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Sales Target MTD]",
+    "VAR _ACTUAL = [Actuals MTD]",
+    "VAR _DELTA  = _ACTUAL - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "",
+    "RETURN",
+    "",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "2. MTD\\Sales Target",
+  "lineageTag": "2d7fff67-3495-4143-b0e4-2322aca32642"
+}

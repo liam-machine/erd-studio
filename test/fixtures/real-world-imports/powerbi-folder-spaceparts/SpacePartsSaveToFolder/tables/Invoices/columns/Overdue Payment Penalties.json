@@ -1,0 +1,20 @@
+{
+  "name": "Overdue Payment Penalties",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "overdue_payment_penalties",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "1d349cb7-8e68-44a1-89f6-8b9dc9c318b7",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

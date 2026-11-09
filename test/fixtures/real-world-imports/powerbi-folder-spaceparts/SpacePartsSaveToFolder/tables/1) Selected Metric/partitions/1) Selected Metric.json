@@ -1,0 +1,15 @@
+{
+  "name": "1) Selected Metric",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "SELECTCOLUMNS(",
+      "    'Z01CG2 - Value (Budget Rate)',",
+      "        \"Select a Measure\", 'Z01CG2 - Value (Budget Rate)'[Measure],",
+      "        \"Order\", 'Z01CG2 - Value (Budget Rate)'[Ordinal]",
+      ")"
+    ]
+  }
+}

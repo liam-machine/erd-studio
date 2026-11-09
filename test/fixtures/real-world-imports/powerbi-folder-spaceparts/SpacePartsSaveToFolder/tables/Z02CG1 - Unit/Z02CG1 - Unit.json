@@ -1,0 +1,40 @@
+{
+  "name": "Z02CG1 - Unit",
+  "isHidden": true,
+  "lineageTag": "516121f5-e575-4aef-9915-f766b1aa72e0",
+  "calculationGroup": {
+    "precedence": 2,
+    "calculationItems": [
+      {
+        "name": "Value (Budget Rate)",
+        "expression": [
+          "",
+          "[Value]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "Quantity",
+        "expression": [
+          "",
+          "[Quantity]"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "Lines",
+        "expression": [
+          "",
+          "[Lines]"
+        ],
+        "ordinal": 2
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

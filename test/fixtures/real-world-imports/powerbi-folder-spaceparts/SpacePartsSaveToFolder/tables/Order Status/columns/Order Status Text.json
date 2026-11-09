@@ -1,0 +1,19 @@
+{
+  "name": "Order Status Text",
+  "dataType": "string",
+  "sourceColumn": "order_status_text",
+  "sortByColumn": "Order Status Ordinal",
+  "displayFolder": "1. Order Status",
+  "lineageTag": "cac50369-1d71-44df-9a3a-852a8da9d08f",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

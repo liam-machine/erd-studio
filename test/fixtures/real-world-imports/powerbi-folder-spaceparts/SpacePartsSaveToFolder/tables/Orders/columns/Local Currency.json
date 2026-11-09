@@ -1,0 +1,15 @@
+{
+  "name": "Local Currency",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "local_currency",
+  "displayFolder": "Columns\\3. Keys",
+  "lineageTag": "2022bec1-9cd4-4ac9-993e-9cc85a29646c",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

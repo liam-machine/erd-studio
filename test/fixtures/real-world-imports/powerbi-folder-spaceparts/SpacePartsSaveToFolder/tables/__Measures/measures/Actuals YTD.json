@@ -1,0 +1,16 @@
+{
+  "name": "Actuals YTD",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Actuals],",
+    "    CALCULATETABLE (",
+    "        DATESYTD ('Date'[Date]),",
+    "        'Date'[IsDateInScope]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "4. YTD",
+  "lineageTag": "cceb1633-c625-4f81-92e9-220b5bcdf28f"
+}

@@ -216,8 +216,10 @@ describe('readSemanticModel: TMDL', () => {
     expect(table(model, 'Customer').columns.map((c) => c.name)).toEqual(['CustomerKey', 'Customer Name', 'City', 'Country/Region', 'Yearly Income', 'Photo', 'Note']);
   });
 
-  it('reads relationships with their defaults, inactive and cross-filter settings, quoted names', () => {
-    expect(model.relationships).toEqual([
+  it('reads relationships with their defaults, inactive and cross-filter settings, quoted names, and where each is written', () => {
+    const file = 'pbip-tmdl/AdventureSales.SemanticModel/definition/relationships.tmdl';
+    expect(model.relationships.map((r) => [r.file, r.line])).toEqual([[file, 1], [file, 5], [file, 10], [file, 14], [file, 19]]);
+    expect(model.relationships.map(({ file: _f, line: _l, ...r }) => r)).toEqual([
       { name: '5e6f7a8b-0001-4000-8000-000000000001', fromTable: 'Sales', fromColumn: 'CustomerKey', toTable: 'Customer', toColumn: 'CustomerKey', fromCardinality: 'many', toCardinality: 'one', isActive: true },
       { name: '5e6f7a8b-0002-4000-8000-000000000002', fromTable: 'Sales', fromColumn: 'ProductKey', toTable: 'Product', toColumn: 'ProductKey', fromCardinality: 'many', toCardinality: 'one', isActive: true, crossFilteringBehavior: 'bothDirections' },
       { name: '5e6f7a8b-0003-4000-8000-000000000003', fromTable: 'Sales', fromColumn: 'OrderDateKey', toTable: 'Date Table', toColumn: 'DateKey', fromCardinality: 'many', toCardinality: 'one', isActive: true },
@@ -497,20 +499,25 @@ describe('semanticModelToDbml: the fixture through Import DBML', () => {
     // Nothing left out: "inactive" travels as the role, not as a setting the import would drop.
     expect(plan.report.dropped).toEqual([]);
     expect(result.dbml).toContain(`Ref "${INACTIVE_RELATIONSHIP_ROLE}": sales.ship_date_key > date_table.date_key\n`);
-    expect(result.warnings.some((w) => w.includes('filters in both directions'))).toBe(true);
+    // Filtering both ways has no place in a diagram: named as not kept, with the relationship's line.
+    expect(result.ledger).toContainEqual(expect.objectContaining({
+      outcome: 'lost', unit: 'setting', what: 'cross-filter direction',
+      where: expect.objectContaining({ table: 'Sales', column: 'ProductKey', line: expect.any(Number) }),
+    }));
   });
 
-  it('keeps the original names, hidden flags and calculated markers in meta, and notes the calculated ones', () => {
+  it('keeps the original names, hidden flags and calculated markers in meta, descriptions exactly, and names the DAX not kept', () => {
     const sales = planned(plan, 'sales');
     expect(sales.meta?.[SEMANTIC_MODEL_META.name]).toBe('Sales');
     expect(planned(plan, 'date_table').meta).toEqual({ [SEMANTIC_MODEL_META.name]: 'Date Table', [SEMANTIC_MODEL_META.calculated]: 'true' });
-    expect(planned(plan, 'date_table').description).toBe(
-      'The calendar every date in the model uses. Calculated table in Power BI; its DAX was not imported.',
-    );
+    // The description is kept exactly as written; that the DAX was not imported is in the ledger.
+    expect(planned(plan, 'date_table').description).toBe('The calendar every date in the model uses.');
+    expect(result.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'table', what: 'DAX expression', where: expect.objectContaining({ table: 'Date Table' }) }));
+    expect(result.ledger).toContainEqual(expect.objectContaining({ outcome: 'lost', unit: 'column', what: 'DAX expression', where: expect.objectContaining({ table: 'Sales', column: 'Line Margin' }) }));
     const customerKey = sales.columns.find((c) => c.name === 'customer_key');
     expect(customerKey?.meta).toEqual({ [SEMANTIC_MODEL_META.name]: 'CustomerKey', [SEMANTIC_MODEL_META.hidden]: 'true' });
     const margin = sales.columns.find((c) => c.name === 'line_margin');
-    expect(margin?.description).toBe('Margin on the line. Calculated column in Power BI; its DAX was not imported.');
+    expect(margin?.description).toBe('Margin on the line.');
     expect(margin?.meta).toMatchObject({ [SEMANTIC_MODEL_META.calculated]: 'true', [SEMANTIC_MODEL_META.name]: 'Line Margin' });
     expect(result.renamed).toContainEqual({ kind: 'table', table: 'date_table', from: 'Date Table', to: 'date_table' });
     expect(result.renamed).toContainEqual({ kind: 'column', table: 'sales', from: 'Sales Amount', to: 'sales_amount' });

@@ -1,0 +1,13 @@
+{
+  "name": "Sales",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Gross Sales],",
+    "    'Exchange Rate'[From Currency] = \"EUR\"",
+    ")"
+  ],
+  "formatString": "#,##0.00",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "19ea0898-8a9e-43a6-8190-48879e67068e"
+}

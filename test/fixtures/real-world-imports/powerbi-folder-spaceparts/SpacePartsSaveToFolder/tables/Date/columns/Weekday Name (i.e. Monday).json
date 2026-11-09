@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Weekday Name (i.e. Monday)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Weekday Name (i.e. Monday)]",
+  "sortByColumn": "Weekday Number EU (i.e. 1)",
+  "displayFolder": "5. Weekday / Workday\\Weekday",
+  "lineageTag": "ef85b198-9069-484e-b7d7-25425c242d1a",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

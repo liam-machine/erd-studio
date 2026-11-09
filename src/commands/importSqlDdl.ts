@@ -18,6 +18,10 @@
  * DBML's own flow (`importDbml` with `source: 'sql'`): the user picks the
  * layer, names the diagram and confirms a dry run that says what the scripts
  * held and what was skipped (views, indexes, grants…, counted by kind).
+ * When the scripts hold partitions (`PARTITION OF`, `ATTACH PARTITION`,
+ * `INHERITS` children with no columns of their own), a step before the
+ * layer asks whether to fold them into their parents (the default, and what
+ * the quick path does) or keep each as a table.
  * Cancelling any step writes nothing.
  *
  * **The quick path** (`quickImportSqlDdl`: the start screen's **Import your
@@ -81,6 +85,7 @@ import {
   type SqlDdlToDbmlResult,
   type SqlDialect,
   type SqlDialectReading,
+  type SqlPartitionMode,
 } from '../services/sqlDdlImport';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import { loadSqlImport, type SqlImportModule } from '../services/sqlImportLoader';
@@ -123,6 +128,11 @@ export interface SqlDialectItem extends vscode.QuickPickItem {
   dialect: SqlDialect;
 }
 
+/** The partitions quick pick's item: fold them into their parents, or keep each as a table. */
+export interface SqlPartitionItem extends vscode.QuickPickItem {
+  mode: SqlPartitionMode;
+}
+
 /**
  * What the user picked: some `.sql` files, or a folder of them. `root`: the
  * files were found under that folder (the quick path, Change Options…), so
@@ -151,6 +161,8 @@ export interface ImportSqlDdlUi {
   /** A file's text (`workspace.fs`), decoded by its byte order mark (UTF-16 from SQL Server Management Studio). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
   pickDialect(items: readonly SqlDialectItem[], options: vscode.QuickPickOptions): Promise<SqlDialectItem | undefined>;
+  /** Partitions found: fold them into their parents or keep each as a table. Absent: they are folded (never asked). */
+  pickPartitions?(items: readonly SqlPartitionItem[], options: vscode.QuickPickOptions): Promise<SqlPartitionItem | undefined>;
   /** Change Options…: which of the found scripts (several may be picked; the found ones start picked). */
   pickFiles?(items: readonly SqlFileItem[], options: vscode.QuickPickOptions): Promise<readonly SqlFileItem[] | undefined>;
   /** The start of a file's text, at most `chars` (the quick path's look at each `.sql`). Absent: `readFile`. */
@@ -217,6 +229,8 @@ export interface SqlPreset {
   dialectChosen?: boolean;
   layer?: string;
   name?: string;
+  /** How partitions were read (the quick path folds them): offered first at the partitions step. */
+  partitions?: SqlPartitionMode;
 }
 
 /** The SQL UI of the automatic draft: it asks nothing and shows nothing (each message goes to the log). */
@@ -230,6 +244,7 @@ export function quietImportSqlDdlUi(base: ImportSqlDdlUi): ImportSqlDdlUi {
     pickSources: async () => undefined,
     pickDialect: async () => undefined,
     pickFiles: async () => undefined,
+    pickPartitions: undefined,
     showInformationMessage: (message) => logged(message),
     showErrorMessage: (message) => logged(message),
   };
@@ -492,11 +507,55 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   // Tables that did not read do not stop the rest: said in the log, the draft's banner and its Not imported list.
   if (result.problems?.length) invalid(result.problems, dialect);
 
+  // 3b. Partitions: folded into their parents (each one a ledger note), unless the user keeps them as tables.
+  const folded = result.partitions?.folded ?? 0;
+  if (folded > 0 && ui.pickPartitions) {
+    const mode = await pickPartitionMode(ui, folded, preset.partitions);
+    if (!mode) return cancelled();
+    if (mode === 'tables') {
+      const engine = loadEngine(deps, ours);
+      if (!engine) return undefined;
+      let kept: SqlDdlToDbmlResult;
+      try {
+        kept = engine.sqlDdlToDbml({ files, dialect, options: { partitions: 'tables' } });
+      } catch (err) {
+        return ours('while converting the SQL', err);
+      }
+      if (!kept.ok) return ours('while converting the SQL', new Error('keeping the partitions as tables read no table'));
+      result = kept;
+    }
+  }
+
   // 4. Import DBML's flow, with the converted DBML as its file.
   return importConvertedSql(deps, read, dialect, result, {
     ...(preset.layer ? { preferredLayer: preset.layer } : {}),
     ...(preset.name ? { name: preset.name } : {}),
   });
+}
+
+/** The partitions step: fold them into their parents (first unless the user kept them before) or keep each as a table. */
+async function pickPartitionMode(ui: ImportSqlDdlUi, folded: number, before: SqlPartitionMode | undefined): Promise<SqlPartitionMode | undefined> {
+  const n = folded.toLocaleString('en-US');
+  const one = folded === 1;
+  const items: SqlPartitionItem[] = [
+    {
+      label: 'Fold partitions into their parent tables',
+      description: ['recommended', ...(before === 'fold' ? ['read this way before'] : []), `${n} ${one ? 'partition is' : 'partitions are'} the parent's rows`].join(' · '),
+      mode: 'fold',
+    },
+    {
+      label: 'Keep each partition as a table',
+      description: [...(before === 'tables' ? ['read this way before'] : []), `${n} more ${one ? 'table' : 'tables'}, each with its parent's columns`].join(' · '),
+      mode: 'tables',
+    },
+  ];
+  const ordered = before === 'tables' ? [items[1], items[0]] : items;
+  const choice = await ui.pickPartitions!(ordered, {
+    title: TITLE,
+    placeHolder: `The scripts hold ${n} ${one ? 'partition' : 'partitions'} with no columns of ${one ? 'its' : 'their'} own (PARTITION OF, ATTACH PARTITION, INHERITS). Fold ${one ? 'it' : 'them'} into ${one ? 'its parent' : 'their parents'}?`,
+    ignoreFocusOut: true,
+  });
+  return choice?.mode;
 }
 
 /** Step 4 of both paths: the converted DBML through Import DBML's own flow (layer, name, dry run, write, open). */
@@ -641,7 +700,7 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     }
   }
   return importConvertedSql(deps, gathered, chosenDialect, best.result, { quick: true },
-    ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name }));
+    ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name, partitions: 'fold' }));
 }
 
 /**
@@ -815,6 +874,7 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     readFile: async (filePath) => decodeText(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
     pickDialect: async (items, options) => vscode.window.showQuickPick([...items], options),
     pickFiles: async (items, options) => vscode.window.showQuickPick([...items], { ...options, canPickMany: true }),
+    pickPartitions: async (items, options) => vscode.window.showQuickPick([...items], options),
     readFileStart: (filePath, chars) => readTextStart(filePath, chars),
     fileSize: (filePath) => fileSize(filePath),
     showInformationMessage: async (message) => vscode.window.showInformationMessage(message),

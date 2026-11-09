@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "YTD",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[YTD]",
+  "sortByColumn": "Order",
+  "displayFolder": "Columns\\0. Select a Period",
+  "lineageTag": "25f552c2-f3ce-428e-a61c-dd66630c4bef",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

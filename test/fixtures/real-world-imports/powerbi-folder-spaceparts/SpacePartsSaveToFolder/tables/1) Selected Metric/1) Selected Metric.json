@@ -1,0 +1,15 @@
+{
+  "name": "1) Selected Metric",
+  "description": "It lets you select a Metric.",
+  "lineageTag": "31535870-007d-4636-8348-2f06b750951d",
+  "annotations": [
+    {
+      "name": "TabularEditor_TableGroup",
+      "value": "Measure Selection"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

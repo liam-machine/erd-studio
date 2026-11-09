@@ -1,0 +1,44 @@
+{
+  "name": "Forecast",
+  "lineageTag": "f44175ec-6e73-4cc5-93db-4febba622528",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Table"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": [
+        "[",
+        "  {",
+        "    \"name\": \"3795aac2-e6ba-48a7-9722-b7dd7af7b762\",",
+        "    \"fromTable\": \"Forecast\",",
+        "    \"fromColumn\": \"Forecast Month\",",
+        "    \"toTable\": \"Date\",",
+        "    \"toColumn\": \"Date\"",
+        "  },",
+        "  {",
+        "    \"name\": \"599b10ac-8bcb-4550-b452-56d8954b2a35\",",
+        "    \"toCardinality\": \"many\",",
+        "    \"fromTable\": \"Forecast\",",
+        "    \"fromColumn\": \"Product Type\",",
+        "    \"toTable\": \"Products\",",
+        "    \"toColumn\": \"Type\"",
+        "  },",
+        "  {",
+        "    \"name\": \"703b86a0-df9c-47d6-82e4-7c457de95971\",",
+        "    \"toCardinality\": \"many\",",
+        "    \"fromTable\": \"Forecast\",",
+        "    \"fromColumn\": \"Region Territory\",",
+        "    \"toTable\": \"Regions\",",
+        "    \"toColumn\": \"Territory\"",
+        "  }",
+        "]"
+      ]
+    }
+  ]
+}

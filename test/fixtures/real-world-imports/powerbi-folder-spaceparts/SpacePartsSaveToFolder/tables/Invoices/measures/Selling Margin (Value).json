@@ -1,0 +1,17 @@
+{
+  "name": "Selling Margin (Value)",
+  "description": "The selling margin is the margin earned when considering only the revenue and costs associated with the product, before delivery",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    SUMX (",
+    "        'Invoices',",
+    "        'Invoices'[Net Invoice Value] - 'Invoices'[Net Invoice COGS]",
+    "    ),",
+    "    'Invoice Document Type'[Billing Document Type Code] = \"invoice\"",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\d. Margins\\II. Selling Margin\\$",
+  "lineageTag": "be448632-beb1-4250-b5dd-9a0faaab6f52"
+}

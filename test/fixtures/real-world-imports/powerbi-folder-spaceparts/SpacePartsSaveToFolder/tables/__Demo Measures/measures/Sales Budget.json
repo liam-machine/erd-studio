@@ -1,0 +1,13 @@
+{
+  "name": "Sales Budget",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Budget],",
+    "    'Exchange Rate'[From Currency] = \"EUR\"",
+    ")"
+  ],
+  "formatString": "#,##0.00",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "e3555966-4f07-443b-a732-838da8defcc2"
+}

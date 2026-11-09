@@ -1,0 +1,12 @@
+{
+  "name": "# Workdays QTD",
+  "expression": [
+    "CALCULATE(",
+    "    MAX( 'Date'[Workdays QTD] ),",
+    "    'Date'[IsDateInScope] = TRUE",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "a07fb670-6765-4b8b-91da-3170765e8e94"
+}

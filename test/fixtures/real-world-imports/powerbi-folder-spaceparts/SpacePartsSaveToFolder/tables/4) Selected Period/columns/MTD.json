@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "MTD",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[MTD]",
+  "sortByColumn": "Order",
+  "displayFolder": "Columns\\0. Select a Period",
+  "lineageTag": "c9ee146b-ada4-4f64-b3ec-5367e8e35c2e",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

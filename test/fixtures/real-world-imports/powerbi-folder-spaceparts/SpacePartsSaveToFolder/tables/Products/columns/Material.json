@@ -1,0 +1,14 @@
+{
+  "name": "Material",
+  "dataType": "string",
+  "sourceColumn": "material",
+  "displayFolder": "1. Product Hierarchy",
+  "lineageTag": "a78bca4e-9fc2-42b7-8e38-44a2800b9ad1",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

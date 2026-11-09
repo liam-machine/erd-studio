@@ -1,0 +1,13 @@
+{
+  "name": "Delivery Margin 1YP (%)",
+  "description": "The delivery margin only considers the revenue and costs associated with freights, delivery and shipments.",
+  "expression": [
+    "CALCULATE (",
+    "    [Delivery Margin (%)],",
+    "    DATEADD ('Date'[Date], -1, YEAR)",
+    ")"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "1. Value\\d. Margins\\III. Delivery Margin\\%",
+  "lineageTag": "d15f4a1b-40e8-4af0-9fa8-4c8691b5702f"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Territory Directors",
+  "dataType": "string",
+  "sourceColumn": "territory_directors",
+  "displayFolder": "3. Managers",
+  "lineageTag": "a55a008d-d15b-4c72-ac32-796786fb4cce",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

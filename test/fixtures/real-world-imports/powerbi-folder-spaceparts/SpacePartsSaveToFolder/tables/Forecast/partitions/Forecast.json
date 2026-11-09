@@ -1,0 +1,16 @@
+{
+  "name": "Forecast",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"forecast\"]}[Data],",
+      "    #\"Select Columns\" = Table.SelectColumns ( Data, {\"forecast_month\", \"forecast_eur\", \"region_territory\", \"product_type\"})",
+      "in",
+      "    #\"Select Columns\""
+    ]
+  }
+}

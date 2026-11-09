@@ -1,0 +1,17 @@
+{
+  "name": "SqlEndpoint",
+  "kind": "m",
+  "expression": "\"4vft62jnceaujcmrpa4ib27kuq-ubv5teutsnsufbwwj6ezco7vj4.datawarehouse.fabric.microsoft.com\" meta [IsParameterQuery=true, Type=\"Text\", IsParameterQueryRequired=true]",
+  "queryGroup": "Parameters",
+  "lineageTag": "c5701a1a-761b-4a4f-abb2-8bb5e7de8d4d",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Text"
+    }
+  ]
+}

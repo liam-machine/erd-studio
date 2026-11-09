@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Year Week Number ISO (ie 202125)",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[Calendar Year Week Number ISO (ie 202125)]",
+  "displayFolder": "4. Week",
+  "lineageTag": "b7562b0b-32a5-49ab-8c2b-c0f933e8e272",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

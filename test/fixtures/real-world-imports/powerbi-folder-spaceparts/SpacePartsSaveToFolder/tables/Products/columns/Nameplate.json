@@ -1,0 +1,14 @@
+{
+  "name": "Nameplate",
+  "dataType": "string",
+  "sourceColumn": "nameplate",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "4e1f18fb-66c0-457f-a7df-65694bfe81de",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

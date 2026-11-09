@@ -1,0 +1,22 @@
+{
+  "name": "Orders",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"orders\"]}[Data],",
+      "    #\"Select Columns\" = Table.RemoveColumns ( Data, \"dwcreateddate\" ),",
+      "    #\"Added Custom\" = Table.AddColumn(#\"Select Columns\", \"RandomDays\", each Number.RandomBetween(7, 90), Int64.Type),",
+      "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Added Custom\",{{\"RandomDays\", Int64.Type}}),",
+      "    #\"Added Custom1\" = Table.AddColumn(#\"Changed Type\", \"Fixed Order Date\", each if [order_date] = null then Date.AddDays([request_goods_receipt_date], -[RandomDays]) else [order_date]),",
+      "    #\"Changed Type1\" = Table.TransformColumnTypes(#\"Added Custom1\",{{\"Fixed Order Date\", type date}}),",
+      "    #\"Removed Columns\" = Table.RemoveColumns(#\"Changed Type1\",{\"order_date\", \"RandomDays\"}),",
+      "    #\"Renamed Columns\" = Table.RenameColumns(#\"Removed Columns\",{{\"Fixed Order Date\", \"order_date\"}})",
+      "in",
+      "    #\"Renamed Columns\""
+    ]
+  }
+}

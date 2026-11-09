@@ -1,0 +1,18 @@
+{
+  "name": "3) Selected Target",
+  "description": [
+    "This is a disconnected table for Measure Selection.",
+    "It lets you select a Target."
+  ],
+  "lineageTag": "faedb0d7-81a5-4a5b-aa77-569ccb6f80d4",
+  "annotations": [
+    {
+      "name": "TabularEditor_TableGroup",
+      "value": "Measure Selection"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

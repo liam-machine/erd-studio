@@ -1,0 +1,16 @@
+{
+  "name": "Gross Sales (Selected Unit)",
+  "expression": [
+    "",
+    "-- Sideways recursion",
+    "CALCULATE (",
+    "    [Actuals],",
+    "    ALL ( '1) Selected Metric'[Select a Measure] ),",
+    "    '1) Selected Metric'[Select a Measure] = \"Gross Sales\"",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\I. Total",
+  "lineageTag": "c6803610-3c05-4cb0-bf47-500545195637"
+}

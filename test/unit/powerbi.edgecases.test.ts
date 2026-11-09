@@ -162,10 +162,13 @@ describe('nameless objects are named in a warning with their place, never droppe
     expect(shown).toMatch(/A column in table T \(T\.tmdl, line 2\) has no name, so it was skipped\./);
   });
 
-  it('a TMDL table with no name is a problem with its line (its columns would go with it)', () => {
+  it('a TMDL table with no name is a problem with its line (its columns go with it); the other tables still import', () => {
     const r = readSemanticModel([tmdl('tables/T.tmdl', ['table', `${T}column a`, `${T}${T}dataType: string`]), tmdl('tables/U.tmdl', ['table U', `${T}column u`])]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.problems).toEqual([{ file: 'Edge.SemanticModel/definition/tables/T.tmdl', line: 1, message: 'A table has no name.' }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.model.tables.map((t) => t.name)).toEqual(['U']);
+    expect(r.problems).toEqual([{ file: 'Edge.SemanticModel/definition/tables/T.tmdl', line: 1, message: 'A table has no name.' }]);
+    expect(r.model.ledger).toEqual([expect.objectContaining({ outcome: 'problem', unit: 'table', what: 'TMDL table with no name', where: { file: 'Edge.SemanticModel/definition/tables/T.tmdl', line: 1 } })]);
   });
 
   it('a TMDL relationship with no name is still read', () => {
@@ -526,12 +529,14 @@ describe('hostile input never throws', () => {
 });
 
 describe('many relationships that filter both ways', () => {
-  it('are one warning naming three and counting the rest, so they do not bury the other notes', () => {
+  it('are one Not imported line naming three and counting the rest, each in the ledger, so they do not bury the other notes', () => {
     const tables = [{ name: 'F', columns: ['a', 'b', 'c', 'd', 'e'].map((name) => ({ name, dataType: 'int64' })) }, ...['A', 'B', 'C', 'D', 'E'].map((name) => ({ name, columns: [{ name: 'k', dataType: 'int64' }] }))];
     const relationships = ['a', 'b', 'c', 'd', 'e'].map((c) => ({ fromTable: 'F', fromColumn: c, toTable: c.toUpperCase(), toColumn: 'k', crossFilteringBehavior: 'bothDirections' }));
     const { result, imported } = importAll(bim({ tables, relationships }));
     expect(imported.relationships).toHaveLength(5);
-    expect(result.warnings).toEqual(['5 relationships (F[a] → A[k], F[b] → B[k], F[c] → C[k] and 2 more) each filters in both directions in Power BI; ERD Studio does not record filter direction.']);
+    expect(result.warnings).toEqual([]);
+    expect(result.ledger.filter((e) => e.what === 'cross-filter direction')).toHaveLength(5);
+    expect(ledgerLeftOut(result.ledger)).toContain('5 settings: cross-filter direction not kept: it filters both ways in Power BI (F.a, F.b, F.c and 2 more).');
   });
 });
 
@@ -567,13 +572,13 @@ describe('very long table names', () => {
 });
 
 describe('model formats this import does not read', () => {
-  it('a .pbix / .pbit and Tabular Editor 2\'s database.json are named with what to do; anything else is not', () => {
+  it('a .pbix / .pbit is named with what to do, and a database.json with no tables/ beside it; anything else is not (Save to Folder is read)', () => {
     expect(isUnreadModelFile('Sales.pbix')).toBe(true);
     expect(isUnreadModelFile('Sales.PBIT')).toBe(true);
-    expect(isUnreadModelFile('Model/database.json')).toBe(true);
+    expect(isUnreadModelFile('Model/database.json')).toBe(false);
     expect(isUnreadModelFile('package.json')).toBe(false);
     expect(unreadModelFormat(['repo/README.md'])).toBeUndefined();
     expect(unreadModelFormat(['repo/Sales.pbit'])).toMatch(/^Sales\.pbit is a Power BI Desktop file/);
-    expect(unreadModelFormat(['repo/Model/database.json', 'repo/Model/tables/Sales/Sales.json'])).toMatch(/^repo\/Model\/database\.json is a model saved by Tabular Editor/);
+    expect(unreadModelFormat(['repo/Model/database.json'])).toMatch(/^repo\/Model\/database\.json has no tables\/ folder/);
   });
 });

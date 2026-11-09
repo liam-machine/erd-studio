@@ -34,7 +34,7 @@ import type {
 } from '../types/draft';
 import type { DisplaySubjectArea } from '../types/display';
 import { createLogger } from './logger';
-import { ledgerLeftOut, ledgerNotes, savedOptionalNote, type LedgerEntry } from './importLedger';
+import { ledgerLeftOut, ledgerLogLines, ledgerNotes, ledgerText, savedOptionalNote, type LedgerEntry } from './importLedger';
 import type { LayerConfig } from '../types/layer';
 import type { ColumnDef, Relationship, SemanticTable } from '../types/semantic';
 import {
@@ -50,7 +50,7 @@ import {
 } from './dbmlImport';
 import { IMPORT_GUIDE_LABEL, OPEN_FOLDER_LABEL, START_ACTION_LABELS } from '../types/startActions';
 import { readDbml, readDbmlImportLayout } from './dbmlImportParse';
-import { folderRank, type DbtDraft, type DraftScope, type DraftSkipped } from './dbtDraft';
+import { folderRank, type DbtDraft, type DraftRelationshipCondition, type DraftScope, type DraftSkipped, type DraftSourceTable } from './dbtDraft';
 import { describeImportTable, relationshipLines, buildImportReview } from './importReview';
 import { displayFromFiles, displayFromTables, draftSchemas } from './draftDisplay';
 
@@ -270,6 +270,8 @@ function tableAndRelationshipSections(
   relationships: readonly Relationship[],
   tagOf: (name: string) => string | undefined,
   undrawnForeignKeys: ReadonlyMap<string, number> = new Map(),
+  /** A line of text for a relationship, by its label lower-cased (`a.x → b.y`): a dbt test's condition. */
+  relationshipText: ReadonlyMap<string, string> = new Map(),
 ): DraftDetailSection[] {
   const links = relationshipLines(relationships);
   const fkCount = new Map<string, number>();
@@ -293,7 +295,7 @@ function tableAndRelationshipSections(
       id: 'relationships',
       title: 'Relationships',
       count: countLinks(relationships),
-      items: links.map((l): DraftDetailItem => ({ path: l.label, tag: l.cardinality, text: '' })),
+      items: links.map((l): DraftDetailItem => ({ path: l.label, tag: l.cardinality, text: relationshipText.get(l.label.toLowerCase()) ?? '' })),
     });
   }
   return sections.filter((s) => s.items.length > 0);
@@ -587,7 +589,74 @@ function undrawnLinkLine(link: NonNullable<DbtDraft['undrawnLinks']>[number]): s
     case 'noColumns': return `${link.toModel} has no columns in your schema yml, so it can't be drawn.`;
     case 'notAModel': return `${link.toModel} is not a model in this project (a package's or a source?), so it can't be drawn.`;
     case 'source': return `${link.toModel} is a dbt source, not a model, so it can't be drawn.`;
+    case 'package': return `${link.toModel} is a model from an installed dbt package, so it can't be drawn.`;
+    case 'disabled': return `${link.toModel} is disabled in dbt, so it can't be drawn.`;
+    case 'noColumn': return `${link.missing?.table ?? link.fromModel} has no column ${link.missing?.column ?? link.fromColumn} in dbt (an older version's, or a stale manifest?), so the line can't be drawn.`;
   }
+}
+
+/** The longest a condition's text runs in the drawer before it is cut (`…`). */
+const CONDITION_MAX = 160;
+
+/** One line, at most `max` characters. */
+function oneLine(text: string, max: number): string {
+  // eslint-disable-next-line no-control-regex
+  const flat = text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+}
+
+/**
+ * What Relationships says of a link dbt tests only for some rows
+ * (`relationships_where`, a `where:` config), its conditions as written:
+ * "dbt tests it only where gender_concept_id <> 0 (concept: domain_id = 'Gender'). The diagram draws it for every row."
+ */
+export function dbtConditionText(link: Pick<DraftRelationshipCondition, 'toModel' | 'conditions'>): string {
+  const phrases = link.conditions.map((c) => {
+    const from = [c.from, c.where].filter((x): x is string => !!x).map((x) => oneLine(x, CONDITION_MAX)).join(' and ');
+    const to = c.to ? oneLine(c.to, CONDITION_MAX) : '';
+    if (from && to) return `where ${from} (${link.toModel}: ${to})`;
+    if (from) return `where ${from}`;
+    return `against ${link.toModel} rows where ${to}`;
+  }).filter((p) => p !== '');
+  const tested = phrases.length > 0 ? `dbt tests it only ${phrases.join(', and ')}` : 'dbt tests it only for some rows (relationships_where)';
+  return `${tested}. The diagram draws it for every row.`;
+}
+
+/** The longest list of source names Not drawn gives before counting the rest. */
+const SOURCES_NAMED = 20;
+
+/** The longest a source or table name runs in Not drawn before it is cut. */
+const SOURCE_NAME_MAX = 80;
+
+/** Not drawn's line for the project's dbt sources ({@link DbtDraft.sources}). */
+export function dbtSourcesLine(sources: readonly DraftSourceTable[]): string {
+  const names = sources.map((s) => (s.identifier
+    ? `${oneLine(s.name, SOURCE_NAME_MAX)} (table ${oneLine(s.identifier, SOURCE_NAME_MAX)})`
+    : oneLine(s.name, SOURCE_NAME_MAX)));
+  const listed = names.length > SOURCES_NAMED
+    ? `${names.slice(0, SOURCES_NAMED).join(', ')} and ${thousands(names.length - SOURCES_NAMED)} more (ERD Studio: Show Logs lists every one)`
+    : names.join(', ');
+  const one = sources.length === 1;
+  return `${count(sources.length, 'dbt source is', 'dbt sources are')} not drawn: Import from dbt draws models, and a source is a table dbt reads but doesn't build. ${one ? 'It is' : 'They are'} ${listed}.`;
+}
+
+/** The ledger's `what` for a dbt source (see `buildDbtDraft`). */
+const DBT_SOURCE_WHAT = 'dbt source';
+
+/**
+ * The output-log lines for a dbt draft: one per ledger entry
+ * ({@link ledgerLogLines}), and one per dbt source whether or not its file
+ * and line are known, since Not drawn names only the first
+ * {@link SOURCES_NAMED} and points to the log for the rest.
+ */
+export function dbtDraftLogLines(draft: Pick<DbtDraft, 'ledger' | 'sources'>, title = 'Import from dbt'): string[] {
+  const lines = ledgerLogLines((draft.ledger ?? []).filter((e) => e.what !== DBT_SOURCE_WHAT), title);
+  for (const s of draft.sources ?? []) {
+    const at = s.file ? `${ledgerText(s.file, 200)}${s.line !== undefined ? ` line ${s.line}` : ''}: ` : '';
+    const table = s.identifier ? ` (table ${ledgerText(s.identifier, SOURCE_NAME_MAX, true)})` : '';
+    lines.push(`${title}: ${at}dbt source ${ledgerText(s.name, SOURCE_NAME_MAX * 2, true)}${table}: not drawn (a source is a table dbt reads but doesn't build)`);
+  }
+  return lines;
 }
 
 /** The ledger's D18 count (`savedOptional`), and the ledger without it (its note is said in its own words). */
@@ -657,6 +726,9 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
   ]);
   const ledgerLostLines = dedupeLines(ledgerLeftOut(ledger));
   const undrawnLinks = draft.undrawnLinks ?? [];
+  const sourcesLine = (draft.sources ?? []).length > 0 ? dbtSourcesLine(draft.sources!) : undefined;
+  const conditionText = new Map((draft.relationshipConditions ?? []).map((c) =>
+    [`${c.fromModel}.${c.fromColumn} → ${c.toModel}.${c.toColumn}`.toLowerCase(), dbtConditionText(c)]));
   const noColumns = input.modelsWithoutColumns ?? [];
   const noColumnsLine = noColumns.length === 0 ? undefined
     : `${count(noColumns.length, 'model has', 'models have')} no columns in your schema yml, so ${noColumns.length === 1 ? "it can't" : "they can't"} be drawn: ${someNames(noColumns, 4)}. Add columns: to ${noColumns.length === 1 ? 'its' : 'their'} yml to draw ${noColumns.length === 1 ? 'it' : 'them'}.`;
@@ -669,7 +741,7 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
     changedTables: changed.length,
     schemas: draftSchemas(tables),
     notes: ledgerNoteLines.length,
-    leftOut: leftOut.length + ledgerLostLines.length + undrawnLinks.length + (noColumnsLine ? 1 : 0),
+    leftOut: leftOut.length + ledgerLostLines.length + undrawnLinks.length + (noColumnsLine ? 1 : 0) + (sourcesLine ? 1 : 0),
     ...(available !== undefined ? { available } : {}),
   };
   const switcher = dbtDraftScopes(input.scopes).scopes;
@@ -688,8 +760,8 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
   const undrawnFks = new Map<string, number>();
   for (const l of undrawnLinks) undrawnFks.set(lc(l.fromModel), (undrawnFks.get(lc(l.fromModel)) ?? 0) + 1);
   const details = tableAndRelationshipSections(tables, input.relationships, (name) =>
-    changedNames.has(lc(name)) ? 'changed' : reused.has(lc(name)) ? 'in your library' : 'new', undrawnFks);
-  if (leftOut.length > 0 || ledgerLostLines.length > 0 || undrawnLinks.length > 0 || noColumnsLine) {
+    changedNames.has(lc(name)) ? 'changed' : reused.has(lc(name)) ? 'in your library' : 'new', undrawnFks, conditionText);
+  if (leftOut.length > 0 || ledgerLostLines.length > 0 || undrawnLinks.length > 0 || noColumnsLine || sourcesLine) {
     details.push({
       id: 'leftOut',
       title: 'Not drawn',
@@ -697,6 +769,7 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
         ...leftOut.map(({ s, line }) => ({ path: s.name, text: line, tag: 'left out' })),
         ...undrawnLinks.map((l) => ({ path: `${l.fromModel}.${l.fromColumn} → ${l.toModel}`, text: undrawnLinkLine(l), tag: 'relationship' })),
         ...(noColumnsLine ? [{ text: noColumnsLine, tag: 'no columns' }] : []),
+        ...(sourcesLine ? [{ text: sourcesLine, tag: 'sources' }] : []),
         ...ledgerLostLines.map((text) => ({ text, tag: 'not imported' })),
       ],
     });

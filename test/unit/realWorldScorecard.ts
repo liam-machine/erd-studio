@@ -8,7 +8,7 @@
  * The flows mirrored here:
  * - SQL DDL: `gatherSqlFiles` (folder or files, data stripped) → the detected
  *   dialect → `sqlDdlToDbml` → Import DBML's flow on the converted DBML.
- * - Power BI: `walkFiles` + `findSemanticModels` → `readSemanticModel` →
+ * - Power BI: `walkSemanticModelFiles` + `findSemanticModels` → `readSemanticModel` →
  *   `semanticModelToDbml` → Import DBML's flow.
  * - DBML file: `readDbml` → `analyseDbml` → `planDbmlImport`.
  * - Import from dbt: `listDraftScopes` → the top-ranked folder
@@ -26,10 +26,10 @@ import type { ColumnDef, Relationship, SemanticTable } from '../../src/types/sem
 import type { LayerConfig } from '../../src/types/layer';
 import { toDraftView, type Draft, type DraftTarget } from '../../src/types/draft';
 import { gatherSqlFiles } from '../../src/commands/importSqlDdl';
-import { isSemanticModelFile, MAX_SEMANTIC_MODEL_FILES } from '../../src/commands/importSemanticModel';
+import { walkSemanticModelFiles } from '../../src/commands/importSemanticModel';
 import { IMPORT_TITLES } from '../../src/commands/importDbml';
 import * as sqlEngine from '../../src/services/sqlImportEngine';
-import { SQL_DIALECT_LABELS, type SqlDialect } from '../../src/services/sqlDdlImport';
+import { SQL_DIALECT_LABELS, type SqlDialect, type SqlPartitionMode } from '../../src/services/sqlDdlImport';
 import { readDbml, readDbmlImportLayout } from '../../src/services/dbmlImportParse';
 import {
   analyseDbml,
@@ -45,11 +45,10 @@ import {
   semanticModelRenameNote,
   semanticModelSkippedSummary,
   sqlOriginPhrase,
-  walkFiles,
   PROBLEMS_SHOWN,
   type DirEntries,
 } from '../../src/services/importSources';
-import { findSemanticModels, readSemanticModel, semanticModelToDbml, type SemanticModelFile } from '../../src/services/semanticModelImport';
+import { SEMANTIC_MODEL_META, findSemanticModels, readSemanticModel, semanticModelToDbml, type SemanticModelFile } from '../../src/services/semanticModelImport';
 import { draftFromDbt, draftFromImportPlan, dbtDraftScopes } from '../../src/services/draftModel';
 import type { LedgerEntry } from '../../src/services/importLedger';
 import { buildDbtDraft, listDraftModels, listDraftScopes, suggestSubjectAreaName } from '../../src/services/dbtDraft';
@@ -90,7 +89,8 @@ export interface TruthRelationship {
 
 export interface TruthSample {
   importer: 'sql' | 'dbml' | 'semanticModel' | 'dbt';
-  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string };
+  /** `partitions`: the SQL import's choice for partitions (absent: fold them, the default and the one-click import's). */
+  input: { files?: string[]; folder?: string; file?: string; dialect?: SqlDialect; project?: string; manifest?: string; scope?: string; partitions?: SqlPartitionMode };
   counts: { tables: number; columns: number; primaryKeys: number; relationships: number };
   tables: TruthTable[];
   relationships: TruthRelationship[];
@@ -163,7 +163,8 @@ function draftStrings(draft: Draft): string[] {
     view.banner.from ?? '',
     view.banner.detail,
     view.banner.notice ?? '',
-    ...view.details.flatMap((s) => [s.title, s.hint ?? '', ...s.items.flatMap((i) => [i.path ?? '', i.text, i.tag ?? ''])]),
+    // An item reads as one row (`person.gender_concept_id → concept.concept_id: dbt tests it only where …`), so it is also one string.
+    ...view.details.flatMap((s) => [s.title, s.hint ?? '', ...s.items.flatMap((i) => [i.path ?? '', i.text, i.tag ?? '', i.path && i.text ? `${i.path}: ${i.text}` : ''])]),
   ].filter((s) => s !== '');
 }
 
@@ -243,7 +244,7 @@ async function runSql(sample: TruthSample): Promise<ImportRun> {
   const detected = sqlEngine.detectSqlDialect(gathered.files.map((f) => f.text).join('\n')) ?? null;
   const dialect = detected ?? sample.input.dialect ?? 'postgres';
   const label = SQL_DIALECT_LABELS[dialect];
-  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect });
+  const result = sqlEngine.sqlDdlToDbml({ files: gathered.files, dialect, ...(sample.input.partitions ? { options: { partitions: sample.input.partitions } } : {}) });
   if (!result.ok) {
     const failureMessage = describeImportProblems(IMPORT_TITLES.sql, result.problems, `They were read as ${label}.`);
     return {
@@ -271,7 +272,7 @@ async function runDbmlFile(sample: TruthSample): Promise<ImportRun> {
 async function runSemanticModel(sample: TruthSample): Promise<ImportRun> {
   const folder = path.join(SAMPLES_ROOT, sample.input.folder!);
   const folderName = path.basename(folder);
-  const walk = await walkFiles(folder, fsDir, { include: isSemanticModelFile, limit: MAX_SEMANTIC_MODEL_FILES });
+  const walk = await walkSemanticModelFiles(folder, fsDir);
   const relative = (full: string): string => path.join(folderName, path.relative(folder, full)).split(path.sep).join('/');
   const fullOf = new Map(walk.files.map((full) => [relative(full), full]));
   const entries = findSemanticModels([...fullOf.keys()]);
@@ -453,6 +454,14 @@ export interface SampleScore {
   };
   oneToOne: { source: number; imported: number; drawnAsMany: string[] };
   /**
+   * Links the source tests only for some rows (`filtered` in the truth: dbt's
+   * `relationships_where`, a `where:` config) among the matched ones; `shown`:
+   * the draft shows the condition (a string names the link's table and column
+   * with "where"); `reported`: not shown, but a line names the link with
+   * "relationships_where"; `silent`: neither.
+   */
+  conditions: { source: number; shown: number; reported: number; silent: string[] };
+  /**
    * FKs whose columns are all NOT NULL (dbt: not_null) among the matched links; how many keep NOT NULL
    * in the table files; whether a note says relationships are saved optional (D18), and the number of
    * required references it claims (null when it gives none).
@@ -471,7 +480,10 @@ export interface SampleScore {
   falseNotLostNote: boolean;
   silentLosses: {
     tables: number; columns: number; primaryKeys: number; relationships: number; oneToOne: number;
-    requiredFks: number; uniqueKeys: number; typeDetail: number; descriptions: number; schemas: number; total: number;
+    requiredFks: number; uniqueKeys: number; typeDetail: number; descriptions: number; schemas: number;
+    /** Filtered links drawn with no word of their condition. */
+    conditions: number;
+    total: number;
   };
 }
 
@@ -482,7 +494,41 @@ export interface SampleScore {
  */
 const GENERIC_PROBLEM = /(could not|couldn't|can't|cannot) (read|parse) (this|the) (statement|file|line|script)\.?$/i;
 
-export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): SampleScore {
+/**
+ * A semantic model's run with each table and column under the Power BI name
+ * the import keeps (`meta.power_bi_name`, written when snake_case changed it:
+ * `1) Selected Metric` became `t_1_selected_metric`, `YOY%` became
+ * `yoy_pct`), so it is compared with the source by its own name.
+ */
+export function withSourceNames(run: ImportRun): ImportRun {
+  const original = (m: { meta?: unknown }): string | undefined => {
+    const v = ((m.meta ?? {}) as Record<string, unknown>)[SEMANTIC_MODEL_META.name];
+    return typeof v === 'string' && v.trim() ? v : undefined;
+  };
+  const tableName = new Map<string, string>();
+  const columnName = new Map<string, string>();
+  const tables = run.tables.map((t) => {
+    const name = original(t) ?? t.name;
+    tableName.set(t.name, name);
+    const columns = (t.columns ?? []).map((c) => {
+      const col = original(c) ?? c.name;
+      columnName.set(`${t.name}\u0000${c.name}`, col);
+      return { ...c, name: col };
+    });
+    return { ...t, name, columns };
+  });
+  const relationships = run.relationships.map((r) => ({
+    ...r,
+    fromModel: tableName.get(r.fromModel) ?? r.fromModel,
+    fromColumn: columnName.get(`${r.fromModel}\u0000${r.fromColumn}`) ?? r.fromColumn,
+    toModel: tableName.get(r.toModel) ?? r.toModel,
+    toColumn: columnName.get(`${r.toModel}\u0000${r.toColumn}`) ?? r.toColumn,
+  }));
+  return { ...run, tables, relationships };
+}
+
+export function scoreSample(slug: string, truth: TruthSample, given: ImportRun): SampleScore {
+  const run = truth.importer === 'semanticModel' ? withSourceNames(given) : given;
   const shown = run.shown;
   const failed = !run.ok || run.tables.length === 0;
   const reasons: string[] = [];
@@ -645,6 +691,15 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
     .filter((l) => importedLinks.some((il) => il.pairs.every((p) => l.pairs.includes(p)) && il.cardinality !== 'one-to-one'))
     .map((l) => `${l.from}.${l.fromColumns.join('+')} → ${l.to}`);
 
+  // Conditions (filtered links: relationships_where) ----------------------------
+  const filtered = new Set(truth.relationships.filter((r) => r.filtered).map((r) => pairKey(r.from, r.fromColumn, r.to, r.toColumn)));
+  const filteredLinks = matchedLinks.filter((l) => l.pairs.some((p) => filtered.has(p)));
+  const conditionShown = (l: Link): boolean => l.fromColumns.some((c) => mentioned(shown, l.from, c, l.to, 'where'));
+  const conditionReported = (l: Link): boolean => l.fromColumns.some((c) => mentioned(shown, l.from, c, 'relationships_where'));
+  const conditionsShown = filteredLinks.filter(conditionShown);
+  const conditionsReported = filteredLinks.filter((l) => !conditionShown(l) && conditionReported(l));
+  const conditionsSilent = filteredLinks.filter((l) => !conditionShown(l) && !conditionReported(l)).map((l) => `${l.from}.${l.fromColumns.join('+')} → ${l.to}`);
+
   // Required FKs (NOT NULL / not_null) -----------------------------------------
   const allNotes = [...run.notes, ...run.leftOut];
   const optionalNote = allNotes.find((n) => /optional/i.test(n));
@@ -720,7 +775,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
   };
 
   const silent = failed
-    ? { tables: 0, columns: 0, primaryKeys: 0, relationships: 0, oneToOne: 0, requiredFks: 0, uniqueKeys: 0, typeDetail: 0, descriptions: 0, schemas: 0 }
+    ? { tables: 0, columns: 0, primaryKeys: 0, relationships: 0, oneToOne: 0, requiredFks: 0, uniqueKeys: 0, typeDetail: 0, descriptions: 0, schemas: 0, conditions: 0 }
     : {
       tables: missingTables.length - missingTablesReported.length,
       columns: colMissing - colMissingReported,
@@ -732,9 +787,10 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
       typeDetail: detailLostSilent,
       descriptions: descChanged + descMissing,
       schemas: schemasLostSilently.length,
+      conditions: conditionsSilent.length,
     };
   const total = Object.values(silent).reduce((a, b) => a + b, 0);
-  const detailSilent = silent.typeDetail + silent.descriptions + silent.uniqueKeys + silent.requiredFks + silent.schemas;
+  const detailSilent = silent.typeDetail + silent.descriptions + silent.uniqueKeys + silent.requiredFks + silent.schemas + silent.conditions;
   const falseNotLostNote = !failed && detailSilent + silent.columns > 0 && allNotes.some((n) => /not lost/i.test(n));
 
   const score: SampleScore = {
@@ -753,6 +809,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
       extra: extraLinks.map((l) => l.label), wrongDirection,
     },
     oneToOne: { source: truthOneToOne.length, imported: importedOneToOne, drawnAsMany },
+    conditions: { source: filteredLinks.length, shown: conditionsShown.length, reported: conditionsReported.length, silent: conditionsSilent },
     requiredFks: {
       source: requiredSource, keptNotNull: requiredKept, toldOptional: !!optionalNote, ...(optionalNote ? { optionalNote } : {}),
       noteClaims: optionalNote ? Number(optionalNote.match(/(\d+) (?:references?|relationships?)[^.]*not optional|(\d+) required/i)?.slice(1).find(Boolean) ?? NaN) : null,
@@ -779,7 +836,7 @@ export function scoreSample(slug: string, truth: TruthSample, run: ImportRun): S
  *   many-to-one.
  * - With gaps: the structure is right, but something is left out (and said),
  *   or a detail is lost silently (type detail, description, unique key,
- *   NOT NULL, schema), or the draft says nothing was lost when it was, or
+ *   NOT NULL, schema, a relationship's condition), or the draft says nothing was lost when it was, or
  *   required relationships are saved optional (D18) with no note.
  * - Clean: none of these.
  */
@@ -806,6 +863,7 @@ export function verdictOf(s: SampleScore, failed: boolean, reasons: string[]): V
   if (L.uniqueKeys) gap.push(`${L.uniqueKeys} unique key(s) lost`);
   if (L.requiredFks) gap.push(`${L.requiredFks} required FK(s) lost`);
   if (L.schemas) gap.push(`schema(s) ${s.schemas.lostSilently.join(', ')} lost`);
+  if (L.conditions) gap.push(`${L.conditions} relationship condition(s) lost silently`);
   if (s.falseNotLostNote) gap.push('a note says details are not lost');
   if (s.requiredFks.source > 0 && !s.requiredFks.toldOptional) gap.push(`${s.requiredFks.source} required relationship(s) saved optional with no note`);
   const claims = s.requiredFks.noteClaims;

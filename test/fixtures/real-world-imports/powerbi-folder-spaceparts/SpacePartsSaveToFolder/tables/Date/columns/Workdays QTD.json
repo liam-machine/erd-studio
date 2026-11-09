@@ -1,0 +1,44 @@
+{
+  "type": "calculated",
+  "name": "Workdays QTD",
+  "dataType": "int64",
+  "isDataTypeInferred": true,
+  "expression": [
+    "VAR _Holidays =",
+    "    CALCULATETABLE (",
+    "        DISTINCT ('Date'[Date]),",
+    "        'Date'[IsHoliday] <> TRUE",
+    "    )",
+    "VAR _WeekdayName = CALCULATE ( SELECTEDVALUE ( 'Date'[Weekday Short (i.e. Mon)] ) )",
+    "VAR _WeekendDays = SWITCH (",
+    "        _WeekdayName,",
+    "        \"Sat\", 2,",
+    "        \"Sun\", 3,",
+    "        0",
+    "    )",
+    "VAR _WorkdaysMTD =",
+    "    CALCULATE (",
+    "        NETWORKDAYS (",
+    "            CALCULATE (",
+    "                MIN ('Date'[Date]),",
+    "                ALLEXCEPT ('Date', 'Date'[Calendar Quarter Year (ie Q1 2021)])",
+    "            ),",
+    "            CALCULATE (MAX ('Date'[Date]) - _WeekendDays),",
+    "            1,",
+    "            _Holidays",
+    "        )",
+    "    )",
+    "        + 1",
+    "RETURN",
+    "    IF (_WorkdaysMTD < 1, 1, _WorkdaysMTD)"
+  ],
+  "displayFolder": "5. Weekday / Workday\\Workdays",
+  "lineageTag": "9d01d75f-4942-4b6a-9217-a702574aaf64",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

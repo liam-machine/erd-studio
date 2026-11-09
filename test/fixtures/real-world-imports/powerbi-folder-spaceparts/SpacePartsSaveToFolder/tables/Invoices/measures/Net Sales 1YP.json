@@ -1,0 +1,13 @@
+{
+  "name": "Net Sales 1YP",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Net Sales],",
+    "    DATEADD ('Date'[Date], -1, YEAR)",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\c. Net Sales",
+  "lineageTag": "ad3c564a-708d-4c42-9e18-bb723225c142"
+}
