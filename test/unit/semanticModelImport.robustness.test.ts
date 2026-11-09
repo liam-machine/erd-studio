@@ -461,7 +461,7 @@ describe('parseJsonWithLines', () => {
     }
   });
 
-  it('throws what JSON.parse throws on bad JSON, and reads (without lines) what is nested too deep to follow', () => {
+  it('throws what JSON.parse throws on bad JSON, and reads (without lines inside it) what is nested too deep to follow', () => {
     for (const bad of ['{"a": 01}', '{"a": }', '[1,]', '{"a": "x\u0001"}', '']) {
       let mine = '';
       let theirs = '';
@@ -472,6 +472,10 @@ describe('parseJsonWithLines', () => {
     const deep = `${'['.repeat(MAX_JSON_DEPTH + 10)}1${']'.repeat(MAX_JSON_DEPTH + 10)}`;
     const r = parseJsonWithLines(deep);
     expect(JSON.stringify(r.value)).toBe(deep);
-    expect(r.lines.lineOf(r.value)).toBeUndefined();
+    // Lines are kept down to the depth followed; inside the deeper value, none.
+    expect(r.lines.lineOf(r.value)).toBe(1);
+    let inner: unknown = r.value;
+    for (let d = 0; d < MAX_JSON_DEPTH + 5; d++) inner = (inner as unknown[])[0];
+    expect(r.lines.lineOf(inner)).toBeUndefined();
   });
 });

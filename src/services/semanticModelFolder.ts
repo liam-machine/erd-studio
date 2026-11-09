@@ -202,7 +202,8 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
       const x = todo.pop();
       if (Array.isArray(x)) {
         linesOf.set(x, { file: file.path, lines: parsed.lines });
-        todo.push(...x);
+        // One push each: spreading a list of 100 000+ items into push() overflows the stack.
+        for (const v of x) if (typeof v === 'object' && v !== null) todo.push(v);
       } else if (isObject(x)) {
         linesOf.set(x, { file: file.path, lines: parsed.lines });
         for (const v of Object.values(x)) if (typeof v === 'object' && v !== null) todo.push(v);
@@ -226,14 +227,17 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
   // Tables first (by folder), then everything else, each in path order.
   const sorted = [...files].filter((f) => f !== databaseEntry).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const tableByFolder = new Map<string, Loose | null>();
+  // A table's own file is the one named after its folder (`tables/Sales/Sales.json`); any other file directly in the
+  // folder (a copy, `Sales - Copy.json`) is outside the layout, even when it sorts first or the table's own does not read.
+  const ownFile = (rel: readonly string[]): boolean => decodeName(rel[2]).toLowerCase() === decodeName(rel[1]).toLowerCase();
   const tableFiles = sorted.filter((f) => {
     const rel = relative(f.path);
     return rel && rel.length === 3 && rel[0].toLowerCase() === 'tables';
-  });
+  }).sort((a, b) => Number(!ownFile(relative(a.path)!)) - Number(!ownFile(relative(b.path)!)));
   for (const f of tableFiles) {
     const rel = relative(f.path)!;
     const folder = rel[1];
-    if (tableByFolder.get(folder)) {
+    if (tableByFolder.has(folder)) {
       // A second file directly in a table's folder: not part of the layout.
       ledger.skipped('file', 'other', 'file outside the Save to Folder layout', { file: f.path });
       continue;
@@ -312,6 +316,21 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
     const line = (key !== undefined ? at.lines.keyLine(obj, key) : undefined) ?? at.lines.lineOf(obj);
     return { file: at.file, ...(line !== undefined ? { line } : {}) };
   };
+  /** An annotation that holds what the import names (perspectives, translations) but does not parse: a problem at its line. */
+  const annotationProblem = (at: JsonPlace | undefined, what: string, annotation: string, message: string, names: { table?: string; column?: string } = {}): void => {
+    const file = at?.file ?? '';
+    problems.push({ file, ...(at?.line !== undefined ? { line: at.line } : {}), message });
+    ledger.problem('object', 'parseError', what, { file, ...(at?.line !== undefined ? { line: at.line } : {}), ...names }, `not read: its ${annotation} annotation`);
+  };
+  /** The table (and column) an object of the model is, or belongs to, by the file it is in. */
+  const owner = (obj: Loose): { table?: string; column?: string } => {
+    const file = linesOf.get(obj)?.file;
+    const rel = file ? relative(file) : undefined;
+    if (!rel || rel.length < 3 || rel[0].toLowerCase() !== 'tables') return {};
+    const table = str(tableByFolder.get(rel[1])?.name) ?? decodeName(rel[1]);
+    const column = rel.length === 4 && rel[2].toLowerCase() === 'columns' ? str(obj.name) : undefined;
+    return { table, ...(column ? { column } : {}) };
+  };
   for (const table of Array.isArray(model.tables) ? (model.tables as unknown[]).filter(isObject) : []) {
     for (const a of annotations(table)) {
       if (str(a.name) !== 'TabularEditor_Relationships') continue;
@@ -332,8 +351,23 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
         ledger.problem('relationship', 'parseError', 'relationships kept with a table that do not parse', { file, ...(line !== undefined ? { line } : {}), ...(str(table.name) ? { table: str(table.name) } : {}) }, 'not read: its TabularEditor_Relationships annotation');
         continue;
       }
-      for (const r of Array.isArray(parsed.value) ? parsed.value : []) {
-        if (!isObject(r)) continue;
+      const tableName = str(table.name);
+      const notRelationship = (line: number | undefined, n = 1): void => {
+        const file = at?.file ?? '';
+        problems.push({ file, ...(line !== undefined ? { line } : {}), message: `The relationships kept in table ${tableName ?? ''} hold ${n === 1 ? 'an entry that is' : `${n} entries that are`} not a relationship.` });
+        ledger.problem('relationship', 'parseError', 'relationship kept with a table that is not an object', { file, ...(line !== undefined ? { line } : {}), ...(tableName ? { table: tableName } : {}) }, 'not read: its TabularEditor_Relationships annotation', n);
+      };
+      // A list, as Tabular Editor writes it; one relationship on its own is read as a list of one.
+      const list = Array.isArray(parsed.value) ? parsed.value : isObject(parsed.value) ? [parsed.value] : undefined;
+      if (!list) {
+        notRelationship(lineIn(1));
+        continue;
+      }
+      for (const r of list) {
+        if (!isObject(r)) {
+          notRelationship(lineIn(parsed.lines.lineOf(list) ?? 1));
+          continue;
+        }
         const line = lineIn(parsed.lines.lineOf(r));
         places.set(r, { file: at?.file ?? '', ...(line !== undefined ? { line } : {}) });
         push(model, 'relationships', r);
@@ -344,13 +378,15 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
   // Local perspectives: named in the model's TabularEditor_Perspectives annotation.
   for (const a of annotations(model)) {
     if (str(a.name) !== 'TabularEditor_Perspectives') continue;
+    const at = placeOf(a, 'value');
     let list: unknown;
     try {
       list = JSON.parse(textOf(a.value) ?? '[]');
-    } catch {
-      list = [];
+    } catch (e) {
+      // Perspectives are named as not imported: one that cannot be named is a problem, never left unsaid.
+      annotationProblem(at, 'perspectives kept in the model that do not parse', 'TabularEditor_Perspectives', `The perspectives kept in the model are not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
     }
-    const at = placeOf(a, 'value');
     const known = new Set((Array.isArray(model.perspectives) ? model.perspectives : []).filter(isObject).map((p) => str(p.name)?.toLowerCase()));
     for (const p of Array.isArray(list) ? list : []) {
       const name = isObject(p) ? str(p.Name) ?? str(p.name) : undefined;
@@ -367,7 +403,7 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
   while (todo.length > 0) {
     const x = todo.pop();
     if (Array.isArray(x)) {
-      todo.push(...x);
+      for (const v of x) if (typeof v === 'object' && v !== null) todo.push(v);
       continue;
     }
     if (!isObject(x)) continue;
@@ -375,14 +411,18 @@ export function readFolderModel(files: readonly FolderModelFile[]): FolderModelR
       if (k === 'annotations' && Array.isArray(v)) {
         for (const a of v.filter(isObject)) {
           if (!LOCAL_TRANSLATIONS.test(str(a.name) ?? '')) continue;
+          let byCulture: unknown;
           try {
-            const byCulture = JSON.parse(textOf(a.value) ?? '{}') as unknown;
-            if (!isObject(byCulture)) continue;
-            for (const [culture, text] of Object.entries(byCulture)) {
-              if (typeof text === 'string' && text !== '') localTranslations.set(culture, (localTranslations.get(culture) ?? 0) + 1);
-            }
-          } catch {
-            // A translation annotation that does not parse holds no translation to name.
+            byCulture = JSON.parse(textOf(a.value) ?? '{}') as unknown;
+          } catch (e) {
+            // Translations are named as not imported: ones that cannot be counted are a problem, never left unsaid.
+            const name = str(x.name);
+            annotationProblem(placeOf(a, 'value'), 'translations kept on an object that do not parse', str(a.name) ?? '', `The ${str(a.name)} annotation${name ? ` of ${name}` : ''} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`, owner(x));
+            continue;
+          }
+          if (!isObject(byCulture)) continue;
+          for (const [culture, text] of Object.entries(byCulture)) {
+            if (typeof text === 'string' && text !== '') localTranslations.set(culture, (localTranslations.get(culture) ?? 0) + 1);
           }
         }
       } else if (typeof v === 'object' && v !== null) {

@@ -200,16 +200,23 @@ export function mCombineCalls(expr: string): MCombineCall[] {
 /** The names among `names` (steps or queries) that `expr` refers to, in the order first written. */
 export function mReferences(expr: string, names: Iterable<string>): string[] {
   const masked = maskM(expr);
+  // Every bare name the code could be referring to, read once: a run of name characters not after a `#`,
+  // and each of its prefixes that ends before a `.` (`Sales.Total` refers to `Sales` and to `Sales.Total`).
+  // One pass over the text, not a regex per name: a model with thousands of queries asks this for each of them.
+  const bare = new Set<string>();
+  const run = /[A-Za-z0-9_.]+/g;
+  for (const m of masked.matchAll(run)) {
+    const at = m.index!;
+    if (at > 0 && masked[at - 1] === '#') continue;
+    const word = m[0];
+    bare.add(word);
+    for (let d = word.indexOf('.'); d > 0; d = word.indexOf('.', d + 1)) bare.add(word.slice(0, d));
+  }
   const out: string[] = [];
   for (const name of names) {
     if (name === '') continue;
     const quoted = `#"${name.replace(/"/g, '""')}"`;
-    let found = expr.includes(quoted);
-    if (!found && /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name)) {
-      const re = new RegExp(`(^|[^A-Za-z0-9_.#])${name.replace(/[.]/g, '\\.')}(?![A-Za-z0-9_])`);
-      found = re.test(masked);
-    }
-    if (found) out.push(name);
+    if (expr.includes(quoted) || (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) && bare.has(name))) out.push(name);
   }
   return out;
 }

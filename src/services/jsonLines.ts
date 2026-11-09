@@ -6,13 +6,14 @@
  * its file and line, as it does for TMDL.
  *
  * Values are what `JSON.parse` gives (the same objects, keys in the same
- * order, the last of a repeated key winning, `__proto__` an own key). Where
- * this reader cannot follow (invalid JSON, or nesting deeper than
- * {@link MAX_JSON_DEPTH}), `JSON.parse` decides: its error is thrown as it
- * is, or its value is returned with no lines. Pure: no Node built-ins.
+ * order, the last of a repeated key winning, `__proto__` an own key). A
+ * value nested deeper than {@link MAX_JSON_DEPTH} is read by `JSON.parse`
+ * with no lines inside it; the rest of the file keeps its lines. Where this
+ * reader cannot follow (invalid JSON), `JSON.parse` decides: its error is
+ * thrown as it is, with the line it is on. Pure: no Node built-ins.
  */
 
-/** Deeper than this, lines are not tracked (a hostile file must not overflow the stack): `JSON.parse` reads it. */
+/** Deeper than this, lines are not tracked (a hostile file must not overflow the stack): `JSON.parse` reads that value. */
 export const MAX_JSON_DEPTH = 256;
 
 export interface JsonLines {
@@ -70,10 +71,48 @@ export function parseJsonWithLines(text: string): JsonWithLines {
     i += word.length;
     return value;
   };
+  /**
+   * A container deeper than {@link MAX_JSON_DEPTH}: found by counting brackets
+   * (no recursion) and read by `JSON.parse`, with no lines inside it, so the
+   * rest of the file keeps its lines and an error after it is reported on its
+   * own line. An error inside it is reported on the line it starts on.
+   */
+  const deep = (): unknown => {
+    const start = i;
+    const startLine = line;
+    let open = 0;
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (c === 0x22) {
+        string();
+        continue;
+      }
+      if (c === 0x0a) line++;
+      else if (c === 0x0d) {
+        line++;
+        if (text.charCodeAt(i + 1) === 0x0a) i++;
+      } else if (c === 0x7b || c === 0x5b) open++;
+      else if (c === 0x7d || c === 0x5d) {
+        open--;
+        if (open === 0) {
+          i++;
+          break;
+        }
+      }
+      i++;
+    }
+    if (open !== 0) throw new Stop();
+    try {
+      return JSON.parse(text.slice(start, i)) as unknown;
+    } catch {
+      line = startLine;
+      throw new Stop();
+    }
+  };
   const value = (depth: number): unknown => {
-    if (depth > MAX_JSON_DEPTH) throw new Stop();
     ws();
     const c = text[i];
+    if (depth > MAX_JSON_DEPTH && (c === '{' || c === '[')) return deep();
     if (c === '{') {
       const obj: Record<string, unknown> = {};
       starts.set(obj, line);

@@ -377,7 +377,9 @@ export function findSemanticModels(paths: readonly string[]): SemanticModelEntry
     if (tmdlRoots.some((r) => r.normRoot === '' || isUnder(p, r.normRoot))) return;
     const dir = dirOf(p);
     const inside = (q: string): boolean => dir === '' || isUnder(q, dir);
-    if (!isSaveToFolderLayout(norm.filter((q, j) => usable[j] && inside(q)))) return;
+    // This database.json's own tables/ folder: one deeper down (another model's) does not make it a model.
+    const tables = `${dir ? `${dir}/` : ''}tables/`.toLowerCase();
+    if (!isSaveToFolderLayout([p, ...norm.filter((q, j) => usable[j] && q.toLowerCase().startsWith(tables))])) return;
     if (folderRoots.some((r) => r.toLowerCase() === dir.toLowerCase())) return;
     folderRoots.push(dir);
     const files: string[] = [];
@@ -799,21 +801,69 @@ export function mCombinedSources(
   queries: ReadonlyMap<string, string> = new Map(),
   tableNames: ReadonlySet<string> = new Set(),
 ): { kind: 'merge' | 'append' | 'merge and append'; inputs: string[] } | undefined {
+  return combinedSourcesIn(m, mSourcesContext(queries, tableNames), 0);
+}
+
+/**
+ * What resolving one query's merge sources shares across the shared queries
+ * it reaches: each shared query is resolved once (`memo`), one that reads
+ * itself through others stops at its name (`visiting`), and the queries and
+ * tables an expression can start from are listed once, not per expression.
+ */
+interface MSourcesContext {
+  queries: ReadonlyMap<string, string>;
+  lowerTables: ReadonlySet<string>;
+  /** Shared queries that hold rows (not a parameter or a function), then tables with no query of their own, in that order. */
+  candidates: readonly string[];
+  /** Names (lower case) never followed: the table whose query this is. */
+  exclude: ReadonlySet<string>;
+  memo: Map<string, string[]>;
+  visiting: Set<string>;
+}
+
+/** Shared queries deeper than this are named, not followed. */
+const MAX_M_QUERY_NESTING = 16;
+
+function mSourcesContext(queries: ReadonlyMap<string, string>, tableNames: ReadonlySet<string>, exclude: ReadonlySet<string> = new Set()): MSourcesContext {
+  const candidates = [
+    ...[...queries].filter(([, text]) => !isMParameter(text) && !isMFunction(text)).map(([q]) => q),
+    ...[...tableNames].filter((t) => !queries.has(t)),
+  ].filter((q) => !exclude.has(q.toLowerCase()));
+  return { queries, lowerTables: new Set([...tableNames].map((t) => t.toLowerCase())), candidates, exclude, memo: new Map(), visiting: new Set() };
+}
+
+function combinedSourcesIn(m: string, ctx: MSourcesContext, nesting: number): { kind: 'merge' | 'append' | 'merge and append'; inputs: string[] } | undefined {
   const { steps } = parseMLet(m);
   const byName = new Map(steps.map((s) => [s.name, s.expr]));
   const calls = steps.flatMap((s) => mCombineCalls(s.expr));
   if (calls.length === 0) return undefined;
   const memo = new Map<string, string[]>();
-  const lowerTables = new Set([...tableNames].map((t) => t.toLowerCase()));
   /** A shared query or table: a table by its name, a query by the warehouse table it navigates to, else its name. */
   const query = (name: string, depth: number): string[] => {
-    if (lowerTables.has(name.toLowerCase()) || depth > 4) return [name];
-    const text = queries.get(name);
+    const lower = name.toLowerCase();
+    if (ctx.lowerTables.has(lower) || ctx.exclude.has(lower) || depth > 4) return [name];
+    const text = ctx.queries.get(name);
     if (text === undefined) return [name];
-    const nested = mCombinedSources(text, queries, tableNames);
-    if (nested && depth < 4) return nested.inputs;
-    const source = describeMSource(text, queries);
-    return [source.kind === 'navigation' && source.table ? source.table : name];
+    // Followed only above step depth 4, so remembered per side of it.
+    const key = `${name}\u0000${depth < 4}`;
+    const known = ctx.memo.get(key);
+    if (known) return known;
+    // A query that reads itself through others (Power BI refuses the cycle; a file can still hold one): named, not followed again.
+    if (ctx.visiting.has(name) || nesting >= MAX_M_QUERY_NESTING) return [name];
+    ctx.visiting.add(name);
+    let out: string[];
+    try {
+      const nested = combinedSourcesIn(text, ctx, nesting + 1);
+      if (nested && depth < 4) out = nested.inputs;
+      else {
+        const source = describeMSource(text, ctx.queries);
+        out = [source.kind === 'navigation' && source.table ? source.table : name];
+      }
+    } finally {
+      ctx.visiting.delete(name);
+    }
+    ctx.memo.set(key, out);
+    return out;
   };
   /** The steps an expression reads, each with the steps it reads, in step order: the text a navigation is spread over. */
   const chain = (expr: string, seen = new Set<string>()): string => {
@@ -842,8 +892,7 @@ export function mCombinedSources(
     if (table) return [table];
     if (FILE_SOURCE.test(text)) return ['a file'];
     // An expression that starts from a shared query or another table (`Table.SelectColumns(Item, …)`); a parameter or a function is not a source.
-    const sources = [...queries].filter(([q, text]) => !byName.has(q) && !isMParameter(text) && !isMFunction(text)).map(([q]) => q);
-    const named = mReferences(expr, [...sources, ...[...tableNames].filter((q) => !byName.has(q) && !queries.has(q))]);
+    const named = mReferences(expr, ctx.candidates.filter((q) => !byName.has(q)));
     if (named.length > 0) return query(named[0], depth);
     return ['its own rows'];
   };
@@ -851,7 +900,7 @@ export function mCombinedSources(
     const out: string[] = [];
     for (const call of list) {
       if (call.dynamic) out.push('tables listed at run time');
-      for (const t of call.tables) out.push(...resolve(t, depth));
+      for (const t of call.tables) for (const input of resolve(t, depth)) out.push(input);
     }
     return [...new Set(out)];
   };
@@ -872,13 +921,16 @@ function resolveSources(partitions: ReadonlyMap<SemanticModelTable, RawPartition
     tableNames.add(table.name);
     if (raw?.type === 'm' && raw.text && !queries.has(table.name)) queries.set(table.name, raw.text);
   }
+  // Listed once for the model: which queries hold rows (a regex over every query's text) does not change per table.
+  const shared = mSourcesContext(queries, tableNames);
   for (const [table, raw] of partitions) {
     const source = resolveSource(raw, expressions);
     if (!source) continue;
-    if (raw?.type === 'm' && raw.text) {
-      const others = new Set([...tableNames].filter((t) => t !== table.name));
-      const ownless = new Map([...queries].filter(([name]) => name !== table.name));
-      const combined = mCombinedSources(raw.text, ownless, others);
+    if (raw?.type === 'm' && raw.text && mCombineCalls(raw.text).length > 0) {
+      // Its own query is never one of its sources.
+      const self = table.name.toLowerCase();
+      const ctx: MSourcesContext = { ...shared, candidates: shared.candidates.filter((q) => q.toLowerCase() !== self), exclude: new Set([self]), memo: new Map(), visiting: new Set() };
+      const combined = combinedSourcesIn(raw.text, ctx, 0);
       if (combined && combined.inputs.length > 0) source.combined = combined;
     }
     table.source = source;
@@ -912,7 +964,8 @@ function countTmslTranslations(v: unknown): number {
   while (todo.length > 0) {
     const x = todo.pop();
     if (Array.isArray(x)) {
-      todo.push(...x);
+      // One push each: spreading a list of 100 000+ items into push() overflows the stack.
+      for (const y of x) todo.push(y);
     } else if (isObject(x)) {
       for (const [k, y] of Object.entries(x)) {
         if (/^translated(Caption|Description|DisplayFolder)$/.test(k) && textOf(y)) n++;
@@ -1237,15 +1290,21 @@ function finish(model: SemanticModel, warnings: string[], file: string, problems
   // What did not read left no column to draw: those problems are why nothing imports.
   if (problems.length > 0 && !model.tables.some((t) => t.columns.length > 0)) return { ok: false, problems: [...problems] };
   const seen = new Set<string>();
+  const duplicates = createLedger();
   model.tables = model.tables.filter((t) => {
     const key = t.name.toLowerCase();
     if (seen.has(key)) {
       warnings.push(`Table "${t.name}" is defined more than once; the first definition was used.`);
+      // Its columns go with it: named where it is defined, so the second definition is not left unsaid.
+      duplicates.skipped('table', 'duplicate', 'table defined more than once', {
+        ...(t.file ? { file: t.file } : {}), ...(t.line !== undefined ? { line: t.line } : {}), table: t.name,
+      }, 'not read: the first definition was used');
       return false;
     }
     seen.add(key);
     return true;
   });
+  if (duplicates.entries.length > 0) model.ledger = [...(model.ledger ?? []), ...duplicates.entries];
   return { ok: true, model, warnings, ...(problems.length > 0 ? { problems: [...problems] } : {}) };
 }
 
@@ -1312,7 +1371,12 @@ interface TmdlParse {
    * was not read. `table` is the top-level object they were under.
    */
   unread: Array<{ keyword: string; name: string; line: number; table?: string }>;
+  /** Git merge conflicts left in the file (`<<<<<<<` … `>>>>>>>`): the line each starts on, and the table it is in. */
+  conflicts: Array<{ line: number; table?: string }>;
 }
+
+/** A Git merge conflict marker line: `<<<<<<< HEAD`, `=======`, `>>>>>>> branch`. */
+const MERGE_CONFLICT_MARKER = /^(?:<{7}|>{7})(?:\s|$)|^={7}$/;
 
 /** Why a TMDL object did not read: the end of its ledger phrase (`TMDL column with no closing quote`), so each reason is its own line. */
 const TMDL_BROKEN = {
@@ -1341,6 +1405,8 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
   const lines = file.text.replace(/^﻿/, '').split(TMDL_LINE_BREAK);
   const problems: SemanticModelProblem[] = [];
   const unread: TmdlParse['unread'] = [];
+  const conflicts: TmdlParse['conflicts'] = [];
+  let inConflict = false;
   const root: TmdlNode = { keyword: '', kind: 'object', name: '', indent: -1, line: 0, children: [] };
   const stack: TmdlNode[] = [root];
   let doc: string[] = [];
@@ -1357,6 +1423,16 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
     if (trimmed.startsWith('//')) continue;
     const indent = indentWidth(raw);
     const lineNo = i + 1;
+    if (MERGE_CONFLICT_MARKER.test(trimmed)) {
+      // Both sides are read as they stand (nothing here can say which is meant): the conflict is named where it starts.
+      if (!inConflict) {
+        const top = stack.length > 1 ? stack[1] : undefined;
+        conflicts.push({ line: lineNo, ...(top && top.keyword.toLowerCase() === 'table' && top.name ? { table: top.name } : {}) });
+      }
+      inConflict = !trimmed.startsWith('>');
+      doc = [];
+      continue;
+    }
 
     const head = /^([A-Za-z_][A-Za-z0-9_]*)(.*)$/.exec(trimmed);
     if (!head) {
@@ -1422,12 +1498,15 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
             // The rest of the file was read as the expression: name what is declared in it, so none of it goes unsaid.
             while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
             const top = stack.length > 1 ? stack[1] : node;
-            const context = top.keyword.toLowerCase() === 'table' ? top.name : undefined;
+            // The table what follows is declared in: this one, until a later `table` line starts another.
+            let context = top.keyword.toLowerCase() === 'table' ? top.name : undefined;
             for (let k = i + 1; k < lines.length; k++) {
               const decl = /^\s*(table|column|measure|relationship|partition|hierarchy|role|perspective|cultureInfo|expression|dataSource|function|calculationItem)\s+(.+)$/.exec(lines[k]);
               const declared = decl ? readTmdlName(decl[2].trim()) : undefined;
               if (!decl || !declared) continue;
               const kw = decl[1];
+              if (kw === 'table') context = declared.name;
+              else if (indentWidth(lines[k]) === 0) context = undefined;
               const table = kw === 'table' ? declared.name : context;
               unread.push({ keyword: kw, name: declared.name, line: k + 1, ...(table ? { table } : {}) });
             }
@@ -1470,7 +1549,7 @@ function parseTmdl(file: SemanticModelFile): TmdlParse {
     stack[stack.length - 1].children.push(node);
     stack.push(node);
   }
-  return { nodes: root.children, problems, unread };
+  return { nodes: root.children, problems, unread, conflicts };
 }
 
 /** Why a node, or one under it, did not read (the first such); undefined when all of it read. */
@@ -1700,6 +1779,10 @@ function readTmdl(files: readonly SemanticModelFile[], platformName?: string): R
       } else if (keyword === 'function' && node.kind === 'object') {
         features.push({ kind: 'function', name: node.name, ...at(node) });
       }
+    }
+    for (const c of parsed.conflicts) {
+      problems.push({ file: file.path, line: c.line, message: 'A Git merge conflict (<<<<<<< … >>>>>>>) is left in this file: both sides were read. Resolve it and import again.' });
+      ledger.problem('file', 'parseError', 'TMDL merge conflict', { file: file.path, line: c.line, ...(c.table ? { table: c.table } : {}) }, 'not resolved: both sides were read');
     }
     for (const u of parsed.unread) {
       unreadObject(file, u.keyword, u.line, TMDL_BROKEN.afterFence, {

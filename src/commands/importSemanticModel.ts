@@ -404,8 +404,8 @@ export const SEMANTIC_MODEL_FORMAT_LABELS: Readonly<Record<SemanticModelKind, st
 /**
  * Every model file under `folder`, bounded by {@link MAX_SEMANTIC_MODEL_FILES}:
  * `.tmdl`, `.bim` and `database.json` (`alsoUnread`: `.pbix` / `.pbit` too,
- * only to name them), then, under each `database.json`'s folder, every
- * `.json` (a Save to Folder model's files). Only model files count toward the
+ * only to name them), then, under each `database.json`'s folder that has a
+ * `tables/` folder beside it, every `.json` (a Save to Folder model's files). Only model files count toward the
  * bound, so a big repo holding one model somewhere still imports from its root.
  */
 export async function walkSemanticModelFiles(
@@ -421,6 +421,15 @@ export async function walkSemanticModelFiles(
   const files = new Set(walk.files);
   const roots = walk.files.filter((f) => path.basename(f).toLowerCase() === 'database.json').map((f) => path.dirname(f));
   for (const root of roots) {
+    // Only a Save to Folder model's folder (a tables/ folder beside its database.json) is walked: a database.json
+    // of another tool (db-migrate's, at a repo's root) must not pull in every JSON file of the repo.
+    let entries: DirEntries;
+    try {
+      entries = await readDirectory(root);
+    } catch {
+      continue;
+    }
+    if (!entries.some(([name, isDirectory]) => isDirectory && name.toLowerCase() === 'tables')) continue;
     const inner = await walkFiles(root, readDirectory, { include: (f) => /\.json$/i.test(f), limit: MAX_SEMANTIC_MODEL_FILES - files.size + 1 });
     for (const f of inner.files) files.add(f);
     if (inner.truncated || files.size > MAX_SEMANTIC_MODEL_FILES) return { files: [...files], truncated: true };
