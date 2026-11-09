@@ -417,6 +417,49 @@ Read it as a funnel: `dbtParse` → the pre-run keys → `dbtParseLaunched`
 (split by the `dbtParseFail*` keys) | `dbtParseStopped` | `dbtParseNoStart` →
 `manifestAfterParse`.
 
+### Import outcomes (2.0)
+
+Which imports work, which only partly, and which edge cases real files hit.
+Every import counts one `importOutcome<Importer><Outcome>` (`SqlDdl`,
+`SemanticModel`, `Dbml`, `Dbt` × `Clean`, `Repaired`, `Partial`, `Fail`,
+`Cancelled`, `TimedOut`), a SQL import also `importSqlOutcome<Dialect><Outcome>`,
+and one `importCause<Cause>` per loss-ledger cause class its ledger holds. All
+are event counts, never sizes (the definitions are under "Keys added in
+2.0.0"). Sum them over finished days, leave out `dev` rows, and never add a
+`heartbeatProvisional` row to its final (they are the same `(install_id, day)`
+row, replaced).
+
+```bash
+# Outcome mix per importer (installs and imports, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key AS outcome, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS imports FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'importOutcome%' GROUP BY j.key ORDER BY j.key"
+
+# SQL by dialect: which grammar needs the repair ladder, or leaves tables out
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key AS dialect_outcome, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS imports FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'importSqlOutcome%' GROUP BY j.key ORDER BY imports DESC"
+
+# Loss-ledger causes: the edge cases real files hit, most installs first
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key AS cause, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS imports FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'importCause%' GROUP BY j.key ORDER BY installs DESC"
+```
+
+Read `Partial` beside the `importSql*` B7 keys (why the tables did not read)
+and `Fail` beside `importSqlDdlInvalid` / `importDbmlInvalid` /
+`importSemanticModelInvalid` and the `*Failed` errors. A cause count is per
+import and per day, capped at 100 like every key: it says how many imports
+met that cause, never how many tables did. `Cancelled` and `TimedOut` are
+Import SQL DDL's only (its progress notification's Cancel, and
+`erdStudio.import.timeLimitSeconds`), whether the import then drew the tables
+it had read or nothing. `importCauseCancelled` / `importCauseTimeLimit` come
+with them whenever the stopped import's ledger holds what the stop left
+unread, drawn or not: the statements a stopped reading did not reach, or a
+reading the worker ended because one step did not stop in time (then nothing
+it read was kept). So a cause key never says a partial draft was drawn; count
+those with `importOutcome<Importer>Cancelled` / `TimedOut` beside `draftKept`
+or the draft keys instead. A stop before the reading reached a statement has
+an empty ledger and no cause key. The other importers' `Cancelled` /
+`TimedOut` stay 0: they do not read in a worker.
+
 ### Onboarding funnel (the first five minutes)
 
 Why installs stop using ERD Studio, step by step. The start screen
@@ -1015,6 +1058,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNothingDrawable` — a quiet draft was dropped: nothing it found could be drawn.
 - `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
+- `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
 - `startLookTimeout` — the start screen look at the folder timed out.
 - `startLookGaveUp` — the start screen gave up looking at the folder.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
@@ -1213,6 +1257,93 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `loggedErrorOther` (error) — a logged error from anywhere else.
 
 The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
+
+**Import outcomes — how each import ended, by importer and SQL dialect, and the loss-ledger cause classes it met.**
+
+Appended after the launch keys, in this order (`src/services/importOutcomeTelemetry.ts` decides them on the device). Every key is an event count: one per import, never a name, path, statement, message or a count of tables or columns. All of them are counted off the onboarding trail (`featureQuiet`), like the B6 draft flags. `clean`, `repaired` and `partial` are counted once per plan an import builds (its draft, or the dry run without one), whether it is kept or not, the automatic draft's included; never on a redraw of the same draft (Change options… and Try Again build a new plan, so they count again). `Fail` is counted where the source brought nothing in, never for the automatic draft's quiet early end (`draftDrop*`), a project stop (`importStop*`) or a closed picker. `Cancelled` and `TimedOut` come from the SQL import worker's stop (Cancel) and time limit: once with the draft of what it had read (its ledger then holds `problem` entries with the cause `cancelled` / `timeLimit`), or where the import ends when it stopped before it read a table (the automatic draft's time limit is `draftDropTimeLimit` instead). The example diagram counts nothing. The outcome comes from the import's loss ledger (`importLedger.ts`), the conversion's and the plan's together: a `problem` entry with the cause `timeLimit` is timed out, else one with the cause `cancelled` is cancelled, else any `problem` entry is partial, else a `repaired` entry is repaired, else clean; `lost`, `changed` and `skipped` entries are fidelity notes, counted only by their cause keys. Importer tokens are the other import keys' (`SqlDdl`, `SemanticModel` = Power BI / Fabric, `Dbml`, `Dbt`); `failed` is `Fail`, because a feature key never ends in `Failed`.
+
+- `importOutcomeSqlDdlClean` — Import SQL DDL ended clean: the source read as written (no `problem` or `repaired` ledger entry).
+- `importOutcomeSqlDdlRepaired` — Import SQL DDL read everything, after the repair ladder rewrote something (a `repaired` entry, no `problem`).
+- `importOutcomeSqlDdlPartial` — Import SQL DDL imported, but left something out that could not be read (a `problem` entry).
+- `importOutcomeSqlDdlFail` — Import SQL DDL brought nothing in: the source did not read or held nothing to import, an input limit, or a failure of ours.
+- `importOutcomeSqlDdlCancelled` — Import SQL DDL was stopped by the user while it read the source.
+- `importOutcomeSqlDdlTimedOut` — Import SQL DDL was stopped by the import time limit while it read the source.
+- `importOutcomeSemanticModelClean` — Import Semantic Model (Power BI / Fabric) ended clean: the source read as written (no `problem` or `repaired` ledger entry).
+- `importOutcomeSemanticModelRepaired` — Import Semantic Model (Power BI / Fabric) read everything, after the repair ladder rewrote something (a `repaired` entry, no `problem`).
+- `importOutcomeSemanticModelPartial` — Import Semantic Model (Power BI / Fabric) imported, but left something out that could not be read (a `problem` entry).
+- `importOutcomeSemanticModelFail` — Import Semantic Model (Power BI / Fabric) brought nothing in: the source did not read or held nothing to import, an input limit, or a failure of ours.
+- `importOutcomeSemanticModelCancelled` — Import Semantic Model (Power BI / Fabric) was stopped by the user while it read the source.
+- `importOutcomeSemanticModelTimedOut` — Import Semantic Model (Power BI / Fabric) was stopped by the import time limit while it read the source.
+- `importOutcomeDbmlClean` — Import DBML (the user's own file) ended clean: the source read as written (no `problem` or `repaired` ledger entry).
+- `importOutcomeDbmlRepaired` — Import DBML (the user's own file) read everything, after the repair ladder rewrote something (a `repaired` entry, no `problem`).
+- `importOutcomeDbmlPartial` — Import DBML (the user's own file) imported, but left something out that could not be read (a `problem` entry).
+- `importOutcomeDbmlFail` — Import DBML (the user's own file) brought nothing in: the source did not read or held nothing to import, an input limit, or a failure of ours.
+- `importOutcomeDbmlCancelled` — Import DBML (the user's own file) was stopped by the user while it read the source.
+- `importOutcomeDbmlTimedOut` — Import DBML (the user's own file) was stopped by the import time limit while it read the source.
+- `importOutcomeDbtClean` — Import from dbt ended clean: the source read as written (no `problem` or `repaired` ledger entry).
+- `importOutcomeDbtRepaired` — Import from dbt read everything, after the repair ladder rewrote something (a `repaired` entry, no `problem`).
+- `importOutcomeDbtPartial` — Import from dbt imported, but left something out that could not be read (a `problem` entry).
+- `importOutcomeDbtFail` — Import from dbt brought nothing in: the source did not read or held nothing to import, an input limit, or a failure of ours.
+- `importOutcomeDbtCancelled` — Import from dbt was stopped by the user while it read the source.
+- `importOutcomeDbtTimedOut` — Import from dbt was stopped by the import time limit while it read the source.
+
+The same outcome by the SQL dialect the conversion ran with, beside `importOutcomeSqlDdl*` (only when the import had a dialect: a failure before the dialect pick, or the SQL importer not loading, has none):
+
+- `importSqlOutcomePostgresClean` — an Import SQL DDL read as PostgreSQL ended clean.
+- `importSqlOutcomePostgresRepaired` — an Import SQL DDL read as PostgreSQL ended repaired.
+- `importSqlOutcomePostgresPartial` — an Import SQL DDL read as PostgreSQL ended partial.
+- `importSqlOutcomePostgresFail` — an Import SQL DDL read as PostgreSQL brought nothing in.
+- `importSqlOutcomePostgresCancelled` — an Import SQL DDL read as PostgreSQL was cancelled while reading.
+- `importSqlOutcomePostgresTimedOut` — an Import SQL DDL read as PostgreSQL hit the time limit while reading.
+- `importSqlOutcomeMysqlClean` — an Import SQL DDL read as MySQL ended clean.
+- `importSqlOutcomeMysqlRepaired` — an Import SQL DDL read as MySQL ended repaired.
+- `importSqlOutcomeMysqlPartial` — an Import SQL DDL read as MySQL ended partial.
+- `importSqlOutcomeMysqlFail` — an Import SQL DDL read as MySQL brought nothing in.
+- `importSqlOutcomeMysqlCancelled` — an Import SQL DDL read as MySQL was cancelled while reading.
+- `importSqlOutcomeMysqlTimedOut` — an Import SQL DDL read as MySQL hit the time limit while reading.
+- `importSqlOutcomeSqlserverClean` — an Import SQL DDL read as SQL Server ended clean.
+- `importSqlOutcomeSqlserverRepaired` — an Import SQL DDL read as SQL Server ended repaired.
+- `importSqlOutcomeSqlserverPartial` — an Import SQL DDL read as SQL Server ended partial.
+- `importSqlOutcomeSqlserverFail` — an Import SQL DDL read as SQL Server brought nothing in.
+- `importSqlOutcomeSqlserverCancelled` — an Import SQL DDL read as SQL Server was cancelled while reading.
+- `importSqlOutcomeSqlserverTimedOut` — an Import SQL DDL read as SQL Server hit the time limit while reading.
+- `importSqlOutcomeSnowflakeClean` — an Import SQL DDL read as Snowflake ended clean.
+- `importSqlOutcomeSnowflakeRepaired` — an Import SQL DDL read as Snowflake ended repaired.
+- `importSqlOutcomeSnowflakePartial` — an Import SQL DDL read as Snowflake ended partial.
+- `importSqlOutcomeSnowflakeFail` — an Import SQL DDL read as Snowflake brought nothing in.
+- `importSqlOutcomeSnowflakeCancelled` — an Import SQL DDL read as Snowflake was cancelled while reading.
+- `importSqlOutcomeSnowflakeTimedOut` — an Import SQL DDL read as Snowflake hit the time limit while reading.
+- `importSqlOutcomeDatabricksClean` — an Import SQL DDL read as Databricks ended clean.
+- `importSqlOutcomeDatabricksRepaired` — an Import SQL DDL read as Databricks ended repaired.
+- `importSqlOutcomeDatabricksPartial` — an Import SQL DDL read as Databricks ended partial.
+- `importSqlOutcomeDatabricksFail` — an Import SQL DDL read as Databricks brought nothing in.
+- `importSqlOutcomeDatabricksCancelled` — an Import SQL DDL read as Databricks was cancelled while reading.
+- `importSqlOutcomeDatabricksTimedOut` — an Import SQL DDL read as Databricks hit the time limit while reading.
+
+Each loss-ledger cause class the import's ledger holds, once per import (with any outcome that has a ledger: a SQL failure's ledger counts too), whatever the entry's outcome (`problem`, `lost`, `changed`, `repaired` or `skipped`) and however many entries:
+
+- `importCauseParseError` — an import met the `parseError` cause: something could not be read as written (a parse error, or a repair of one).
+- `importCauseGrammarGap` — an import met the `grammarGap` cause: something is not in the SQL grammar.
+- `importCauseTemplatePlaceholder` — an import met the `templatePlaceholder` cause: something held template placeholders (`{{ }}`, `${ }`).
+- `importCauseUnknownType` — an import met the `unknownType` cause: something had a type the parser does not know.
+- `importCauseReservedWord` — an import met the `reservedWord` cause: something used a reserved word as a name.
+- `importCauseTrailingOption` — an import met the `trailingOption` cause: something had a table option after the column list.
+- `importCauseUnsupportedModifier` — an import met the `unsupportedModifier` cause: something had a column modifier ERD Studio does not keep.
+- `importCauseProceduralBlock` — an import met the `proceduralBlock` cause: something sat inside a procedural block (a DO block, dynamic DDL).
+- `importCauseNotInFiles` — an import met the `notInFiles` cause: something pointed at something not in the files.
+- `importCauseDroppedLater` — an import met the `droppedLater` cause: something was dropped later in the files.
+- `importCauseNoField` — an import met the `noField` cause: something has no field in ERD Studio.
+- `importCauseNotDesign` — an import met the `notDesign` cause: something is physical, not design (views, indexes, grants, measures, report settings).
+- `importCauseRenamed` — an import met the `renamed` cause: something was renamed on the way.
+- `importCauseNormalised` — an import met the `normalised` cause: something was written differently on the way.
+- `importCauseInferred` — an import met the `inferred` cause: something was inferred (a key, a type).
+- `importCauseCapped` — an import met the `capped` cause: something was over a limit.
+- `importCauseSavedOptional` — an import met the `savedOptional` cause: something was a required relationship saved optional (D18).
+- `importCauseDuplicate` — an import met the `duplicate` cause: something was defined twice.
+- `importCauseCancelled` — an import met the `cancelled` cause: something was not read because the user cancelled the import first (whether or not a partial draft was drawn).
+- `importCauseTimeLimit` — an import met the `timeLimit` cause: something was not read because the import reached its time limit first (whether or not a partial draft was drawn).
+- `importCauseOther` — an import met the `other` cause: something had another cause.
+- `draftDropTimeLimit` — a quiet draft (the automatic draft) was dropped: the SQL import's time limit was reached before it read a table. Before this key the drop was not told apart from `draftDropUnreadable`.
 
 **B15 — trail marker.**
 

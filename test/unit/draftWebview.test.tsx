@@ -104,6 +104,21 @@ describe('small (a SQL find)', () => {
     expect(screen.getByText('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.')).toBeTruthy();
   });
 
+  it('Show Import Report: drawn only when the banner offers it, after the other links, and posts importReport only', () => {
+    renderPage(fixture('small'));
+    expect(screen.queryByRole('button', { name: 'Show Import Report' })).toBeNull();
+    cleanup();
+    const view = fixture('small');
+    const { posts, container } = renderPage({ ...view, banner: { ...view.banner, importReport: true } });
+    const links = [...container.querySelectorAll('.draft-banner__links .draft-banner__link')].map((b) => b.textContent);
+    expect(links).toEqual(['Change options…', 'Show details', 'Show Import Report']);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Import Report' }));
+    expect(posts.at(-1)).toEqual({ type: 'importReport' });
+    // A passive link: it stays usable while the host works (it opens a read-only tab beside the draft).
+    send({ type: 'busy', action: 'keep' });
+    expect((screen.getByRole('button', { name: 'Show Import Report' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('posts changeOptions and discard', () => {
     const { posts } = renderPage(fixture('small'));
     fireEvent.click(screen.getByRole('button', { name: 'Change options…' }));

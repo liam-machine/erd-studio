@@ -204,6 +204,8 @@ export function draftPreviewEvents(
   onDetailsOpened?: () => void,
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill: the crash screen's Send Feedback. */
   openFeedback?: (prefill: FeedbackPrefill) => unknown,
+  /** Run Show Import Report (`erdStudio.showImportReport`) for the draft's import: the banner's link. */
+  showImportReport?: (reportId?: number) => unknown,
 ): DraftPreviewEvents {
   // The built-in examples are left out of the layout keys (2.0 B17): their size is ERD Studio's, not the user's.
   const isExample = (source: DraftSource): boolean => source === 'example' || source === 'exampleProject';
@@ -213,6 +215,7 @@ export function draftPreviewEvents(
       onDetailsOpened?.();
     },
     layoutFailed: () => error('draftLayoutFailed'),
+    ...(showImportReport ? { importReport: (_source: DraftSource, reportId?: number) => { void Promise.resolve().then(() => showImportReport(reportId)).catch(() => undefined); } } : {}),
     ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
     pageReady: (_source, slow) => {
       feature('draftPageReady');

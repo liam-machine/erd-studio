@@ -45,6 +45,7 @@ import { telemetry } from '../../src/services/telemetryService';
 import { QUICK_IMPORT_ARG, isQuickImportArg, startActionArgs, startDraftTriggerOf } from '../../src/types/startActions';
 import { DRAFT_REDRAWN_NOTICE } from '../../src/services/draftModel';
 import { fakeDraftPreview, type ScriptedAnswer } from './helpers/draftDriver';
+import { generatedSqlWithLines } from './sqlImportPerformance.fixture';
 
 const FIXTURES = path.join(__dirname, '../fixtures');
 
@@ -517,6 +518,45 @@ describe('Draft-first: the quick path ends in the draft (docs/dev/draft-first.md
     // Logged with its file (named under the open folder, as every entry point names it) and line.
     expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringMatching(/db\/schema\.sql line 5: CREATE TABLE broken could not be read/));
     expect(features()).toEqual(expect.arrayContaining(['importSqlDialectPostgres', 'importSqlDdlInvalid', 'importSqlInvalidParse']));
+  });
+
+  it('Cancel on the progress notification mid-way: the tables read so far are drafted, the banner says where reading stopped, no other dialect is read', async () => {
+    fs.mkdirSync(path.join(tmp, 'db'));
+    const { text, lines } = generatedSqlWithLines(300);
+    fs.writeFileSync(path.join(tmp, 'db', 'schema.sql'), text);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { preview, options } = draft(['keep']);
+    const titles: string[] = [];
+    const sql: ImportSqlDdlUi = {
+      ...sqlUi(),
+      withProgress: async (title, task) => {
+        titles.push(title);
+        const cancel = new AbortController();
+        return task({ report: (_message, fraction) => { if ((fraction ?? 0) >= 0.5) cancel.abort(); } }, cancel.signal);
+      },
+    };
+    const kept = await quickImportSqlDdl({ ...sqlDeps(sql, dbmlUi(), { plain: true }), draft: options });
+    const read = kept!.plan.newTables.length;
+    expect(read).toBeGreaterThan(100);
+    expect(read).toBeLessThan(200);
+    expect(titles).toEqual(['Import SQL DDL: reading the scripts']);
+    expect(preview.drafts[0].banner.notice).toBe(`The import was cancelled at db/schema.sql line ${lines[read].toLocaleString('en-US')}: ${300 - read} of 300 tables were not read; Show details lists them.`);
+    expect(JSON.stringify(preview.drafts[0])).toContain(`"${300 - read} tables: CREATE TABLE not read: the import was cancelled first"`);
+    // Kept as the import, never counted as a cancelled one.
+    expect(features()).toEqual(expect.arrayContaining(['importSqlDialectPostgres']));
+    expect(features()).not.toContain('importSqlDdlCancelled');
+    expect(features()).not.toContain('quickSqlDialectFallback');
+  });
+
+  it('Cancel before a table is read: nothing is drafted or written, counted as the import\'s cancel', async () => {
+    fs.mkdirSync(path.join(tmp, 'db'));
+    fs.writeFileSync(path.join(tmp, 'db', 'schema.sql'), generatedSqlWithLines(20).text);
+    const { preview, options } = draft(['keep']);
+    const sql: ImportSqlDdlUi = { ...sqlUi(), withProgress: async (_title, task) => { const c = new AbortController(); c.abort(); return task({ report: () => {} }, c.signal); } };
+    expect(await quickImportSqlDdl({ ...sqlDeps(sql, dbmlUi(), { plain: true }), draft: options })).toBeUndefined();
+    expect(preview.drafts).toEqual([]);
+    expect(fs.existsSync(erd())).toBe(false);
+    expect(features()).toEqual(['importSqlDdlCancelled']);
   });
 
   it('Change options… runs the preselected step-by-step flow, which ends in a draft of its own (trigger changeOptions)', async () => {

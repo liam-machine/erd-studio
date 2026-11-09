@@ -38,6 +38,7 @@ import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 
 import {
   analyseDbml,
+  importLedgerOf,
   planDbmlImport,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
@@ -87,7 +88,17 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
-import type { LedgerEntry } from '../services/importLedger';
+import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
+import {
+  SHOW_IMPORT_REPORT_COMMAND,
+  SHOW_IMPORT_REPORT_LABEL,
+  partialImportMessage,
+  problemLedger,
+  type ImportReportSource,
+} from '../services/importReport';
+import { recordImportReport, updateImportReport } from '../services/importReportStore';
+import { recordImportOutcome, type ImportOutcome, type ImportOutcomeImporter } from '../services/importOutcomeTelemetry';
+import type { SqlDialect } from '../services/sqlDdlModel';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
@@ -129,6 +140,17 @@ export const IMPORT_SOURCE_TELEMETRY: Readonly<Record<ImportDbmlSource, {
 };
 
 /**
+ * The importer each source's outcome is counted under
+ * (`importOutcomeTelemetry.ts`); the example is ERD Studio's own, so none.
+ */
+export const IMPORT_OUTCOME_IMPORTERS: Readonly<Record<ImportDbmlSource, ImportOutcomeImporter | undefined>> = {
+  file: 'dbml',
+  example: undefined,
+  sql: 'sql',
+  semanticModel: 'powerbi',
+};
+
+/**
  * A model ERD Studio converted to DBML before the import (SQL DDL, a
  * semantic model): what the dry run says it came from, and what the
  * conversion left out or changed. Shown to the user only, never counted.
@@ -150,7 +172,21 @@ export interface ImportDbmlOrigin {
   ledger?: readonly LedgerEntry[];
   /** A line for the draft's banner (`3 tables could not be read; Show details lists them`). */
   notice?: string;
+  /**
+   * The files the conversion read: each name its ledger gives as
+   * `where.file` → the absolute path. Show Import Report opens these (and
+   * only these) at a ledger entry's line.
+   */
+  sourceFiles?: Readonly<Record<string, string>>;
 }
+
+/** The report each source records (`importReport.ts`); the bundled example records none. */
+const IMPORT_REPORT_SOURCES: Readonly<Record<ImportDbmlSource, ImportReportSource | undefined>> = {
+  file: 'dbml',
+  example: undefined,
+  sql: 'sql',
+  semanticModel: 'semanticModel',
+};
 
 export { ADD_LAYER_BUTTON, CHOOSE_ANOTHER_NAME_BUTTON, NO_LAYERS_MESSAGE, OPEN_IT_BUTTON, SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON };
 /** The fallback dry run's buttons (no preview): Import, and Change Options… on a quick import. */
@@ -196,6 +232,8 @@ export interface ImportDbmlUi {
   addLayer(): Promise<void>;
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Run Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent (a test's fake): no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
 export interface ImportDbmlDeps {
@@ -230,6 +268,8 @@ export interface ImportDbmlDeps {
   source?: ImportDbmlSource;
   /** With `'sql'` / `'semanticModel'`: what the dry run says about the conversion. */
   origin?: ImportDbmlOrigin;
+  /** With `'sql'`: the dialect the conversion ran with (counted with the import's outcome, nothing else). */
+  sqlDialect?: SqlDialect;
   /**
    * A DBML file in the open folder (the start screen's look at it found one),
    * which the Open dialog then starts on, chosen, so Import takes it in one
@@ -337,6 +377,27 @@ interface ImportRunProgress {
   loud: boolean;
   /** The draft's Keep, not settled yet. */
   settle?: (outcome: DraftKeepOutcome) => void;
+  /** The run's import outcome is counted (`importOutcomeTelemetry.ts`): at most one per run, none on a redraw. */
+  outcomeCounted?: boolean;
+}
+
+/**
+ * Count how the run's import ended (`importOutcomeTelemetry.ts`), once per
+ * run, never for the example. Off the onboarding trail (`featureQuiet`).
+ */
+function countImportOutcome(
+  deps: Pick<ImportDbmlDeps, 'source' | 'sqlDialect'>,
+  progress: ImportRunProgress,
+  report: { outcome?: ImportOutcome; ledger?: readonly LedgerEntry[] },
+): void {
+  const importer = IMPORT_OUTCOME_IMPORTERS[deps.source ?? 'file'];
+  if (!importer || progress.outcomeCounted) return;
+  progress.outcomeCounted = true;
+  recordImportOutcome((key) => telemetry.featureQuiet(key), {
+    importer,
+    ...report,
+    ...(importer === 'sql' && deps.sqlDialect ? { dialect: deps.sqlDialect } : {}),
+  });
 }
 
 /** The title an unexpected failure is said under (Open Example Diagram is its own command, #236). */
@@ -356,7 +417,8 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
   const base = deps.ui ?? vscodeImportDbmlUi();
   const source = deps.source ?? 'file';
   const ui = deps.draft?.quiet ? quietImportDbmlUi(base, IMPORT_TITLES[source]) : base;
-  const progress: ImportRunProgress = { loud: !deps.draft?.quiet };
+  // A redraw re-plans a draft whose outcome is already counted: nothing it meets is counted again.
+  const progress: ImportRunProgress = { loud: !deps.draft?.quiet, outcomeCounted: resume?.redraw !== undefined };
   try {
     return await runImportDbml(deps, ui, base, resume, progress);
   } catch (err) {
@@ -364,6 +426,8 @@ export async function importDbml(deps: ImportDbmlDeps, resume?: ImportDbmlResume
     // A Keep left waiting gets its answer: kept when the diagram is on disk.
     progress.settle?.(progress.written ? { kept: true } : { kept: false });
     if (!progress.loud) throw err;
+    // Before the import had an outcome, the throw is its outcome.
+    countImportOutcome(deps, progress, { outcome: 'failed' });
     log.error(`[ERD Studio] ${failureTitle(source)} failed:`, err);
     reportUnexpectedImportFailure(base, source, progress, err);
     return undefined;
@@ -445,6 +509,10 @@ async function runImportDbml(
     if (counts.cancelled && !quiet) telemetry.feature(counts.cancelled);
     return undefined;
   };
+  /** The source brought nothing in (`importOutcome*Fail`); never on the automatic draft, whose early end is `draftDrop*`. */
+  const failedOutcome = (): void => {
+    if (!quiet) countImportOutcome(deps, progress, { outcome: 'failed' });
+  };
 
   /** Show an error with its buttons, and run the one the user picks. Never awaited. */
   const showError = (message: string, actions: ErrorActions = {}): void => {
@@ -484,6 +552,7 @@ async function runImportDbml(
     log.error(`[ERD Studio] ${title}: could not read the file:`, err);
     if (quiet) dropQuietly(draftOptions, 'unreadable');
     else telemetry.feature('importInputUnreadable');
+    failedOutcome();
     showError(`${title} couldn't read ${fileName}. Check that the file still exists and that you can open it, then try again.`, {
       [TRY_AGAIN_BUTTON]: again(),
     });
@@ -496,6 +565,7 @@ async function runImportDbml(
   if (!read.ok && generated) {
     // DBML ERD Studio converted itself and cannot read back: our failure.
     telemetry.error(counts.failed);
+    failedOutcome();
     log.error(`[ERD Studio] ${title}: the converted DBML does not read:`, read.diagnostics.slice(0, 5).map((d) => `line ${d.line}: ${d.message}`).join('; '));
     const doing = 'while reading the converted model';
     showError(oursMessage(title, doing, 'nothing was changed'), {
@@ -505,6 +575,7 @@ async function runImportDbml(
   }
   if (!read.ok) {
     dropQuietly(draftOptions, 'unreadable');
+    failedOutcome();
     if (read.threw) {
       // The parser itself stopped: ours, not the user's file (the message to them is the same).
       telemetry.error('importDbmlParserThrew');
@@ -514,8 +585,27 @@ async function runImportDbml(
       if (read.diagnostics.some((d) => SEVERAL_FIELDS_ON_ONE_LINE.test(d.message))) telemetry.feature('importDbmlSeveralFieldsOneLine');
     }
     const first = read.diagnostics[0];
+    // The report lists every problem with its line (the message names the first few). A file
+    // with use lines has one problem, said in full: no report.
+    const reportSource = IMPORT_REPORT_SOURCES[source];
+    const reported = !quiet && !read.importsOtherFiles && reportSource !== undefined && ui.showImportReport !== undefined;
+    const failedLedger = problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML');
+    const failedReportId = !reported ? undefined : recordImportReport({
+      source: reportSource!,
+      title,
+      from: `from ${fileName}`,
+      status: 'failed',
+      ledger: failedLedger,
+      files: { [fileName]: filePath },
+    });
+    // The report's lines in the log too (its page says Show Logs has them), each problem with its message.
+    if (reported) {
+      for (const d of read.diagnostics) log.info(`[ERD Studio] ${title}: ${fileName} line ${d.line}: ${d.message}`);
+      for (const line of ledgerLogLines(failedLedger, title)) log.info(`[ERD Studio] ${line}`);
+    }
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
+      ...(failedReportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(failedReportId) } : {}),
     });
     return undefined;
   }
@@ -523,6 +613,7 @@ async function runImportDbml(
   if (model.tables.length === 0) {
     if (quiet) dropQuietly(draftOptions, 'nothingDrawable');
     else telemetry.feature('importDbmlNoTables');
+    failedOutcome();
     void ui.showInformationMessage(`${title}: ${fileName} has no tables, so there is nothing to import.`);
     return undefined;
   }
@@ -695,6 +786,7 @@ async function runImportDbml(
       return undefined;
     }
     telemetry.error(counts.failed);
+    failedOutcome();
     const doing = 'while preparing the import';
     showError(oursMessage(title, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err),
@@ -713,6 +805,9 @@ async function runImportDbml(
     showUnsaved(dirty[0]);
     return undefined;
   }
+  // The import has its result (the plan, about to show): how the reading went and the
+  // ledger's cause classes, the conversion's and the plan's. Never again on a redraw of it.
+  countImportOutcome(deps, progress, { ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])] });
 
   // 5. The draft: the plan as a read-only diagram, what it creates, reuses and
   // leaves out, before any write (or, with no preview, the dry run's modal).
@@ -736,6 +831,22 @@ async function runImportDbml(
   };
   const changeOptions = deps.changeOptions;
   const chosen = { layer: chosenLayer, name: slug };
+  // The report of this import (Show Import Report): the plan's ledger and the conversion's, in memory only.
+  const reportSource = IMPORT_REPORT_SOURCES[source];
+  const reportLedger = importLedgerOf(plan, describeOptions);
+  const reportId = reportSource === undefined ? undefined : recordImportReport({
+    source: reportSource,
+    title,
+    from: deps.origin?.from ?? `from ${fileName}`,
+    status: 'draft',
+    imported: { tables: plan.modelNames.length, relationships: plan.report.relationships },
+    ledger: reportLedger,
+    files: source === 'file' ? { [fileName]: filePath } : (deps.origin?.sourceFiles ?? {}),
+  });
+  // The plan's own entries in the log (its page says Show Logs has every line): the conversion
+  // that handed the plan its DBML (SQL, a semantic model) logged its own ledger already.
+  if (reportId !== undefined) for (const line of ledgerLogLines(plan.report.ledger ?? [], title, { everySkipped: true })) log.info(`[ERD Studio] ${line}`);
+  const notKept = (): void => { updateImportReport(reportId, { status: 'notKept' }); };
   /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};
   /** A Keep is waiting: settled once, here or (after a throw) by `importDbml`. */
@@ -790,6 +901,7 @@ async function runImportDbml(
           changeOptions: changeOptions !== undefined,
           ...(draftOptions.scopes ? { scopes: draftOptions.scopes } : {}),
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : deps.origin?.notice ? { notice: deps.origin.notice } : {}),
+          ...(reportId !== undefined ? { importReportId: reportId } : {}),
         });
       } catch (err) {
         telemetry.error('draftBuildFailed');
@@ -836,6 +948,7 @@ async function runImportDbml(
           break;
         }
         case 'changeOptions':
+          notKept();
           if (!changeOptions) return undefined;
           telemetry.feature('quickImportChangeOptions');
           void Promise.resolve().then(() => changeOptions(chosen));
@@ -850,21 +963,27 @@ async function runImportDbml(
         }
         case 'discard':
         case 'closed':
+          notKept();
           return cancelled();
         // More ways to start: the host ran its fixed command. Superseded: another flow has the page.
         case 'otherStart':
         case 'superseded':
+          notKept();
           return undefined;
       }
     } else if (!draftOptions) {
       const { headline, detail } = summariseDbmlImportPlan(plan, describeOptions);
       const answer = await dryRun(ui, headline, detail.join('\n'), changeOptions !== undefined);
       if (answer === 'changeOptions' && changeOptions) {
+        notKept();
         telemetry.feature('quickImportChangeOptions');
         void Promise.resolve().then(() => changeOptions(chosen));
         return undefined;
       }
-      if (answer !== 'import') return cancelled();
+      if (answer !== 'import') {
+        notKept();
+        return cancelled();
+      }
     }
     answered = false;
 
@@ -896,9 +1015,17 @@ async function runImportDbml(
     if (quick) telemetry.feature('quickImport');
     if (source === 'file' && layout) telemetry.feature('importDbmlLayout');
 
+    updateImportReport(reportId, { status: 'kept', diagram: `${chosenLayer}/${slug}` });
     // Kept: the draft closes and the new diagram opens.
     settleKeep({ kept: true });
     await ui.openDiagram(domainPath);
+    // Something could not be read and is not in the diagram: said once more, now the draft has closed.
+    const partial = reportId !== undefined && ui.showImportReport ? partialImportMessage(title, reportLedger) : undefined;
+    if (partial) {
+      void Promise.resolve(ui.showInformationMessage(partial, SHOW_IMPORT_REPORT_LABEL))
+        .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.(reportId) : undefined))
+        .catch((err: unknown) => log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+    }
     return { domainPath, plan };
   }
 
@@ -1109,5 +1236,6 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     },
     addLayer: async () => { await vscode.commands.executeCommand('erdStudio.addLayer'); },
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

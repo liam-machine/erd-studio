@@ -1,8 +1,8 @@
 // esbuild.js — Build for ERD Studio VS Code extension
 // Targets: Extension host (Node.js, CJS), Webview (Browser, IIFE with React),
 // manifest worker (Node.js worker thread), the standalone `erd-studio` CLI,
-// the lazily loaded SQL importer (dist/sqlImport.js) and the draft preview
-// page (dist/draft.js).
+// the lazily loaded SQL importer (dist/sqlImport.js), the SQL import worker
+// (dist/sqlImportWorker.js) and the draft preview page (dist/draft.js).
 
 const esbuild = require('esbuild');
 const path = require('path');
@@ -151,6 +151,25 @@ const sqlImportConfig = {
   plugins: [stubOracleGrammarPlugin, problemMatcherPlugin],
 };
 
+// SQL import worker — `dist/sqlImportWorker.js`, the worker thread Import SQL
+// DDL… converts in (src/workers/sqlImportWorker.ts, src/services/sqlConverter.ts),
+// so a large script never blocks the extension host. Small: it loads the
+// converter and grammars from dist/sqlImport.js at run time. No `external`:
+// an import of 'vscode' fails this bundle.
+const sqlImportWorkerConfig = {
+  entryPoints: ['./src/workers/sqlImportWorker.ts'],
+  bundle: true,
+  outfile: './dist/sqlImportWorker.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',
+  sourcemap: !isProduction,
+  minify: isProduction,
+  treeShaking: true,
+  logLevel: 'warning',
+  plugins: [problemMatcherPlugin],
+};
+
 // Webview build — Browser, IIFE, bundle everything including React
 const webviewConfig = {
   entryPoints: ['./webview/index.tsx'],
@@ -203,6 +222,7 @@ async function build() {
       esbuild.context(workerConfig),
       esbuild.context(cliConfig),
       esbuild.context(sqlImportConfig),
+      esbuild.context(sqlImportWorkerConfig),
       esbuild.context(draftConfig),
     ]);
     await Promise.all(contexts.map((ctx) => ctx.watch()));
@@ -214,6 +234,7 @@ async function build() {
       esbuild.build(workerConfig),
       esbuild.build(cliConfig),
       esbuild.build(sqlImportConfig),
+      esbuild.build(sqlImportWorkerConfig),
       esbuild.build(draftConfig),
     ]);
     console.log('Build complete.');

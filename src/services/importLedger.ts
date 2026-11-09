@@ -29,7 +29,10 @@ export type LedgerUnit =
 export type LedgerCause =
   | 'parseError' | 'grammarGap' | 'templatePlaceholder' | 'unknownType' | 'reservedWord' | 'trailingOption'
   | 'unsupportedModifier' | 'proceduralBlock' | 'notInFiles' | 'droppedLater' | 'noField' | 'notDesign'
-  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate' | 'other';
+  | 'renamed' | 'normalised' | 'inferred' | 'capped' | 'savedOptional' | 'duplicate'
+  // Not read because the import stopped first: the user cancelled it, or its time limit was reached.
+  | 'cancelled' | 'timeLimit'
+  | 'other';
 
 export interface LedgerWhere {
   file?: string;
@@ -160,6 +163,11 @@ const UNIT_NOUNS: Readonly<Record<LedgerUnit, [string, string]>> = {
   object: ['object', 'objects'],
 };
 
+/** A unit's nouns; a unit this build does not know (a ledger is plain data across bundles and the import worker) is an item. */
+function unitNouns(unit: unknown): [string, string] {
+  return typeof unit === 'string' && Object.prototype.hasOwnProperty.call(UNIT_NOUNS, unit) ? UNIT_NOUNS[unit as LedgerUnit] : ['item', 'items'];
+}
+
 /** What an entry's cause says when it has no `detail` of its own. */
 const CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = {
   parseError: 'could not be read',
@@ -180,6 +188,8 @@ const CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = {
   capped: 'over the limit',
   savedOptional: 'saved as optional',
   duplicate: 'defined twice',
+  cancelled: 'the import was cancelled before it was read',
+  timeLimit: 'the time limit was reached before it was read',
   other: '',
 };
 
@@ -251,7 +261,7 @@ function groupLine(g: Group): string {
   const cause = CAUSE_PHRASES[g.cause];
   const phrase = detail || (cause ? `${OUTCOME_PHRASES[g.outcome]}: ${cause}` : OUTCOME_PHRASES[g.outcome]);
   const names = examples(g.names);
-  return `${plural(g.count, UNIT_NOUNS[g.unit])}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
+  return `${plural(g.count, unitNouns(g.unit))}: ${what}${what ? ' ' : ''}${phrase}${names ? ` (${names})` : ''}.`;
 }
 
 function capped(lines: string[], max: number | undefined): string[] {
@@ -273,18 +283,22 @@ export function ledgerLeftOut(entries: readonly LedgerEntry[], opts: { max?: num
 /**
  * One output-log line per entry (`Import SQL DDL: film.sql line 12: column
  * film.rating: lost (unknownType): VECTOR — kept as text`). Skipped entries
- * are logged only when they have a line (the skipped summary counts the rest).
+ * are logged only when they have a line (SQL's skipped summary counts the
+ * rest), unless `everySkipped`: an importer with no such summary (a dbt
+ * draw, Import DBML's own plan) logs every one, so the log holds every line
+ * of the import report.
  */
-export function ledgerLogLines(entries: readonly LedgerEntry[], title: string): string[] {
+export function ledgerLogLines(entries: readonly LedgerEntry[], title: string, opts: { everySkipped?: boolean } = {}): string[] {
   const lines: string[] = [];
   const order = (e: LedgerEntry): number => OUTCOMES.indexOf(e.outcome);
   for (const e of [...entries].sort((a, b) => order(a) - order(b))) {
-    if (e.outcome === 'skipped' && e.where?.line === undefined) continue;
+    if (e.outcome === 'skipped' && e.where?.line === undefined && !opts.everySkipped) continue;
     const at = e.where?.file ? `${ledgerText(e.where.file, 200)}${e.where.line !== undefined ? ` line ${e.where.line}` : ''}: ` : '';
     const name = nameOf(e.where);
     const count = e.count > 1 ? `${e.count} × ` : '';
     const detail = e.detail ? ` (${ledgerText(e.detail, MAX_DETAIL, true)})` : '';
-    lines.push(`${title}: ${at}${count}${UNIT_NOUNS[e.unit][0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}: ${ledgerText(e.what, MAX_WHAT, true)}${detail}`);
+    const what = ledgerText(e.what, MAX_WHAT, true);
+    lines.push(`${title}: ${at}${count}${unitNouns(e.unit)[0]}${name ? ` ${name}` : ''}: ${e.outcome}, ${e.cause}:${what ? ` ${what}` : ''}${detail}`);
   }
   return lines;
 }
@@ -304,3 +318,10 @@ export function savedOptionalNote(requiredCount: number, total?: number): string
   const rest = others > 0 ? `; the other ${others.toLocaleString('en-US')} may be empty` : '';
   return `Every relationship is saved as optional (?: its foreign key may be empty), as ERD Studio saves them all. In the source, ${required}${rest}.`;
 }
+
+/** A unit's singular and plural noun (`column`, `columns`), for other renderers of the ledger (the import report). */
+export const LEDGER_UNIT_NOUNS: Readonly<Record<LedgerUnit, readonly [string, string]>> = UNIT_NOUNS;
+/** What each cause says (`not in the SQL grammar`; `other` says nothing), for other renderers of the ledger (the import report). */
+export const LEDGER_CAUSE_PHRASES: Readonly<Record<LedgerCause, string>> = CAUSE_PHRASES;
+/** What each outcome says when an entry has no `detail` (`not kept`, `rewritten so it reads`). */
+export const LEDGER_OUTCOME_PHRASES: Readonly<Record<LedgerOutcome, string>> = OUTCOME_PHRASES;

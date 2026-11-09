@@ -133,7 +133,9 @@ export type DraftDropReason =
   | 'nothingDrawable'
   | 'noDialect'
   /** Several dialects or models, or any other question the quiet run cannot ask. */
-  | 'needsChoice';
+  | 'needsChoice'
+  /** The import's time limit was reached before a table was read (SQL). */
+  | 'timeLimit';
 
 export const DRAFT_DROP_FEATURES: Readonly<Record<DraftDropReason, TelemetryFeature>> = {
   nothingFound: 'draftDropNothingFound',
@@ -143,6 +145,7 @@ export const DRAFT_DROP_FEATURES: Readonly<Record<DraftDropReason, TelemetryFeat
   nothingDrawable: 'draftDropNothingDrawable',
   noDialect: 'draftDropNoDialect',
   needsChoice: 'draftDropNeedsChoice',
+  timeLimit: 'draftDropTimeLimit',
 };
 
 /** A quiet run (the automatic draft) ends before its draft: tell the host why. Only while quiet; never throws. */

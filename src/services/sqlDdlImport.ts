@@ -229,13 +229,50 @@ export type SqlDdlToDbmlResult =
       tablesFound: number;
       /** How the tables were read: as written, rewritten by the repair ladder, or salvaged without a grammar. */
       readWith?: SqlReadWith;
+      /** The reading stopped before the end of the files (cancelled, or the time limit): what was read is the result, the rest is in the ledger. */
+      stopped?: SqlConvertStop;
       /**
        * Partition and inheritance children (`PARTITION OF`, `ATTACH PARTITION`, `INHERITS`): how many were
        * folded into their parent and how many kept as tables. Absent when the scripts have none.
        */
       partitions?: { folded: number; kept: number };
     }
-  | { ok: false; problems: SqlDdlProblem[]; ledger?: LedgerEntry[]; tablesFound?: number; readWith?: SqlReadWith };
+  | { ok: false; problems: SqlDdlProblem[]; ledger?: LedgerEntry[]; tablesFound?: number; readWith?: SqlReadWith; stopped?: SqlConvertStop };
+
+/** Why a reading stopped before the end of the files: the user cancelled it, or the import's time limit was reached. */
+export type SqlStopReason = 'cancelled' | 'timeLimit';
+
+/**
+ * A reading that stopped early: how far it got, and what it left unread.
+ * Every unread statement is also in the ledger (`problem` entries with the
+ * stop's cause, one or two per file: its CREATE TABLEs and its other
+ * statements, each placed at the line where the unread part of that file
+ * starts), so conservation holds: tables found = read + reported.
+ */
+export interface SqlConvertStop {
+  reason: SqlStopReason;
+  /** Statements read before the stop. */
+  statementsRead: number;
+  /** Statements not read (the rest of the file it stopped in, and every later file). */
+  statementsUnread: number;
+  /** Of those, CREATE TABLE statements with a column list (counted in `tablesFound`). */
+  tablesUnread: number;
+  /** Where the unread part starts. */
+  at: { file: string; line: number };
+}
+
+/** How far a reading has got, reported after every statement (`SqlDdlConvertOptions.onProgress`). */
+export interface SqlConvertProgress {
+  /** Statements read so far, in every file. */
+  statementsRead: number;
+  /** Tables read so far (by a grammar, rewritten or salvaged). */
+  tablesRead: number;
+  /** Files read to the end, of `files`. */
+  filesRead: number;
+  files: number;
+  /** How much of the SQL text has been read, 0 to 1 (by characters). */
+  fraction: number;
+}
 
 /** How a conversion's tables were read (`sqlDdlRepair.ts`, `sqlDdlSalvage.ts`). */
 export interface SqlReadWith {
@@ -255,6 +292,21 @@ export interface SqlDdlConvertOptions {
   ladderTables?: number;
   /** After this many milliseconds of repairs, the rest go straight to salvage (default {@link REPAIR_LADDER_MAX_MS}). */
   ladderMs?: number;
+  /** Called after every statement read (a worker throttles what it posts). */
+  onProgress?: (progress: SqlConvertProgress) => void;
+  /**
+   * Asked before every statement: a reason stops the reading there. What was
+   * read is converted as usual and the rest goes into the ledger (`stopped`).
+   */
+  shouldStop?: () => SqlStopReason | undefined;
+  /**
+   * Called once, when the reading has ended (every statement read, or the
+   * stop recorded): what is left is converting what was read, which is never
+   * stopped (a worker tells its host, so the host never ends it for that).
+   */
+  onReadingEnd?: () => void;
+  /** The time limit the caller set (ms), only for the ledger's wording when `shouldStop` says `timeLimit`. */
+  timeLimitMs?: number;
   /**
    * Partition and inheritance children with no columns of their own: `fold` (default) reads each as its
    * parent's rows (one ledger note per child); `tables` keeps each as a table with its parent's columns.
@@ -518,24 +570,39 @@ export function countCreateTablesWithColumns(text: string, dialect?: SqlDialect)
   const d = dialect ?? detectSqlDialect(text) ?? 'postgres';
   let count = 0;
   for (const st of splitStatements(prepareText(text, d).text, d)) {
-    const t = st.tokens;
-    if (upper(t[0]) !== 'CREATE') continue;
-    let i = 1;
-    while (i < t.length && t[i].kind === 'word' && !CREATE_OBJECT_WORDS.has(upper(t[i]))) i++;
-    if (upper(t[i]) !== 'TABLE') continue;
-    i++;
-    if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS') i += 3;
-    const name = readName(t, i);
-    if (!name || !isPunct(t[name.next], '(')) continue;
-    const close = matchParen(t, name.next);
-    if (close < 0 || close === name.next + 1) continue;
-    let ctas = false;
-    for (let k = close + 1; k < t.length && !ctas; k++) {
-      ctas = upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH');
-    }
-    if (!ctas) count++;
+    if (isCreateTableWithColumns(st.tokens)) count++;
   }
   return count;
+}
+
+/** Where a `CREATE … TABLE` statement's name starts (after any `IF NOT EXISTS`), or undefined when it is not one. */
+function createTableName(t: Token[]): { at: number; ifNotExists: boolean } | undefined {
+  if (upper(t[0]) !== 'CREATE') return undefined;
+  let i = 1;
+  while (i < t.length && t[i].kind === 'word' && !CREATE_OBJECT_WORDS.has(upper(t[i]))) i++;
+  if (upper(t[i]) !== 'TABLE') return undefined;
+  i++;
+  const ifNotExists = upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS';
+  return { at: ifNotExists ? i + 3 : i, ifNotExists };
+}
+
+/** SQL Server's `#tmp` / `##global` scratch table name at `i` (never one of the design's tables). */
+function isTempTableName(t: Token[], i: number): boolean {
+  return isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'));
+}
+
+/** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
+function isCreateTableWithColumns(t: Token[]): boolean {
+  const head = createTableName(t);
+  if (!head) return false;
+  const name = readName(t, head.at);
+  if (!name || !isPunct(t[name.next], '(')) return false;
+  const close = matchParen(t, name.next);
+  if (close < 0 || close === name.next + 1) return false;
+  for (let k = close + 1; k < t.length; k++) {
+    if (upper(t[k]) === 'AS' && (upper(t[k + 1]) === 'SELECT' || isPunct(t[k + 1], '(') || upper(t[k + 1]) === 'WITH')) return false;
+  }
+  return true;
 }
 
 /** Oracle's own DDL words, which no dialect the import reads has (`VARCHAR2`, `VARCHAR2(25 BYTE)`, storage clauses). */
@@ -703,6 +770,17 @@ class Converter implements ConverterContext {
   private ladderTables = 0;
   private ladderStarted = 0;
   private ladderCapped = false;
+  /** Statements read so far (every file), for progress and the stop. */
+  statementsRead = 0;
+  /** Set once `options.shouldStop` stops the reading: what was read, and where the unread part starts. */
+  stopped: SqlConvertStop | undefined;
+  /** A stop `options.shouldStop` gave during a statement (the repair ladder asks between tries): the next statement boundary stops there. */
+  private stopSaid: SqlStopReason | undefined;
+  /** For progress: characters in every file, and in the files read before this one. */
+  totalChars = 0;
+  private charsBefore = 0;
+  private filesRead = 0;
+  fileCount = 0;
 
   /** Placeholder names two different placeholders share across the files (`ambiguousPlaceholderNames`). */
   placeholderNames?: ReadonlySet<string>;
@@ -775,15 +853,115 @@ class Converter implements ConverterContext {
     // teardown or reset script, read after the CREATEs it undoes) is skipped
     // DROP statements, as the quick path never takes it (`isSqlScriptTaken`).
     this.dropsApply = looksLikeMigrationFile(file.name) || statements.some((st) => definesOrChangesTables(st.tokens));
-    for (const statement of statements) {
+    const { onProgress } = this.options;
+    for (let j = 0; j < statements.length; j++) {
+      // Between statements only: a statement is read whole or not at all.
+      const reason = this.stopAsked();
+      if (reason) { this.stop(reason, file.name, statements.slice(j)); break; }
+      const statement = statements[j];
       this.currentStatement = statement;
       readStatement(this, file.name, text, statement);
+      this.statementsRead++;
+      if (onProgress) {
+        const within = text.length ? (statement.end / text.length) * file.text.length : 0;
+        this.reportProgress(Math.min(file.text.length, within));
+      }
     }
     this.currentStatement = undefined;
+    if (!this.stopped) {
+      this.filesRead++;
+      this.charsBefore += file.text.length;
+    }
     const applied = this.appliedChanges - appliedBefore;
     const added = count() - before;
     // A migration that only drops or renames still did something.
     return applied > 0 ? Math.max(1, added + applied) : Math.max(0, added);
+  }
+
+  // -- stopping early ------------------------------------------------------
+
+  /**
+   * Whether the reading should stop: asked before every statement, and
+   * between the repair ladder's tries (a stop then ends the climb, and the
+   * table is salvaged, so one table's ladder never overruns the limit). Once
+   * said, it holds until the next statement boundary stops there.
+   */
+  private stopAsked(): SqlStopReason | undefined {
+    this.stopSaid ??= this.options.shouldStop?.();
+    return this.stopSaid;
+  }
+
+  private reportProgress(charsInFile: number): void {
+    this.options.onProgress?.({
+      statementsRead: this.statementsRead,
+      tablesRead: this.readWith.grammar + this.readWith.repaired + this.readWith.salvaged,
+      filesRead: this.filesRead,
+      files: this.fileCount,
+      fraction: this.totalChars > 0 ? Math.min(1, (this.charsBefore + charsInFile) / this.totalChars) : 0,
+    });
+  }
+
+  /** Stops the reading at the first of `rest` (statements of `file` not read): records it and the rest of the file. */
+  private stop(reason: SqlStopReason, file: string, rest: readonly Statement[]): void {
+    this.stopped = { reason, statementsRead: this.statementsRead, statementsUnread: 0, tablesUnread: 0, at: { file, line: rest[0]?.line ?? 1 } };
+    this.recordUnread(file, rest);
+  }
+
+  /** A file the reading stopped before: every statement of it is unread. */
+  skipUnreadFile(file: SqlDdlFile): void {
+    const text = prepareText(file.text, this.dialect, this.placeholderNames).text;
+    this.recordUnread(file.name, splitStatements(text, this.dialect));
+  }
+
+  /**
+   * Unread statements of one file in the ledger, placed at the line where the
+   * unread part starts: its CREATE TABLEs with a column list as one `table`
+   * entry (counted in `tablesFound`, so the tables found are the tables read
+   * plus the tables reported), the others as one `statement` entry.
+   */
+  private recordUnread(file: string, statements: readonly Statement[]): void {
+    const stop = this.stopped;
+    if (!stop || statements.length === 0) return;
+    const tables = this.unreadTables(statements);
+    const others = statements.length - tables;
+    const where = { file, line: statements[0].line };
+    const limit = this.options.timeLimitMs;
+    const detail = stop.reason === 'cancelled'
+      ? 'not read: the import was cancelled first'
+      : `not read: the time limit${limit ? ` (${timeLimitText(limit)})` : ''} was reached first`;
+    if (tables > 0) this.ledger.problem('table', stop.reason, 'CREATE TABLE', where, detail, tables);
+    if (others > 0) this.ledger.problem('statement', stop.reason, '', where, detail, others);
+    stop.statementsUnread += statements.length;
+    stop.tablesUnread += tables;
+    this.tablesFound += tables;
+  }
+
+  /** Names of the unread CREATE TABLEs counted so far, so a later `IF NOT EXISTS` of one is not counted again. */
+  private readonly unreadTableNames: string[][] = [];
+
+  /**
+   * How many of `statements` (unread) are tables a full reading would count
+   * in `tablesFound`: a CREATE TABLE with a column list, never a `#temp`
+   * table or an `IF NOT EXISTS` of a table already defined (read, or unread
+   * before it), as {@link readCreateTable} skips both.
+   */
+  private unreadTables(statements: readonly Statement[]): number {
+    let count = 0;
+    for (const st of statements) {
+      const t = st.tokens;
+      if (!isCreateTableWithColumns(t)) continue;
+      const head = createTableName(t)!;
+      if (isTempTableName(t, head.at)) continue;
+      const name = readName(t, head.at);
+      if (!name) continue;
+      const parts = this.qualify(name.parts);
+      const same = (other: readonly string[]): boolean => sameIdent(other[other.length - 1], parts[parts.length - 1])
+        && sameSchema(other.length >= 2 ? other[other.length - 2] : null, parts.length >= 2 ? parts[parts.length - 2] : null, this.dialect);
+      if (head.ifNotExists && (this.findTable(parts) || this.unreadTableNames.some(same))) continue;
+      this.unreadTableNames.push(parts);
+      count++;
+    }
+    return count;
   }
 
   // -- CREATE TABLE --------------------------------------------------------
@@ -794,7 +972,7 @@ class Converter implements ConverterContext {
     const ifNotExists = upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS';
     if (ifNotExists) i += 3;
     // SQL Server's `#tmp` / `##global` scratch tables (the name reads after its `#`s).
-    if (isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'))) { this.skip(file, 'temporary'); return; }
+    if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
     // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined (or a partition created with none of its own columns) does nothing.
@@ -1010,13 +1188,15 @@ class Converter implements ConverterContext {
         return result;
       };
       for (const rungs of REPAIR_LADDER) {
+        // Stopped (cancelled, or the time limit) part-way up: no more tries, the table is salvaged.
+        if (this.stopAsked()) break;
         let ok = attempt(own, rungs);
         if (!ok) continue;
         // The rungs are cumulative: keep only those the table needed, so the ledger names what made it read
         // (a column named like a keyword is not "quoted so it reads" when a VIRTUAL column was the problem).
         const needed = new Set(rungs);
         for (const rung of rungs) {
-          if (needed.size === 1) break;
+          if (needed.size === 1 || this.stopAsked()) break;
           const fewer = new Set([...needed].filter((r) => r !== rung));
           const smaller = attempt(own, fewer);
           if (smaller) { needed.delete(rung); ok = smaller; }
@@ -1024,6 +1204,7 @@ class Converter implements ConverterContext {
         return { raw: ok.raw, prepared: ok.rewrite.prepared, rawTable: ok.rawTable, repairs: ok.rewrite.repairs, how: 'repaired', droppedIndexes: ok.rewrite.droppedIndexes };
       }
       for (const format of OTHER_GRAMMARS) {
+        if (this.stopAsked()) break;
         if (format === own) continue;
         const ok = attempt(format, ALL_RUNGS);
         if (ok) {
@@ -1605,17 +1786,26 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
   }
   if (input.files.length === 0) return { ok: false, problems: [{ file: '', message: 'No SQL files to import.', kind: 'noFiles' }] };
   const converter = new Converter(input.dialect, engine, input.options);
+  converter.fileCount = input.files.length;
+  converter.totalChars = input.files.reduce((n, f) => n + f.text.length, 0);
   // A placeholder reads the same in every file: by its full name wherever its short one would name two things.
   converter.placeholderNames = ambiguousPlaceholderNames(input.files.map((f) => withoutPlaceholdersYet(f.text, input.dialect)), input.dialect);
   const unused: string[] = [];
   for (const file of input.files) {
+    // Stopped (cancelled, or the time limit): every later file is unread, and in the ledger.
+    if (converter.stopped) { converter.skipUnreadFile(file); continue; }
+    const read = converter.readFile(file);
+    // A file the reading stopped in was not read to its end: never "no tables in it".
+    if (converter.stopped) continue;
     // A file whose statements were only skipped was read: its skipped line says what it held.
-    if (converter.readFile(file) === 0 && !converter.problems.some((p) => p.file === file.name) && !converter.skippedIn(file.name)) unused.push(file.name);
+    if (read === 0 && !converter.problems.some((p) => p.file === file.name) && !converter.skippedIn(file.name)) unused.push(file.name);
   }
+  input.options?.onReadingEnd?.();
   const fileOrder = input.files.map((f) => f.name);
+  const stopped = converter.stopped ? { stopped: converter.stopped } : {};
   if (converter.tables.length === 0) {
-    if (converter.problems.length) {
-      return { ok: false, problems: converter.problems, ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith };
+    if (converter.problems.length || converter.stopped) {
+      return { ok: false, problems: converter.problems, ledger: converter.ledgerEntries(fileOrder), tablesFound: converter.tablesFound, readWith: converter.readWith, ...stopped };
     }
     const problem: SqlDdlProblem = { file: input.files.length === 1 ? input.files[0].name : '', message: `No CREATE TABLE statements with a column list were found in ${input.files.length === 1 ? 'the file' : 'the files'}.`, kind: 'noCreateTable' };
     converter.ledger.problem('file', 'other', 'no CREATE TABLE with a column list', problem.file ? { file: problem.file } : undefined, undefined, input.files.length);
@@ -1652,6 +1842,16 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     ledger: converter.ledgerEntries(fileOrder),
     tablesFound: converter.tablesFound,
     readWith: converter.readWith,
+    ...stopped,
     ...(partitions && (partitions.folded || partitions.kept) ? { partitions: { ...partitions } } : {}),
   };
+}
+
+/** `0.5 s`, `90 s`, `2 min`, `2 min 30 s`: a time limit as the ledger and the messages say it. */
+export function timeLimitText(ms: number): string {
+  if (ms < 10_000) return `${Number((ms / 1000).toFixed(1))} s`;
+  const s = Math.round(ms / 1000);
+  if (s < 120) return `${s} s`;
+  const m = Math.floor(s / 60);
+  return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
 }

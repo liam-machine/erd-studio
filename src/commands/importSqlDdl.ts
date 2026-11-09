@@ -69,8 +69,11 @@ import {
   walkFiles,
   type DirEntries,
 } from '../services/importSources';
+import { getErdStudioSetting } from '../services/configService';
 import { log } from '../services/logger';
-import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
+import { createLedger, ledgerLogLines, type LedgerEntry } from '../services/importLedger';
+import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL } from '../services/importReport';
+import { recordImportReport } from '../services/importReportStore';
 import {
   SQL_DIALECTS,
   SQL_DIALECT_LABELS,
@@ -79,17 +82,31 @@ import {
   rankSqlDialects,
   sqlDialectReading,
   sqlDialectReadingLabel,
+  timeLimitText,
   withoutSqlData,
   type SqlDdlFile,
   type SqlDdlProblem,
   type SqlDdlToDbmlResult,
+  type SqlConvertProgress,
+  type SqlConvertStop,
   type SqlDialect,
   type SqlDialectReading,
+  type SqlStopReason,
   type SqlPartitionMode,
 } from '../services/sqlDdlImport';
+import {
+  STOP_GRACE_MS,
+  SqlConvertAbandonedError,
+  SqlEngineLoadError,
+  inProcessSqlConverter,
+  workerSqlConverter,
+  type SqlConvertControl,
+  type SqlConverter,
+} from '../services/sqlConverter';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
-import { loadSqlImport, type SqlImportModule } from '../services/sqlImportLoader';
+import type { SqlImportModule } from '../services/sqlImportLoader';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, sqlInvalidFeatures, type ImportInputLimit } from '../services/importTelemetry';
+import { recordImportOutcome } from '../services/importOutcomeTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
@@ -169,23 +186,145 @@ export interface ImportSqlDdlUi {
   readFileStart?(filePath: string, chars: number): Promise<string>;
   /** A file's size in bytes (undefined: unknown). Absent: never checked before reading. */
   fileSize?(filePath: string): Promise<number | undefined>;
-  showInformationMessage(message: string): Promise<unknown>;
+  /** Resolves the button picked (when `items` are given); the flow never awaits it. */
+  showInformationMessage(message: string, ...items: string[]): Promise<unknown>;
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   openFileAt(filePath: string, line?: number): Promise<void>;
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
   /** Opens the ERD Studio output channel (`erdStudio.showLogs`). Absent: no Show Logs button. */
   showLogs?(): Promise<void>;
+  /**
+   * Runs `task` under a progress notification with a Cancel button (shown
+   * only once the task runs longer than a moment); Cancel aborts `signal`.
+   * Absent (tests, the automatic draft): no notification, never cancelled.
+   */
+  withProgress?<T>(title: string, task: (progress: SqlProgressReporter, signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** Opens the Settings editor at one setting. Absent: no Open Settings button. */
+  openSettings?(setting: string): Promise<void>;
+  /** Runs Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent: no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
-export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
+/** What a reading reports to the progress notification: a line, and how far it is (0 to 1). */
+export interface SqlProgressReporter {
+  report(message: string, fraction?: number): void;
+  /** Another reading of the scripts starts (the next dialect): its bar starts again from empty. */
+  restart?(): void;
+}
+
+export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
   /** The extension's folder: the SQL importer is `<extensionPath>/dist/sqlImport.js`. */
   extensionPath: string;
   sqlUi?: ImportSqlDdlUi;
   /** The Import DBML half (layer, name, dry run, open). */
   ui?: ImportDbmlUi;
-  /** Loads the SQL importer (tests pass the engine module itself). Default `loadSqlImport(extensionPath)`. */
+  /** Loads the SQL importer (tests pass the engine module itself): the conversion then runs in-process. Default: in a worker (`workerSqlConverter`). */
   loadSqlImport?: () => SqlImportModule;
+  /** The converter each run uses (tests). Default: `loadSqlImport` in-process when given, else a worker. */
+  sqlConverter?: () => SqlConverter;
+  /**
+   * How long one reading of the scripts may take (ms; `erdStudio.import.timeLimitSeconds`):
+   * the dialect ranking as a whole, and the conversion after the pick. At the
+   * limit what was read is imported and the rest is reported. 0: no limit.
+   * Default {@link DEFAULT_SQL_TIME_LIMIT_MS}.
+   */
+  timeLimitMs?: number;
+}
+
+/** `erdStudio.import.timeLimitSeconds`'s default, in ms. */
+export const DEFAULT_SQL_TIME_LIMIT_MS = 120_000;
+
+/**
+ * `erdStudio.import.timeLimitSeconds` in ms (0: no limit; any other value is
+ * at least 1 ms, never rounded to "no limit"); a value that is not a number
+ * ≥ 0 is the default.
+ */
+export function sqlImportTimeLimitMs(): number {
+  const seconds = getErdStudioSetting<unknown>('import.timeLimitSeconds', DEFAULT_SQL_TIME_LIMIT_MS / 1000);
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return DEFAULT_SQL_TIME_LIMIT_MS;
+  return seconds === 0 ? 0 : Math.max(1, Math.round(seconds * 1000));
+}
+
+/** The converter a run uses: the deps' own, the injected importer in-process, or a worker. */
+function converterOf(deps: ImportSqlDdlDeps): SqlConverter {
+  if (deps.sqlConverter) return deps.sqlConverter();
+  if (deps.loadSqlImport) return inProcessSqlConverter(deps.loadSqlImport);
+  return workerSqlConverter({
+    extensionPath: deps.extensionPath,
+    log: (message) => log.info(`[ERD Studio] ${TITLE}: ${message}`),
+  });
+}
+
+/**
+ * One reading of the scripts (the dialect ranking, or the conversion after
+ * the pick) as its converter sees it: its Cancel, its deadline, its
+ * progress; `stoppedBy` once a reading stopped early.
+ */
+export interface SqlReadingControl {
+  signal?: AbortSignal;
+  deadline?: number;
+  timeLimitMs?: number;
+  onProgress?(dialect: SqlDialect, progress: SqlConvertProgress): void;
+  stoppedBy?: SqlStopReason;
+  /** The reading was ended after the grace (one step did not stop): how far it had got. */
+  abandoned?: SqlConvertAbandonedError;
+}
+
+/** The converter's control for one dialect's reading. */
+function convertControl(control: SqlReadingControl | undefined, dialect: SqlDialect): SqlConvertControl {
+  if (!control) return {};
+  return {
+    ...(control.signal ? { signal: control.signal } : {}),
+    ...(control.deadline !== undefined ? { deadline: control.deadline } : {}),
+    ...(control.timeLimitMs !== undefined ? { timeLimitMs: control.timeLimitMs } : {}),
+    ...(control.onProgress ? { onProgress: (p: SqlConvertProgress) => control.onProgress!(dialect, p) } : {}),
+  };
+}
+
+/** Whether a reading must not start (cancelled, or past the deadline). */
+function readingStopped(control: SqlReadingControl | undefined): SqlStopReason | undefined {
+  if (!control) return undefined;
+  if (control.stoppedBy) return control.stoppedBy;
+  if (control.signal?.aborted) return 'cancelled';
+  return control.deadline !== undefined && Date.now() >= control.deadline ? 'timeLimit' : undefined;
+}
+
+/** `1,234 statements, 1,000 tables read as PostgreSQL`: a reading's progress line. */
+export function sqlProgressMessage(dialect: SqlDialect, p: SqlConvertProgress): string {
+  const fmt = (n: number): string => n.toLocaleString('en-US');
+  const files = p.files > 1 ? ` (file ${fmt(Math.min(p.filesRead + 1, p.files))} of ${fmt(p.files)})` : '';
+  return `${fmt(p.statementsRead)} ${p.statementsRead === 1 ? 'statement' : 'statements'}, ${fmt(p.tablesRead)} ${p.tablesRead === 1 ? 'table' : 'tables'} read as ${SQL_DIALECT_LABELS[dialect]}${files}`;
+}
+
+/**
+ * Runs one reading under the progress notification (when the UI has one):
+ * its Cancel aborts the reading's signal, its deadline is the time limit from
+ * now, and each statement's progress is reported.
+ */
+async function withReadingControl<T>(ui: ImportSqlDdlUi, deps: ImportSqlDdlDeps, task: (control: SqlReadingControl) => Promise<T>): Promise<T> {
+  const limit = Math.max(0, deps.timeLimitMs ?? DEFAULT_SQL_TIME_LIMIT_MS);
+  const control = (signal: AbortSignal | undefined, progress: SqlProgressReporter | undefined): SqlReadingControl => {
+    // Each dialect's reading reads the scripts from the start: its own bar, never one already full.
+    let reading: SqlDialect | undefined;
+    const onProgress = (dialect: SqlDialect, p: SqlConvertProgress): void => {
+      if (reading !== undefined && reading !== dialect) progress!.restart?.();
+      reading = dialect;
+      progress!.report(sqlProgressMessage(dialect, p), p.fraction);
+    };
+    return {
+      ...(signal ? { signal } : {}),
+      ...(limit > 0 ? { deadline: Date.now() + limit, timeLimitMs: limit } : {}),
+      ...(progress ? { onProgress } : {}),
+    };
+  };
+  if (!ui.withProgress) return task(control(undefined, undefined));
+  return ui.withProgress(`${TITLE}: reading the scripts`, (progress, signal) => task(control(signal, progress)));
+}
+
+/** `2 min`, `90 s`: the time limit as a message says it. */
+function limitText(ms: number | undefined): string {
+  return ms ? ` (${timeLimitText(ms)})` : '';
 }
 
 /** Where Try Another Dialect re-enters: with the files already read. */
@@ -239,8 +378,10 @@ export function quietImportSqlDdlUi(base: ImportSqlDdlUi): ImportSqlDdlUi {
     log.info(`[ERD Studio] ${TITLE} (automatic draft, not shown): ${message}`);
     return undefined;
   };
+  // Shows nothing: no progress notification either (the time limit still holds).
+  const { withProgress: _shown, ...rest } = base;
   return {
-    ...base,
+    ...rest,
     pickSources: async () => undefined,
     pickDialect: async () => undefined,
     pickFiles: async () => undefined,
@@ -261,10 +402,24 @@ function sqlUiOf(deps: ImportSqlDdlDeps): ImportSqlDdlUi {
  * of ours. `quiet` (the automatic draft): an early end is neither the user's
  * cancel nor their file, so neither is counted.
  */
-function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
+function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['draft']) {
   const cancelled = (): undefined => {
     if (!quiet) telemetry.feature('importSqlDdlCancelled');
     return undefined;
+  };
+  /**
+   * The scripts brought nothing in (`importOutcomeSqlDdlFail`, by dialect when
+   * one was chosen, with the ledger's cause classes when the reading has one).
+   * A success is counted by Import DBML's flow, once its plan is ready.
+   */
+  const failed = (dialect?: SqlDialect, ledger?: readonly LedgerEntry[]): void => {
+    if (quiet) return;
+    recordImportOutcome((key) => telemetry.featureQuiet(key), {
+      importer: 'sql',
+      outcome: 'failed',
+      ...(dialect ? { dialect } : {}),
+      ...(ledger ? { ledger } : {}),
+    });
   };
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
@@ -273,8 +428,9 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
-  const ours = (doing: string, err: unknown, code: TelemetryErrorCode = 'importSqlDdlFailed'): undefined => {
+  const ours = (doing: string, err: unknown, code: TelemetryErrorCode = 'importSqlDdlFailed', dialect?: SqlDialect): undefined => {
     telemetry.error(code);
+    failed(dialect);
     log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
     showError(oursMessage(TITLE, doing, 'nothing was changed'), {
       [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)),
@@ -285,6 +441,8 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
   const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }): undefined => {
     if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
     if (gathered.limit && !quiet) telemetry.feature(IMPORT_LIMIT_FEATURES[gathered.limit]);
+    // No scripts in the folder, a limit or a file that does not read; "no files were picked" is neither.
+    if (gathered.error || gathered.invalid) failed();
     if (gathered.error) showError(gathered.message);
     else void ui.showInformationMessage(gathered.message);
     return undefined;
@@ -300,7 +458,135 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false) {
     telemetry.feature('importSqlDdlInvalid');
     for (const key of sqlInvalidFeatures(problems, dialect)) telemetry.feature(key);
   };
-  return { cancelled, showError, ours, gatherMessage, invalid };
+  /**
+   * A reading that stopped before it read a table: a cancel is the user's
+   * cancel (nothing to import: a note with Show Import Report); the time
+   * limit says so, with the setting that raises it. Either way the import
+   * report holds what the stopped reading left unread (`cancelled` /
+   * `timedOut`, each file's unread part at its line) and the import's
+   * outcome is counted; the automatic draft's quiet stop records neither
+   * (its time limit is its own drop reason). A reading ended after the grace
+   * (`stop.abandoned`: one step did not stop) lost what it had read: the
+   * report holds the ended reading, and the message says how many tables
+   * were lost rather than "before it read a table".
+   */
+  const stoppedBeforeATable = (reason: SqlStopReason, limitMs: number | undefined, stop: SqlStopContext = {}): undefined => {
+    const status = reason === 'cancelled' ? 'cancelled' : 'timedOut';
+    const ended = stop.abandoned ? abandonedReadingLedger(stop.abandoned, stop.read?.files.map((f) => f.name) ?? [], limitMs) : [];
+    const ledger = [...(stop.ledger ?? []), ...ended];
+    const lost = stop.abandoned?.progress?.tablesRead ?? 0;
+    const lostText = lost > 0
+      ? `, and one step of the reading did not stop within ${timeLimitText(STOP_GRACE_MS)} of it, so the reading was ended: the ${lost.toLocaleString('en-US')} ${lost === 1 ? 'table it had read was' : 'tables it had read were'} lost, and nothing was imported.`
+      : undefined;
+    if (stop.abandoned) log.warn(`[ERD Studio] ${TITLE}: ${stop.abandoned.message}${lost > 0 ? ` It had read ${lost.toLocaleString('en-US')} tables (${(stop.abandoned.progress?.statementsRead ?? 0).toLocaleString('en-US')} statements); they were lost.` : ''}`);
+    let reportId: number | undefined;
+    if (!quiet) {
+      recordImportOutcome((key) => telemetry.featureQuiet(key), {
+        importer: 'sql',
+        outcome: status,
+        ...(stop.dialect ? { dialect: stop.dialect } : {}),
+        ledger,
+      });
+      reportId = recordImportReport({
+        source: 'sql',
+        title: TITLE,
+        ...(stop.read ? { from: stoppedOriginPhrase(stop.read.files.length, stop.dialect) } : {}),
+        status,
+        ledger,
+        ...(stop.read ? { files: Object.fromEntries(stop.read.fullPaths) } : {}),
+      });
+    }
+    const report: Record<string, () => unknown> = reportId !== undefined && ui.showImportReport
+      ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(reportId) }
+      : {};
+    if (reason === 'cancelled') {
+      if (!lostText) log.info(`[ERD Studio] ${TITLE}: cancelled before a table was read; nothing was imported.`);
+      cancelled();
+      // Only with the report to show, or tables lost: a bare "cancelled" would say what the user just did.
+      if (Object.keys(report).length || lostText) {
+        showErrorWithActions(
+          (m, ...items) => Promise.resolve(ui.showInformationMessage(m, ...items)).then((c) => (typeof c === 'string' ? c : undefined)),
+          lostText ? `${TITLE} was cancelled${lostText}` : `${TITLE} was cancelled before it read a table, so nothing was imported.`,
+          report,
+          (choice, err) => log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err),
+        );
+      }
+      return undefined;
+    }
+    dropQuietly(draft, 'timeLimit');
+    const limit = limitText(limitMs ?? DEFAULT_SQL_TIME_LIMIT_MS);
+    const actions: Record<string, () => unknown> = {};
+    if (ui.openSettings) actions[OPEN_SETTINGS_BUTTON] = () => ui.openSettings!(TIME_LIMIT_SETTING);
+    Object.assign(actions, report);
+    if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
+    const what = lostText ? `${TITLE} reached its time limit${limit}${lostText}` : `${TITLE} reached its time limit${limit} before it read a table, so nothing was imported.`;
+    showError(`${what} Raise the limit (${TIME_LIMIT_SETTING}), or import fewer scripts at a time.`, actions);
+    return undefined;
+  };
+  return { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable };
+}
+
+/** What a reading that stopped before it read a table leaves for the import report and the outcome count. */
+interface SqlStopContext {
+  /** The scripts the import read: their count, and their paths by the names the ledger gives them. */
+  read?: Pick<SqlResume, 'files' | 'fullPaths'>;
+  /** The dialect the stopped conversion ran as; none for the dialect ranking (no dialect was chosen yet). */
+  dialect?: SqlDialect;
+  /** The stopped reading's ledger: its unread statements, each file's at the line its unread part starts. */
+  ledger?: readonly LedgerEntry[];
+  /** The reading was ended after the grace: nothing it read was kept. */
+  abandoned?: SqlConvertAbandonedError;
+}
+
+/**
+ * A reading ended after the grace, in the ledger: one `problem` entry with the
+ * stop's cause, at the file it was busy in (from its last progress), saying
+ * that nothing was imported and how many tables it had read were lost. No
+ * statement can be placed: what it read never came back from the worker.
+ */
+function abandonedReadingLedger(err: SqlConvertAbandonedError, fileNames: readonly string[], limitMs: number | undefined): LedgerEntry[] {
+  const p = err.progress;
+  const at = fileNames.length ? fileNames[Math.min(Math.max(0, p?.filesRead ?? 0), fileNames.length - 1)] : undefined;
+  const why = err.reason === 'cancelled' ? 'the import was cancelled' : `the time limit${limitText(limitMs ?? DEFAULT_SQL_TIME_LIMIT_MS)} was reached`;
+  const lost = p && p.tablesRead > 0 ? `; the ${p.tablesRead.toLocaleString('en-US')} ${p.tablesRead === 1 ? 'table' : 'tables'} it had read were lost` : '';
+  const ledger = createLedger();
+  ledger.problem('file', err.reason, 'reading ended', at ? { file: at } : undefined,
+    `nothing was imported: ${why}, and the reading (busy in this file) did not stop within ${timeLimitText(STOP_GRACE_MS)}, so it was ended${lost}`);
+  return ledger.entries;
+}
+
+/** The report's source phrase for a stopped reading: `from 3 SQL files (PostgreSQL)`, or `from 3 SQL files` before a dialect. */
+function stoppedOriginPhrase(fileCount: number, dialect: SqlDialect | undefined): string {
+  return dialect ? sqlOriginPhrase(fileCount, SQL_DIALECT_LABELS[dialect]) : `from ${fileCount.toLocaleString('en-US')} SQL ${fileCount === 1 ? 'file' : 'files'}`;
+}
+
+/** Whether any dialect's reading read a table. */
+function readsATable(readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined): boolean {
+  return [...(readings?.values() ?? [])].some((r) => r.tablesRead > 0);
+}
+
+/** The reading of a ranking that stopped early (its ledger holds the unread statements), if any did. */
+function stoppedReadingOf(readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined): SqlDialectReading | undefined {
+  return [...(readings?.values() ?? [])].find((r) => r.result.stopped);
+}
+
+/** The setting that holds the time limit (seconds). */
+export const TIME_LIMIT_SETTING = 'erdStudio.import.timeLimitSeconds';
+/** The button that opens the settings at {@link TIME_LIMIT_SETTING}. */
+export const OPEN_SETTINGS_BUTTON = 'Open Settings';
+
+/** A reading that stopped early in the log: one line, then each file's unread part (file and line) from the ledger. */
+function logStop(stop: SqlConvertStop, ledger: readonly LedgerEntry[] | undefined, limitMs: number | undefined): void {
+  const fmt = (n: number): string => n.toLocaleString('en-US');
+  const why = stop.reason === 'cancelled' ? 'cancelled' : `stopped at its time limit${limitText(limitMs ?? DEFAULT_SQL_TIME_LIMIT_MS)}`;
+  const others = stop.statementsUnread - stop.tablesUnread;
+  log.warn(`[ERD Studio] ${TITLE}: ${why} at ${stop.at.file} line ${stop.at.line}, after ${fmt(stop.statementsRead)} statements. Not read: ${fmt(stop.tablesUnread)} CREATE TABLE ${stop.tablesUnread === 1 ? 'statement' : 'statements'} and ${fmt(others)} other ${others === 1 ? 'statement' : 'statements'}; where each file's unread part starts follows.`);
+  for (const line of ledgerLogLines((ledger ?? []).filter((e) => e.cause === stop.reason), TITLE)) log.warn(`[ERD Studio] ${line}`);
+}
+
+/** Readings of the files that read them whole: one that stopped early is never reused by another run. */
+function withoutStoppedReadings(readings: ReadonlyMap<SqlDialect, SqlDialectReading>): ReadonlyMap<SqlDialect, SqlDialectReading> {
+  return new Map([...readings].filter(([, r]) => !r.result.stopped));
 }
 
 /** Every problem of a conversion, one log line each with its file and line. */
@@ -316,18 +602,28 @@ function logProblems(problems: readonly SqlDdlProblem[], dialect: SqlDialect): v
  */
 export function sqlPartialNotice(result: Extract<SqlDdlToDbmlResult, { ok: true }>): string | undefined {
   const problems = result.problems ?? [];
-  if (!problems.length) return undefined;
+  const stop = result.stopped;
+  if (!problems.length && !stop) return undefined;
   const fmt = (n: number): string => n.toLocaleString('en-US');
   const twice = problems.filter((p) => p.kind === 'duplicateTable').length;
   const unread = problems.filter((p) => p.table !== undefined && p.kind !== 'duplicateTable').length;
   const statements = problems.length - twice - unread;
-  // Each second definition is a CREATE TABLE counted in tablesFound, not another table.
-  const distinct = Math.max(result.tablesFound - twice, unread);
+  // Each second definition is a CREATE TABLE counted in tablesFound, not another table; tables
+  // the import stopped before are said apart (they were never tried).
+  const distinct = Math.max(result.tablesFound - twice - (stop?.tablesUnread ?? 0), unread);
   const parts: string[] = [];
+  if (stop) {
+    const why = stop.reason === 'cancelled' ? 'The import was cancelled' : 'The import reached its time limit';
+    const others = stop.statementsUnread - stop.tablesUnread;
+    const rest = stop.tablesUnread > 0
+      ? `${fmt(stop.tablesUnread)} of ${fmt(result.tablesFound - twice)} tables were not read`
+      : `${fmt(others)} ${others === 1 ? 'statement was' : 'statements were'} not read`;
+    parts.push(`${why} at ${stop.at.file} line ${fmt(stop.at.line)}: ${rest}`);
+  }
   if (unread > 0) parts.push(`${fmt(unread)} of ${fmt(distinct)} tables could not be read`);
   if (twice > 0) parts.push(`${fmt(twice)} ${twice === 1 ? 'table is' : 'tables are'} defined twice (the first definition is kept)`);
   if (statements > 0) parts.push(`${fmt(statements)} ${statements === 1 ? 'statement' : 'statements'} could not be read`);
-  const many = problems.length > 1;
+  const many = problems.length + (stop ? 2 : 0) > 1;
   return `${parts.join('; ')}; Show details lists ${many ? 'them' : 'it'}.`;
 }
 
@@ -343,12 +639,18 @@ function ledgerLogLinesWithoutProblems(ledger: readonly LedgerEntry[]): string[]
  * until a dialect reads a table every one is tried (as one would be after
  * the pick anyway), and after that another only while it fits the budget. A
  * dialect whose conversion throws is left out (the conversion after the pick
- * reports it).
+ * reports it). Each reading runs on `engine` (a worker's converter, or the
+ * importer itself in-process). `budget.control`: the reading's Cancel,
+ * deadline and progress; once a reading stops early (or is abandoned) no
+ * other dialect is tried, and `control.stoppedBy` says why. Throws
+ * {@link SqlEngineLoadError} when the importer cannot be loaded.
  */
-export function readAsDialects(
-  engine: SqlImportModule, files: SqlDdlFile[], order: readonly SqlDialect[], known?: ReadonlyMap<SqlDialect, SqlDialectReading>,
-  budget: { ms?: number; now?: () => number } = {},
-): Map<SqlDialect, SqlDialectReading> {
+export async function readAsDialects(
+  engine: SqlConverter | SqlImportModule, files: SqlDdlFile[], order: readonly SqlDialect[], known?: ReadonlyMap<SqlDialect, SqlDialectReading>,
+  budget: { ms?: number; now?: () => number; control?: SqlReadingControl } = {},
+): Promise<Map<SqlDialect, SqlDialectReading>> {
+  const converter = 'convert' in engine ? engine : inProcessSqlConverter(() => engine);
+  const control = budget.control;
   const readings = new Map<SqlDialect, SqlDialectReading>(known ?? []);
   const chars = files.reduce((n, f) => n + f.text.length, 0);
   const all = chars <= RANK_ALL_DIALECTS_CHARS;
@@ -359,6 +661,12 @@ export function readAsDialects(
   for (const r of readings.values()) { const ms = readingMs.get(r) ?? 0; spent += ms; slowest = Math.max(slowest, ms); }
   for (const dialect of order) {
     if (!readings.has(dialect)) {
+      const stop = readingStopped(control);
+      if (stop) {
+        if (control) control.stoppedBy = stop;
+        log.info(`[ERD Studio] ${TITLE}: the scripts were not read as another dialect (${stop === 'cancelled' ? 'cancelled' : 'the time limit was reached'}).`);
+        break;
+      }
       const readsATable = [...readings.values()].some((r) => r.tablesRead > 0);
       if (readsATable && spent + slowest > limit) {
         log.info(`[ERD Studio] ${TITLE}: the scripts were not read as every dialect first (${(spent / 1000).toFixed(1)} s spent; the rest would take longer than ${(limit / 1000).toFixed(0)} s).`);
@@ -366,14 +674,26 @@ export function readAsDialects(
       }
       const started = now();
       try {
-        const reading = sqlDialectReading(dialect, engine.sqlDdlToDbml({ files, dialect }));
+        const result = await converter.convert({ files, dialect }, convertControl(control, dialect));
+        const reading = sqlDialectReading(dialect, result);
         readings.set(dialect, reading);
         const ms = Math.max(0, now() - started);
         readingMs.set(reading, ms);
         spent += ms;
         slowest = Math.max(slowest, ms);
+        // Stopped early (cancelled, or the time limit): what it read is kept, and no other dialect is read.
+        if (result.stopped) {
+          if (control) control.stoppedBy = result.stopped.reason;
+          break;
+        }
       } catch (err) {
+        if (err instanceof SqlEngineLoadError) throw err;
         spent += Math.max(0, now() - started);
+        if (err instanceof SqlConvertAbandonedError) {
+          if (control) { control.stoppedBy = err.reason; control.abandoned = err; }
+          log.warn(`[ERD Studio] ${TITLE}: reading the scripts as ${SQL_DIALECT_LABELS[dialect]}: ${err.message}`);
+          break;
+        }
         log.warn(`[ERD Studio] ${TITLE}: reading the scripts as ${SQL_DIALECT_LABELS[dialect]} failed:`, err);
         continue;
       }
@@ -392,16 +712,6 @@ function noDialectReason(readings: ReadonlyMap<SqlDialect, SqlDialectReading>, d
   return first ? problemLabel(first) : undefined;
 }
 
-/** The SQL importer, loaded on first use; undefined after saying it failed. */
-function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown, code?: TelemetryErrorCode) => undefined): SqlImportModule | undefined {
-  try {
-    return deps.loadSqlImport ? deps.loadSqlImport() : loadSqlImport(deps.extensionPath);
-  } catch (err) {
-    // Its own code: a VSIX missing dist/sqlImport.js shows up as exactly this.
-    return ours('while loading its SQL importer', err, 'importSqlEngineLoadFailed');
-  }
-}
-
 /**
  * Run the flow. Resolves Import DBML's result once a diagram is written, or
  * undefined when the user cancels, the scripts do not read, or something
@@ -410,7 +720,7 @@ function loadEngine(deps: ImportSqlDdlDeps, ours: (doing: string, err: unknown, 
  */
 export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, preset: SqlPreset = {}): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
-  const { cancelled, showError, ours, gatherMessage, invalid } = sqlRun(ui, deps.draft?.quiet === true);
+  const { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable } = sqlRun(ui, deps.draft?.quiet === true, deps.draft);
 
   // 1. The scripts.
   let read = resume;
@@ -426,71 +736,130 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   // 2. The dialect: the one the user chose already (the import guide's card), else a pick
   //    with the one chosen before (Change Options…) first, then every dialect by how many
   //    tables it reads (the scripts are read as each first, when they are not too big).
-  const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
-  let readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined = read.readings;
+  //    Every reading runs in a worker (`converterOf`), under a progress notification with
+  //    Cancel and the time limit; the worker ends with this step.
+  const converter = converterOf(deps);
   let dialect: SqlDialect;
-  if (preset.dialect && preset.dialectChosen) {
-    dialect = preset.dialect;
-  } else {
-    if (!readings || readings.size < SQL_DIALECTS.length) {
-      let early: SqlImportModule | undefined;
-      try { early = deps.loadSqlImport ? deps.loadSqlImport() : loadSqlImport(deps.extensionPath); } catch { early = undefined; }
-      if (early) readings = readAsDialects(early, files, dialectOrder(files.map((f) => f.text).join('\n'), detected), readings);
-    }
-    const ranked = readings && readings.size ? rankSqlDialectReadings([...readings.values()], detected).map((r) => r.dialect) : [];
-    const rest = [...ranked, ...SQL_DIALECTS.filter((d) => !ranked.includes(d))];
-    const first = preset.dialect ?? (ranked.length ? undefined : detected);
-    const ordered = first ? [first, ...rest.filter((d) => d !== first)] : rest;
-    const why = readings ? noDialectReason(readings, detected) : undefined;
-    if (why) log.info(`[ERD Studio] ${TITLE}: no dialect reads a table in the scripts: ${why}`);
-    const describe = (d: SqlDialect): string | undefined => {
-      const reading = readings?.get(d);
-      const parts: string[] = [];
-      // Never "detected" for a dialect that reads none of the tables.
-      if (d === detected && (!reading || reading.tablesRead > 0)) parts.push('detected');
-      if (d === preset.dialect) parts.push('read as this before');
-      if (reading) parts.push(sqlDialectReadingLabel(reading));
-      return parts.length ? parts.join(' · ') : undefined;
-    };
-    const these = files.length === 1 ? 'the script' : 'the scripts';
-    const choice = await ui.pickDialect(
-      ordered.map((d) => {
-        const description = describe(d);
-        return { label: SQL_DIALECT_LABELS[d], ...(description ? { description } : {}), dialect: d };
-      }),
-      {
-        title: TITLE,
-        placeHolder: why
-          ? `No dialect reads a table in ${these} (${why.length > 120 ? `${why.slice(0, 119)}…` : why}). Which dialect ${files.length === 1 ? 'is it' : 'are they'} written in?`
-          : `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`,
-        ignoreFocusOut: true,
-      },
-    );
-    if (!choice) return cancelled();
-    dialect = choice.dialect;
-  }
-  telemetry.feature(SQL_DIALECT_FEATURES[dialect]);
-
-  // 3. Convert, with the importer loaded only now (or the pick's reading of this dialect).
+  // A reading that stopped early (cancelled, or the time limit) belongs to the run it stopped in:
+  // another run (Try Another Dialect, the quick path's hand-over) reads that dialect again, whole.
+  let readings: ReadonlyMap<SqlDialect, SqlDialectReading> | undefined = read.readings && withoutStoppedReadings(read.readings);
   let result: SqlDdlToDbmlResult;
-  const known = readings?.get(dialect);
-  if (known) {
-    result = known.result;
-  } else {
-    const engine = loadEngine(deps, ours);
-    if (!engine) return undefined;
-    try {
-      result = engine.sqlDdlToDbml({ files, dialect });
-    } catch (err) {
-      return ours('while converting the SQL', err);
+  try {
+    const detected = detectSqlDialect(files.map((f) => f.text).join('\n'));
+    let stoppedBy: SqlStopReason | undefined;
+    if (!(preset.dialect && preset.dialectChosen)) {
+      if (!readings || readings.size < SQL_DIALECTS.length) {
+        const order = dialectOrder(files.map((f) => f.text).join('\n'), detected);
+        const before = readings;
+        let abandoned: SqlConvertAbandonedError | undefined;
+        try {
+          readings = await withReadingControl(ui, deps, async (control) => {
+            try {
+              return await readAsDialects(converter, files, order, before, { control });
+            } finally {
+              stoppedBy = control.stoppedBy;
+              abandoned = control.abandoned;
+            }
+          });
+        } catch (err) {
+          // The importer did not load: the conversion after the pick says so.
+          if (!(err instanceof SqlEngineLoadError)) log.warn(`[ERD Studio] ${TITLE}: reading the scripts as each dialect failed:`, err);
+        }
+        // Cancelled (or the time limit) before any dialect read a table: the import ends here, as
+        // the quick path's does; a dialect pick would only read the scripts again. Once other
+        // dialects have read the scripts whole without a table, the time limit does not end it:
+        // the pick says why no dialect reads one (the conversion after it has its own limit).
+        if (stoppedBy && !readsATable(readings) && (stoppedBy === 'cancelled' || !readings || withoutStoppedReadings(readings).size === 0)) {
+          return stoppedBeforeATable(stoppedBy, deps.timeLimitMs, { read, ledger: stoppedReadingOf(readings)?.result.ledger, abandoned });
+        }
+      }
     }
+    if (preset.dialect && preset.dialectChosen) {
+      dialect = preset.dialect;
+    } else if (stoppedBy === 'cancelled' && readings && readsATable(readings)) {
+      // Cancel imports the tables read so far: the dialect that read the most, without a pick.
+      dialect = rankSqlDialectReadings([...readings.values()], detected)[0].dialect;
+      log.info(`[ERD Studio] ${TITLE}: cancelled while reading the scripts as each dialect; importing what ${SQL_DIALECT_LABELS[dialect]} read.`);
+    } else {
+      const ranked = readings && readings.size ? rankSqlDialectReadings([...readings.values()], detected).map((r) => r.dialect) : [];
+      const rest = [...ranked, ...SQL_DIALECTS.filter((d) => !ranked.includes(d))];
+      const first = preset.dialect ?? (ranked.length ? undefined : detected);
+      const ordered = first ? [first, ...rest.filter((d) => d !== first)] : rest;
+      // A reading the time limit stopped says nothing about why a dialect does not read the scripts.
+      const whole = readings && withoutStoppedReadings(readings);
+      const why = readings ? noDialectReason(whole && whole.size ? whole : readings, detected) : undefined;
+      if (why) log.info(`[ERD Studio] ${TITLE}: no dialect reads a table in the scripts: ${why}`);
+      const describe = (d: SqlDialect): string | undefined => {
+        const reading = readings?.get(d);
+        const parts: string[] = [];
+        // Never "detected" for a dialect that reads none of the tables.
+        if (d === detected && (!reading || reading.tablesRead > 0)) parts.push('detected');
+        if (d === preset.dialect) parts.push('read as this before');
+        if (reading) parts.push(sqlDialectReadingLabel(reading));
+        if (reading?.result.stopped) parts.push(reading.result.stopped.reason === 'cancelled' ? 'stopped when cancelled' : 'stopped at the time limit');
+        return parts.length ? parts.join(' · ') : undefined;
+      };
+      const these = files.length === 1 ? 'the script' : 'the scripts';
+      const choice = await ui.pickDialect(
+        ordered.map((d) => {
+          const description = describe(d);
+          return { label: SQL_DIALECT_LABELS[d], ...(description ? { description } : {}), dialect: d };
+        }),
+        {
+          title: TITLE,
+          placeHolder: why
+            ? `No dialect reads a table in ${these} (${why.length > 120 ? `${why.slice(0, 119)}…` : why}). Which dialect ${files.length === 1 ? 'is it' : 'are they'} written in?`
+            : `Which SQL dialect ${files.length === 1 ? 'is the script' : 'are the scripts'} written in?`,
+          ignoreFocusOut: true,
+        },
+      );
+      if (!choice) return cancelled();
+      dialect = choice.dialect;
+    }
+    telemetry.feature(SQL_DIALECT_FEATURES[dialect]);
+
+    // 3. Convert (or the pick's reading of this dialect).
+    // A reading stopped before it read a table is read again, under a limit of its own.
+    const known = readings?.get(dialect);
+    if (known && !(known.result.stopped && known.tablesRead === 0)) {
+      result = known.result;
+    } else {
+      try {
+        result = await withReadingControl(ui, deps, (control) => converter.convert({ files, dialect }, convertControl(control, dialect)));
+      } catch (err) {
+        if (err instanceof SqlEngineLoadError) {
+          // Its own code: a VSIX missing dist/sqlImport.js shows up as exactly this.
+          return ours('while loading its SQL importer', err.cause ?? err, 'importSqlEngineLoadFailed');
+        }
+        if (err instanceof SqlConvertAbandonedError) return stoppedBeforeATable(err.reason, deps.timeLimitMs, { read, dialect, abandoned: err });
+        return ours('while converting the SQL', err, undefined, dialect);
+      }
+    }
+  } finally {
+    converter.dispose();
   }
+  // Stopped (cancelled, or the time limit) before a table was read: nothing to import.
+  if (!result.ok && result.stopped) return stoppedBeforeATable(result.stopped.reason, deps.timeLimitMs, { read, dialect, ledger: result.ledger });
+  if (result.stopped) logStop(result.stopped, result.ledger, deps.timeLimitMs);
   if (!result.ok) {
     invalid(result.problems, dialect);
+    failed(dialect, result.ledger ?? []);
     for (const line of ledgerLogLinesWithoutProblems(result.ledger ?? [])) log.info(`[ERD Studio] ${line}`);
     const firstProblem = result.problems.find((p) => p.file && fullPaths.has(p.file));
     const actions: Record<string, () => unknown> = {};
     if (firstProblem) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(fullPaths.get(firstProblem.file)!, firstProblem.line);
+    // The report lists every problem with its file and line (the message names the first few).
+    if (ui.showImportReport && deps.draft?.quiet !== true) {
+      const reportId = recordImportReport({
+        source: 'sql',
+        title: TITLE,
+        from: sqlOriginPhrase(files.length, SQL_DIALECT_LABELS[dialect]),
+        status: 'failed',
+        ledger: result.ledger ?? [],
+        files: Object.fromEntries(fullPaths),
+      });
+      actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!(reportId);
+    }
     if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
     // Another dialect only when one reads more (or nobody has looked).
     const mine = sqlDialectReading(dialect, result).tablesRead;
@@ -513,15 +882,21 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     const mode = await pickPartitionMode(ui, folded, preset.partitions);
     if (!mode) return cancelled();
     if (mode === 'tables') {
-      const engine = loadEngine(deps, ours);
-      if (!engine) return undefined;
+      // Read again with the partitions kept: in the worker, under its own progress, Cancel and time limit.
+      const again = converterOf(deps);
       let kept: SqlDdlToDbmlResult;
       try {
-        kept = engine.sqlDdlToDbml({ files, dialect, options: { partitions: 'tables' } });
+        kept = await withReadingControl(ui, deps, (control) => again.convert({ files, dialect, options: { partitions: 'tables' } }, convertControl(control, dialect)));
       } catch (err) {
-        return ours('while converting the SQL', err);
+        if (err instanceof SqlEngineLoadError) return ours('while loading its SQL importer', err.cause ?? err, 'importSqlEngineLoadFailed');
+        if (err instanceof SqlConvertAbandonedError) return stoppedBeforeATable(err.reason, deps.timeLimitMs, { read, dialect, abandoned: err });
+        return ours('while converting the SQL', err, undefined, dialect);
+      } finally {
+        again.dispose();
       }
+      if (!kept.ok && kept.stopped) return stoppedBeforeATable(kept.stopped.reason, deps.timeLimitMs, { read, dialect, ledger: kept.ledger });
       if (!kept.ok) return ours('while converting the SQL', new Error('keeping the partitions as tables read no table'));
+      if (kept.stopped) logStop(kept.stopped, kept.ledger, deps.timeLimitMs);
       result = kept;
     }
   }
@@ -581,6 +956,7 @@ function importConvertedSql(
     ...rest,
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
     source: 'sql',
+    sqlDialect: dialect,
     origin: {
       from: sqlOriginPhrase(read.files.length, dialectLabel),
       description: `Imported from ${read.sourceLabel} (${dialectLabel}).`,
@@ -588,6 +964,8 @@ function importConvertedSql(
       skipped: result.skipped,
       ledger,
       ...(sqlPartialNotice(result) ? { notice: sqlPartialNotice(result) } : {}),
+      // The scripts, by the names the ledger gives them: Show Import Report opens them at a line.
+      sourceFiles: Object.fromEntries(read.fullPaths),
     },
     ...(changeOptions ? { changeOptions } : {}),
   }, { filePath, ...resume });
@@ -641,7 +1019,7 @@ export async function findSqlDdlScripts(
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
   const quiet = deps.draft?.quiet === true;
-  const { ours, gatherMessage } = sqlRun(ui, quiet);
+  const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
   const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui).catch(() => ({ files: [] as string[], truncated: false }));
   if (found.truncated && found.files.length > 0) {
     log.info(`[ERD Studio] ${TITLE}: the folder holds more .sql files than are looked at; importing the ${found.files.length} CREATE TABLE scripts found first.`);
@@ -668,14 +1046,42 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
   const text = gathered.files.map((f) => f.text).join('\n');
   const detected = detectSqlDialect(text);
   const order = dialectOrder(text, detected);
-  const engine = loadEngine(deps, ours);
-  if (!engine) return undefined;
-  const first = readAsDialects(engine, gathered.files, [order[0]]);
-  const firstReading = first.get(order[0]);
-  const whole = firstReading && firstReading.tablesRead === firstReading.tablesFound && firstReading.salvaged === 0 && firstReading.repaired === 0 && !firstReading.result.problems?.length;
-  const readings = whole ? first : readAsDialects(engine, gathered.files, order, first);
-  if (readings.size === 0) return ours('while converting the SQL', new Error('no dialect could convert the scripts'));
+  // Every reading in a worker, under one progress notification with Cancel and the time limit:
+  // a reading that stops early is kept (what it read is the import) and no other dialect is read.
+  const converter = converterOf(deps);
+  let stoppedBy: SqlStopReason | undefined;
+  let abandoned: SqlConvertAbandonedError | undefined;
+  let readings: Map<SqlDialect, SqlDialectReading>;
+  try {
+    readings = await withReadingControl(ui, deps, async (control) => {
+      try {
+        const first = await readAsDialects(converter, gathered.files, [order[0]], undefined, { control });
+        const firstReading = first.get(order[0]);
+        const whole = firstReading && firstReading.tablesRead === firstReading.tablesFound && firstReading.salvaged === 0 && firstReading.repaired === 0 && !firstReading.result.problems?.length;
+        return whole || control.stoppedBy ? first : await readAsDialects(converter, gathered.files, order, first, { control });
+      } finally {
+        stoppedBy = control.stoppedBy;
+        abandoned = control.abandoned;
+      }
+    });
+  } catch (err) {
+    if (err instanceof SqlEngineLoadError) return ours('while loading its SQL importer', err.cause ?? err, 'importSqlEngineLoadFailed');
+    return ours('while converting the SQL', err);
+  } finally {
+    converter.dispose();
+  }
+  if (readings.size === 0) {
+    if (stoppedBy) return stoppedBeforeATable(stoppedBy, deps.timeLimitMs, { read: gathered, abandoned });
+    return ours('while converting the SQL', new Error('no dialect could convert the scripts'));
+  }
   const best = rankSqlDialectReadings([...readings.values()], detected)[0];
+  // Stopped (cancelled, or the time limit) before any dialect read a table: nothing to import. Once
+  // another dialect read the scripts whole without a table, the time limit hands over to the pick
+  // below, which says why no dialect reads one.
+  if (!best.result.ok && stoppedBy && (stoppedBy === 'cancelled' || withoutStoppedReadings(readings).size === 0)) {
+    return stoppedBeforeATable(stoppedBy, deps.timeLimitMs, { read: gathered, ledger: stoppedReadingOf(readings)?.result.ledger, abandoned });
+  }
+  if (best.result.stopped) logStop(best.result.stopped, best.result.ledger, deps.timeLimitMs);
   // No dialect reads a table: ask which (the step-by-step flow's dialect step, which says why and reports the problems).
   if (!best.result.ok) {
     const why = noDialectReason(readings, detected);
@@ -877,10 +1283,74 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     pickPartitions: async (items, options) => vscode.window.showQuickPick([...items], options),
     readFileStart: (filePath, chars) => readTextStart(filePath, chars),
     fileSize: (filePath) => fileSize(filePath),
-    showInformationMessage: async (message) => vscode.window.showInformationMessage(message),
+    showInformationMessage: async (message, ...items) => vscode.window.showInformationMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
     showLogs: async () => { await vscode.commands.executeCommand(SHOW_LOGS_COMMAND); },
+    withProgress: (title, task) => withDelayedProgress(title, task),
+    openSettings: async (setting) => { await vscode.commands.executeCommand('workbench.action.openSettings', setting); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
+}
+
+/** A reading shorter than this never shows a progress notification. */
+export const PROGRESS_DELAY_MS = 400;
+
+/**
+ * `task` under a cancellable progress notification, shown only once it has
+ * run {@link PROGRESS_DELAY_MS} (a small script reads before it would
+ * flash). The bar follows the largest fraction reported, as a bar cannot go
+ * back; `restart` (the ranking's next dialect reads the scripts from the
+ * start) replaces a notification whose bar has moved with a new, empty one,
+ * so a bar is never full while a reading still runs.
+ */
+export function withDelayedProgress<T>(
+  title: string,
+  task: (progress: SqlProgressReporter, signal: AbortSignal) => Promise<T>,
+  delayMs = PROGRESS_DELAY_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let latest: { message: string; fraction?: number } | undefined;
+  let shown: ((message: string, fraction?: number) => void) | undefined;
+  /** Ends the notification on show, and whether its bar had moved. */
+  let close: (() => void) | undefined;
+  let moved = false;
+  let done = false;
+  const show = (): void => {
+    void vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title, cancellable: true },
+      (progress, token) => {
+        token.onCancellationRequested(() => controller.abort());
+        let percent = 0;
+        moved = false;
+        shown = (message, fraction) => {
+          const next = fraction === undefined ? percent : Math.max(percent, Math.min(100, Math.round(fraction * 100)));
+          progress.report({ message, ...(next > percent ? { increment: next - percent } : {}) });
+          if (next > percent) moved = true;
+          percent = next;
+        };
+        if (latest) shown(latest.message, latest.fraction);
+        const closed = new Promise<undefined>((resolve) => { close = () => resolve(undefined); });
+        return Promise.race([work.then(() => undefined, () => undefined), closed]);
+      },
+    );
+  };
+  const work = task({
+    report: (message, fraction) => {
+      latest = { message, ...(fraction !== undefined ? { fraction } : {}) };
+      shown?.(message, fraction);
+    },
+    restart: () => {
+      latest = undefined;
+      if (!shown || !moved || done) return;
+      shown = undefined;
+      close?.();
+      show();
+    },
+  }, controller.signal);
+  const timer = setTimeout(() => {
+    if (!done) show();
+  }, delayMs);
+  return work.finally(() => { done = true; clearTimeout(timer); });
 }

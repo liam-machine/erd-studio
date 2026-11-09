@@ -168,7 +168,7 @@ import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFrom
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
 import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
-import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, type ImportSqlDdlDeps } from './commands/importSqlDdl';
+import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, sqlImportTimeLimitMs, type ImportSqlDdlDeps } from './commands/importSqlDdl';
 import { sqlDialectOfImportArg } from './services/sqlDdlImport';
 import {
   IMPORT_GUIDE_COMMAND,
@@ -179,6 +179,7 @@ import {
 } from './services/importGuide';
 import { ImportGuidePanel } from './providers/ImportGuidePanel';
 import { IMPORT_SEMANTIC_MODEL_COMMAND, importSemanticModel, quickImportSemanticModel, type ImportSemanticModelDeps } from './commands/importSemanticModel';
+import { SHOW_IMPORT_REPORT_COMMAND, showImportReport } from './commands/showImportReport';
 import { recordStartSuggested, runStart } from './commands/start';
 import { OPEN_EXAMPLE_PROJECT_COMMAND, openExampleDraft } from './commands/openExampleProject';
 import { PENDING_EXAMPLE_OPEN_KEY, takePendingExample } from './services/exampleProjects';
@@ -803,6 +804,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showImportGuide',
   'erdStudio.showMeAround',
   'erdStudio.customiseFields',
+  'erdStudio.showImportReport',
 ]);
 
 /**
@@ -1358,6 +1360,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       () => draftDetailsOpened(),
       // The crash screen's Send Feedback: the canvas-less flow (a draft tab is no canvas).
       (prefill) => vscode.commands.executeCommand('erdStudio.reportBug', prefill),
+      // The banner's Show Import Report: the import's report (in memory, read-only).
+      (reportId?: number) => (reportId === undefined
+        ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND)
+        : vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId)),
     )),
     {
       // The first draft's quality flags, counted off the onboarding trail.
@@ -2884,6 +2890,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     extensionPath: context.extensionPath,
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterNewSubjectArea,
+    timeLimitMs: sqlImportTimeLimitMs(),
     ...(draft ? { draft } : {}),
   });
   const semanticModelDeps = (draft?: ImportDraftOptions): ImportSemanticModelDeps => ({
@@ -3726,6 +3733,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       const deps = semanticModelDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
       await (isQuickImportArg(arg) ? quickImportSemanticModel : importSemanticModel)(deps);
     }),
+    // Show Import Report: the last import's ledger, grouped and counted, read-only
+    // (src/services/importReport.ts). Linked from the draft's banner, the toast
+    // after a Keep that left tables out and the imports' failure messages.
+    vscode.commands.registerCommand(SHOW_IMPORT_REPORT_COMMAND, (arg?: unknown) => showImportReport(arg)),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
       async (layerArg?: Layer | { type: 'layer'; layer: Layer }) => {

@@ -51,6 +51,8 @@ import {
 } from '../services/importSources';
 import { log } from '../services/logger';
 import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
+import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL, problemLedger } from '../services/importReport';
+import { recordImportReport } from '../services/importReportStore';
 import {
   decodeSemanticModelFile,
   findSemanticModels,
@@ -63,6 +65,7 @@ import {
 } from '../services/semanticModelImport';
 import { telemetry } from '../services/telemetryService';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, type ImportInputLimit } from '../services/importTelemetry';
+import { recordImportOutcome } from '../services/importOutcomeTelemetry';
 import type { TelemetryFeature } from '../services/telemetryPayload';
 import {
   IMPORT_TITLES,
@@ -116,9 +119,11 @@ export interface ImportSemanticModelUi {
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   openFileAt(filePath: string, line?: number): Promise<void>;
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Runs Show Import Report (`erdStudio.showImportReport`) for import `reportId`. Absent: no such button. */
+  showImportReport?(reportId?: number): Promise<void>;
 }
 
-export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin'> {
+export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
   modelUi?: ImportSemanticModelUi;
   /** The Import DBML half (layer, name, dry run, open). */
   ui?: ImportDbmlUi;
@@ -147,8 +152,17 @@ export async function importSemanticModel(
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
   };
+  /**
+   * The model brought nothing in (`importOutcomeSemanticModelFail`). A success
+   * is counted by Import DBML's flow, once its plan is ready; quiet, the draft's
+   * early end is `draftDrop*` instead.
+   */
+  const failed = (): void => {
+    if (!quiet) recordImportOutcome((key) => telemetry.featureQuiet(key), { importer: 'powerbi', outcome: 'failed' });
+  };
   /** The model does not import: `importSemanticModelInvalid` and why (`reason`); quiet, the draft is dropped as unreadable. */
   const invalid = (message: string, actions: ErrorActions = {}, reason?: TelemetryFeature): undefined => {
+    failed();
     if (quiet) dropQuietly(deps.draft, 'unreadable');
     else {
       telemetry.feature('importSemanticModelInvalid');
@@ -159,6 +173,7 @@ export async function importSemanticModel(
   };
   /** The input could not be taken in (too many files, too much text, a file that does not read). */
   const limited = (limit: ImportInputLimit): void => {
+    failed();
     if (quiet) dropQuietly(deps.draft, 'unreadable');
     else telemetry.feature(IMPORT_LIMIT_FEATURES[limit]);
   };
@@ -279,15 +294,29 @@ export async function importSemanticModel(
     read = readSemanticModel(files);
     if (!read.ok) {
       const first = read.problems.find((p) => fullOf.has(p.file));
+      // The report lists every problem with its file and line (the message names the first few).
+      const reported = !quiet && ui.showImportReport !== undefined;
+      const reportId = !reported ? undefined : recordImportReport({
+        source: 'semanticModel',
+        title: TITLE,
+        from: `from the semantic model ${entry.name}`,
+        status: 'failed',
+        ledger: problemLedger(read.problems, 'file', 'model file'),
+        files: modelFiles(entry.files, fullOf),
+      });
       return invalid(
         describeImportProblems(TITLE, read.problems),
-        first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {},
+        {
+          ...(first ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(fullOf.get(first.file)!, first.line) } : {}),
+          ...(reportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(reportId) } : {}),
+        },
         SEMANTIC_MODEL_PARSE_FEATURES[entry.kind],
       );
     }
     converted = semanticModelToDbml(read.model);
   } catch (err) {
     telemetry.error('importSemanticModelFailed');
+    failed();
     const doing = 'while converting the semantic model';
     log.error(`[ERD Studio] ${TITLE} failed ${doing}:`, err);
     showError(oursMessage(TITLE, doing, 'nothing was changed'), {
@@ -316,6 +345,8 @@ export async function importSemanticModel(
       notes: [...(renameNote ? [renameNote] : []), ...warnings],
       skipped: semanticModelSkippedSummary(converted.skippedCounts),
       ledger: converted.ledger ?? [],
+      // The model's files, by the names the ledger gives them: Show Import Report opens them at a line.
+      sourceFiles: modelFiles(entry.files, fullOf),
     },
   };
   if (!quick) return importDbml(importDeps, { filePath });
@@ -324,6 +355,11 @@ export async function importSemanticModel(
     ...importDeps,
     changeOptions: ({ layer, name }) => importDbml({ ...importDeps, ...changeOptionsDraft(importDeps.draft) }, { filePath, preferredLayer: layer, name }),
   }, { filePath, quick: true });
+}
+
+/** The model's own files, by the path the reader names them (the ledger's `where.file`) → full path. */
+function modelFiles(files: readonly string[], fullOf: ReadonlyMap<string, string>): Record<string, string> {
+  return Object.fromEntries(files.flatMap((f) => (fullOf.has(f) ? [[f, fullOf.get(f)!]] : [])));
 }
 
 /**
@@ -501,5 +537,6 @@ export function vscodeImportSemanticModelUi(): ImportSemanticModelUi {
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
   };
 }

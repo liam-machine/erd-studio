@@ -1,7 +1,8 @@
 /**
  * The banner across the top of the preview (docs/dev/draft-first.md §2.1):
  * the headline and detail (final text from the host), the notice line, the
- * Change options… link and the notes count with Show details, the switcher,
+ * Change options… link, the notes count with Show details and the Show
+ * Import Report link (an import's draft), the switcher,
  * and the buttons — exactly one primary (`banner.primary`), the starts the
  * banner shows beside it, Keep as a quiet button when it is not the primary,
  * More ways to start ▾ for the rest, and Discard.
@@ -10,7 +11,7 @@
 import type { DraftOtherStart, DraftView } from '../../src/types/draft';
 import { ScopeSwitcher } from './ScopeSwitcher';
 import { OtherStartsMenu } from './OtherStartsMenu';
-import { CHANGE_OPTIONS, DISCARD, SHOW_DETAILS, notesLine } from '../lib/wording';
+import { CHANGE_OPTIONS, DISCARD, SHOW_DETAILS, SHOW_IMPORT_REPORT, notesLine } from '../lib/wording';
 import { GUIDE_TARGETS } from '../../src/types/onboardingGuide';
 
 export interface DraftBannerProps {
@@ -27,10 +28,12 @@ export interface DraftBannerProps {
   onOtherStart(start: DraftOtherStart): void;
   onScope(scopeId: string): void;
   onShowDetails(): void;
+  /** The banner's Show Import Report link (only drawn when `banner.importReport`). */
+  onImportReport(): void;
 }
 
 export function DraftBanner({
-  view, notice, status, busy, onKeep, onChangeOptions, onDiscard, onOtherStart, onScope, onShowDetails,
+  view, notice, status, busy, onKeep, onChangeOptions, onDiscard, onOtherStart, onScope, onShowDetails, onImportReport,
 }: DraftBannerProps) {
   const { banner, otherStarts, summary } = view;
   const labelOf = (id: DraftOtherStart) => otherStarts.find((s) => s.id === id)?.label;
@@ -44,7 +47,8 @@ export function DraftBanner({
   const inMenu = otherStarts.filter((s) => s.id !== primaryStart && !shown.includes(s.id));
   const counts = notesLine(summary.notes, summary.leftOut);
   const hasDetails = view.details.length > 0;
-  const showSecondLine = banner.changeOptions || counts !== '' || hasDetails;
+  const importReport = banner.importReport === true;
+  const showSecondLine = banner.changeOptions || counts !== '' || hasDetails || importReport;
 
   return (
     <header className="draft-banner">
@@ -65,6 +69,14 @@ export function DraftBanner({
             {hasDetails && (
               <button type="button" className="draft-banner__link" onClick={onShowDetails}>
                 {SHOW_DETAILS}
+              </button>
+            )}
+            {importReport && (banner.changeOptions || counts !== '' || hasDetails) && (
+              <span className="draft-banner__separator" aria-hidden="true"> · </span>
+            )}
+            {importReport && (
+              <button type="button" className="draft-banner__link" onClick={onImportReport}>
+                {SHOW_IMPORT_REPORT}
               </button>
             )}
           </p>
