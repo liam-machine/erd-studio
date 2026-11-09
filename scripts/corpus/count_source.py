@@ -55,6 +55,8 @@ except ImportError:
 
 logging.getLogger('sqlglot').setLevel(logging.ERROR)
 HERE = os.path.dirname(os.path.abspath(__file__))
+BACKSLASH_DIALECTS = ('mysql', 'databricks', 'hive', 'bigquery')
+
 SQLGLOT_DIALECT = {
     'postgres': 'postgres', 'mysql': 'mysql', 'sqlserver': 'tsql', 'oracle': 'oracle', 'bigquery': 'bigquery',
     'redshift': 'redshift', 'sqlite': 'sqlite', 'snowflake': 'snowflake', 'databricks': 'databricks', 'ansi': 'postgres',
@@ -246,9 +248,10 @@ class Model:
         return self.tables[k]
 
     def create(self, name, schema, where):
-        """A CREATE TABLE: the table, new, and its key. Created again in the same schema (a dump's
-        DROP/CREATE, a migration), the later one counts; a table of the same name in another schema
-        is another table, kept beside it under schema.name."""
+        """A CREATE TABLE: the table, new, and its key. Created again in the same schema (CREATE OR
+        REPLACE; the callers leave out a plain CREATE of a table still defined, which the engine refuses),
+        the later one counts; a table of the same name in another schema is another table, kept beside
+        it under schema.name."""
         k = name.lower()
         old = self.tables.get(k)
         if old is not None and schema and old.get('schema') and old['schema'].lower() != schema.lower():
@@ -450,8 +453,9 @@ def on_create_table(m, e, dialect, where, written=None):
                 return
             if isinstance(p, exp.SchemaCommentProperty):
                 pass
-    # CREATE TABLE IF NOT EXISTS of a table already defined does nothing: the first definition stays.
-    if e.args.get('exists') and m.defined(name, schema_of(tbl)):
+    # CREATE TABLE IF NOT EXISTS of a table already defined does nothing, and a plain CREATE TABLE of one is
+    # refused: the first definition stays. Only CREATE OR REPLACE (or a DROP before it) replaces it.
+    if not e.args.get('replace') and m.defined(name, schema_of(tbl)):
         return
     t, key = m.create(name, schema_of(tbl), where)
     if not isinstance(target, exp.Schema):
@@ -625,7 +629,7 @@ def structural_create(m, sql, where):
         if pm:
             m.parent[name.lower()] = idents(pm.group(1))[-1]
         return True
-    if re.search(r'\bTABLE\s+IF\s+NOT\s+EXISTS\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
+    if not re.search(r'\bOR\s+(?:REPLACE|REFRESH)\b', s[:mm.start(1)], re.I) and m.defined(name, parts[-2] if len(parts) > 1 else None):
         return True
     t, key = m.create(name, parts[-2] if len(parts) > 1 else None, where)
     if mm.group(2) != '(':
@@ -803,6 +807,15 @@ def count_sql(entry, base):
                     # A comment made before the rename is on the renamed table (one made after names the new one).
                     m.comments[:] = [(new if c[0].lower() == target.lower() else c[0],) + tuple(c[1:]) for c in m.comments]
                     return
+                # RENAME COLUMN a TO b: the column keeps its place, type and flags under its new name.
+                rc = re.match(r'\s*RENAME\s+COLUMN\s+(' + IDENT + r')\s+TO\s+(' + IDENT + r')\s*;?\s*$', rest, re.I)
+                if rc:
+                    old_c, new_c = unquote(rc.group(1)), unquote(rc.group(2))
+                    for c in t['columns']:
+                        if c[0].lower() == old_c.lower():
+                            c[0] = new_c
+                    t['pk'] = [new_c if p.lower() == old_c.lower() else p for p in t['pk']]
+                    return
                 drops = re.findall(r'DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(' + IDENT + r')', rest, re.I)
                 drops = [unquote(d) for d in drops if unquote(d).upper() not in ('CONSTRAINT', 'INDEX', 'DEFAULT', 'NOT', 'PRIMARY', 'FOREIGN')]
                 if drops and not re.search(r'\bADD\b', rest, re.I):
@@ -895,6 +908,9 @@ def finish_sql(entry, m, stats):
         pkl = {c.lower() for c in pk}
         cols = []
         for name, typ, flags, desc in t['columns']:
+            # Spark, Hive, MySQL and BigQuery read a backslash escape in a string: `'a \" b'` holds a quote.
+            if desc and entry.get('dialect') in BACKSLASH_DIALECTS:
+                desc = re.sub(r'\\(["\'])', r'\1', desc)
             fl = ''.join(sorted(set(flags + ('P' if name.lower() in pkl else '') + ('N' if name.lower() in pkl else '')), key='PNUC'.index))
             col = [name, typ or '', fl]
             if desc:
