@@ -168,7 +168,7 @@ import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFrom
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
 import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
-import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, type ImportSqlDdlDeps } from './commands/importSqlDdl';
+import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, sqlImportTimeLimitMs, type ImportSqlDdlDeps } from './commands/importSqlDdl';
 import { sqlDialectOfImportArg } from './services/sqlDdlImport';
 import {
   IMPORT_GUIDE_COMMAND,
@@ -2884,6 +2884,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     extensionPath: context.extensionPath,
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterNewSubjectArea,
+    timeLimitMs: sqlImportTimeLimitMs(),
     ...(draft ? { draft } : {}),
   });
   const semanticModelDeps = (draft?: ImportDraftOptions): ImportSemanticModelDeps => ({
