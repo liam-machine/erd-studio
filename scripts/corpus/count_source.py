@@ -696,6 +696,8 @@ def count_sql(entry, base):
                     m.tables[new.lower()] = t
                     m.order[i] = new.lower()
                     m.fks[:] = [(new if fk[0].lower() == target.lower() else fk[0],) + fk[1:] for fk in m.fks]
+                    # A comment made before the rename is on the renamed table (one made after names the new one).
+                    m.comments[:] = [(new if c[0].lower() == target.lower() else c[0],) + tuple(c[1:]) for c in m.comments]
                     return
                 drops = re.findall(r'DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(' + IDENT + r')', rest, re.I)
                 drops = [unquote(d) for d in drops if unquote(d).upper() not in ('CONSTRAINT', 'INDEX', 'DEFAULT', 'NOT', 'PRIMARY', 'FOREIGN')]

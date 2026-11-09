@@ -600,6 +600,15 @@ describe('what DBML cannot say is counted, never dropped silently', () => {
 });
 
 describe('more places a schema says structure', () => {
+  it('a foreign key to a table not in the files names its table as the files leave it (renamed later: Snowplow r1 → r2)', () => {
+    const r = convert('postgres', 'CREATE TABLE atomic.a_1 (root_id char(36) NOT NULL, FOREIGN KEY (root_id) REFERENCES atomic.events (event_id));\n'
+      + 'ALTER TABLE atomic.a_1 RENAME TO a_1_r1;\nCREATE TABLE atomic.a_1 (root_id char(36) NOT NULL, FOREIGN KEY (root_id) REFERENCES atomic.events (event_id));');
+    const lines = r.skipped.filter((l) => l.includes('atomic.events'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('foreign key atomic.a_1_r1(root_id) → atomic.events: that table is not in the files');
+    expect(lines[1]).toContain('foreign key atomic.a_1(root_id) → atomic.events');
+  });
+
   it('CREATE TABLE … AS SELECT CAST(NULL AS type) AS column, with no FROM, is an empty table of those columns (OMOP CDM for Spark)', () => {
     const sql = [
       'CREATE TABLE @cdmDatabaseSchema.person  ',
