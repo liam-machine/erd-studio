@@ -34,6 +34,17 @@ CRLF, a BOM, inline or `ALTER TABLE` / `Ref:` foreign keys, a schema
 qualifier, comments between tokens and at line ends (holding `;`, `(` and
 quotes), TMDL tabs or spaces, TMSL indent.
 
+The SQL writer covers all nine dialects the picker offers. `sqlCaseArb`
+draws the dialect first and then a schema that dialect can write (Oracle's
+and BigQuery's quoted names cannot hold a double quote, so those two get no
+embedded-quote names). Each dialect is written as its own tools write it:
+Oracle `VARCHAR2(100 BYTE)` / `NUMBER(10)` types with `TABLESPACE` and
+segment clauses; BigQuery backtick names, `INT64` / `STRING` types,
+`OPTIONS(description=…)` comments, keys marked `NOT ENFORCED`, `CLUSTER BY`
+and `#` comments, no `UNIQUE`; Redshift `ENCODE`, `DISTKEY`, `DISTSTYLE`
+and `SORTKEY`; SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`, `WITHOUT ROWID`,
+inline foreign keys only and no schema qualifier.
+
 `breaks.ts` then applies one break inside one table: truncate the file, drop
 a comma, a bracket or a quote, an unknown type, a reserved word as a bare
 name, the table defined twice, a very long statement (up to 900 columns per

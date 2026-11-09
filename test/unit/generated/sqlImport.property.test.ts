@@ -35,8 +35,8 @@ import {
   locationViolations,
   timeRatio,
 } from './invariants';
-import { allPlain, BIG_RUN, copies, params, runs, schemaArb, schemaTruth, timeout, type GSchema } from './schemaArbitraries';
-import { sqlKit, sqlStyleArb, writeSql, type SqlStyle } from './sqlWriter';
+import { allPlain, BIG_RUN, copies, params, runs, schemaTruth, timeout, type GSchema } from './schemaArbitraries';
+import { NO_UNIQUE, sqlCaseArb, sqlKit, sqlSchemaArb, sqlStyleArb, writeSql, type SqlStyle } from './sqlWriter';
 
 type Converted = Extract<SqlDdlToDbmlResult, { ok: true }>;
 
@@ -49,8 +49,6 @@ const namesOf = (schema: GSchema, extra: readonly string[] = []): string[] => [
   ...extra,
 ];
 
-const dialectArb = fc.constantFrom(...SQL_DIALECTS);
-
 /** A short description of an input for a failure message (the file itself, cut). */
 const show = (files: SqlDdlFile[], dialect: SqlDialect, extra = ''): string =>
   `${dialect}${extra}\n${files.map((f) => `--- ${f.name}\n${f.text.length > 4000 ? `${f.text.slice(0, 4000)}…` : f.text}`).join('\n')}`;
@@ -58,7 +56,7 @@ const show = (files: SqlDdlFile[], dialect: SqlDialect, extra = ''): string =>
 describe('SQL import (generated): valid input imports whole', () => {
   it('every table, column, key and foreign key, in every dialect, however it is written', () => {
     fc.assert(
-      fc.property(schemaArb(), dialectArb, sqlStyleArb(), (schema, dialect, style) => {
+      fc.property(sqlCaseArb(), sqlStyleArb(), ([schema, dialect], style) => {
         const { files } = writeSql(schema, dialect, style);
         const run = runSqlImport(files, dialect);
         const truth = schemaTruth(schema);
@@ -81,7 +79,7 @@ describe('SQL import (generated): valid input imports whole', () => {
           const got = draft.tables.map((t) => ({ name: t.name, columns: (t.columns ?? []).map((c) => c.name), pk: (t.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name).sort() })).sort((a, b) => a.name.localeCompare(b.name));
           expect(got, where).toEqual(want);
           // A foreign key over unique columns (its own UNIQUE, or a unique key over a composite's) is one-to-one.
-          const wantLinks = schema.tables.flatMap((t) => t.fks.flatMap((fk) => fk.columns.map((c, k) => `${t.name}.${c}>${fk.table}.${fk.references[k]} ${fk.oneToOne && dialect !== 'databricks' ? '1:1' : 'n:1'}`))).sort();
+          const wantLinks = schema.tables.flatMap((t) => t.fks.flatMap((fk) => fk.columns.map((c, k) => `${t.name}.${c}>${fk.table}.${fk.references[k]} ${fk.oneToOne && !NO_UNIQUE.has(dialect) ? '1:1' : 'n:1'}`))).sort();
           const gotLinks = draft.relationships.map((l) => (l.cardinality === 'one-to-many'
             ? `${l.toModel}.${l.toColumn}>${l.fromModel}.${l.fromColumn} n:1`
             : `${l.fromModel}.${l.fromColumn}>${l.toModel}.${l.toColumn} ${l.cardinality === 'one-to-one' ? '1:1' : 'n:1'}`)).sort();
@@ -97,7 +95,7 @@ describe('SQL import (generated): valid input imports whole', () => {
 describe('SQL import (generated): broken input is imported or reported', () => {
   it('never throws; tables found = imported + reported; untouched tables import; every problem located; no long echo', () => {
     fc.assert(
-      fc.property(schemaArb({ maxTables: 4, maxColumns: 4 }), dialectArb, sqlStyleArb(), breakArb(), (schema, dialect, style, brk) => {
+      fc.property(sqlCaseArb({ maxTables: 4, maxColumns: 4 }), sqlStyleArb(), breakArb(), ([schema, dialect], style, brk) => {
         const written = writeSql(schema, dialect, style);
         const file = written.files[0];
         const broken: Broken = applyBreak(file.text, written.spans, brk, sqlKit(dialect), style.eol);
@@ -152,11 +150,11 @@ describe('SQL import (generated): broken input is imported or reported', () => {
 
 describe('SQL import (generated): time grows in line with size', () => {
   const style: SqlStyle = { quote: 'needed', keywordCase: 'upper', eol: '\n', bom: false, fkStyle: 'inline', inlinePk: false, noise: true, seed: 7 };
-  const fixed = schemaArb({ minTables: 4, maxTables: 4, maxColumns: 6, kinds: { reserved: 0, unicode: 0, spaced: 0, mixedCase: 0, huge: 0 } });
+  const fixed = (dialect: SqlDialect) => sqlSchemaArb(dialect, { minTables: 4, maxTables: 4, maxColumns: 6, kinds: { reserved: 0, unicode: 0, spaced: 0, mixedCase: 0, huge: 0 } });
   const K = 8;
 
   it.each(SQL_DIALECTS)('%s: n and 8·n tables (valid, and one break in every table)', (dialect) => {
-    const [schema] = fc.sample(fixed, { seed: 11, numRuns: 1 });
+    const [schema] = fc.sample(fixed(dialect), { seed: 11, numRuns: 1 });
     const n = BIG_RUN ? 6 : 2;
     const small = writeSql(copies(schema, n), dialect, style).files;
     const big = writeSql(copies(schema, n * K), dialect, style).files;
@@ -164,7 +162,7 @@ describe('SQL import (generated): time grows in line with size', () => {
     // Generous: 4× worse than linear is still "in line" under load; a quadratic step would be ~8×.
     expect(t.ratio, JSON.stringify(t)).toBeLessThan(4);
     // Broken: an unknown type in every table (each goes down the repair ladder).
-    const breakAll = (files: SqlDdlFile[]): SqlDdlFile[] => files.map((f) => ({ ...f, text: f.text.replace(/ (integer|int|bigint|number\(38,0\)) /g, ' frobnicator(3) ') }));
+    const breakAll = (files: SqlDdlFile[]): SqlDdlFile[] => files.map((f) => ({ ...f, text: f.text.replace(/ (integer|int|bigint|int64|number\(38,0\)|number\(1?0\)|number\(19\)) /gi, ' frobnicator(3) ') }));
     const tb = timeRatio(() => sqlDdlToDbml({ files: breakAll(small), dialect }), () => sqlDdlToDbml({ files: breakAll(big), dialect }), K, { tries: 1 });
     expect(tb.ratio, JSON.stringify(tb)).toBeLessThan(4);
   }, timeout(60_000));

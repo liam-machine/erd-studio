@@ -25,10 +25,10 @@ import { readDbml } from '../../../src/services/dbmlImportParse';
 import { importDbmlFlow, loadTruth, SAMPLES_ROOT } from '../realWorldScorecard';
 import { gatherSqlFiles } from '../../../src/commands/importSqlDdl';
 import { walkSemanticModelFiles } from '../../../src/commands/importSemanticModel';
-import { detectSqlDialect, SQL_DIALECTS } from '../../../src/services/sqlDdlImport';
+import { detectSqlDialect } from '../../../src/services/sqlDdlImport';
 import { sqlDdlToDbml } from '../../../src/services/sqlImportEngine';
 import { findSemanticModels, readSemanticModel, semanticModelToDbml } from '../../../src/services/semanticModelImport';
-import { writeSql, sqlStyleArb } from './sqlWriter';
+import { sqlCaseArb, sqlStyleArb, writeSql } from './sqlWriter';
 import { applyBreak, breakArb, headersIn } from './breaks';
 import { dbmlKit, dbmlStyleArb, writeDbml } from './dbmlWriter';
 import { roundTripDbml } from './dbmlRoundTrip';
@@ -159,7 +159,7 @@ describe('DBML round trip: committed samples and other tools\' DBML', () => {
 
 describe('DBML round trip: the DBML the other importers convert to', () => {
   it('generated SQL, converted in every dialect', () => {
-    fc.assert(fc.property(schemaArb({ maxTables: 4 }), fc.constantFrom(...SQL_DIALECTS), sqlStyleArb(), (schema, dialect, style) => {
+    fc.assert(fc.property(sqlCaseArb({ maxTables: 4 }), sqlStyleArb(), ([schema, dialect], style) => {
       const converted = sqlDdlToDbml({ files: writeSql(schema, dialect, style).files, dialect });
       if (!converted.ok) throw new Error(JSON.stringify(converted.problems));
       const trip = roundTripDbml(converted.dbml);
