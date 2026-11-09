@@ -836,6 +836,7 @@ const FEATURES = [
   'importCauseCancelled',
   'importCauseTimeLimit',
   'importCauseOther',
+  'draftDropTimeLimit',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

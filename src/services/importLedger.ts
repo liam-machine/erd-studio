@@ -283,13 +283,16 @@ export function ledgerLeftOut(entries: readonly LedgerEntry[], opts: { max?: num
 /**
  * One output-log line per entry (`Import SQL DDL: film.sql line 12: column
  * film.rating: lost (unknownType): VECTOR — kept as text`). Skipped entries
- * are logged only when they have a line (the skipped summary counts the rest).
+ * are logged only when they have a line (SQL's skipped summary counts the
+ * rest), unless `everySkipped`: an importer with no such summary (a dbt
+ * draw, Import DBML's own plan) logs every one, so the log holds every line
+ * of the import report.
  */
-export function ledgerLogLines(entries: readonly LedgerEntry[], title: string): string[] {
+export function ledgerLogLines(entries: readonly LedgerEntry[], title: string, opts: { everySkipped?: boolean } = {}): string[] {
   const lines: string[] = [];
   const order = (e: LedgerEntry): number => OUTCOMES.indexOf(e.outcome);
   for (const e of [...entries].sort((a, b) => order(a) - order(b))) {
-    if (e.outcome === 'skipped' && e.where?.line === undefined) continue;
+    if (e.outcome === 'skipped' && e.where?.line === undefined && !opts.everySkipped) continue;
     const at = e.where?.file ? `${ledgerText(e.where.file, 200)}${e.where.line !== undefined ? ` line ${e.where.line}` : ''}: ` : '';
     const name = nameOf(e.where);
     const count = e.count > 1 ? `${e.count} × ` : '';

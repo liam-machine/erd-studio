@@ -85,7 +85,7 @@ import type { YmlData } from '../types/ymlData';
 import { log } from '../services/logger';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 import { countLinks } from '../services/dbmlImport';
-import { createLedger, type LedgerEntry } from '../services/importLedger';
+import { createLedger, ledgerLogLines, type LedgerEntry } from '../services/importLedger';
 import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL } from '../services/importReport';
 import { recordImportReport, updateImportReport } from '../services/importReportStore';
 
@@ -346,7 +346,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
     }
     telemetry.feature('drawNothingDrawable');
     countDbtOutcome(run, { outcome: 'failed', ledger: draft.ledger });
-    void vscode.window.showWarningMessage(`${TITLE}: none of the chosen models could be drawn. ${describeSkipped(draft.skipped)}`);
+    // The report says why each model was left out (the message names the first few), and the log has the same lines.
+    const failedLedger = dbtReportLedger(draft);
+    const failedReportId = recordImportReport({ source: 'dbt', title: TITLE, from: `from ${pick.scope.label}`, status: 'failed', ledger: failedLedger });
+    for (const line of ledgerLogLines(failedLedger, TITLE, { everySkipped: true })) log.info(`[ERD Studio] ${line}`);
+    void Promise.resolve(vscode.window.showWarningMessage(`${TITLE}: none of the chosen models could be drawn. ${describeSkipped(draft.skipped)}`, SHOW_IMPORT_REPORT_LABEL))
+      .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, failedReportId) : undefined))
+      .then(undefined, (err: unknown) => log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
     return undefined;
   }
 
@@ -451,14 +457,17 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
   countDbtOutcome(run, { ledger: draft.ledger });
 
   // The report of this draw (Show Import Report): the draft's ledger and the models it left out, in memory only.
+  const reportLedger = dbtReportLedger(draft);
   const reportId = recordImportReport({
     source: 'dbt',
     title: TITLE,
     from: `from ${pick.scope.label}`,
     status: 'draft',
     imported: { tables: draft.modelNames.length, relationships: countLinks(draft.relationships) },
-    ledger: dbtReportLedger(draft),
+    ledger: reportLedger,
   });
+  // Every line of the report in the log too (its page says Show Logs has them, the models over the cap included).
+  for (const line of ledgerLogLines(reportLedger, TITLE, { everySkipped: true })) log.info(`[ERD Studio] ${line}`);
   const notKept = (): void => { updateImportReport(reportId, { status: 'notKept' }); };
 
   // The draft (§5.2): the diagram as Keep writes it, read-only, before any write.

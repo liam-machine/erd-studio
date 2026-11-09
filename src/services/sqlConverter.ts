@@ -16,9 +16,13 @@
  * Stopping is cooperative: between statements the converter asks whether
  * the import was cancelled or the deadline passed, and what was read so far
  * is the result (`result.stopped`; the unread statements are in its ledger,
- * file and line). Only when a single statement keeps a worker busy past
+ * file and line). Once the reading has stopped or ended (the worker says
+ * `stopping` or `read`), converting what was read is never cut short: a
+ * deadline or Cancel after that changes nothing. Only when a single step of
+ * the reading (one statement, or preparing a file) keeps a worker busy past
  * {@link STOP_GRACE_MS} after the stop is the worker ended, rejecting with
- * {@link SqlConvertAbandonedError} (nothing read).
+ * {@link SqlConvertAbandonedError}: what it had read is lost (the error
+ * carries how far it had got).
  *
  * No `vscode` (the CLI may bundle it): the caller passes the extension path
  * and an optional log.
@@ -68,9 +72,13 @@ export class SqlEngineLoadError extends Error {
   }
 }
 
-/** A worker that did not stop within {@link STOP_GRACE_MS} of a cancel or the time limit was ended: nothing was read. */
+/**
+ * A worker that did not stop within {@link STOP_GRACE_MS} of a cancel or the
+ * time limit was ended: nothing it read is kept. `progress`: how far it had
+ * got (its last progress message), so the import can say what was lost.
+ */
 export class SqlConvertAbandonedError extends Error {
-  constructor(readonly reason: SqlStopReason) {
+  constructor(readonly reason: SqlStopReason, readonly progress?: SqlConvertProgress) {
     super(reason === 'cancelled'
       ? 'The SQL conversion did not stop when it was cancelled, so it was ended.'
       : 'The SQL conversion did not stop at its time limit, so it was ended.');
@@ -203,8 +211,10 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
       return new Promise<SqlDdlToDbmlResult>((resolve, reject) => {
         let grace: ReturnType<typeof setTimeout> | undefined;
         let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-        /** The worker said it stopped reading: what is left is converting what it read, never cut short. */
+        /** The worker said its reading stopped or ended: what is left is converting what it read, never cut short. */
         let stopping = false;
+        /** How far the reading had got, for an abandoned worker's error. */
+        let last: SqlConvertProgress | undefined;
         const settle = (): void => {
           clearTimeout(grace);
           clearTimeout(deadlineTimer);
@@ -219,7 +229,7 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
           grace = setTimeout(() => {
             settle();
             end(w);
-            reject(new SqlConvertAbandonedError(reason));
+            reject(new SqlConvertAbandonedError(reason, last));
           }, graceMs);
         };
         const onAbort = (): void => {
@@ -238,8 +248,8 @@ export function workerSqlConverter(options: WorkerSqlConverterOptions): SqlConve
         };
         const onMessage = (msg: SqlWorkerMessage): void => {
           if (msg.id !== id) return;
-          if (msg.type === 'progress') { control.onProgress?.(msg.progress); return; }
-          if (msg.type === 'stopping') {
+          if (msg.type === 'progress') { last = msg.progress; control.onProgress?.(msg.progress); return; }
+          if (msg.type === 'stopping' || msg.type === 'read') {
             stopping = true;
             clearTimeout(grace);
             grace = undefined;

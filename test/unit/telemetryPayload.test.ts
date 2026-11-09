@@ -677,7 +677,9 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.indexOf('crashFallbackReload')).toBe(FEATURES.indexOf('handlerFileProblem') + 1);
     // The import outcome keys follow the crash screen's, as one run (importOutcomeTelemetry.test.ts holds their order).
     expect(FEATURES.indexOf('importOutcomeSqlDdlClean')).toBe(FEATURES.indexOf('crashFallbackFeedback') + 1);
-    expect(FEATURES.at(-1)).toBe('importCauseOther');
+    // The automatic draft's time-limit drop is appended after them.
+    expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
+    expect(FEATURES.at(-1)).toBe('draftDropTimeLimit');
     expect(ERROR_CODES.at(-1)).toBe('loggedErrorOther');
     // Liam's decision for B6: no table-count bucket is ever a key.
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);

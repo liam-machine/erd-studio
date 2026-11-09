@@ -108,6 +108,56 @@ describe('a conversion stopped early', () => {
     expect('stopped' in watched).toBe(false);
   });
 
+  it('says once that the reading ended, after the last statement, whether or not it stopped (and before converting what it read)', () => {
+    const { text } = tables(0, 6);
+    for (const shouldStop of [undefined, stopAt(3).shouldStop, stopAt(0).shouldStop]) {
+      const events: string[] = [];
+      sqlDdlToDbml({
+        files: [{ name: 'a.sql', text }, { name: 'b.sql', text: tables(6, 2).text }],
+        dialect: 'postgres',
+        options: {
+          ...(shouldStop ? { shouldStop: () => { const r = shouldStop(); events.push(r ? 'stop' : 'ask'); return r; } } : {}),
+          onProgress: () => { events.push('progress'); },
+          onReadingEnd: () => { events.push('end'); },
+        },
+      });
+      expect(events.filter((e) => e === 'end')).toHaveLength(1);
+      expect(events[events.length - 1]).toBe('end');
+    }
+  });
+
+  it('counts as found only the tables a full reading would: never an IF NOT EXISTS of a table already defined, or a #temp table', () => {
+    const cases: Array<{ dialect: 'postgres' | 'sqlserver'; files: SqlDdlFile[] }> = [
+      {
+        // An idempotent migration: the second CREATE of users does nothing.
+        dialect: 'postgres',
+        files: [
+          { name: '001.sql', text: 'CREATE TABLE users (id INTEGER PRIMARY KEY);\nCREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER);\n' },
+          { name: '002.sql', text: 'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);\nCREATE TABLE IF NOT EXISTS items (id INTEGER);\nCREATE TABLE IF NOT EXISTS Items (id INTEGER);\n' },
+        ],
+      },
+      {
+        // SQL Server scratch tables are never the design.
+        dialect: 'sqlserver',
+        files: [
+          { name: 'a.sql', text: 'CREATE TABLE dbo.users (id INT PRIMARY KEY);\nCREATE TABLE #staging (id INT);\nCREATE TABLE ##shared (id INT);\nCREATE TABLE dbo.orders (id INT);\n' },
+        ],
+      },
+    ];
+    for (const { dialect, files } of cases) {
+      const full = sqlDdlToDbml({ files, dialect });
+      const found = full.ok ? full.tablesFound : -1;
+      const statements = files.reduce((n, f) => n + f.text.split(';').length - 1, 0);
+      for (let at = 0; at < statements; at++) {
+        const stopped = sqlDdlToDbml({ files, dialect, options: { shouldStop: stopAt(at).shouldStop } });
+        // However early it stops, it finds what a full reading finds: read + reported = found.
+        expect({ at, found: stopped.tablesFound }).toEqual({ at, found });
+        const read = stopped.ok ? stopped.tableCount : 0;
+        expect(read + (stopped.stopped?.tablesUnread ?? 0)).toBe(found);
+      }
+    }
+  });
+
   it('reports progress after every statement, statements and tables read rising to the whole text', () => {
     const one = tables(0, 3);
     const two = tables(3, 3);

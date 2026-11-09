@@ -291,6 +291,12 @@ export interface SqlDdlConvertOptions {
    * read is converted as usual and the rest goes into the ledger (`stopped`).
    */
   shouldStop?: () => SqlStopReason | undefined;
+  /**
+   * Called once, when the reading has ended (every statement read, or the
+   * stop recorded): what is left is converting what was read, which is never
+   * stopped (a worker tells its host, so the host never ends it for that).
+   */
+  onReadingEnd?: () => void;
   /** The time limit the caller set (ms), only for the ledger's wording when `shouldStop` says `timeLimit`. */
   timeLimitMs?: number;
 }
@@ -556,15 +562,27 @@ export function countCreateTablesWithColumns(text: string, dialect?: SqlDialect)
   return count;
 }
 
-/** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
-function isCreateTableWithColumns(t: Token[]): boolean {
-  if (upper(t[0]) !== 'CREATE') return false;
+/** Where a `CREATE … TABLE` statement's name starts (after any `IF NOT EXISTS`), or undefined when it is not one. */
+function createTableName(t: Token[]): { at: number; ifNotExists: boolean } | undefined {
+  if (upper(t[0]) !== 'CREATE') return undefined;
   let i = 1;
   while (i < t.length && t[i].kind === 'word' && !CREATE_OBJECT_WORDS.has(upper(t[i]))) i++;
-  if (upper(t[i]) !== 'TABLE') return false;
+  if (upper(t[i]) !== 'TABLE') return undefined;
   i++;
-  if (upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS') i += 3;
-  const name = readName(t, i);
+  const ifNotExists = upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS';
+  return { at: ifNotExists ? i + 3 : i, ifNotExists };
+}
+
+/** SQL Server's `#tmp` / `##global` scratch table name at `i` (never one of the design's tables). */
+function isTempTableName(t: Token[], i: number): boolean {
+  return isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'));
+}
+
+/** Whether a statement is a `CREATE TABLE` with a column list (never a CTAS or `LIKE`): {@link countCreateTablesWithColumns}'s test. */
+function isCreateTableWithColumns(t: Token[]): boolean {
+  const head = createTableName(t);
+  if (!head) return false;
+  const name = readName(t, head.at);
   if (!name || !isPunct(t[name.next], '(')) return false;
   const close = matchParen(t, name.next);
   if (close < 0 || close === name.next + 1) return false;
@@ -887,7 +905,7 @@ class Converter implements ConverterContext {
   private recordUnread(file: string, statements: readonly Statement[]): void {
     const stop = this.stopped;
     if (!stop || statements.length === 0) return;
-    const tables = statements.filter((st) => isCreateTableWithColumns(st.tokens)).length;
+    const tables = this.unreadTables(statements);
     const others = statements.length - tables;
     const where = { file, line: statements[0].line };
     const limit = this.options.timeLimitMs;
@@ -901,6 +919,34 @@ class Converter implements ConverterContext {
     this.tablesFound += tables;
   }
 
+  /** Names of the unread CREATE TABLEs counted so far, so a later `IF NOT EXISTS` of one is not counted again. */
+  private readonly unreadTableNames: string[][] = [];
+
+  /**
+   * How many of `statements` (unread) are tables a full reading would count
+   * in `tablesFound`: a CREATE TABLE with a column list, never a `#temp`
+   * table or an `IF NOT EXISTS` of a table already defined (read, or unread
+   * before it), as {@link readCreateTable} skips both.
+   */
+  private unreadTables(statements: readonly Statement[]): number {
+    let count = 0;
+    for (const st of statements) {
+      const t = st.tokens;
+      if (!isCreateTableWithColumns(t)) continue;
+      const head = createTableName(t)!;
+      if (isTempTableName(t, head.at)) continue;
+      const name = readName(t, head.at);
+      if (!name) continue;
+      const parts = this.qualify(name.parts);
+      const same = (other: readonly string[]): boolean => sameIdent(other[other.length - 1], parts[parts.length - 1])
+        && sameSchema(other.length >= 2 ? other[other.length - 2] : null, parts.length >= 2 ? parts[parts.length - 2] : null, this.dialect);
+      if (head.ifNotExists && (this.findTable(parts) || this.unreadTableNames.some(same))) continue;
+      this.unreadTableNames.push(parts);
+      count++;
+    }
+    return count;
+  }
+
   // -- CREATE TABLE --------------------------------------------------------
 
   readCreateTable(file: string, text: string, st: Statement, at: number): void {
@@ -909,7 +955,7 @@ class Converter implements ConverterContext {
     const ifNotExists = upper(t[i]) === 'IF' && upper(t[i + 1]) === 'NOT' && upper(t[i + 2]) === 'EXISTS';
     if (ifNotExists) i += 3;
     // SQL Server's `#tmp` / `##global` scratch tables (the name reads after its `#`s).
-    if (isPunct(t[i], '#') || (t[i]?.kind === 'word' && t[i].value.startsWith('#'))) { this.skip(file, 'temporary'); return; }
+    if (isTempTableName(t, i)) { this.skip(file, 'temporary'); return; }
     const name = readName(t, i);
     if (!name || !isPunct(t[name.next], '(')) { this.skip(file, 'ctas'); return; }
     // A later migration's CREATE TABLE IF NOT EXISTS of a table already defined does nothing.
@@ -1735,6 +1781,7 @@ function convertFiles(input: SqlDdlToDbmlInput & { options?: SqlDdlConvertOption
     // A file whose statements were only skipped was read: its skipped line says what it held.
     if (read === 0 && !converter.problems.some((p) => p.file === file.name) && !converter.skippedIn(file.name)) unused.push(file.name);
   }
+  input.options?.onReadingEnd?.();
   const fileOrder = input.files.map((f) => f.name);
   const stopped = converter.stopped ? { stopped: converter.stopped } : {};
   if (converter.tables.length === 0) {

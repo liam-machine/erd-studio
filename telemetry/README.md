@@ -450,10 +450,15 @@ import and per day, capped at 100 like every key: it says how many imports
 met that cause, never how many tables did. `Cancelled` and `TimedOut` are
 Import SQL DDL's only (its progress notification's Cancel, and
 `erdStudio.import.timeLimitSeconds`), whether the import then drew the tables
-it had read or nothing; `importCauseCancelled` / `importCauseTimeLimit` mark
-the ones that drew a partial draft (their ledger holds the unread
-statements). The other importers' `Cancelled` / `TimedOut` stay 0: they do
-not read in a worker.
+it had read or nothing. `importCauseCancelled` / `importCauseTimeLimit` come
+with them whenever the stopped import's ledger holds what the stop left
+unread, drawn or not: the statements a stopped reading did not reach, or a
+reading the worker ended because one step did not stop in time (then nothing
+it read was kept). So a cause key never says a partial draft was drawn; count
+those with `importOutcome<Importer>Cancelled` / `TimedOut` beside `draftKept`
+or the draft keys instead. A stop before the reading reached a statement has
+an empty ledger and no cause key. The other importers' `Cancelled` /
+`TimedOut` stay 0: they do not read in a worker.
 
 ### Onboarding funnel (the first five minutes)
 
@@ -1053,6 +1058,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNothingDrawable` — a quiet draft was dropped: nothing it found could be drawn.
 - `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
+- `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
 - `startLookTimeout` — the start screen look at the folder timed out.
 - `startLookGaveUp` — the start screen gave up looking at the folder.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
@@ -1254,7 +1260,7 @@ The area comes from the `[tag]` the error line starts with (a `createLogger` sco
 
 **Import outcomes — how each import ended, by importer and SQL dialect, and the loss-ledger cause classes it met.**
 
-Appended after the launch keys, in this order (`src/services/importOutcomeTelemetry.ts` decides them on the device). Every key is an event count: one per import, never a name, path, statement, message or a count of tables or columns. All of them are counted off the onboarding trail (`featureQuiet`), like the B6 draft flags. `clean`, `repaired` and `partial` are counted once per plan an import builds (its draft, or the dry run without one), whether it is kept or not, the automatic draft's included; never on a redraw of the same draft (Change options… and Try Again build a new plan, so they count again). `Fail` is counted where the source brought nothing in, never for the automatic draft's quiet early end (`draftDrop*`), a project stop (`importStop*`) or a closed picker. `Cancelled` and `TimedOut` come from the SQL import worker's stop (Cancel) and time limit: once with the draft of what it had read (its ledger then holds `problem` entries with the cause `cancelled` / `timeLimit`), or where the import ends when it stopped before it read a table (the automatic draft's time limit stays `draftDropUnreadable`). The example diagram counts nothing. The outcome comes from the import's loss ledger (`importLedger.ts`), the conversion's and the plan's together: a `problem` entry with the cause `timeLimit` is timed out, else one with the cause `cancelled` is cancelled, else any `problem` entry is partial, else a `repaired` entry is repaired, else clean; `lost`, `changed` and `skipped` entries are fidelity notes, counted only by their cause keys. Importer tokens are the other import keys' (`SqlDdl`, `SemanticModel` = Power BI / Fabric, `Dbml`, `Dbt`); `failed` is `Fail`, because a feature key never ends in `Failed`.
+Appended after the launch keys, in this order (`src/services/importOutcomeTelemetry.ts` decides them on the device). Every key is an event count: one per import, never a name, path, statement, message or a count of tables or columns. All of them are counted off the onboarding trail (`featureQuiet`), like the B6 draft flags. `clean`, `repaired` and `partial` are counted once per plan an import builds (its draft, or the dry run without one), whether it is kept or not, the automatic draft's included; never on a redraw of the same draft (Change options… and Try Again build a new plan, so they count again). `Fail` is counted where the source brought nothing in, never for the automatic draft's quiet early end (`draftDrop*`), a project stop (`importStop*`) or a closed picker. `Cancelled` and `TimedOut` come from the SQL import worker's stop (Cancel) and time limit: once with the draft of what it had read (its ledger then holds `problem` entries with the cause `cancelled` / `timeLimit`), or where the import ends when it stopped before it read a table (the automatic draft's time limit is `draftDropTimeLimit` instead). The example diagram counts nothing. The outcome comes from the import's loss ledger (`importLedger.ts`), the conversion's and the plan's together: a `problem` entry with the cause `timeLimit` is timed out, else one with the cause `cancelled` is cancelled, else any `problem` entry is partial, else a `repaired` entry is repaired, else clean; `lost`, `changed` and `skipped` entries are fidelity notes, counted only by their cause keys. Importer tokens are the other import keys' (`SqlDdl`, `SemanticModel` = Power BI / Fabric, `Dbml`, `Dbt`); `failed` is `Fail`, because a feature key never ends in `Failed`.
 
 - `importOutcomeSqlDdlClean` — Import SQL DDL ended clean: the source read as written (no `problem` or `repaired` ledger entry).
 - `importOutcomeSqlDdlRepaired` — Import SQL DDL read everything, after the repair ladder rewrote something (a `repaired` entry, no `problem`).
@@ -1334,9 +1340,10 @@ Each loss-ledger cause class the import's ledger holds, once per import (with an
 - `importCauseCapped` — an import met the `capped` cause: something was over a limit.
 - `importCauseSavedOptional` — an import met the `savedOptional` cause: something was a required relationship saved optional (D18).
 - `importCauseDuplicate` — an import met the `duplicate` cause: something was defined twice.
-- `importCauseCancelled` — an import met the `cancelled` cause: something was not read because the user cancelled the import first.
-- `importCauseTimeLimit` — an import met the `timeLimit` cause: something was not read because the import reached its time limit first.
+- `importCauseCancelled` — an import met the `cancelled` cause: something was not read because the user cancelled the import first (whether or not a partial draft was drawn).
+- `importCauseTimeLimit` — an import met the `timeLimit` cause: something was not read because the import reached its time limit first (whether or not a partial draft was drawn).
 - `importCauseOther` — an import met the `other` cause: something had another cause.
+- `draftDropTimeLimit` — a quiet draft (the automatic draft) was dropped: the SQL import's time limit was reached before it read a table. Before this key the drop was not told apart from `draftDropUnreadable`.
 
 **B15 — trail marker.**
 

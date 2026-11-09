@@ -509,6 +509,11 @@ describe('validation — acceptance and normalisation', () => {
     );
   });
 
+  it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
+    const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
+    assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');
+  });
+
   it('treats omitted features and errors as empty', async () => {
     const body = heartbeat();
     delete body.features;

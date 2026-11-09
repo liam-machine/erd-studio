@@ -50,11 +50,15 @@ export const SQL_WORKER_CANCELLED = 1;
  * fails before it posts anything could not start (the host converts
  * in-process instead). `stopping` is posted once per request, when the
  * reading stops at a cancel or the deadline: what is left is converting what
- * was read, which the host's grace period never cuts short.
+ * was read, which the host's grace period never cuts short. `read` is
+ * posted once per request when the reading has ended, stopped or not: from
+ * then on the host never ends the worker for a cancel or the deadline, since
+ * converting what was read (references, names, the DBML) is never stopped.
  */
 export type SqlWorkerMessage =
   | { id?: undefined; type: 'ready' }
   | { id: number; type: 'stopping'; reason: SqlStopReason }
+  | { id: number; type: 'read' }
   | { id: number; type: 'progress'; progress: SqlConvertProgress }
   | { id: number; type: 'result'; result: SqlDdlToDbmlResult }
   /** `load`: the converter bundle could not be loaded (a broken install), not a failed conversion. */

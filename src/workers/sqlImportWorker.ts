@@ -49,6 +49,8 @@ parentPort!.on('message', (msg: SqlWorkerRequest) => {
           if (stopping) post({ id: msg.id, type: 'stopping', reason: stopping });
           return stopping;
         },
+        // Every statement read (or the stop recorded): the rest is converting what was read, never cut short.
+        onReadingEnd: () => post({ id: msg.id, type: 'read' }),
         onProgress: (progress) => {
           const now = Date.now();
           if (now - lastPost < msg.progressMs) return;

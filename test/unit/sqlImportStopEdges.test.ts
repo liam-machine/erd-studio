@@ -154,35 +154,91 @@ parentPort.on('message', (msg) => { parentPort.postMessage({ id: msg.id, type: '
   }, 20_000);
 
   it('once the worker has stopped reading, finishing what it read is never cut short by the grace period', async () => {
-    // Sees the cancel at a statement boundary, then spends 600 ms converting what it read (longer than the grace).
+    // Says it is reading (progress), sees the cancel at a statement boundary, then spends 1.5 s converting what
+    // it read (far longer than the grace). Cancel is pressed once the worker is reading, never on a timer: a
+    // worker that is slow to start on a loaded machine would otherwise be ended before it ever reads.
     const dir = ext({
       'sqlImportWorker.js': workerBundle,
-      'sqlImport.js': stubImporter(`let reason; while (!(reason = input.options.shouldStop())) {}
-const until = Date.now() + 600; while (Date.now() < until) {}
+      'sqlImport.js': stubImporter(`input.options.onProgress({ statementsRead: 1, tablesRead: 1, filesRead: 0, files: 1, fraction: 0.5 });
+let reason; while (!(reason = input.options.shouldStop())) {}
+const until = Date.now() + 1500; while (Date.now() < until) {}
 const r = ${TINY}; r.stopped = { reason, statementsRead: 1, statementsUnread: 1, tablesUnread: 1, at: { file: 'a.sql', line: 5 } }; return r;`),
     });
-    const converter = workerSqlConverter({ extensionPath: dir, graceMs: 150 });
+    const converter = workerSqlConverter({ extensionPath: dir, graceMs: 300 });
     const abort = new AbortController();
     try {
-      setTimeout(() => abort.abort(), 50);
-      const result = await converter.convert({ files: [{ name: 'a.sql', text: 'x' }], dialect: 'postgres' }, { signal: abort.signal });
+      const result = await converter.convert({ files: [{ name: 'a.sql', text: 'x' }], dialect: 'postgres' }, { signal: abort.signal, onProgress: () => abort.abort() });
       expect(result.stopped?.reason).toBe('cancelled');
     } finally {
       converter.dispose();
     }
   }, 20_000);
 
-  it('one statement that keeps the worker busy past the grace: ended (nothing read), and the next conversion gets a new worker', async () => {
+  it('a deadline that passes after the reading ended never cuts short converting what was read (no stop was ever seen)', async () => {
+    // Reads every statement well before the deadline, then spends far longer than the deadline plus the
+    // grace converting what it read (resolving references, writing DBML), never asked to stop.
     const dir = ext({
       'sqlImportWorker.js': workerBundle,
-      'sqlImport.js': stubImporter(`if (input.files[0].text === 'hang') { for (;;) {} } return ${TINY};`),
+      'sqlImport.js': stubImporter(`for (let i = 0; i < 1000; i++) { if (input.options.shouldStop()) throw new Error('stopped while reading'); }
+input.options.onReadingEnd?.();
+const until = Date.now() + 2000; while (Date.now() < until) {}
+return ${TINY};`),
+    });
+    const converter = workerSqlConverter({ extensionPath: dir, graceMs: 200 });
+    try {
+      const result = await converter.convert({ files: [{ name: 'a.sql', text: 'x' }], dialect: 'postgres' }, { deadline: Date.now() + 1000, timeLimitMs: 1000 });
+      expect(result.ok).toBe(true);
+      expect(result.stopped).toBeUndefined();
+    } finally {
+      converter.dispose();
+    }
+  }, 20_000);
+
+  it('Cancel pressed after the reading ended never cuts short converting what was read', async () => {
+    // Says it started (progress), reads, ends the reading, says so again past the throttle, then converts for long.
+    const dir = ext({
+      'sqlImportWorker.js': workerBundle,
+      'sqlImport.js': stubImporter(`const p = (n) => input.options.onProgress({ statementsRead: n, tablesRead: n, filesRead: 0, files: 1, fraction: 1 });
+p(1);
+for (let i = 0; i < 1000; i++) { if (input.options.shouldStop()) throw new Error('stopped while reading'); }
+input.options.onReadingEnd?.();
+let wait = Date.now() + 150; while (Date.now() < wait) {}
+p(2);
+wait = Date.now() + 1500; while (Date.now() < wait) {}
+return ${TINY};`),
+    });
+    const converter = workerSqlConverter({ extensionPath: dir, graceMs: 150 });
+    const abort = new AbortController();
+    try {
+      const result = await converter.convert({ files: [{ name: 'a.sql', text: 'x' }], dialect: 'postgres' }, {
+        signal: abort.signal,
+        onProgress: (p) => { if (p.statementsRead === 2) abort.abort(); },
+      });
+      expect(abort.signal.aborted).toBe(true);
+      expect(result.ok).toBe(true);
+    } finally {
+      converter.dispose();
+    }
+  }, 20_000);
+
+  it('one statement that keeps the worker busy past the grace: ended (with how far it got), and the next conversion gets a new worker', async () => {
+    const dir = ext({
+      'sqlImportWorker.js': workerBundle,
+      'sqlImport.js': stubImporter(`if (input.files[0].text === 'hang') {
+  input.options.onProgress({ statementsRead: 6000, tablesRead: 5000, filesRead: 1, files: 2, fraction: 0.5 });
+  for (;;) {}
+}
+return ${TINY};`),
     });
     const converter = workerSqlConverter({ extensionPath: dir, graceMs: 100 });
     const abort = new AbortController();
     try {
-      setTimeout(() => { abort.abort(); abort.abort(); }, 50); // pressed twice
-      await expect(converter.convert({ files: [{ name: 'a.sql', text: 'hang' }], dialect: 'postgres' }, { signal: abort.signal }))
-        .rejects.toBeInstanceOf(SqlConvertAbandonedError);
+      // Pressed (twice) once the worker says how far it got.
+      const ended = await converter.convert({ files: [{ name: 'a.sql', text: 'hang' }], dialect: 'postgres' }, { signal: abort.signal, onProgress: () => { abort.abort(); abort.abort(); } })
+        .then(() => undefined, (err: unknown) => err);
+      expect(ended).toBeInstanceOf(SqlConvertAbandonedError);
+      // It carries how far the reading had got, so the import can say what was lost.
+      expect((ended as SqlConvertAbandonedError).progress).toEqual({ statementsRead: 6000, tablesRead: 5000, filesRead: 1, files: 2, fraction: 0.5 });
       expect((await within(5_000, converter.convert({ files: [{ name: 'a.sql', text: 'x' }], dialect: 'postgres' }))).ok).toBe(true);
     } finally {
       converter.dispose();

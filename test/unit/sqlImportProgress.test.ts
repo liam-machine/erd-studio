@@ -68,6 +68,38 @@ describe('the reading\'s progress notification', () => {
     ]);
   });
 
+  it('the next dialect\'s reading gets a new, empty bar: never one already full while it runs', async () => {
+    const { reports, shown } = fakeProgress();
+    const result = await withDelayedProgress('t', async (progress) => {
+      await new Promise((r) => setTimeout(r, 30));
+      progress.report('as PostgreSQL', 1);
+      progress.restart?.();
+      progress.report('as MySQL', 0.25);
+      await new Promise((r) => setTimeout(r, 10));
+      progress.report('as MySQL', 0.5);
+      return 'done';
+    }, 10);
+    expect(result).toBe('done');
+    expect(shown).toHaveLength(2);
+    expect(reports).toEqual([
+      { message: 'as PostgreSQL', increment: 100 },
+      { message: 'as MySQL', increment: 25 },
+      { message: 'as MySQL', increment: 25 },
+    ]);
+  });
+
+  it('a restart before the bar moved (or before anything shows) keeps the one notification', async () => {
+    const { shown } = fakeProgress();
+    await withDelayedProgress('t', async (progress) => {
+      progress.restart?.();
+      await new Promise((r) => setTimeout(r, 30));
+      progress.report('as PostgreSQL');
+      progress.restart?.();
+      progress.report('as MySQL', 0.5);
+    }, 10);
+    expect(shown).toHaveLength(1);
+  });
+
   it('its Cancel aborts the reading\'s signal', async () => {
     fakeProgress(true);
     const aborted = await withDelayedProgress('t', (_progress, signal) => new Promise<boolean>((resolve) => {

@@ -45,6 +45,8 @@ export class ImportReportPanel {
   private reportId: number | undefined;
   /** Follow a new import (the tab shows the latest). */
   private follow = true;
+  /** The report the page on show was drawn from (a change to another import never redraws it). */
+  private drawn: { record: ImportReportRecord | undefined } | undefined;
 
   /**
    * Open the report of import `reportId` (default: the latest), or bring the
@@ -81,11 +83,13 @@ export class ImportReportPanel {
     this.disposables.push(
       panel.webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message)),
       panel.onDidDispose(() => this.dispose()),
-      // A new import (or a Keep) while the tab is open: the latest's tab moves to the new one; any tab redraws its own.
+      // A new import (or a Keep) while the tab is open: the latest's tab moves to the new one; any tab redraws its
+      // own report when it changed, and only then (a redraw resets the page and refuses a click already sent).
       onImportReportChanged(() => {
         // An older report a long session has since dropped: the tab moves to the latest rather than going blank.
         if (!this.follow && this.reportId !== undefined && !importReportById(this.reportId)) this.follow = true;
         if (this.follow) this.reportId = latestImportReportId();
+        if (this.drawn && this.drawn.record === this.record()) return;
         this.render();
       }),
     );
@@ -98,10 +102,16 @@ export class ImportReportPanel {
     this.reportId = this.follow ? latest : reportId;
   }
 
+  /** The report to show, as it is now (the store replaces a record when it changes). */
+  private record(): ImportReportRecord | undefined {
+    return this.deps.report ? this.deps.report() : this.reportId !== undefined ? importReportById(this.reportId) : undefined;
+  }
+
   /** Draw the page for the report as it is now. */
   render(): void {
     if (this.disposed) return;
-    const record = this.deps.report ? this.deps.report() : this.reportId !== undefined ? importReportById(this.reportId) : undefined;
+    const record = this.record();
+    this.drawn = { record };
     const view = record ? buildImportReportView(record) : undefined;
     this.links = view?.links ?? [];
     this.viewToken = crypto.randomBytes(12).toString('hex');

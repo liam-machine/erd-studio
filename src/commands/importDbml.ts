@@ -88,7 +88,7 @@ import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
 import { log } from '../services/logger';
-import type { LedgerEntry } from '../services/importLedger';
+import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
 import {
   SHOW_IMPORT_REPORT_COMMAND,
   SHOW_IMPORT_REPORT_LABEL,
@@ -589,14 +589,20 @@ async function runImportDbml(
     // with use lines has one problem, said in full: no report.
     const reportSource = IMPORT_REPORT_SOURCES[source];
     const reported = !quiet && !read.importsOtherFiles && reportSource !== undefined && ui.showImportReport !== undefined;
+    const failedLedger = problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML');
     const failedReportId = !reported ? undefined : recordImportReport({
       source: reportSource!,
       title,
       from: `from ${fileName}`,
       status: 'failed',
-      ledger: problemLedger(read.diagnostics.map((d) => ({ file: fileName, line: d.line })), 'statement', 'DBML'),
+      ledger: failedLedger,
       files: { [fileName]: filePath },
     });
+    // The report's lines in the log too (its page says Show Logs has them), each problem with its message.
+    if (reported) {
+      for (const d of read.diagnostics) log.info(`[ERD Studio] ${title}: ${fileName} line ${d.line}: ${d.message}`);
+      for (const line of ledgerLogLines(failedLedger, title)) log.info(`[ERD Studio] ${line}`);
+    }
     showError(read.importsOtherFiles ? `${title}: ${first.message}` : describeInvalidDbml(fileName, read.diagnostics), {
       [OPEN_FILE_BUTTON]: () => ui.openFileAt(filePath, first?.line, first?.column),
       ...(failedReportId !== undefined ? { [SHOW_IMPORT_REPORT_LABEL]: () => ui.showImportReport!(failedReportId) } : {}),
@@ -837,6 +843,9 @@ async function runImportDbml(
     ledger: reportLedger,
     files: source === 'file' ? { [fileName]: filePath } : (deps.origin?.sourceFiles ?? {}),
   });
+  // The plan's own entries in the log (its page says Show Logs has every line): the conversion
+  // that handed the plan its DBML (SQL, a semantic model) logged its own ledger already.
+  if (reportId !== undefined) for (const line of ledgerLogLines(plan.report.ledger ?? [], title, { everySkipped: true })) log.info(`[ERD Studio] ${line}`);
   const notKept = (): void => { updateImportReport(reportId, { status: 'notKept' }); };
   /** The waiting Keep, settled once the write ends (no draft: nothing to settle). */
   let settleKeep: (outcome: DraftKeepOutcome) => void = () => {};

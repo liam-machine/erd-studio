@@ -713,6 +713,8 @@ export const FEATURES = [
   'importCauseCancelled',
   'importCauseTimeLimit',
   'importCauseOther',
+  // The automatic draft stopped by the import's time limit before it read a table.
+  'draftDropTimeLimit',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

@@ -256,6 +256,31 @@ describe('the page and the host agree on which report a link belongs to', () => 
     expect(opened).toEqual(['/proj/other.sql']);
   });
 
+  it('a change to another import (a new import, or another draft kept) leaves the page on show as it is: its state and its clicks', async () => {
+    const opened: string[] = [];
+    const a = recordImportReport(record({ title: 'Report A', files: { 'a.sql': '/proj/a.sql' } }));
+    const b = recordImportReport(record({ title: 'Report B' }));
+    ImportReportPanel.createOrShow({ openFileAt: async (file) => { opened.push(file); } }, a);
+    const panel = reportPanels()[0];
+    const html = panel.webview.html;
+    let drawn = 0;
+    const set = Object.getOwnPropertyDescriptor(panel.webview, 'html');
+    let value = html;
+    Object.defineProperty(panel.webview, 'html', { configurable: true, get: () => value, set: (v: string) => { drawn++; value = v; } });
+    // Draft B is kept, then a new import runs: neither is the report on show.
+    expect(updateImportReport(b, { status: 'kept', diagram: 'main/b' })).toBe(true);
+    recordImportReport(record({ title: 'Report C' }));
+    expect(drawn).toBe(0);
+    expect(panel.webview.html).toBe(html);
+    // A click the page sent before those changes still opens.
+    await panel._simulateMessage({ type: 'open', link: 0, view: viewToken(html) });
+    expect(opened).toEqual(['/proj/a.sql']);
+    // A change to the report on show redraws it.
+    updateImportReport(a, { status: 'kept', diagram: 'main/a' });
+    expect(drawn).toBe(1);
+    if (set) Object.defineProperty(panel.webview, 'html', set);
+  });
+
   it('parses only a message for the page on show', () => {
     expect(parseImportReportToHost({ type: 'open', link: 0, view: 'v1' }, 1, 'v1')).toEqual({ type: 'open', link: 0 });
     expect(parseImportReportToHost({ type: 'open', link: 0, view: 'v0' }, 1, 'v1')).toBeUndefined();
