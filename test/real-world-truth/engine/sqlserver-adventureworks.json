@@ -1,0 +1,6350 @@
+{
+ "sample": "sqlserver-adventureworks",
+ "engine": "Microsoft SQL Server 2025 (RTM-CU10) (KB5125471) - 17.0.5035.5 (X64) (Docker mcr.microsoft.com/mssql/server:2025-latest)",
+ "loaded": [
+  "sqlserver-adventureworks/instawdb.sql"
+ ],
+ "setup": "sqlcmd -v SqlSamplesSourceDataPath=/sample/no-data/ (the data CSVs are not in the sample)",
+ "errors": [
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 7,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 20,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 39,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 52,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 65,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 78,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 91,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 104,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 117,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 130,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 143,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 156,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 169,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 182,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 195,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 208,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 221,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 234,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 247,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 260,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 273,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 286,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 299,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 312,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 325,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 338,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 351,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 364,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 377,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 390,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 403,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 416,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 429,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 442,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 455,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 468,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 481,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 494,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 507,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 520,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 533,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 546,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 559,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 572,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 585,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 598,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 611,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 624,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 637,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 650,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 663,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 676,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 689,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 702,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 715,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 728,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 741,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 754,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 767,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 780,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 793,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 806,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 819,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 831,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 844,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 857,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 870,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 883,
+   "error": "16202: Keyword or statement option 'CODEPAGE' is not supported on the 'Linux' platform."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 4,
+   "error": "7609: Full-Text Search is not installed, or a full-text component cannot be loaded."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 6,
+   "error": "7609: Full-Text Search is not installed, or a full-text component cannot be loaded."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 6,
+   "error": "7609: Full-Text Search is not installed, or a full-text component cannot be loaded."
+  },
+  {
+   "file": "sqlserver-adventureworks/instawdb.sql",
+   "batchLine": 26,
+   "error": "7601: Cannot use a CONTAINS or FREETEXT predicate on table or indexed view 'HumanResources.JobCandidate' because it is not full-text indexed."
+  }
+ ],
+ "tables": [
+  {
+   "schema": "HumanResources",
+   "name": "Department",
+   "comment": "Lookup table containing the departments within the Adventure Works Cycles company.",
+   "pk": [
+    "DepartmentID"
+   ],
+   "columns": [
+    {
+     "name": "DepartmentID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Department records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the department."
+    },
+    {
+     "name": "GroupName",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the group to which the department belongs."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "name": "Employee",
+   "comment": "Employee information such as salary, department, and title.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for Employee records.  Foreign key to BusinessEntity.BusinessEntityID."
+    },
+    {
+     "name": "NationalIDNumber",
+     "type": "nvarchar(15)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Unique national identification number such as a social security number."
+    },
+    {
+     "name": "LoginID",
+     "type": "nvarchar(256)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Network login."
+    },
+    {
+     "name": "OrganizationNode",
+     "type": "hierarchyid",
+     "notNull": false,
+     "identity": false,
+     "comment": "Where the employee is located in corporate hierarchy."
+    },
+    {
+     "name": "OrganizationLevel",
+     "type": "(computed)",
+     "notNull": false,
+     "identity": false,
+     "computed": "([OrganizationNode].[GetLevel]())",
+     "comment": "The depth of the employee in the corporate hierarchy."
+    },
+    {
+     "name": "JobTitle",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Work title such as Buyer or Sales Representative."
+    },
+    {
+     "name": "BirthDate",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date of birth."
+    },
+    {
+     "name": "MaritalStatus",
+     "type": "nchar(1)",
+     "notNull": true,
+     "identity": false,
+     "comment": "M = Married, S = Single"
+    },
+    {
+     "name": "Gender",
+     "type": "nchar(1)",
+     "notNull": true,
+     "identity": false,
+     "comment": "M = Male, F = Female"
+    },
+    {
+     "name": "HireDate",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employee hired on this date."
+    },
+    {
+     "name": "SalariedFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "Job classification. 0 = Hourly, not exempt from collective bargaining. 1 = Salaried, exempt from collective bargaining."
+    },
+    {
+     "name": "VacationHours",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Number of available vacation hours."
+    },
+    {
+     "name": "SickLeaveHours",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Number of available sick leave hours."
+    },
+    {
+     "name": "CurrentFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Inactive, 1 = Active"
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "name": "EmployeeDepartmentHistory",
+   "comment": "Employee department transfers.",
+   "pk": [
+    "BusinessEntityID",
+    "StartDate",
+    "DepartmentID",
+    "ShiftID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employee identification number. Foreign key to Employee.BusinessEntityID."
+    },
+    {
+     "name": "DepartmentID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Department in which the employee worked including currently. Foreign key to Department.DepartmentID."
+    },
+    {
+     "name": "ShiftID",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Identifies which 8-hour shift the employee works. Foreign key to Shift.Shift.ID."
+    },
+    {
+     "name": "StartDate",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the employee started work in the department."
+    },
+    {
+     "name": "EndDate",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the employee left the department. NULL = Current department."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "name": "EmployeePayHistory",
+   "comment": "Employee pay history.",
+   "pk": [
+    "BusinessEntityID",
+    "RateChangeDate"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employee identification number. Foreign key to Employee.BusinessEntityID."
+    },
+    {
+     "name": "RateChangeDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the change in pay is effective"
+    },
+    {
+     "name": "Rate",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Salary hourly rate."
+    },
+    {
+     "name": "PayFrequency",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "1 = Salary received monthly, 2 = Salary received biweekly"
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "name": "JobCandidate",
+   "comment": "Résumés submitted to Human Resources by job applicants.",
+   "pk": [
+    "JobCandidateID"
+   ],
+   "columns": [
+    {
+     "name": "JobCandidateID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for JobCandidate records."
+    },
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Employee identification number if applicant was hired. Foreign key to Employee.BusinessEntityID."
+    },
+    {
+     "name": "Resume",
+     "type": "xml(CONTENT HumanResources.HRResumeSchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Résumé in XML format."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "name": "Shift",
+   "comment": "Work shift lookup table.",
+   "pk": [
+    "ShiftID"
+   ],
+   "columns": [
+    {
+     "name": "ShiftID",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Shift records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shift description."
+    },
+    {
+     "name": "StartTime",
+     "type": "time(7)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shift start time."
+    },
+    {
+     "name": "EndTime",
+     "type": "time(7)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shift end time."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "Address",
+   "comment": "Street address information for customers, employees, and vendors.",
+   "pk": [
+    "AddressID"
+   ],
+   "columns": [
+    {
+     "name": "AddressID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Address records."
+    },
+    {
+     "name": "AddressLine1",
+     "type": "nvarchar(60)",
+     "notNull": true,
+     "identity": false,
+     "comment": "First street address line."
+    },
+    {
+     "name": "AddressLine2",
+     "type": "nvarchar(60)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Second street address line."
+    },
+    {
+     "name": "City",
+     "type": "nvarchar(30)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the city."
+    },
+    {
+     "name": "StateProvinceID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Unique identification number for the state or province. Foreign key to StateProvince table."
+    },
+    {
+     "name": "PostalCode",
+     "type": "nvarchar(15)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Postal code for the street address."
+    },
+    {
+     "name": "SpatialLocation",
+     "type": "geography",
+     "notNull": false,
+     "identity": false,
+     "comment": "Latitude and longitude of this address."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "AddressType",
+   "comment": "Types of addresses stored in the Address table. ",
+   "pk": [
+    "AddressTypeID"
+   ],
+   "columns": [
+    {
+     "name": "AddressTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for AddressType records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Address type description. For example, Billing, Home, or Shipping."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "BusinessEntity",
+   "comment": "Source of the ID that connects vendors, customers, and employees with address and contact information.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for all customers, vendors, and employees."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "BusinessEntityAddress",
+   "comment": "Cross-reference table mapping customers, vendors, and employees to their addresses.",
+   "pk": [
+    "BusinessEntityID",
+    "AddressID",
+    "AddressTypeID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to BusinessEntity.BusinessEntityID."
+    },
+    {
+     "name": "AddressID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Address.AddressID."
+    },
+    {
+     "name": "AddressTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to AddressType.AddressTypeID."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "BusinessEntityContact",
+   "comment": "Cross-reference table mapping stores, vendors, and employees to people",
+   "pk": [
+    "BusinessEntityID",
+    "PersonID",
+    "ContactTypeID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to BusinessEntity.BusinessEntityID."
+    },
+    {
+     "name": "PersonID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Person.BusinessEntityID."
+    },
+    {
+     "name": "ContactTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key.  Foreign key to ContactType.ContactTypeID."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "ContactType",
+   "comment": "Lookup table containing the types of business entity contacts.",
+   "pk": [
+    "ContactTypeID"
+   ],
+   "columns": [
+    {
+     "name": "ContactTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ContactType records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Contact type description."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "CountryRegion",
+   "comment": "Lookup table containing the ISO standard codes for countries and regions.",
+   "pk": [
+    "CountryRegionCode"
+   ],
+   "columns": [
+    {
+     "name": "CountryRegionCode",
+     "type": "nvarchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO standard code for countries and regions."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Country or region name."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "EmailAddress",
+   "comment": "Where to send a person email.",
+   "pk": [
+    "BusinessEntityID",
+    "EmailAddressID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Person associated with this email address.  Foreign key to Person.BusinessEntityID"
+    },
+    {
+     "name": "EmailAddressID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key. ID of this email address."
+    },
+    {
+     "name": "EmailAddress",
+     "type": "nvarchar(50)",
+     "notNull": false,
+     "identity": false,
+     "comment": "E-mail address for the person."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "Password",
+   "comment": "One way hashed authentication information",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "PasswordHash",
+     "type": "varchar(128)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Password for the e-mail account."
+    },
+    {
+     "name": "PasswordSalt",
+     "type": "varchar(10)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Random value concatenated with the password string before the password is hashed."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "Person",
+   "comment": "Human beings involved with AdventureWorks: employees, customer contacts, and vendor contacts.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for Person records."
+    },
+    {
+     "name": "PersonType",
+     "type": "nchar(2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary type of person: SC = Store Contact, IN = Individual (retail) customer, SP = Sales person, EM = Employee (non-sales), VC = Vendor contact, GC = General contact"
+    },
+    {
+     "name": "NameStyle",
+     "type": "dbo.NameStyle",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = The data in FirstName and LastName are stored in western style (first name, last name) order.  1 = Eastern style (last name, first name) order."
+    },
+    {
+     "name": "Title",
+     "type": "nvarchar(8)",
+     "notNull": false,
+     "identity": false,
+     "comment": "A courtesy title. For example, Mr. or Ms."
+    },
+    {
+     "name": "FirstName",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "First name of the person."
+    },
+    {
+     "name": "MiddleName",
+     "type": "dbo.Name",
+     "notNull": false,
+     "identity": false,
+     "comment": "Middle name or middle initial of the person."
+    },
+    {
+     "name": "LastName",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Last name of the person."
+    },
+    {
+     "name": "Suffix",
+     "type": "nvarchar(10)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Surname suffix. For example, Sr. or Jr."
+    },
+    {
+     "name": "EmailPromotion",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Contact does not wish to receive e-mail promotions, 1 = Contact does wish to receive e-mail promotions from AdventureWorks, 2 = Contact does wish to receive e-mail promotions from AdventureWorks and selected partners. "
+    },
+    {
+     "name": "AdditionalContactInfo",
+     "type": "xml(CONTENT Person.AdditionalContactInfoSchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Additional contact information about the person stored in xml format. "
+    },
+    {
+     "name": "Demographics",
+     "type": "xml(CONTENT Person.IndividualSurveySchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Personal information such as hobbies, and income collected from online shoppers. Used for sales analysis."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "PersonPhone",
+   "comment": "Telephone number and type of a person.",
+   "pk": [
+    "BusinessEntityID",
+    "PhoneNumber",
+    "PhoneNumberTypeID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business entity identification number. Foreign key to Person.BusinessEntityID."
+    },
+    {
+     "name": "PhoneNumber",
+     "type": "dbo.Phone",
+     "notNull": true,
+     "identity": false,
+     "comment": "Telephone number identification number."
+    },
+    {
+     "name": "PhoneNumberTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Kind of phone number. Foreign key to PhoneNumberType.PhoneNumberTypeID."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "PhoneNumberType",
+   "comment": "Type of phone number of a person.",
+   "pk": [
+    "PhoneNumberTypeID"
+   ],
+   "columns": [
+    {
+     "name": "PhoneNumberTypeID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for telephone number type records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the telephone number type"
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Person",
+   "name": "StateProvince",
+   "comment": "State and province lookup table.",
+   "pk": [
+    "StateProvinceID"
+   ],
+   "columns": [
+    {
+     "name": "StateProvinceID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for StateProvince records."
+    },
+    {
+     "name": "StateProvinceCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO standard state or province code."
+    },
+    {
+     "name": "CountryRegionCode",
+     "type": "nvarchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO standard country or region code. Foreign key to CountryRegion.CountryRegionCode. "
+    },
+    {
+     "name": "IsOnlyStateProvinceFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = StateProvinceCode exists. 1 = StateProvinceCode unavailable, using CountryRegionCode."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "State or province description."
+    },
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "ID of the territory in which the state or province is located. Foreign key to SalesTerritory.SalesTerritoryID."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "BillOfMaterials",
+   "comment": "Items required to make bicycles and bicycle subassemblies. It identifies the heirarchical relationship between a parent product and its components.",
+   "pk": [
+    "BillOfMaterialsID"
+   ],
+   "columns": [
+    {
+     "name": "BillOfMaterialsID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for BillOfMaterials records."
+    },
+    {
+     "name": "ProductAssemblyID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Parent product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "ComponentID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Component identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the component started being used in the assembly item."
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the component stopped being used in the assembly item."
+    },
+    {
+     "name": "UnitMeasureCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Standard code identifying the unit of measure for the quantity."
+    },
+    {
+     "name": "BOMLevel",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Indicates the depth the component is from its parent (AssemblyID)."
+    },
+    {
+     "name": "PerAssemblyQty",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity of the component needed to create the assembly."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "Culture",
+   "comment": "Lookup table containing the languages in which some AdventureWorks data is stored.",
+   "pk": [
+    "CultureID"
+   ],
+   "columns": [
+    {
+     "name": "CultureID",
+     "type": "nchar(6)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for Culture records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Culture description."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "Document",
+   "comment": "Product maintenance documents.",
+   "pk": [
+    "DocumentNode"
+   ],
+   "columns": [
+    {
+     "name": "DocumentNode",
+     "type": "hierarchyid",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for Document records."
+    },
+    {
+     "name": "DocumentLevel",
+     "type": "(computed)",
+     "notNull": false,
+     "identity": false,
+     "computed": "([DocumentNode].[GetLevel]())",
+     "comment": "Depth in the document hierarchy."
+    },
+    {
+     "name": "Title",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Title of the document."
+    },
+    {
+     "name": "Owner",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employee who controls the document.  Foreign key to Employee.BusinessEntityID"
+    },
+    {
+     "name": "FolderFlag",
+     "type": "bit",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = This is a folder, 1 = This is a document."
+    },
+    {
+     "name": "FileName",
+     "type": "nvarchar(400)",
+     "notNull": true,
+     "identity": false,
+     "comment": "File name of the document"
+    },
+    {
+     "name": "FileExtension",
+     "type": "nvarchar(8)",
+     "notNull": true,
+     "identity": false,
+     "comment": "File extension indicating the document type. For example, .doc or .txt."
+    },
+    {
+     "name": "Revision",
+     "type": "nchar(5)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Revision number of the document. "
+    },
+    {
+     "name": "ChangeNumber",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Engineering change approval number."
+    },
+    {
+     "name": "Status",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "1 = Pending approval, 2 = Approved, 3 = Obsolete"
+    },
+    {
+     "name": "DocumentSummary",
+     "type": "nvarchar(max)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Document abstract."
+    },
+    {
+     "name": "Document",
+     "type": "varbinary(max)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Complete document."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Required for FileStream."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "Illustration",
+   "comment": "Bicycle assembly diagrams.",
+   "pk": [
+    "IllustrationID"
+   ],
+   "columns": [
+    {
+     "name": "IllustrationID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Illustration records."
+    },
+    {
+     "name": "Diagram",
+     "type": "xml",
+     "notNull": false,
+     "identity": false,
+     "comment": "Illustrations used in manufacturing instructions. Stored as XML."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "Location",
+   "comment": "Product inventory and manufacturing locations.",
+   "pk": [
+    "LocationID"
+   ],
+   "columns": [
+    {
+     "name": "LocationID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Location records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Location description."
+    },
+    {
+     "name": "CostRate",
+     "type": "smallmoney",
+     "notNull": true,
+     "identity": false,
+     "comment": "Standard hourly cost of the manufacturing location."
+    },
+    {
+     "name": "Availability",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Work capacity (in hours) of the manufacturing location."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "Product",
+   "comment": "Products sold or used in the manfacturing of sold products.",
+   "pk": [
+    "ProductID"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for Product records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the product."
+    },
+    {
+     "name": "ProductNumber",
+     "type": "nvarchar(25)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Unique product identification number."
+    },
+    {
+     "name": "MakeFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Product is purchased, 1 = Product is manufactured in-house."
+    },
+    {
+     "name": "FinishedGoodsFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Product is not a salable item. 1 = Product is salable."
+    },
+    {
+     "name": "Color",
+     "type": "nvarchar(15)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product color."
+    },
+    {
+     "name": "SafetyStockLevel",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Minimum inventory quantity. "
+    },
+    {
+     "name": "ReorderPoint",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inventory level that triggers a purchase order or work order. "
+    },
+    {
+     "name": "StandardCost",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Standard cost of the product."
+    },
+    {
+     "name": "ListPrice",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Selling price."
+    },
+    {
+     "name": "Size",
+     "type": "nvarchar(5)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product size."
+    },
+    {
+     "name": "SizeUnitMeasureCode",
+     "type": "nchar(3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit of measure for Size column."
+    },
+    {
+     "name": "WeightUnitMeasureCode",
+     "type": "nchar(3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit of measure for Weight column."
+    },
+    {
+     "name": "Weight",
+     "type": "decimal(8,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product weight."
+    },
+    {
+     "name": "DaysToManufacture",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Number of days required to manufacture the product."
+    },
+    {
+     "name": "ProductLine",
+     "type": "nchar(2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "R = Road, M = Mountain, T = Touring, S = Standard"
+    },
+    {
+     "name": "Class",
+     "type": "nchar(2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "H = High, M = Medium, L = Low"
+    },
+    {
+     "name": "Style",
+     "type": "nchar(2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "W = Womens, M = Mens, U = Universal"
+    },
+    {
+     "name": "ProductSubcategoryID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product is a member of this product subcategory. Foreign key to ProductSubCategory.ProductSubCategoryID. "
+    },
+    {
+     "name": "ProductModelID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product is a member of this product model. Foreign key to ProductModel.ProductModelID."
+    },
+    {
+     "name": "SellStartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the product was available for sale."
+    },
+    {
+     "name": "SellEndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the product was no longer available for sale."
+    },
+    {
+     "name": "DiscontinuedDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the product was discontinued."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductCategory",
+   "comment": "High-level product categorization.",
+   "pk": [
+    "ProductCategoryID"
+   ],
+   "columns": [
+    {
+     "name": "ProductCategoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductCategory records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Category description."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductCostHistory",
+   "comment": "Changes in the cost of a product over time.",
+   "pk": [
+    "ProductID",
+    "StartDate"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID"
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product cost start date."
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Product cost end date."
+    },
+    {
+     "name": "StandardCost",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Standard cost of the product."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductDescription",
+   "comment": "Product descriptions in several languages.",
+   "pk": [
+    "ProductDescriptionID"
+   ],
+   "columns": [
+    {
+     "name": "ProductDescriptionID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductDescription records."
+    },
+    {
+     "name": "Description",
+     "type": "nvarchar(400)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Description of the product."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductDocument",
+   "comment": "Cross-reference table mapping products to related product documents.",
+   "pk": [
+    "ProductID",
+    "DocumentNode"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "DocumentNode",
+     "type": "hierarchyid",
+     "notNull": true,
+     "identity": false,
+     "comment": "Document identification number. Foreign key to Document.DocumentNode."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductInventory",
+   "comment": "Product inventory information.",
+   "pk": [
+    "ProductID",
+    "LocationID"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "LocationID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inventory location identification number. Foreign key to Location.LocationID. "
+    },
+    {
+     "name": "Shelf",
+     "type": "nvarchar(10)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Storage compartment within an inventory location."
+    },
+    {
+     "name": "Bin",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Storage container on a shelf in an inventory location."
+    },
+    {
+     "name": "Quantity",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity of products in the inventory location."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductListPriceHistory",
+   "comment": "Changes in the list price of a product over time.",
+   "pk": [
+    "ProductID",
+    "StartDate"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID"
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "List price start date."
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "List price end date"
+    },
+    {
+     "name": "ListPrice",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product list price."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductModel",
+   "comment": "Product model classification.",
+   "pk": [
+    "ProductModelID"
+   ],
+   "columns": [
+    {
+     "name": "ProductModelID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductModel records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product model description."
+    },
+    {
+     "name": "CatalogDescription",
+     "type": "xml(CONTENT Production.ProductDescriptionSchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Detailed product catalog information in xml format."
+    },
+    {
+     "name": "Instructions",
+     "type": "xml(CONTENT Production.ManuInstructionsSchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Manufacturing instructions in xml format."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductModelIllustration",
+   "comment": "Cross-reference table mapping product models and illustrations.",
+   "pk": [
+    "ProductModelID",
+    "IllustrationID"
+   ],
+   "columns": [
+    {
+     "name": "ProductModelID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to ProductModel.ProductModelID."
+    },
+    {
+     "name": "IllustrationID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Illustration.IllustrationID."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductModelProductDescriptionCulture",
+   "comment": "Cross-reference table mapping product descriptions and the language the description is written in.",
+   "pk": [
+    "ProductModelID",
+    "ProductDescriptionID",
+    "CultureID"
+   ],
+   "columns": [
+    {
+     "name": "ProductModelID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to ProductModel.ProductModelID."
+    },
+    {
+     "name": "ProductDescriptionID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to ProductDescription.ProductDescriptionID."
+    },
+    {
+     "name": "CultureID",
+     "type": "nchar(6)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Culture identification number. Foreign key to Culture.CultureID."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductPhoto",
+   "comment": "Product images.",
+   "pk": [
+    "ProductPhotoID"
+   ],
+   "columns": [
+    {
+     "name": "ProductPhotoID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductPhoto records."
+    },
+    {
+     "name": "ThumbNailPhoto",
+     "type": "varbinary(max)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Small image of the product."
+    },
+    {
+     "name": "ThumbnailPhotoFileName",
+     "type": "nvarchar(50)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Small image file name."
+    },
+    {
+     "name": "LargePhoto",
+     "type": "varbinary(max)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Large image of the product."
+    },
+    {
+     "name": "LargePhotoFileName",
+     "type": "nvarchar(50)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Large image file name."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductProductPhoto",
+   "comment": "Cross-reference table mapping products and product photos.",
+   "pk": [
+    "ProductID",
+    "ProductPhotoID"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "ProductPhotoID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product photo identification number. Foreign key to ProductPhoto.ProductPhotoID."
+    },
+    {
+     "name": "Primary",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Photo is not the principal image. 1 = Photo is the principal image."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductReview",
+   "comment": "Customer reviews of products they have purchased.",
+   "pk": [
+    "ProductReviewID"
+   ],
+   "columns": [
+    {
+     "name": "ProductReviewID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductReview records."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "ReviewerName",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the reviewer."
+    },
+    {
+     "name": "ReviewDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date review was submitted."
+    },
+    {
+     "name": "EmailAddress",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Reviewer's e-mail address."
+    },
+    {
+     "name": "Rating",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product rating given by the reviewer. Scale is 1 to 5 with 5 as the highest rating."
+    },
+    {
+     "name": "Comments",
+     "type": "nvarchar(3850)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reviewer's comments"
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ProductSubcategory",
+   "comment": "Product subcategories. See ProductCategory table.",
+   "pk": [
+    "ProductSubcategoryID"
+   ],
+   "columns": [
+    {
+     "name": "ProductSubcategoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ProductSubcategory records."
+    },
+    {
+     "name": "ProductCategoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product category identification number. Foreign key to ProductCategory.ProductCategoryID."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Subcategory description."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "ScrapReason",
+   "comment": "Manufacturing failure reasons lookup table.",
+   "pk": [
+    "ScrapReasonID"
+   ],
+   "columns": [
+    {
+     "name": "ScrapReasonID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ScrapReason records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Failure description."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "TransactionHistory",
+   "comment": "Record of each purchase order, sales order, or work order transaction year to date.",
+   "pk": [
+    "TransactionID"
+   ],
+   "columns": [
+    {
+     "name": "TransactionID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for TransactionHistory records."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "ReferenceOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Purchase order, sales order, or work order identification number."
+    },
+    {
+     "name": "ReferenceOrderLineID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Line number associated with the purchase order, sales order, or work order."
+    },
+    {
+     "name": "TransactionDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time of the transaction."
+    },
+    {
+     "name": "TransactionType",
+     "type": "nchar(1)",
+     "notNull": true,
+     "identity": false,
+     "comment": "W = WorkOrder, S = SalesOrder, P = PurchaseOrder"
+    },
+    {
+     "name": "Quantity",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product quantity."
+    },
+    {
+     "name": "ActualCost",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product cost."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "TransactionHistoryArchive",
+   "comment": "Transactions for previous years.",
+   "pk": [
+    "TransactionID"
+   ],
+   "columns": [
+    {
+     "name": "TransactionID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for TransactionHistoryArchive records."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "ReferenceOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Purchase order, sales order, or work order identification number."
+    },
+    {
+     "name": "ReferenceOrderLineID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Line number associated with the purchase order, sales order, or work order."
+    },
+    {
+     "name": "TransactionDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time of the transaction."
+    },
+    {
+     "name": "TransactionType",
+     "type": "nchar(1)",
+     "notNull": true,
+     "identity": false,
+     "comment": "W = Work Order, S = Sales Order, P = Purchase Order"
+    },
+    {
+     "name": "Quantity",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product quantity."
+    },
+    {
+     "name": "ActualCost",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product cost."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "UnitMeasure",
+   "comment": "Unit of measure lookup table.",
+   "pk": [
+    "UnitMeasureCode"
+   ],
+   "columns": [
+    {
+     "name": "UnitMeasureCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Unit of measure description."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "WorkOrder",
+   "comment": null,
+   "pk": [
+    "WorkOrderID"
+   ],
+   "columns": [
+    {
+     "name": "WorkOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": true
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "OrderQty",
+     "type": "int",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "StockedQty",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull([OrderQty]-[ScrappedQty],(0)))"
+    },
+    {
+     "name": "ScrappedQty",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "DueDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ScrapReasonID",
+     "type": "smallint",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    }
+   ]
+  },
+  {
+   "schema": "Production",
+   "name": "WorkOrderRouting",
+   "comment": null,
+   "pk": [
+    "WorkOrderID",
+    "ProductID",
+    "OperationSequence"
+   ],
+   "columns": [
+    {
+     "name": "WorkOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "OperationSequence",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "LocationID",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ScheduledStartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ScheduledEndDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ActualStartDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "ActualEndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "ActualResourceHrs",
+     "type": "decimal(9,4)",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "PlannedCost",
+     "type": "money",
+     "notNull": true,
+     "identity": false
+    },
+    {
+     "name": "ActualCost",
+     "type": "money",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    }
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "name": "ProductVendor",
+   "comment": "Cross-reference table mapping vendors with the products they supply.",
+   "pk": [
+    "ProductID",
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Vendor.BusinessEntityID."
+    },
+    {
+     "name": "AverageLeadTime",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "The average span of time (in days) between placing an order with the vendor and receiving the purchased product."
+    },
+    {
+     "name": "StandardPrice",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "The vendor's usual selling price."
+    },
+    {
+     "name": "LastReceiptCost",
+     "type": "money",
+     "notNull": false,
+     "identity": false,
+     "comment": "The selling price when last purchased."
+    },
+    {
+     "name": "LastReceiptDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the product was last received by the vendor."
+    },
+    {
+     "name": "MinOrderQty",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "The maximum quantity that should be ordered."
+    },
+    {
+     "name": "MaxOrderQty",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "The minimum quantity that should be ordered."
+    },
+    {
+     "name": "OnOrderQty",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "The quantity currently on order."
+    },
+    {
+     "name": "UnitMeasureCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "The product's unit of measure."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "name": "PurchaseOrderDetail",
+   "comment": "Individual products associated with a specific purchase order. See PurchaseOrderHeader.",
+   "pk": [
+    "PurchaseOrderID",
+    "PurchaseOrderDetailID"
+   ],
+   "columns": [
+    {
+     "name": "PurchaseOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to PurchaseOrderHeader.PurchaseOrderID."
+    },
+    {
+     "name": "PurchaseOrderDetailID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key. One line number per purchased product."
+    },
+    {
+     "name": "DueDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the product is expected to be received."
+    },
+    {
+     "name": "OrderQty",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity ordered."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "UnitPrice",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Vendor's selling price of a single product."
+    },
+    {
+     "name": "LineTotal",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull([OrderQty]*[UnitPrice],(0.00)))",
+     "comment": "Per product subtotal. Computed as OrderQty * UnitPrice."
+    },
+    {
+     "name": "ReceivedQty",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity actually received from the vendor."
+    },
+    {
+     "name": "RejectedQty",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity rejected during inspection."
+    },
+    {
+     "name": "StockedQty",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull([ReceivedQty]-[RejectedQty],(0.00)))",
+     "comment": "Quantity accepted into inventory. Computed as ReceivedQty - RejectedQty."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "name": "PurchaseOrderHeader",
+   "comment": "General purchase order information. See PurchaseOrderDetail.",
+   "pk": [
+    "PurchaseOrderID"
+   ],
+   "columns": [
+    {
+     "name": "PurchaseOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key."
+    },
+    {
+     "name": "RevisionNumber",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Incremental number to track changes to the purchase order over time."
+    },
+    {
+     "name": "Status",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Order current status. 1 = Pending; 2 = Approved; 3 = Rejected; 4 = Complete"
+    },
+    {
+     "name": "EmployeeID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employee who created the purchase order. Foreign key to Employee.BusinessEntityID."
+    },
+    {
+     "name": "VendorID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Vendor with whom the purchase order is placed. Foreign key to Vendor.BusinessEntityID."
+    },
+    {
+     "name": "ShipMethodID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping method. Foreign key to ShipMethod.ShipMethodID."
+    },
+    {
+     "name": "OrderDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Purchase order creation date."
+    },
+    {
+     "name": "ShipDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Estimated shipment date from the vendor."
+    },
+    {
+     "name": "SubTotal",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Purchase order subtotal. Computed as SUM(PurchaseOrderDetail.LineTotal)for the appropriate PurchaseOrderID."
+    },
+    {
+     "name": "TaxAmt",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Tax amount."
+    },
+    {
+     "name": "Freight",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping cost."
+    },
+    {
+     "name": "TotalDue",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull(([SubTotal]+[TaxAmt])+[Freight],(0)))",
+     "comment": "Total due to vendor. Computed as Subtotal + TaxAmt + Freight."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "name": "ShipMethod",
+   "comment": "Shipping company lookup table.",
+   "pk": [
+    "ShipMethodID"
+   ],
+   "columns": [
+    {
+     "name": "ShipMethodID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ShipMethod records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping company name."
+    },
+    {
+     "name": "ShipBase",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Minimum shipping charge."
+    },
+    {
+     "name": "ShipRate",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping charge per pound."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "name": "Vendor",
+   "comment": "Companies from whom Adventure Works Cycles purchases parts or other goods.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for Vendor records.  Foreign key to BusinessEntity.BusinessEntityID"
+    },
+    {
+     "name": "AccountNumber",
+     "type": "dbo.AccountNumber",
+     "notNull": true,
+     "identity": false,
+     "comment": "Vendor account (identification) number."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Company name."
+    },
+    {
+     "name": "CreditRating",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "1 = Superior, 2 = Excellent, 3 = Above average, 4 = Average, 5 = Below average"
+    },
+    {
+     "name": "PreferredVendorStatus",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Do not use if another vendor is available. 1 = Preferred over other vendors supplying the same product."
+    },
+    {
+     "name": "ActiveFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Vendor no longer used. 1 = Vendor is actively used."
+    },
+    {
+     "name": "PurchasingWebServiceURL",
+     "type": "nvarchar(1024)",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "CountryRegionCurrency",
+   "comment": "Cross-reference table mapping ISO currency codes to a country or region.",
+   "pk": [
+    "CountryRegionCode",
+    "CurrencyCode"
+   ],
+   "columns": [
+    {
+     "name": "CountryRegionCode",
+     "type": "nvarchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO code for countries and regions. Foreign key to CountryRegion.CountryRegionCode."
+    },
+    {
+     "name": "CurrencyCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO standard currency code. Foreign key to Currency.CurrencyCode."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "CreditCard",
+   "comment": "Customer credit card information.",
+   "pk": [
+    "CreditCardID"
+   ],
+   "columns": [
+    {
+     "name": "CreditCardID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for CreditCard records."
+    },
+    {
+     "name": "CardType",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Credit card name."
+    },
+    {
+     "name": "CardNumber",
+     "type": "nvarchar(25)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Credit card number."
+    },
+    {
+     "name": "ExpMonth",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Credit card expiration month."
+    },
+    {
+     "name": "ExpYear",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Credit card expiration year."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "Currency",
+   "comment": "Lookup table containing standard ISO currencies.",
+   "pk": [
+    "CurrencyCode"
+   ],
+   "columns": [
+    {
+     "name": "CurrencyCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "The ISO code for the Currency."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Currency name."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "CurrencyRate",
+   "comment": "Currency exchange rates.",
+   "pk": [
+    "CurrencyRateID"
+   ],
+   "columns": [
+    {
+     "name": "CurrencyRateID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for CurrencyRate records."
+    },
+    {
+     "name": "CurrencyRateDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the exchange rate was obtained."
+    },
+    {
+     "name": "FromCurrencyCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Exchange rate was converted from this currency code."
+    },
+    {
+     "name": "ToCurrencyCode",
+     "type": "nchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Exchange rate was converted to this currency code."
+    },
+    {
+     "name": "AverageRate",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Average exchange rate for the day."
+    },
+    {
+     "name": "EndOfDayRate",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Final exchange rate for the day."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "Customer",
+   "comment": "Current customer information. Also see the Person and Store tables.",
+   "pk": [
+    "CustomerID"
+   ],
+   "columns": [
+    {
+     "name": "CustomerID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key."
+    },
+    {
+     "name": "PersonID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Foreign key to Person.BusinessEntityID"
+    },
+    {
+     "name": "StoreID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Foreign key to Store.BusinessEntityID"
+    },
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "ID of the territory in which the customer is located. Foreign key to SalesTerritory.SalesTerritoryID."
+    },
+    {
+     "name": "AccountNumber",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull('AW'+[dbo].[ufnLeadingZeros]([CustomerID]),''))",
+     "comment": "Unique number identifying the customer assigned by the accounting system."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "PersonCreditCard",
+   "comment": "Cross-reference table mapping people to their credit card information in the CreditCard table. ",
+   "pk": [
+    "BusinessEntityID",
+    "CreditCardID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business entity identification number. Foreign key to Person.BusinessEntityID."
+    },
+    {
+     "name": "CreditCardID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Credit card identification number. Foreign key to CreditCard.CreditCardID."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesOrderDetail",
+   "comment": "Individual products associated with a specific sales order. See SalesOrderHeader.",
+   "pk": [
+    "SalesOrderID",
+    "SalesOrderDetailID"
+   ],
+   "columns": [
+    {
+     "name": "SalesOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to SalesOrderHeader.SalesOrderID."
+    },
+    {
+     "name": "SalesOrderDetailID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key. One incremental unique number per product sold."
+    },
+    {
+     "name": "CarrierTrackingNumber",
+     "type": "nvarchar(25)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Shipment tracking number supplied by the shipper."
+    },
+    {
+     "name": "OrderQty",
+     "type": "smallint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Quantity ordered per product."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product sold to customer. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "SpecialOfferID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Promotional code. Foreign key to SpecialOffer.SpecialOfferID."
+    },
+    {
+     "name": "UnitPrice",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Selling price of a single product."
+    },
+    {
+     "name": "UnitPriceDiscount",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount amount."
+    },
+    {
+     "name": "LineTotal",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull(([UnitPrice]*((1.0)-[UnitPriceDiscount]))*[OrderQty],(0.0)))",
+     "comment": "Per product subtotal. Computed as UnitPrice * (1 - UnitPriceDiscount) * OrderQty."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesOrderHeader",
+   "comment": "General sales order information.",
+   "pk": [
+    "SalesOrderID"
+   ],
+   "columns": [
+    {
+     "name": "SalesOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key."
+    },
+    {
+     "name": "RevisionNumber",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Incremental number to track changes to the sales order over time."
+    },
+    {
+     "name": "OrderDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Dates the sales order was created."
+    },
+    {
+     "name": "DueDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the order is due to the customer."
+    },
+    {
+     "name": "ShipDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the order was shipped to the customer."
+    },
+    {
+     "name": "Status",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "Order current status. 1 = In process; 2 = Approved; 3 = Backordered; 4 = Rejected; 5 = Shipped; 6 = Cancelled"
+    },
+    {
+     "name": "OnlineOrderFlag",
+     "type": "dbo.Flag",
+     "notNull": true,
+     "identity": false,
+     "comment": "0 = Order placed by sales person. 1 = Order placed online by customer."
+    },
+    {
+     "name": "SalesOrderNumber",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull(N'SO'+CONVERT([nvarchar](23),[SalesOrderID]),N'*** ERROR ***'))",
+     "comment": "Unique sales order identification number."
+    },
+    {
+     "name": "PurchaseOrderNumber",
+     "type": "dbo.OrderNumber",
+     "notNull": false,
+     "identity": false,
+     "comment": "Customer purchase order number reference. "
+    },
+    {
+     "name": "AccountNumber",
+     "type": "dbo.AccountNumber",
+     "notNull": false,
+     "identity": false,
+     "comment": "Financial accounting number reference."
+    },
+    {
+     "name": "CustomerID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Customer identification number. Foreign key to Customer.BusinessEntityID."
+    },
+    {
+     "name": "SalesPersonID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sales person who created the sales order. Foreign key to SalesPerson.BusinessEntityID."
+    },
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Territory in which the sale was made. Foreign key to SalesTerritory.SalesTerritoryID."
+    },
+    {
+     "name": "BillToAddressID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Customer billing address. Foreign key to Address.AddressID."
+    },
+    {
+     "name": "ShipToAddressID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Customer shipping address. Foreign key to Address.AddressID."
+    },
+    {
+     "name": "ShipMethodID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping method. Foreign key to ShipMethod.ShipMethodID."
+    },
+    {
+     "name": "CreditCardID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Credit card identification number. Foreign key to CreditCard.CreditCardID."
+    },
+    {
+     "name": "CreditCardApprovalCode",
+     "type": "varchar(15)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Approval code provided by the credit card company."
+    },
+    {
+     "name": "CurrencyRateID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Currency exchange rate used. Foreign key to CurrencyRate.CurrencyRateID."
+    },
+    {
+     "name": "SubTotal",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales subtotal. Computed as SUM(SalesOrderDetail.LineTotal)for the appropriate SalesOrderID."
+    },
+    {
+     "name": "TaxAmt",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Tax amount."
+    },
+    {
+     "name": "Freight",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shipping cost."
+    },
+    {
+     "name": "TotalDue",
+     "type": "(computed)",
+     "notNull": true,
+     "identity": false,
+     "computed": "(isnull(([SubTotal]+[TaxAmt])+[Freight],(0)))",
+     "comment": "Total due from customer. Computed as Subtotal + TaxAmt + Freight."
+    },
+    {
+     "name": "Comment",
+     "type": "nvarchar(128)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sales representative comments."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesOrderHeaderSalesReason",
+   "comment": "Cross-reference table mapping sales orders to sales reason codes.",
+   "pk": [
+    "SalesOrderID",
+    "SalesReasonID"
+   ],
+   "columns": [
+    {
+     "name": "SalesOrderID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to SalesOrderHeader.SalesOrderID."
+    },
+    {
+     "name": "SalesReasonID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to SalesReason.SalesReasonID."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesPerson",
+   "comment": "Sales representative current information.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for SalesPerson records. Foreign key to Employee.BusinessEntityID"
+    },
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Territory currently assigned to. Foreign key to SalesTerritory.SalesTerritoryID."
+    },
+    {
+     "name": "SalesQuota",
+     "type": "money",
+     "notNull": false,
+     "identity": false,
+     "comment": "Projected yearly sales."
+    },
+    {
+     "name": "Bonus",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Bonus due if quota is met."
+    },
+    {
+     "name": "CommissionPct",
+     "type": "smallmoney",
+     "notNull": true,
+     "identity": false,
+     "comment": "Commision percent received per sale."
+    },
+    {
+     "name": "SalesYTD",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales total year to date."
+    },
+    {
+     "name": "SalesLastYear",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales total of previous year."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesPersonQuotaHistory",
+   "comment": "Sales performance tracking.",
+   "pk": [
+    "BusinessEntityID",
+    "QuotaDate"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales person identification number. Foreign key to SalesPerson.BusinessEntityID."
+    },
+    {
+     "name": "QuotaDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales quota date."
+    },
+    {
+     "name": "SalesQuota",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales quota amount."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesReason",
+   "comment": "Lookup table of customer purchase reasons.",
+   "pk": [
+    "SalesReasonID"
+   ],
+   "columns": [
+    {
+     "name": "SalesReasonID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for SalesReason records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales reason description."
+    },
+    {
+     "name": "ReasonType",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Category the sales reason belongs to."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesTaxRate",
+   "comment": "Tax rate lookup table.",
+   "pk": [
+    "SalesTaxRateID"
+   ],
+   "columns": [
+    {
+     "name": "SalesTaxRateID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for SalesTaxRate records."
+    },
+    {
+     "name": "StateProvinceID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "State, province, or country/region the sales tax applies to."
+    },
+    {
+     "name": "TaxType",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": false,
+     "comment": "1 = Tax applied to retail transactions, 2 = Tax applied to wholesale transactions, 3 = Tax applied to all sales (retail and wholesale) transactions."
+    },
+    {
+     "name": "TaxRate",
+     "type": "smallmoney",
+     "notNull": true,
+     "identity": false,
+     "comment": "Tax rate amount."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Tax rate description."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesTerritory",
+   "comment": "Sales territory lookup table.",
+   "pk": [
+    "TerritoryID"
+   ],
+   "columns": [
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for SalesTerritory records."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales territory description"
+    },
+    {
+     "name": "CountryRegionCode",
+     "type": "nvarchar(3)",
+     "notNull": true,
+     "identity": false,
+     "comment": "ISO standard country or region code. Foreign key to CountryRegion.CountryRegionCode. "
+    },
+    {
+     "name": "Group",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Geographic area to which the sales territory belong."
+    },
+    {
+     "name": "SalesYTD",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales in the territory year to date."
+    },
+    {
+     "name": "SalesLastYear",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Sales in the territory the previous year."
+    },
+    {
+     "name": "CostYTD",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business costs in the territory year to date."
+    },
+    {
+     "name": "CostLastYear",
+     "type": "money",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business costs in the territory the previous year."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SalesTerritoryHistory",
+   "comment": "Sales representative transfers to other sales territories.",
+   "pk": [
+    "BusinessEntityID",
+    "StartDate",
+    "TerritoryID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. The sales rep.  Foreign key to SalesPerson.BusinessEntityID."
+    },
+    {
+     "name": "TerritoryID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Territory identification number. Foreign key to SalesTerritory.SalesTerritoryID."
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Date the sales representive started work in the territory."
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the sales representative left work in the territory."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "ShoppingCartItem",
+   "comment": "Contains online customer orders until the order is submitted or cancelled.",
+   "pk": [
+    "ShoppingCartItemID"
+   ],
+   "columns": [
+    {
+     "name": "ShoppingCartItemID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ShoppingCartItem records."
+    },
+    {
+     "name": "ShoppingCartID",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Shopping cart identification number."
+    },
+    {
+     "name": "Quantity",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product quantity ordered."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product ordered. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "DateCreated",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date the time the record was created."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SpecialOffer",
+   "comment": "Sale discounts lookup table.",
+   "pk": [
+    "SpecialOfferID"
+   ],
+   "columns": [
+    {
+     "name": "SpecialOfferID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for SpecialOffer records."
+    },
+    {
+     "name": "Description",
+     "type": "nvarchar(255)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount description."
+    },
+    {
+     "name": "DiscountPct",
+     "type": "smallmoney",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount precentage."
+    },
+    {
+     "name": "Type",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount type category."
+    },
+    {
+     "name": "Category",
+     "type": "nvarchar(50)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Group the discount applies to such as Reseller or Customer."
+    },
+    {
+     "name": "StartDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount start date."
+    },
+    {
+     "name": "EndDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Discount end date."
+    },
+    {
+     "name": "MinQty",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Minimum discount percent allowed."
+    },
+    {
+     "name": "MaxQty",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "Maximum discount percent allowed."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "SpecialOfferProduct",
+   "comment": "Cross-reference table mapping products to special offer discounts.",
+   "pk": [
+    "SpecialOfferID",
+    "ProductID"
+   ],
+   "columns": [
+    {
+     "name": "SpecialOfferID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key for SpecialOfferProduct records."
+    },
+    {
+     "name": "ProductID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Product identification number. Foreign key to Product.ProductID."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "Sales",
+   "name": "Store",
+   "comment": "Customers (resellers) of Adventure Works products.",
+   "pk": [
+    "BusinessEntityID"
+   ],
+   "columns": [
+    {
+     "name": "BusinessEntityID",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary key. Foreign key to Customer.BusinessEntityID."
+    },
+    {
+     "name": "Name",
+     "type": "dbo.Name",
+     "notNull": true,
+     "identity": false,
+     "comment": "Name of the store."
+    },
+    {
+     "name": "SalesPersonID",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "ID of the sales person assigned to the customer. Foreign key to SalesPerson.BusinessEntityID."
+    },
+    {
+     "name": "Demographics",
+     "type": "xml(CONTENT Sales.StoreSurveySchemaCollection)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Demographic informationg about the store such as the number of employees, annual sales and store type."
+    },
+    {
+     "name": "rowguid",
+     "type": "uniqueidentifier",
+     "notNull": true,
+     "identity": false,
+     "comment": "ROWGUIDCOL number uniquely identifying the record. Used to support a merge replication sample."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "dbo",
+   "name": "AWBuildVersion",
+   "comment": "Current version number of the AdventureWorks 2025 sample database. ",
+   "pk": [
+    "SystemInformationID"
+   ],
+   "columns": [
+    {
+     "name": "SystemInformationID",
+     "type": "tinyint",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for AWBuildVersion records."
+    },
+    {
+     "name": "Database Version",
+     "type": "nvarchar(25)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Version number of the database in 9.yy.mm.dd.00 format."
+    },
+    {
+     "name": "VersionDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    },
+    {
+     "name": "ModifiedDate",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "Date and time the record was last updated."
+    }
+   ]
+  },
+  {
+   "schema": "dbo",
+   "name": "DatabaseLog",
+   "comment": "Audit table tracking all DDL changes made to the AdventureWorks database. Data is captured by the database trigger ddlDatabaseTriggerLog.",
+   "pk": [
+    "DatabaseLogID"
+   ],
+   "columns": [
+    {
+     "name": "DatabaseLogID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for DatabaseLog records."
+    },
+    {
+     "name": "PostTime",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "The date and time the DDL change occurred."
+    },
+    {
+     "name": "DatabaseUser",
+     "type": "sysname",
+     "notNull": true,
+     "identity": false,
+     "comment": "The user who implemented the DDL change."
+    },
+    {
+     "name": "Event",
+     "type": "sysname",
+     "notNull": true,
+     "identity": false,
+     "comment": "The type of DDL statement that was executed."
+    },
+    {
+     "name": "Schema",
+     "type": "sysname",
+     "notNull": false,
+     "identity": false,
+     "comment": "The schema to which the changed object belongs."
+    },
+    {
+     "name": "Object",
+     "type": "sysname",
+     "notNull": false,
+     "identity": false,
+     "comment": "The object that was changed by the DDL statment."
+    },
+    {
+     "name": "TSQL",
+     "type": "nvarchar(max)",
+     "notNull": true,
+     "identity": false,
+     "comment": "The exact Transact-SQL statement that was executed."
+    },
+    {
+     "name": "XmlEvent",
+     "type": "xml",
+     "notNull": true,
+     "identity": false,
+     "comment": "The raw XML data generated by database trigger."
+    }
+   ]
+  },
+  {
+   "schema": "dbo",
+   "name": "ErrorLog",
+   "comment": "Audit table tracking errors in the the AdventureWorks database that are caught by the CATCH block of a TRY...CATCH construct. Data is inserted by stored procedure dbo.uspLogError when it is executed from inside the CATCH block of a TRY...CATCH construct.",
+   "pk": [
+    "ErrorLogID"
+   ],
+   "columns": [
+    {
+     "name": "ErrorLogID",
+     "type": "int",
+     "notNull": true,
+     "identity": true,
+     "comment": "Primary key for ErrorLog records."
+    },
+    {
+     "name": "ErrorTime",
+     "type": "datetime",
+     "notNull": true,
+     "identity": false,
+     "comment": "The date and time at which the error occurred."
+    },
+    {
+     "name": "UserName",
+     "type": "sysname",
+     "notNull": true,
+     "identity": false,
+     "comment": "The user who executed the batch in which the error occurred."
+    },
+    {
+     "name": "ErrorNumber",
+     "type": "int",
+     "notNull": true,
+     "identity": false,
+     "comment": "The error number of the error that occurred."
+    },
+    {
+     "name": "ErrorSeverity",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "The severity of the error that occurred."
+    },
+    {
+     "name": "ErrorState",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "The state number of the error that occurred."
+    },
+    {
+     "name": "ErrorProcedure",
+     "type": "nvarchar(126)",
+     "notNull": false,
+     "identity": false,
+     "comment": "The name of the stored procedure or trigger where the error occurred."
+    },
+    {
+     "name": "ErrorLine",
+     "type": "int",
+     "notNull": false,
+     "identity": false,
+     "comment": "The line number at which the error occurred."
+    },
+    {
+     "name": "ErrorMessage",
+     "type": "nvarchar(4000)",
+     "notNull": true,
+     "identity": false,
+     "comment": "The message text of the error that occurred."
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [
+  {
+   "schema": "HumanResources",
+   "table": "Department",
+   "name": "AK_Department_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "HumanResources",
+   "table": "Employee",
+   "name": "AK_Employee_LoginID",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "LoginID"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "HumanResources",
+   "table": "Employee",
+   "name": "AK_Employee_NationalIDNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "NationalIDNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "HumanResources",
+   "table": "Employee",
+   "name": "AK_Employee_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "HumanResources",
+   "table": "Shift",
+   "name": "AK_Shift_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "HumanResources",
+   "table": "Shift",
+   "name": "AK_Shift_StartTime_EndTime",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "StartTime",
+    "EndTime"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "Address",
+   "name": "AK_Address_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "Address",
+   "name": "IX_Address_AddressLine1_AddressLine2_City_StateProvinceID_PostalCode",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "AddressLine1",
+    "AddressLine2",
+    "City",
+    "StateProvinceID",
+    "PostalCode"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "AddressType",
+   "name": "AK_AddressType_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "AddressType",
+   "name": "AK_AddressType_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntity",
+   "name": "AK_BusinessEntity_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityAddress",
+   "name": "AK_BusinessEntityAddress_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityContact",
+   "name": "AK_BusinessEntityContact_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "ContactType",
+   "name": "AK_ContactType_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "CountryRegion",
+   "name": "AK_CountryRegion_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "Person",
+   "name": "AK_Person_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "StateProvince",
+   "name": "AK_StateProvince_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "StateProvince",
+   "name": "AK_StateProvince_StateProvinceCode_CountryRegionCode",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "StateProvinceCode",
+    "CountryRegionCode"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "StateProvince",
+   "name": "AK_StateProvince_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Person",
+   "table": "vStateProvinceCountryRegion",
+   "name": "IX_vStateProvinceCountryRegion",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "StateProvinceID",
+    "CountryRegionCode"
+   ],
+   "on": "VIEW"
+  },
+  {
+   "schema": "Production",
+   "table": "BillOfMaterials",
+   "name": "AK_BillOfMaterials_ProductAssemblyID_ComponentID_StartDate",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "ProductAssemblyID",
+    "ComponentID",
+    "StartDate"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Culture",
+   "name": "AK_Culture_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Document",
+   "name": "AK_Document_DocumentLevel_DocumentNode",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "DocumentLevel",
+    "DocumentNode"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Document",
+   "name": "AK_Document_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Document",
+   "name": "UQ__Document__F73921F73AA98B51",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Location",
+   "name": "AK_Location_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "AK_Product_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "AK_Product_ProductNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "ProductNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "AK_Product_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductCategory",
+   "name": "AK_ProductCategory_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductCategory",
+   "name": "AK_ProductCategory_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductDescription",
+   "name": "AK_ProductDescription_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModel",
+   "name": "AK_ProductModel_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModel",
+   "name": "AK_ProductModel_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductSubcategory",
+   "name": "AK_ProductSubcategory_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ProductSubcategory",
+   "name": "AK_ProductSubcategory_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "ScrapReason",
+   "name": "AK_ScrapReason_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "UnitMeasure",
+   "name": "AK_UnitMeasure_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Production",
+   "table": "vProductAndDescription",
+   "name": "IX_vProductAndDescription",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "CultureID",
+    "ProductID"
+   ],
+   "on": "VIEW"
+  },
+  {
+   "schema": "Purchasing",
+   "table": "ShipMethod",
+   "name": "AK_ShipMethod_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Purchasing",
+   "table": "ShipMethod",
+   "name": "AK_ShipMethod_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Purchasing",
+   "table": "Vendor",
+   "name": "AK_Vendor_AccountNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "AccountNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "CreditCard",
+   "name": "AK_CreditCard_CardNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "CardNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "Currency",
+   "name": "AK_Currency_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "CurrencyRate",
+   "name": "AK_CurrencyRate_CurrencyRateDate_FromCurrencyCode_ToCurrencyCode",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "CurrencyRateDate",
+    "FromCurrencyCode",
+    "ToCurrencyCode"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "Customer",
+   "name": "AK_Customer_AccountNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "AccountNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "Customer",
+   "name": "AK_Customer_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderDetail",
+   "name": "AK_SalesOrderDetail_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "AK_SalesOrderHeader_SalesOrderNumber",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "SalesOrderNumber"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "AK_SalesOrderHeader_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesPerson",
+   "name": "AK_SalesPerson_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesPersonQuotaHistory",
+   "name": "AK_SalesPersonQuotaHistory_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTaxRate",
+   "name": "AK_SalesTaxRate_StateProvinceID_TaxType",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "StateProvinceID",
+    "TaxType"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTaxRate",
+   "name": "AK_SalesTaxRate_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritory",
+   "name": "AK_SalesTerritory_Name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "Name"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritory",
+   "name": "AK_SalesTerritory_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritoryHistory",
+   "name": "AK_SalesTerritoryHistory_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SpecialOffer",
+   "name": "AK_SpecialOffer_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "SpecialOfferProduct",
+   "name": "AK_SpecialOfferProduct_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  },
+  {
+   "schema": "Sales",
+   "table": "Store",
+   "name": "AK_Store_rowguid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rowguid"
+   ],
+   "on": "USER_TABLE"
+  }
+ ],
+ "foreignKeys": [
+  {
+   "schema": "HumanResources",
+   "table": "Employee",
+   "name": "FK_Employee_Person_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "table": "EmployeeDepartmentHistory",
+   "name": "FK_EmployeeDepartmentHistory_Department_DepartmentID",
+   "columns": [
+    "DepartmentID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Department",
+   "refColumns": [
+    "DepartmentID"
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "table": "EmployeeDepartmentHistory",
+   "name": "FK_EmployeeDepartmentHistory_Employee_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "table": "EmployeeDepartmentHistory",
+   "name": "FK_EmployeeDepartmentHistory_Shift_ShiftID",
+   "columns": [
+    "ShiftID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Shift",
+   "refColumns": [
+    "ShiftID"
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "table": "EmployeePayHistory",
+   "name": "FK_EmployeePayHistory_Employee_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "HumanResources",
+   "table": "JobCandidate",
+   "name": "FK_JobCandidate_Employee_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "Address",
+   "name": "FK_Address_StateProvince_StateProvinceID",
+   "columns": [
+    "StateProvinceID"
+   ],
+   "refSchema": "Person",
+   "refTable": "StateProvince",
+   "refColumns": [
+    "StateProvinceID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityAddress",
+   "name": "FK_BusinessEntityAddress_AddressType_AddressTypeID",
+   "columns": [
+    "AddressTypeID"
+   ],
+   "refSchema": "Person",
+   "refTable": "AddressType",
+   "refColumns": [
+    "AddressTypeID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityAddress",
+   "name": "FK_BusinessEntityAddress_Address_AddressID",
+   "columns": [
+    "AddressID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Address",
+   "refColumns": [
+    "AddressID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityAddress",
+   "name": "FK_BusinessEntityAddress_BusinessEntity_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "BusinessEntity",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityContact",
+   "name": "FK_BusinessEntityContact_BusinessEntity_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "BusinessEntity",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityContact",
+   "name": "FK_BusinessEntityContact_ContactType_ContactTypeID",
+   "columns": [
+    "ContactTypeID"
+   ],
+   "refSchema": "Person",
+   "refTable": "ContactType",
+   "refColumns": [
+    "ContactTypeID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "BusinessEntityContact",
+   "name": "FK_BusinessEntityContact_Person_PersonID",
+   "columns": [
+    "PersonID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "EmailAddress",
+   "name": "FK_EmailAddress_Person_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "Password",
+   "name": "FK_Password_Person_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "Person",
+   "name": "FK_Person_BusinessEntity_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "BusinessEntity",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "PersonPhone",
+   "name": "FK_PersonPhone_Person_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "PersonPhone",
+   "name": "FK_PersonPhone_PhoneNumberType_PhoneNumberTypeID",
+   "columns": [
+    "PhoneNumberTypeID"
+   ],
+   "refSchema": "Person",
+   "refTable": "PhoneNumberType",
+   "refColumns": [
+    "PhoneNumberTypeID"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "StateProvince",
+   "name": "FK_StateProvince_CountryRegion_CountryRegionCode",
+   "columns": [
+    "CountryRegionCode"
+   ],
+   "refSchema": "Person",
+   "refTable": "CountryRegion",
+   "refColumns": [
+    "CountryRegionCode"
+   ]
+  },
+  {
+   "schema": "Person",
+   "table": "StateProvince",
+   "name": "FK_StateProvince_SalesTerritory_TerritoryID",
+   "columns": [
+    "TerritoryID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesTerritory",
+   "refColumns": [
+    "TerritoryID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "BillOfMaterials",
+   "name": "FK_BillOfMaterials_Product_ComponentID",
+   "columns": [
+    "ComponentID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "BillOfMaterials",
+   "name": "FK_BillOfMaterials_Product_ProductAssemblyID",
+   "columns": [
+    "ProductAssemblyID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "BillOfMaterials",
+   "name": "FK_BillOfMaterials_UnitMeasure_UnitMeasureCode",
+   "columns": [
+    "UnitMeasureCode"
+   ],
+   "refSchema": "Production",
+   "refTable": "UnitMeasure",
+   "refColumns": [
+    "UnitMeasureCode"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "Document",
+   "name": "FK_Document_Employee_Owner",
+   "columns": [
+    "Owner"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "FK_Product_ProductModel_ProductModelID",
+   "columns": [
+    "ProductModelID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductModel",
+   "refColumns": [
+    "ProductModelID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "FK_Product_ProductSubcategory_ProductSubcategoryID",
+   "columns": [
+    "ProductSubcategoryID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductSubcategory",
+   "refColumns": [
+    "ProductSubcategoryID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "FK_Product_UnitMeasure_SizeUnitMeasureCode",
+   "columns": [
+    "SizeUnitMeasureCode"
+   ],
+   "refSchema": "Production",
+   "refTable": "UnitMeasure",
+   "refColumns": [
+    "UnitMeasureCode"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "Product",
+   "name": "FK_Product_UnitMeasure_WeightUnitMeasureCode",
+   "columns": [
+    "WeightUnitMeasureCode"
+   ],
+   "refSchema": "Production",
+   "refTable": "UnitMeasure",
+   "refColumns": [
+    "UnitMeasureCode"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductCostHistory",
+   "name": "FK_ProductCostHistory_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductDocument",
+   "name": "FK_ProductDocument_Document_DocumentNode",
+   "columns": [
+    "DocumentNode"
+   ],
+   "refSchema": "Production",
+   "refTable": "Document",
+   "refColumns": [
+    "DocumentNode"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductDocument",
+   "name": "FK_ProductDocument_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductInventory",
+   "name": "FK_ProductInventory_Location_LocationID",
+   "columns": [
+    "LocationID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Location",
+   "refColumns": [
+    "LocationID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductInventory",
+   "name": "FK_ProductInventory_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductListPriceHistory",
+   "name": "FK_ProductListPriceHistory_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModelIllustration",
+   "name": "FK_ProductModelIllustration_Illustration_IllustrationID",
+   "columns": [
+    "IllustrationID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Illustration",
+   "refColumns": [
+    "IllustrationID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModelIllustration",
+   "name": "FK_ProductModelIllustration_ProductModel_ProductModelID",
+   "columns": [
+    "ProductModelID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductModel",
+   "refColumns": [
+    "ProductModelID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModelProductDescriptionCulture",
+   "name": "FK_ProductModelProductDescriptionCulture_Culture_CultureID",
+   "columns": [
+    "CultureID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Culture",
+   "refColumns": [
+    "CultureID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModelProductDescriptionCulture",
+   "name": "FK_ProductModelProductDescriptionCulture_ProductDescription_ProductDescriptionID",
+   "columns": [
+    "ProductDescriptionID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductDescription",
+   "refColumns": [
+    "ProductDescriptionID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductModelProductDescriptionCulture",
+   "name": "FK_ProductModelProductDescriptionCulture_ProductModel_ProductModelID",
+   "columns": [
+    "ProductModelID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductModel",
+   "refColumns": [
+    "ProductModelID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductProductPhoto",
+   "name": "FK_ProductProductPhoto_ProductPhoto_ProductPhotoID",
+   "columns": [
+    "ProductPhotoID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductPhoto",
+   "refColumns": [
+    "ProductPhotoID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductProductPhoto",
+   "name": "FK_ProductProductPhoto_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductReview",
+   "name": "FK_ProductReview_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "ProductSubcategory",
+   "name": "FK_ProductSubcategory_ProductCategory_ProductCategoryID",
+   "columns": [
+    "ProductCategoryID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ProductCategory",
+   "refColumns": [
+    "ProductCategoryID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "TransactionHistory",
+   "name": "FK_TransactionHistory_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "WorkOrder",
+   "name": "FK_WorkOrder_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "WorkOrder",
+   "name": "FK_WorkOrder_ScrapReason_ScrapReasonID",
+   "columns": [
+    "ScrapReasonID"
+   ],
+   "refSchema": "Production",
+   "refTable": "ScrapReason",
+   "refColumns": [
+    "ScrapReasonID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "WorkOrderRouting",
+   "name": "FK_WorkOrderRouting_Location_LocationID",
+   "columns": [
+    "LocationID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Location",
+   "refColumns": [
+    "LocationID"
+   ]
+  },
+  {
+   "schema": "Production",
+   "table": "WorkOrderRouting",
+   "name": "FK_WorkOrderRouting_WorkOrder_WorkOrderID",
+   "columns": [
+    "WorkOrderID"
+   ],
+   "refSchema": "Production",
+   "refTable": "WorkOrder",
+   "refColumns": [
+    "WorkOrderID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "ProductVendor",
+   "name": "FK_ProductVendor_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "ProductVendor",
+   "name": "FK_ProductVendor_UnitMeasure_UnitMeasureCode",
+   "columns": [
+    "UnitMeasureCode"
+   ],
+   "refSchema": "Production",
+   "refTable": "UnitMeasure",
+   "refColumns": [
+    "UnitMeasureCode"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "ProductVendor",
+   "name": "FK_ProductVendor_Vendor_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Purchasing",
+   "refTable": "Vendor",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "PurchaseOrderDetail",
+   "name": "FK_PurchaseOrderDetail_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "PurchaseOrderDetail",
+   "name": "FK_PurchaseOrderDetail_PurchaseOrderHeader_PurchaseOrderID",
+   "columns": [
+    "PurchaseOrderID"
+   ],
+   "refSchema": "Purchasing",
+   "refTable": "PurchaseOrderHeader",
+   "refColumns": [
+    "PurchaseOrderID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "PurchaseOrderHeader",
+   "name": "FK_PurchaseOrderHeader_Employee_EmployeeID",
+   "columns": [
+    "EmployeeID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "PurchaseOrderHeader",
+   "name": "FK_PurchaseOrderHeader_ShipMethod_ShipMethodID",
+   "columns": [
+    "ShipMethodID"
+   ],
+   "refSchema": "Purchasing",
+   "refTable": "ShipMethod",
+   "refColumns": [
+    "ShipMethodID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "PurchaseOrderHeader",
+   "name": "FK_PurchaseOrderHeader_Vendor_VendorID",
+   "columns": [
+    "VendorID"
+   ],
+   "refSchema": "Purchasing",
+   "refTable": "Vendor",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Purchasing",
+   "table": "Vendor",
+   "name": "FK_Vendor_BusinessEntity_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "BusinessEntity",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "CountryRegionCurrency",
+   "name": "FK_CountryRegionCurrency_CountryRegion_CountryRegionCode",
+   "columns": [
+    "CountryRegionCode"
+   ],
+   "refSchema": "Person",
+   "refTable": "CountryRegion",
+   "refColumns": [
+    "CountryRegionCode"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "CountryRegionCurrency",
+   "name": "FK_CountryRegionCurrency_Currency_CurrencyCode",
+   "columns": [
+    "CurrencyCode"
+   ],
+   "refSchema": "Sales",
+   "refTable": "Currency",
+   "refColumns": [
+    "CurrencyCode"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "CurrencyRate",
+   "name": "FK_CurrencyRate_Currency_FromCurrencyCode",
+   "columns": [
+    "FromCurrencyCode"
+   ],
+   "refSchema": "Sales",
+   "refTable": "Currency",
+   "refColumns": [
+    "CurrencyCode"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "CurrencyRate",
+   "name": "FK_CurrencyRate_Currency_ToCurrencyCode",
+   "columns": [
+    "ToCurrencyCode"
+   ],
+   "refSchema": "Sales",
+   "refTable": "Currency",
+   "refColumns": [
+    "CurrencyCode"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "Customer",
+   "name": "FK_Customer_Person_PersonID",
+   "columns": [
+    "PersonID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "Customer",
+   "name": "FK_Customer_SalesTerritory_TerritoryID",
+   "columns": [
+    "TerritoryID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesTerritory",
+   "refColumns": [
+    "TerritoryID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "Customer",
+   "name": "FK_Customer_Store_StoreID",
+   "columns": [
+    "StoreID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "Store",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "PersonCreditCard",
+   "name": "FK_PersonCreditCard_CreditCard_CreditCardID",
+   "columns": [
+    "CreditCardID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "CreditCard",
+   "refColumns": [
+    "CreditCardID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "PersonCreditCard",
+   "name": "FK_PersonCreditCard_Person_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Person",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderDetail",
+   "name": "FK_SalesOrderDetail_SalesOrderHeader_SalesOrderID",
+   "columns": [
+    "SalesOrderID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesOrderHeader",
+   "refColumns": [
+    "SalesOrderID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderDetail",
+   "name": "FK_SalesOrderDetail_SpecialOfferProduct_SpecialOfferIDProductID",
+   "columns": [
+    "SpecialOfferID",
+    "ProductID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SpecialOfferProduct",
+   "refColumns": [
+    "SpecialOfferID",
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_Address_BillToAddressID",
+   "columns": [
+    "BillToAddressID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Address",
+   "refColumns": [
+    "AddressID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_Address_ShipToAddressID",
+   "columns": [
+    "ShipToAddressID"
+   ],
+   "refSchema": "Person",
+   "refTable": "Address",
+   "refColumns": [
+    "AddressID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_CreditCard_CreditCardID",
+   "columns": [
+    "CreditCardID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "CreditCard",
+   "refColumns": [
+    "CreditCardID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_CurrencyRate_CurrencyRateID",
+   "columns": [
+    "CurrencyRateID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "CurrencyRate",
+   "refColumns": [
+    "CurrencyRateID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_Customer_CustomerID",
+   "columns": [
+    "CustomerID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "Customer",
+   "refColumns": [
+    "CustomerID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_SalesPerson_SalesPersonID",
+   "columns": [
+    "SalesPersonID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesPerson",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_SalesTerritory_TerritoryID",
+   "columns": [
+    "TerritoryID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesTerritory",
+   "refColumns": [
+    "TerritoryID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeader",
+   "name": "FK_SalesOrderHeader_ShipMethod_ShipMethodID",
+   "columns": [
+    "ShipMethodID"
+   ],
+   "refSchema": "Purchasing",
+   "refTable": "ShipMethod",
+   "refColumns": [
+    "ShipMethodID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeaderSalesReason",
+   "name": "FK_SalesOrderHeaderSalesReason_SalesOrderHeader_SalesOrderID",
+   "columns": [
+    "SalesOrderID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesOrderHeader",
+   "refColumns": [
+    "SalesOrderID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesOrderHeaderSalesReason",
+   "name": "FK_SalesOrderHeaderSalesReason_SalesReason_SalesReasonID",
+   "columns": [
+    "SalesReasonID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesReason",
+   "refColumns": [
+    "SalesReasonID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesPerson",
+   "name": "FK_SalesPerson_Employee_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "HumanResources",
+   "refTable": "Employee",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesPerson",
+   "name": "FK_SalesPerson_SalesTerritory_TerritoryID",
+   "columns": [
+    "TerritoryID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesTerritory",
+   "refColumns": [
+    "TerritoryID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesPersonQuotaHistory",
+   "name": "FK_SalesPersonQuotaHistory_SalesPerson_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesPerson",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTaxRate",
+   "name": "FK_SalesTaxRate_StateProvince_StateProvinceID",
+   "columns": [
+    "StateProvinceID"
+   ],
+   "refSchema": "Person",
+   "refTable": "StateProvince",
+   "refColumns": [
+    "StateProvinceID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritory",
+   "name": "FK_SalesTerritory_CountryRegion_CountryRegionCode",
+   "columns": [
+    "CountryRegionCode"
+   ],
+   "refSchema": "Person",
+   "refTable": "CountryRegion",
+   "refColumns": [
+    "CountryRegionCode"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritoryHistory",
+   "name": "FK_SalesTerritoryHistory_SalesPerson_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesPerson",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SalesTerritoryHistory",
+   "name": "FK_SalesTerritoryHistory_SalesTerritory_TerritoryID",
+   "columns": [
+    "TerritoryID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesTerritory",
+   "refColumns": [
+    "TerritoryID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "ShoppingCartItem",
+   "name": "FK_ShoppingCartItem_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SpecialOfferProduct",
+   "name": "FK_SpecialOfferProduct_Product_ProductID",
+   "columns": [
+    "ProductID"
+   ],
+   "refSchema": "Production",
+   "refTable": "Product",
+   "refColumns": [
+    "ProductID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "SpecialOfferProduct",
+   "name": "FK_SpecialOfferProduct_SpecialOffer_SpecialOfferID",
+   "columns": [
+    "SpecialOfferID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SpecialOffer",
+   "refColumns": [
+    "SpecialOfferID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "Store",
+   "name": "FK_Store_BusinessEntity_BusinessEntityID",
+   "columns": [
+    "BusinessEntityID"
+   ],
+   "refSchema": "Person",
+   "refTable": "BusinessEntity",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  },
+  {
+   "schema": "Sales",
+   "table": "Store",
+   "name": "FK_Store_SalesPerson_SalesPersonID",
+   "columns": [
+    "SalesPersonID"
+   ],
+   "refSchema": "Sales",
+   "refTable": "SalesPerson",
+   "refColumns": [
+    "BusinessEntityID"
+   ]
+  }
+ ]
+}

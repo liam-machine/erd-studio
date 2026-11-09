@@ -3,7 +3,8 @@
   "Source truth for the real-world import scorecard (test/unit/realWorldImports.scorecard.test.ts).",
   "Counted from the upstream files only, never through ERD Studio: SQL by a replaying statement reader (comments, strings, $$ bodies, DELIMITER and GO handled; CREATE/ALTER/DROP TABLE, ADD/DROP/RENAME/ALTER COLUMN, ADD/DROP CONSTRAINT incl. PostgreSQL default constraint names, RENAME TO, CREATE UNIQUE INDEX, COMMENT ON, MS_Description, USE SCHEMA, ALTER TABLE inside DO blocks), DBML/TMDL by line readers, model.bim as JSON, dbt by parsing models/**/*.yml.",
   "Every count was checked against the independently counted numbers in each sample's SOURCE.md (the \"counts\" object). Columns are [name, type, flags, description?] with flags P primary key, N not null, U unique, C calculated.",
-  "Relationships are one entry per column pair from the FK (many) side; a composite FK shares \"composite\". \"notes\" says where a sample's truth needs a reading."
+  "Relationships are one entry per column pair from the FK (many) side; a composite FK shares \"composite\". \"notes\" says where a sample's truth needs a reading.",
+  "SQL samples are checked against the real engines (test/real-world-truth/, docs/dev/real-world-truth.md): every difference between this file and the engines' catalogs is explained in test/real-world-truth/differences.json."
  ],
  "samples": {
   "dbml-qut-workbench": {
@@ -4359,10 +4360,10 @@
    "counts": {
     "tables": 71,
     "columns": 479,
-    "primaryKeys": 16,
+    "primaryKeys": 71,
     "relationships": 37
    },
-   "notes": "The same pg_dump as postgres-pagila, imported with 'Keep each partition as a table' (input.partitions 'tables'): payment's 55 monthly partitions are CREATE TABLE ... (the same 7 columns) of their own and count as tables, as SOURCE.md counts them (71 tables, 479 columns, 16 primary keys, 37 FKs: the 18 FKs pg_dump declares only on partitions 2022_01..06 included). This is the truth the scorecard held before folding became the default, kept so the kept-as-tables reading of a real dump stays measured. length_hours is a PostgreSQL 18 VIRTUAL generated column.",
+   "notes": "The same pg_dump as postgres-pagila, imported with 'Keep each partition as a table' (input.partitions 'tables'): payment's 55 monthly partitions are CREATE TABLE ... (the same 7 columns) of their own and count as tables, as SOURCE.md counts them (71 tables, 479 columns, 37 FKs: the 18 FKs pg_dump declares only on partitions 2022_01..06 included). Each partition also has payment's primary key (payment_date, payment_id) and unique index (uuid, payment_date): the dump writes neither on a partition, but PostgreSQL creates both when a partition is attached (read back from PostgreSQL 18, test/real-world-truth/engine/postgres-pagila.json), so 71 primary keys, not SOURCE.md's 16. This is the truth the scorecard held before folding became the default, kept so the kept-as-tables reading of a real dump stays measured. length_hours is a PostgreSQL 18 VIRTUAL generated column.",
    "tables": [
     {
      "name": "customer",
@@ -4842,12 +4843,15 @@
     {
      "name": "payment_p2022_01",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -4872,7 +4876,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -4884,12 +4888,15 @@
     {
      "name": "payment_p2022_02",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -4914,7 +4921,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -4926,12 +4933,15 @@
     {
      "name": "payment_p2022_03",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -4956,7 +4966,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -4968,12 +4978,15 @@
     {
      "name": "payment_p2022_04",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -4998,7 +5011,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5010,12 +5023,15 @@
     {
      "name": "payment_p2022_05",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5040,7 +5056,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5052,12 +5068,15 @@
     {
      "name": "payment_p2022_06",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5082,7 +5101,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5094,12 +5113,15 @@
     {
      "name": "payment_p2022_07",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5124,7 +5146,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5136,12 +5158,15 @@
     {
      "name": "payment_p2022_08",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5166,7 +5191,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5178,12 +5203,15 @@
     {
      "name": "payment_p2022_09",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5208,7 +5236,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5220,12 +5248,15 @@
     {
      "name": "payment_p2022_10",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5250,7 +5281,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5262,12 +5293,15 @@
     {
      "name": "payment_p2022_11",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5292,7 +5326,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5304,12 +5338,15 @@
     {
      "name": "payment_p2022_12",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5334,7 +5371,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5346,12 +5383,15 @@
     {
      "name": "payment_p2023_01",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5376,7 +5416,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5388,12 +5428,15 @@
     {
      "name": "payment_p2023_02",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5418,7 +5461,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5430,12 +5473,15 @@
     {
      "name": "payment_p2023_03",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5460,7 +5506,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5472,12 +5518,15 @@
     {
      "name": "payment_p2023_04",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5502,7 +5551,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5514,12 +5563,15 @@
     {
      "name": "payment_p2023_05",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5544,7 +5596,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5556,12 +5608,15 @@
     {
      "name": "payment_p2023_06",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5586,7 +5641,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5598,12 +5653,15 @@
     {
      "name": "payment_p2023_07",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5628,7 +5686,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5640,12 +5698,15 @@
     {
      "name": "payment_p2023_08",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5670,7 +5731,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5682,12 +5743,15 @@
     {
      "name": "payment_p2023_09",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5712,7 +5776,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5724,12 +5788,15 @@
     {
      "name": "payment_p2023_10",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5754,7 +5821,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5766,12 +5833,15 @@
     {
      "name": "payment_p2023_11",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5796,7 +5866,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5808,12 +5878,15 @@
     {
      "name": "payment_p2023_12",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5838,7 +5911,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5850,12 +5923,15 @@
     {
      "name": "payment_p2024_01",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5880,7 +5956,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5892,12 +5968,15 @@
     {
      "name": "payment_p2024_02",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5922,7 +6001,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5934,12 +6013,15 @@
     {
      "name": "payment_p2024_03",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -5964,7 +6046,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -5976,12 +6058,15 @@
     {
      "name": "payment_p2024_04",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6006,7 +6091,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6018,12 +6103,15 @@
     {
      "name": "payment_p2024_05",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6048,7 +6136,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6060,12 +6148,15 @@
     {
      "name": "payment_p2024_06",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6090,7 +6181,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6102,12 +6193,15 @@
     {
      "name": "payment_p2024_07",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6132,7 +6226,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6144,12 +6238,15 @@
     {
      "name": "payment_p2024_08",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6174,7 +6271,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6186,12 +6283,15 @@
     {
      "name": "payment_p2024_09",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6216,7 +6316,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6228,12 +6328,15 @@
     {
      "name": "payment_p2024_10",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6258,7 +6361,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6270,12 +6373,15 @@
     {
      "name": "payment_p2024_11",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6300,7 +6406,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6312,12 +6418,15 @@
     {
      "name": "payment_p2024_12",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6342,7 +6451,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6354,12 +6463,15 @@
     {
      "name": "payment_p2025_01",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6384,7 +6496,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6396,12 +6508,15 @@
     {
      "name": "payment_p2025_02",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6426,7 +6541,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6438,12 +6553,15 @@
     {
      "name": "payment_p2025_03",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6468,7 +6586,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6480,12 +6598,15 @@
     {
      "name": "payment_p2025_04",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6510,7 +6631,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6522,12 +6643,15 @@
     {
      "name": "payment_p2025_05",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6552,7 +6676,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6564,12 +6688,15 @@
     {
      "name": "payment_p2025_06",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6594,7 +6721,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6606,12 +6733,15 @@
     {
      "name": "payment_p2025_07",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6636,7 +6766,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6648,12 +6778,15 @@
     {
      "name": "payment_p2025_08",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6678,7 +6811,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6690,12 +6823,15 @@
     {
      "name": "payment_p2025_09",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6720,7 +6856,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6732,12 +6868,15 @@
     {
      "name": "payment_p2025_10",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6762,7 +6901,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6774,12 +6913,15 @@
     {
      "name": "payment_p2025_11",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6804,7 +6946,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6816,12 +6958,15 @@
     {
      "name": "payment_p2025_12",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6846,7 +6991,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6858,12 +7003,15 @@
     {
      "name": "payment_p2026_01",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6888,7 +7036,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6900,12 +7048,15 @@
     {
      "name": "payment_p2026_02",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6930,7 +7081,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6942,12 +7093,15 @@
     {
      "name": "payment_p2026_03",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -6972,7 +7126,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -6984,12 +7138,15 @@
     {
      "name": "payment_p2026_04",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -7014,7 +7171,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -7026,12 +7183,15 @@
     {
      "name": "payment_p2026_05",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -7056,7 +7216,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -7068,12 +7228,15 @@
     {
      "name": "payment_p2026_06",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -7098,7 +7261,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -7110,12 +7273,15 @@
     {
      "name": "payment_p2026_07",
      "schema": "public",
-     "pk": [],
+     "pk": [
+      "payment_date",
+      "payment_id"
+     ],
      "columns": [
       [
        "payment_id",
        "integer",
-       "N"
+       "PN"
       ],
       [
        "customer_id",
@@ -7140,7 +7306,7 @@
       [
        "payment_date",
        "timestamp with time zone",
-       "N"
+       "PN"
       ],
       [
        "uuid",
@@ -7549,6 +7715,446 @@
     },
     {
      "table": "payment",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_01",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_02",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_03",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_04",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_05",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_06",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_07",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_08",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_09",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_10",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_11",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2022_12",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_01",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_02",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_03",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_04",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_05",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_06",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_07",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_08",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_09",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_10",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_11",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2023_12",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_01",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_02",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_03",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_04",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_05",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_06",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_07",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_08",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_09",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_10",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_11",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2024_12",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_01",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_02",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_03",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_04",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_05",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_06",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_07",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_08",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_09",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_10",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_11",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2025_12",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_01",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_02",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_03",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_04",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_05",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_06",
+     "columns": [
+      "uuid",
+      "payment_date"
+     ],
+     "index": true
+    },
+    {
+     "table": "payment_p2026_07",
      "columns": [
       "uuid",
       "payment_date"
@@ -8335,7 +8941,7 @@
     "primaryKeys": 71,
     "relationships": 90
    },
-   "notes": "Types are as written ([nvarchar](60), alias types such as [dbo].[Name]); computed columns have no type (\"(computed)\"). Descriptions are MS_Description extended properties. 2 unique indexes on views are not table keys.",
+   "notes": "Types are as written ([nvarchar](60), alias types such as [dbo].[Name]); computed columns have no type (\"(computed)\"). Descriptions are MS_Description extended properties. 2 unique indexes on views are not table keys. A computed column of ISNULL(expr, constant) is NOT NULL (SQL Server 2025 sys.columns.is_nullable = 0, test/real-world-truth/engine/sqlserver-adventureworks.json): Customer.AccountNumber, PurchaseOrderDetail.LineTotal, PurchaseOrderDetail.StockedQty, SalesOrderDetail.LineTotal, SalesOrderHeader.SalesOrderNumber, SalesOrderHeader.TotalDue, WorkOrder.StockedQty.",
    "tables": [
     {
      "name": "DatabaseLog",
@@ -9041,7 +9647,7 @@
       [
        "AccountNumber",
        "AS ISNULL('AW' + [dbo].[ufnLeadingZeros](CustomerID), '')",
-       "",
+       "N",
        "Unique number identifying the customer assigned by the accounting system."
       ],
       [
@@ -10552,7 +11158,7 @@
       [
        "LineTotal",
        "AS ISNULL([OrderQty] * [UnitPrice], 0.00)",
-       "",
+       "N",
        "Per product subtotal. Computed as OrderQty * UnitPrice."
       ],
       [
@@ -10570,7 +11176,7 @@
       [
        "StockedQty",
        "AS ISNULL([ReceivedQty] - [RejectedQty], 0.00)",
-       "",
+       "N",
        "Quantity accepted into inventory. Computed as ReceivedQty - RejectedQty."
       ],
       [
@@ -10729,7 +11335,7 @@
       [
        "LineTotal",
        "AS ISNULL([UnitPrice] * (1.0 - [UnitPriceDiscount]) * [OrderQty], 0.0)",
-       "",
+       "N",
        "Per product subtotal. Computed as UnitPrice * (1 - UnitPriceDiscount) * OrderQty."
       ],
       [
@@ -10799,7 +11405,7 @@
       [
        "SalesOrderNumber",
        "AS ISNULL(N'SO' + CONVERT(nvarchar(23), [SalesOrderID]), N'*** ERROR ***')",
-       "",
+       "N",
        "Unique sales order identification number."
       ],
       [
@@ -10889,7 +11495,7 @@
       [
        "TotalDue",
        "AS ISNULL([SubTotal] + [TaxAmt] + [Freight], 0)",
-       "",
+       "N",
        "Total due from customer. Computed as Subtotal + TaxAmt + Freight."
       ],
       [
@@ -11862,7 +12468,7 @@
       [
        "StockedQty",
        "AS ISNULL([OrderQty] - [ScrappedQty], 0)",
-       ""
+       "N"
       ],
       [
        "ScrappedQty",
@@ -12950,7 +13556,7 @@
     "primaryKeys": 18,
     "relationships": 12
    },
-   "notes": "Schemas come from USE SCHEMA, which every CREATE OR REPLACE TABLE runs under.",
+   "notes": "Schemas come from USE SCHEMA, which every CREATE OR REPLACE TABLE runs under. AUTOINCREMENT (8 primary keys) is the column's identity, not its type: the type is NUMBER(38,0), as Snowflake's information_schema reads it.",
    "tables": [
     {
      "name": "ASSET_MASTER",
@@ -13087,7 +13693,7 @@
      "columns": [
       [
        "READING_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13337,7 +13943,7 @@
      "columns": [
       [
        "WEATHER_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13402,7 +14008,7 @@
      "columns": [
       [
        "EVENT_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13467,7 +14073,7 @@
      "columns": [
       [
        "RECORD_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13607,7 +14213,7 @@
      "columns": [
       [
        "PREDICTION_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13782,7 +14388,7 @@
      "columns": [
       [
        "IMPORTANCE_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13822,7 +14428,7 @@
      "columns": [
       [
        "STAGING_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
@@ -13862,7 +14468,7 @@
      "columns": [
       [
        "STAGING_ID",
-       "NUMBER(38,0) AUTOINCREMENT",
+       "NUMBER(38,0)",
        "PN"
       ],
       [
