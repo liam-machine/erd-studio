@@ -975,6 +975,15 @@ export const ERROR_CODES = [
   'loggedErrorHarness',
   'loggedErrorDbt',
   'loggedErrorOther',
+  // 2.0 (#262) — which canvas load step threw, beside domainLoadInternal (the total)
+  'domainLoadInternalManifest',
+  'domainLoadInternalYml',
+  'domainLoadInternalCatalog',
+  'domainLoadInternalRead',
+  'domainLoadInternalPositions',
+  'domainLoadInternalPhysical',
+  'domainLoadInternalDisplay',
+  'domainLoadInternalOther',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -1571,6 +1580,30 @@ const SUBJECT_AREA_LOAD_ERROR_CODES: Record<SubjectAreaLoadFailure, TelemetryErr
 /** The error sub-code counted for a canvas load failure of `kind`; recorded alongside `domainLoad`. */
 export function subjectAreaLoadErrorCode(kind: SubjectAreaLoadFailure): TelemetryErrorCode {
   return SUBJECT_AREA_LOAD_ERROR_CODES[kind] ?? 'domainLoadInternal';
+}
+
+/**
+ * The canvas load step that was running when an `internal` failure threw
+ * (#262): the dbt files (manifest, schema yml, catalog), the diagram and its
+ * tables, the positions for new tables, the Physical stage's build or the
+ * Logical stage's display build, or anything after the payload went out.
+ */
+export type SubjectAreaLoadStep = 'manifest' | 'yml' | 'catalog' | 'read' | 'positions' | 'physical' | 'display' | 'other';
+
+const SUBJECT_AREA_LOAD_STEP_CODES: Record<SubjectAreaLoadStep, TelemetryErrorCode> = {
+  manifest: 'domainLoadInternalManifest',
+  yml: 'domainLoadInternalYml',
+  catalog: 'domainLoadInternalCatalog',
+  read: 'domainLoadInternalRead',
+  positions: 'domainLoadInternalPositions',
+  physical: 'domainLoadInternalPhysical',
+  display: 'domainLoadInternalDisplay',
+  other: 'domainLoadInternalOther',
+};
+
+/** The error code counted beside `domainLoadInternal` for the step an internal load failure threw in (#262). */
+export function subjectAreaLoadStepCode(step: SubjectAreaLoadStep): TelemetryErrorCode {
+  return SUBJECT_AREA_LOAD_STEP_CODES[step] ?? 'domainLoadInternalOther';
 }
 
 /** Why a save failed (see saveDocument in src/providers/documentSave.ts). */

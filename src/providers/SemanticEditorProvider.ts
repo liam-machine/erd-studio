@@ -81,7 +81,7 @@ import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
 import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
 import { askNoReadyRecovery } from './noReadyRecovery';
 import { ManifestService } from '../services/manifestService';
@@ -181,8 +181,9 @@ import {
 import { ReadyWatch } from '../services/readyWatch';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
-import { subjectAreaLoadErrorCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
+import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
+import { redactPaths } from '../types/feedback';
 import {
   buildDbtDraft,
   dbtTestsOf,
@@ -4646,6 +4647,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return undefined;
     }
 
+    // Which step is running, for an internal failure's telemetry (#262).
+    let step: SubjectAreaLoadStep = 'manifest';
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
@@ -4658,8 +4661,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       timer.phase('reading dbt files');
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      step = 'yml';
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      step = 'catalog';
       const catalog = await this.loadCatalog();
+      step = 'read';
       const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
       timer.phase('reading the diagram and its tables');
@@ -4678,6 +4684,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
+      step = 'positions';
       const computed = this.computeMissingPositions(unifiedDomain);
       if (computed) {
         if (options.persistPositions && !autoLayout) {
@@ -4697,6 +4704,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       timer.phase(`building the ${activeStage} canvas`);
       let postedTables: number;
       if (activeStage === 'physical') {
+        step = 'physical';
         const physicalDomain = this.subjectAreaService.buildPhysicalSubjectArea(unifiedDomain, ymlData, manifest, catalog);
         postedTables = physicalDomain.models.length;
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
@@ -4704,9 +4712,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const fields = this.displayFields();
         if (fields) { physicalDomain.fields = fields; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
+        step = 'other';
         this.cancelCanvasContext(webview);
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
+        step = 'display';
         const domain = SubjectAreaService.toLogicalStage(unifiedDomain);
         const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         postedTables = displayDomain.models.length;
@@ -4719,6 +4729,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
+        step = 'other';
         // What the canvas knows beyond the diagram, once the diagram has gone out.
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
         if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
@@ -4747,14 +4758,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.postLoadError(webview, errorKey, fileProblem, err, classifySubjectAreaLoadFailure(err));
         return undefined;
       }
-      const message = err instanceof Error ? err.message : String(err);
-      this.postLoadError(webview, errorKey, {
-        message,
-        ...(err instanceof SubjectAreaFileError ? { kind: 'domain-file' as const } : {}),
-        ...(err instanceof SubjectAreaFileError && err.mergeConflict ? { mergeConflict: true as const } : {}),
-      }, err, classifySubjectAreaLoadFailure(err));
+      if (err instanceof SubjectAreaFileError) {
+        // A merge conflict, or a file that stayed locked or unreadable.
+        this.postLoadError(webview, errorKey, {
+          message: err.message,
+          kind: 'domain-file',
+          ...(err.mergeConflict ? { mergeConflict: true as const } : {}),
+        }, err, classifySubjectAreaLoadFailure(err));
+        return undefined;
+      }
+      this.postLoadError(webview, errorKey, this.subjectAreaLoadFailurePayload(err, document.uri.fsPath), err, classifySubjectAreaLoadFailure(err), step);
     }
     return undefined;
+  }
+
+  /**
+   * The screen for a load failure that is not about reading the file (#261):
+   * a file ERD Studio reads but can't accept (`invalid`: the user's to fix,
+   * named project-relative, through the commands' `describeDiagramFileProblem`)
+   * or anything else (`internal`: ERD Studio's, the exception with every local
+   * path redacted). Core's wrapped TypeError is `describeDiagramFileProblem`'s
+   * "ours" case, so it gets the internal screen.
+   */
+  private subjectAreaLoadFailurePayload(err: unknown, fsPath: string): ErrorMessage['payload'] {
+    if (err instanceof SubjectAreaValidationError) {
+      const problem = describeDiagramFileProblem(err, fsPath, this.shownSubjectAreaPath(fsPath));
+      if (problem) {
+        const newerSchema = err.kind === 'newerSchema' || !problem.openable;
+        return { message: `${problem.reason}.`, kind: 'invalid', ...(newerSchema ? { newerSchema: true as const } : {}) };
+      }
+    }
+    const raw = err instanceof Error ? err.message : String(err);
+    return { message: redactPaths(raw), kind: 'internal' };
   }
 
   /**
@@ -4917,6 +4952,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     payload: ErrorMessage['payload'],
     err: unknown,
     failure: SubjectAreaLoadFailure,
+    step?: SubjectAreaLoadStep,
   ): void {
     if (this.lastLoadError.get(errorKey) === payload.message) {
       return;
@@ -4924,6 +4960,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.lastLoadError.set(errorKey, payload.message);
     telemetry.error('domainLoad');
     telemetry.error(subjectAreaLoadErrorCode(failure));
+    // Which step threw, beside domainLoadInternal (the total, #262).
+    if (failure === 'internal' && step) telemetry.error(subjectAreaLoadStepCode(step));
     if (failure !== 'missing') {
       // 2.0 B14: a failure over a live canvas (often an assistant part-way
       // through writing several files) is only flagged; one that keeps the

@@ -379,4 +379,37 @@ describe.each([
     expect(posted(panel).filter((m) => m.type === 'discrepancyReport').length).toBe(1);
     await expectNoCachedReport(panel);
   });
+
+  it('says dbt is still writing an unreadable manifest, then on Try Again says the file is the problem (#263)', async () => {
+    await openShowcase();
+    fs.writeFileSync(path.join(ws, 'target', 'manifest.json'), '{"nodes": {');
+    const warn = vi.mocked(vscode.window.showWarningMessage);
+    warn.mockClear();
+    warn.mockResolvedValueOnce('Try Again' as never);
+
+    await vscode.commands.executeCommand('erdStudio.refreshManifest');
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(2), { timeout: 8000, interval: 10 });
+    expect(warn.mock.calls[0]).toEqual([
+      'dbt is still writing target/manifest.json. Diagrams show the last version ERD Studio could read.',
+      'Try Again',
+    ]);
+    expect(String(warn.mock.calls[1][0])).toContain("ERD Studio can't read target/manifest.json: it isn't valid JSON.");
+    expect(String(warn.mock.calls[1][0])).toContain('not in your diagrams');
+    expect(String(warn.mock.calls[1][0])).not.toContain('Try again shortly');
+    expect(warn.mock.calls[1].slice(1)).toEqual(['Run dbt parse', 'Open File']);
+  });
+
+  it('says a throw while refreshing is ERD Studio\'s, with Send Feedback and Try Again (#263)', async () => {
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined);
+    vi.spyOn(provider, 'refreshAllOpenSubjectAreas').mockRejectedValue(new Error(`boom at ${ws}/target/manifest.json`));
+
+    await vscode.commands.executeCommand('erdStudio.refreshManifest');
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled(), { timeout: 8000, interval: 10 });
+    const [message, ...buttons] = error.mock.calls[0];
+    expect(String(message)).toContain('Refresh Manifest hit a problem in ERD Studio');
+    expect(String(message)).not.toContain(ws);
+    expect(buttons).toEqual(['Send Feedback', 'Try Again']);
+  });
 });

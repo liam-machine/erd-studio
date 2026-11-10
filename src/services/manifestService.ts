@@ -44,6 +44,9 @@ export class ManifestMissingError extends Error {
 }
 
 /** A worker parse ran past {@link ManifestServiceOptions.parseTimeoutMs} and was abandoned. */
+/** Why a manifest load served stale data: see {@link ManifestService.staleReason}. */
+export type ManifestStaleReason = 'midWrite' | 'malformed' | 'timeout';
+
 export class ManifestParseTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Manifest parse timed out after ${timeoutMs}ms`);
@@ -157,6 +160,22 @@ export class ManifestService {
   }
 
   /**
+   * Why the most recent loadManifest() was stale (#263), or null when it was
+   * not: `midWrite` — it parsed but listed no models where the last good one
+   * had some (dbt part-way through writing it); `malformed` — it is not valid
+   * JSON; `timeout` — it took longer to read than ERD Studio allows.
+   */
+  private _staleReason: ManifestStaleReason | null = null;
+  get staleReason(): ManifestStaleReason | null {
+    return this._staleReason;
+  }
+
+  /** Whether an earlier good manifest is being shown in place of an unreadable one (#263). */
+  get hasLastKnownGood(): boolean {
+    return this.lastKnownGood !== null;
+  }
+
+  /**
    * True when the most recent loadManifest() found no manifest.json on disk.
    * Distinct from isStale: a missing file is definitive (not mid-write), so
    * no fallback data is served and no retry is scheduled.
@@ -223,12 +242,14 @@ export class ManifestService {
           );
           this.cache = this.lastKnownGood;
           this._isStale = true;
+          this._staleReason = 'midWrite';
           return this.lastKnownGood;
         }
 
         this.cache = result;
         this.lastKnownGood = result;
         this._isStale = false;
+        this._staleReason = null;
         this._isMissing = false;
       }
       return result;
@@ -244,6 +265,7 @@ export class ManifestService {
           this.lastKnownGood = null;
           this.cache = empty;
           this._isStale = false;
+          this._staleReason = null;
           this._isMissing = true;
         }
         return empty;
@@ -258,9 +280,11 @@ export class ManifestService {
       );
       const fallback = this.lastKnownGood ?? this.emptyManifest();
       if (currentLoadId === this.loadId) {
-        this.onLoadFailure?.(err instanceof ManifestParseTimeoutError ? 'timeout' : 'malformed');
+        const reason = err instanceof ManifestParseTimeoutError ? 'timeout' : 'malformed';
+        this.onLoadFailure?.(reason);
         this.cache = fallback;
         this._isStale = true;
+        this._staleReason = reason;
       }
       return fallback;
     } finally {
@@ -305,6 +329,7 @@ export class ManifestService {
     this.cache = null;
     this.loadPromise = null;
     this._isStale = false;
+    this._staleReason = null;
     this._isMissing = false;
     // Cancel any in-flight parse — its result would be discarded by the
     // loadId guard anyway, so don't let it keep chewing through a 60MB file.

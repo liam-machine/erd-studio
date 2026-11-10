@@ -110,6 +110,7 @@ function EditorCanvas() {
   const errorKind = useEditorStore((s) => s.errorKind);
   const errorMergeConflict = useEditorStore((s) => s.errorMergeConflict);
   const errorFileProblem = useEditorStore((s) => s.errorFileProblem);
+  const errorNewerSchema = useEditorStore((s) => s.errorNewerSchema);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   // The first-open fit, decided once from the first nodes the canvas gets: a
@@ -296,6 +297,7 @@ function EditorCanvas() {
                 ...(msg.payload.fileType ? { fileType: msg.payload.fileType } : {}),
               }
               : null,
+            msg.payload.newerSchema === true,
           );
           break;
         case 'openFeedback':
@@ -367,6 +369,11 @@ function EditorCanvas() {
   // a domain file the canvas cannot parse, and the right home for a template.
   const handleOpenFile = useCallback(() => {
     vscode.postMessage({ type: 'viewFile' });
+  }, [vscode]);
+
+  // ERD Studio in the Extensions view, for a diagram saved by a newer version (#261).
+  const handleUpdateExtension = useCallback(() => {
+    vscode.postMessage({ type: 'openFeedbackLink', payload: { target: 'extension' } });
   }, [vscode]);
 
   // Open it with the cursor on the JSON mistake the error screen names (#186).
@@ -621,6 +628,77 @@ function EditorCanvas() {
     );
   }
 
+  // A file ERD Studio reads but can't accept (#261): the user's to fix, like
+  // the screen above. One saved by a newer ERD Studio is fixed by updating,
+  // not by editing, so it offers Update ERD Studio instead of Open as Text.
+  if (error && !domain && errorKind === 'invalid') {
+    return (
+      <div className="editor-message editor-message--error" role="alert">
+        {errorNewerSchema ? (
+          <>
+            <p className="editor-message__title">This diagram was saved by a newer ERD Studio</p>
+            <p className="editor-message__detail">Update ERD Studio to open it. Your file hasn&apos;t changed.</p>
+            <p className="editor-message__detail editor-message__detail--dim">{error}</p>
+          </>
+        ) : (
+          <>
+            <p className="editor-message__title">ERD Studio can&apos;t read this diagram&apos;s file</p>
+            <p className="editor-message__detail">{error}</p>
+            <p className="editor-message__detail">
+              This is a problem in the file, not in ERD Studio. Fix it and save, and the diagram reloads by itself.
+            </p>
+          </>
+        )}
+        {errorNewerSchema ? (
+          <button type="button" className="editor-message__button" onClick={handleUpdateExtension}>
+            Update ERD Studio
+          </button>
+        ) : (
+          <button type="button" className="editor-message__button" onClick={handleOpenFile}>
+            Open as Text
+          </button>
+        )}
+        <button type="button" className="editor-message__button" onClick={handleRetryLoad}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // Any other failure is ERD Studio's (#261): say so, keep the exception
+  // (paths already redacted by the host) to a dimmed line, and offer Send
+  // Feedback with it filled in.
+  if (error && !domain && errorKind === 'internal') {
+    return (
+      <div className="editor-message editor-message--error" role="alert">
+        <p className="editor-message__title">ERD Studio couldn&apos;t show this diagram</p>
+        <p className="editor-message__detail">
+          This is a problem in ERD Studio, not in your files. Your diagram file hasn&apos;t changed. Try again, and if
+          it keeps happening, send us a report. The error is filled in for you, with paths removed.
+        </p>
+        <p className="editor-message__detail editor-message__detail--dim">{error}</p>
+        <button type="button" className="editor-message__retry" onClick={handleRetryLoad}>
+          Retry
+        </button>
+        <button
+          type="button"
+          className="editor-message__button"
+          onClick={() => setFeedbackDialogOpen(true, {
+            kind: 'bug',
+            title: 'A diagram failed to load',
+            description: `The canvas showed "ERD Studio couldn't show this diagram".\n\nError: ${redactPaths(error)}`,
+          })}
+        >
+          Send Feedback
+        </button>
+        <button type="button" className="editor-message__button" onClick={handleShowLogs}>
+          Show Logs
+        </button>
+        <FeedbackDialog />
+      </div>
+    );
+  }
+
   if (error && !domain) {
     // `not-a-domain` is settled: this JSON is a template or lives in a
     // reserved directory, and no amount of retrying turns it into a domain.
@@ -788,7 +866,14 @@ function EditorCanvas() {
       {/* Host error surfaced over the live canvas. Sticky until dismissed or the
           next domain payload clears it (setDomain resets error). */}
       {error && (
-        <Toast message={error} variant="error" autoDismissMs={null} onDismiss={dismissError} />
+        <Toast
+          message={errorKind === 'internal'
+            ? `ERD Studio couldn't refresh this diagram. This is a problem in ERD Studio, not in your files: ${error}`
+            : error}
+          variant="error"
+          autoDismissMs={null}
+          onDismiss={dismissError}
+        />
       )}
 
       {/* Drag line for column relationship creation */}

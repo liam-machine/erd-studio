@@ -36,12 +36,25 @@ const EXCLUDED_DIRS = new Set([
   'dbt_packages', 'dbt_modules',
 ]);
 
+/**
+ * A file the cleanup left alone, and why (#263): it could not be read, it is
+ * not valid YAML (never rewritten, so nothing in it changed), or the rewrite
+ * could not be written.
+ */
+export interface SkippedFile {
+  path: string;
+  reason: 'read' | 'parse' | 'write';
+}
+
 export interface StripResult {
   filesScanned: number;
   filesModified: number;
   tagsRemoved: number;
   modifiedPaths: string[];
+  /** One line per skipped file, for the log. */
   errors: string[];
+  /** The skipped files, with why, for Show Skipped Files (#263). */
+  skipped: SkippedFile[];
 }
 
 export class LegacyTagCleanupService {
@@ -54,6 +67,7 @@ export class LegacyTagCleanupService {
       tagsRemoved: 0,
       modifiedPaths: [],
       errors: [],
+      skipped: [],
     };
 
     const yamlFiles: string[] = [];
@@ -69,6 +83,7 @@ export class LegacyTagCleanupService {
         raw = fs.readFileSync(filePath, 'utf-8');
       } catch (err) {
         result.errors.push(`Read failed: ${filePath}: ${this.msg(err)}`);
+        result.skipped.push({ path: filePath, reason: 'read' });
         continue;
       }
 
@@ -78,12 +93,14 @@ export class LegacyTagCleanupService {
       } catch (err) {
         // Skip non-YAML or malformed files silently
         result.errors.push(`Parse failed: ${filePath}: ${this.msg(err)}`);
+        result.skipped.push({ path: filePath, reason: 'parse' });
         continue;
       }
       // parseDocument reports syntax errors on the document rather than
       // throwing; never re-serialise a partial AST over a malformed file.
       if (doc.errors.length > 0) {
         result.errors.push(`Parse failed: ${filePath}: ${doc.errors[0].message}`);
+        result.skipped.push({ path: filePath, reason: 'parse' });
         continue;
       }
 
@@ -105,6 +122,7 @@ export class LegacyTagCleanupService {
           result.modifiedPaths.push(filePath);
         } catch (err) {
           result.errors.push(`Write failed: ${filePath}: ${this.msg(err)}`);
+          result.skipped.push({ path: filePath, reason: 'write' });
         }
       }
     }
