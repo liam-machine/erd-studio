@@ -2,8 +2,12 @@
   "information_for_contributors": [
     "DBML grammar for ERD Studio. Its tokens follow the Monarch tokenizer that ships in @dbml/parse",
     "(dbmlMonarchTokensProvider and dbmlLanguageConfig, Apache-2.0, https://github.com/holistics/dbml),",
-    "translated to TextMate and extended with declaration-aware scopes (table, column and type names, built-in",
-    "settings and custom properties) so it highlights the syntax the pinned parser (11.0.0) accepts.",
+    "translated to TextMate and extended with declaration-aware scopes so it highlights the syntax the pinned parser",
+    "(11.0.0) accepts. Scopes follow what a token means in an ERD Studio model, one colour per kind of thing in every",
+    "file: a table, a column (entity.name.variable.column), a key flag (pk, natural_key, foreign_key:",
+    "keyword.other.setting.key), a field label (entity.name.tag.property, as YAML keys), a coded value",
+    "(variable.other.enummember, booleans) and prose (strings). The schema prefix is left uncoloured. Scopes were picked",
+    "so the default themes (Dark / Light 2026, Dark / Light Modern) paint them; variable.other.* is uncoloured in 2026.",
     "Edit it as JSON; test/unit/dbmlGrammar.test.ts tokenizes samples with the real oniguruma WASM."
   ],
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
@@ -226,22 +230,28 @@
       ]
     },
     "relation-operator": {
-      "name": "keyword.operator.relation.dbml",
+      "name": "keyword.control.relation.dbml",
       "match": "\\??(?:<>|<|>|-)\\??"
     },
     "column-reference": {
       "patterns": [
         {
           "name": "meta.column-reference.composite.dbml",
-          "begin": "((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))?)(\\.)(\\()",
+          "begin": "(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.)(\\()",
           "beginCaptures": {
             "1": {
-              "name": "entity.name.type.table.dbml"
+              "name": "meta.qualifier.schema.dbml"
             },
             "2": {
               "name": "punctuation.accessor.dot.dbml"
             },
             "3": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "4": {
+              "name": "punctuation.accessor.dot.dbml"
+            },
+            "5": {
               "name": "punctuation.section.parens.begin.dbml"
             }
           },
@@ -256,7 +266,7 @@
               "include": "#comments"
             },
             {
-              "name": "variable.other.column.dbml",
+              "name": "entity.name.variable.column.dbml",
               "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
             },
             {
@@ -266,16 +276,22 @@
         },
         {
           "name": "meta.column-reference.dbml",
-          "match": "((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))?)(\\.)((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+          "match": "(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.)((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
           "captures": {
             "1": {
-              "name": "entity.name.type.table.dbml"
+              "name": "meta.qualifier.schema.dbml"
             },
             "2": {
               "name": "punctuation.accessor.dot.dbml"
             },
             "3": {
-              "name": "variable.other.column.dbml"
+              "name": "entity.name.type.table.dbml"
+            },
+            "4": {
+              "name": "punctuation.accessor.dot.dbml"
+            },
+            "5": {
+              "name": "entity.name.variable.column.dbml"
             }
           }
         }
@@ -300,36 +316,92 @@
           "include": "#comments"
         },
         {
-          "include": "#strings"
+          "match": "(?i)(?<![\\w.\"])((?:erd_)?(?:natural_key|foreign_key))\\s*(:)\\s*(?:(')(true)(')|(true)(?![\\w.]))",
+          "captures": {
+            "1": {
+              "name": "keyword.other.setting.key.erd-studio.dbml"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.dbml"
+            },
+            "3": {
+              "name": "punctuation.definition.string.begin.dbml"
+            },
+            "4": {
+              "name": "constant.language.boolean.dbml"
+            },
+            "5": {
+              "name": "punctuation.definition.string.end.dbml"
+            },
+            "6": {
+              "name": "constant.language.boolean.dbml"
+            }
+          }
         },
         {
-          "match": "(:)\\s*(?i:(true|false)|(null))(?![\\w.])",
+          "name": "keyword.other.setting.key.dbml",
+          "match": "(?i)(?<![\\w.\"])(?:pk|primary\\s+key|primary_key)\\b(?=\\s*(?:[,\\]]|//|/\\*|$))"
+        },
+        {
+          "match": "(?i)(?<![\\w.\"])((?:erd_)?(?:role|scd_type|additive_type))\\s*(:)\\s*(')([^'\\\\\\n]*)(')",
+          "captures": {
+            "1": {
+              "name": "entity.name.tag.property.erd-studio.dbml"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.dbml"
+            },
+            "3": {
+              "name": "punctuation.definition.string.begin.dbml"
+            },
+            "4": {
+              "name": "variable.other.enummember.dbml"
+            },
+            "5": {
+              "name": "punctuation.definition.string.end.dbml"
+            }
+          }
+        },
+        {
+          "match": "(:)\\s*(?:(')(?i:(true|false))(')|(?i:(true|false)|(null))(?![\\w.]))",
           "captures": {
             "1": {
               "name": "punctuation.separator.key-value.dbml"
             },
             "2": {
-              "name": "constant.language.boolean.dbml"
+              "name": "punctuation.definition.string.begin.dbml"
             },
             "3": {
+              "name": "constant.language.boolean.dbml"
+            },
+            "4": {
+              "name": "punctuation.definition.string.end.dbml"
+            },
+            "5": {
+              "name": "constant.language.boolean.dbml"
+            },
+            "6": {
               "name": "constant.language.null.dbml"
             }
           }
         },
         {
-          "name": "keyword.other.setting.dbml",
-          "match": "(?i)(?<![\\w.\"])(?:not\\s+null|primary\\s+key)\\b"
+          "include": "#strings"
         },
         {
           "name": "keyword.other.setting.dbml",
-          "match": "(?i)(?<![\\w.\"])(?:pk|null|unique|increment|default|note|ref|dep|name|type|headercolor|color|check|update|delete|inactive|example)\\b(?=\\s*(?:[:,\\]]|//|/\\*|$))"
+          "match": "(?i)(?<![\\w.\"])(?:not\\s+null|not_null|unique|increment|null|inactive)\\b(?=\\s*(?:[,\\]]|//|/\\*|$))"
         },
         {
-          "name": "variable.other.property.erd-studio.dbml",
+          "name": "keyword.other.setting.dbml",
+          "match": "(?i)(?<![\\w.\"])ref\\b(?=\\s*:)"
+        },
+        {
+          "name": "entity.name.tag.property.erd-studio.dbml",
           "match": "(?i)(?<![\\w.\"])(?:role|grain|schema|alias|rationale_\\w*|natural_key|scd_type|additive_type|foreign_key|linked_table|meta_\\w+|erd_\\w+|purpose|decisions|open_questions|scd_strategy|measures|source_of_truth|freshness|known_issues|retention|design|role_choice|grain_choice|business_rule)\\b(?=\\s*:)"
         },
         {
-          "name": "variable.other.property.dbml",
+          "name": "entity.name.tag.property.dbml",
           "match": "(?<![\\w.\"])(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?=\\s*:)"
         },
         {
@@ -340,7 +412,7 @@
         },
         {
           "name": "support.constant.dbml",
-          "match": "(?i)(?<![\\w.\"])(?:cascade|restrict|set\\s+null|set\\s+default|no\\s+action|btree|hash|gin|gist|brin)\\b"
+          "match": "(?i)(?<![\\w.\\\"])(?:cascade|restrict|set\\s+null|set\\s+default|no\\s+action|btree|hash|gin|gist|brin)\\b"
         },
         {
           "include": "#column-reference"
@@ -420,6 +492,23 @@
           "patterns": [
             {
               "include": "#comments"
+            },
+            {
+              "match": "(?i)(?<![\\w.\"])(table|tablepartial)\\s+(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
+              "captures": {
+                "1": {
+                  "name": "keyword.other.${1:/downcase}.dbml"
+                },
+                "2": {
+                  "name": "meta.qualifier.schema.dbml"
+                },
+                "3": {
+                  "name": "punctuation.accessor.dot.dbml"
+                },
+                "4": {
+                  "name": "entity.name.type.${1:/downcase}.dbml"
+                }
+              }
             },
             {
               "match": "(?i)(?<![\\w.\"])(tablepartial|tablegroup|table|enum|note|schema)\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
@@ -510,6 +599,9 @@
               "include": "#comments"
             },
             {
+              "include": "#erd-layout"
+            },
+            {
               "include": "#note-property"
             },
             {
@@ -519,7 +611,7 @@
               "match": "(?i)^\\s*(database_type)\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "keyword.other.setting.dbml"
+                  "name": "entity.name.tag.property.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -530,7 +622,7 @@
               "match": "(?i)^\\s*(erd_\\w+)\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "variable.other.property.erd-studio.dbml"
+                  "name": "entity.name.tag.property.erd-studio.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -541,7 +633,7 @@
               "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "variable.other.property.dbml"
+                  "name": "entity.name.tag.property.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -581,15 +673,21 @@
       "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
       "patterns": [
         {
-          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "match": "\\G\\s+(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
           "captures": {
             "1": {
-              "name": "entity.name.type.table.dbml"
+              "name": "meta.qualifier.schema.dbml"
             },
             "2": {
-              "name": "keyword.other.as.dbml"
+              "name": "punctuation.accessor.dot.dbml"
             },
             "3": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "4": {
+              "name": "keyword.other.as.dbml"
+            },
+            "5": {
               "name": "entity.name.type.alias.dbml"
             }
           }
@@ -616,15 +714,21 @@
       "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
       "patterns": [
         {
-          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
+          "match": "\\G\\s+(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(?:\\s+(?i:(as))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)))?",
           "captures": {
             "1": {
-              "name": "entity.name.type.tablepartial.dbml"
+              "name": "meta.qualifier.schema.dbml"
             },
             "2": {
-              "name": "keyword.other.as.dbml"
+              "name": "punctuation.accessor.dot.dbml"
             },
             "3": {
+              "name": "entity.name.type.tablepartial.dbml"
+            },
+            "4": {
+              "name": "keyword.other.as.dbml"
+            },
+            "5": {
               "name": "entity.name.type.alias.dbml"
             }
           }
@@ -710,7 +814,7 @@
                   "include": "#strings"
                 },
                 {
-                  "name": "variable.other.column.dbml",
+                  "name": "entity.name.variable.column.dbml",
                   "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
                 },
                 {
@@ -722,7 +826,7 @@
               "include": "#strings"
             },
             {
-              "name": "variable.other.column.dbml",
+              "name": "entity.name.variable.column.dbml",
               "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
             },
             {
@@ -807,7 +911,7 @@
       "match": "(?:^|(?<=\\{))\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)(?:(\\()([^)\\n]*)(\\)))?(\\[\\])?",
       "captures": {
         "1": {
-          "name": "variable.other.column.dbml"
+          "name": "entity.name.variable.column.dbml"
         },
         "2": {
           "name": "support.type.dbml"
@@ -972,9 +1076,15 @@
               "include": "#note-block"
             },
             {
-              "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+              "match": "^\\s*(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
               "captures": {
                 "1": {
+                  "name": "meta.qualifier.schema.dbml"
+                },
+                "2": {
+                  "name": "punctuation.accessor.dot.dbml"
+                },
+                "3": {
                   "name": "entity.name.type.table.dbml"
                 }
               }
@@ -1140,9 +1250,15 @@
       "end": "(?<=\\})|(?=^\\s*(?i:table|tablepartial|tablegroup|enum|ref|dep|project|note|use|reuse|records|diagramview|metadata)\\b)",
       "patterns": [
         {
-          "match": "\\G\\s+((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)(?:\\.(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))*)",
+          "match": "\\G\\s+(?:((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(\\.))?((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))",
           "captures": {
             "1": {
+              "name": "meta.qualifier.schema.dbml"
+            },
+            "2": {
+              "name": "punctuation.accessor.dot.dbml"
+            },
+            "3": {
               "name": "entity.name.type.table.dbml"
             }
           }
@@ -1168,7 +1284,7 @@
               "include": "#comments"
             },
             {
-              "name": "variable.other.column.dbml",
+              "name": "entity.name.variable.column.dbml",
               "match": "(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+)"
             },
             {
@@ -1366,13 +1482,16 @@
               "include": "#comments"
             },
             {
+              "include": "#erd-layout"
+            },
+            {
               "include": "#note-block"
             },
             {
               "match": "(?i)^\\s*(database_type)\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "keyword.other.setting.dbml"
+                  "name": "entity.name.tag.property.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -1383,7 +1502,7 @@
               "match": "(?i)^\\s*(erd_\\w+)\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "variable.other.property.erd-studio.dbml"
+                  "name": "entity.name.tag.property.erd-studio.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -1394,7 +1513,7 @@
               "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))\\s*(:)",
               "captures": {
                 "1": {
-                  "name": "variable.other.property.dbml"
+                  "name": "entity.name.tag.property.dbml"
                 },
                 "2": {
                   "name": "punctuation.separator.key-value.dbml"
@@ -1420,6 +1539,46 @@
               "include": "#punctuation"
             }
           ]
+        }
+      ]
+    },
+    "erd-layout": {
+      "name": "meta.layout.dbml",
+      "begin": "(?i)^\\s*(erd_layout)\\s*(:)\\s*(''')",
+      "beginCaptures": {
+        "1": {
+          "name": "entity.name.tag.property.erd-studio.dbml"
+        },
+        "2": {
+          "name": "punctuation.separator.key-value.dbml"
+        },
+        "3": {
+          "name": "punctuation.definition.string.begin.dbml"
+        }
+      },
+      "end": "'''",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.dbml"
+        }
+      },
+      "patterns": [
+        {
+          "match": "^\\s*((?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\w+))(?:(/)(\\w+))?(?=\\s)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.table.dbml"
+            },
+            "2": {
+              "name": "punctuation.separator.slash.dbml"
+            },
+            "3": {
+              "name": "entity.name.type.note.dbml"
+            }
+          }
+        },
+        {
+          "include": "#numbers"
         }
       ]
     }
