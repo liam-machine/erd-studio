@@ -172,24 +172,71 @@ let conversionInFlight = false;
 /** The message a run started while another is converting shows. */
 export const CONVERT_ALREADY_RUNNING_MESSAGE = `${CONVERT_TO_DBML_TITLE}: a conversion is already running. Wait for it to finish, then run it again if you need to.`;
 
-/** Files a conversion replaced this session: an undo or redo of one is saved, so the disk follows. */
 /** Convert's lines in the ERD Studio log. */
 const convertLog = createLogger('Convert to DBML');
 
+/** Files a conversion replaced this session: an undo or redo of one is saved, so the disk follows. */
 const convertedReplaces = new Set<string>();
-let undoListener: vscode.Disposable | undefined;
+/** Files a conversion created this session: a delete of one (an undo of the conversion) sweeps the folders below. */
+const convertedCreates = new Set<string>();
+/**
+ * Folders a conversion made for its new files this session (`gold/diagrams`,
+ * `silver/tables/public`, …). They are made outside the WorkspaceEdit, so
+ * VS Code's undo deletes the files but leaves the folders: each is removed
+ * again once it is empty (#275). A folder that existed before Convert is
+ * never in here, and one holding anything (a file the user added, a
+ * `.DS_Store`) is never removed. A redo re-creates them: VS Code makes a
+ * created file's parent folders.
+ */
+const convertedFolders = new Set<string>();
+let undoListeners: vscode.Disposable[] = [];
+let sweepTimer: ReturnType<typeof setTimeout> | undefined;
 
-function saveReplacedOnUndo(paths: readonly string[]): void {
-  for (const p of paths) convertedReplaces.add(path.resolve(p));
-  if (undoListener || paths.length === 0) return;
-  undoListener = vscode.workspace.onDidChangeTextDocument((e) => {
+/** Remove each folder a conversion made that is empty again, deepest first. */
+function removeEmptiedConvertFolders(): void {
+  for (const folder of [...convertedFolders].sort((a, b) => b.length - a.length)) {
+    try {
+      if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
+    } catch { /* gone, or in use again */ }
+  }
+}
+
+/**
+ * One sweep after the undo has landed: an undo of 1,100 tables fires a
+ * delete event per file, and every one of them resets the timer.
+ */
+function sweepConvertFoldersSoon(): void {
+  if (sweepTimer) clearTimeout(sweepTimer);
+  sweepTimer = setTimeout(() => { sweepTimer = undefined; removeEmptiedConvertFolders(); }, 50);
+}
+
+/**
+ * Follow an undo or redo of a conversion, wherever it was typed: a replaced
+ * file is saved, so the disk follows, and the folders the conversion made
+ * go again once the undo has emptied them. A project with no replaces (pure
+ * YAML) fires no text change on undo, only the delete of each created file,
+ * so both events are heard. One set of listeners for the session, covering
+ * every conversion made in it.
+ */
+function followConvertUndo(replaced: readonly string[], created: readonly string[], folders: Iterable<string>): void {
+  for (const p of replaced) convertedReplaces.add(path.resolve(p));
+  for (const p of created) convertedCreates.add(path.resolve(p));
+  for (const f of folders) convertedFolders.add(path.resolve(f));
+  for (const listener of undoListeners) listener.dispose();
+  undoListeners = [];
+  const onDelete = vscode.workspace.onDidDeleteFiles?.((e) => {
+    if (e.files.some((uri) => convertedCreates.has(path.resolve(uri.fsPath)))) sweepConvertFoldersSoon();
+  });
+  if (onDelete) undoListeners.push(onDelete);
+  undoListeners.push(vscode.workspace.onDidChangeTextDocument((e) => {
     const undoRedo = e.reason === vscode.TextDocumentChangeReason?.Undo || e.reason === vscode.TextDocumentChangeReason?.Redo;
     if (!undoRedo || !convertedReplaces.has(path.resolve(e.document.uri.fsPath))) return;
+    sweepConvertFoldersSoon();
     setTimeout(() => {
       if (!e.document.isDirty) return;
       void saveWithoutFormatting(e.document).then((saved) => { if (saved) ownWrites.recordWrite(e.document.uri.fsPath); });
     }, 50);
-  });
+  }));
 }
 
 function showErrorWithActions(
@@ -507,7 +554,8 @@ async function runConversion(
     ...plan.replaces.map((r): FileWrite => ({ kind: 'replace', path: abs(r.path), text: r.text })),
     ...plan.deletes.map((d): FileWrite => ({ kind: 'delete', path: abs(d) })),
   ];
-  // Folders are made only while the edit is built, and go again if it does not land.
+  // Folders are made only while the edit is built, and go again if it does not
+  // land, or once an undo of it has emptied them (followConvertUndo).
   const newFolders = new Set<string>();
   const ensureDir = (filePath: string): void => {
     for (let dir = path.dirname(filePath); dir.length > semanticRoot.length && !fs.existsSync(dir); dir = path.dirname(dir)) newFolders.add(dir);
@@ -526,7 +574,7 @@ async function runConversion(
   convertLog.info(`Applying ${plural(writes.length, 'file write')}`);
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: CONVERT_TO_DBML_TITLE, cancellable: false },
-    (bar) => applyConversion(deps, plan, writes, { ensureDir, removeNewFolders, retry, progress, abs, semanticRoot }, async (message) => {
+    (bar) => applyConversion(deps, plan, writes, { ensureDir, removeNewFolders, newFolders, retry, progress, abs, semanticRoot }, async (message) => {
       applyTimer.phase(message);
       bar.report({ message });
       ConvertToDbmlPanel.showProgress(message);
@@ -550,6 +598,8 @@ async function applyConversion(
   ctx: {
     ensureDir: (filePath: string) => void;
     removeNewFolders: () => void;
+    /** The folders `ensureDir` made for the new files. */
+    newFolders: ReadonlySet<string>;
     retry: () => Promise<ConvertProjectOutcome>;
     progress: { applied: boolean; counted: boolean };
     abs: (rel: string) => string;
@@ -557,7 +607,7 @@ async function applyConversion(
   },
   report: (message: string) => Promise<void>,
 ): Promise<ConvertProjectOutcome> {
-  const { ensureDir, removeNewFolders, retry, progress, abs, semanticRoot } = ctx;
+  const { ensureDir, removeNewFolders, newFolders, retry, progress, abs, semanticRoot } = ctx;
   // Open canvases, and the sidebar views and context keys, wait until every file is written.
   const held = deps.holdRefreshes?.();
   const heldViews = deps.holdViewRefreshes?.();
@@ -607,7 +657,7 @@ async function applyConversion(
     }
     for (const filePath of applied.created) ownWrites.recordWrite(filePath);
     for (const filePath of applied.deleted) ownWrites.recordDelete(filePath);
-    saveReplacedOnUndo(applied.replaced.map((u) => u.fsPath));
+    followConvertUndo(applied.replaced.map((u) => u.fsPath), applied.created, newFolders);
 
     // 10. The YAML library's folders the deletes emptied go: logical-models/ and its folders, and the v6
     // tables/ library's folders and tables/ itself (a DBML project keeps its tables in <layer>/tables/).

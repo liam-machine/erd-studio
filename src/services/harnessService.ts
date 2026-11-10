@@ -38,7 +38,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '47';
+export const HARNESS_VERSION = '48';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -665,14 +665,14 @@ The table and sticky-note positions are the Project's \`erd_layout\`, one triple
 
 ## Layout
 
-ERD Studio writes every \`.dbml\` in one layout and tidies a file into it each time it changes that file; **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac, or right-click → Format Document) does the same for a file you or the user edit, except the blank lines between foreign-key tables' Refs (below). Write in this layout, so the next save by ERD Studio changes only what was meant to change:
+ERD Studio writes every new \`.dbml\` in one layout. An edit of an existing file changes only the lines it touches: in a file in the layout those lines are in it too, and a file laid out any other way (by hand) keeps its layout. **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac, or right-click → Format Document) puts a file into the layout, except the blank lines between foreign-key tables' Refs (below). Write in this layout, so the next save by ERD Studio changes only what was meant to change:
 
 - **Two-space indents.** At most one blank line in a row, and none straight after \`{\` or before \`}\`.
 - **A table's \`Note\` comes first** in its body, then one blank line, then the columns, then \`indexes\`.
 - **Columns line up**: on consecutive lines, the names are padded to the group's longest name (a name over 32 characters does not widen it); the types are padded to the longest type **of a column that has settings** (a type over 24 characters does not widen it), then one space and the settings. A column with no settings ends at its type, so a long settings-less type such as \`"VARCHAR(4000)"\` does not push the other columns' settings out. A blank line or an own-line comment between columns starts a new group with its own alignment, so use one to group related columns.
 - **Column settings in this order**: \`pk\`; DBML's own (\`not null\`, \`unique\`, \`increment\`, \`default\`); ERD Studio's (\`natural_key\`, \`scd_type\`, \`additive_type\`, \`foreign_key\`); the fields (\`pii: 'true'\`, any \`meta_json\`); then \`note\` last. Written \`[a, b: c]\`: no space inside the brackets, \`, \` between settings, \`: \` after a name.
 - **Long settings go one per line**: when a column's line would pass 100 characters, \`[\` ends the column line, each setting sits on its own line two spaces further in with a comma after all but the last, and \`]\` is alone on the column's indent (as \`order_number\` above). A Table with two or more settings lists them the same way.
-- **Relationships**: single spaces around the operator. When ERD Studio writes a relationships file it puts one blank line between the Refs of each foreign-key table; Format Document keeps blank lines that are there but does not add these, so keep a table's Refs together and leave a blank line before the next table's.
+- **Relationships**: single spaces around the operator. When ERD Studio writes a new relationships file, or adds a Ref to one, it sets the Refs of each foreign-key table apart with one blank line; it never adds one between Refs a file already has, and Format Document keeps blank lines that are there but does not add these, so keep a table's Refs together and leave a blank line before the next table's.
 - **\`use\` lines** next to each other line up their \`from\` (a \`use { … }\` part over 48 characters does not widen the run).
 - Spacing only: text in quotes (a \`'''\` note or \`erd_layout\` included) is never changed, and neither is the order of an existing file's lines or settings — ERD Studio keeps the order a file has, so do not reorder one just to match.
 

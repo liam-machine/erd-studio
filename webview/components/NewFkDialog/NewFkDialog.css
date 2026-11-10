@@ -2,7 +2,7 @@
  * NewFkDialog styles.
  *
  * Centered dialog for creating FK relationships between models.
- * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ * BEM naming, VS Code theme tokens from packages/renderer/src/styles/theme.css.
  */
 
 .new-fk-dialog {
@@ -341,9 +341,17 @@
   cursor: not-allowed;
 }
 
-/* "Will be stored in …": the file a new relationship goes to (DBML). */
+/*
+ * "Will be stored in …": the file a new relationship goes to (DBML). A band of
+ * its own between the scrolling fields and the footer, like the header and
+ * footer: it never shrinks, and its divider marks where the scrolled fields
+ * are cut off, so on a short canvas the Role field's hint never reads as
+ * part of it (#275).
+ */
 .new-fk-dialog__stored-in {
-  padding: 0 16px 8px;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-top: 1px solid var(--panel-border);
   font-size: 11px;
   color: var(--dim-fg);
   overflow-wrap: anywhere;

@@ -948,6 +948,19 @@ describe('Delete Table (File): the D16 cascade', () => {
     expect(await provider.deleteTablesWithCascade(['dim_date'])).toEqual({ ok: true, unrestored: [] });
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Could not save .erd-studio/gold/relationships/gold.dbml'));
   });
+
+  it('the prompt leaves out a count of 0, never "0 relationships" or "0 diagrams" (#274)', () => {
+    const { provider } = buildProvider(new OwnWriteTracker());
+    // bridge_empty: on one diagram, in no relationship.
+    expect(provider.describeDbmlDeleteCascade(['bridge_empty'], false)).toBe(" This removes the table's file and its place in 1 diagram.");
+    expect(provider.describeDbmlDeleteCascade(['bridge_empty', 'dim_date'], false))
+      .toBe(' This removes their files, their 3 relationships and their places in 2 diagrams.');
+    fs.writeFileSync(at('gold/diagrams/sales.dbml'), fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')
+      .replace("use { table gold.bridge_empty } from '../tables/gold/bridge_empty.dbml'\n", '')
+      .replace('    bridge_empty 760 400\n', ''));
+    expect(provider.describeDbmlDeleteCascade(['bridge_empty'], false)).toBe(" This removes the table's file.");
+    expect(provider.describeDbmlDeleteCascade(['bridge_empty'])).toBe(" This removes the table's file.");
+  });
 });
 
 describe('another diagram with a byte-order mark (D7)', () => {

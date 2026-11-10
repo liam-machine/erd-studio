@@ -8,6 +8,16 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **New Relationship:** on a short window the **Stored in** picker no longer runs into the Role field's hint. It sits in a band of its own above the buttons, with a divider where the fields above scroll away (#275).
+- **Convert Project to DBML, then Undo:** the undo now also removes the empty folders the conversion made for its new files (`gold/diagrams`, `silver/tables/public`, …), so the project is exactly as it was. A folder that existed before, or that you have put a file in since, stays (#275).
+- **Edits keep a DBML file's own layout:** renaming a table, Move Table, new relationships and deletes now change only the lines they must, in every `.dbml` file. They no longer re-align other columns or `use` lines (even when a new name is the longest in its group), add blank lines between Refs you kept together, leave two blank lines where a deleted line was, or put a new `use` line above the file's opening comment. In a file in ERD Studio's layout the lines an edit writes line up with their neighbours where they fit, and **Format Document** still re-aligns a whole file when you ask (#275).
+- **Undo after Remove from Diagram and Delete Table File puts things back in the right order.** Edit > Undo on the diagram now first brings back the deleted table file, with its relationships and its place in other diagrams, and only the next Undo puts the table back on the diagram. Before, the first Undo brought back the table's `use` line while its file was still deleted, so the diagram showed an empty "No columns" table that other DBML tools could not read. The files an Undo brings back are saved straight away, so you no longer need Save All. This works for YAML tables on JSON diagrams too.
+- **The Delete Table File question no longer says "its place in 0 other diagrams".** When nothing else uses the table, it now just says it removes the table's file. Delete Table in the Table Library leaves out a count of 0 the same way.
+
 ## 2.0.1 — 2026-11-10
 
 - Release: renderer 0.4.1 (routing worker file) — develop → main (#279)

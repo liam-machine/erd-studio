@@ -82,6 +82,7 @@ import {
 import {
   applyTextEdits,
   attachedStart,
+  closeCutGaps,
   cutEdit,
   eolOf,
   indentAt,
@@ -987,7 +988,7 @@ function editTableOnce(
     edits.push({ start: regionStart, end: regionEnd, text: region });
   }
 
-  const out = applyTextEdits(text, [...edits, ...lateEdits]);
+  const out = applyTextEdits(text, [...closeCutGaps(text, edits, lateEdits), ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
   /**
