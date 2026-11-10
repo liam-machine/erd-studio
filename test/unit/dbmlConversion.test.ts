@@ -596,7 +596,8 @@ describe('planDbmlConversion: mixed, half-converted and library-folder projects'
     ]);
     // The diagram's unlinked member gains its table file, and so its use line (D26); its Project stays first.
     const sales = written(plan, 'gold/diagrams/sales.dbml')!;
-    expect(sales).toContain("use { table gold.fct_refund }   from '../tables/gold/fct_refund.dbml'\n");
+    // Spliced into the hand-laid diagram as it is: no use line around it is re-aligned (#275).
+    expect(sales).toContain("use { table gold.fct_refund } from '../tables/gold/fct_refund.dbml'\n");
     expect(sales).not.toContain('erd_unlinked_tables');
     expect(sales).toMatch(/^Project sales \{/);
     // Tables (the v6 tables/ library's: one by its folder, one by the diagram that shows it), relationships files, diagrams, the README.

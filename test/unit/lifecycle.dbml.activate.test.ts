@@ -17,15 +17,9 @@ import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from '@erd-studio/core/dbml';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
-import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
 import { parseLayersText } from '@erd-studio/core';
 import { answerDraft, nextDraft } from './helpers/draftDriver';
-
-/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
-function canonical(text: string): string {
-  return formatWrittenDbml(text, 'expected.dbml');
-}
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBML_NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -317,8 +311,8 @@ describe('in a native DBML project', () => {
     expect(errors).not.toHaveBeenCalled();
     expect(fs.existsSync(salesPath())).toBe(false);
     const revenue = erd('gold', 'diagrams', 'revenue.dbml');
-    // The Project name spliced, then the file in the canonical layout (every DBML write is formatted).
-    expect(fs.readFileSync(revenue, 'utf-8')).toBe(canonical(before.replace('Project sales {', 'Project revenue {')));
+    // The Project name spliced and nothing else: sales.dbml is laid out by hand, and keeps its layout (#275).
+    expect(fs.readFileSync(revenue, 'utf-8')).toBe(before.replace('Project sales {', 'Project revenue {'));
     expect(fs.readFileSync(revenue, 'utf-8')).toContain('    fct_order 400 200\n');
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: revenue }), expect.any(String));
     compilesClean();

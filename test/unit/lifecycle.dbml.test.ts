@@ -39,14 +39,8 @@ import { exportAllDiagramsCommand, type ExportAllDiagramsUi } from '../../src/co
 import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { SemanticTable } from '../../src/types/semantic';
-import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 import { semanticReadmeText } from '../../src/services/semanticReadme';
 import { parseLayersText } from '@erd-studio/core';
-
-/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
-function canonical(text: string): string {
-  return formatWrittenDbml(text, 'expected.dbml');
-}
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBML_NATIVE = path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native');
@@ -506,7 +500,8 @@ describe('the lifecycle planners (src/commands/dbmlLifecycle.ts)', () => {
     const writes = planDbmlSubjectAreaRename({ semanticRoot: erd(), oldPath, newPath: erd('gold', 'diagrams', 'revenue.dbml'), newSlug: 'revenue', text });
     expect(writes.map((w) => `${w.kind} ${rel(w.path)}`)).toEqual(['create gold/diagrams/revenue.dbml', 'delete gold/diagrams/sales.dbml']);
     const created = textOf(writes[0]);
-    expect(created).toBe(canonical(text.replace('Project sales {', 'Project revenue {')));
+    // Only the Project name changes: sales.dbml is laid out by hand, so its use lines keep their spacing (#275).
+    expect(created).toBe(text.replace('Project sales {', 'Project revenue {'));
     expect(created).toContain("  erd_layout: '''\n    bridge_empty 760 400\n");
     for (const line of text.split('\n').filter((l) => l.startsWith('use '))) expect(created).toContain(line.replace(/ +from/, ' from').split(' from ')[1]);
   });

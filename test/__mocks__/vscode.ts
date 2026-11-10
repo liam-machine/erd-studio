@@ -82,6 +82,18 @@ export async function _fireDidRenameFiles(files: ReadonlyArray<{ oldUri: unknown
   await Promise.all([..._renameFilesListeners].map((listener) => listener({ files })));
 }
 
+/** Listeners registered through workspace.onDidDeleteFiles. */
+const _deleteFilesListeners: Array<(e: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidDeleteFiles as VS Code does after files are deleted,
+ * an undo of a WorkspaceEdit's createFile among them. Resolves once every
+ * (async) listener has finished.
+ */
+export async function _fireDidDeleteFiles(files: ReadonlyArray<unknown>): Promise<void> {
+  await Promise.all([..._deleteFilesListeners].map((listener) => listener({ files })));
+}
+
 export enum TextDocumentChangeReason {
   Undo = 1,
   Redo = 2,
@@ -166,6 +178,16 @@ export const workspace = {
       dispose: () => {
         const idx = _renameFilesListeners.indexOf(listener);
         if (idx !== -1) _renameFilesListeners.splice(idx, 1);
+      },
+    };
+  },
+  /** Registers a listener; `_fireDidDeleteFiles` calls it. */
+  onDidDeleteFiles: (listener: (e: unknown) => unknown) => {
+    _deleteFilesListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = _deleteFilesListeners.indexOf(listener);
+        if (idx !== -1) _deleteFilesListeners.splice(idx, 1);
       },
     };
   },
@@ -950,6 +972,7 @@ export function _resetMockWorkspace(): void {
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
   _renameFilesListeners.length = 0;
+  _deleteFilesListeners.length = 0;
   _tabListeners.length = 0;
   _tabGroupListeners.length = 0;
   _contentProviders.length = 0;

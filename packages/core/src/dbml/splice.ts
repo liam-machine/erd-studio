@@ -27,23 +27,35 @@ export interface TextEdit {
  * is a writer bug, never something a file can cause.
  */
 export function applyTextEdits(text: string, edits: readonly TextEdit[]): string {
-  if (edits.length === 0) return text;
+  return applyTextEditsTracked(text, edits).text;
+}
+
+/**
+ * {@link applyTextEdits}, also saying where each edit's text landed:
+ * `spans[i]` is the `[start, end)` of `edits[i].text` in the result. A
+ * writer that must treat the lines it added differently from the lines it
+ * found (W3 adds a blank line only next to an added Ref) reads them here.
+ */
+export function applyTextEditsTracked(text: string, edits: readonly TextEdit[]): { text: string; spans: Array<{ start: number; end: number }> } {
+  const spans: Array<{ start: number; end: number }> = edits.map(() => ({ start: 0, end: 0 }));
+  if (edits.length === 0) return { text, spans };
   const sorted = edits
     .map((edit, index) => ({ edit, index }))
     .sort((a, b) => a.edit.start - b.edit.start
       || (a.edit.end - a.edit.start) - (b.edit.end - b.edit.start)
-      || a.index - b.index)
-    .map(({ edit }) => edit);
+      || a.index - b.index);
   let out = '';
   let at = 0;
-  for (const edit of sorted) {
+  for (const { edit, index } of sorted) {
     if (edit.start < at || edit.end < edit.start || edit.end > text.length) {
       throw new Error(`DBML writer: overlapping or out-of-range edit [${edit.start}, ${edit.end}) after ${at}`);
     }
-    out += text.slice(at, edit.start) + edit.text;
+    out += text.slice(at, edit.start);
+    spans[index] = { start: out.length, end: out.length + edit.text.length };
+    out += edit.text;
     at = edit.end;
   }
-  return out + text.slice(at);
+  return { text: out + text.slice(at), spans };
 }
 
 /**
@@ -130,6 +142,44 @@ export function cutEdit(text: string, node: AstNode): TextEdit {
 }
 
 /**
+ * The edits with each run of whole-line cuts that would leave two blank
+ * lines in a row (a blank line above the run and one below it) also taking
+ * the blank line above it, so a cut never opens a gap
+ * the file did not have (#275: deleting the middle Ref of a blank-separated
+ * file leaves one blank line, not two). A run whose blank line another edit
+ * writes into or next to is left as it is (`alongside` are the other edits
+ * applied with these, checked but never changed). Every other edit comes
+ * back as it was.
+ */
+export function closeCutGaps(text: string, edits: readonly TextEdit[], alongside: readonly TextEdit[] = []): TextEdit[] {
+  const isLineCut = (e: TextEdit): boolean =>
+    e.text === '' && e.end > e.start && lineStartOf(text, e.start) === e.start && (e.end === text.length || text[e.end - 1] === '\n');
+  const cuts = edits.filter(isLineCut).sort((a, b) => a.start - b.start);
+  if (cuts.length === 0) return [...edits];
+  const runs: Array<{ start: number; end: number; members: TextEdit[] }> = [];
+  for (const cut of cuts) {
+    const last = runs[runs.length - 1];
+    if (last && last.end === cut.start) {
+      last.end = cut.end;
+      last.members.push(cut);
+    } else runs.push({ start: cut.start, end: cut.end, members: [cut] });
+  }
+  const out = [...edits];
+  for (const run of runs) {
+    if (run.start === 0) continue;
+    const above = lineStartOf(text, run.start - 1);
+    if (!isBlankLine(text, above)) continue;
+    if (run.end >= text.length || !isBlankLine(text, run.end)) continue;
+    // Another edit writing into the blank line or the run (an insertion inside it too) keeps the line.
+    const others = [...edits, ...alongside].filter((e) => !run.members.includes(e));
+    if (others.some((e) => (e.start < run.end && e.end > above) || (e.start === e.end && e.start >= run.start && e.start < run.end))) continue;
+    for (const m of run.members) out.splice(out.indexOf(m), 1);
+    out.push({ start: above, end: run.end, text: '' });
+  }
+  return out;
+}
+
+/**
  * Where to insert a line before `node` without separating it from the
  * comment lines directly above it (no blank line between): the start of the
  * first of those lines, never earlier than `floor`.
@@ -143,6 +193,24 @@ export function attachedStart(text: string, node: AstNode, floor = 0): number {
     start = previous;
   }
   return start;
+}
+
+/**
+ * The end of the `//` comment lines a file starts with, whether or not a
+ * blank line follows them: the start of the first line after them, or 0 when
+ * the file does not start with a comment line. A comment at the very top of a
+ * file describes the file, so a line inserted above the file's first element
+ * goes below it, never above it (#275), even when no blank line separates
+ * the two.
+ */
+export function leadingCommentEnd(text: string): number {
+  let at = 0;
+  while (at < text.length && isCommentLine(text, at)) {
+    const next = nextLineStart(text, at);
+    if (next === at) return text.length;
+    at = next;
+  }
+  return at;
 }
 
 /**
