@@ -99,5 +99,7 @@ The workflows do the publishing; these are the steps they cannot do.
     curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started-logical.mp4
     curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4
     curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4
+    curl -s https://purge.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/how-it-works.mp4
     ```
+    `docs/assets/how-it-works.mp4` is not a Welcome panel video, but `docs/dbt.md` links it through jsDelivr on `main` too, so it goes stale the same way. To find every such link: `grep -rhoE "cdn\.jsdelivr\.net/gh/liam-machine/erd-studio@main/[^\"') ]+" README.md docs src | sort -u`.
     Then open both `videoOnline` and `videoOnlineLogical` in Chrome: each must play, with sound. Know what the button gives a Safari user: it opens these `media/onboarding/` MP3 copies, which play **silently** in Safari (and QuickTime), so a Safari check passes only on the picture. The AAC copies in `docs/assets/` (open `https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started-logical.mp4` in Safari: it must play with sound) are what the README links; the Welcome panel's button never opens them. Pointing the button at the `docs/assets/` copies would be a code change to `GETTING_STARTED_EXTERNAL_URLS`.
