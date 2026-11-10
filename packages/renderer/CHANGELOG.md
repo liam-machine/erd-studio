@@ -2,6 +2,11 @@
 
 All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bumps the minor version.
 
+## 0.4.1
+
+### Added
+- **`ErdCanvas` prop `routingWorkerUrl`** (optional) and the routing worker as its own file, **`@erd-studio/renderer/edge-routing-worker.js`** (a new `exports` entry; the same code the canvas inlines). A host whose CSP refuses a blob worker but allows its own scripts (`script-src 'self'` with no `worker-src`, as some app-hosting platforms set) serves that file from its own origin and passes its URL, and diagrams over 100 lines route in the worker again instead of keeping simple lines past 150 lines. Without the prop nothing changes: the worker starts from the inlined code through a blob URL. The canvas store gains the optional `routingWorkerUrl` (absent or null by default, so a host that hand-builds `CanvasState` needs no change). No `DisplaySubjectArea` change, no new `--vscode-*` variables, and the viewer still posts nothing.
+
 ## 0.4.0
 
 ### Added

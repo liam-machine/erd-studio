@@ -26,7 +26,7 @@ export { buildRoutingInput, routingInputKey, draggingNodesKey } from './input';
 export { createAvoidRouter, type AvoidRouter } from './routers/orthogonalAvoid';
 export * from './lineStyle';
 export { routeAll, type RouteAllOptions } from './routeAll';
-export { createRoutingWorker, type RoutingWorkerFactory, type RoutingWorkerHandle, type RoutingWorkerEvents } from './worker/client';
+export { createRoutingWorker, routingWorkerFactory, type RoutingWorkerFactory, type RoutingWorkerHandle, type RoutingWorkerEvents } from './worker/client';
 export type { WorkerRouteRequest, WorkerRouteResult } from './worker/protocol';
 
 // ---------------------------------------------------------------------------

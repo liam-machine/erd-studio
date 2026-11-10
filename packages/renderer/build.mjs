@@ -4,7 +4,11 @@
 //      one set of components). Component `.css` imports are dropped here
 //      (`empty` loader); consumers load the single dist/styles.css instead.
 //      The line-routing worker is bundled into a string and inlined
-//      (`__ERD_EDGE_ROUTING_WORKER__`, scripts/edgeRoutingWorker.cjs).
+//      (`__ERD_EDGE_ROUTING_WORKER__`, scripts/edgeRoutingWorker.cjs), and
+//      the same code is written as dist/edge-routing-worker.js (export
+//      `./edge-routing-worker.js`) for hosts whose CSP refuses a blob worker:
+//      they serve it themselves and pass its URL to ErdCanvas
+//      (`routingWorkerUrl`).
 //   2. CSS — src/styles.css, bundled in its explicit order into
 //      dist/styles.css. The React Flow base stylesheet stays an `@import` for
 //      the consumer's bundler to resolve.
@@ -13,7 +17,7 @@
 // when its declarations are missing.
 import { build } from 'esbuild';
 import { execSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import workerBuild from './scripts/edgeRoutingWorker.cjs';
 
@@ -23,6 +27,9 @@ if (!existsSync(new URL('../core/dist/index.d.ts', import.meta.url))) {
 }
 
 rmSync(new URL('./dist', import.meta.url), { recursive: true, force: true });
+
+// The worker's code, built once: inlined into the canvas and written as its own file.
+const workerCode = workerBuild.edgeRoutingWorkerCode();
 
 await build({
   entryPoints: ['src/index.ts', 'src/editor.ts', 'src/store.ts', 'src/sizing.ts'],
@@ -35,9 +42,12 @@ await build({
   loader: { '.css': 'empty' },
   external: ['react', 'react-dom', 'react/jsx-runtime', '@xyflow/react', 'zustand', '@erd-studio/core'],
   // The line-routing worker, inlined (scripts/edgeRoutingWorker.cjs).
-  define: workerBuild.edgeRoutingWorkerDefine(),
+  define: { __ERD_EDGE_ROUTING_WORKER__: JSON.stringify(workerCode) },
   logLevel: 'warning',
 });
+
+// The same worker as a classic script, for hosts that serve it themselves (ErdCanvas `routingWorkerUrl`).
+writeFileSync(new URL('./dist/edge-routing-worker.js', import.meta.url), workerCode);
 
 await build({
   entryPoints: ['src/styles.css'],
