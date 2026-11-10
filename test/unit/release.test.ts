@@ -235,7 +235,10 @@ describe('release.mjs — capReleaseNotes (GitHub refuses a body over 125,000 ch
   it('keeps the real 2.0 notes, and the pre-release notes built from them, under the budget', () => {
     const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
     const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-10' });
-    for (const notes of [capReleaseNotes(extractReleaseNotes(released, '2.0.0')), capReleaseNotes(prereleaseNotes(changelog, '1.9.11'))]) {
+    // Pre-release notes come from the newest section; cut the changelog at 2.0.0 so later releases don't change what this checks.
+    const preamble = changelog.slice(0, changelog.search(/^## /m));
+    const from20 = preamble + changelog.slice(changelog.search(/^## 2\.0\.0\b/m));
+    for (const notes of [capReleaseNotes(extractReleaseNotes(released, '2.0.0')), capReleaseNotes(prereleaseNotes(from20, '1.9.11'))]) {
       expect(Buffer.byteLength(notes, 'utf8')).toBeLessThanOrEqual(RELEASE_NOTES_MAX_BYTES);
       expect(notes.length).toBeGreaterThan(50_000);
     }
