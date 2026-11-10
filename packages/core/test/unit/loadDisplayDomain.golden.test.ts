@@ -233,7 +233,10 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
       }
       const message = (caught as Error).message.replace(LINE_COLUMN, '');
       // The extension's not-a-diagram page adds how to reopen the file as text (§1.8); core's own text has no such sentence.
-      expect(message).toBe(golden.message.split('<root>/').join('').replace(` ${REOPEN_AS_TEXT}`, ''));
+      const expected = golden.message.split('<root>/').join('').replace(` ${REOPEN_AS_TEXT}`, '');
+      // The host's "can't read this diagram's file" screen (#261, `kind: 'invalid'`) ends core's
+      // reason with exactly one full stop; core's own sentence may have none.
+      expect(golden.kind === 'invalid' ? `${message.replace(/\.\s*$/, '')}.` : message).toBe(expected);
     });
   });
 
