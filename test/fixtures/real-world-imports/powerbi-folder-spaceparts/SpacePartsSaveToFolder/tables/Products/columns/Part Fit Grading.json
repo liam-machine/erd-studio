@@ -1,0 +1,14 @@
+{
+  "name": "Part Fit Grading",
+  "dataType": "string",
+  "sourceColumn": "part_fit_grading",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "5832f019-fb01-4e09-ab32-ca411cb31e53",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

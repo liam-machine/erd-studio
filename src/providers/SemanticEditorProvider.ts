@@ -17,10 +17,12 @@
  *                         feedback (requestFeedbackContext, analyzeFeedback,
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
- *                         viewFile, requestReload, dismissWelcome,
- *                         dismissManifestHint, openGettingStarted,
- *                         exportDiagram, closeEditor, openAnotherDomain
- *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
+ *                         viewFile, requestReload,
+ *                         dismissManifestHint, openGettingStarted, showLogs,
+ *                         exportDiagram, closeEditor, openAnotherDomain,
+ *                         requestExistingTables
+ *   Extension → Webview:  loading (first answer to ready), domainLoaded,
+ *                         existingTables, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
  *                         feedbackAnalysis, feedbackSubmitted, error
@@ -66,14 +68,22 @@ import {
   SubjectAreaFileError,
   SubjectAreaService,
   isSubjectAreaFilePath,
+  notADiagramMessage,
+  subjectAreaTableNames,
+  unimportedRelationshipsMessage,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
-import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
-import { findVenvActivate } from '../services/dbtEnv';
+import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
+import { findVenvDir } from '../services/dbtEnv';
+import { claudeTerminalLaunch } from './GettingStartedPanel';
 import { runDbtParse } from '../commands/runDbtParse';
+import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
+import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
+import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
+import { askNoReadyRecovery } from './noReadyRecovery';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -81,21 +91,27 @@ import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
+  ERD_LAYOUT_NOTE_PREFIX,
+  classifySemanticFile,
   computeMissingPositions,
+  diagramPathOf,
+  isErdLayoutName,
+  subjectAreaStorageOf,
   SubjectAreaValidationError,
   EMPTY_DBT_KEY_INDEX,
   backwardsRelationshipNote,
+  foreignKeyEnd,
   linkKey,
   normaliseSubjectAreaDocument,
-  toTableNamingDocument,
-  parseSubjectAreaJson,
   sameLink,
+  builtInField,
   setMetaEntry,
   toDisplaySubjectArea,
 } from '@erd-studio/core';
-import type { DbtKeyIndex } from '@erd-studio/core';
+import type { DbtKeyIndex, FieldList, MetaValue } from '@erd-studio/core';
+import { FieldsService } from '../services/fieldsService';
+import { CUSTOMISE_FIELDS_COMMAND } from '../commands/customiseFields';
 import { dbtKeyIndexOf, withDbtKeyHints } from '../services/stageDisplay';
-import { keepLineEndings } from '../services/lineEndings';
 import { rewriteJsonScalars } from '../services/minimalEdits';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
@@ -120,17 +136,20 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
+import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
+  AddModelMessage,
   AddRelationshipMessage,
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
   EditRelationshipMessage,
   ErrorMessage,
+  NewRelationshipFileChoice,
   OpenFeedbackLinkMessage,
   OpenModelFileMessage,
   ViewFileMessage,
   SetFeedbackProviderMessage,
+  SetLineStyleMessage,
   OpenFeedbackMessage,
   RelationshipKey,
   RequestFeedbackContextMessage,
@@ -141,15 +160,30 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
+import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
-import type { NodePosition, Relationship, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
-import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat, getRawSubjectAreaTableNames } from '../types/semantic';
+import type { NodePosition, Relationship, SemanticTable, TableRelationship, UnifiedSubjectArea } from '../types/semantic';
+import { describeUnsupportedSubjectAreaFormat, detectSubjectAreaFormat } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
-import { saveDocument, saveDocumentByUri } from './documentSave';
+import { handlerFailureKeys, handlerGroupOf, type HandlerGroup } from '../services/runtimeTelemetry';
+import { markRecorded, wasRecorded } from '../services/telemetryOnce';
+import {
+  canvasLayoutTelemetry,
+  dbmlDiagramFeatures,
+  isUserFileProblem,
+  loaderWarningFeatures,
+  slowCanvasLoad,
+  subjectAreaLoadDetailCode,
+  webviewErrorCodes,
+} from '../services/telemetryCanvas';
+import { ReadyWatch } from '../services/readyWatch';
+import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
-import { subjectAreaLoadErrorCode, layoutFeature, type SubjectAreaLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
+import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
+import { redactPaths } from '../types/feedback';
 import {
   buildDbtDraft,
   dbtTestsOf,
@@ -158,6 +192,8 @@ import {
   markDraftKeys,
   relationshipsForAddedTables,
   seedTableFromDbt,
+  seededColumnCount,
+  configuredSchemaOf,
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
@@ -172,8 +208,11 @@ import {
   removeColumnRelationships,
   renameColumnInSubjectAreaRelationships,
   renameColumnInRelationships,
+  relinkSticky,
+  renameTableInSubjectArea,
   renameTableInSubjectAreaRelationships,
   renameTableInRelationships,
+  describeUnstoredRelationships,
   routeToLibrary,
   sharedRelationshipCount,
   usesLibraryRelationships,
@@ -181,12 +220,48 @@ import {
 import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/libraryRelationships';
 import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
 import { namingMigrationIsEmpty } from '../services/namingMigration';
+import type { DbmlConversionCandidates } from '../services/dbmlConversionFiles';
+import { convertOfferApplies } from '../services/convertOffer';
 import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
-import { DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
+import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
+import { tableHomesOf } from '../services/tableHomes';
+import { buildCanvasContext } from '../services/canvasContext';
+import type { CodeOwnersReader } from '../services/codeOwners';
+import { newTableSchemaChoice } from '../services/newTableSchema';
+import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
+import type { FileWrite } from '../services/fileWrites';
+import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
+import { applyFileWrites, writtenPaths } from './applyFileWrites';
+import { primeLayoutOnlyReading, readDbmlDiagram } from '../services/dbmlDiagramReadings';
+import { changedMemberPath, dbmlResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
+import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
+import type { DbmlDraftTable, DbmlTableHome, NewRefFileChoice } from '../services/dbmlLibraryWrites';
+import type { AppliedFileWrites } from './applyFileWrites';
+import {
+  NotASubjectAreaObject,
+  codecFor,
+  isLayoutOnlyChange,
+  isTableNamingDocument,
+  layoutOnlyText,
+  markTableNamingDocument,
+  sameOutsideErdLayout,
+  serialiseSubjectArea,
+  subjectAreaFileObject,
+} from './subjectAreaCodec';
+import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
+import { withRelationshipHomes } from '../services/diagramRelationshipHomes';
 import { normaliseName } from '../services/nameUtils';
+import { yieldToEventLoop } from '../services/libraryWarmUp';
+import { createLogger, elapsedMs, log, phaseTimer, plural } from '../services/logger';
+import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
+import type { SessionPromptKind } from '../services/activationPrompts';
+import { parseGuideAction, type CanvasGuideStart, type GuideActionPayload } from '../types/onboardingGuide';
+
+/** The canvas's lines in the ERD Studio log: opening a diagram, position saves. */
+const canvasLog = createLogger('Canvas');
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -216,6 +291,7 @@ export function classifySubjectAreaLoadFailure(err: unknown): SubjectAreaLoadFai
     if (err.reason === 'unreadable') return 'unreadable';
     if (err.reason === 'empty') return 'empty';
     if (err.mergeConflict) return 'conflict';
+    if (err.reason === 'invalid-dbml') return 'dbml';
     return 'json';
   }
   if (err instanceof SubjectAreaValidationError) return 'invalid';
@@ -225,14 +301,32 @@ export function classifySubjectAreaLoadFailure(err: unknown): SubjectAreaLoadFai
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * At most this many Table Library files are read to list the Add Existing
+ * Table rows with a payload. With more unread (a large library opened before
+ * the background read reached it) none is read: their rows go out with
+ * `detailsPending`, and the dialog asks for them when it opens.
+ */
+export const EXISTING_TABLES_READ_AT_MOST = 100;
+
+/**
+ * How long after a canvas opens its relationship survey (usage telemetry,
+ * #133) runs: off the open's critical path, once the payload has gone out.
+ */
+export const RELATIONSHIP_SURVEY_DELAY_MS = 3000;
+
+/**
  * The logical-models/ sub-folder new models created from a domain go in: the
- * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`).
+ * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`, or a
+ * DBML diagram's `{layer}/diagrams/{domain}.dbml`).
  * `TableLibraryService` ignores a name that is not layer-shaped, so a domain
  * opened from anywhere else simply creates its models at the top level.
  */
 export function tableFolderForSubjectArea(domainFilePath: string): string {
-  return path.basename(path.dirname(domainFilePath));
+  return diagramPathOf(domainFilePath)?.layer ?? path.basename(path.dirname(domainFilePath));
 }
+
+/** The last sentence of every "not a DBML diagram" page (§1.8): how to see the file as text. */
+export const REOPEN_AS_TEXT_SENTENCE = 'To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.';
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -243,6 +337,12 @@ interface TableFileOps {
   save?: TableFileSave[];
   /** Model names whose yml should be deleted (e.g. the old name on rename). */
   delete?: string[];
+  /**
+   * DBML only: the relationships file the New Relationship dialog picked for
+   * the relationship being added (`TableLibraryService.planTableWrites` →
+   * `planDbmlLibraryWrites`' `newRefFile`). A YAML write never reads it.
+   */
+  newRefFile?: NewRefFileChoice;
 }
 
 /** A single yml write inside a {@link TableFileOps}. */
@@ -267,14 +367,26 @@ const DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
 };
 
 /**
- * One sentence naming the chosen models a batch "Add models from dbt" left
- * out, or `''` when nothing worth mentioning was. Duplicates and models
- * already in the domain are the expected case and are not listed.
+ * {@link DRAFT_SKIP_WORDS} in a folder without dbt (logical only), where a
+ * pick from the Table Library that has no table file is simply not there.
  */
-export function describeSkippedDbtModels(skipped: readonly DraftSkipped[]): string {
+const LOGICAL_DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
+  ...DRAFT_SKIP_WORDS,
+  'not-found': 'not in the Table Library',
+};
+
+/**
+ * One sentence naming the chosen models a batch "Add models from dbt" (or
+ * a batch pick from the Table Library) left out, or `''` when nothing worth
+ * mentioning was. Duplicates and models already in the domain are the
+ * expected case and are not listed. `logicalOnly` (no dbt project): the
+ * reasons are worded without dbt.
+ */
+export function describeSkippedDbtModels(skipped: readonly DraftSkipped[], options: { logicalOnly?: boolean } = {}): string {
+  const words = options.logicalOnly ? LOGICAL_DRAFT_SKIP_WORDS : DRAFT_SKIP_WORDS;
   const parts = skipped
-    .filter((s) => DRAFT_SKIP_WORDS[s.reason])
-    .map((s) => `${s.name} (${DRAFT_SKIP_WORDS[s.reason]})`);
+    .filter((s) => words[s.reason])
+    .map((s) => `${s.name} (${words[s.reason]})`);
   if (parts.length === 0) return '';
   const shown = parts.slice(0, 5).join(', ');
   return `Left out: ${shown}${parts.length > 5 ? ` and ${parts.length - 5} more` : ''}.`;
@@ -309,14 +421,22 @@ export function isFreshLayout(
 function pruneViewConfigForRemovedTables(
   parsed: Record<string, unknown>,
   removed: ReadonlySet<string>,
+  /** Match names without case: DBML diagrams only (a position key or `linked_table` may spell a member another way, §1.6); JSON stays exact. */
+  caseInsensitive = false,
 ): void {
   const viewConfig = parsed.viewConfig;
   if (!viewConfig || typeof viewConfig !== 'object' || Array.isArray(viewConfig)) return;
   const vc = viewConfig as Record<string, unknown>;
+  const lowered = new Set([...removed].map((n) => n.toLowerCase()));
+  const isRemoved = (name: string): boolean => (caseInsensitive ? lowered.has(name.toLowerCase()) : removed.has(name));
 
   const positions = vc.positions;
   if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
-    for (const name of removed) delete (positions as Record<string, unknown>)[name];
+    if (caseInsensitive) {
+      for (const key of Object.keys(positions)) if (isRemoved(key)) delete (positions as Record<string, unknown>)[key];
+    } else {
+      for (const name of removed) delete (positions as Record<string, unknown>)[name];
+    }
   }
 
   const annotations = vc.annotations;
@@ -324,7 +444,7 @@ function pruneViewConfigForRemovedTables(
     for (const annotation of annotations) {
       if (!annotation || typeof annotation !== 'object') continue;
       const ann = annotation as Record<string, unknown>;
-      if (typeof ann.linkedModel === 'string' && removed.has(ann.linkedModel)) {
+      if (typeof ann.linkedModel === 'string' && isRemoved(ann.linkedModel)) {
         delete ann.linkedModel;
       }
     }
@@ -337,7 +457,7 @@ function pruneViewConfigForRemovedTables(
  * dbt convention, with the alias carrying the table name.
  */
 function sameTableName(name: string, domainPath: string): string {
-  const layer = path.basename(path.dirname(domainPath)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const layer = tableFolderForSubjectArea(domainPath).toLowerCase().replace(/[^a-z0-9_]/g, '_');
   return layer ? `${layer}_${name}` : `${name}_2`;
 }
 
@@ -359,34 +479,64 @@ class EditAborted extends Error {
  * telemetry counts only the throws that are not one of these.
  */
 class EditRefused extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** Made from a DBML writer's overlap refusal (`DbmlEditRefused.reason`): a writer bug, counted as ours. */
+    readonly overlap = false,
+  ) {
     super(message);
     this.name = 'EditRefused';
   }
 }
 
+/** What an edit VS Code did not apply says when the caller gives no label of its own (§5.3 step 7). */
+const EDIT_NOT_APPLIED_MESSAGE = 'The edit could not be applied; nothing was changed.';
+
 /** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
 function isExplainedRefusal(err: unknown): boolean {
   return err instanceof EditRefused || err instanceof RelationshipsRewriteRefused || err instanceof DuplicateKeyWriteRefused
-    || err instanceof TableNamingWriteRefused;
+    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused || err instanceof DbmlEditRefused;
 }
 
 /**
- * The subject area documents `parseSubjectAreaDocument` read from a v6 file
- * (#162): held under the in-memory (v5) keys like every other, and written
- * back in the v6 naming by `serialiseSubjectArea` (#182).
+ * A DBML writer refused its own overlapping edits (core's `refuseOverlaps`):
+ * the user is told as for any refusal, but usage telemetry counts it as ours
+ * (`dbmlWriteOverlap`, B12).
  */
-const tableNamingDocuments = new WeakSet<object>();
-
-/** A parsed subject area document as its file's text: v6 keys again for a v6 file (#182), else as it is. */
-function subjectAreaFileObject(parsed: Record<string, unknown>): Record<string, unknown> {
-  return tableNamingDocuments.has(parsed) ? toTableNamingDocument(parsed) : parsed;
+function isDbmlWriteOverlap(err: unknown): boolean {
+  return (err instanceof DbmlEditRefused && err.reason === 'overlap') || (err instanceof EditRefused && err.overlap);
 }
 
-/** `parsed` re-rendered as its file's text, in the file's own naming and line endings. */
-function serialiseSubjectArea(parsed: Record<string, unknown>, original: string): string {
-  return keepLineEndings(JSON.stringify(subjectAreaFileObject(parsed), null, 2) + '\n', original);
+/**
+ * Usage telemetry for a canvas handler that failed (B12), once per error
+ * (`telemetryOnce`): the boundary and a handler's own catch may both see it.
+ * Fixed keys from the message type's group; never the error's text.
+ */
+function recordHandlerFailure(group: HandlerGroup, err: unknown): void {
+  if (wasRecorded(err)) return;
+  markRecorded(err);
+  const keys = handlerFailureKeys(group, {
+    explained: isExplainedRefusal(err),
+    overlap: isDbmlWriteOverlap(err),
+    userFile: isUserFileProblem(err),
+  });
+  for (const code of keys.errors) telemetry.error(code);
+  for (const feature of keys.features) telemetry.feature(feature);
 }
+
+/**
+ * Log a canvas handler failure at the level its telemetry counts it: a
+ * refusal the user was told about in plain words, or a diagram file the
+ * user or an assistant broke, is a warning, so the B19 catch-all
+ * (`loggedError*`) does not count it as ours either. Everything else,
+ * including a DBML writer overlap, stays an error.
+ */
+function logHandlerFailure(line: string, err: unknown): void {
+  const theirs = !isDbmlWriteOverlap(err) && (isExplainedRefusal(err) || isUserFileProblem(err));
+  if (theirs) log.warn(line);
+  else log.error(line);
+}
+
 import {
   isValidCardinality,
   isValidRelationshipRole,
@@ -395,22 +545,36 @@ import {
   isValidStage,
   validateColumnDef as validateColumnDefPayload,
   validateColumnDefs,
+  validateSchemaFolderPayload,
+  validateRequestNewRelationshipFilesPayload,
   validateTableName,
   validateModelAliasPayload,
   validateMetaPayload,
+  validateOpenFieldsFilePayload,
+  validateRationalePayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateAddExistingModelsPayload,
+  validateDropTablesPayload,
   validateOpenModelFilePayload,
+  validateGoToTablePayload,
+  validateTableActionPayload,
   validateLayoutFinishedPayload,
+  validateWebviewErrorPayload,
+  validateCrashFallbackPayload,
   validateViewFilePayload,
   validateExtraPairs,
   validateMarkKey,
+  validateNoRelationshipsFile,
   validateRelationshipEnds,
+  validateRelationshipsFileChoice,
   validateDismissManifestHintPayload,
+  validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
+  validateGuidePayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
+  validateNewDbmlTableName,
   validatePoint,
   validatePositions,
   validateAnalyzeFeedbackPayload,
@@ -418,60 +582,18 @@ import {
   validateOpenFeedbackLinkPayload,
   validateRequestFeedbackContextPayload,
   validateSetFeedbackProviderPayload,
+  validateSetLineStylePayload,
   validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
-import { DBML_STORAGE_MESSAGE, showDbmlStoragePage } from './dbmlStorageGuardUi';
-
-/**
- * Canvas messages still handled while the project is stored as DBML by a
- * newer ERD Studio (see `src/services/dbmlStorageGuard.ts`): the ones that
- * write nothing into the ERD Studio folder. Everything else is refused with
- * {@link DBML_STORAGE_MESSAGE}. A canvas only meets this when the project
- * became DBML while it was open (a git checkout); one opened on such a
- * project shows the message instead.
- */
-export const DBML_GUARD_ALLOWED_MESSAGE_TYPES: ReadonlySet<string> = new Set([
-  'ready', 'switchStage', 'toggleDiscrepancy', 'refreshManifest', 'dismissWelcome',
-  'viewFile', 'runDbtCompile', 'runDbtParse',
-  'requestReload', 'openGettingStarted', 'closeEditor', 'openAnotherDomain',
-  'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
-  'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-  'openModelFile', 'layoutFinished', 'exportDiagram',
-]);
+import { affectsLineStyle, readLineStyle, writeLineStyle } from './lineStyleSetting';
+import { dropGridPositions, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
 function stageRelationships(parsed: Record<string, unknown>): Array<Record<string, unknown>> {
   const logical = parsed.logical as Record<string, unknown> | undefined;
   return logical && Array.isArray(logical.relationships) ? logical.relationships as Array<Record<string, unknown>> : [];
-}
-
-/**
- * Follow a model rename in another v5 domain file, in place (#133 L5): its
- * `logical.models` entry, its stored position and its own relationship
- * copies, matched without case. Returns whether anything changed.
- */
-function renameTableInSubjectArea(parsed: Record<string, unknown>, oldName: string, newName: string): boolean {
-  let touched = false;
-  const logical = parsed.logical as Record<string, unknown> | undefined;
-  if (logical && Array.isArray(logical.models)) {
-    logical.models = (logical.models as unknown[]).map((m) => {
-      if (typeof m !== 'string' || !sameName(m, oldName)) return m;
-      touched = true;
-      return newName;
-    });
-  }
-  const positions = ((parsed.viewConfig ?? {}) as Record<string, unknown>).positions as Record<string, unknown> | undefined;
-  if (positions && typeof positions === 'object') {
-    const key = Object.keys(positions).find((k) => sameName(k, oldName));
-    if (key !== undefined && !(newName in positions)) {
-      positions[newName] = positions[key];
-      delete positions[key];
-      touched = true;
-    }
-  }
-  return renameTableInSubjectAreaRelationships(stageRelationships(parsed), oldName, newName) || touched;
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +623,72 @@ export const RELATIONSHIP_BACKWARDS_DECLINED_KEY = 'erdStudio.relationshipBackwa
  * the new file naming (#182). Per workspace, like #126's and #163's.
  */
 export const NAMING_MIGRATION_DECLINED_KEY = 'erdStudio.namingMigrationDeclined';
+
+/**
+ * workspaceState key: "Don't Ask Again" on the offer to convert the project
+ * to DBML (native DBML storage, §6.4). Per workspace.
+ */
+export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
+
+/** How long outside changes to table files are collected into one canvas refresh. */
+export const TABLE_REFRESH_BATCH_MS = 150;
+
+/** How long a relationship reveal waits for its canvas to load (a large diagram can take a few seconds). */
+export const PENDING_REVEAL_MS = 60_000;
+
+/** How long a Table Library drag is remembered for a drop that brings no table file. */
+export const PENDING_LIBRARY_DRAG_MS = 60_000;
+
+/** The answer to a drop on the canvas that names no table. */
+export const DROP_TABLES_NOTHING_MESSAGE =
+  'ERD Studio: Hold Shift and drop a table from the Table Library, or a table file from the Explorer, onto the diagram.';
+
+/** The answer to a drop of tables that are all on the diagram already (they are selected instead). */
+export function alreadyOnDiagramMessage(tables: readonly string[]): string {
+  return tables.length === 1
+    ? `ERD Studio: "${tables[0]}" is already on this diagram.`
+    : `ERD Studio: These ${tables.length} tables are already on this diagram.`;
+}
+
+/** How long the status bar says where a new relationship was saved. */
+export const RELATIONSHIP_SAVED_STATUS_MS = 8000;
+
+/** "ERD Studio: Relationship saved in .erd-studio/gold/relationships/finance.dbml (line 7)". */
+export function relationshipSavedMessage(file: string, line: number): string {
+  return `ERD Studio: Relationship saved in ${file} (line ${line})`;
+}
+/** The Convert offer's dialog (§6.4): its title and its two buttons (VS Code adds Cancel, which is Not Now). */
+export const DBML_CONVERSION_OFFER_TITLE = 'Convert this project to DBML?';
+export const DBML_CONVERSION_OFFER_CONVERT = 'Convert…';
+export const DBML_CONVERSION_OFFER_DECLINE = "Don't Ask Again";
+
+/** The setting that turns the Convert offer off everywhere (`erdStudio.dbml.offerConvert`, default on). */
+export const DBML_OFFER_CONVERT_SETTING = 'dbml.offerConvert';
+
+/**
+ * The Convert offer's explanation (§6.4): converting is optional, and what a
+ * converted project needs from everyone who opens it. `files` is how many
+ * YAML/JSON files a mixed project still has.
+ */
+export function dbmlConversionOfferDetail(storage: 'yaml' | 'mixed', files: number): string {
+  if (storage === 'mixed') {
+    return `Your project keeps working as it is — converting is optional. It is stored as DBML, but ${files} file${files === 1 ? ' is' : 's are'} ` +
+      'YAML or JSON (probably written by an AI helper set up with an older ERD Studio, or by a teammate on one). Convert them to DBML? (You\'ll see the full list first.)';
+  }
+  return 'Your project keeps working as YAML and JSON — converting is optional. ERD Studio can store it as DBML instead, an open format. ' +
+    'Afterwards, everyone who opens it needs ERD Studio 2.0 or later. ' +
+    "Convert now? (You'll see the full list of changes first.)";
+}
+
+/** What the canvas needs to offer Convert Project to DBML (§6.4), wired by the extension. */
+interface DbmlConversionHooks {
+  /** What there is to convert, from the file listing alone (no plan: that waits until the user asks). */
+  candidates: () => DbmlConversionCandidates;
+  /** Run the command, with its own modal; true when it converted. */
+  run: () => Promise<boolean>;
+  /** The last run was refused or left only files to fix, and nothing changed since: offering would lead nowhere. */
+  goesNowhere?: () => boolean;
+}
 
 /** What the canvas needs to offer the naming migration (#182), wired by the extension. */
 interface NamingMigrationHooks {
@@ -539,6 +727,19 @@ export function tableFileDeleteFailedMessage(shownPaths: readonly string[]): str
   const what = shownPaths.length === 1 ? shownPaths[0] : `${shownPaths.length} table files`;
   return `ERD Studio couldn't delete ${what}, so no table file was deleted. ` +
     `Another program may have ${shownPaths.length === 1 ? 'it' : 'one of them'} open, or the folder may be read-only.`;
+}
+
+/** What {@link SemanticEditorProvider.onDidWriteSubjectArea} says about a write. */
+export interface SubjectAreaWriteEvent {
+  uri: vscode.Uri;
+  /** True when a logical-models/*.yml file was created or deleted. */
+  modelLibraryChanged: boolean;
+  /**
+   * True when the write changed only the layout (table positions, sticky-note
+   * boxes): nothing either sidebar tree shows, so listeners skip their
+   * refreshes. Absent means anything may have changed.
+   */
+  layoutOnly?: boolean;
 }
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
@@ -593,11 +794,30 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+  /**
+   * Panels a {@link holdRefreshes} hold marked in `pendingUpdates` (not for an
+   * edit of their own), and those of them a native undo/redo reached while
+   * held: that Cmd+Z is the user's, and is flushed when the hold releases.
+   */
+  private readonly heldPanels = new Set<string>();
+  private readonly undoWhileHeld = new Set<string>();
+  /** Panels whose toolbar Undo / Redo command is rewinding the documents (it flushes them itself). */
+  private readonly toolbarUndoRedo = new Set<string>();
   /** The move-to-library offer is made at most once per session (#126). */
   private relationshipMoveOffered = false;
   /** The naming migration's offer (#182): at most once per session, before the relationship offers. */
   private namingMigrationOffered = false;
+  private dbmlConversionOffered = false;
+  /** The DBML offer was eligible this session: the naming offer is then never made (§6.4). */
+  private dbmlConversionEligible = false;
+  private dbmlConversion: DbmlConversionHooks | undefined;
   private namingMigration: NamingMigrationHooks | undefined;
+  /**
+   * The window session's one prompt (src/services/activationPrompts.ts): the
+   * Convert and naming offers claim it, and wait for the next window when an
+   * activation prompt already showed. Unset (tests): never gated.
+   */
+  private sessionPrompts: { claim(kind: SessionPromptKind): boolean } | undefined;
   private relationshipBackwardsOffered = false;
   /** Each document's logical relationships flagged `keysContradict` when its canvas last loaded (#163). */
   private readonly backwardsDrawn = new Map<string, DisplayRelationship[]>();
@@ -617,11 +837,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private readonly editedTablePaths = new Map<string, Set<string>>();
 
+  /** Tables changed outside ERD Studio, waiting for one batched canvas refresh (see queueTableRefresh). */
+  private readonly queuedTableRefresh = new Set<string>();
+  private tableRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Per webview: the log lines its Send Feedback dialog last previewed (the only ones a report may carry). */
+  private readonly feedbackLogShown = new WeakMap<vscode.Webview, string[]>();
+
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
+  private libraryWarmUp: { noteForegroundWork(): void } | undefined;
+  /** Delay before a canvas open's relationship survey; tests set 0. */
+  relationshipSurveyDelayMs = RELATIONSHIP_SURVEY_DELAY_MS;
+
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
+  /** Relationships files a DBML diagram does not import but needs, already warned about this session (diagram + file). */
+  private readonly importDriftWarningsShown = new Set<string>();
+  /** Open holds from {@link holdRefreshes}; while above 0, outside refreshes and the duplicate warning wait. */
+  private refreshHolds = 0;
+  /** Canvas refreshes asked for while held, and so not made: a hold's release says whether any were. */
+  private droppedRefreshes = 0;
 
   /**
    * Fires after this provider has written a domain file (and any model files)
@@ -629,11 +867,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * deliberately ignore them — extension.ts listens here instead to refresh
    * the domain tree, the model library view and the context keys.
    */
-  private readonly _onDidWriteSubjectArea = new vscode.EventEmitter<{
-    uri: vscode.Uri;
-    /** True when a logical-models/*.yml file was created or deleted. */
-    modelLibraryChanged: boolean;
-  }>();
+  private readonly _onDidWriteSubjectArea = new vscode.EventEmitter<SubjectAreaWriteEvent>();
 
   /** @see _onDidWriteSubjectArea */
   readonly onDidWriteSubjectArea = this._onDidWriteSubjectArea.event;
@@ -665,16 +899,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * The stable DBML guard (`dbmlStorageGuardUi.ts`), injected after
-   * construction. Undefined in tests that do not set it: nothing is refused.
+   * Logical-only mode: the open root has no dbt_project.yml, so there is no
+   * Physical stage to show or compare against. Set once by activate(), same
+   * pattern as the other setters. While true, every logical payload carries
+   * `logicalOnly: true`, a physical switch is answered with the logical stage,
+   * a Diff request is answered with no report, and Add Tables from dbt
+   * explains itself instead of listing models.
    */
-  private dbmlGuard: { isActive(): boolean } | undefined;
+  private logicalOnly = false;
 
-  /** @see dbmlGuard */
-  setDbmlStorageGuard(guard: { isActive(): boolean } | undefined): void {
-    this.dbmlGuard = guard;
+  /** @see logicalOnly */
+  setLogicalOnly(logicalOnly: boolean): void {
+    this.logicalOnly = logicalOnly;
   }
 
+  /** `{ logicalOnly: true }` for a logical payload in logical-only mode, else nothing (absent = Physical available). */
+  private logicalOnlyFlag(): { logicalOnly?: true } {
+    return this.logicalOnly ? { logicalOnly: true } : {};
+  }
 
   /**
    * Load the warehouse catalog, if a reader was injected and an artifact exists.
@@ -702,7 +944,60 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const prev = this.editQueues.get(documentUri) ?? Promise.resolve();
     const next = prev.then(() => fn(), () => fn());
     this.editQueues.set(documentUri, next);
+    this.editQueueSeq.set(documentUri, (this.editQueueSeq.get(documentUri) ?? 0) + 1);
     return next;
+  }
+
+  /** Per panel: how many edits were ever queued (to tell whether a waiting batch is still the last one). */
+  private readonly editQueueSeq = new Map<string, number>();
+
+  /**
+   * Per panel: the `updatePositions` batch that is queued and has not started
+   * yet, with the queue position it was given ({@link queuePositions}).
+   */
+  private readonly waitingPositions = new Map<string, {
+    seq: number;
+    positions: Record<string, { x: number; y: number }>;
+    annotations: Map<string, AnnotationPositionPayload>;
+    done: Promise<void>;
+  }>();
+
+  /**
+   * Queue an `updatePositions`, folding it into the batch already waiting
+   * for this panel when that batch is still the last thing queued: the
+   * positions merge (the later message wins for a table or note both moved),
+   * one edit is written and both senders resolve when it lands. While the
+   * host is busy, drags that pile up are saved once instead of one save
+   * (and one layout file write) each. A batch that has started, or one with
+   * another edit queued after it, is never joined, so edits stay in order.
+   * Folded drags are one undo step (they reach the file as one edit).
+   */
+  private queuePositions(
+    panelKey: string,
+    run: (positions: Record<string, { x: number; y: number }>, annotations: AnnotationPositionPayload[]) => Promise<void>,
+    positions: Record<string, { x: number; y: number }>,
+    annotations: AnnotationPositionPayload[],
+  ): Promise<void> {
+    const waiting = this.waitingPositions.get(panelKey);
+    if (waiting && waiting.seq === this.editQueueSeq.get(panelKey)) {
+      Object.assign(waiting.positions, positions);
+      for (const a of annotations) waiting.annotations.set(a.id, a);
+      return waiting.done;
+    }
+    const batch = {
+      seq: 0,
+      positions: { ...positions },
+      annotations: new Map(annotations.map((a) => [a.id, a] as const)),
+      done: Promise.resolve(),
+    };
+    batch.done = this.queueEdit(panelKey, () => {
+      // Started: a later message queues a batch of its own.
+      if (this.waitingPositions.get(panelKey) === batch) this.waitingPositions.delete(panelKey);
+      return run(batch.positions, [...batch.annotations.values()]);
+    });
+    batch.seq = this.editQueueSeq.get(panelKey) ?? 0;
+    this.waitingPositions.set(panelKey, batch);
+    return batch.done;
   }
 
   /**
@@ -716,12 +1011,50 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document: vscode.TextDocument;
       webview: vscode.Webview;
       activeStage: Stage;
+      /** The tab's panel, to tell a canvas VS Code closed without its dispose reaching us (see {@link panelIsGone}). */
+      panel?: vscode.WebviewPanel;
       /** Cached discrepancy report from the last comparison (used by sync plan generation). */
       lastDiscrepancyReport?: DiscrepancyReport | null;
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
       lastCompareAgainst?: Stage;
+      /**
+       * Bumped by every Compare toggle and every stage change: a comparison
+       * still loading when it moves on is dropped, not cached or posted.
+       */
+      compareRequest?: number;
+      /** The webview answered `ready` with its diagram: a reveal can be posted now. */
+      loaded?: boolean;
+      /**
+       * The page crashed while rendering and shows the crash screen (a render
+       * `webviewError` or a `crashFallback` arrived; cleared by its next
+       * `ready`): Send Feedback must not be routed to its dead dialog.
+       */
+      crashed?: boolean;
     }
   >();
+
+  /**
+   * Relationship reveals asked for before their canvas had loaded (Open in
+   * Diagram on a diagram that is still opening), by diagram path. The `ready`
+   * handler posts one once the diagram is on the canvas; one older than
+   * {@link PENDING_REVEAL_MS} is dropped, so a canvas that failed to open
+   * does not jump to it the next time it is opened by hand.
+   */
+  private readonly pendingReveals = new Map<string, { target: RevealRelationshipMessage['payload']; at: number }>();
+
+  /**
+   * Table reveals (and Add to Diagram…'s adds) asked for before their canvas
+   * had loaded, by diagram path; run by the `ready` handler, dropped after
+   * {@link PENDING_REVEAL_MS} like {@link pendingReveals}.
+   */
+  private readonly pendingTableActions = new Map<string, { reveal: string; add?: string[]; at: number }>();
+
+  /**
+   * The last drag that started in the Table Library ({@link noteLibraryDrag}):
+   * a drop on a canvas whose DataTransfer names no table file adds these,
+   * once, while younger than {@link PENDING_LIBRARY_DRAG_MS}.
+   */
+  private pendingLibraryDrag: { tables: string[]; at: number } | undefined;
 
   /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
@@ -730,12 +1063,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * of calling into a dead webview.
    */
   private readonly disposedWebviews = new WeakSet<vscode.Webview>();
+  /** The canvas most recently opened or focused (Run dbt parse's Open Physical view falls back to it). */
+  private lastActivePanelKey?: string;
 
   /**
    * Post a message to a webview, skipping disposed panels and observing the
    * returned promise so a rejection can never surface as an unhandled
    * rejection from a fire-and-forget call site.
    */
+  /** Tell a canvas how to draw its lines (`erdStudio.canvas.lineStyle`). */
+  private postLineStyle(webview: vscode.Webview): void {
+    this.post(webview, { type: 'lineStyle', payload: { lineStyle: readLineStyle() } });
+  }
+
   private post(webview: vscode.Webview, message: unknown): void {
     if (this.disposedWebviews.has(webview)) {
       return;
@@ -743,11 +1083,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       void Promise.resolve(webview.postMessage(message)).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[SemanticEditorProvider] postMessage failed: ${msg}`);
+        log.warn(`[SemanticEditorProvider] postMessage failed: ${msg}`);
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[SemanticEditorProvider] postMessage threw: ${msg}`);
+      log.warn(`[SemanticEditorProvider] postMessage threw: ${msg}`);
     }
   }
 
@@ -766,7 +1106,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         const type = isTypedMessage(message) ? message.type : 'unknown';
-        console.error(`[SemanticEditorProvider] Message "${type}" failed: ${detail}`);
+        recordHandlerFailure(handlerGroupOf(type), err);
+        logHandlerFailure(`[SemanticEditorProvider] Message "${type}" failed: ${detail}`, err);
         this.post(webview, { type: 'error', payload: { message: `Failed to handle "${type}": ${detail}` } });
       }
     };
@@ -792,6 +1133,162 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ) {}
 
   /**
+   * The `ready` handler's first answer (`loading`), posted before the
+   * diagram is read, then again with its table count — counted from the
+   * diagram's own text, no table read — each followed by a turn of the
+   * event loop so the message leaves the host before the read blocks it.
+   */
+  private async postLoading(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+    this.post(webview, { type: 'loading', payload: {} });
+    await yieldToEventLoop();
+    let tables: number | undefined;
+    try {
+      tables = this.subjectAreaService.countSubjectAreaTablesInText(document.getText(), document.uri.fsPath);
+    } catch {
+      // The read that follows reports what is wrong with the file.
+      return;
+    }
+    this.post(webview, { type: 'loading', payload: { tables } });
+    await yieldToEventLoop();
+  }
+
+  /**
+   * Answer `requestExistingTables`: read the Table Library files a payload
+   * listed by name only (`detailsPending`), a slice at a time so the host
+   * stays responsive, then post the Add Existing Table rows in full.
+   */
+  private async sendExistingTables(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+    const library = this.tableLibraryService;
+    const unread = library.unreadTableFiles();
+    while (unread.length > 0) {
+      const started = Date.now();
+      do library.warmTableFile(unread.shift()!); while (unread.length > 0 && Date.now() - started < 20);
+      await yieldToEventLoop();
+    }
+    if (this.disposedWebviews.has(webview)) return;
+    const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+    const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+    const domain = this.subjectAreaService.getSubjectArea(document.uri.fsPath);
+    const { existingModels, manifestModels } = this.buildWebviewPayload(
+      { models: domain.logical.models }, manifest, ymlData, domain.modelFolder,
+      { readAllTables: true, catalog: await this.loadCatalog() },
+    );
+    this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
+  }
+
+  /** The repository's CODEOWNERS (read only), for "Reviewed by" in the detail panel. */
+  private codeOwners: Pick<CodeOwnersReader, 'ownersOf'> | undefined;
+
+  /** Hand the editor the CODEOWNERS reader the sidebar uses (set once, at activation). */
+  useCodeOwners(reader: Pick<CodeOwnersReader, 'ownersOf'>): void {
+    this.codeOwners = reader;
+  }
+
+  /** Each webview's latest `canvasContext` request: an older one still running posts nothing. */
+  private readonly canvasContextRuns = new WeakMap<vscode.Webview, number>();
+
+  /** Stop a `canvasContext` still being worked out: the physical stage gets none. */
+  private cancelCanvasContext(webview: vscode.Webview): void {
+    this.canvasContextRuns.set(webview, (this.canvasContextRuns.get(webview) ?? 0) + 1);
+  }
+
+  /**
+   * Post the `canvasContext` for a logical-stage diagram just posted: each
+   * table's file and reviewers, and its relationships to tables not on the
+   * diagram (`buildCanvasContext`). Runs after the diagram has gone out, so
+   * the canvas paints first, and reads no table file a refresh would not:
+   * the Refs of every relationships file (DBML: the whole library, not just
+   * the diagram's imports) and the own relationships of each YAML table
+   * already read (a large YAML library's other tables join as the
+   * background warm-up reads them, on the next refresh). Writes nothing;
+   * never throws.
+   */
+  private async sendCanvasContext(webview: vscode.Webview, members: readonly string[], diagramLayer: string | undefined): Promise<void> {
+    const run = (this.canvasContextRuns.get(webview) ?? 0) + 1;
+    this.canvasContextRuns.set(webview, run);
+    const current = (): boolean => this.canvasContextRuns.get(webview) === run && !this.disposedWebviews.has(webview);
+    try {
+      await yieldToEventLoop();
+      if (!current()) return;
+      const library = this.tableLibraryService;
+      const labels = new Map(this.layerService.getAllLayers().map((l) => [l.id, l.label || l.id]));
+      const labelOf = (layer: string | undefined): string | undefined => (layer === undefined ? undefined : labels.get(layer) ?? layer);
+      // One look at the library's listing for every lookup below, not one per table.
+      const context = library.withIndexSnapshot(() => {
+        const tables = library.dirExists() ? this.knownLibraryRelationships() : [];
+        const entries = library.listTableFiles();
+        const homes = tableHomesOf(entries);
+        // A table's file from the listing: a name with no file gets no File line
+        // (`resolveTablePath` would name where a new one would go).
+        const files = new Map<string, string>();
+        for (const e of entries) if (!e.shadowedBy && !files.has(e.name.toLowerCase())) files.set(e.name.toLowerCase(), e.filePath);
+        const fileOf = (name: string): string | undefined => files.get(name.toLowerCase());
+        return buildCanvasContext({
+          members,
+          libraryTables: tables,
+          fileOf: (name) => {
+            const file = fileOf(name);
+            return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
+          },
+          layerLabelOf: (name) => labelOf(homes.get(name.toLowerCase())?.layer),
+          ...(diagramLayer !== undefined ? { diagramLayerLabel: labelOf(diagramLayer) } : {}),
+          ...(this.codeOwners ? {
+            ownersOf: (name: string) => {
+              const file = fileOf(name);
+              return file === undefined ? [] : this.codeOwners!.ownersOf(file);
+            },
+          } : {}),
+        });
+      });
+      if (!current()) return;
+      this.post(webview, { type: 'canvasContext', payload: context });
+    } catch (err) {
+      // The canvas works without it: no File line, no "Not on this diagram" list.
+      log.warn(`[SemanticEditorProvider] Canvas context failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Every library table by name (no columns), each with the relationships it
+   * owns as far as is known without reading a table file: the Refs of every
+   * relationships file (a Ref's pairs as one composite line), and each YAML
+   * table's own list when its file is already read. For `buildCanvasContext`.
+   */
+  private knownLibraryRelationships(): SemanticTable[] {
+    const library = this.tableLibraryService;
+    const entries = library.listTableFiles().filter((e) => !e.shadowedBy);
+    const owned = new Map<string, TableRelationship[]>();
+    const own = (owner: string, rel: TableRelationship): void => {
+      const key = owner.toLowerCase();
+      const list = owned.get(key);
+      if (list) list.push(rel);
+      else owned.set(key, [rel]);
+    };
+    for (const file of library.listRelationshipsFiles()) {
+      const reading = library.readRelationshipsFile(file);
+      if (!reading?.readable) continue;
+      for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
+        const composite = ref.relationships.length > 1 ? `ref:${file}:${ref.line}` : undefined;
+        for (const { fromModel, ...rel } of ref.relationships) {
+          own(fromModel, composite && !rel.compositeKey ? { ...rel, compositeKey: composite } : rel);
+        }
+      }
+    }
+    const unread = new Set(library.unreadTableFiles().map((e) => e.filePath));
+    for (const entry of entries) {
+      if (entry.storage === 'dbml' || unread.has(entry.filePath)) continue;
+      let table: SemanticTable | null = null;
+      try {
+        table = library.getTable(entry.name);
+      } catch {
+        table = null;
+      }
+      for (const rel of table?.relationships ?? []) own(entry.name, rel);
+    }
+    return entries.map((e) => ({ name: e.name, columns: [], relationships: owned.get(e.name.toLowerCase()) ?? [] }) as unknown as SemanticTable);
+  }
+
+  /**
    * Build supplementary payload data for webview messages.
    * Includes templates and list of available models from logical-models/, yml, and manifest.
    */
@@ -800,6 +1297,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
     ymlData: YmlData,
     modelFolder?: string,
+    options: { readAllTables?: boolean; catalog?: CatalogData } = {},
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -817,24 +1315,36 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const existingModels: import('../types/display').ExistingTablePreview[] = [];
     const addedNames = new Set<string>();
 
-    // 1. Logical models (already designed in ERD Studio's model library)
-    const logicalModels = this.tableLibraryService.listTables();
-    for (const model of logicalModels) {
-      if (existingModelNames.has(model.name)) continue;
-      // A yml whose internal `name:` is not path-safe cannot be added to a
-      // domain — skip it rather than failing the whole payload.
-      const absPath = this.tableLibraryService.resolveTablePath(model.name);
-      if (absPath === null) continue;
-      existingModels.push({
-        name: model.name,
-        schema: model.schema ?? '',
-        description: model.description ?? '',
-        columnCount: (model.columns ?? []).length,
-        source: 'logical',
-        sourcePath: path.relative(this.workspaceRoot, absPath),
-      });
-      addedNames.add(model.name);
-    }
+    // 1. Logical models (already designed in ERD Studio's model library):
+    // what the dialog shows of each, from the caches. On a large library
+    // opened before its files were read, the unread ones go out by name
+    // only (`detailsPending`) and the dialog asks for the rest when it opens.
+    const library = this.tableLibraryService;
+    const previews = library.withIndexSnapshot(() => library.tablePreviews({ readAtMost: options.readAllTables ? Infinity : EXISTING_TABLES_READ_AT_MOST }));
+    library.withIndexSnapshot(() => {
+      for (const model of previews) {
+        if (existingModelNames.has(model.name)) continue;
+        // A yml whose internal `name:` is not path-safe cannot be added to a
+        // domain — skip it rather than failing the whole payload.
+        const absPath = model.pending ? model.filePath : library.resolveTablePath(model.name);
+        if (absPath === null) continue;
+        existingModels.push({
+          name: model.name,
+          schema: model.schema,
+          description: model.description,
+          columnCount: model.columnCount,
+          source: 'logical',
+          sourcePath: path.relative(this.workspaceRoot, absPath),
+          ...(model.pending ? { detailsPending: true as const } : {}),
+        });
+        addedNames.add(model.name);
+      }
+    });
+
+    // A dbt model's count is what adding it gives the table
+    // (`seedTableFromDbt`): its declared columns plus the ones only the
+    // catalog has. The cached catalog when the caller has none to hand.
+    const catalog = 'catalog' in options ? options.catalog : this.catalogService?.peekCatalog();
 
     // 2. dbt .yml source file models (declared in dbt project)
     for (const [name, ymlModel] of ymlData.models) {
@@ -844,7 +1354,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name,
         schema: manifestModel?.schema ?? '',
         description: ymlModel.description || manifestModel?.description || '',
-        columnCount: ymlModel.columns.length,
+        columnCount: seededColumnCount(name, ymlModel.columns, manifestModel, catalog),
         source: 'yml',
         sourcePath: path.relative(this.workspaceRoot, ymlModel.filePath),
       });
@@ -868,7 +1378,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name: m.name,
         schema: m.schema,
         description: m.description,
-        columnCount: m.columns.length,
+        columnCount: seededColumnCount(m.name, m.columns, m, catalog),
         source: 'manifest',
         // Honours a custom `target-path` — the literal 'target/manifest.json'
         // this replaced was wrong for any project that sets one.
@@ -913,6 +1423,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       payload.domain,
       payload.webviewErrors ?? [],
     );
+    // The log a report from this dialog may carry is exactly what it shows.
+    this.feedbackLogShown.set(webview, diagnostics.log ?? []);
     const tier = await resolveAnalysisTier(this.context);
     // The handle is decoration: it labels the auth pill and helps the tracker
     // reconcile. A host with no GitHub authentication provider registered
@@ -964,16 +1476,52 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * The crash screen's two buttons (the page's `crashFallback`), and the same
+   * two in the host's notification for a canvas that never became ready.
+   * Reload gives the panel a new page; Send Feedback opens the canvas-less
+   * flow with `prefill`. Telemetry counts the button only.
+   */
+  private async crashChoice(
+    action: CrashFallbackAction,
+    panelKey: string,
+    webviewPanel: vscode.WebviewPanel,
+    document: vscode.TextDocument,
+    prefill: FeedbackPrefill,
+  ): Promise<void> {
+    if (action === 'reload') {
+      telemetry.feature('crashFallbackReload');
+      canvasLog.info(`Reloading the canvas of ${document.uri.fsPath}`);
+      const entry = this.openPanels.get(panelKey);
+      if (entry?.webview === webviewPanel.webview) entry.loaded = false;
+      // A new page (a fresh nonce, so the html always changes): it says `ready` and loads again.
+      webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+      return;
+    }
+    telemetry.feature('crashFallbackFeedback');
+    this.markCrashed(panelKey, webviewPanel.webview);
+    // The canvas-less Send Feedback (requestFeedbackDialog skips a crashed canvas).
+    await vscode.commands.executeCommand('erdStudio.reportBug', prefill);
+  }
+
+  /** Note that `webview` (still this panel's) shows the crash screen. */
+  private markCrashed(panelKey: string, webview: vscode.Webview): void {
+    const entry = this.openPanels.get(panelKey);
+    if (entry?.webview === webview) entry.crashed = true;
+  }
+
+  /**
    * If the active editor tab is one of our canvases, ask its webview to open
    * the Feedback dialog (so the report can include the diagnostics chips and
-   * the optional analysis). Returns false when no canvas is active so the
-   * caller can fall back to the canvas-less QuickPick flow.
+   * the optional analysis). Returns false when no canvas is active, or when
+   * the active one shows the crash screen, so the caller can fall back to the
+   * canvas-less QuickPick flow.
    */
   requestFeedbackDialog(prefill?: OpenFeedbackMessage['payload']): boolean {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     if (!(input instanceof vscode.TabInputCustom)) return false;
     const panel = this.openPanels.get(input.uri.toString());
-    if (!panel) return false;
+    // A crashed canvas shows the crash screen: its Feedback dialog went down with the tree.
+    if (!panel || panel.crashed) return false;
     const msg: OpenFeedbackMessage = { type: 'openFeedback', payload: prefill };
     this.post(panel.webview, msg);
     return true;
@@ -1005,7 +1553,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const current = path.basename(this.workspaceRoot);
     const webview = webviewPanel.webview;
     const nonce = crypto.randomBytes(16).toString('base64');
-    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    // A plain (logical-only) window: nothing about dbt applies, even when the
+    // file sits in a dbt project elsewhere, so the page and the toast say only
+    // that it is in another folder or project, and offer no Switch (selecting a
+    // dbt project needs a dbt project in this window's folders).
+    const plainWindow = this.logicalOnly;
+    const outsideFolder = plainWindow && !owner;
+    const switchable = owner !== undefined && !plainWindow;
+    webview.options = { enableScripts: switchable, localResourceRoots: [] };
     webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1014,10 +1569,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 </head>
 <body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
-  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  ${outsideFolder ? `<h2 style="margin-top: 0;">This diagram is outside <code>${esc(current)}</code></h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only the diagrams in that folder.
+  Open this file\u2019s folder to edit it here.</p>` : plainWindow && owner ? `<h2 style="margin-top: 0;">This diagram is in <code>${esc(path.basename(owner))}</code>, another project</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window and draws only that project\u2019s diagrams.
+  Open <code>${esc(path.basename(owner))}</code> to edit it here.</p>` : `<h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
   <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
-  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>
-  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+  Drawing this file here would mix its tables with the wrong project\u2019s dbt data.</p>`}
+  ${switchable && owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
     background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1027,13 +1586,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 </html>`;
 
     const name = path.basename(filePath);
-    if (!owner) {
-      // Not a dead end (#205): the file still opens as text, and another project can be picked.
+    if (plainWindow && owner) {
       void vscode.window.showWarningMessage(
-        `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+        `ERD Studio: ${name} is in ${path.basename(owner)}, another project, so ERD Studio can't draw it in ${current}.`,
         OPEN_AS_TEXT_BUTTON,
-        SELECT_DBT_PROJECT_BUTTON,
       ).then(choice => {
+        if (choice === OPEN_AS_TEXT_BUTTON) {
+          void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
+        }
+      });
+      return;
+    }
+    if (!owner) {
+      // Not a dead end (#205): the file still opens as text, and (in a dbt
+      // project) another project can be picked.
+      const shown = outsideFolder
+        ? vscode.window.showWarningMessage(
+          `ERD Studio: ${name} is outside ${current}, the folder open in this window, so ERD Studio can't draw it here.`,
+          OPEN_AS_TEXT_BUTTON,
+        )
+        : vscode.window.showWarningMessage(
+          `ERD Studio: ${name} isn't inside a dbt project, so ERD Studio can't draw it with ${current}'s dbt data.`,
+          OPEN_AS_TEXT_BUTTON,
+          SELECT_DBT_PROJECT_BUTTON,
+        );
+      void shown.then(choice => {
         if (choice === OPEN_AS_TEXT_BUTTON) {
           void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default');
         } else if (choice === SELECT_DBT_PROJECT_BUTTON) {
@@ -1072,12 +1649,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
       return;
     }
-    // A project a newer ERD Studio stored as DBML: this version would draw it
-    // wrong and could write YAML / JSON beside the DBML files.
-    if (this.dbmlGuard?.isActive()) {
-      showDbmlStoragePage(webviewPanel);
-      return;
-    }
 
     webviewPanel.webview.options = {
       enableScripts: true,
@@ -1085,19 +1656,37 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+    // A canvas is opening: the background read of the library waits.
+    this.libraryWarmUp?.noteForegroundWork();
 
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
-    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical' });
+    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
+    this.lastActivePanelKey = panelKey;
+    // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
+    const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
+      ready: (slow) => { if (slow) telemetry.feature('readySlowOver10s'); },
+      noReady: () => {
+        telemetry.error('webviewNoReadyCanvas');
+        // The page never mounted, so its crash screen cannot show: the host
+        // offers the same two buttons in a notification.
+        void askNoReadyRecovery('canvas').then((action) => {
+          if (!action || this.openPanels.get(panelKey)?.webview !== webviewPanel.webview) return undefined;
+          return this.crashChoice(action, panelKey, webviewPanel, document, noReadyFeedbackPrefill('canvas'));
+        }).catch((err: unknown) => log.warn('[SemanticEditorProvider] The blank-canvas recovery failed', err));
+      },
+    });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
     const messageSubscription = webviewPanel.webview.onDidReceiveMessage(
       this.withMessageErrorBoundary(webviewPanel.webview, async (message: unknown) => {
         if (!isTypedMessage(message)) {
-          console.warn('[SemanticEditorProvider] Ignoring webview message without a string "type"');
+          log.warn('[SemanticEditorProvider] Ignoring webview message without a string "type"');
           return;
         }
+        // The user is working: the background read of the library waits.
+        this.libraryWarmUp?.noteForegroundWork();
 
         // Guard: reject mutation messages when viewing physical (read-only) stage.
         // Allowed through in physical: non-mutations (ready, switching, viewing,
@@ -1110,24 +1699,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const panel = this.openPanels.get(panelKey);
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
-          'refreshManifest', 'dismissWelcome',
+          'refreshManifest',
           'viewFile', 'generateSyncPlan', 'runDbtCompile', 'runDbtParse', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
-          'requestReload', 'openGettingStarted', 'closeEditor', 'openAnotherDomain',
+          'requestReload', 'openGettingStarted', 'showLogs', 'closeEditor', 'openAnotherDomain',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-          'openModelFile', 'layoutFinished', 'exportDiagram',
+          'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables', 'requestNewRelationshipFiles',
+          // Finding a table elsewhere: they open, select or copy, never write.
+          'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
+          // The onboarding guide: fixed action ids mapped to fixed commands and a fixed URL; writes no file.
+          'guide',
+          // Usage telemetry only (2.0 B13): a crash's kind and area.
+          'webviewError',
+          // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
+          'crashFallback',
+          // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
+          // mutation; it writes no project file, and the physical stage draws lines too.
+          'setLineStyle',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
-          console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
+          telemetry.error('physicalEditDropped');
+          log.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
           this.post(webviewPanel.webview, { type: 'error', payload: { message: PHYSICAL_READ_ONLY_MESSAGE } });
-          return;
-        }
-        // The project became DBML storage while this canvas was open.
-        const dbmlStorage = this.dbmlGuard?.isActive() === true;
-        if (dbmlStorage && !DBML_GUARD_ALLOWED_MESSAGE_TYPES.has(message.type)) {
-          console.warn(`[SemanticEditorProvider] Dropped "${message.type}": the project is stored as DBML`);
-          this.post(webviewPanel.webview, { type: 'error', payload: { message: DBML_STORAGE_MESSAGE } });
           return;
         }
 
@@ -1145,16 +1739,62 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // cleared its error, so a suppressed repeat would leave it showing
             // "Loading domain…" for ever.
             this.lastLoadError.delete(panelKey);
-            // The initial load is the one refresh path allowed to persist
-            // auto-computed positions for models that lack them.
-            await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: !dbmlStorage });
+            readyWatch.ready();
+            {
+              // A fresh page (first load, or the crash screen's Reload): not crashed.
+              const entry = this.openPanels.get(panelKey);
+              if (entry?.webview === webviewPanel.webview) entry.crashed = false;
+            }
+            {
+              const readyAt = Date.now();
+              canvasLog.info(`Opening ${document.uri.fsPath}`);
+              // Answer at once, before reading anything: the webview's
+              // "Canvas disconnected" timer stops, and it says how many
+              // tables are loading while a large diagram is read.
+              await this.postLoading(document, webviewPanel.webview);
+              // How to draw the lines, before the diagram: the first routing pass uses the reader's style.
+              this.postLineStyle(webviewPanel.webview);
+              // The initial load is the one refresh path allowed to persist
+              // auto-computed positions for models that lack them.
+              const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+              canvasLog.info(posted === undefined
+                ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
+                : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready`);
+              // A large diagram that took long to read (2.0 B17): once a day.
+              if (posted !== undefined && slowCanvasLoad(Date.now() - readyAt)) telemetry.featureOnce('canvasLoadOver20s');
+              const entry = this.openPanels.get(panelKey);
+              if (posted !== undefined && entry?.webview === webviewPanel.webview) {
+                entry.loaded = true;
+                this.flushPendingReveal(document.uri.fsPath, webviewPanel.webview);
+                this.flushPendingTableAction(document.uri.fsPath, panelKey);
+                // The onboarding guide's phase B: the first diagram opened after its
+                // draft part. Taken before the canvas's own offers, so it holds the
+                // window's one prompt and none of them pops over it.
+                const guideStart = this.onboardingGuide?.takeCanvas();
+                if (guideStart) this.post(webviewPanel.webview, { type: 'guideStart', payload: guideStart });
+              }
+            }
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
             break;
+          case 'requestExistingTables':
+            await this.sendExistingTables(document, webviewPanel.webview);
+            break;
+          case 'requestNewRelationshipFiles': {
+            // Reads only, so it is allowed on the physical stage too.
+            const payloadError = validateRequestNewRelationshipFilesPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            this.sendNewRelationshipFiles(document, webviewPanel.webview);
+            break;
+          }
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
             // activation auto-recovery could fire). Save & reload safely.
+            telemetry.feature('canvasReconnectReload');
             saveAllAndReload('ERD Studio canvas connection lost').catch(err => {
-              console.error('[ERD Studio] requestReload handling failed:', err);
+              log.error('[ERD Studio] requestReload handling failed:', err);
             });
             break;
           case 'closeEditor':
@@ -1166,9 +1806,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'openAnotherDomain':
             await vscode.commands.executeCommand('erdStudio.openDomain');
             break;
-          case 'dismissWelcome':
-            await this.context.globalState.update('welcomeDismissed', true);
+          case 'importEmbeddedTables': {
+            // The banner over a DBML diagram that holds its own tables (§2.5):
+            // Import DBML on this very file. The command asks before writing.
+            const payloadError = validateImportEmbeddedTablesPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            telemetry.feature('dbmlEmbeddedTablesImport');
+            await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
             break;
+          }
           case 'dismissManifestHint': {
             // The webview has already hidden the hint; persisting it is all
             // that is left, so no domain is re-sent.
@@ -1181,9 +1830,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             telemetry.featureOnce('manifestHintDismissed');
             break;
           }
+          case 'guide': {
+            // The onboarding guide (Show Me Around): a fixed action id, rebuilt from
+            // its checked fields; the host maps it (src/providers/guideWiring.ts).
+            const raw = (message as { payload?: unknown }).payload;
+            const payloadError = validateGuidePayload(raw);
+            const action = payloadError ? undefined : parseGuideAction(raw);
+            if (!action) {
+              log.warn(`[SemanticEditorProvider] Ignoring a guide message: ${payloadError ?? 'unknown action'}`);
+              break;
+            }
+            this.onboardingGuide?.onCanvasAction(action);
+            break;
+          }
           case 'openGettingStarted':
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+            break;
+          case 'showLogs':
+            // No payload to validate. Opens the ERD Studio output channel; on the physical allowlist.
+            await vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
             break;
           case 'exportDiagram': {
             // Writes no domain data and always exports the logical (design)
@@ -1212,19 +1878,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to move annotation: ${annotations}` } });
                 break;
               }
-              await this.queueEdit(panelKey, () =>
-                this.handleUpdatePositions(
-                  document,
-                  webviewPanel.webview,
-                  payload.positions,
-                  annotations,
-                ),
+              await this.queuePositions(
+                panelKey,
+                (positions, moved) => this.handleUpdatePositions(document, webviewPanel.webview, positions, moved),
+                payload.positions,
+                annotations,
               );
             }
             break;
           }
           case 'addModel': {
-            const payload = (message as { payload?: DesignTable }).payload;
+            const payload = (message as { payload?: AddModelMessage['payload'] }).payload;
             if (payload) {
               telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
@@ -1281,7 +1945,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               }
               // extraPairs first: the other two read every pair once it is valid.
               const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
-                ?? validateMarkKey(payload.markKey, payload);
+                ?? validateMarkKey(payload.markKey, payload) ?? validateRelationshipsFileChoice(payload.relationshipsFile);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${linkError}` } });
                 break;
@@ -1356,8 +2020,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 break;
               }
               // extraPairs first: the other two read every pair once it is valid.
-              const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
-                ?? validateMarkKey(payload.markKey, payload);
+              const linkError = validateNoRelationshipsFile(payload) ?? validateExtraPairs(payload.extraPairs, payload)
+                ?? validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${linkError}` } });
                 break;
@@ -1389,11 +2053,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.handleAddExistingModels(document, webviewPanel.webview, (payload as { modelNames: string[] }).modelNames));
             break;
           }
+          case 'dropTables': {
+            // A Shift-drop of Table Library rows or Explorer table files. Logical
+            // only, like addExistingModels: not in NON_MUTATION_TYPES.
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateDropTablesPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${payloadError}` } });
+              break;
+            }
+            await this.handleDropTables(document, webviewPanel.webview, panelKey, payload as DropTablesMessage['payload']);
+            break;
+          }
           case 'addModelsFromDbt': {
             // Logical only: not in NON_MUTATION_TYPES, so the physical guard
             // above has already refused it there. The QuickPick runs outside
             // the edit queue (it can stay open for a while); the edit itself
             // is queued and re-reads the document.
+            if (this.logicalOnly) {
+              // No dbt project: nothing to list. The webview hides the button;
+              // a stale or hand-sent message still gets an answer.
+              void vscode.window.showInformationMessage(ADD_FROM_DBT_NEEDS_DBT_MESSAGE);
+              break;
+            }
             const payloadError = validateAddModelsFromDbtPayload((message as { payload?: unknown }).payload);
             if (payloadError) {
               this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add tables from dbt: ${payloadError}` } });
@@ -1430,7 +2112,54 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 telemetry.error('layoutFailed');
                 if (payload.firstOpen) telemetry.error('firstLayoutFailed');
               }
+              // 2.0 B17: the failure's class, the stack-safe fallback, a slow first-open layout.
+              const big = canvasLayoutTelemetry(payload);
+              for (const code of big.errors) telemetry.error(code);
+              for (const feature of big.features) telemetry.feature(feature);
             }
+            break;
+          }
+          case 'webviewError': {
+            // Usage telemetry only (2.0 B13): the canvas crashed or hit an
+            // uncaught error. Fixed kind and area only; the text stays in the
+            // webview. Writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateWebviewErrorPayload(payload)) {
+              for (const code of webviewErrorCodes(payload.kind, payload.area)) telemetry.error(code);
+              // A render crash always ends on the crash screen (the page's root boundary).
+              if (payload.kind === 'render') this.markCrashed(panelKey, webviewPanel.webview);
+            } else {
+              log.warn('[SemanticEditorProvider] Ignoring a webviewError with an unknown kind or area');
+            }
+            break;
+          }
+          case 'crashFallback': {
+            // The crash screen's buttons (CanvasCrashFallback). Writes nothing,
+            // so it is on the physical allowlist. Telemetry counts the button only.
+            const raw = (message as { payload?: unknown }).payload;
+            // A known button with a bad area or detail still works (the button
+            // never goes dead); only the extras are dropped.
+            const action = (raw as { action?: unknown } | null | undefined)?.action;
+            const payload = validateCrashFallbackPayload(raw)
+              ? raw
+              : isCrashFallbackAction(action) ? { action } : undefined;
+            if (!payload) {
+              log.warn('[SemanticEditorProvider] Ignoring a crashFallback with an unknown action');
+              break;
+            }
+            if (payload !== raw) log.warn('[SemanticEditorProvider] Dropped a bad area or detail from a crashFallback');
+            await this.crashChoice(payload.action, panelKey, webviewPanel, document, crashFeedbackPrefill('canvas', payload));
+            break;
+          }
+          case 'openFieldsFile': {
+            // The Detail panel's "Customise fields" link (editor only). Writes
+            // nothing: it opens fields.yml, or an unsaved one holding the starting set.
+            const payloadError = validateOpenFieldsFilePayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await vscode.commands.executeCommand(CUSTOMISE_FIELDS_COMMAND);
             break;
           }
           case 'openModelFile': {
@@ -1442,6 +2171,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             await this.handleOpenModelFile(payload.modelName, webviewPanel.webview);
+            break;
+          }
+          case 'goToTable': {
+            // The search's "Not on this diagram" hint. Writes nothing (physical allowlist).
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateGoToTablePayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to open Go to Table: ${payloadError}` } });
+              break;
+            }
+            const query = (payload as { query?: string } | undefined)?.query?.trim();
+            await vscode.commands.executeCommand(GO_TO_TABLE_COMMAND, query || undefined);
+            break;
+          }
+          case 'showTableOnOtherDiagrams':
+          case 'moveTable':
+          case 'copyTablePath':
+          case 'revealTableInLibrary': {
+            // A table's context menu. Only moveTable writes (it moves files),
+            // so it alone is left off the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateTableActionPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.handleTableAction(message.type, (payload as { modelName: string }).modelName.trim(), document, webviewPanel.webview);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -1511,6 +2267,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'setLineStyle': {
+            const payload = (message as SetLineStyleMessage).payload;
+            const validationError = validateSetLineStylePayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to change the line style: ${validationError}` },
+              });
+              break;
+            }
+            // The webview has already switched. Once the write lands, the
+            // configuration listener below tells every open canvas the
+            // effective value (a workspace value wins over the user's, and
+            // puts this toolbar back); a failed write puts it back here.
+            try {
+              await writeLineStyle(payload.lineStyle);
+            } catch (err) {
+              hostErrorLog.record('setLineStyle', err);
+              this.postLineStyle(webviewPanel.webview);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: 'ERD Studio could not save the line style in your settings.' },
+              });
+            }
+            break;
+          }
           case 'setFeedbackProvider': {
             const payload = (message as SetFeedbackProviderMessage).payload;
             const validationError = validateSetFeedbackProviderPayload(payload);
@@ -1551,7 +2333,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             try {
-              const result = await submitFeedback(this.context, payload, payload.domain);
+              const result = await submitFeedback(this.context, payload, payload.domain, { previewedLog: this.feedbackLogShown.get(webviewPanel.webview) });
               // The issue is filed in the user's own browser, so all we can
               // record is that a form was opened; the tracker reconciles it
               // against GitHub later. A comment on an existing thread files
@@ -1587,7 +2369,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             try {
-              await copyFeedbackReport(this.context, payload, payload.domain);
+              await copyFeedbackReport(this.context, payload, payload.domain, { previewedLog: this.feedbackLogShown.get(webviewPanel.webview) });
             } catch (err) {
               hostErrorLog.record('copyFeedbackReport', err);
               this.post(webviewPanel.webview, {
@@ -1639,10 +2421,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'updateModelRationale': {
             const payload = (message as { payload?: { modelName: string; rationale: Rationale } }).payload;
-            if (payload) {
-              await this.queueEdit(panelKey, () =>
-                this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage));
+            const rationaleError = validateRationalePayload(payload);
+            if (rationaleError || !payload) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update design rationale: ${rationaleError ?? 'Missing payload.'}` } });
+              break;
             }
+            await this.queueEdit(panelKey, () =>
+              this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage));
             break;
           }
           case 'updateModelDescription': {
@@ -1730,13 +2515,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'runDbtCompile': {
             telemetry.feature('dbtCompile');
-            await this.handleRunDbtCompile();
+            // Awaits only the start; the run's follow-up settles on its own.
+            await runDbtCompile(this.workspaceRoot);
             break;
           }
           case 'runDbtParse': {
             // Records the `dbtParse` feature itself; the manifest watcher
-            // refreshes this canvas once manifest.json appears.
-            await runDbtParse(this.workspaceRoot);
+            // refreshes this canvas once manifest.json appears, and a parse
+            // that wrote it offers Open Physical view for this canvas.
+            await runDbtParse(this.workspaceRoot, { origin: document.uri });
             break;
           }
           case 'launchClaudeSync': {
@@ -1798,21 +2585,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           default:
             // A message type this host does not know — most likely webview /
             // host version skew after an update. Log rather than drop silently.
-            console.warn(`[SemanticEditorProvider] Ignoring unknown webview message type "${message.type}"`);
+            telemetry.error('messageUnknownType');
+            log.warn(`[SemanticEditorProvider] Ignoring unknown webview message type "${message.type}"`);
             break;
         }
       }),
     );
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
-      if (this.pendingUpdates.get(panelKey)) {
-        return;
-      }
       // Cmd+Z / Cmd+Shift+Z on the canvas is VS Code's own undo, not the
       // toolbar's message: it rewinds the domain file and the model files the
       // edit wrote in memory only. Flush them as the toolbar's Undo does.
       const undoRedo = e.reason === vscode.TextDocumentChangeReason.Undo
         || e.reason === vscode.TextDocumentChangeReason.Redo;
+      // A hold's mark (holdRefreshes) is not this canvas's undo.
+      const heldByHold = this.heldPanels.has(panelKey);
+      if (this.pendingUpdates.get(panelKey)) {
+        const ours = undoRedo && (e.document.uri.toString() === document.uri.toString()
+          || (webviewPanel.active && this.editedTablePaths.get(panelKey)?.has(e.document.uri.fsPath)));
+        if (!ours) return;
+        if (heldByHold) {
+          // Pending only because a hold marked it (Convert, a bulk change), not
+          // for an edit of this canvas: a native undo/redo it would flush below
+          // is flushed when the hold releases, never dropped.
+          this.undoWhileHeld.add(panelKey);
+        } else if (!this.toolbarUndoRedo.has(panelKey)) {
+          // A Cmd+Z while this canvas's own edit or flush is under way (a
+          // second Cmd+Z during the first one's save, or one straight after a
+          // drag): flushed once that work is done, never dropped. Dropped, it
+          // left the documents it rewound dirty. The toolbar's own
+          // Undo / Redo flushes what its command rewinds.
+          this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
+        }
+        return;
+      }
       if (e.document.uri.toString() !== document.uri.toString()) {
         // A model file this canvas wrote — while the canvas has focus, so an
         // undo typed in that file's own tab stays the user's to save.
@@ -1825,22 +2631,36 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         return;
       }
+      // No text changed: the dirty state did (a save, including the flush's
+      // own after an undo). Nothing to save or send again.
+      if (e.contentChanges.length === 0) return;
       // A file deleted outside ERD Studio is not saved back into existence (#161).
       if (document.isDirty && fs.existsSync(document.uri.fsPath)) {
-        await document.save();
+        await saveWithoutFormatting(document);
       }
       await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey);
     });
 
+    // The onboarding trail: the canvas went behind another tab and came back, or closed.
+    const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => {
+      telemetry.canvasVisible(panelKey, e.webviewPanel.visible);
+      readyWatch.visibility(e.webviewPanel.visible);
+      if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
+        this.lastActivePanelKey = panelKey;
+      }
+    });
+    // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
+    const lineStyleSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (affectsLineStyle(e)) this.postLineStyle(webviewPanel.webview);
+    });
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
-      this.disposedWebviews.add(webviewPanel.webview);
-      this.openPanels.delete(panelKey);
-      this.editedTablePaths.delete(panelKey);
-      clearTimeout(this.nativeUndoTimers.get(panelKey));
-      this.nativeUndoTimers.delete(panelKey);
-      this.lastLoadError.delete(panelKey);
+      viewStateSubscription.dispose();
+      lineStyleSubscription.dispose();
+      readyWatch.dispose();
+      telemetry.canvasClosed(panelKey);
+      this.forgetPanel(panelKey, webviewPanel.webview);
       this.backwardsDrawn.delete(document.uri.toString());
     });
   }
@@ -1873,7 +2693,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private isSubjectAreaV5(parsed: Record<string, unknown>): boolean {
     // A v6 file (#162) is held under the v5 keys: it is edited as v5 and written back as v6.
-    if (tableNamingDocuments.has(parsed)) return true;
+    if (isTableNamingDocument(parsed)) return true;
     const format = detectSubjectAreaFormat(parsed);
     const unsupported = describeUnsupportedSubjectAreaFormat(format, 'being edited', parsed);
     if (unsupported) {
@@ -1883,22 +2703,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * The layer folder a model created from this domain goes in, or undefined
-   * for the top level: only when the domain's directory is a configured layer
-   * AND the library has opted into layer folders (see `groupsByFolder`).
+   * Where a table created from this diagram goes. A DBML diagram: its layer
+   * `L` and the schema folder `L` as `L/tables/` lists it (case aside), else
+   * `L` (§2.4 step 2). A JSON diagram in a project that writes DBML
+   * (a mixed one): its layer too, as for a DBML diagram, whatever
+   * `groupsByFolder` says of the YAML tables. A JSON diagram whose new
+   * tables are YAML: the layer folder, or undefined for the top level — only
+   * when the diagram's directory is a configured layer AND the library has
+   * opted into layer folders (see `groupsByFolder`).
    */
-  private newTableFolder(domainFilePath: string): string | undefined {
-    const layer = tableFolderForSubjectArea(domainFilePath);
-    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
-    return layerIds.has(layer) && this.tableLibraryService.groupsByFolder(layerIds) ? layer : undefined;
+  private newTableFolder(domainFilePath: string): string | DbmlTableHome | undefined {
+    // One rule with the sync plan's new-table paths (syncPlanLibraryLookups).
+    return this.tableLibraryService.newTableHomeFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
   }
 
-  /** `logical-models/[{folder}/]{name}.yml` (or `tables/…`) for an existing model file, for messages. */
+  /** {@link newTableFolder} for a JSON diagram's YAML table: the layer folder, or undefined for the top level (the same rule, `yamlTableFolderFor`). */
+  private newYamlTableFolder(domainFilePath: string): string | undefined {
+    return this.tableLibraryService.yamlTableFolderFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
+  }
+
+  /**
+   * A table's file relative to the semantic dir, for messages: the file that
+   * holds it, else where the project puts a new one (`tables/…/x.dbml` in a
+   * DBML project, `logical-models/…/x.yml` or `tables/…/x.yml` in a YAML one).
+   */
   private libraryRelativePath(name: string): string {
     const filePath = this.tableLibraryService.findTableFile(name);
     if (filePath) return this.tableLibraryService.libraryRelativePath(filePath);
-    const folder = this.tableLibraryService.tableFolder(name);
-    return `logical-models/${folder ? `${folder}/` : ''}${name}.yml`;
+    try {
+      return this.tableLibraryService.libraryRelativePath(this.tableLibraryService.pathForNewTable(name));
+    } catch {
+      return name;
+    }
   }
 
   /**
@@ -1929,6 +2765,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * A table's canvas context menu: Show on Other Diagrams…, Move Table…,
+   * Copy Path and Reveal in Table Library. Each acts on the table's library
+   * file; a table with none (a dbt model the library does not have) is named
+   * in the toast. Only Move Table writes, through its own command.
+   */
+  private async handleTableAction(
+    action: 'showTableOnOtherDiagrams' | 'moveTable' | 'copyTablePath' | 'revealTableInLibrary',
+    modelName: string,
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+  ): Promise<void> {
+    if (action === 'showTableOnOtherDiagrams') {
+      await vscode.commands.executeCommand('erdStudio.openInDiagram', { type: 'model', name: modelName }, { excludeDiagram: document.uri.fsPath });
+      return;
+    }
+    const filePath = this.tableLibraryService.findTableFile(modelName);
+    if (!filePath) {
+      this.post(webview, { type: 'error', payload: { message: `Table "${modelName}" not found in the Table Library.` } });
+      return;
+    }
+    if (action === 'moveTable') {
+      await vscode.commands.executeCommand(MOVE_TABLE_COMMAND, filePath);
+    } else if (action === 'copyTablePath') {
+      const shown = projectRelativePath(this.workspaceRoot, filePath);
+      await vscode.env.clipboard.writeText(shown);
+      vscode.window.setStatusBarMessage(`ERD Studio: Copied ${shown}`, 4000);
+    } else {
+      await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, modelName);
+    }
+  }
+
+  /**
    * Why a model cannot be edited: its file has a YAML error (the file exists
    * but is broken), else the old "not found" wording.
    */
@@ -1939,7 +2807,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (error.kind === 'read') return `Can't edit "${modelName}": its file could not be read.`;
       return error.mergeConflict
         ? `Can't edit "${modelName}": its file has an unresolved git merge conflict${where}.`
-        : `Can't edit "${modelName}": its file has a YAML error${where}.`;
+        : `Can't edit "${modelName}": its file has a ${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${where}.`;
     }
     return `Table "${modelName}" not found in the Table Library.`;
   }
@@ -1948,13 +2816,42 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
    */
-  private relationshipsInLibrary(models: readonly SemanticTable[]): boolean {
+  private relationshipsInLibrary(models: readonly SemanticTable[], document?: vscode.TextDocument): boolean {
+    // A DBML diagram holds no relationships (D5): they live in the table library.
+    if (document && this.isDbmlDocument(document)) return true;
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     return usesLibraryRelationships(
       models,
       this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
       this.tableLibraryService.hasUnreadableRelationships(),
+      this.libraryHoldsDbml(),
     );
+  }
+
+  /**
+   * Whether the table library holds a DBML table or relationships file. A
+   * library double without the method (older tests) holds none.
+   */
+  private libraryHoldsDbml(): boolean {
+    const lib = this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'hasDbmlLibrary'>>;
+    return typeof lib.hasDbmlLibrary === 'function' ? lib.hasDbmlLibrary.call(this.tableLibraryService) : false;
+  }
+
+  /**
+   * Why `name` cannot join the DBML diagram `document`, or null (D20): an
+   * existing YAML table cannot (a `use` line cannot point at a `.yml`), and a
+   * new table's name must be safe as a file name. Null for a JSON diagram.
+   */
+  private dbmlMemberProblem(document: vscode.TextDocument, name: string): string | null {
+    if (!this.isDbmlDocument(document)) return null;
+    const storage = this.tableLibraryService.tableStorage(name);
+    if (storage === 'yaml') return `"${name}" is a YAML table, and a DBML diagram can only show DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`;
+    return storage === undefined ? validateNewDbmlTableName(name) : null;
+  }
+
+  /** Whether `document` is a DBML diagram (`.dbml`). */
+  private isDbmlDocument(document: vscode.TextDocument): boolean {
+    return codecFor(document.uri.fsPath).storage === 'dbml';
   }
 
   /**
@@ -1966,7 +2863,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     added: readonly Relationship[],
     newModels: readonly SemanticTable[],
-  ): { kept: Relationship[]; saves: SemanticTable[] } {
+  ): { kept: Relationship[]; saves: SemanticTable[]; unstored?: string } {
+    if (this.isDbmlDocument(document)) {
+      // A DBML diagram holds no relationships (D5): every one goes to the
+      // library. One whose many-side table cannot be read has nowhere to go:
+      // the edit says so (`unstored`) rather than drop it without a word.
+      const { kept, changed } = routeToLibrary(added, newModels, (name) => this.tableLibraryService.getTable(name), []);
+      const unstored = describeUnstoredRelationships(kept);
+      return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))], ...(unstored ? { unstored } : {}) };
+    }
     if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {
       return { kept: [...added], saves: [...newModels] };
     }
@@ -2013,13 +2918,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // The move reports its own failures; anything that escapes it is
           // still the user's to see, never only a console line.
           telemetry.error('relMoveFailed');
-          console.error('[SemanticEditorProvider] Move Relationships to Table Library failed:', err);
+          log.error('[SemanticEditorProvider] Move Relationships to Table Library failed:', err);
           // Never the raw exception (#204): the move never started, and the failure is ours.
           const title = 'Move Relationships to Table Library';
           const doing = 'while starting the move';
-          const choice = await vscode.window.showErrorMessage(oursMessage(title, doing, 'nothing was changed'), SEND_FEEDBACK_BUTTON);
+          const choice = await vscode.window.showErrorMessage(oursMessage(title, doing, 'nothing was changed'), SEND_FEEDBACK_BUTTON, SHOW_LOGS_BUTTON);
           if (choice === SEND_FEEDBACK_BUTTON) {
             void vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(title, doing, err));
+          } else if (choice === SHOW_LOGS_BUTTON) {
+            void vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
           }
         }
       } else if (choice === "Don't Ask Again") {
@@ -2031,7 +2938,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Only the move itself turns backwards copies round; after Not Now the next offer may still ask.
       return choice === 'Review the Move…';
     } catch (err) {
-      console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
+      log.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
       return false;
     }
   }
@@ -2043,11 +2950,115 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram's relationships drawn backwards (#163).
    */
   private async offerRelationshipPrompts(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
-    // At most one prompt per canvas open (#182): the naming migration's, when
-    // it is made, leaves #126's and #163's offers for a later open.
+    // At most one prompt per canvas open (#182): the DBML conversion's (§6.4)
+    // first, then the naming migration's; either, when it is made, leaves
+    // #126's and #163's offers for a later open.
+    if (await this.maybeOfferDbmlConversion()) return;
     if (await this.maybeOfferNamingMigration()) return;
     if (await this.maybeOfferRelationshipMove()) return;
     await this.maybeOfferTurnRound(document, webview, panelKey);
+  }
+
+  /** Wire the background read of the table library, which steps aside while a canvas is busy. */
+  setLibraryWarmUp(warmUp: { noteForegroundWork(): void } | undefined): void {
+    this.libraryWarmUp = warmUp;
+  }
+
+  /** The onboarding guide's host (Show Me Around, `src/providers/guideWiring.ts`); the extension sets it once. */
+  private onboardingGuide: {
+    takeCanvas(): CanvasGuideStart | undefined;
+    startOnCanvas(): CanvasGuideStart;
+    onCanvasAction(action: GuideActionPayload): void;
+  } | undefined;
+
+  /** Wire the onboarding guide (phase B runs on a canvas); the extension calls it once. */
+  setOnboardingGuide(guide: SemanticEditorProvider['onboardingGuide']): void {
+    this.onboardingGuide = guide;
+  }
+
+  /**
+   * Show Me Around on the active canvas: phase B starts there now. False when
+   * no canvas of ours is the active tab, or it has not loaded its diagram yet.
+   */
+  startGuideOnActiveCanvas(): boolean {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (!(input instanceof vscode.TabInputCustom) || !this.onboardingGuide) return false;
+    const panel = this.openPanels.get(input.uri.toString());
+    if (!panel?.loaded) return false;
+    this.post(panel.webview, { type: 'guideStart', payload: this.onboardingGuide.startOnCanvas() });
+    return true;
+  }
+
+  /** Wire the window session's one-prompt gate; the extension calls it once. */
+  setSessionPrompts(gate: { claim(kind: SessionPromptKind): boolean }): void {
+    this.sessionPrompts = gate;
+  }
+
+  /** Wire Convert Project to DBML's offer (§6.4); the extension calls it once. */
+  setDbmlConversion(
+    candidates: DbmlConversionHooks['candidates'],
+    run: DbmlConversionHooks['run'],
+    goesNowhere?: DbmlConversionHooks['goesNowhere'],
+  ): void {
+    this.dbmlConversion = { candidates, run, ...(goesNowhere ? { goesNowhere } : {}) };
+  }
+
+  /**
+   * Offer, once a session, to convert a YAML or mixed project to DBML
+   * (§6.4), in a modal dialog. Nothing is written without the user's choice:
+   * Convert… runs the command, whose panel lists the whole plan. It decides
+   * from the file listing alone, so opening a canvas never waits for a plan:
+   * not made when there is no YAML table or JSON diagram, when a layer is
+   * called `tables` (Convert would refuse), when the last run was refused or
+   * left only files to fix and none of the files changed since (a project
+   * Convert left mixed is not offered again until they are fixed), after
+   * "Don't Ask Again" in this workspace, or with `erdStudio.dbml.offerConvert`
+   * off. True when it was shown.
+   */
+  private async maybeOfferDbmlConversion(): Promise<boolean> {
+    const hooks = this.dbmlConversion;
+    if (!hooks || this.dbmlConversionOffered) return false;
+    this.dbmlConversionOffered = true;
+    try {
+      const declined = this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true;
+      const offerSetting = getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false;
+      // Checked before the storage is worked out: a turned-down offer costs nothing.
+      if (declined || !offerSetting) return false;
+      const storage = this.tableLibraryService.projectStorage();
+      if (storage === 'dbml') return false;
+      let candidates: DbmlConversionCandidates = { files: 0, tablesDirIsLayer: false };
+      // The rule activation's opening notice uses too (src/services/convertOffer.ts).
+      if (!convertOfferApplies({
+        storage, declined, offerSetting,
+        candidates: () => (candidates = hooks.candidates()),
+        goesNowhere: () => hooks.goesNowhere?.() === true,
+      })) return false;
+      this.dbmlConversionEligible = true;
+      // Another prompt already showed in this window: ask in the next one.
+      if (this.sessionPrompts && !this.sessionPrompts.claim('dbmlConversion')) return false;
+      telemetry.feature('convertToDbmlOffered');
+      const message = dbmlConversionOfferDetail(storage, candidates.files);
+      // A dialog the user must answer (after pre-release 1.9.0): VS Code adds
+      // its own Cancel, and Cancel, Escape or closing it is Not Now.
+      const choice = await vscode.window.showInformationMessage(
+        DBML_CONVERSION_OFFER_TITLE,
+        { modal: true, detail: message },
+        DBML_CONVERSION_OFFER_CONVERT,
+        DBML_CONVERSION_OFFER_DECLINE,
+      );
+      if (choice === DBML_CONVERSION_OFFER_CONVERT) {
+        await hooks.run();
+      } else if (choice === DBML_CONVERSION_OFFER_DECLINE) {
+        telemetry.feature('convertToDbmlDeclined');
+        await this.context.workspaceState?.update(DBML_CONVERSION_DECLINED_KEY, true);
+      } else {
+        telemetry.feature('convertToDbmlNotNow');
+      }
+      return true;
+    } catch (err) {
+      log.warn('[SemanticEditorProvider] DBML conversion offer skipped:', err);
+      return false;
+    }
   }
 
   /** Wire the naming migration's offer (#182); the extension calls it once. */
@@ -2064,12 +3075,37 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Hold every open canvas's refresh while the naming migration applies
    * (#182): half-way through, a table can be in both folders or in neither,
    * and a canvas redrawn then would warn about it. The returned function
-   * lets them refresh again; the migration then redraws each once.
+   * lets them refresh again; the migration then redraws each once. It
+   * returns whether a canvas refresh was asked for while this hold was open:
+   * a holder that does not redraw on its own (the watcher's bulk change,
+   * whose burst may be another command's own writes) redraws when it was.
    */
-  holdRefreshes(): () => void {
+  holdRefreshes(): () => boolean {
     const held = [...this.openPanels.keys()].filter((key) => !this.pendingUpdates.get(key));
-    for (const key of held) this.pendingUpdates.set(key, true);
-    return () => { for (const key of held) this.pendingUpdates.delete(key); };
+    for (const key of held) {
+      this.pendingUpdates.set(key, true);
+      this.heldPanels.add(key);
+    }
+    // Watcher-driven refreshes and the duplicate warning wait too: they read
+    // the disk half-way through, when a converted table's .yml and .dbml
+    // both exist, and a warning shown then is never taken back.
+    this.refreshHolds++;
+    const droppedAtHold = this.droppedRefreshes;
+    let released = false;
+    return () => {
+      if (released) return false;
+      released = true;
+      this.refreshHolds--;
+      for (const key of held) {
+        this.pendingUpdates.delete(key);
+        this.heldPanels.delete(key);
+        // A Cmd+Z on this canvas while held (a bulk change can start under
+        // any edit): flushed now, as it would have been then.
+        const open = this.undoWhileHeld.delete(key) ? this.openPanels.get(key) : undefined;
+        if (open && !this.disposedWebviews.has(open.webview)) this.scheduleNativeUndoFlush(open.document, open.webview, key);
+      }
+      return this.droppedRefreshes > droppedAtHold;
+    };
   }
 
   /**
@@ -2083,16 +3119,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async maybeOfferNamingMigration(): Promise<boolean> {
     const hooks = this.namingMigration;
     if (!hooks || this.namingMigrationOffered) return false;
+    // Never in a session where the DBML conversion was offered (§6.4).
+    if (this.dbmlConversionEligible) return false;
     this.namingMigrationOffered = true;
     try {
       if (this.context.workspaceState?.get<boolean>(NAMING_MIGRATION_DECLINED_KEY)) return false;
       if (hooks.naming() === 'v6') return false;
+      // A DBML or mixed project is not offered the YAML naming migration (§5.7).
+      if (this.tableLibraryService.projectStorage() !== 'yaml') return false;
       const plan = hooks.plan();
       // A v4 file is no refusal here: the command runs the v5 migration first.
       const refused = plan.v4SubjectAreas.length > 0 ? plan.refusals.length > 1 : plan.refusals.length > 0;
       if (refused || (namingMigrationIsEmpty(plan) && plan.v4SubjectAreas.length === 0)) return false;
+      // Another prompt already showed in this window: ask in the next one.
+      if (this.sessionPrompts && !this.sessionPrompts.claim('namingMigration')) return false;
       const choice = await vscode.window.showInformationMessage(
-        'ERD Studio now says "table" and "subject area", and this project\'s files can say so too: .erd-studio/tables/ ' +
+        'ERD Studio now says "table" where it said "model", and this project\'s files can say so too: .erd-studio/tables/ ' +
           `instead of logical-models/, "subjectArea" instead of "domain". Teammates will need ERD Studio ${hooks.version} or later ` +
           'to open the files afterwards. Review the migration?',
         'Review the Migration…',
@@ -2106,7 +3148,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       return true;
     } catch (err) {
-      console.warn('[SemanticEditorProvider] Naming migration offer skipped:', err);
+      log.warn('[SemanticEditorProvider] Naming migration offer skipped:', err);
       return false;
     }
   }
@@ -2163,16 +3205,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         cardinality: members[0].cardinality === 'many-to-one' ? 'one-to-many' : 'many-to-one',
       }));
       await this.queueEdit(panelKey, async () => {
+        // Set once VS Code applies the edit: a library-only turn round leaves this diagram's text (and version) as it was.
+        let applied = false;
         try {
-          await this.commitRelationshipWrite(document, webview, ops, 'logical', 'Failed to turn relationships round.');
+          await this.commitRelationshipWrite(
+            document, webview, ops, 'logical',
+            "Couldn't turn the relationships round: VS Code didn't accept the change, so nothing was changed.",
+            () => { applied = true; },
+          );
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
           this.recordRelationshipFailure(err);
-          webview.postMessage({ type: 'error', payload: { message: `Failed to turn relationships round: ${message}` } });
+          if (isExplainedRefusal(err)) {
+            // A refusal already says, in plain words, what in the user's files stopped it.
+            const message = err instanceof Error ? err.message : String(err);
+            webview.postMessage({ type: 'error', payload: { message: `Couldn't turn the relationships round: ${message}` } });
+            return;
+          }
+          // Anything else is ours (#219): never the raw exception, which goes to the log and the report.
+          log.error('[SemanticEditorProvider] Turn round failed:', err);
+          const doing = applied ? 'after turning the relationships round' : 'while turning the relationships round';
+          // Not awaited: the edit queue must not wait on the toast.
+          showErrorWithActions(
+            (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+            applied
+              ? 'Turning the relationships round hit a problem in ERD Studio, not in your diagram. The change was made; Edit > Undo puts it back.'
+              : "Couldn't turn the relationships round: that's a problem in ERD Studio, not your diagram. Nothing was changed.",
+            { [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill('Turn Round', doing, err)) },
+            (choice, actionErr) => log.error(`[SemanticEditorProvider] Turn Round: "${choice}" failed:`, actionErr),
+          );
         }
       });
     } catch (err) {
-      console.warn('[SemanticEditorProvider] Turn-round offer skipped:', err);
+      log.warn('[SemanticEditorProvider] Turn-round offer skipped:', err);
     }
   }
 
@@ -2332,20 +3396,28 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * domain are saved (`editedTablePaths`). A logical-models/*.yml the user has
    * open in another tab with unsaved hand edits is never force-saved — those
    * bytes are theirs to keep or discard.
+   *
+   * Returns the paths that could not be saved (and, in `saved`, those that were).
    */
-  private async saveDirtyTableDocuments(panelKey: string): Promise<void> {
-    const ourPaths = this.editedTablePaths.get(panelKey);
-    if (!ourPaths || ourPaths.size === 0) return;
+  private async saveDirtyTableDocuments(
+    panelKey: string,
+    onFailure: (reason: SaveFailure) => void,
+    saved: string[] = [],
+  ): Promise<string[]> {
+    const ourPaths = new Set(this.editedTablePaths.get(panelKey) ?? []);
+    if (ourPaths.size === 0) return [];
+    const unsaved: string[] = [];
     for (const doc of vscode.workspace.textDocuments) {
-      if (!doc.isDirty) continue;
       if (!ourPaths.has(doc.uri.fsPath)) continue;
-      try {
-        await doc.save();
+      if (!doc.isDirty) continue;
+      if (await saveDocument(doc, onFailure)) {
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
-      } catch (err) {
-        console.error(`[SemanticEditorProvider] Failed to save ${doc.uri.fsPath} after undo/redo:`, err);
+        saved.push(doc.uri.fsPath);
+      } else {
+        unsaved.push(doc.uri.fsPath);
       }
     }
+    return unsaved;
   }
 
   /**
@@ -2365,7 +3437,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.refuseIfSubjectAreaFileGone(document);
     this.pendingUpdates.set(panelKey, true);
     try {
-      await vscode.commands.executeCommand(command);
+      // What this command rewinds is flushed just below; a Cmd+Z that
+      // arrives during that flush is the user's and gets its own.
+      this.toolbarUndoRedo.add(panelKey);
+      try {
+        await vscode.commands.executeCommand(command);
+      } finally {
+        this.toolbarUndoRedo.delete(panelKey);
+      }
       await this.flushUndoRedo(document, webview, panelKey);
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -2380,12 +3459,70 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Cmd+Z on a canvas whose file was deleted outside ERD Studio rewinds the
     // document in memory only; saving it would recreate the file (#161).
     if (!fs.existsSync(document.uri.fsPath)) return;
-    await document.save();
-    this.ownWriteTracker.recordWrite(document.uri.fsPath);
-    await this.saveDirtyTableDocuments(panelKey);
-    this.tableLibraryService.invalidateCache();
+    // A save that fails is reported, never ignored, as after a canvas edit (#126).
+    const saveFailures = new Set<SaveFailure>();
+    const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+    const unsaved: string[] = [];
+    const expected = [document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])];
+    const isDbml = this.isDbmlDocument(document);
+    const diskText = isDbml ? this.diskTextOf(document.uri.fsPath) : undefined;
+    // The undo of a drag rewinds the diagram's erd_layout and nothing else
+    // (a minimal-range edit of the diagram alone): nothing the library or
+    // the trees show changed.
+    const layoutOnlyRewind = isDbml && diskText !== undefined
+      && sameOutsideErdLayout(diskText, document.getText());
+    // An undo VS Code refused across files ("Could not undo 'Workspace Edit'
+    // across all files because changes were made to …") is split, not
+    // dropped: VS Code rewinds this diagram's own part alone. When that is a
+    // one-character anchor, its text stays as on disk (and the document
+    // dirty): nothing the canvas, the library or the trees show changed —
+    // unless a file this canvas created is gone (the undo of a create deletes
+    // it, with no text event).
+    const diagramUnchanged = isDbml && document.getText() === diskText;
+    const nothingRewound = diagramUnchanged
+      && [...(this.editedTablePaths.get(panelKey) ?? [])].every((p) => fs.existsSync(p));
+    const savedOthers: string[] = [];
+    const expectation = this.ownWriteTracker.expectWrite(expected);
+    let unsavedTables: string[];
+    try {
+      if (await saveDocument(document, onSaveFailure)) {
+        this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      } else {
+        unsaved.push(document.uri.fsPath);
+      }
+      unsavedTables = await this.saveDirtyTableDocuments(panelKey, onSaveFailure, savedOthers);
+    } finally {
+      this.ownWriteTracker.settleWrites(expectation);
+    }
+    unsaved.push(...unsavedTables);
+    if (unsaved.length > 0) {
+      const modelFile = unsavedTables.some((p) => /\.(ya?ml|dbml)$/i.test(p));
+      for (const code of saveFailureCodes(saveFailures, { modelFile, undoRedo: true })) telemetry.error(code);
+      void webview.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
+    }
+    // Saving the anchor's rewind cleared the dirty mark; the canvas stays as is.
+    if (nothingRewound && unsavedTables.length === 0 && savedOthers.length === 0) return;
+    if (layoutOnlyRewind && unsavedTables.length === 0 && savedOthers.length === 0) {
+      await this.sendSubjectAreaData(document, webview, panelKey);
+      this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: false, layoutOnly: true });
+      return;
+    }
+    // Only what this canvas wrote can have changed (an undo of a create
+    // deletes, of a delete creates): those files' parses, and the library
+    // index, which is rebuilt from one listing.
+    this.tableLibraryService.invalidatePaths([document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])]);
+    this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
+  }
+
+  /** What `filePath` holds on disk, or undefined when it cannot be read. */
+  private diskTextOf(filePath: string): string | undefined {
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -2400,11 +3537,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.nativeUndoTimers.delete(panelKey);
       void this.queueEdit(panelKey, async () => {
         if (this.disposedWebviews.has(webview)) return;
+        // Work outside the edit queue still holds this canvas (a hold, or the
+        // toolbar's Undo / Redo): flush after it, never under it.
+        if (this.pendingUpdates.get(panelKey)) {
+          if (this.heldPanels.has(panelKey)) this.undoWhileHeld.add(panelKey);
+          else this.scheduleNativeUndoFlush(document, webview, panelKey);
+          return;
+        }
         this.pendingUpdates.set(panelKey, true);
         try {
           await this.flushUndoRedo(document, webview, panelKey);
         } catch (err) {
-          console.error('[SemanticEditorProvider] Failed to save after undo/redo:', err);
+          log.error('[SemanticEditorProvider] Failed to save after undo/redo:', err);
         } finally {
           this.pendingUpdates.delete(panelKey);
         }
@@ -2443,24 +3587,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview?: vscode.Webview;
       stage: 'logical';
       modelFiles?: TableFileOps;
-      otherDomains?: (parsed: Record<string, unknown>) => boolean;
+      /** Rewrite another diagram in place (a rename cascade); `storage` says which kind of file it is. True when it changed. */
+      otherDomains?: (parsed: Record<string, unknown>, storage: 'json' | 'dbml') => boolean;
       errorLabel?: string;
       onSuccess?: () => void;
       /** Called when the edit applied but a file could not be saved (usage telemetry). */
       onUnsaved?: () => void;
+      /** Called as soon as VS Code applies the edit, before anything is saved. */
+      onApplied?: () => void;
+      /** Called when the edit went through as a layout-only write (positions or sticky-note boxes alone). */
+      onLayoutOnly?: () => void;
     },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
     const panelKey = document.uri.toString();
 
-    // Backstop for the DBML guard: never write YAML / JSON into a project a
-    // newer ERD Studio stored as DBML.
-    if (this.dbmlGuard?.isActive()) throw new EditRefused(DBML_STORAGE_MESSAGE);
     // The open document outlives its file: saving this edit would bring back a
     // diagram an AI assistant, git or the file explorer just removed (#161).
     this.refuseIfSubjectAreaFileGone(document);
     const text = document.getText();
-    const parsed = this.parseSubjectAreaDocument(document, text);
+    const file = this.parseSubjectAreaFile(document, text);
+    const parsed = file.parsed;
     const section = this.getStageSection(parsed, stage);
 
     try {
@@ -2469,6 +3616,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (err instanceof EditAborted) return false;
       throw err;
     }
+    // Only positions or sticky-note boxes moved (a drag, a layout, a resize):
+    // the layout is all that is written, in either storage, and the sidebar
+    // trees are told nothing they show changed.
+    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && options.otherDomains === undefined
+      && isLayoutOnlyChange(file.snapshot, file.parsed);
+    if (layoutOnly && (file.storage === 'json' || (file.writable !== false && !file.holdsOwnTables))) {
+      const written = await this.applyLayoutOnlyEdit(document, file, text, options);
+      if (written) options.onLayoutOnly?.();
+      return written;
+    }
+    // A DBML diagram, or a project whose library holds DBML (native DBML
+    // storage, §5.3): planned against the library and applied by
+    // applyFileWrites. A YAML/JSON project keeps the path below unchanged.
+    if (file.storage === 'dbml' || this.libraryHoldsDbml()
+      || (options.otherDomains !== undefined && this.listOtherSubjectAreas(document.uri.fsPath).some((s) => s.storage === 'dbml'))) {
+      return this.applyStorageEdit(document, file, text, options, layoutOnly);
+    }
     // A model file open with unsaved edits would be replaced by text rendered
     // from disk: refuse by name (the handler reports it), before anything is written.
     const dirty = this.dirtyTableFile(modelFiles);
@@ -2476,7 +3640,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const otherDomains = options.otherDomains ? this.rewriteOtherSubjectAreas(document.uri.fsPath, options.otherDomains) : [];
 
     // Re-rendered as before, in the file's own naming (#182) and line endings.
-    const updatedText = serialiseSubjectArea(parsed, text);
+    const [primary] = codecFor(document.uri.fsPath).render(file, text, document.uri.fsPath);
+    const updatedText = primary.kind === 'delete' ? text : primary.text;
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       document.positionAt(0),
@@ -2487,7 +3652,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       edit,
       modelFiles,
       // Layer folders are opt-in: a flat library stays flat (see groupsByFolder).
-      modelFiles?.save?.length ? this.newTableFolder(document.uri.fsPath) : undefined,
+      modelFiles?.save?.length ? this.newYamlTableFolder(document.uri.fsPath) : undefined,
     );
     const otherDomainDocs: vscode.TextDocument[] = [];
     for (const { filePath, text: newText } of otherDomains) {
@@ -2496,6 +3661,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       otherDomainDocs.push(otherDoc);
     }
 
+    // The watchers wait for these saves instead of taking one for an external change.
+    const expected = [document.uri.fsPath, ...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath), ...otherDomainDocs.map((d) => d.uri.fsPath)];
+    const expectation = this.ownWriteTracker.expectWrite(expected);
     this.pendingUpdates.set(panelKey, true);
     try {
       const success = await vscode.workspace.applyEdit(edit);
@@ -2506,12 +3674,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         return false;
       }
+      options.onApplied?.();
       // A save that fails is reported, never ignored: the edit is applied in
       // memory, so without a word the file would sit open and unsaved (#126).
       const unsaved: string[] = [];
-      if (await saveDocument(document)) {
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
         // Own writes are recorded only once the bytes are on disk — the tracker
-        // stats the file — so the logical-model / semantic watchers can tell
+        // reads what the file holds — so the logical-model / semantic watchers can tell
         // this save apart from an external edit and skip the extra refresh.
         this.ownWriteTracker.recordWrite(document.uri.fsPath);
       } else {
@@ -2524,21 +3696,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.ownWriteTracker.recordDelete(filePath);
       }
       const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
-      for (const modelDoc of [...modelDocs, ...otherDomainDocs]) {
+      for (const [index, modelDoc] of [...modelDocs, ...otherDomainDocs].entries()) {
         // Remember which yml (and other domain) documents WE edited for this
         // domain, so an undo/redo only ever flushes those (never a buffer the
         // user is hand-editing in another tab).
         ourPaths.add(modelDoc.uri.fsPath);
         // Re-fetched by URI: VS Code may have disposed the handle opened
         // before the edit, and the edit then landed in a fresh copy (#126).
-        if (await saveDocumentByUri(modelDoc.uri)) {
+        if (await saveDocumentByUri(modelDoc.uri, onSaveFailure)) {
           this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
         } else {
           unsaved.push(modelDoc.uri.fsPath);
+          if (index < modelDocs.length) modelFileUnsaved = true;
         }
       }
       if (unsaved.length > 0) {
-        telemetry.error('saveFailed');
+        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
         options.onUnsaved?.();
         webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }
@@ -2548,6 +3721,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (ourPaths.size > 0) {
         this.editedTablePaths.set(panelKey, ourPaths);
       }
+      // The table files this edit wrote, created or deleted: their parses, and
+      // the library index when one appeared or went (the redraw below reads both).
+      this.tableLibraryService.invalidatePaths([...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath)]);
       // Our own writes are suppressed at the watcher, so the refreshes it
       // used to drive are issued here instead: this panel via sendSubjectAreaData,
       // the sidebar/model library via onDidWriteSubjectArea, and any OTHER open
@@ -2556,6 +3732,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         await this.sendSubjectAreaData(document, webview);
       }
     } finally {
+      this.ownWriteTracker.settleWrites(expectation);
       this.pendingUpdates.delete(panelKey);
     }
 
@@ -2563,10 +3740,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
       ...(modelFiles?.delete ?? []),
     ];
-    for (const name of new Set(touchedModels)) {
-      this.tableLibraryService.invalidateCache(name);
-      await this.refreshSubjectAreasReferencingTable(name, panelKey);
-    }
+    for (const name of new Set(touchedModels)) this.tableLibraryService.invalidateCache(name);
+    await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
     this._onDidWriteSubjectArea.fire({
       uri: document.uri,
       modelLibraryChanged: created.length > 0 || deleted.length > 0,
@@ -2583,6 +3758,474 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Every diagram of the project except `currentPath`. The DBML ones come
+   * from every DBML layer folder, listed in layers.json or not (as the batch
+   * settle reads them): a cascade that skipped a diagram in an unlisted
+   * folder, or behind an unreadable layers.json, would leave it a `use`
+   * line to a file that is gone.
+   */
+  private listOtherSubjectAreas(currentPath: string): import('../types/semantic').SubjectAreaSummary[] {
+    const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
+    const listed = this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir);
+    const semanticRoot = this.semanticRootDir();
+    for (const filePath of this.tableLibraryService.listDbmlDiagrams()) {
+      if (listed.some((s) => samePath(s.filePath, filePath))) continue;
+      const [layer] = path.relative(semanticRoot, filePath).split(path.sep);
+      listed.push({ domain: path.basename(filePath).replace(/\.dbml$/i, ''), layer, filePath, storage: 'dbml' });
+    }
+    return listed.filter((s) => !samePath(s.filePath, currentPath));
+  }
+
+  /** A file's text: an open document's (unsaved edits included), else the disk's without a byte-order mark; null when there is none. */
+  private openOrDiskText(filePath: string): string | null {
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, filePath));
+    if (doc) return doc.getText();
+    try {
+      // A byte-order mark is the document's encoding, not its text: VS Code
+      // keeps it on save, so a text with one would be written with two (D7).
+      return fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+    } catch {
+      return null;
+    }
+  }
+
+  /** A writer's refusal (`DbmlEditRefused`) as the toast the handlers show; anything else as it is. */
+  private refusalOf(err: unknown): unknown {
+    if (err instanceof DbmlEditRefused) return new EditRefused(err.message, err.reason === 'overlap');
+    return err;
+  }
+
+  /**
+   * Whether `filePath` is a table library file: inside `logical-models/` or
+   * a YAML `tables/`, or a DBML table or relationships file of a layer
+   * (`<L>/tables/**`, `<L>/relationships/*`, by the classifier).
+   */
+  private isLibraryPath(filePath: string): boolean {
+    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
+    const rel = path.relative(semanticRoot, filePath).split(path.sep);
+    if (rel.length < 2 || rel[0] === '..' || path.isAbsolute(rel[0])) return false;
+    if (rel[0] === 'tables' || rel[0] === 'logical-models') return true;
+    const kind = classifySemanticFile(rel.join('/'), { tablesDirIsLayer: this.tableLibraryService.tablesDirIsLayer() }).kind;
+    return kind === 'table' || kind === 'relationships';
+  }
+
+  /** The semantic dir, absolute. */
+  private semanticRootDir(): string {
+    return path.dirname(this.tableLibraryService.getTablesDir());
+  }
+
+  /** The project's fields.yml reader, for the semantic dir in use (it changes only with a reload). */
+  private fieldsReader: FieldsService | undefined;
+  /** The problems last logged for fields.yml, so one broken file is logged once, not on every redraw. */
+  private loggedFieldsReading: unknown;
+
+  private fieldsService(): FieldsService {
+    const root = this.semanticRootDir();
+    if (!this.fieldsReader || this.fieldsReader.semanticRoot !== root) this.fieldsReader = new FieldsService(root);
+    return this.fieldsReader;
+  }
+
+  /**
+   * The field list a DisplaySubjectArea carries (both stages): the project's
+   * fields.yml, only when it has one, so a project without the file posts
+   * exactly what it did before. A broken file is logged (doctor reports it in
+   * full) and its readable part, or the starting set, is used. Reads only.
+   */
+  private displayFields(): FieldList | undefined {
+    try {
+      const service = this.fieldsService();
+      const reading = service.read();
+      if (reading.problems.length > 0 && this.loggedFieldsReading !== reading) {
+        this.loggedFieldsReading = reading;
+        for (const problem of reading.problems) {
+          log.warn(`[SemanticEditorProvider] ${projectRelative(this.workspaceRoot, reading.filePath)}${problem.line !== undefined ? ` (line ${problem.line})` : ''}: ${problem.message}`);
+        }
+      }
+      return service.displayFields();
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] Could not read fields.yml: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    }
+  }
+
+  /** The resolved field list (the starting set without a file), for an edit that depends on a field's type. */
+  private fieldList(): FieldList | undefined {
+    try {
+      return this.fieldsService().getList();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * fields.yml was created, changed or deleted outside ERD Studio: drop the
+   * cached list and redraw every open canvas, on whichever stage it shows.
+   * A refresh path: it never writes.
+   */
+  async onFieldsFileChanged(): Promise<void> {
+    this.fieldsReader?.invalidate();
+    await this.refreshAllOpenSubjectAreas();
+  }
+
+  /**
+   * The {@link SubjectAreaResolver} of a library plan: tables, the
+   * relationships files a diagram imports and file existence as the plan
+   * leaves them, and the tables whose file moved, was renamed, was deleted
+   * or was created (old and new names).
+   */
+  private resolverOf(plan: DbmlLibraryWritePlan): SubjectAreaResolver {
+    return dbmlResolverOf(plan, this.semanticRootDir());
+  }
+
+  /**
+   * {@link applySubjectAreaEdit} for a DBML diagram, or a project whose
+   * library holds DBML (§2.6): the library writes are planned
+   * (`planTableWrites`), the diagram is rendered against the library as the
+   * edit leaves it (its relationships imports recomputed on every edit,
+   * which also heals one it lacked), other diagrams the edit renames in are
+   * re-rendered, and every other DBML diagram whose `use` lines the edit
+   * invalidates is settled — all in ONE WorkspaceEdit applied by
+   * `applyFileWrites`, with the primary's replace first so the step undoes
+   * as one.
+   */
+  private async applyStorageEdit(
+    document: vscode.TextDocument,
+    file: ParsedSubjectArea,
+    text: string,
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+    layoutOnly = false,
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview, modelFiles, onSuccess } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
+
+    let primaryText: string;
+    let writes: FileWrite[];
+    let plan: DbmlLibraryWritePlan;
+    let tableWrites: FileWrite[];
+    try {
+      const lib = this.tableLibraryService.planTableWrites(
+        modelFiles,
+        modelFiles?.save?.length ? this.newTableFolder(fsPath) : undefined,
+        { dbml: file.storage === 'dbml', readText },
+      );
+      tableWrites = lib.writes;
+      plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
+      const resolver = this.resolverOf(plan);
+      // §2.6 step 1: the diagram being edited gets its imports recomputed on every edit but a layout-only one.
+      const [primary] = codecFor(fsPath).render(file, text, fsPath, { ...resolver, refreshRelationshipsUses: !layoutOnly });
+      primaryText = primary.kind === 'delete' ? text : primary.text;
+      const others = options.otherDomains ? this.rewriteOtherSubjectAreaWrites(fsPath, options.otherDomains, resolver, { plan }) : [];
+      const rewritten = new Set(others.map((w) => path.resolve(w.path)));
+      const settled = this.settleDbmlDiagrams(fsPath, rewritten, plan);
+      writes = [...tableWrites, ...others, ...settled];
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    // Any file this edit writes that is open with unsaved changes would be
+    // replaced under the user's work: refused by name, before anything is written.
+    const dirty = dirtyFiles(writes.map((w) => w.path).filter((p) => !samePath(p, fsPath)));
+    if (dirty.length > 0) {
+      const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+      throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+    }
+
+    this.pendingUpdates.set(panelKey, true);
+    let applied: AppliedFileWrites;
+    try {
+      const result = await this.applyAndSaveWrites(document, primaryText, writes, options);
+      if (!result) return false;
+      applied = result;
+      // Only the files this edit wrote: every other table keeps its parse,
+      // and the attach memo its result unless a relationships file or a
+      // table's columns or keys changed. The relationships files it wrote
+      // are read once more, from disk, so the next edit's snapshot reads none.
+      const written = writtenPaths(applied);
+      this.tableLibraryService.invalidatePaths(written);
+      this.tableLibraryService.primeRelationshipsFiles(written);
+      if (refreshWebview && webview) {
+        await this.sendSubjectAreaData(document, webview);
+      }
+    } finally {
+      this.pendingUpdates.delete(panelKey);
+    }
+
+    const touchedModels = [
+      ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
+      ...(modelFiles?.delete ?? []),
+    ];
+    await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
+    this._onDidWriteSubjectArea.fire({
+      uri: document.uri,
+      modelLibraryChanged: applied.created.length > 0 || applied.deleted.length > 0,
+      ...(layoutOnly ? { layoutOnly: true } : {}),
+    });
+    // Other diagrams this edit wrote (never a table or relationships file).
+    const otherDiagrams = new Set<string>();
+    for (const w of writes) {
+      if (w.kind === 'delete' || this.isLibraryPath(w.path)) continue;
+      if (!samePath(w.path, fsPath)) otherDiagrams.add(w.path);
+    }
+    for (const diagram of otherDiagrams) {
+      const uri = vscode.Uri.file(diagram);
+      this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: false });
+      const other = this.openPanels.get(uri.toString());
+      if (other && !this.disposedWebviews.has(other.webview)) await this.sendSubjectAreaData(other.document, other.webview, uri.toString());
+    }
+
+    onSuccess?.();
+    return true;
+  }
+
+  /**
+   * Apply `writes` with the primary document's new text as ONE WorkspaceEdit
+   * (`applyFileWrites`), then save every document it touched and record each
+   * file as an own write once its bytes are on disk. Every path is announced
+   * to the own-write tracker first, so a watcher that fires before a save
+   * completes waits for it. Reports a rejected edit or an unsaved file to the
+   * webview; returns what was applied, or null when VS Code rejected it.
+   * The caller holds `pendingUpdates`.
+   */
+  private async applyAndSaveWrites(
+    document: vscode.TextDocument,
+    primaryText: string,
+    writes: readonly FileWrite[],
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+    /** Replace only the primary's changed range: the DBML layout-only path alone. */
+    minimalPrimary = false,
+  ): Promise<AppliedFileWrites | null> {
+    const { webview, errorLabel } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    const expected = [fsPath, ...writes.map((w) => w.path)];
+    const expectation = this.ownWriteTracker.expectWrite(expected);
+    try {
+      const applied = await applyFileWrites(writes, {
+        primary: { document, text: primaryText },
+        ...(minimalPrimary ? { minimalPrimary: true } : {}),
+        semanticRoot: this.semanticRootDir(),
+        ensureDir: (filePath) => { if (this.isLibraryPath(filePath)) this.tableLibraryService.ensureDir(filePath); },
+      });
+      if (!applied.ok) {
+        telemetry.error('editRejected');
+        // Put back: the caller's label, else the plain refusal (§5.3 step 7).
+        // Not put back: the reconcile's modal already lists the files, and a
+        // toast saying nothing changed would contradict it.
+        if (webview && applied.unrestored.length === 0) {
+          webview.postMessage({ type: 'error', payload: { message: errorLabel ?? EDIT_NOT_APPLIED_MESSAGE } });
+        }
+        return null;
+      }
+      options.onApplied?.();
+      const unsaved: string[] = [];
+      const saveFailures = new Set<SaveFailure>();
+      const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
+      let modelFileUnsaved = false;
+      if (await saveDocument(document, onSaveFailure)) {
+        this.ownWriteTracker.recordWrite(fsPath);
+      } else {
+        unsaved.push(fsPath);
+      }
+      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      for (const { from, to } of applied.renamed) {
+        this.ownWriteTracker.recordDelete(from);
+        this.ownWriteTracker.recordWrite(to);
+      }
+      const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
+      for (const uri of applied.replaced) {
+        // Remember what WE edited for this diagram, so an undo/redo only ever
+        // flushes those.
+        ourPaths.add(uri.fsPath);
+        if (await saveDocumentByUri(uri, onSaveFailure)) {
+          this.ownWriteTracker.recordWrite(uri.fsPath);
+        } else {
+          unsaved.push(uri.fsPath);
+          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+        }
+      }
+      for (const filePath of applied.created) ourPaths.add(filePath);
+      if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+      if (unsaved.length > 0) {
+        for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
+        options.onUnsaved?.();
+        webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
+      }
+      return applied;
+    } finally {
+      this.ownWriteTracker.settleWrites(expectation);
+    }
+  }
+
+  /**
+   * {@link applySubjectAreaEdit} for an edit that changed only the layout
+   * (table positions, sticky-note boxes; {@link isLayoutOnlyChange}): a drag,
+   * an auto layout, a note moved or resized. Nothing in the table library
+   * can change, so nothing is planned against it: no `planTableWrites`, no
+   * library plan or attachment, no settle pass, no diagram render.
+   *
+   * - A DBML diagram rewrites its Project's `erd_layout` and nothing else
+   *   ({@link layoutOnlyText}, never formatted), sent as the diagram's
+   *   minimal-range replace: native Cmd+Z then rewinds that one edit. A
+   *   conflicted `erd_layout` refuses it (a toast). The reading of the text
+   *   it wrote is remembered (`primeLayoutOnlyReading`), so the next drag
+   *   compiles nothing.
+   * - A JSON diagram holds its positions, so its own text is rendered as on
+   *   any edit (cheap: no library involved), as a full-range replace.
+   *
+   * Still one WorkspaceEdit, one save, one undo step, own writes recorded
+   * after the bytes land. Nothing in the library is invalidated, and
+   * `onDidWriteSubjectArea` carries `layoutOnly`, so the sidebar trees are
+   * not refreshed.
+   */
+  private async applyLayoutOnlyEdit(
+    document: vscode.TextDocument,
+    file: ParsedSubjectArea,
+    text: string,
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview, onSuccess } = options;
+    const panelKey = document.uri.toString();
+    const fsPath = document.uri.fsPath;
+    const dbml = file.storage === 'dbml';
+    let primaryText: string;
+    try {
+      if (dbml) {
+        primaryText = layoutOnlyText(file, text, fsPath, path.dirname(this.tableLibraryService.getTablesDir()));
+      } else {
+        const [primary] = codecFor(fsPath).render(file, text, fsPath);
+        primaryText = primary.kind === 'delete' ? text : primary.text;
+      }
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    // Nothing moved (a drop where it was): no edit, no save, no undo step.
+    if (primaryText === text) {
+      onSuccess?.();
+      return true;
+    }
+
+    this.pendingUpdates.set(panelKey, true);
+    try {
+      const applied = await this.applyAndSaveWrites(document, primaryText, [], options, dbml);
+      if (!applied) return false;
+      if (dbml) primeLayoutOnlyReading(text, primaryText, fsPath, file.parsed);
+      if (refreshWebview && webview) {
+        await this.sendSubjectAreaData(document, webview);
+      }
+    } finally {
+      this.pendingUpdates.delete(panelKey);
+    }
+    this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: false, layoutOnly: true });
+    onSuccess?.();
+    return true;
+  }
+
+  /**
+   * {@link rewriteOtherSubjectAreas} for every diagram format (§2.6): each
+   * other diagram, parsed from its open document or the disk, run through
+   * `rewrite`, and the ones it changes rendered against the library as the
+   * edit leaves it — a DBML one with its imports recomputed and a conflicted
+   * `erd_layout` kept as it is (§1.6). Throws, naming it, when a file it
+   * would change is open with unsaved edits, and when a DBML diagram that
+   * names a table whose path the edit changes (`changed`) cannot be read or
+   * rendered: it would keep a `use` line to a file that is gone. Any other
+   * DBML diagram that does not read is left as it is.
+   */
+  private rewriteOtherSubjectAreaWrites(
+    currentPath: string,
+    rewrite: (parsed: Record<string, unknown>, storage: 'json' | 'dbml') => boolean,
+    resolver: SubjectAreaResolver,
+    options: {
+      /** Only DBML diagrams: JSON ones are neither parsed nor dirty-checked. */
+      dbmlOnly?: boolean;
+      /** The plan whose path changes refuse an unreadable diagram (default: the resolver's). */
+      plan?: DbmlLibraryWritePlan;
+    } = {},
+  ): FileWrite[] {
+    const semanticRoot = this.semanticRootDir();
+    // The tables whose file the edit renames, moves, deletes or re-qualifies (not the ones it creates).
+    const changed = options.plan ? settleSignalsOf(options.plan) : { pathChanged: resolver.pathChanged };
+    const out: FileWrite[] = [];
+    for (const summary of this.listOtherSubjectAreas(currentPath)) {
+      if (summary.storage !== 'dbml') {
+        if (options.dbmlOnly) continue;
+        for (const { filePath, text } of this.rewriteOtherSubjectAreas(currentPath, rewrite, [summary])) {
+          out.push({ kind: 'replace', path: filePath, text });
+        }
+        continue;
+      }
+      const original = this.openOrDiskText(summary.filePath);
+      if (original === null) continue;
+      const rel = path.relative(semanticRoot, summary.filePath).split(path.sep).join('/');
+      // What it imports, from a syntax-only read: whether a member's path changes decides refuse-or-skip.
+      const memberPath = (): string | undefined => {
+        const imports = diagramSummaryForFile(rel, summary.filePath, this.openDocumentText(summary.filePath));
+        return changedMemberPath(rel, original, imports === 'unreadable' ? null : imports, changed);
+      };
+      let rendered: FileWrite[];
+      try {
+        const file = codecFor(summary.filePath).parse(original, summary.filePath);
+        if (!rewrite(file.parsed, 'dbml')) continue;
+        // Not the diagram being edited: its imports are recomputed, a conflicted erd_layout stays as it is (§1.6).
+        rendered = codecFor(summary.filePath).render(file, original, summary.filePath, { ...resolver, refreshRelationshipsUses: true, keepLayoutIfConflicted: true });
+      } catch (err) {
+        const oldPath = memberPath();
+        if (oldPath !== undefined) throw unsettledDiagramRefusal(rel, problemOf(err, rel, summary.filePath), oldPath);
+        log.warn(`[SemanticEditorProvider] ${summary.filePath} left as it is: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      const changedWrites = rendered.filter((w, i) => i > 0 || (w.kind !== 'delete' && w.text !== original));
+      if (changedWrites.length === 0) continue;
+      const dirty = dirtyFiles(changedWrites.map((w) => w.path));
+      if (dirty.length > 0) {
+        const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+        throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+      }
+      out.push(...changedWrites);
+    }
+    return out;
+  }
+
+  /** An open document's text (unsaved edits included), else undefined. */
+  private openDocumentText(filePath: string): string | undefined {
+    return vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, filePath))?.getText();
+  }
+
+  /**
+   * The settle (§2.6): every other DBML diagram whose `use` lines the plan
+   * invalidates (`needsSettle`), re-rendered with no change of its own in
+   * the same WorkspaceEdit, through the one settle every write path shares
+   * (`settleDbmlDiagramWrites`). An edit that changes no path, creates no
+   * table, re-qualifies nothing and moves no Ref pair lists and reads
+   * nothing. `skip` holds the diagrams the caller already writes (resolved
+   * paths). Throws, naming it, when a diagram it would change is open with
+   * unsaved edits.
+   */
+  private settleDbmlDiagrams(currentPath: string, skip: ReadonlySet<string>, plan: DbmlLibraryWritePlan): FileWrite[] {
+    if (settlesNothing(plan)) return [];
+    const diagrams = this.listOtherSubjectAreas(currentPath)
+      .filter((s) => s.storage === 'dbml' && !skip.has(path.resolve(s.filePath)))
+      .map((s) => s.filePath);
+    const out = settleDbmlDiagramWrites({
+      semanticRoot: this.semanticRootDir(),
+      diagrams,
+      plan,
+      readText: (filePath) => this.openOrDiskText(filePath),
+      openText: (filePath) => this.openDocumentText(filePath),
+    });
+    if (out.length > 0) {
+      const dirty = dirtyFiles(out.map((w) => w.path));
+      if (dirty.length > 0) {
+        const name = path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/');
+        throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
+      }
+    }
+    return out;
+  }
+
+  /**
    * The other v5 domain files `rewrite` changes, with their new text (#133
    * L5). Read from disk, as the next canvas load would; a file that does not
    * parse is left alone. Throws, naming it, when a file it would change is
@@ -2590,12 +4233,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private rewriteOtherSubjectAreas(
     currentPath: string,
-    rewrite: (parsed: Record<string, unknown>) => boolean,
+    rewrite: (parsed: Record<string, unknown>, storage: 'json' | 'dbml') => boolean,
+    summaries?: readonly import('../types/semantic').SubjectAreaSummary[],
   ): Array<{ filePath: string; text: string }> {
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     const out: Array<{ filePath: string; text: string }> = [];
-    for (const summary of this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir)) {
+    for (const summary of summaries ?? this.subjectAreaService.listSubjectAreas(this.workspaceRoot, semanticDir)) {
       if (samePath(summary.filePath, currentPath)) continue;
+      // A `.dbml` diagram is never JSON.parse'd here (rewriteOtherSubjectAreaWrites renders it).
+      if (summary.storage === 'dbml') continue;
       let original: string;
       let parsed: Record<string, unknown>;
       try {
@@ -2610,9 +4256,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A v6 diagram (#162) is rewritten under the v5 keys and written back in its own naming (#182).
       if (format === 'v6') {
         parsed = normaliseSubjectAreaDocument(parsed);
-        tableNamingDocuments.add(parsed);
+        markTableNamingDocument(parsed);
       }
-      if (!rewrite(parsed)) continue;
+      if (!rewrite(parsed, 'json')) continue;
       if (dirtyFiles([summary.filePath]).length > 0) {
         const name = path.relative(this.workspaceRoot, summary.filePath).split(path.sep).join('/');
         throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
@@ -2644,10 +4290,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * tolerant `JSON.parse`: a bad document there is not the user's error.
    */
   private parseSubjectAreaDocument(document: vscode.TextDocument, text: string = document.getText()): Record<string, unknown> {
+    return this.parseSubjectAreaFile(document, text).parsed;
+  }
+
+  /**
+   * {@link parseSubjectAreaDocument} with what the codec knows besides the
+   * object (§5.2): the storage, and for a DBML diagram its version and
+   * writable flag. A `.dbml` diagram reads into a plain v5 object (D8).
+   */
+  private parseSubjectAreaFile(document: vscode.TextDocument, text: string = document.getText()): ParsedSubjectArea {
     const shown = this.shownSubjectAreaPath(document.uri.fsPath);
-    let data: unknown;
+    const codec = codecFor(document.uri.fsPath);
     try {
-      data = parseSubjectAreaJson(text, shown);
+      // Messages name the file project-relative.
+      return codec.parse(text, shown);
     } catch (err) {
       if (err instanceof SubjectAreaFileError) {
         const fileProblem = this.subjectAreaFileProblemPayload(err, document.uri.fsPath);
@@ -2655,19 +4311,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const next = fileProblem.fileProblem === 'empty' ? 'Restore its content, then try again.' : 'Fix it and save, then try again.';
         throw new EditRefused(`${fileProblem.message} ${next}`);
       }
+      if (err instanceof NotASubjectAreaObject) {
+        throw new EditRefused(`Diagram file ${shown} does not contain a JSON object.`);
+      }
+      if (err instanceof SubjectAreaValidationError) throw new EditRefused(err.message);
       throw err;
     }
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      throw new EditRefused(`Subject area file ${shown} does not contain a JSON object.`);
+  }
+
+  /**
+   * A warning, once per file and diagram in a session, for each
+   * relationships file holding a Ref (or a pending line) between two of this
+   * DBML diagram's tables that it does not import (§2.3): the canvas leaves those Refs
+   * out, as core and other DBML tools do, and the next edit of the diagram
+   * adds the import.
+   */
+  private warnAboutUnimportedRelationships(filePath: string): void {
+    if (this.refreshHolds > 0 || subjectAreaStorageOf(filePath) !== 'dbml') return;
+    for (const file of this.subjectAreaService.relationshipsImportDrift(filePath)) {
+      const key = `${path.resolve(filePath)}\0${file}`;
+      if (this.importDriftWarningsShown.has(key)) continue;
+      this.importDriftWarningsShown.add(key);
+      void vscode.window.showWarningMessage(unimportedRelationshipsMessage(file));
     }
-    // A v6 file (#162) is edited under the v5 keys, like every other, and
-    // written back in its own naming (`serialiseSubjectArea`, #182).
-    if (detectSubjectAreaFormat(data) === 'v6') {
-      const normalised = normaliseSubjectAreaDocument(data as Record<string, unknown>);
-      tableNamingDocuments.add(normalised);
-      return normalised;
-    }
-    return data as Record<string, unknown>;
   }
 
   /**
@@ -2677,6 +4343,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `date` table's columns. The warning names both files and offers the fix.
    */
   private warnAboutDuplicateTables(domain: UnifiedSubjectArea): void {
+    if (this.refreshHolds > 0) return;
     const used = new Set(domain.logical.models.map((m) => m.name.toLowerCase()));
     const rel = (p: string): string => this.tableLibraryService.libraryRelativePath(p);
     for (const entry of this.tableLibraryService.listTableFiles()) {
@@ -2685,9 +4352,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.duplicateWarningsShown.has(key)) continue;
       this.duplicateWarningsShown.add(key);
       // In both libraries (#162): a project half-way between the v5 and v6
-      // naming. Reported, never resolved here — the v6 file is not written.
+      // naming, or a DBML copy of a YAML table (part-way through Convert).
+      // Reported, never resolved here — the ignored copy is not written.
       const shadowedBy = entry.shadowedBy;
-      if (entry.library && !this.tableLibraryService.isTableNamingFile(shadowedBy)) {
+      if (this.tableLibraryService.isCrossLibraryDuplicate(entry)) {
         void vscode.window.showWarningMessage(
           `"${entry.name}" has a file in both the old and the new table folder. ${domain.layer}/${domain.domain} uses ` +
           `${rel(entry.shadowedBy)}; ${rel(entry.filePath)} is ignored. Delete the copy you don't want.`,
@@ -2703,7 +4371,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ? `, not the ${domain.layer} copy ${rel(entry.filePath)}, which is ignored.`
           : `; ${rel(entry.filePath)} is ignored.`);
       // The fix rewrites files, so it is offered only inside logical-models/.
-      const fixable = !entry.library;
+      const fixable = !entry.library && entry.layer === undefined;
       void vscode.window.showWarningMessage(
         fixable ? message : `${message} Rename or delete one copy.`,
         ...(fixable ? ['Fix…'] : []),
@@ -2728,11 +4396,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     ymlData: YmlData,
     viewConfig: import('../types/semantic').ViewConfig,
     stubColumns?: string[],
+    /** The diagram's file: a DBML diagram's tables are badged with the layer each was read from. */
+    diagramPath?: string,
   ): DisplaySubjectArea {
     const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
     const readOnly = domain.stage === 'physical';
     const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
+    const fields = this.displayFields();
     const display = toDisplaySubjectArea(domain, {
       viewConfig,
       stubColumns,
@@ -2741,9 +4412,112 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       editorPayload,
       // A relationship drawn backwards is flagged on dbt's evidence too (#163).
       dbtKeyIndex,
+      // The project's fields.yml, only when it has one.
+      ...(fields ? { fields } : {}),
     });
     // dbt's key evidence orients new relationships on an editable canvas (#133 L1).
-    return readOnly ? display : withDbtKeyHints(display, dbtKeyIndex);
+    return readOnly ? display : this.withWhereThingsLand(this.withOwnRelationships(this.withTableLayers(withDbtKeyHints(display, dbtKeyIndex), diagramPath), diagramPath), diagramPath);
+  }
+
+  /**
+   * Where New Table puts a table, for its Schema field: the layer's schema
+   * folders and the default (`newTableSchemaChoice`), only when the
+   * diagram's new tables are DBML (`newTableFolder`); a YAML project is
+   * unchanged. Lists table files; reads none.
+   */
+  private withWhereThingsLand(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    if (diagramPath === undefined) return display;
+    try {
+      const home = this.newTableFolder(diagramPath);
+      if (home === undefined || typeof home === 'string') return display;
+      const choice = newTableSchemaChoice({
+        layer: home.layer,
+        layerSchema: home.schema,
+        members: display.models.map((m) => m.name),
+        homes: tableHomesOf(this.tableLibraryService.listTableFiles()),
+      });
+      return { ...display, newTableSchemas: { dir: projectRelative(this.workspaceRoot, this.semanticRootDir()), ...choice } };
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where new tables go: ${err instanceof Error ? err.message : String(err)}`);
+      return display;
+    }
+  }
+
+  /**
+   * Answer `requestNewRelationshipFiles` (the New Relationship dialog
+   * opening): the relationships file a new relationship of each of the
+   * diagram's DBML tables goes to when that table holds the foreign key
+   * (`placeNewRef`, through `newRelationshipPlacements`), project-relative,
+   * and the files the dialog may save it in instead (`choices`: that file
+   * first, then the layer's other readable relationships files; omitted when
+   * empty). Asked for on demand, not sent with every payload: it reads every
+   * relationships file. The member names come from the open document's
+   * text (no table is resolved); a YAML project answers empty at once.
+   */
+  private sendNewRelationshipFiles(document: vscode.TextDocument, webview: vscode.Webview): void {
+    const files: Record<string, string> = {};
+    const choices: Record<string, NewRelationshipFileChoice[]> = {};
+    try {
+      // No DBML table in the project: no relationship of this diagram goes to a relationships file.
+      const names = (this.tableLibraryService.writesDbml()
+        ? subjectAreaTableNames(document.getText(), document.uri.fsPath)
+        : null) ?? [];
+      for (const [name, placed] of this.tableLibraryService.newRelationshipPlacements(names)) {
+        files[name] = projectRelative(this.workspaceRoot, placed.file);
+        // The dialog's "Stored in" choice: the default first, then the layer's other readable files.
+        choices[name] = placed.choices.map((rel) => ({
+          path: rel,
+          projectPath: projectRelative(this.workspaceRoot, this.tableLibraryService.semanticAbsolute(rel)),
+        }));
+      }
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where new relationships go: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (this.disposedWebviews.has(webview)) return;
+    this.post(webview, { type: 'newRelationshipFiles', payload: { files, ...(Object.keys(choices).length > 0 ? { choices } : {}) } });
+  }
+
+  /**
+   * Which relationships the diagram file holds itself, so the detail panel's
+   * Remove confirmation warns only about the ones that really go with a
+   * table (`withRelationshipHomes`). Reads the open document's text when
+   * there is one; a file that cannot be read is left unmarked.
+   */
+  private withOwnRelationships(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    if (diagramPath === undefined) return display;
+    if (subjectAreaStorageOf(diagramPath) === 'dbml') return withRelationshipHomes(display, undefined, true);
+    let own: unknown = null;
+    try {
+      const open = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === diagramPath);
+      const text = open ? open.getText() : fs.readFileSync(diagramPath, 'utf-8');
+      const logical = codecFor(diagramPath).parse(text, diagramPath).parsed.logical as { relationships?: unknown } | undefined;
+      own = logical?.relationships;
+    } catch {
+      own = null;
+    }
+    return withRelationshipHomes(display, own, false);
+  }
+
+  /**
+   * Each DBML table's own layer and every layer's config, so the canvas
+   * badges a table borrowed from another layer with that layer, not the
+   * diagram's. A DBML diagram's tables take the layer of the file each was
+   * read from (its `use` path first, as core's loader reads it); a JSON
+   * diagram's DBML tables, their file's. A project with no DBML tables is unchanged.
+   */
+  private withTableLayers(display: DisplaySubjectArea, diagramPath: string | undefined): DisplaySubjectArea {
+    const read = diagramPath !== undefined ? this.subjectAreaService.dbmlMemberLayers(diagramPath) : undefined;
+    const homes = read ? undefined : tableHomesOf(this.tableLibraryService.listTableFiles());
+    const layerOf = (name: string): string | undefined => read ? read.get(name.toLowerCase()) : homes?.get(name.toLowerCase())?.layer;
+    if (!display.models.some((m) => layerOf(m.name) !== undefined)) return display;
+    return {
+      ...display,
+      layerConfigs: this.layerService.getAllLayers(),
+      models: display.models.map((model) => {
+        const layer = layerOf(model.name);
+        return layer !== undefined ? { ...model, layer } : model;
+      }),
+    };
   }
 
   /**
@@ -2767,6 +4541,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const shown = this.shownSubjectAreaPath(fsPath);
     if (err.reason === 'empty') {
       return { message: `${shown} has no content.`, kind: 'domain-file', fileProblem: 'empty' };
+    }
+    if (err.reason === 'invalid-dbml') {
+      // A broken DBML diagram gets the same syntax screen, worded for DBML (§4.7).
+      return {
+        message: describeDbmlMistake(shown, err),
+        kind: 'domain-file',
+        fileProblem: 'syntax',
+        ...(err.line !== undefined ? { line: err.line } : {}),
+        ...(err.column !== undefined ? { column: err.column } : {}),
+        fileType: 'DBML',
+      };
     }
     if (err.reason !== 'invalid-json') return undefined;
     return {
@@ -2831,7 +4616,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     panelKey?: string,
     options: { persistPositions?: boolean } = {},
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     const errorKey = panelKey ?? document.uri.toString();
 
     // A JSON file under the semantic dir is not automatically a domain. The
@@ -2839,30 +4624,54 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // `templates/*.json` and the other reserved directories, and a glob cannot
     // express the exclusion, so the refusal lives here. Rendering a canvas for
     // one of those can only ever end in a parse error the user cannot act on.
+    if (!isSubjectAreaFilePath(document.uri.fsPath) && document.uri.fsPath.toLowerCase().endsWith('.dbml')) {
+      // The selector (`*/diagrams/*.dbml`) is case-insensitive in VS Code, a
+      // tab restored from 1.9 keeps its editor, and `vscode.openWith` ignores
+      // the selector: a table, relationships, 1.9 or other `.dbml` gets the
+      // not-a-diagram page (§1.8), never a reroute.
+      this.postLoadError(webview, errorKey, {
+        message: `${notADiagramMessage(document.uri.fsPath, path.dirname(this.tableLibraryService.getTablesDir()))} ${REOPEN_AS_TEXT_SENTENCE}`,
+        kind: 'not-a-domain',
+      }, undefined, 'notDomain');
+      return undefined;
+    }
     if (!isSubjectAreaFilePath(document.uri.fsPath)) {
+      const semanticDirName = path.basename(path.dirname(path.dirname(document.uri.fsPath)));
       this.postLoadError(webview, errorKey, {
         message:
-          `${path.basename(document.uri.fsPath)} is not an ERD Studio subject area file — ` +
-          `subject areas live in ${path.basename(path.dirname(path.dirname(document.uri.fsPath)))}/{layer}/{domain}.json. ` +
+          `${path.basename(document.uri.fsPath)} is not an ERD Studio diagram file — ` +
+          `diagrams live in ${semanticDirName}/{layer}/diagrams/{name}.dbml or ${semanticDirName}/{layer}/{name}.json. ` +
           `Open it as text to edit it.`,
         kind: 'not-a-domain',
       }, undefined, 'notDomain');
-      return;
+      return undefined;
     }
 
+    // Which step is running, for an internal failure's telemetry (#262).
+    let step: SubjectAreaLoadStep = 'manifest';
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
+      // Logical-only: there is no Physical stage to restore into.
+      if (panel && this.logicalOnly) { panel.activeStage = 'logical'; }
       const activeStage = panel?.activeStage ?? 'logical';
+      // The first load's phases at info, a refresh's at debug.
+      const timer = phaseTimer(canvasLog, `${options.persistPositions ? 'Open' : 'Refresh'} ${document.uri.fsPath}`,
+        { level: options.persistPositions ? 'info' : 'debug' });
 
+      timer.phase('reading dbt files');
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      step = 'yml';
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      step = 'catalog';
       const catalog = await this.loadCatalog();
-      const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
+      step = 'read';
       const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
+      timer.phase('reading the diagram and its tables');
       let unifiedDomain = await this.readSubjectAreaTolerantly(document.uri.fsPath, { dbtKeyIndex });
       this.warnAboutDuplicateTables(unifiedDomain);
+      this.warnAboutUnimportedRelationships(document.uri.fsPath);
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
@@ -2870,41 +4679,63 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
       // should the ELK run fail, the next open simply asks again.
+      // A DBML diagram's positions live in its Project's `erd_layout`,
+      // written the same way.
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
+      step = 'positions';
       const computed = this.computeMissingPositions(unifiedDomain);
       if (computed) {
         if (options.persistPositions && !autoLayout) {
+          timer.phase(`saving positions for ${plural(Object.keys(computed).length, 'new table')}`);
           const positionsWritten = await this.autoPositionNewTables(document, computed);
-          if (positionsWritten) {
-            // Re-read since we wrote new positions to the file
+          if (positionsWritten === 'full') {
+            // The full edit path may have settled more than the positions: read the diagram again.
             unifiedDomain = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex });
           }
+          // A layout-only write stored exactly the positions merged below: nothing to read again.
         }
         // Whether or not they were persisted, the payload carries the positions
         // so the canvas never renders a model at (0,0).
         unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...computed };
       }
 
+      timer.phase(`building the ${activeStage} canvas`);
+      let postedTables: number;
       if (activeStage === 'physical') {
+        step = 'physical';
         const physicalDomain = this.subjectAreaService.buildPhysicalSubjectArea(unifiedDomain, ymlData, manifest, catalog);
+        postedTables = physicalDomain.models.length;
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
-        this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
+        const fields = this.displayFields();
+        if (fields) { physicalDomain.fields = fields; }
+        this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
+        step = 'other';
+        this.cancelCanvasContext(webview);
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
+        step = 'display';
         const domain = SubjectAreaService.toLogicalStage(unifiedDomain);
-        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
+        postedTables = displayDomain.models.length;
         // What the turn-round offer asks about (#163): the lines this canvas flags, without reading the file again.
         this.backwardsDrawn.set(document.uri.toString(), displayDomain.relationships.filter((r) => r.keysContradict));
         this.post(webview, {
           type: 'domainLoaded',
           payload: displayDomain,
-          welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
           ...this.manifestHintFlag(),
+          ...this.logicalOnlyFlag(),
         });
+        step = 'other';
+        // What the canvas knows beyond the diagram, once the diagram has gone out.
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
+        if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
+          // A single-file DBML dropped into a layer folder (§2.5): offer Import.
+          this.post(webview, { type: 'dbmlEmbeddedTables' });
+        }
         if (options.persistPositions) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
           if (displayDomain.models.length === 0) telemetry.feature('emptyCanvas');
@@ -2913,25 +4744,52 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       // A payload went out, so the next failure is news again.
       this.lastLoadError.delete(errorKey);
+      timer.end(`posted ${plural(postedTables, 'table')}${autoLayout ? ' (auto layout next)' : ''}`);
+      return postedTables;
     } catch (err) {
       // A restored tab, or a refresh, whose file is gone (#161): the same
       // screen as a delete seen live, so Retry and Open as Text never show.
       if (err instanceof SubjectAreaFileError && err.reason === 'missing') {
         this.postLoadError(webview, errorKey, this.subjectAreaMissingPayload(document), err, 'missing');
-        return;
+        return undefined;
       }
       const fileProblem = err instanceof SubjectAreaFileError ? this.subjectAreaFileProblemPayload(err, document.uri.fsPath) : undefined;
       if (fileProblem) {
         this.postLoadError(webview, errorKey, fileProblem, err, classifySubjectAreaLoadFailure(err));
-        return;
+        return undefined;
       }
-      const message = err instanceof Error ? err.message : String(err);
-      this.postLoadError(webview, errorKey, {
-        message,
-        ...(err instanceof SubjectAreaFileError ? { kind: 'domain-file' as const } : {}),
-        ...(err instanceof SubjectAreaFileError && err.mergeConflict ? { mergeConflict: true as const } : {}),
-      }, err, classifySubjectAreaLoadFailure(err));
+      if (err instanceof SubjectAreaFileError) {
+        // A merge conflict, or a file that stayed locked or unreadable.
+        this.postLoadError(webview, errorKey, {
+          message: err.message,
+          kind: 'domain-file',
+          ...(err.mergeConflict ? { mergeConflict: true as const } : {}),
+        }, err, classifySubjectAreaLoadFailure(err));
+        return undefined;
+      }
+      this.postLoadError(webview, errorKey, this.subjectAreaLoadFailurePayload(err, document.uri.fsPath), err, classifySubjectAreaLoadFailure(err), step);
     }
+    return undefined;
+  }
+
+  /**
+   * The screen for a load failure that is not about reading the file (#261):
+   * a file ERD Studio reads but can't accept (`invalid`: the user's to fix,
+   * named project-relative, through the commands' `describeDiagramFileProblem`)
+   * or anything else (`internal`: ERD Studio's, the exception with every local
+   * path redacted). Core's wrapped TypeError is `describeDiagramFileProblem`'s
+   * "ours" case, so it gets the internal screen.
+   */
+  private subjectAreaLoadFailurePayload(err: unknown, fsPath: string): ErrorMessage['payload'] {
+    if (err instanceof SubjectAreaValidationError) {
+      const problem = describeDiagramFileProblem(err, fsPath, this.shownSubjectAreaPath(fsPath));
+      if (problem) {
+        const newerSchema = err.kind === 'newerSchema' || !problem.openable;
+        return { message: `${problem.reason}.`, kind: 'invalid', ...(newerSchema ? { newerSchema: true as const } : {}) };
+      }
+    }
+    const raw = err instanceof Error ? err.message : String(err);
+    return { message: redactPaths(raw), kind: 'internal' };
   }
 
   /**
@@ -2941,6 +4799,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * and only for logical payloads.
    */
   private manifestHintFlag(): { manifestMissing?: true } {
+    if (this.logicalOnly) return {};
     if (!this.manifestService.isMissing) return {};
     // A folder that is not a dbt project (#111) will never have a manifest.
     if (!hasDbtProjectFile(this.workspaceRoot)) return {};
@@ -2948,22 +4807,80 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return { manifestMissing: true };
   }
 
+  /** Whether a DBML diagram declares Tables of its own and has no table `use` line (§2.5). Never throws. */
+  private holdsOwnTables(document: vscode.TextDocument): boolean {
+    try {
+      return codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath).holdsOwnTables === true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
   private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
     let format: 'v4' | 'v5' = 'v5';
-    try {
-      if (detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
-    } catch {
-      // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+    if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml') {
+      // A DBML diagram counts as 'v5' (D21), plus the feature: never JSON-parsed.
+      telemetry.featureOnce('dbmlProject');
+    } else {
+      try {
+        const detected = detectSubjectAreaFormat(JSON.parse(document.getText()) as Record<string, unknown>);
+        if (detected === 'v4') format = 'v4';
+        // A JSON diagram in the v6 table naming (still counted as 'v5'): once a day, off the onboarding trail.
+        if (detected === 'v6') telemetry.featureQuiet('canvasJsonV6', true);
+      } catch {
+        // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+      }
     }
     telemetry.canvasOpened(stage, format, modelCount);
-    telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
-    // #113: where a missing manifest is met (once per day).
-    if (this.manifestService.isMissing) {
-      telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+    // Without dbt the manifest service is disabled and reports neither missing
+    // nor stale: recording that as 'ok' would count a plain folder as a fresh
+    // manifest. The day's manifest state stays 'unknown' instead.
+    if (!this.logicalOnly) {
+      telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+      // #113: where a missing manifest is met (once per day).
+      if (this.manifestService.isMissing) {
+        telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+      }
     }
     telemetry.catalog(hasCatalog);
-    if (stage === 'logical') this.recordRelationshipState(document);
+    this.recordDiagramFlags(document);
+    if (stage === 'logical') this.scheduleRelationshipSurvey(document);
+  }
+
+  /**
+   * Usage telemetry for a canvas's first load (2.0 B14): how the diagram
+   * renders degraded — the loader's warning codes (a table not found, DBML
+   * from another tool) and, for a DBML diagram, what its reading found (the
+   * remembered one: no compile). Presence flags, once a day each. Never throws.
+   * Skipped when usage telemetry is off: its only use is telemetry.
+   */
+  private recordDiagramFlags(document: vscode.TextDocument): void {
+    if (!telemetry.enabled()) return;
+    try {
+      const fsPath = document.uri.fsPath;
+      const features = loaderWarningFeatures(this.subjectAreaService.loaderWarningCodes(fsPath));
+      if (subjectAreaStorageOf(fsPath) === 'dbml') features.push(...dbmlDiagramFeatures(readDbmlDiagram(document.getText(), fsPath)));
+      for (const feature of features) telemetry.featureOnce(feature);
+    } catch (err) {
+      log.debug(`[SemanticEditorProvider] Diagram flags not recorded: ${err instanceof Error ? err.name : 'unknown'}`);
+    }
+  }
+
+  /**
+   * Run the canvas open's relationship survey ({@link recordRelationshipState})
+   * a little later, off the open's critical path: it reads every table in
+   * the library, which on a large library opened cold is most of the cost
+   * of the open. Skipped when usage telemetry is off (nothing would be sent)
+   * or the diagram has been closed since.
+   */
+  private scheduleRelationshipSurvey(document: vscode.TextDocument): void {
+    const timer = setTimeout(() => {
+      if (!telemetry.enabled() || !this.openPanels.has(document.uri.toString())) return;
+      this.libraryWarmUp?.noteForegroundWork();
+      this.recordRelationshipState(document);
+    }, this.relationshipSurveyDelayMs);
+    (timer as { unref?: () => void }).unref?.();
   }
 
   /**
@@ -2972,7 +4889,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private recordRelationshipState(document: vscode.TextDocument): void {
     try {
-      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      // A DBML diagram is read through its codec (a v5 object, D8), never `JSON.parse`d.
+      const parsed = subjectAreaStorageOf(document.uri.fsPath) === 'dbml'
+        ? codecFor(document.uri.fsPath).parse(document.getText(), document.uri.fsPath).parsed
+        : JSON.parse(document.getText()) as Record<string, unknown>;
       // Read only: a v6 file (#162) is surveyed like v5, through its v5 keys.
       const format = detectSubjectAreaFormat(parsed);
       const section = this.getStageSection(format === 'v6' ? normaliseSubjectAreaDocument(parsed) : parsed, 'logical');
@@ -2981,7 +4901,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const unreadableEntries = v5 && this.tableLibraryService.hasUnreadableRelationships() ? 1 : 0;
       telemetry.relationshipState(surveyLibrary(models, (section.relationships ?? []) as Relationship[], { unreadableEntries }));
     } catch (err) {
-      console.error('[SemanticEditorProvider] relationship survey failed:', err);
+      log.error('[SemanticEditorProvider] relationship survey failed:', err);
     }
   }
 
@@ -3008,7 +4928,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (last || !isRetryableSubjectAreaRead(err)) {
           throw err;
         }
-        console.warn(
+        log.warn(
           `[SemanticEditorProvider] ${filePath} is ${err.reason} — ` +
           `re-reading in ${SUBJECT_AREA_READ_RETRY_DELAYS_MS[attempt]}ms (likely mid-write)`,
         );
@@ -3032,6 +4952,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     payload: ErrorMessage['payload'],
     err: unknown,
     failure: SubjectAreaLoadFailure,
+    step?: SubjectAreaLoadStep,
   ): void {
     if (this.lastLoadError.get(errorKey) === payload.message) {
       return;
@@ -3039,8 +4960,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.lastLoadError.set(errorKey, payload.message);
     telemetry.error('domainLoad');
     telemetry.error(subjectAreaLoadErrorCode(failure));
-    hostErrorLog.record('sendDomainData', err ?? payload.message);
-    console.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
+    // Which step threw, beside domainLoadInternal (the total, #262).
+    if (failure === 'internal' && step) telemetry.error(subjectAreaLoadStepCode(step));
+    if (failure !== 'missing') {
+      // 2.0 B14: a failure over a live canvas (often an assistant part-way
+      // through writing several files) is only flagged; one that keeps the
+      // canvas from opening also says why, from core's fixed fields.
+      if (this.openPanels.get(errorKey)?.loaded) {
+        telemetry.feature('domainLoadOverLive');
+      } else {
+        telemetry.feature('domainLoadBlocking');
+        const detail = subjectAreaLoadDetailCode(err);
+        if (detail) telemetry.error(detail);
+      }
+    }
+    if (failure === 'missing') {
+      // The canvas's file was removed (an Undo of Convert, a delete or a
+      // `git checkout` outside ERD Studio): expected, and the screen says
+      // so. Not an error: no error line, nothing for a bug report.
+      log.info(`[SemanticEditorProvider] ${payload.message} The canvas shows the "deleted or renamed" screen.`);
+    } else {
+      hostErrorLog.record('sendDomainData', err ?? payload.message);
+      log.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
+    }
     this.post(webview, { type: 'error', payload });
   }
 
@@ -3063,19 +5005,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async autoPositionNewTables(
     document: vscode.TextDocument,
     computed: Record<string, NodePosition>,
-  ): Promise<boolean> {
+  ): Promise<'layout' | 'full' | false> {
     // Merge computed positions into the document. No webview refresh — the
     // caller (sendSubjectAreaData) is about to send the payload itself.
-    return this.applySubjectAreaEdit(
-      document,
-      (_section, parsed) => {
-        const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
-        const existingPos = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
-        viewConfig.positions = { ...existingPos, ...computed };
-        parsed.viewConfig = viewConfig;
-      },
-      { refreshWebview: false, stage: 'logical' },
-    );
+    let layoutOnly = false;
+    const save = async (): Promise<'layout' | 'full' | false> => {
+      const written = await this.applySubjectAreaEdit(
+        document,
+        (_section, parsed) => {
+          const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+          const existingPos = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
+          viewConfig.positions = { ...existingPos, ...computed };
+          parsed.viewConfig = viewConfig;
+        },
+        { refreshWebview: false, stage: 'logical', onLayoutOnly: () => { layoutOnly = true; } },
+      );
+      return written ? (layoutOnly ? 'layout' : 'full') : false;
+    };
+    if (!this.isDbmlDocument(document)) return save();
+    // A DBML diagram's save rewrites its erd_layout, which can be refused (the
+    // diagram is read-only, or erd_layout holds a merge conflict). A refresh
+    // path never fails on a write: the canvas still loads with the computed
+    // positions, and the next open asks again.
+    try {
+      if (this.parseSubjectAreaFile(document).writable === false) return false;
+      return await save();
+    } catch (err) {
+      if (err instanceof EditRefused || err instanceof DbmlEditRefused) {
+        log.warn(`[SemanticEditorProvider] Positions for ${document.uri.fsPath} not saved: ${err.message}`);
+        return false;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -3084,10 +5045,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Stage-aware: panels viewing physical stage get physical data.
    */
   async refreshAllOpenSubjectAreas(): Promise<void> {
-    for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+    // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
+    for (const [panelKey, { document, webview, activeStage, lastCompareAgainst }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
-      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
         continue;
       }
       try {
@@ -3096,9 +5059,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         } else {
           await this.sendSubjectAreaData(document, webview, panelKey);
         }
+        // An open Compare overlay is worked out again (Refresh Manifest, a new
+        // catalog, …): otherwise it, the staleness banner and the report Sync
+        // plans from would still describe the data before the refresh. Only a
+        // comparison made from the stage on screen: a stage switch closes the
+        // overlay in the webview.
+        // Read from the live entry, not the snapshot: Compare may have been
+        // closed, or the stage switched, while the redraw above awaited.
+        const live = lastCompareAgainst ? this.openPanels.get(panelKey) : undefined;
+        if (live?.lastCompareAgainst && live.lastCompareAgainst !== live.activeStage && !this.logicalOnly
+          && !this.disposedWebviews.has(webview)) {
+          await this.handleToggleDiscrepancy(panelKey, document, webview, { enabled: true, compareAgainst: live.lastCompareAgainst });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(
+        telemetry.error('refreshFailed');
+        log.error(
           `[SemanticEditorProvider] Refresh failed for ${document.uri.fsPath}: ${message}`,
         );
         this.post(webview, {
@@ -3118,8 +5094,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * cross-panel refresh has to be driven from here).
    */
   async refreshSubjectAreasReferencingTable(modelName: string, exceptPanelKey?: string): Promise<void> {
+    await this.refreshSubjectAreasReferencingTables([modelName], exceptPanelKey);
+  }
+
+  /**
+   * {@link refreshSubjectAreasReferencingTable} for several tables at once:
+   * each open canvas naming any of them is sent once, however many of them
+   * it names (a branch switch or an assistant's bulk edit changes hundreds).
+   */
+  async refreshSubjectAreasReferencingTables(modelNames: Iterable<string>, exceptPanelKey?: string): Promise<void> {
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
+    const wanted = new Set([...modelNames].map(normaliseName));
+    if (wanted.size === 0) return;
+    const label = wanted.size === 1 ? `model "${[...modelNames][0]}"` : `${wanted.size} models`;
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
-      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey) || this.forgetIfGone(panelKey)) {
         continue;
       }
       // The panel that made the edit has already been refreshed by
@@ -3128,22 +5117,318 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         continue;
       }
       try {
-        const text = document.getText();
-        const parsed = JSON.parse(text) as unknown;
-
-        // Check if this domain references the changed model. The shared
-        // format-agnostic extractor handles v5 name strings, v4/hybrid inline
-        // objects and legacy top-level `models` — and tolerates junk entries.
-        const referencesModel = getRawSubjectAreaTableNames(parsed).includes(modelName);
-
-        if (referencesModel) {
+        // Check if this domain references a changed model. The shared
+        // raw membership reader handles v5 name strings, v4/hybrid inline
+        // objects, legacy top-level `models` and a DBML diagram's `use`
+        // lines — and tolerates junk entries.
+        const names = subjectAreaTableNames(document.getText(), document.uri.fsPath);
+        if (names === null) throw new Error(`${this.shownSubjectAreaPath(document.uri.fsPath)} does not parse`);
+        if (names.some((n) => wanted.has(normaliseName(n)))) {
           await this.sendSubjectAreaData(document, webview, panelKey);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[SemanticEditorProvider] Refresh for model "${modelName}" failed: ${message}`);
+        log.error(`[SemanticEditorProvider] Refresh for ${label} failed: ${message}`);
       }
     }
+  }
+
+  /**
+   * A table file changed outside ERD Studio: refresh the canvases naming it,
+   * together with every other table that changes within
+   * {@link TABLE_REFRESH_BATCH_MS} (one send per canvas for a burst, as the
+   * sidebar trees already batch theirs).
+   */
+  queueTableRefresh(modelName: string): void {
+    this.queuedTableRefresh.add(modelName);
+    if (this.tableRefreshTimer !== undefined) return;
+    this.tableRefreshTimer = setTimeout(() => {
+      this.tableRefreshTimer = undefined;
+      const names = [...this.queuedTableRefresh];
+      this.queuedTableRefresh.clear();
+      void this.refreshSubjectAreasReferencingTables(names);
+    }, TABLE_REFRESH_BATCH_MS);
+  }
+
+  /**
+   * Close the canvases of these files (Convert replaced them with their
+   * `.dbml`): each panel is disposed, which drops its state, and its entry
+   * is forgotten even if the dispose never reaches us, so no refresh reads
+   * a file that is gone.
+   */
+  closeCanvasesOf(fsPaths: readonly string[]): void {
+    for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
+      if (!fsPaths.some((p) => samePath(entry.document.uri.fsPath, p))) continue;
+      try { entry.panel?.dispose(); } catch { /* already disposed */ }
+      this.forgetPanel(panelKey, entry.webview);
+    }
+  }
+
+  /**
+   * Whether a canvas's panel is gone (VS Code closed its tab, e.g. when Undo
+   * deleted its file) though its dispose never reached us: a disposed
+   * panel throws on `active`. Forgets it when so.
+   */
+  private forgetIfGone(panelKey: string): boolean {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry?.panel) return false;
+    try {
+      void entry.panel.active;
+      return false;
+    } catch {
+      this.forgetPanel(panelKey, entry.webview);
+      return true;
+    }
+  }
+
+  /**
+   * Select and centre one relationship on the canvas of `uri` (the
+   * Relationships view's Open in Diagram). A canvas that has loaded its
+   * diagram gets it at once, switched to the logical stage first (the line is
+   * a design relationship); one still opening gets it from the `ready`
+   * handler, so the caller may ask before or after opening the editor.
+   */
+  async revealRelationship(uri: vscode.Uri, target: RevealRelationshipMessage['payload']): Promise<void> {
+    const open = Array.from(this.openPanels.entries()).find(([, p]) =>
+      p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
+    if (!open) {
+      this.pendingReveals.set(uri.fsPath, { target, at: Date.now() });
+      return;
+    }
+    const [panelKey, panel] = open;
+    if (panel.activeStage !== 'logical') {
+      await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
+    }
+    this.post(panel.webview, { type: 'revealRelationship', payload: target } satisfies RevealRelationshipMessage);
+  }
+
+  /**
+   * Select and centre one table, with its detail panel open, on the canvas of
+   * `uri` (Open in Diagram / Go to Table on a table). As
+   * {@link revealRelationship}: posted at once to a loaded canvas (switched
+   * to the logical stage first), else held until its `ready` has its diagram.
+   */
+  async revealTable(uri: vscode.Uri, modelName: string): Promise<void> {
+    await this.runTableAction(uri, { reveal: modelName });
+  }
+
+  /**
+   * Add to Diagram… and a plain drop of Table Library rows on a diagram (its
+   * drop receipt, `src/providers/libraryDropReceipts.ts`): once the canvas of
+   * `uri` has its diagram, add `modelNames` through the Add Existing Tables
+   * edit (`handleAddExistingModels`: one edit, one undo, placed next to
+   * related tables), then select the first one added. When every one is on
+   * the diagram already, the first is selected and named instead. The caller
+   * opens the diagram.
+   */
+  async addTablesToDiagram(uri: vscode.Uri, modelNames: readonly string[]): Promise<void> {
+    if (modelNames.length === 0) return;
+    await this.runTableAction(uri, { reveal: modelNames[0], add: [...modelNames] });
+  }
+
+  /**
+   * A drag started in the Table Library (its drag controller): remember its
+   * tables for a drop that brings no table file ({@link PENDING_LIBRARY_DRAG_MS}),
+   * and tell every loaded canvas on the logical stage, which shows how to drop
+   * them (an editable diagram only; the webview decides).
+   */
+  noteLibraryDrag(tables: readonly string[]): void {
+    if (tables.length === 0) return;
+    this.pendingLibraryDrag = { tables: [...tables], at: Date.now() };
+    const message: LibraryDragStartedMessage = { type: 'libraryDragStarted', payload: { tables: [...tables] } };
+    for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
+      if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
+      this.post(panel.webview, message);
+    }
+  }
+
+  /** The remembered Table Library drag's tables, if it is still fresh; forgotten either way. */
+  private takeLibraryDrag(): string[] | undefined {
+    const pending = this.pendingLibraryDrag;
+    this.pendingLibraryDrag = undefined;
+    return pending && Date.now() - pending.at <= PENDING_LIBRARY_DRAG_MS ? pending.tables : undefined;
+  }
+
+  /**
+   * A drop on the canvas (`dropTables`): the table files among the dropped
+   * URIs, else the Table Library drag of the last minute. Tables already on
+   * the diagram are selected and named; the rest are added through the Add
+   * Existing Tables edit with their positions at the drop point (one edit,
+   * one undo step), and the first of them is selected.
+   */
+  private async handleDropTables(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    panelKey: string,
+    payload: DropTablesMessage['payload'],
+  ): Promise<void> {
+    try {
+      const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
+      // The drop uses the library drag up, whichever way its tables came.
+      const dragged = (this.takeLibraryDrag() ?? []).filter((name) => validateTableNameSafety(name) === null);
+      const names = dropped.length > 0 ? dropped : dragged;
+      if (names.length === 0) {
+        void vscode.window.showInformationMessage(DROP_TABLES_NOTHING_MESSAGE);
+        return;
+      }
+      const membersOf = (): Set<string> =>
+        new Set((subjectAreaTableNames(document.getText(), document.uri.fsPath) ?? []).map(normaliseName));
+      const members = membersOf();
+      const fresh = names.filter((name) => !members.has(normaliseName(name)));
+      if (fresh.length === 0) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: names[0] } } satisfies RevealTableMessage);
+        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+        return;
+      }
+      telemetry.feature('addModel');
+      // Every name goes to the add, so its note names the ones already here.
+      await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, { dropAt: payload.position }));
+      // Selected only once it is on the diagram: a refused add has said why.
+      const after = membersOf();
+      const added = fresh.find((name) => after.has(normaliseName(name)));
+      if (added !== undefined) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logHandlerFailure(`[SemanticEditorProvider] Dropping tables failed: ${message}`, err);
+      recordHandlerFailure('model', err);
+      this.post(webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${message}` } });
+    }
+  }
+
+  /** Run a table action on a loaded canvas of `uri` now, or hold it for its `ready`. */
+  private async runTableAction(uri: vscode.Uri, action: { reveal: string; add?: string[] }): Promise<void> {
+    const open = Array.from(this.openPanels.entries()).find(([, p]) =>
+      p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
+    if (!open) {
+      this.pendingTableActions.set(uri.fsPath, { ...action, at: Date.now() });
+      return;
+    }
+    await this.applyTableAction(open[0], action);
+  }
+
+  private async applyTableAction(panelKey: string, action: { reveal: string; add?: string[] }): Promise<void> {
+    const panel = this.openPanels.get(panelKey);
+    if (!panel) return;
+    if (panel.activeStage !== 'logical') {
+      await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
+    }
+    let reveal = action.reveal;
+    if (action.add) {
+      const add = action.add;
+      const membersOf = (): Set<string> =>
+        new Set((subjectAreaTableNames(panel.document.getText(), panel.document.uri.fsPath) ?? []).map(normaliseName));
+      const before = membersOf();
+      const fresh = add.filter((name) => !before.has(normaliseName(name)));
+      if (fresh.length === 0) {
+        // All there already: select the first and say so, briefly.
+        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(add));
+      } else {
+        // Every name goes to the add, so its note names the ones already here.
+        await this.queueEdit(panelKey, () => this.handleAddExistingModels(panel.document, panel.webview, add));
+        const after = membersOf();
+        const added = fresh.find((name) => after.has(normaliseName(name)));
+        // A refused add has said why: nothing to select.
+        if (added === undefined) return;
+        reveal = added;
+      }
+    }
+    this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+  }
+
+  /** Run the table action held for the diagram at `fsPath`, if it is still fresh. */
+  private flushPendingTableAction(fsPath: string, panelKey: string): void {
+    for (const [key, pending] of Array.from(this.pendingTableActions.entries())) {
+      if (!samePath(key, fsPath)) continue;
+      this.pendingTableActions.delete(key);
+      if (Date.now() - pending.at <= PENDING_REVEAL_MS) {
+        const { at: _at, ...action } = pending;
+        void this.applyTableAction(panelKey, action).catch((err: unknown) => {
+          log.error(`[SemanticEditorProvider] Table action failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    }
+  }
+
+  /** Post the reveal held for the diagram at `fsPath`, if it is still fresh. */
+  private flushPendingReveal(fsPath: string, webview: vscode.Webview): void {
+    for (const [key, pending] of Array.from(this.pendingReveals.entries())) {
+      if (!samePath(key, fsPath)) continue;
+      this.pendingReveals.delete(key);
+      if (Date.now() - pending.at <= PENDING_REVEAL_MS) {
+        this.post(webview, { type: 'revealRelationship', payload: pending.target } satisfies RevealRelationshipMessage);
+      }
+    }
+  }
+
+  /** Drop everything kept for one canvas (on its dispose, or when it is found gone). */
+  private forgetPanel(panelKey: string, webview: vscode.Webview): void {
+    this.disposedWebviews.add(webview);
+    // Only this panel's entry: another canvas of the same file may have replaced it.
+    if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
+    if (this.lastActivePanelKey === panelKey && !this.openPanels.has(panelKey)) this.lastActivePanelKey = undefined;
+    this.editedTablePaths.delete(panelKey);
+    this.undoWhileHeld.delete(panelKey);
+    clearTimeout(this.nativeUndoTimers.get(panelKey));
+    this.nativeUndoTimers.delete(panelKey);
+    this.lastLoadError.delete(panelKey);
+  }
+
+  /**
+   * Redraw every open canvas of the diagram at `fsPath`. Nothing in the
+   * extension calls it since positions moved into the diagram's `erd_layout`
+   * (a change to the diagram reaches its canvas through its document); kept
+   * for the callers outside it (the guard suite's held-refresh check).
+   */
+  async refreshSubjectAreaPanel(fsPath: string): Promise<void> {
+    if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
+    for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+      if (this.disposedWebviews.has(webview) || !samePath(document.uri.fsPath, fsPath) || this.forgetIfGone(panelKey)) continue;
+      try {
+        if (activeStage === 'physical') {
+          await this.handleSwitchStage(panelKey, document, webview, 'physical');
+        } else {
+          await this.sendSubjectAreaData(document, webview, panelKey);
+        }
+      } catch (err) {
+        log.error(`[SemanticEditorProvider] Refresh failed for ${fsPath}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  /**
+   * The canvas Run dbt parse's **Open Physical view** would switch: the one
+   * that asked (`origin`) while it is open, else the canvas last active;
+   * only a live canvas on the Logical stage, and never in a logical-only
+   * window.
+   */
+  physicalSwitchTarget(origin?: vscode.Uri): vscode.Uri | undefined {
+    if (this.logicalOnly) return undefined;
+    const originKey = origin?.toString();
+    const key = originKey && this.openPanels.has(originKey) ? originKey : this.lastActivePanelKey;
+    const panel = key ? this.openPanels.get(key) : undefined;
+    if (!panel || this.disposedWebviews.has(panel.webview) || panel.activeStage !== 'logical') return undefined;
+    return panel.document.uri;
+  }
+
+  /** The canvas that asked is open on the Physical stage. */
+  originIsPhysical(origin?: vscode.Uri): boolean {
+    if (!origin) return false;
+    const panel = this.openPanels.get(origin.toString());
+    return !!panel && !this.disposedWebviews.has(panel.webview) && panel.activeStage === 'physical';
+  }
+
+  /**
+   * Bring the open canvas for `uri` to the front (its own editor group, with
+   * focus): Run dbt parse's **Open Physical view** can target a canvas in a
+   * background tab. False when no live canvas is open for it.
+   */
+  revealCanvas(uri: vscode.Uri): boolean {
+    const entry = this.openPanels.get(uri.toString());
+    if (!entry?.panel || this.disposedWebviews.has(entry.webview)) return false;
+    entry.panel.reveal(undefined, false);
+    return true;
   }
 
   /**
@@ -3167,7 +5452,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (attempts < 10) {
         setTimeout(trySwitch, 100);
       } else {
-        console.error(`[SemanticEditorProvider] switchStageForUri: panel not found for ${panelKey} after ${attempts} attempts`);
+        log.error(`[SemanticEditorProvider] switchStageForUri: panel not found for ${panelKey} after ${attempts} attempts`);
       }
     };
     trySwitch();
@@ -3180,10 +5465,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleAddModel(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    model: DesignTable,
+    payload: AddModelMessage['payload'],
     stage: 'logical',
   ): Promise<void> {
     try {
+      const { schemaFolder, ...given } = payload;
+      let model: DesignTable = given;
       // Validate the payload before anything touches disk: the model name
       // becomes a file name under logical-models/, and column names are used
       // as keys by every later edit/remove path.
@@ -3201,6 +5488,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         webview.postMessage({ type: 'error', payload: { message: `Failed to add table: unknown role "${String(model.modelRole)}".` } });
         return;
       }
+      const schemaError = validateSchemaFolderPayload(schemaFolder);
+      if (schemaError) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${schemaError}` } });
+        return;
+      }
       model = { ...model, name: model.name.trim() };
 
       const text = document.getText();
@@ -3212,9 +5504,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const modelNames = (section.models ?? []) as string[];
         const inDomain = modelNames.find((n) => sameName(n, model.name));
         if (inDomain !== undefined) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
         }
+        // A new table's name follows the authoring rule (a letter first).
         // The model library is shared across domains — never overwrite a
         // logical-models/{name}.yml that another domain may depend on. Case is
         // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.
@@ -3224,7 +5517,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Use "Add Existing Table" to reference it in this subject area, or, for a separate table also called ' +
+                'Use "Add Existing Tables" to add it to this diagram, or, for a separate table also called ' +
                 `${model.name}, name it ${sameTableName(model.name, document.uri.fsPath)} and set its warehouse name to ${model.name}.`,
             },
           });
@@ -3233,12 +5526,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Central model file — written via the same WorkspaceEdit as the domain
         // change so creating the model is a single, atomic, undoable step.
-        const semanticModel: import('../types/semantic').SemanticTable = {
+        // A DBML table's schema folder is the one the dialog named (`configuredSchema`:
+        // transient, never written; a YAML table drops it), else the diagram's layer.
+        const semanticModel: DbmlDraftTable = {
           name: model.name,
           schema: model.schema,
           description: model.description,
           columns: model.columns,
           ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+          ...(schemaFolder !== undefined ? { configuredSchema: schemaFolder } : {}),
         };
 
         // Add name reference + position to domain file
@@ -3268,7 +5564,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (success) {
           this.selectorsService.scheduleRegenerate();
         } else {
-          webview.postMessage({ type: 'error', payload: { message: 'Failed to add table to subject area.' } });
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add the table to this diagram.' } });
         }
         return;
       }
@@ -3282,7 +5578,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (models.some((m) => typeof m.name === 'string' && sameName(m.name, model.name))) {
             webview.postMessage({
               type: 'error',
-              payload: { message: `Table "${model.name}" already exists in this subject area.` },
+              payload: { message: `Table "${model.name}" already exists in this diagram.` },
             });
             throw new EditAborted();
           }
@@ -3314,13 +5610,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         {
           webview,
           stage,
-          errorLabel: 'Failed to add table to subject area.',
+          errorLabel: 'Failed to add the table to this diagram.',
           onSuccess: () => this.selectorsService.scheduleRegenerate(),
         },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add model failed: ${message}`, err);
+      recordHandlerFailure('model', err);
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to add table: ${message}` },
@@ -3401,7 +5698,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add column failed: ${message}`, err);
+      recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add column: ${message}` } });
     }
   }
@@ -3531,7 +5829,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update column failed: ${message}`, err);
+      recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update column: ${message}` } });
     }
   }
@@ -3598,7 +5897,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Remove column failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove column failed: ${message}`, err);
+      recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove column: ${message}` } });
     }
   }
@@ -3669,7 +5969,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Toggle key failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Toggle key failed: ${message}`, err);
+      recordHandlerFailure('key', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to toggle key type: ${message}` } });
     }
   }
@@ -3743,7 +6044,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Reorder columns failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Reorder columns failed: ${message}`, err);
+      recordHandlerFailure('column', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to reorder columns: ${message}` } });
     }
   }
@@ -3755,21 +6057,71 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
-      const { markKey, extraPairs, ...rest } = payload;
+      const { markKey, extraPairs, relationshipsFile, ...rest } = payload;
       const drawn: Relationship = {
         fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
         cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
       };
-      await this.commitRelationshipWrite(
+      // The dialog's "Stored in" pick (DBML): checked now, against the files as they are.
+      let newRefFile: NewRefFileChoice | undefined;
+      if (relationshipsFile !== undefined) {
+        const chosen = this.chosenRelationshipsFile(drawn, relationshipsFile);
+        if ('error' in chosen) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${chosen.error}` } });
+          return;
+        }
+        const pairs = [{ fromColumn: drawn.fromColumn, toColumn: drawn.toColumn }, ...(extraPairs ?? [])];
+        newRefFile = {
+          file: chosen.path,
+          links: pairs.map((p) => linkKey({ fromModel: drawn.fromModel, fromColumn: p.fromColumn, toModel: drawn.toModel, toColumn: p.toColumn })),
+        };
+      }
+      const written = await this.commitRelationshipWrite(
         document, webview,
         { kind: 'add', drawn, ...(markKey ? { markKey } : {}), ...(extraPairs?.length ? { extraPairs } : {}) },
-        stage, 'Failed to add relationship.',
+        stage, 'Failed to add relationship.', undefined, newRefFile,
       );
+      if (written?.home === 'library') this.sayWhereRelationshipLanded(drawn);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
+    }
+  }
+
+  /**
+   * The relationships file `relPath` (relative to the semantic dir) the New
+   * Relationship dialog picked for `drawn`, when it may hold it: the project
+   * stores DBML, the table holding the foreign key is a DBML table, and the
+   * file is an existing, readable relationships file inside the semantic dir
+   * (`TableLibraryService.chosenRelationshipsFile`). Its listed spelling, or
+   * why not.
+   */
+  private chosenRelationshipsFile(drawn: Relationship, relPath: string): { path: string } | { error: string } {
+    if (this.tableLibraryService.projectStorage() === 'yaml') {
+      return { error: 'this project keeps its relationships in its YAML table files, so there is no relationships file to choose.' };
+    }
+    const fk = foreignKeyEnd(drawn).model;
+    if (this.tableLibraryService.tableStorage(fk) === 'yaml') {
+      return { error: `${fk} is a YAML table: its relationships are kept in its own file, not a relationships file.` };
+    }
+    return this.tableLibraryService.chosenRelationshipsFile(relPath, (filePath) => projectRelative(this.workspaceRoot, filePath));
+  }
+
+  /**
+   * After a new relationship is saved in a relationships file (DBML), say
+   * which file and line in the status bar for a few seconds
+   * (`TableLibraryService.relationshipLocation`, read after the write). A
+   * relationship kept in its table's own YAML file has no such line: nothing is said.
+   */
+  private sayWhereRelationshipLanded(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): void {
+    try {
+      const at = this.tableLibraryService.relationshipLocation(rel);
+      if (!at) return;
+      vscode.window.setStatusBarMessage(relationshipSavedMessage(projectRelative(this.workspaceRoot, at.filePath), at.line), RELATIONSHIP_SAVED_STATUS_MS);
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] where the relationship was saved: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -3790,13 +6142,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     op: RelationshipWriteOp | readonly RelationshipWriteOp[],
     stage: 'logical',
     errorLabel: string,
+    /** Called as soon as VS Code applies the edit, before it saves (Turn Round's "was it made?"). */
+    onApplied?: () => void,
+    /** DBML: the relationships file the New Relationship dialog picked for the relationship being added (placement only). */
+    newRefFile?: NewRefFileChoice,
   ): Promise<{ home: 'library' | 'domain'; changed: SemanticTable[] } | null> {
     // Several ops (Turn round all, #163) are folded into one plan, so they are one edit and one undo step.
     const ops: readonly RelationshipWriteOp[] = Array.isArray(op) ? op : [op as RelationshipWriteOp];
     const parsed = this.parseSubjectAreaDocument(document);
     const v5 = this.isSubjectAreaV5(parsed);
     const models = v5 ? this.tableLibraryService.listTables() : [];
-    const home = v5 && this.relationshipsInLibrary(models) ? 'library' : 'domain';
+    // A DBML diagram always stores relationships in the library (D5).
+    const home = v5 && this.relationshipsInLibrary(models, document) ? 'library' : 'domain';
     const dbt = await this.loadDbtKeyIndex();
     // Filled by the mutator, which applySubjectAreaEdit runs before it reads modelFiles.
     const save: Array<{ model: SemanticTable }> = [];
@@ -3823,7 +6180,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           usage.push(...stepAudit.usage);
           if (stepAudit.broken.length > 0) {
             telemetry.relationshipInvariants(stepAudit.broken);
-            console.warn(`[SemanticEditorProvider] relationship self-check (${step.op.kind}): ${stepAudit.broken.join(', ')}`);
+            log.warn(`[SemanticEditorProvider] relationship self-check (${step.op.kind}): ${stepAudit.broken.join(', ')}`);
           }
           audit = { ...stepAudit, usage };
         }
@@ -3835,11 +6192,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (typeof marked === 'string') throw new EditRefused(marked.replace('{was}', ops[0].kind === 'add' ? 'added' : 'changed'));
           (section.models as SemanticTable[])[inline] = marked;
         }
-        if (plan.domainRelationships) section.relationships = plan.domainRelationships;
+        if (plan.domainRelationships) {
+          // A DBML diagram's object holds only its pending relationships (D27), which an edit may keep or
+          // remove but never add or change; the writer refuses anything else.
+          if (home === 'library' && this.isDbmlDocument(document)) {
+            const identity = (r: Relationship): string => [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((p) => String(p ?? '').toLowerCase()).join('\u0000');
+            const held = new Set(((section.relationships ?? []) as Relationship[]).map(identity));
+            if (plan.domainRelationships.some((r) => !held.has(identity(r)))) {
+              throw new EditRefused('A DBML diagram holds no relationships; they live in the table library.');
+            }
+          }
+          section.relationships = plan.domainRelationships;
+        }
         save.push(...plan.changed.map((model) => ({ model })));
         grouped = plan.grouped;
       },
-      { webview, stage, errorLabel, modelFiles: { save }, onUnsaved: () => telemetry.error('relWriteFailed') },
+      { webview, stage, errorLabel, modelFiles: { save, ...(newRefFile ? { newRefFile } : {}) }, onUnsaved: () => telemetry.error('relWriteFailed'), onApplied },
     );
     if (success) telemetry.relationshipUsage(audit?.usage ?? []);
     else telemetry.error('relWriteFailed');
@@ -3891,7 +6259,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const currentNames = (section.models ?? []) as string[];
         const inDomain = currentNames.find((n) => sameName(n, trimmedNew));
         if (inDomain !== undefined) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
         }
         // The model library is shared across domains — renaming onto an
@@ -3902,7 +6270,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Table "${inLibrary}" already exists in the Table Library (${this.libraryRelativePath(inLibrary)}). ` +
-                'Choose a different name, or use "Add Existing Table" to reference it in this subject area.',
+                'Choose a different name, or use "Add Existing Tables" to add it to this diagram.',
             },
           });
           return;
@@ -3912,6 +6280,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: this.tableUnavailableMessage(payload.oldName) } });
           return;
         }
+        const dbmlDiagram = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
         const renamedModel: import('../types/semantic').SemanticTable = { ...existingModel, name: trimmedNew };
         // Library relationships that point at the model — its own self-references
         // and every other model's — follow the rename (#126).
@@ -3938,6 +6307,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               positions[trimmedNew] = positions[payload.oldName];
               delete positions[payload.oldName];
             }
+            // A DBML diagram's sticky notes name the table they point at (`linked_table`): they follow it.
+            if (dbmlDiagram) relinkSticky(p, payload.oldName, trimmedNew);
           },
           {
             refreshWebview: true,
@@ -3955,7 +6326,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             },
             // Every other diagram that names the model follows the rename —
             // its model list, position and own relationship copies (#133 L5).
-            otherDomains: (other) => renameTableInSubjectArea(other, payload.oldName, trimmedNew),
+            otherDomains: (other, storage) => renameTableInSubjectArea(other, payload.oldName, trimmedNew, storage),
           },
         );
 
@@ -3978,7 +6349,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new EditAborted();
           }
           if (models.some((m) => m !== model && typeof m.name === 'string' && sameName(m.name, trimmedNew))) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${trimmedNew}" already exists in this subject area.` } });
+            webview.postMessage({ type: 'error', payload: { message: `Table "${trimmedNew}" already exists in this diagram.` } });
             throw new EditAborted();
           }
 
@@ -4003,7 +6374,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Rename model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Rename model failed: ${message}`, err);
+      recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to rename table: ${message}` } });
     }
   }
@@ -4064,7 +6436,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               (rel) => !namesLower.has(String(rel.fromModel).toLowerCase()) && !namesLower.has(String(rel.toModel).toLowerCase()),
             );
 
-            pruneViewConfigForRemovedTables(p, namesSet);
+            pruneViewConfigForRemovedTables(p, namesSet, subjectAreaStorageOf(document.uri.fsPath) === 'dbml');
           },
           { refreshWebview: true, webview, stage },
         );
@@ -4076,15 +6448,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         this.selectorsService.scheduleRegenerate();
 
-        // Single batched prompt for any underlying .yml files.
-        const filesToOffer = [...namesSet].filter((name) =>
-          this.tableLibraryService.tableExists(name),
-        );
+        // Single batched prompt for any underlying table files. A `.dbml`
+        // table's file goes with its relationships and every use line that
+        // names it, in diagrams and relationships files (D16).
+        const filesToOffer = [...namesSet].filter((name) => this.tableLibraryService.tableExists(name));
         if (filesToOffer.length > 0) {
           const fileIsSingle = filesToOffer.length === 1;
+          const dbmlNames = filesToOffer.filter((name) => this.tableLibraryService.tableStorage(name) === 'dbml');
+          const cascade = dbmlNames.length > 0 ? this.describeDbmlDeleteCascade(dbmlNames) : '';
           const prompt = fileIsSingle
-            ? `Table "${filesToOffer[0]}" removed from this subject area. Delete the table file entirely?`
-            : `${filesToOffer.length} tables removed from this subject area. Delete their table files entirely?`;
+            ? `Removed "${filesToOffer[0]}" from this diagram. It stays in the Table Library for other diagrams. Delete its table file too?${cascade}`
+            : `Removed ${filesToOffer.length} tables from this diagram. They stay in the Table Library for other diagrams. Delete their table files too?${cascade}`;
           const deleteLabel = fileIsSingle ? 'Delete Table File' : 'Delete Table Files';
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
           void vscode.window
@@ -4095,17 +6469,36 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               const filePaths = filesToOffer.map((name) => this.tableLibraryService.tablePath(name));
               const shownPaths = filesToOffer.map((name) => this.libraryRelativePath(name));
               const deleteFiles = async (): Promise<void> => {
-                // Delete through a WorkspaceEdit so VS Code snapshots the files
-                // and the deletion is undoable, rather than a bare unlink.
-                const deleteEdit = new vscode.WorkspaceEdit();
-                for (const filePath of filePaths) {
-                  deleteEdit.deleteFile(vscode.Uri.file(filePath), { ignoreIfNotExists: true });
+                // A DBML table: the D16 cascade, one WorkspaceEdit through applyFileWrites.
+                if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
+                  let result: { ok: boolean; unrestored: string[] };
+                  try {
+                    result = await this.deleteTablesWithCascade(filesToOffer);
+                  } catch (err) {
+                    void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
+                    return;
+                  }
+                  if (result.ok) {
+                    vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
+                    return;
+                  }
+                  // Files left half-deleted: the reconcile's modal names them, and "nothing was deleted" would contradict it.
+                  if (result.unrestored.length > 0) return;
+                  const again = await vscode.window.showErrorMessage(tableFileDeleteFailedMessage(shownPaths), 'Try Again');
+                  if (again === 'Try Again') await deleteFiles();
+                  return;
                 }
-                if (await vscode.workspace.applyEdit(deleteEdit)) {
+                // Delete through one WorkspaceEdit (applyFileWrites, D23) so VS Code
+                // snapshots the files and the deletion is undoable, rather than a
+                // bare unlink; a partial apply is put back before anything is said.
+                const deleted = await applyFileWrites(filePaths.map((filePath): FileWrite => ({ kind: 'delete', path: filePath })));
+                if (deleted.ok) {
                   vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
                   return;
                 }
-                // applyEdit gives no reason, so none is guessed (#205); the edit is all or nothing.
+                // Files the reconcile could not put back are named in its modal; "nothing was deleted" would contradict it.
+                if (deleted.unrestored.length > 0) return;
+                // applyEdit gives no reason, so none is guessed (#205); the reconcile put every file back.
                 const choice = await vscode.window.showErrorMessage(
                   tableFileDeleteFailedMessage(shownPaths),
                   'Try Again',
@@ -4143,9 +6536,115 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`, err);
+      recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}: ${message}` } });
     }
+  }
+
+  /**
+   * What deleting DBML tables also removes, for the Delete Table prompts
+   * (D16): the relationships the cascade drops (the deleted tables' own and
+   * other DBML owners' to them; a YAML owner keeps its own) and the DBML
+   * diagrams that list them. `other` words them for the canvas, whose own
+   * diagram has just dropped them.
+   */
+  describeDbmlDeleteCascade(names: readonly string[], other = true): string {
+    const lowerNames = new Set(names.map((n) => n.toLowerCase()));
+    // Every Ref in the project's relationships files with an end among them: one per relationship, a composite once.
+    let relationships = 0;
+    for (const ref of this.tableLibraryService.relationshipsIndex().refs) {
+      if (!ref.pending && (lowerNames.has(ref.owner) || lowerNames.has(ref.target))) relationships++;
+    }
+    // Every DBML diagram listing one, from its syntax-only summary (memoised).
+    const semanticRoot = this.semanticRootDir();
+    let diagrams = 0;
+    for (const summary of this.listOtherSubjectAreas('')) {
+      if (summary.storage !== 'dbml') continue;
+      const rel = path.relative(semanticRoot, summary.filePath).split(path.sep).join('/');
+      const imports = diagramSummaryForFile(rel, summary.filePath, this.openDocumentText(summary.filePath));
+      const members = imports === null || imports === 'unreadable' ? [] : [...imports.members, ...imports.unlinked];
+      if (members.some((m) => lowerNames.has(m.toLowerCase()))) diagrams++;
+    }
+    const rels = `${relationships} relationship${relationships === 1 ? '' : 's'}`;
+    const places = `${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`;
+    return names.length === 1
+      ? ` This removes the table's file, its ${rels} and its place in ${places}.`
+      : ` This removes their files, their ${rels} and their places in ${places}.`;
+  }
+
+  /**
+   * Delete Table (File) for tables that include DBML ones (D16): the files,
+   * the Refs they own, other DBML owners' Refs to them, and every `use` line
+   * naming them (relationships files and DBML diagrams, with their positions
+   * and sticky-note links), as ONE WorkspaceEdit (its own undo step). JSON
+   * diagrams are neither read nor written: they name tables, and a deleted
+   * one shows as a placeholder there, as for a YAML table. Returns false when
+   * VS Code did not apply it (reconciled by applyFileWrites). A file that
+   * could not be saved afterwards is reported, never ignored.
+   */
+  async deleteTablesWithCascade(names: readonly string[]): Promise<{ ok: boolean; unrestored: string[] }> {
+    const lowerNames = new Set(names.map((n) => n.toLowerCase()));
+    const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
+    let writes: FileWrite[];
+    try {
+      const lib = this.tableLibraryService.planTableWrites(this.tableLibraryService.dbmlDeleteCascadeOps(names), undefined, { readText });
+      const plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
+      const resolver = this.resolverOf(plan);
+      const diagrams = this.rewriteOtherSubjectAreaWrites('', (parsed) => {
+        const logical = (parsed.logical ?? {}) as Record<string, unknown>;
+        const models = Array.isArray(logical.models) ? (logical.models as unknown[]) : [];
+        const removed = new Set(models.filter((m): m is string => typeof m === 'string' && lowerNames.has(m.toLowerCase())));
+        if (removed.size === 0) return false;
+        logical.models = models.filter((m) => !(typeof m === 'string' && removed.has(m)));
+        pruneViewConfigForRemovedTables(parsed, removed, true);
+        return true;
+      }, resolver, { dbmlOnly: true, plan });
+      // Every other diagram whose imports the cut Refs change (§2.6).
+      const settled = this.settleDbmlDiagrams('', new Set(diagrams.map((w) => path.resolve(w.path))), plan);
+      writes = [...lib.writes, ...diagrams, ...settled];
+    } catch (err) {
+      throw this.refusalOf(err);
+    }
+    const dirty = dirtyFiles(writes.map((w) => w.path));
+    if (dirty.length > 0) {
+      throw new EditRefused(`${path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again.`);
+    }
+    // The watchers wait for these files instead of deciding while the saves
+    // run (one per diagram listing the table), so none is taken for an
+    // outside change before its record is made.
+    const expectation = this.ownWriteTracker.expectWrite(writes.map((w) => w.path));
+    const unsaved: string[] = [];
+    const saveFailures = new Set<SaveFailure>();
+    let modelFileUnsaved = false;
+    let applied: AppliedFileWrites;
+    try {
+      applied = await applyFileWrites(writes, { semanticRoot: this.semanticRootDir() });
+      // Not applied: `unrestored` lists the files the reconcile could not put back (its modal already named them).
+      if (!applied.ok) return { ok: false, unrestored: applied.unrestored };
+      // Creates and deletes landed with the edit itself: recorded before the saves.
+      for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
+      for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      for (const uri of applied.replaced) {
+        if (await saveDocumentByUri(uri, (reason) => saveFailures.add(reason))) {
+          this.ownWriteTracker.recordWrite(uri.fsPath);
+        } else {
+          unsaved.push(uri.fsPath);
+          if (this.isLibraryPath(uri.fsPath)) modelFileUnsaved = true;
+        }
+      }
+    } finally {
+      this.ownWriteTracker.settleWrites(expectation);
+    }
+    if (unsaved.length > 0) {
+      for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
+      void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));
+    }
+    this.tableLibraryService.invalidatePaths(writtenPaths(applied));
+    this.tableLibraryService.primeRelationshipsFiles(writtenPaths(applied));
+    await this.refreshAllOpenSubjectAreas();
+    for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
+    return { ok: true, unrestored: [] };
   }
 
   /** Single-relationship removal — thin wrapper over the batch handler. */
@@ -4189,7 +6688,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (written?.home === 'library') this.noteDiagramsStillDrawing(document, keys);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Remove ${label} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${label} failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${label}: ${message}` } });
     }
@@ -4216,14 +6715,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         : `Deleted. These diagrams still draw ${what} from copies of their own: ${labels.join(', ')}. ` +
           'Delete those copies too if it should go everywhere.');
     } catch (err) {
-      console.error('[SemanticEditorProvider] Could not check other diagrams after a delete:', err);
+      log.error('[SemanticEditorProvider] Could not check other diagrams after a delete:', err);
     }
   }
 
   /** Usage telemetry: a relationship handler threw something other than a refusal it explained. */
   private recordRelationshipFailure(err: unknown): void {
-    if (isExplainedRefusal(err)) return;
-    telemetry.error('relHandlerFailed');
+    recordHandlerFailure('relationship', err);
   }
 
   private async handleUpdateRelationship(
@@ -4238,7 +6736,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update relationship: ${message}` } });
     }
@@ -4276,7 +6774,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Edit relationship failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Edit relationship failed: ${message}`, err);
       this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to edit relationship: ${message}` } });
     }
@@ -4293,12 +6791,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     positions: Record<string, { x: number; y: number }>,
     annotations: AnnotationPositionPayload[] = [],
   ): Promise<void> {
+    const start = Date.now();
+    let layoutOnly = false;
+    if (this.isDbmlDocument(document)) {
+      // erd_layout holds one name per line (§1.6): a name it cannot hold is not saved.
+      const dropped = Object.keys(positions).filter((name) => !isErdLayoutName(name) || name.startsWith(ERD_LAYOUT_NOTE_PREFIX));
+      if (dropped.length > 0) log.warn(`[SemanticEditorProvider] Positions of ${plural(dropped.length, 'table')} not saved in ${document.uri.fsPath}: erd_layout cannot hold ${dropped.map((n) => JSON.stringify(n)).join(', ')}`);
+    }
     try {
-      await this.applySubjectAreaEdit(
+      const written = await this.applySubjectAreaEdit(
         document,
         (_section, parsed) => {
           const existingViewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
           const existingPositions = (existingViewConfig.positions ?? {}) as Record<string, unknown>;
+          // Every table dropped where it already was, and no note moved: nothing to write.
+          const unmoved = Object.entries(positions).every(([name, p]) => {
+            const old = existingPositions[name] as { x?: unknown; y?: unknown } | undefined;
+            return old?.x === p.x && old?.y === p.y;
+          });
+          if (unmoved && annotations.length === 0) throw new EditAborted();
           // Merge incoming positions over disk positions — prevents concurrent tabs from
           // clobbering each other's saves when using the shared global viewConfig.
           const mergedPositions = { ...existingPositions, ...positions };
@@ -4314,11 +6825,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
           }
         },
-        { refreshWebview: false, webview, stage: 'logical', errorLabel: 'Failed to save layout positions.' },
+        { refreshWebview: false, webview, stage: 'logical', errorLabel: 'Failed to save layout positions.', onLayoutOnly: () => { layoutOnly = true; } },
       );
+      const what = [
+        ...(Object.keys(positions).length > 0 ? [plural(Object.keys(positions).length, 'table')] : []),
+        ...(annotations.length > 0 ? [plural(annotations.length, 'note')] : []),
+      ].join(' and ');
+      canvasLog.info(written
+        ? `Saved the positions of ${what} in ${document.uri.fsPath} in ${elapsedMs(start)} ms${layoutOnly ? ' (layout only)' : ''}`
+        : `Positions of ${what} in ${document.uri.fsPath} unchanged or not saved (${elapsedMs(start)} ms)`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Position update failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Position update failed: ${message}`, err);
+      recordHandlerFailure('layout', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to save positions: ${message}` } });
     }
   }
@@ -4356,7 +6875,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add annotation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add annotation failed: ${msg}`, err);
+      recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add annotation: ${msg}` } });
     }
   }
@@ -4399,7 +6919,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update annotation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update annotation failed: ${msg}`, err);
+      recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update annotation: ${msg}` } });
     }
   }
@@ -4431,7 +6952,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Remove ${label} failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Remove ${label} failed: ${msg}`, err);
+      recordHandlerFailure('annotation', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${label}: ${msg}` } });
     }
   }
@@ -4461,25 +6983,35 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isSubjectAreaV5(parsed)) {
         const modelNames = (section.models ?? []) as string[];
         if (modelNames.includes(payload.modelName)) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" already exists in this subject area.` } });
+          webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" already exists in this diagram.` } });
           return;
         }
 
         // Seed the logical model from yml (primary) or the manifest (fallback)
-        // when it is not in the library yet — the same seeding Draw from dbt
+        // when it is not in the library yet — the same seeding Import from dbt
         // uses (`seedTableFromDbt`). The file is NOT written here — it rides
         // in the same WorkspaceEdit as the domain change below, so a rejected
         // edit leaves no orphan yml behind and one undo removes both.
         const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
         const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
         let seededModel: import('../types/semantic').SemanticTable | undefined;
+        const dbmlProblem = this.dbmlMemberProblem(document, payload.modelName);
+        if (dbmlProblem) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${dbmlProblem}` } });
+          return;
+        }
         if (!this.tableLibraryService.tableExists(payload.modelName)) {
           const seed = seedTableFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
-            webview.postMessage({ type: 'error', payload: { message: `Table "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
+            webview.postMessage({ type: 'error', payload: { message: this.logicalOnly
+              ? `Table "${payload.modelName}" is not in the Table Library.`
+              : `Table "${payload.modelName}" not found in your dbt .yml files, the manifest or the table library.` } });
             return;
           }
           seededModel = { ...seed, name: payload.modelName };
+          // A DBML diagram's new table goes in its dbt custom schema's folder, when the model has one (§2.4).
+          const configuredSchema = this.isDbmlDocument(document) ? configuredSchemaOf(payload.modelName, ymlData, manifest) : undefined;
+          if (configuredSchema !== undefined) seededModel = { ...seededModel, configuredSchema } as DbmlDraftTable;
         }
 
         // Relationships from the yml and manifest relationship tests together,
@@ -4524,8 +7056,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         if (success) {
           this.selectorsService.scheduleRegenerate();
+          if (routed.unstored) void vscode.window.showInformationMessage(`Added ${payload.modelName}. ${routed.unstored}`);
         } else {
-          webview.postMessage({ type: 'error', payload: { message: 'Failed to add table to subject area.' } });
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add the table to this diagram.' } });
         }
         return;
       }
@@ -4540,7 +7073,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!ymlModel && !manifestModel) {
         webview.postMessage({
           type: 'error',
-          payload: { message: `Table "${payload.modelName}" not found in .yml files or manifest.` },
+          payload: { message: this.logicalOnly
+            ? `Table "${payload.modelName}" is not in the Table Library.`
+            : `Table "${payload.modelName}" not found in your dbt .yml files or the manifest.` },
         });
         return;
       }
@@ -4558,7 +7093,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           if (models.some((m) => m.name === payload.modelName)) {
             webview.postMessage({
               type: 'error',
-              payload: { message: `Table "${payload.modelName}" already exists in this subject area.` },
+              payload: { message: `Table "${payload.modelName}" already exists in this diagram.` },
             });
             throw new EditAborted();
           }
@@ -4606,20 +7141,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         {
           webview,
           stage,
-          errorLabel: 'Failed to add table to subject area.',
+          errorLabel: 'Failed to add the table to this diagram.',
           onSuccess: () => this.selectorsService.scheduleRegenerate(),
         },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add existing model failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add existing model failed: ${message}`, err);
+      recordHandlerFailure('model', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${message}` } });
     }
   }
 
   /**
    * "Add models from dbt" — the empty canvas's primary action, a batch version
-   * of Add Existing Model. Asks which dbt models with the Draw from dbt picker
+   * of Add Existing Model. Asks which dbt models with the Import from dbt picker
    * (models already in the domain left out), seeds the ones the library lacks
    * from dbt's yml / manifest and adds names, relationships and new library
    * files in ONE `applySubjectAreaEdit` — one save, one refresh, one undo step.
@@ -4647,7 +7183,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         return;
       }
-      const inDomain = (this.getStageSection(parsed, 'logical').models ?? []) as string[];
+      // A member with no table file (drawn as missing; D26 in a DBML diagram) can be made from dbt here:
+      // only the members that have one are already in.
+      const inDomain = ((this.getStageSection(parsed, 'logical').models ?? []) as string[])
+        .filter((name) => this.tableLibraryService.tableExists(name));
 
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
@@ -4674,7 +7213,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const pick = await pickDraftScope(listDraftScopes(source), {
         models,
         excludeNames: inDomain,
-        title: 'Add tables from dbt',
+        title: 'Add Tables from dbt',
       });
       if (!pick) { telemetry.feature('addFromDbtCancelled'); return; }
 
@@ -4682,10 +7221,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.applyDbtModels(document, webview, pick.modelNames, ymlData, manifest));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add models from dbt failed: ${message}`, err);
       // A refusal the toast explains (a conflicted diagram, a model file
       // with unsaved edits) is not a breakage.
       if (!isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
+      // Counted (or a refusal): the boundary does not count it again.
+      markRecorded(err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add tables from dbt: ${message}` } });
     }
   }
@@ -4703,6 +7244,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     modelNames: readonly string[],
+    /** A drop on the canvas: the new tables go here (`dropTables`), not beside their relations. */
+    options: { dropAt?: NodePosition } = {},
   ): Promise<void> {
     try {
       if (!this.isSubjectAreaV5(this.parseSubjectAreaDocument(document))) {
@@ -4714,10 +7257,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-      await this.applyDbtModels(document, webview, modelNames, ymlData, manifest, 'picked');
+      await this.applyDbtModels(document, webview, modelNames, ymlData, manifest, 'picked', options.dropAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add existing models failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add existing models failed: ${message}`, err);
+      recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add tables: ${message}` } });
     }
   }
@@ -4736,6 +7280,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     ymlData: YmlData,
     manifest: ManifestData,
     origin: 'dbt' | 'picked' = 'dbt',
+    /** Where a drop on the canvas let go: the new tables are placed there (`dropGridPositions`). */
+    dropAt?: NodePosition,
   ): Promise<void> {
     const fromDbt = origin === 'dbt';
     const from = fromDbt ? ' from dbt' : '';
@@ -4743,7 +7289,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Re-read inside the queue: an edit may have landed while the picker was open.
       const parsed = this.parseSubjectAreaDocument(document);
       const section = this.getStageSection(parsed, 'logical');
-      const existingNames = (section.models ?? []) as string[];
+      // A listed member with no table file is drawn as missing: picking it makes its file, and it stays listed once.
+      const existingNames = ((section.models ?? []) as string[]).filter((name) => this.tableLibraryService.tableExists(name));
       const draft = buildDbtDraft({
         modelNames,
         ymlData,
@@ -4761,7 +7308,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // without a word. The dbt picker leaves those out up front.
       const alreadyIn = fromDbt ? [] : draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name);
       const skippedNote = [
-        describeSkippedDbtModels(draft.skipped),
+        describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
         alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',
       ].filter(Boolean).join(' ');
       if (draft.modelNames.length === 0) {
@@ -4773,13 +7320,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      const routed = this.routeAddedRelationships(document, draft.relationships, draft.newModels);
+      const dbmlProblems = draft.modelNames.map((name) => this.dbmlMemberProblem(document, name)).filter((m): m is string => m !== null);
+      if (dbmlProblems.length > 0) {
+        this.post(webview, { type: 'error', payload: { message: `No tables were added${from}. ${dbmlProblems[0]}${dbmlProblems.length > 1 ? ` (and ${dbmlProblems.length - 1} more)` : ''}` } });
+        return;
+      }
+      // A DBML diagram's new tables go in their dbt custom schema's folder, when they have one (§2.4).
+      const newModels = this.isDbmlDocument(document)
+        ? draft.newModels.map((m) => {
+          const configuredSchema = configuredSchemaOf(m.name, ymlData, manifest);
+          return configuredSchema !== undefined ? { ...m, configuredSchema } : m;
+        })
+        : draft.newModels;
+      const routed = this.routeAddedRelationships(document, draft.relationships, newModels);
       await this.applySubjectAreaEdit(
         document,
         (sec, p) => {
           const names = (sec.models ?? []) as string[];
           const wasEmpty = names.length === 0;
-          names.push(...draft.modelNames);
+          const listed = new Set(names.map(normaliseName));
+          names.push(...draft.modelNames.filter((name) => !listed.has(normaliseName(name))));
           sec.models = names;
           if (routed.kept.length > 0) {
             sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...routed.kept];
@@ -4789,15 +7349,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
           const positions = { ...((vc.positions ?? {}) as Record<string, NodePosition>) };
-          if (wasEmpty) {
+          if (dropAt) {
+            // Dropped on the canvas: each table new to the diagram goes where the
+            // user let go (over a stale position it may still have), whatever
+            // else the diagram holds; a member already listed keeps its place.
+            const added = draft.modelNames.filter((name) => !listed.has(normaliseName(name)));
+            vc.positions = { ...positions, ...dropGridPositions(added, dropAt) };
+          } else if (wasEmpty) {
             // Keep it a fresh layout (isFreshLayout): no stored position for
             // any model, so the refresh asks the webview for an ELK layout.
             for (const name of draft.modelNames) delete positions[name];
             if (vc.positions !== undefined) vc.positions = positions;
           } else {
+            // A member already listed (made from dbt where it was drawn as missing) keeps its place.
+            const unplaced = draft.modelNames.filter((name) => !Object.prototype.hasOwnProperty.call(positions, name));
             vc.positions = {
               ...positions,
-              ...computeNewTablePositions({ newModels: draft.modelNames, relationships, existingPositions: positions }),
+              ...computeNewTablePositions({ newModels: unplaced, relationships, existingPositions: positions }),
             };
           }
           p.viewConfig = vc;
@@ -4810,10 +7378,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
-            if (skippedNote) {
+            const note = [skippedNote, routed.unstored].filter(Boolean).join(' ');
+            if (note) {
               const added = draft.modelNames.length;
               void vscode.window.showInformationMessage(
-                `Added ${added} table${added === 1 ? '' : 's'}${from}. ${skippedNote}`,
+                `Added ${added} table${added === 1 ? '' : 's'}${from}. ${note}`,
               );
             }
           },
@@ -4821,10 +7390,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Add models${from} failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Add models${from} failed: ${message}`, err);
       // A refusal the toast explains (a conflicted diagram, a model file
       // with unsaved edits) is not a breakage.
       if (fromDbt && !isExplainedRefusal(err)) telemetry.error('addFromDbtFailed');
+      if (fromDbt) markRecorded(err);
+      else recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add tables${from}: ${message}` } });
     }
   }
@@ -4884,7 +7455,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update design rationale failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update design rationale failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update design rationale: ${message}` } });
     }
   }
@@ -4929,7 +7501,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update description failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update description failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update description: ${message}` } });
     }
   }
@@ -4974,7 +7547,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update grain failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update grain failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update grain: ${message}` } });
     }
   }
@@ -5008,7 +7582,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update alias failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update warehouse name: ${message}` } });
     }
   }
@@ -5033,6 +7608,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         return;
       }
+      const scope = payload.columnName !== undefined ? 'column' : 'table';
       const ok = await this.applyTableEdit(document, webview, payload.modelName, (model) => {
         let target: { meta?: Meta } = model;
         if (payload.columnName !== undefined) {
@@ -5041,8 +7617,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           target = column;
         }
         const meta: Meta = { ...(target.meta ?? {}) };
+        const writesDbmlText = this.tableIsDbml(payload.modelName);
         for (const key of payload.remove ?? []) delete meta[key];
-        for (const [key, value] of Object.entries(payload.set ?? {})) setMetaEntry(meta, key, value);
+        for (const [key, value] of Object.entries(payload.set ?? {})) {
+          setMetaEntry(meta, key, this.metaValueToWrite(key, value, meta[key], scope, writesDbmlText));
+        }
         if (Object.keys(meta).length > 0) { target.meta = meta; } else { delete target.meta; }
       });
       if (!ok) {
@@ -5050,9 +7629,39 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update meta failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update meta failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update metadata: ${message}` } });
     }
+  }
+
+  /** Whether `modelName`'s file is a DBML table (it keeps its storage through an edit). */
+  private tableIsDbml(modelName: string): boolean {
+    try {
+      return this.tableLibraryService.findTableFile(modelName)?.toLowerCase().endsWith('.dbml') ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * What an `updateMeta` set writes for `key` (A12). The canvas posts text;
+   * a yes-no answer (`true` / `false`) is written as a BOOLEAN where the file
+   * keeps booleans: over a value that is already a boolean (YAML `pii: true`,
+   * a DBML `meta_json` entry), and in a YAML table when the project's field
+   * list makes the key a yes-no field. A DBML table's text value stays text
+   * (`pii: 'true'`), as its bare spelling holds only text. Anything else is
+   * the text as posted.
+   */
+  private metaValueToWrite(key: string, value: string, existing: MetaValue | undefined, scope: 'table' | 'column', dbml: boolean): MetaValue {
+    const answer = /^\s*(true|false)\s*$/i.exec(value)?.[1]?.toLowerCase();
+    if (answer === undefined) return value;
+    if (typeof existing === 'boolean') return answer === 'true';
+    if (dbml) return value;
+    const list = this.fieldList();
+    const defs = list ? (scope === 'column' ? list.columns : list.tables) : [];
+    const def = defs.find((d) => d.key === key && d.home.kind === 'meta') ?? builtInField(key, scope);
+    return def?.type === 'yes-no' && def.home.kind === 'meta' ? answer === 'true' : value;
   }
 
   private async handleUpdateModelRole(
@@ -5093,7 +7702,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update model role failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Update model role failed: ${message}`, err);
+      recordHandlerFailure('details', err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update table role: ${message}` } });
     }
   }
@@ -5123,6 +7733,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const panel = this.openPanels.get(panelKey);
       if (!panel) return;
 
+      // Logical-only: no Physical stage. A physical request (a stale webview,
+      // Alt+2, a tree "open in physical") is answered with the logical stage,
+      // echoing requestId so the webview accepts the reply.
+      if (this.logicalOnly) { targetStage = 'logical'; }
+
+      // A stage change closes the Compare overlay in the webview (editorStore's
+      // setDomain), so the host forgets that comparison too: a later redraw
+      // must not re-run it, and Sync must not plan from it.
+      if (panel.activeStage !== targetStage) {
+        panel.lastDiscrepancyReport = null;
+        panel.lastCompareAgainst = undefined;
+        panel.compareRequest = (panel.compareRequest ?? 0) + 1;
+      }
       // Update tracked stage
       panel.activeStage = targetStage;
 
@@ -5148,18 +7771,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
         }
+        const fields = this.displayFields();
+        if (fields) {
+          physicalDomain.fields = fields;
+        }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
+        this.cancelCanvasContext(webview);
         // #113: where a missing manifest is met (once per day).
         if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
         // Logical — extract from unified file
         const domain = this.subjectAreaService.getSubjectAreaStage(document.uri.fsPath, { dbtKeyIndex });
-        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag() });
+        const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
+        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag(), ...this.logicalOnlyFlag() });
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Stage switch failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Stage switch failed: ${message}`, err);
+      recordHandlerFailure('stage', err);
       // A file the user broke (#186) is named the way the load screen names it.
       const fileProblem = err instanceof SubjectAreaFileError ? this.subjectAreaFileProblemPayload(err, document.uri.fsPath) : undefined;
       this.post(webview, { type: 'error', payload: { message: `Failed to switch stage: ${fileProblem?.message ?? message}` } });
@@ -5176,11 +7806,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     payload: { enabled: boolean; compareAgainst?: Stage },
   ): Promise<void> {
-    if (!payload.enabled || !payload.compareAgainst) {
+    // Logical-only: nothing to compare against, and no staleness check.
+    if (!payload.enabled || !payload.compareAgainst || this.logicalOnly) {
       const panelEntry = this.openPanels.get(panelKey);
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = null;
         panelEntry.lastCompareAgainst = undefined;
+        panelEntry.compareRequest = (panelEntry.compareRequest ?? 0) + 1;
       }
       webview.postMessage({ type: 'discrepancyReport', payload: null });
       return;
@@ -5189,10 +7821,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const panel = this.openPanels.get(panelKey);
       if (!panel) return;
+      const request = (panel.compareRequest ?? 0) + 1;
+      panel.compareRequest = request;
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
+      // Compare was closed, asked again or the stage changed while those
+      // loaded: that later request owns the overlay and the cached report.
+      if (this.openPanels.get(panelKey)?.compareRequest !== request) return;
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
@@ -5223,7 +7860,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`);
+      logHandlerFailure(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`, err);
+      recordHandlerFailure('compare', err);
       webview.postMessage({ type: 'discrepancyReport', payload: null });
     }
   }
@@ -5267,16 +7905,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         semanticDir,
         domain: (parsed.domain as string | undefined) ?? '',
         layer: (parsed.layer as string | undefined) ?? '',
-        modelFolder: (name) => this.tableLibraryService.tableFolder(name),
-        tableLibraryFile: (name) => this.tableLibraryService.tableLibraryFile(name),
-        newTableLibraryDir: this.tableLibraryService.newTableLibraryDirName(),
+        // The CLI's lookups (diff): a new table goes where one created from this diagram goes.
+        ...syncPlanLibraryLookups(this.tableLibraryService, {
+          diagramFile: document.uri.fsPath,
+          layerIds: new Set(this.layerService.getAllLayers().map((l) => l.id)),
+          manifest,
+          ymlData,
+        }),
       });
 
       const totalActions = countSyncPlanActions(syncPlan);
       if (totalActions === 0) {
+        // Everything selected touched a table whose file does not read: say
+        // so, rather than suggest the selection was empty.
+        const unreadable = syncPlan.unreadableTables ?? [];
         webview.postMessage({
           type: 'error',
-          payload: { message: 'No actionable resolutions selected.' },
+          payload: {
+            message: unreadable.length > 0
+              ? `Nothing to sync yet: ${unreadable.join(', ')} could not be read. Fix the file, then compare again.`
+              : 'No actionable resolutions selected.',
+          },
         });
         return;
       }
@@ -5302,23 +7951,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.window.showTextDocument(uri, { preview: true, viewColumn: vscode.ViewColumn.Beside });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`);
+      logHandlerFailure(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`, err);
+      recordHandlerFailure('compare', err);
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to generate sync plan: ${msg}` },
       });
     }
-  }
-
-  /**
-   * Run `dbt compile` in a VS Code terminal.
-   * The existing FileWatcherService will detect manifest changes and refresh.
-   */
-  private async handleRunDbtCompile(): Promise<void> {
-    const terminal = vscode.window.createTerminal({ name: 'dbt compile', cwd: this.workspaceRoot });
-    terminal.show();
-    const activate = findVenvActivate(this.workspaceRoot);
-    terminal.sendText(activate ? `${activate} && dbt compile` : 'dbt compile');
   }
 
   /**
@@ -5329,27 +7968,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `erdStudio.claudeSync.skipPermissions` setting is enabled (default off),
    * because it lets Claude edit files in the workspace without asking.
    *
-   * The prompt is typed into the Claude TUI after a short delay; if the user
-   * closes the terminal in the meantime the send is skipped rather than
-   * throwing "Terminal has already been disposed" inside the timer.
+   * The prompt is Claude Code's initial-prompt argument (`claude "<prompt>"`,
+   * built by `claudeTerminalLaunch`, the launcher Open Claude Code uses), never
+   * text typed into its TUI after a delay: on a first run Claude Code shows
+   * its folder-trust prompt with "No, exit" preselected, where typed text is
+   * lost and its newline would confirm the highlighted option.
    */
   private async handleLaunchClaudeSync(): Promise<void> {
     const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
     const skipPermissions = getErdStudioSetting<boolean>('claudeSync.skipPermissions', false) === true;
     const planPath = `${semanticDir}/.sync-plan.json`;
-    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
+    const syncGuide = '.claude/skills/erd-studio/SYNC.md';
+    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read ${syncGuide} for the action reference and follow the execution steps.`;
 
-    const claudeCommand = skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude';
-    const activate = findVenvActivate(this.workspaceRoot);
-    const launchCommand = activate ? `${activate} && ${claudeCommand}` : claudeCommand;
+    // Without the AI helper files the prompt names a guide that isn't there,
+    // and Claude Code goes looking for it across the disk. Offer the setup
+    // instead of launching.
+    if (!fs.existsSync(path.join(this.workspaceRoot, syncGuide))) {
+      const SETUP = 'Set Up My AI Helper';
+      const pick = await vscode.window.showWarningMessage(
+        'Claude Code needs ERD Studio\'s AI helper files to apply the sync plan.',
+        { modal: true, detail: `${syncGuide} is missing. Set Up My AI Helper installs it (choose Claude Code), then run Execute with Claude again. The plan stays at ${planPath}.` },
+        SETUP,
+      );
+      if (pick === SETUP) {
+        await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+      }
+      return;
+    }
+
+    const launch = claudeTerminalLaunch('claude', process.platform, {
+      prompt,
+      args: skipPermissions ? ['--dangerously-skip-permissions'] : [],
+      venvDir: findVenvDir(this.workspaceRoot),
+    });
 
     const detail = skipPermissions
-      ? `Command: ${claudeCommand}\n\n` +
+      ? `Command: ${launch.display}\n\n` +
         'The --dangerously-skip-permissions flag lets Claude Code edit files in this workspace ' +
         'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
-      : `Command: ${claudeCommand}\n\n` +
-        'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
-        'to run unattended with --dangerously-skip-permissions.';
+      : `Command: ${launch.display}\n\n` +
+        'Claude Code asks before editing files unless your own Claude Code settings allow edits. ' +
+        'Enable "erdStudio.claudeSync.skipPermissions" in your user settings to run unattended with --dangerously-skip-permissions.';
     const LAUNCH = 'Launch';
     const choice = await vscode.window.showWarningMessage(
       `Launch Claude Code in a terminal to execute the sync plan at ${planPath}?`,
@@ -5360,25 +8020,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
+    if (launch.kind === 'process') {
+      vscode.window.createTerminal({
+        name: 'ERD Studio Sync', cwd: this.workspaceRoot, shellPath: launch.shellPath, shellArgs: launch.shellArgs, env: launch.env,
+      }).show();
+      return;
+    }
     const terminal = vscode.window.createTerminal({
       name: 'ERD Studio Sync',
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    terminal.sendText(launchCommand);
-    const CLAUDE_TUI_INIT_DELAY_MS = 2000;
-    setTimeout(() => {
-      try {
-        if (!isTerminalAlive(terminal)) {
-          console.warn('[SemanticEditorProvider] Claude sync terminal closed before the prompt could be sent.');
-          return;
-        }
-        terminal.sendText(prompt);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[SemanticEditorProvider] Failed to send sync prompt to terminal: ${message}`);
-      }
-    }, CLAUDE_TUI_INIT_DELAY_MS);
+    terminal.sendText(launch.line);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
@@ -5423,7 +8076,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       font-src ${webview.cspSource};
       connect-src ${webview.cspSource};
       worker-src blob:;">
-  <title>Subject Area Editor</title>
+  <title>ERD Studio Diagram</title>
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
@@ -5440,15 +8093,4 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
 function isTypedMessage(value: unknown): value is { type: string } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof (value as Record<string, unknown>).type === 'string';
-}
-
-/**
- * True while a terminal is still open and its process has not exited.
- * `exitStatus` is set when the shell exits; a closed terminal also drops out of
- * `window.terminals`. Either signal means `sendText` would throw.
- */
-function isTerminalAlive(terminal: vscode.Terminal): boolean {
-  if (terminal.exitStatus !== undefined) return false;
-  const open = vscode.window.terminals;
-  return Array.isArray(open) ? open.includes(terminal) : true;
 }

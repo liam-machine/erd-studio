@@ -24,7 +24,9 @@ import {
   _mockDocuments,
   _clearMockFileWatchers,
   _mockFileWatchers,
+  _failMockSave,
 } from '../__mocks__/vscode';
+import { telemetry } from '../../src/services/telemetryService';
 import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -35,6 +37,8 @@ import { SelectorsService } from '../../src/services/selectorsService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import { FileWatcherService } from '../../src/watchers/FileWatcherService';
+import { CUSTOMISE_FIELDS_COMMAND } from '../../src/commands/customiseFields';
+import { STARTING_FIELD_LIST } from '@erd-studio/core';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -42,6 +46,7 @@ import { FileWatcherService } from '../../src/watchers/FileWatcherService';
 
 interface Harness {
   root: string;
+  provider: SemanticEditorProvider;
   domainPath: string;
   tableLibraryService: TableLibraryService;
   /** Tracker the provider records its own writes into (shared with watchers). */
@@ -148,6 +153,7 @@ async function createHarness(): Promise<Harness> {
 
   return {
     root,
+    provider,
     domainPath,
     tableLibraryService,
     ownWrites,
@@ -232,7 +238,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
     it('still rejects a duplicate within the domain', async () => {
       await h.send({ type: 'addModel', payload: { name: 'fct_order', schema: '', description: '', columns: [] } });
-      expect(h.errors()[0]).toMatch(/already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
     });
 
@@ -288,7 +294,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
       await h.send({ type: 'addModel', payload: { name: 'dim_product', schema: '', description: '', columns: [] } });
 
-      expect(h.errors()).toEqual(['Failed to add table to subject area.']);
+      expect(h.errors()).toEqual(['Failed to add the table to this diagram.']);
       expect(fs.existsSync(ymlPath(h, 'dim_product'))).toBe(false);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });
@@ -331,7 +337,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     it('refuses a new model whose name differs from one in the domain only in case', async () => {
       await h.send({ type: 'addModel', payload: { name: 'FCT_ORDER', schema: '', description: '', columns: [] } });
 
-      expect(h.errors()[0]).toMatch(/Table "fct_order" already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/Table "fct_order" already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
     });
 
@@ -392,7 +398,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     it('refuses to rename onto a name already used in this domain', async () => {
       await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'dim_task' } });
 
-      expect(h.errors()[0]).toMatch(/already exists in this subject area/);
+      expect(h.errors()[0]).toMatch(/already exists in this diagram/);
       expect(_appliedEdits).toHaveLength(0);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });
@@ -703,6 +709,163 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     });
   });
 
+  describe('context fields', () => {
+    const read = () => fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8');
+    const fieldsFile = () => path.join(h.root, '.erd-studio', 'fields.yml');
+    const writeTable = (text: string) => {
+      fs.writeFileSync(ymlPath(h, 'fct_order'), text, 'utf-8');
+      h.tableLibraryService.invalidateCache('fct_order');
+    };
+    const posted = (type: string) => h.panel._postedMessages.filter((m) => (m as { type: string }).type === type) as Array<{ type: string; payload: Record<string, unknown> }>;
+    const PII_FIELDS = 'version: 1\ncolumns:\n  - natural_key\n  - key: pii\n    label: Personal data\n    type: yes-no\n';
+
+    describe('updateModelRationale', () => {
+      it('writes the new built-in text fields camelCase in rationale:, and clears with \'\' or null', async () => {
+        await h.send({ type: 'updateModelRationale', payload: { modelName: 'fct_order', rationale: { decisions: 'Lines, not orders', openQuestions: 'Refunds?' } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')!.rationale).toEqual({ decisions: 'Lines, not orders', openQuestions: 'Refunds?' });
+        expect(read()).toMatch(/\nrationale:\n {2}decisions: Lines, not orders\n {2}openQuestions: Refunds\?\n/);
+
+        await h.send({ type: 'updateModelRationale', payload: { modelName: 'fct_order', rationale: { decisions: '' } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')!.rationale).toEqual({ openQuestions: 'Refunds?' });
+
+        await h.send({ type: 'updateModelRationale', payload: { modelName: 'fct_order', rationale: { openQuestions: null } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')).not.toHaveProperty('rationale');
+        expect(read()).not.toContain('rationale');
+      });
+
+      it('keeps a rationale key ERD Studio does not manage when the last field is cleared', async () => {
+        writeTable('name: fct_order\nrationale:\n  purpose: x\n  notes: kept # by hand\ncolumns:\n  - name: order_key\n    dataType: string\n');
+        await h.send({ type: 'updateModelRationale', payload: { modelName: 'fct_order', rationale: { purpose: '' } } });
+        expect(h.errors()).toEqual([]);
+        expect(read()).toBe('name: fct_order\nrationale:\n  notes: kept # by hand\ncolumns:\n  - name: order_key\n    dataType: string\n');
+      });
+
+      it.each([
+        ['a rationale that is not an object', { modelName: 'fct_order', rationale: 'after' }],
+        ['a list', { modelName: 'fct_order', rationale: ['purpose'] }],
+        ['a key outside the catalogue', { modelName: 'fct_order', rationale: { notes: 'x' } }],
+        ['a snake_case key', { modelName: 'fct_order', rationale: { open_questions: 'x' } }],
+        ['a non-text value', { modelName: 'fct_order', rationale: { purpose: 42 } }],
+        ['an unsafe table name', { modelName: '../x', rationale: { purpose: 'x' } }],
+        ['no payload', undefined],
+      ])('refuses %s, writing nothing', async (_label, payload) => {
+        const before = read();
+        await h.send({ type: 'updateModelRationale', payload });
+        expect(h.errors()).toHaveLength(1);
+        expect(h.errors()[0]).toMatch(/^Failed to update design rationale: /);
+        expect(_appliedEdits).toHaveLength(0);
+        expect(read()).toBe(before);
+      });
+    });
+
+    describe('updateMeta: yes-no answers (A12)', () => {
+      it('writes a boolean over an existing boolean', async () => {
+        writeTable('name: fct_order\nmeta:\n  pii: true # set by dbt\ncolumns:\n  - name: order_key\n    dataType: string\n');
+        await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { pii: 'false' } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')!.meta).toEqual({ pii: false });
+        expect(read()).toContain('  pii: false # set by dbt\n');
+      });
+
+      it('writes a boolean for a yes-no field of fields.yml, even where the file had text', async () => {
+        fs.writeFileSync(fieldsFile(), PII_FIELDS);
+        await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'amount', set: { pii: 'true' } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')!.columns!.find((c) => c.name === 'amount')!.meta).toEqual({ pii: true });
+        expect(read()).toMatch(/\n {6}pii: true\n/);
+        // Not on tables: the list names pii as a column field only.
+        await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { pii: 'true' } } });
+        expect(h.tableLibraryService.getTable('fct_order')!.meta).toEqual({ pii: 'true' });
+      });
+
+      it('keeps text for a key that is not a yes-no field', async () => {
+        await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { reviewed: 'true', owner: 'crm' } } });
+        expect(h.errors()).toEqual([]);
+        expect(h.tableLibraryService.getTable('fct_order')!.meta).toEqual({ reviewed: 'true', owner: 'crm' });
+      });
+    });
+
+    describe('fields.yml reaches the canvas', () => {
+      it('posts no fields without fields.yml, and the file\'s list (both stages) with one', async () => {
+        await h.send({ type: 'ready' });
+        expect(posted('domainLoaded').at(-1)!.payload).not.toHaveProperty('fields');
+
+        fs.writeFileSync(fieldsFile(), PII_FIELDS);
+        await h.send({ type: 'ready' });
+        const fields = posted('domainLoaded').at(-1)!.payload.fields as typeof STARTING_FIELD_LIST;
+        // No tables: section → the starting set's tables; the file's columns.
+        expect(fields.tables.map((d) => d.key)).toEqual(STARTING_FIELD_LIST.tables.map((d) => d.key));
+        expect(fields.columns.map((d) => d.key)).toEqual(['natural_key', 'pii']);
+
+        await h.send({ type: 'switchStage', payload: { stage: 'physical', requestId: 7 } });
+        const physical = posted('stageData').at(-1)!.payload;
+        expect(physical.stage).toBe('physical');
+        expect((physical.fields as typeof STARTING_FIELD_LIST).columns.map((d) => d.key)).toEqual(['natural_key', 'pii']);
+      });
+
+      it('a change to fields.yml redraws the canvas with the new list and writes nothing', async () => {
+        await h.send({ type: 'ready' });
+        const before = read();
+        fs.writeFileSync(fieldsFile(), 'version: 1\ntables:\n  - purpose\n');
+        h.panel._postedMessages.length = 0;
+        _appliedEdits.length = 0;
+        await h.provider.onFieldsFileChanged();
+        const fields = posted('domainLoaded').at(-1)!.payload.fields as typeof STARTING_FIELD_LIST;
+        expect(fields.tables.map((d) => d.key)).toEqual(['purpose']);
+
+        fs.rmSync(fieldsFile());
+        await h.provider.onFieldsFileChanged();
+        expect(posted('domainLoaded').at(-1)!.payload).not.toHaveProperty('fields');
+        expect(_appliedEdits).toHaveLength(0);
+        expect(read()).toBe(before);
+        expect(h.errors()).toEqual([]);
+      });
+
+      it('a broken fields.yml still draws the canvas (no error toast)', async () => {
+        fs.writeFileSync(fieldsFile(), 'tables: [unclosed\n');
+        await h.send({ type: 'ready' });
+        expect(h.errors()).toEqual([]);
+        expect(posted('domainLoaded')).toHaveLength(1);
+      });
+    });
+
+    describe('openFieldsFile', () => {
+      it('runs Customise Fields… and writes nothing', async () => {
+        const run = vi.fn();
+        const registration = vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, run);
+        try {
+          await h.send({ type: 'openFieldsFile' });
+          expect(h.errors()).toEqual([]);
+          expect(run).toHaveBeenCalledTimes(1);
+          expect(_appliedEdits).toHaveLength(0);
+          expect(fs.existsSync(fieldsFile())).toBe(false);
+
+          await h.send({ type: 'openFieldsFile', payload: { path: '/etc/passwd' } });
+          expect(h.errors()).toEqual(['Customise fields takes no payload.']);
+          expect(run).toHaveBeenCalledTimes(1);
+        } finally {
+          registration.dispose();
+        }
+      });
+
+      it('is refused on the read-only physical stage (the link is editor only)', async () => {
+        const run = vi.fn();
+        const registration = vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, run);
+        try {
+          await h.send({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+          await h.send({ type: 'openFieldsFile' });
+          expect(h.errors()).toEqual([PHYSICAL_READ_ONLY_MESSAGE]);
+          expect(run).not.toHaveBeenCalled();
+        } finally {
+          registration.dispose();
+        }
+      });
+    });
+  });
+
   describe('model file with a YAML error (#110)', () => {
     /** Break fct_order.yml: an unquoted ": " inside a value on line 3. */
     function breakFctOrder(): string {
@@ -753,6 +916,24 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       for (const e of errors) {
         expect(e).toContain(`Can't edit "fct_order": its file has a YAML error on line ${line}.`);
         expect(e).not.toContain('not found');
+      }
+    });
+
+    it('an edit names a DBML error for a .dbml table file, and YAML kinds keep their text', async () => {
+      // Broken on disk, so the table is unavailable; the error is then reported as a .dbml file's.
+      const file = breakFctOrder();
+      const spy = vi.spyOn(h.tableLibraryService, 'getTableFileError').mockImplementation((name: string) =>
+        name === 'fct_order' ? { name, filePath: file.replace(/\.yml$/, '.dbml'), kind: 'dbmlSyntax', line: 3, code: '1001', message: 'm' } : null);
+      try {
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a DBML error on line 3.`]);
+        spy.mockImplementation((name: string) =>
+          name === 'fct_order' ? { name, filePath: file, kind: 'yamlScalar', line: 3, message: 'm' } : null);
+        await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+        expect(h.errors()).toEqual([`Failed to update description: Can't edit "fct_order": its file has a YAML error on line 3.`]);
+        expect(_appliedEdits).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
       }
     });
 
@@ -926,6 +1107,31 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(userDoc.isDirty).toBe(true);
       expect(fs.readFileSync(customerPath, 'utf-8')).toBe(onDisk);
     });
+
+    it('reports and counts a model file the undo could not save, and never records it as written', async () => {
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      const modelPath = ymlPath(h, 'fct_order');
+      const ymlDoc = _mockDocuments.get(vscode.Uri.file(modelPath).toString())!;
+      ymlDoc._setText(h.tableLibraryService.serializeTable(FCT_ORDER));
+      _failMockSave(modelPath);
+      const recordWrite = vi.spyOn(h.ownWrites, 'recordWrite');
+      const telemetryError = vi.spyOn(telemetry, 'error');
+      h.panel._postedMessages.length = 0;
+
+      await h.send({ type: 'undo' });
+
+      expect(ymlDoc.isDirty).toBe(true);
+      expect(recordWrite).not.toHaveBeenCalledWith(modelPath);
+      expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedRefused');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+      expect(telemetryError).toHaveBeenCalledWith('saveFailedUndoRedo');
+      const errors = h.panel._postedMessages.filter((m) => (m as { type: string }).type === 'error');
+      expect(JSON.stringify(errors)).toContain('Could not save');
+    });
   });
 
   // ---- H11: own-write suppression on the editor write path ----------------
@@ -970,7 +1176,8 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
         expect(listener).not.toHaveBeenCalled();
 
-        // An external edit to the same file is still reported (the record was consumed).
+        // An external edit to the same file is still reported: it holds other bytes than ours.
+        fs.appendFileSync(ymlPath(h, 'fct_order'), '# edited outside ERD Studio\n');
         _mockFileWatchers[3]._simulateChange(vscode.Uri.file(ymlPath(h, 'fct_order')));
         vi.advanceTimersByTime(300);
         expect(listener).toHaveBeenCalledTimes(1);
@@ -1041,7 +1248,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
 
       await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_new' } });
 
-      expect(h.errors()).toEqual(['Failed to add table to subject area.']);
+      expect(h.errors()).toEqual(['Failed to add the table to this diagram.']);
       expect(fs.existsSync(ymlPath(h, 'dim_new'))).toBe(false);
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });

@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Week EU (ie WK25)",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[Calendar Week EU (ie WK25)]",
+  "sortByColumn": "Calendar Week Number EU (ie 25)",
+  "displayFolder": "4. Week",
+  "lineageTag": "da853b79-633f-4869-b291-880aa11452ad",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

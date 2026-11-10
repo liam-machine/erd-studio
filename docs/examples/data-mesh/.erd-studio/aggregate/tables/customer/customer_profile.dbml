@@ -1,0 +1,13 @@
+Table customer.customer_profile [
+  grain: 'One row per customer account',
+  decisions: 'Built here from accounts.account, orders.customer_order and payments.payment: the customer domain owns it, and the other domains only publish.',
+  owner: 'customer-team'
+] {
+  Note: 'One view of each customer, across domains.'
+
+  account_id             STRING          [pk, foreign_key: 'true']
+  lifetime_orders        INT             [additive_type: 'additive']
+  lifetime_spend         "DECIMAL(12,2)" [additive_type: 'additive']
+  last_order_at          TIMESTAMP
+  preferred_carrier_code STRING
+}

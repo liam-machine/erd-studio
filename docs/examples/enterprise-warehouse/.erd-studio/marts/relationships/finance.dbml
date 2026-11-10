@@ -1,0 +1,18 @@
+// The finance team's relationships. A table's relationships stay together: once one of a table's is here, its next ones are saved here too.
+use { table arrangement.account }             from '../../edw/tables/arrangement/account.dbml'
+use { table marts.dim_branch }                from '../tables/marts/dim_branch.dbml'
+use { table marts.dim_customer }              from '../tables/marts/dim_customer.dbml'
+use { table marts.dim_date }                  from '../tables/marts/dim_date.dbml'
+use { table marts.dim_product }               from '../tables/marts/dim_product.dbml'
+use { table marts.fct_account_balance_daily } from '../tables/marts/fct_account_balance_daily.dbml'
+use { table marts.fct_fee }                   from '../tables/marts/fct_fee.dbml'
+
+Ref account_of_record: marts.fct_account_balance_daily.account_id >? arrangement.account.account_id
+Ref: marts.fct_account_balance_daily.branch_key >? marts.dim_branch.branch_key
+Ref: marts.fct_account_balance_daily.customer_key >? marts.dim_customer.customer_key
+Ref: marts.fct_account_balance_daily.date_key >? marts.dim_date.date_key
+Ref: marts.fct_account_balance_daily.product_key >? marts.dim_product.product_key
+
+Ref: marts.fct_fee.customer_key >? marts.dim_customer.customer_key
+Ref: marts.fct_fee.date_key >? marts.dim_date.date_key
+Ref: marts.fct_fee.product_key >? marts.dim_product.product_key

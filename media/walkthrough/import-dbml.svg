@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <style>
+    .ew-bg{fill:var(--vscode-editor-background,#1e1e1e)}
+    .ew-card{fill:var(--vscode-editorWidget-background,#252526);stroke:var(--vscode-panel-border,#555555);stroke-width:1.5}
+    .ew-fg{fill:var(--vscode-foreground,#cccccc)}
+    .ew-muted{fill:var(--vscode-descriptionForeground,#999999)}
+    .ew-btn{fill:var(--vscode-button-background,#0e639c)}
+    .ew-code{font-family:var(--vscode-editor-font-family,Menlo,Consolas,monospace)}
+  </style>
+  <!-- the DBML file -->
+  <rect x="16" y="40" width="160" height="220" rx="8" class="ew-card"/>
+  <g transform="translate(28 52)">
+    <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#a78bfa" stroke-width="1.4"/>
+    <text x="22" y="12" font-size="11" font-weight="600" class="ew-fg">shop.dbml</text>
+  </g>
+  <line x1="28" y1="78" x2="164" y2="78" stroke="var(--vscode-panel-border,#555555)" stroke-width="1"/>
+  <g font-size="9.5" class="ew-code">
+    <text x="28" y="98"><tspan fill="#a78bfa">Table</tspan><tspan class="ew-fg" dx="6">orders {</tspan></text>
+    <text x="40" y="114" class="ew-muted">id int [pk]</text>
+    <text x="40" y="130" class="ew-muted">customer_id int</text>
+    <text x="28" y="146" class="ew-fg">}</text>
+    <text x="28" y="168"><tspan fill="#a78bfa">Table</tspan><tspan class="ew-fg" dx="6">customers {</tspan></text>
+    <text x="40" y="184" class="ew-muted">id int [pk]</text>
+    <text x="28" y="200" class="ew-fg">}</text>
+    <text x="28" y="222"><tspan fill="#a78bfa">Ref</tspan><tspan class="ew-muted">: orders.customer_id</tspan></text>
+    <text x="40" y="238" class="ew-muted">&gt; customers.id</text>
+  </g>
+  <!-- action -->
+  <rect x="182" y="136" width="36" height="28" rx="14" class="ew-btn"/>
+  <path d="M192 150 H206 M201 145 L207 150 L201 155" fill="none" stroke="var(--vscode-button-foreground,#ffffff)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- canvas -->
+  <rect x="224" y="24" width="240" height="252" rx="10" class="ew-bg" stroke="#60a5fa" stroke-width="1.5"/>
+  <g fill="var(--vscode-descriptionForeground,#999999)" opacity="0.35">
+    <circle cx="244" cy="44" r="1"/><circle cx="264" cy="44" r="1"/><circle cx="244" cy="64" r="1"/><circle cx="444" cy="256" r="1"/><circle cx="424" cy="256" r="1"/><circle cx="444" cy="236" r="1"/>
+  </g>
+  <!-- relationship -->
+  <g fill="none" stroke="#60a5fa" stroke-width="1.5">
+    <path d="M300 128 V166"/>
+    <path d="M294 158 L300 166 L306 158"/>
+  </g>
+  <g font-size="9" font-weight="600" class="ew-fg">
+    <g transform="translate(250 70)">
+      <rect width="100" height="58" rx="4" class="ew-card"/>
+      <path d="M0 4a4 4 0 0 1 4-4h92a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">customers</text>
+      <text x="8" y="30" font-size="8" fill="#f59e0b">PK</text>
+      <rect x="24" y="25" width="40" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="39" width="56" height="4" rx="2" class="ew-muted"/>
+    </g>
+    <g transform="translate(250 166)">
+      <rect width="100" height="66" rx="4" class="ew-card" stroke="#60a5fa" stroke-width="2"/>
+      <path d="M0 4a4 4 0 0 1 4-4h92a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">orders</text>
+      <text x="8" y="30" font-size="8" fill="#f59e0b">PK</text>
+      <rect x="24" y="25" width="40" height="4" rx="2" class="ew-muted"/>
+      <text x="8" y="44" font-size="8" fill="#60a5fa">FK</text>
+      <rect x="24" y="39" width="60" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="53" width="46" height="4" rx="2" class="ew-muted"/>
+    </g>
+  </g>
+  <!-- export back out -->
+  <g transform="translate(370 104)">
+    <rect width="80" height="22" rx="11" fill="none" stroke="#a78bfa" stroke-width="1.4"/>
+    <text x="40" y="15" font-size="9.5" font-weight="600" text-anchor="middle" fill="#a78bfa">DBML</text>
+  </g>
+  <g transform="translate(370 136)">
+    <rect width="80" height="22" rx="11" fill="none" stroke="#a78bfa" stroke-width="1.4"/>
+    <text x="40" y="15" font-size="9.5" font-weight="600" text-anchor="middle" fill="#a78bfa">Mermaid</text>
+  </g>
+  <text x="410" y="178" font-size="9" text-anchor="middle" class="ew-muted">export any time</text>
+</svg>

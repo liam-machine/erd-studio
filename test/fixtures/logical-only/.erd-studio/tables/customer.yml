@@ -1,0 +1,13 @@
+# A logical-only project: no dbt_project.yml anywhere in this folder.
+name: customer
+tableRole: dimension
+description: One row per customer.
+grain: customer_id
+columns:
+  - name: customer_id
+    dataType: INT
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: VARCHAR
+  - name: signed_up_at
+    dataType: TIMESTAMP

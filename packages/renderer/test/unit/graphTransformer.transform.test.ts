@@ -69,6 +69,71 @@ describe('transformSubjectArea nodes', () => {
     expect(data).not.toHaveProperty('discrepancy');
   });
 
+  it('carries each table\'s own layer, its schema prefix and its alias; a table from another layer is marked', () => {
+    const gold = { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 2, creatable: true };
+    const silver = { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 1, creatable: true };
+    const result = transformSubjectArea(subjectArea({
+      layer: 'gold',
+      layerConfig: gold,
+      layerConfigs: [silver, gold],
+      models: [
+        table('fct_order', { schema: 'sales', layer: 'gold' }),
+        table('gold_orders', { schema: 'gold', layer: 'gold', alias: 'orders' }),
+        table('customers', { schema: 'silver', layer: 'silver' }),
+        table('legacy', { schema: 'silver' }),
+      ],
+    }));
+    expect(nodeById(result, 'fct_order').data).toMatchObject({ tableLayer: 'gold', tableLayerConfig: gold, shownSchema: 'sales' });
+    expect(nodeById(result, 'fct_order').data).not.toHaveProperty('otherLayer');
+    // The schema that is the layer's own name is not repeated before the name.
+    expect(nodeById(result, 'gold_orders').data).not.toHaveProperty('shownSchema');
+    expect(nodeById(result, 'gold_orders').data.alias).toBe('orders');
+    expect(nodeById(result, 'customers').data).toMatchObject({ tableLayer: 'silver', tableLayerConfig: silver, otherLayer: true });
+    // A table whose layer the host did not send (YAML, an older core) is drawn as before.
+    expect(nodeById(result, 'legacy').data).not.toHaveProperty('tableLayer');
+  });
+
+  it('prefixes the schema on every stage whenever it is not the badge\'s layer (the table\'s own, else the diagram\'s)', () => {
+    for (const stage of ['logical', 'physical'] as const) {
+      const result = transformSubjectArea(subjectArea({
+        stage,
+        layer: 'silver',
+        models: [
+          table('dim_customer', { schema: 'silver' }),
+          table('dim_region', { schema: 'analytics_silver' }),
+          table('dim_date', { schema: 'SILVER' }),
+          table('dim_blank', { schema: '' }),
+        ],
+      }));
+      expect(nodeById(result, 'dim_customer').data).not.toHaveProperty('shownSchema');
+      expect(nodeById(result, 'dim_region').data.shownSchema).toBe('analytics_silver');
+      expect(nodeById(result, 'dim_date').data).not.toHaveProperty('shownSchema');
+      expect(nodeById(result, 'dim_blank').data).not.toHaveProperty('shownSchema');
+    }
+  });
+
+  it('marks every node of a single-layer project, and none when the domain lists several layers or none', () => {
+    const silver = { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 1, creatable: true };
+    const gold = { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 2, creatable: true };
+    const single = transformSubjectArea(subjectArea({
+      layerConfig: silver,
+      layerConfigs: [silver],
+      models: [table('a', { layer: 'silver' }), table('b')],
+    }));
+    expect(tableNodes(single).map((n) => n.data.singleLayer)).toEqual([true, true]);
+
+    const several = transformSubjectArea(subjectArea({ layerConfigs: [silver, gold], models: [table('a', { layer: 'silver' })] }));
+    expect(nodeById(several, 'a').data).not.toHaveProperty('singleLayer');
+
+    // An older core sends no layer list: every layer cue stays.
+    const older = transformSubjectArea(subjectArea({ models: [table('a')] }));
+    expect(nodeById(older, 'a').data).not.toHaveProperty('singleLayer');
+
+    // One layer configured, but a table read from another layer folder.
+    const borrowed = transformSubjectArea(subjectArea({ layerConfigs: [silver], models: [table('a', { layer: 'gold' })] }));
+    expect(nodeById(borrowed, 'a').data).not.toHaveProperty('singleLayer');
+  });
+
   it('carries column flags and only the optional fields that are set', () => {
     const result = transformSubjectArea(subjectArea({
       models: [table('dim_customer', {
@@ -113,6 +178,20 @@ describe('transformSubjectArea nodes', () => {
     expect(dim.ghostReason).toBe('not-in-project');
 
     expect(fkEdges(result)[0].data?.readOnly).toBe(true);
+  });
+
+  it('hasRationale counts every rationale field with text (new and retired keys), never blank text', () => {
+    const result = transformSubjectArea(subjectArea({
+      models: [
+        table('a', { rationale: { decisions: 'Surrogate keys' } }),
+        table('b', { rationale: { openQuestions: 'Which currency?' } }),
+        table('c', { rationale: { retention: 'Seven years' } }),
+        table('d', { rationale: { grainChoice: 'Order line' } }),
+        table('e', { rationale: { purpose: '   ', decisions: '' } }),
+      ],
+    }));
+    for (const name of ['a', 'b', 'c', 'd']) expect(nodeById(result, name).data.hasRationale).toBe(true);
+    expect(nodeById(result, 'e').data).not.toHaveProperty('hasRationale');
   });
 
   it('carries physical provenance onto node data, and only when the host set it', () => {

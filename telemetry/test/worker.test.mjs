@@ -73,25 +73,46 @@ after(() => {
 /** Every statement the Worker ran against the fake D1, across the whole run. */
 const allStatements = [];
 
-/** An in-memory stand-in for the D1 binding that records every statement. */
-function fakeD1({ fail = false } = {}) {
+/**
+ * An in-memory stand-in for the D1 binding that records every statement:
+ * `worker_daily` ledger statements in `ledger`, everything else in
+ * `statements`. `fail` fails every statement, `failLedger` only the ledger's.
+ */
+function fakeD1({ fail = false, failLedger = false } = {}) {
   const statements = [];
+  const ledger = [];
   return {
     statements,
+    ledger,
     prepare(sql) {
       const statement = { sql, params: [] };
+      const isLedger = /worker_daily/.test(sql);
       return {
         bind(...values) {
           statement.params = values;
           return this;
         },
         async run() {
-          if (fail) throw new Error(`D1_ERROR: boom ${CANARY_IP}`);
-          statements.push(statement);
+          if (fail || (failLedger && isLedger)) throw new Error(`D1_ERROR: boom ${CANARY_IP}`);
+          (isLedger ? ledger : statements).push(statement);
           allStatements.push(statement);
           return { meta: { changes: 3 } };
         },
       };
+    },
+  };
+}
+
+/** A Workers `ctx` whose `waitUntil` promises can be awaited with `settle()`. */
+function makeCtx() {
+  const pending = [];
+  return {
+    pending,
+    waitUntil(promise) {
+      pending.push(promise);
+    },
+    settle() {
+      return Promise.all(pending);
     },
   };
 }
@@ -164,8 +185,18 @@ function streamingRequest(chunks) {
   });
 }
 
-async function call(request, env = makeEnv()) {
-  return worker.fetch(request, env);
+/** Calls the Worker the way the runtime does, then waits for its `waitUntil` work (the ledger). */
+async function call(request, env = makeEnv(), ctx = makeCtx()) {
+  const response = await worker.fetch(request, env, ctx);
+  await ctx.settle();
+  return response;
+}
+
+/** The one ledger row a request wrote, as `{ day, family, outcome, reason, features, errors, trail }`. */
+function ledgerRow(env) {
+  assert.equal(env.DB.ledger.length, 1, 'one ledger upsert per heartbeat request');
+  const [day, family, outcome, reason, features, errors, trail] = env.DB.ledger[0].params;
+  return { day, family, outcome, reason, features, errors, trail };
 }
 
 /** Posts `body` and returns `{ status, env }`. */
@@ -249,18 +280,18 @@ describe('routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('body size', () => {
-  it('accepts a body of exactly 8192 bytes', async () => {
+  it('accepts a body of exactly 32768 bytes', async () => {
     const base = JSON.stringify(heartbeat());
     // Pad with an unknown key (dropped) to hit the cap exactly.
-    const padding = 8192 - base.length - ',"pad":""'.length;
+    const padding = 32768 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
-    assert.equal(new TextEncoder().encode(body).byteLength, 8192);
+    assert.equal(new TextEncoder().encode(body).byteLength, 32768);
     assert.equal((await post(body)).status, 204);
   });
 
-  it('413s a body of 8193 bytes', async () => {
+  it('413s a body of 32769 bytes', async () => {
     const base = JSON.stringify(heartbeat());
-    const padding = 8193 - base.length - ',"pad":""'.length;
+    const padding = 32769 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
     const { status, env } = await post(body);
     assert.equal(status, 413);
@@ -274,7 +305,7 @@ describe('body size', () => {
 
   it('counts the stream rather than trusting a missing Content-Length', async () => {
     const env = makeEnv();
-    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(9000), '"}']), env);
+    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(33000), '"}']), env);
     assert.equal(response.status, 413);
     assert.equal(env.DB.statements.length, 0);
   });
@@ -331,7 +362,7 @@ describe('validation — rejections', () => {
     ['day', '2026-02-31'],
     ['day', '26-01-01'],
     ['day', '2026-1-1'],
-    ['day', utcDay(1)], // future
+    ['day', utcDay(2)], // future
     ['day', utcDay(-8)], // older than 7 days
     ['day', `${utcDay(-1)}T00:00:00Z`],
     ['day', 20260101],
@@ -395,12 +426,27 @@ describe('validation — rejections', () => {
 });
 
 describe('validation — acceptance and normalisation', () => {
+  it('accepts tomorrow only within an hour of our midnight (a fast clock\'s interim copy)', async () => {
+    const realNow = Date.now;
+    try {
+      const midnight = Date.parse(`${utcDay(1)}T00:00:00Z`);
+      Date.now = () => midnight - 10 * 60_000; // 23:50 UTC
+      assert.equal((await post(heartbeat({ day: utcDay(1) }))).status, 204);
+      Date.now = () => midnight - 3 * 3_600_000; // 21:00 UTC
+      const { status, env } = await post(heartbeat({ day: utcDay(1) }));
+      assert.equal(status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it('drops unknown top-level keys', async () => {
     const params = await storedParams(heartbeat({ hostname: 'secret-laptop', ip: '10.0.0.1', extra: { a: 1 } }));
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 29);
+    assert.equal(params.length, 31);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -419,6 +465,53 @@ describe('validation — acceptance and normalisation', () => {
       heartbeat({ features: { drawFromDbt: 1, addFromDbt: 3, emptyCanvas: 2 } }),
     );
     assert.equal(params[17], '{"drawFromDbt":1,"addFromDbt":3,"emptyCanvas":2}');
+  });
+
+  it('keeps the logical-only feature keys', async () => {
+    const params = await storedParams(
+      heartbeat({ features: { logicalOnlyProject: 1, exampleDiagram: 2, blankDiagram: 3 } }),
+    );
+    assert.equal(params[17], '{"logicalOnlyProject":1,"exampleDiagram":2,"blankDiagram":3}');
+  });
+
+  it('keeps the native DBML storage keys', async () => {
+    const params = await storedParams(
+      heartbeat({
+        features: { dbmlProject: 1, convertToDbml: 1, convertToDbmlOffered: 2, convertToDbmlDeclined: 1, convertToDbmlNotNow: 1, convertToDbmlCancelled: 1, convertToDbmlRefused: 1, dbmlForeignFormatWarned: 1 },
+        errors: { modelFileDbmlSyntax: 1, modelFileDbmlInvalid: 2, modelFileDbmlStructure: 3, domainLoadDbml: 4, convertToDbmlFailed: 5 },
+      }),
+    );
+    assert.equal(
+      params[17],
+      '{"dbmlProject":1,"convertToDbml":1,"convertToDbmlOffered":2,"convertToDbmlDeclined":1,"convertToDbmlNotNow":1,"convertToDbmlCancelled":1,"convertToDbmlRefused":1,"dbmlForeignFormatWarned":1}',
+    );
+    assert.equal(params[18], '{"modelFileDbmlSyntax":1,"modelFileDbmlInvalid":2,"modelFileDbmlStructure":3,"domainLoadDbml":4,"convertToDbmlFailed":5}');
+  });
+
+  it('keeps the import outcome keys (importer, SQL dialect, ledger cause), and drops a look-alike', async () => {
+    const params = await storedParams(
+      heartbeat({
+        features: {
+          importOutcomeSqlDdlPartial: 2,
+          importSqlOutcomeSnowflakePartial: 2,
+          importCauseGrammarGap: 1,
+          importOutcomeDbtTimedOut: 1,
+          importCauseOther: 1,
+          importOutcomeSqlDdlFailed: 3,
+          importCauseDimCustomer: 1,
+        },
+      }),
+    );
+    assert.equal(
+      params[17],
+      // In the allowlist's order, not the body's.
+      '{"importOutcomeSqlDdlPartial":2,"importOutcomeDbtTimedOut":1,"importSqlOutcomeSnowflakePartial":2,"importCauseGrammarGap":1,"importCauseOther":1}',
+    );
+  });
+
+  it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
+    const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
+    assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');
   });
 
   it('treats omitted features and errors as empty', async () => {
@@ -488,6 +581,9 @@ describe('validation — acceptance and normalisation', () => {
       null,
       null,
       // So are the physical tooling fields (migrations/0003).
+      null,
+      null,
+      // And the onboarding trail (migrations/0004).
       null,
       null,
     ]);
@@ -570,12 +666,12 @@ describe('optional physical tooling fields', () => {
       physicalTools: ['notebooks', 'dbt', 'fabric', 'dbt'],
       platforms: ['snowflake', 'databricks'],
     }));
-    assert.deepEqual(params.slice(27), ['["dbt","fabric","notebooks"]', '["databricks","snowflake"]']);
+    assert.deepEqual(params.slice(27, 29), ['["dbt","fabric","notebooks"]', '["databricks","snowflake"]']);
   });
 
   it('stores [] (looked, found nothing) apart from NULL (did not look)', async () => {
-    assert.deepEqual((await storedParams(heartbeat({ physicalTools: [], platforms: [] }))).slice(27), ['[]', '[]']);
-    assert.deepEqual((await storedParams(heartbeat({}))).slice(27), [null, null]);
+    assert.deepEqual((await storedParams(heartbeat({ physicalTools: [], platforms: [] }))).slice(27, 29), ['[]', '[]']);
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(27, 29), [null, null]);
   });
 
   it('accepts every value at once', async () => {
@@ -595,6 +691,74 @@ describe('optional physical tooling fields', () => {
     it(`refuses ${field} = ${JSON.stringify(value)} with 400 and no write`, async () => {
       const env = makeEnv();
       const response = await post(heartbeat({ [field]: value }), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The onboarding trail (migrations/0004)
+// ---------------------------------------------------------------------------
+
+describe('the onboarding trail', () => {
+  const TRAIL = [
+    ['windowOpened', 0, 1, 1],
+    ['draftShown', 2, 1, 1],
+    ['guideStarted', 0, 1, 1],
+    ['guideStepDraftBanner', 1, 1, 1],
+    ['windowAway', 34, 1, 1],
+    ['windowBack', 3600, 1, 1],
+    ['editLayout', 4, 2, 7],
+    ['!draftBuildFailed', 0, 1, 1],
+    ['layoutFailed', 1, 1, 1],
+    ['!layoutFailed', 0, 1, 1],
+  ];
+
+  it('stores it in order as JSON, with the dropped count, last', async () => {
+    const params = await storedParams(heartbeat({ trail: TRAIL, trailDropped: 3 }));
+    assert.equal(params.length, 31);
+    assert.deepEqual(JSON.parse(params[29]), TRAIL);
+    assert.equal(params[30], 3);
+  });
+
+  it('stores NULL for both when there is no trail, and 0 dropped when it is omitted', async () => {
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(29), [null, null]);
+    assert.deepEqual((await storedParams(heartbeat({ trail: [] }))).slice(29), ['[]', 0]);
+  });
+
+  it('drops an event it does not list (a newer extension\'s) and keeps the order of the rest', async () => {
+    const params = await storedParams(heartbeat({ trail: [['windowOpened', 0, 1, 1], ['someFutureEvent', 3, 1, 1], ['!someFutureError', 1, 1, 1], ['!compare', 1, 1, 1], ['canvasOpened', 5, 1, 1]] }));
+    assert.deepEqual(JSON.parse(params[29]), [['windowOpened', 0, 1, 1], ['canvasOpened', 5, 1, 1]]);
+  });
+
+  it('accepts 100 entries and every marker', async () => {
+    const markers = ['windowOpened', 'windowClosed', 'windowAway', 'windowBack', 'canvasOpened', 'canvasClosed', 'canvasHidden', 'canvasShown'];
+    const trail = Array.from({ length: 100 }, (_, i) => [markers[i % markers.length], i % 3600, 1 + (i % 20), 1 + (i % 100)]);
+    const params = await storedParams(heartbeat({ trail, trailDropped: 10000 }));
+    assert.equal(JSON.parse(params[29]).length, 100);
+  });
+
+  for (const [what, body] of [
+    ['a trail that is not an array', { trail: { windowOpened: 1 } }],
+    ['101 entries', { trail: Array.from({ length: 101 }, () => ['windowOpened', 0, 1, 1]) }],
+    ['an entry of three values', { trail: [['windowOpened', 0, 1]] }],
+    ['a path as the event', { trail: [['/Users/jane/acme/dim_customer.sql', 0, 1, 1]] }],
+    ['a table name with a dot as the event', { trail: [['sales.dim_customer', 0, 1, 1]] }],
+    ['two bangs before an event', { trail: [['!!draftBuildFailed', 0, 1, 1]] }],
+    ['a gap over an hour', { trail: [['windowOpened', 3601, 1, 1]] }],
+    ['a negative gap', { trail: [['windowOpened', -1, 1, 1]] }],
+    ['a fractional gap', { trail: [['windowOpened', 1.5, 1, 1]] }],
+    ['window 0', { trail: [['windowOpened', 0, 0, 1]] }],
+    ['window 21', { trail: [['windowOpened', 0, 21, 1]] }],
+    ['repeat 0', { trail: [['windowOpened', 0, 1, 0]] }],
+    ['repeat 101', { trail: [['windowOpened', 0, 1, 101]] }],
+    ['a dropped count without a trail', { trailDropped: 1 }],
+    ['a dropped count over the cap', { trail: [], trailDropped: 10001 }],
+  ]) {
+    it(`refuses ${what} with 400 and no write`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat(body), env);
       assert.equal(response.status, 400);
       assert.equal(env.DB.statements.length, 0);
     });
@@ -660,11 +824,155 @@ describe('GET /known-fixes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The worker_daily ledger (migrations/0005)
+// ---------------------------------------------------------------------------
+
+describe('the worker_daily ledger', () => {
+  it('counts an accepted heartbeat as (family, ok, none) with nothing dropped', async () => {
+    const { status, env } = await post(heartbeat({ extVersion: '2.0.3' }));
+    assert.equal(status, 204);
+    assert.deepEqual(ledgerRow(env), { day: utcDay(0), family: '2.0', outcome: 'ok', reason: 'none', features: 0, errors: 0, trail: 0 });
+    assert.match(env.DB.ledger[0].sql, /ON CONFLICT\(day, ext_family, outcome, reason\) DO UPDATE SET\s+n = n \+ 1/);
+  });
+
+  it('counts unknown feature and error keys and trail events it dropped, never their names', async () => {
+    const { status, env } = await post(heartbeat({
+      extVersion: '2.0.0',
+      features: { physicalStage: 1, secretFeatureOne: 1, secretFeatureTwo: 3 },
+      errors: { manifestMissing: 1, secretError: 1 },
+      trail: [['windowOpened', 0, 1, 1], ['secretEvent', 3, 1, 1], ['!secretCode', 4, 1, 1]],
+    }));
+    assert.equal(status, 204);
+    const row = ledgerRow(env);
+    assert.equal(row.features, 2);
+    assert.equal(row.errors, 1);
+    assert.equal(row.trail, 2);
+    assert.ok(!JSON.stringify(env.DB.ledger).includes('secret'));
+  });
+
+  it('records a bad trail as (2.0, denied, shape_trail) and stores no heartbeat', async () => {
+    const { status, env } = await post(heartbeat({ extVersion: '2.0.1', trail: [['windowOpened', -1, 1, 1]] }));
+    assert.equal(status, 400);
+    assert.equal(env.DB.statements.length, 0);
+    assert.deepEqual(ledgerRow(env), { day: utcDay(0), family: '2.0', outcome: 'denied', reason: 'shape_trail', features: 0, errors: 0, trail: 0 });
+  });
+
+  for (const [field, value, reason] of [
+    ['installId', 'nope', 'shape_installId'],
+    ['day', '2020-01-01', 'shape_day'],
+    ['os', 'beos', 'shape_os'],
+    ['activations', 51, 'shape_counts'],
+    ['features', { compare: 101 }, 'shape_features'],
+    ['errors', [], 'shape_errors'],
+    ['host', 'emacs', 'shape_host'],
+    ['harnesses', ['nope'], 'shape_harnesses'],
+    ['platforms', ['nope'], 'shape_platforms'],
+    ['manifest', 'nope', 'shape_other'],
+    ['v', 2, 'shape_other'],
+  ]) {
+    it(`records ${field} = ${JSON.stringify(value)} as ${reason}`, async () => {
+      const { status, env } = await post(heartbeat({ extVersion: '1.9.8', [field]: value }));
+      assert.equal(status, 400);
+      const row = ledgerRow(env);
+      assert.equal(row.reason, reason);
+      assert.equal(row.family, '1.9');
+      assert.equal(row.outcome, 'denied');
+    });
+  }
+
+  it('records trailDropped without a trail as shape_trailDropped', async () => {
+    const { env } = await post(heartbeat({ trailDropped: 3 }));
+    assert.equal(ledgerRow(env).reason, 'shape_trailDropped');
+  });
+
+  it('records an oversized body as (other, denied, body_size)', async () => {
+    const base = JSON.stringify(heartbeat({ extVersion: '2.0.0' }));
+    const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(33000)}"}`;
+    const { status, env } = await post(body);
+    assert.equal(status, 413);
+    const row = ledgerRow(env);
+    assert.deepEqual([row.family, row.outcome, row.reason], ['other', 'denied', 'body_size']);
+  });
+
+  it('records a body that is not JSON as (other, denied, json)', async () => {
+    const { status, env } = await post('{"extVersion":"2.0.0",');
+    assert.equal(status, 400);
+    const row = ledgerRow(env);
+    assert.deepEqual([row.family, row.outcome, row.reason], ['other', 'denied', 'json']);
+  });
+
+  for (const [extVersion, family] of [['x', 'other'], ['10.0.0', 'other'], ['2.100.0', 'other'], ['2.10.4', '2.10'], [42, 'other']]) {
+    it(`files extVersion ${JSON.stringify(extVersion)} under ${family}`, async () => {
+      const { env } = await post(heartbeat({ extVersion }));
+      assert.equal(ledgerRow(env).family, family);
+    });
+  }
+
+  it('writes nothing at all when the kill switch is on', async () => {
+    const env = makeEnv({ KILL_SWITCH: 'on' });
+    const response = await call(makeRequest(heartbeat()), env);
+    assert.equal(response.status, 503);
+    assert.equal(env.DB.statements.length, 0);
+    assert.equal(env.DB.ledger.length, 0);
+  });
+
+  it('writes nothing for 404, 405 or /known-fixes', async () => {
+    const env = makeEnv();
+    await call(makeRequest(heartbeat(), { path: '/nope' }), env);
+    await call(makeRequest(heartbeat(), { method: 'PUT' }), env);
+    await call(makeRequest(null, { method: 'GET', path: '/known-fixes' }), env);
+    assert.equal(env.DB.ledger.length, 0);
+  });
+
+  it('writes no ledger row when the heartbeat upsert itself fails', async () => {
+    const env = makeEnv({ DB: fakeD1({ fail: true }) });
+    const response = await call(makeRequest(heartbeat()), env);
+    assert.equal(response.status, 503);
+    assert.equal(env.DB.ledger.length, 0);
+  });
+
+  it('keeps a 204 a 204 when the ledger write fails, logging only the error name', async () => {
+    logLines = [];
+    const env = makeEnv({ DB: fakeD1({ failLedger: true }) });
+    const response = await call(makeRequest(heartbeat()), env);
+    assert.equal(response.status, 204);
+    assert.equal(env.DB.statements.length, 1);
+    assert.equal(env.DB.ledger.length, 0);
+    assert.match(logLines.join('\n'), /"event":"ledger_error","kind":"Error"/);
+    assert.ok(!logLines.join('\n').includes('boom'));
+  });
+
+  it('keeps a 400 a 400 when the ledger write fails', async () => {
+    const env = makeEnv({ DB: fakeD1({ failLedger: true }) });
+    assert.equal((await call(makeRequest(heartbeat({ os: 'beos' })), env)).status, 400);
+  });
+
+  it('runs the ledger write through ctx.waitUntil, off the response path', async () => {
+    const env = makeEnv();
+    const ctx = makeCtx();
+    const response = await worker.fetch(makeRequest(heartbeat()), env, ctx);
+    assert.equal(response.status, 204);
+    assert.equal(ctx.pending.length, 1);
+    await ctx.settle();
+    assert.equal(env.DB.ledger.length, 1);
+  });
+
+  it('binds no install id, IP, header or body value', async () => {
+    const env = makeEnv();
+    await call(makeRequest(heartbeat({ extVersion: '2.0.0' })), env);
+    const bound = JSON.stringify(env.DB.ledger.map((st) => st.params));
+    for (const canary of [INSTALL_ID, CANARY_IP, CANARY_UA, CANARY_COUNTRY, '2.0.0', 'darwin', '1.104']) {
+      assert.ok(!bound.includes(canary), `ledger params contain ${canary}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------
 
 describe('scheduled retention', () => {
-  it('deletes rows received more than 90 days ago', async () => {
+  it('deletes rows received more than 90 days ago, and ledger days older than 90 days', async () => {
     const env = makeEnv();
     const pending = [];
     await worker.scheduled({}, env, { waitUntil: (p) => pending.push(p) });
@@ -674,7 +982,10 @@ describe('scheduled retention', () => {
       env.DB.statements[0].sql,
       "DELETE FROM heartbeats WHERE received_day < date('now', '-90 days')",
     );
+    assert.equal(env.DB.ledger.length, 1);
+    assert.equal(env.DB.ledger[0].sql, "DELETE FROM worker_daily WHERE day < date('now', '-90 days')");
     assert.match(logLines.join('\n'), /"deleted":3/);
+    assert.match(logLines.join('\n'), /"table":"worker_daily","deleted":3/);
   });
 });
 

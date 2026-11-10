@@ -13,8 +13,21 @@
 import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
-import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
-import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidTableAlias } from '@erd-studio/core';
+import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
+import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
+import { parseGuideAction } from '../types/onboardingGuide';
+import { isCanvasLineStyle } from '../types/lineStyle';
+import {
+  CRASH_DETAIL_MAX,
+  isCrashFallbackAction,
+  isLayoutFailure,
+  isWebviewErrorArea,
+  isWebviewErrorKind,
+  type CrashFallbackPayload,
+  type LayoutFailure,
+  type WebviewErrorPayload,
+} from '../types/webviewError';
+import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, TABLE_ROLE_VALUES, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isRationaleFieldKey, isValidTableAlias, normalisePosix, rationaleKeyToFieldKey } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +68,16 @@ export function validateTableNameSafety(name: unknown): string | null {
  * Do NOT use this for names discovered in the dbt project — see
  * {@link validateTableNameSafety}.
  */
+/**
+ * Validate the name of a table about to be CREATED as a `.dbml` file in
+ * `<layer>/tables/<schema>/`: the path-safety rule. The layer-first tree
+ * reserves no table name (`_relationships` is an ordinary name). Called only
+ * by create paths (Add, Add Existing, Add from dbt, Rename's new name).
+ */
+export function validateNewDbmlTableName(name: unknown): string | null {
+  return validateTableNameSafety(name);
+}
+
 export function validateTableName(name: unknown): string | null {
   const safetyError = validateTableNameSafety(name);
   if (safetyError) {
@@ -143,6 +166,48 @@ export function validateMetaPayload(payload: unknown): string | null {
   return null;
 }
 
+/**
+ * Validate an `updateModelRationale` payload: a patch of the table's built-in
+ * text fields kept in `rationale` (core's `RATIONALE_FIELD_KEYS`, camelCase).
+ * Each value is text, or `null` to clear it; `''` clears too (the handler
+ * trims). A key outside the catalogue is refused rather than dropped on the
+ * way to disk, and an empty patch is a harmless no-op.
+ */
+export function validateRationalePayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return 'Missing payload.';
+  }
+  const { modelName, rationale } = payload as { modelName?: unknown; rationale?: unknown };
+  const nameError = validateTableNameSafety(modelName);
+  if (nameError) {
+    return nameError;
+  }
+  if (!rationale || typeof rationale !== 'object' || Array.isArray(rationale)) {
+    return 'The fields to change must be an object.';
+  }
+  for (const [key, value] of Object.entries(rationale as Record<string, unknown>)) {
+    if (!isRationaleFieldKey(key)) {
+      return `"${key}" is not a built-in text field.`;
+    }
+    // `undefined` never survives the webview's JSON; an in-process sender's is a clear.
+    if (value !== null && value !== undefined && typeof value !== 'string') {
+      return `Value of "${rationaleKeyToFieldKey(key)}" must be text.`;
+    }
+  }
+  return null;
+}
+
+/** `openFieldsFile` (the Detail panel's "Customise fields" link) carries nothing. */
+export function validateOpenFieldsFilePayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Customise fields takes no payload.';
+  }
+  return null;
+}
+
 function validateMetaKey(key: string): string | null {
   if (!key.trim()) {
     return 'Metadata key is required.';
@@ -179,6 +244,18 @@ export function validateColumnDef(column: unknown): string | null {
   if (typeof col.dataType !== 'string' || !col.dataType.trim()) {
     return 'Data type is required';
   }
+  return null;
+}
+
+/**
+ * Validate an `addModel` payload's optional `schemaFolder` (the New Table
+ * dialog's Schema field, DBML only): absent, or a string that is a schema
+ * folder name (`isSchemaFolderName`, the rule every DBML writer shares).
+ */
+export function validateSchemaFolderPayload(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string') return 'The schema must be text.';
+  if (!isSchemaFolderName(value)) return `"${value}" cannot be a schema folder. ${SCHEMA_FOLDER_RULE}`;
   return null;
 }
 
@@ -307,17 +384,45 @@ export function validateMarkKey(markKey: unknown, link: LinkPayloadEnds): string
   return ends.some(([m, cols]) => sameText(m, model) && sameColumnSet(columns, cols)) ? null : invalid;
 }
 
-export const TABLE_ROLES: readonly TableRole[] = [
-  'conformed-dim',
-  'domain-dim',
-  'transaction-fact',
-  'periodic-snapshot',
-  'accumulating-snapshot',
-  'factless-fact',
-  'reference',
-  'gold-fact',
-  'gold-dim',
-];
+/** The longest `relationshipsFile` an `addRelationship` may name. */
+export const RELATIONSHIPS_FILE_MAX_LENGTH = 1024;
+
+/**
+ * The New Relationship dialog's `relationshipsFile` (DBML, 2.0): absent, or
+ * a relationships file's path relative to the semantic dir, by its shape
+ * alone — posix, normalised (no `.` or `..` segment, no empty one), not
+ * absolute, and one `classifySemanticFile` calls a relationships file
+ * (`<layer>/relationships/<name>.dbml`). Whether it exists, reads and stays
+ * inside the semantic dir is the host's check, made when the edit runs.
+ * Returns an error, or null.
+ */
+export function validateRelationshipsFileChoice(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || value === '' || value.length > RELATIONSHIPS_FILE_MAX_LENGTH) {
+    return 'the relationships file must be a path inside the project\'s ERD Studio folder.';
+  }
+  const shape = /^[A-Za-z]:/.test(value) || value.includes('\0') || value.includes('\\') || value.startsWith('/')
+    || normalisePosix(value) !== value || value.split('/').some((segment) => segment === '..' || segment === '.' || segment === '');
+  if (shape) return `"${value}" is not a path inside the project's ERD Studio folder.`;
+  if (classifySemanticFile(value, { tablesDirIsLayer: true }).kind !== 'relationships') {
+    return `"${value}" is not a relationships file (<layer>/relationships/<name>.dbml).`;
+  }
+  return null;
+}
+
+/**
+ * An `editRelationship` names no relationships file: an existing
+ * relationship stays in the file that holds it (decision 5). Returns an
+ * error when the payload carries a `relationshipsFile`, else null.
+ */
+export function validateNoRelationshipsFile(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || !('relationshipsFile' in payload)) return null;
+  if ((payload as { relationshipsFile?: unknown }).relationshipsFile === undefined) return null;
+  return 'an existing relationship stays in the file that holds it; a relationships file can be chosen only for a new one.';
+}
+
+/** Every table role, in the canvas's order: core's one list (`TABLE_ROLE_VALUES`, also the Table role field's choices). */
+export const TABLE_ROLES: readonly TableRole[] = TABLE_ROLE_VALUES;
 
 export function isValidTableRole(value: unknown): value is TableRole {
   return typeof value === 'string' && (TABLE_ROLES as readonly string[]).includes(value);
@@ -476,6 +581,7 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
 /**
  * Validate a `submitFeedback` payload: valid `kind`, string `title` and
  * `description`, optional string `steps`, boolean `includeDiagnostics`,
+ * optional boolean `includeLog`,
  * optional positive integer `regressionOf` / `commentOnIssue`, optional
  * string[] `webviewErrors`, optional domain summary.
  */
@@ -489,6 +595,7 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     regressionOf?: unknown;
     commentOnIssue?: unknown;
@@ -508,6 +615,9 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
   }
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
+  }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
   }
   for (const key of ['regressionOf', 'commentOnIssue'] as const) {
     if (payload[key] !== undefined && !isIssueNumber(payload[key])) {
@@ -531,6 +641,7 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
+    includeLog?: unknown;
     webviewErrors?: unknown;
     domain?: unknown;
   };
@@ -549,10 +660,28 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
   }
+  if (payload.includeLog !== undefined && typeof payload.includeLog !== 'boolean') {
+    return 'Log flag must be a boolean.';
+  }
   return (
     validateStringList(payload.webviewErrors, 'Webview errors') ??
     validateFeedbackSubjectAreaSummary(payload.domain)
   );
+}
+
+/**
+ * Validate a `setLineStyle` payload: `{ lineStyle }`, one of
+ * `CANVAS_LINE_STYLES` (`curved` or `hops`).
+ */
+export function validateSetLineStylePayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Line style must be an object.';
+  }
+  const payload = value as { lineStyle?: unknown };
+  if (!isCanvasLineStyle(payload.lineStyle)) {
+    return 'Line style must be "curved" or "hops".';
+  }
+  return null;
 }
 
 /**
@@ -613,10 +742,10 @@ export function validateAddModelsFromDbtPayload(value: unknown): string | null {
     return null;
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return 'Add tables from dbt takes no payload.';
+    return 'Add Tables from dbt takes no payload.';
   }
   if (Object.keys(value).length > 0) {
-    return 'Add tables from dbt takes no payload.';
+    return 'Add Tables from dbt takes no payload.';
   }
   return null;
 }
@@ -646,6 +775,45 @@ export function validateAddExistingModelsPayload(value: unknown): string | null 
 }
 
 /**
+ * Validate a `dropTables` payload (a drop on the canvas): `{ position: { x, y },
+ * uris }`, the point finite, `uris` a list of at most
+ * {@link DROP_TABLES_URI_LIMIT} strings of at most
+ * {@link DROP_TABLES_URI_MAX_LENGTH} characters (possibly empty: a drag from
+ * the Table Library may bring none). The URIs are only compared with the
+ * library's file paths, never opened.
+ */
+export function validateDropTablesPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'A drop needs a position and a list of URIs.';
+  }
+  const { position, uris } = value as { position?: unknown; uris?: unknown };
+  const pointError = validatePoint(position);
+  if (pointError) return pointError;
+  if (!Array.isArray(uris)) return 'A drop needs a list of URIs.';
+  if (uris.length > DROP_TABLES_URI_LIMIT) return `At most ${DROP_TABLES_URI_LIMIT} files can be dropped at once.`;
+  for (const uri of uris) {
+    if (typeof uri !== 'string') return 'Each dropped URI must be text.';
+    if (uri.length > DROP_TABLES_URI_MAX_LENGTH) return `A dropped URI can be at most ${DROP_TABLES_URI_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+/**
+ * Validate a `requestNewRelationshipFiles` payload. It carries nothing — the
+ * host answers for the open diagram — so only an absent payload or an empty
+ * object passes.
+ */
+export function validateRequestNewRelationshipFilesPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Asking where new relationships go takes no payload.';
+  }
+  return null;
+}
+
+/**
  * Validate a `dismissManifestHint` payload (#113). It carries nothing — only
  * an absent payload or an empty object passes, like `addModelsFromDbt`.
  */
@@ -655,6 +823,20 @@ export function validateDismissManifestHintPayload(value: unknown): string | nul
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
     return 'Dismissing the dbt parse hint takes no payload.';
+  }
+  return null;
+}
+
+/**
+ * Validate an `importEmbeddedTables` payload (§2.5). It carries nothing — only
+ * an absent payload or an empty object passes.
+ */
+export function validateImportEmbeddedTablesPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Importing the tables of this file takes no payload.';
   }
   return null;
 }
@@ -687,6 +869,15 @@ export function validateOpenModelFilePayload(value: unknown): string | null {
   return validateTableNameSafety((value as { modelName?: unknown }).modelName);
 }
 
+/**
+ * Validate a `guide` payload (the onboarding guide on the canvas): one of the
+ * fixed action ids, `step` with a known step id. The host acts on the
+ * rebuilt payload only (`parseGuideAction`), never on a field it did not check.
+ */
+export function validateGuidePayload(value: unknown): string | null {
+  return parseGuideAction(value) ? null : 'The guide sent an action it does not have.';
+}
+
 /** `viewFile`: no payload, or a positive integer `line` and an optional positive integer `column` (#186). */
 export function validateViewFilePayload(value: unknown): value is { line: number; column?: number } | undefined {
   if (value === undefined) return true;
@@ -696,12 +887,43 @@ export function validateViewFilePayload(value: unknown): value is { line: number
   return positive(line) && (column === undefined || positive(column));
 }
 
-/** `layoutFinished` (usage telemetry only): a non-negative finite duration, a boolean and an optional `firstOpen` boolean. */
-export function validateLayoutFinishedPayload(value: unknown): value is { ms: number; ok: boolean; firstOpen?: boolean } {
+/**
+ * `layoutFinished` (usage telemetry only): a non-negative finite duration, a
+ * boolean, an optional `firstOpen` boolean, and (2.0) an optional `failure`
+ * from `LAYOUT_FAILURES` and an optional `fallback: true`.
+ */
+export function validateLayoutFinishedPayload(value: unknown): value is {
+  ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true;
+} {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const { ms, ok, firstOpen } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown };
+  const { ms, ok, firstOpen, failure, fallback } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown; failure?: unknown; fallback?: unknown };
   return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean'
-    && (firstOpen === undefined || typeof firstOpen === 'boolean');
+    && (firstOpen === undefined || typeof firstOpen === 'boolean')
+    && (failure === undefined || isLayoutFailure(failure))
+    && (fallback === undefined || fallback === true);
+}
+
+/** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */
+export function validateWebviewErrorPayload(value: unknown): value is WebviewErrorPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { kind, area } = value as { kind?: unknown; area?: unknown };
+  return isWebviewErrorKind(kind) && isWebviewErrorArea(area);
+}
+
+/**
+ * `crashFallback` (the canvas's crash screen): an `action` from its fixed
+ * list; for `feedback` an optional `area` from the fixed list and an optional
+ * `detail` string of at most `CRASH_DETAIL_MAX` characters (the page cuts it
+ * there, after redacting). Anything else fails, never trimmed into shape;
+ * the canvas handler then keeps a known `action` alone and drops the area and
+ * detail, so the button never goes dead.
+ */
+export function validateCrashFallbackPayload(value: unknown): value is CrashFallbackPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { action, area, detail } = value as { action?: unknown; area?: unknown; detail?: unknown };
+  return isCrashFallbackAction(action)
+    && (area === undefined || isWebviewErrorArea(area))
+    && (detail === undefined || (typeof detail === 'string' && detail.length <= CRASH_DETAIL_MAX));
 }
 
 // ---------------------------------------------------------------------------
@@ -819,4 +1041,35 @@ export function validateAnnotationUpdate(value: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * `goToTable` (the toolbar search's "Not on this diagram" hint): an object
+ * with an optional `query` of at most {@link GO_TO_TABLE_QUERY_MAX}
+ * characters and no line breaks.
+ */
+export function validateGoToTablePayload(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Go to Table needs an object payload.';
+  }
+  const { query } = value as { query?: unknown };
+  if (query === undefined) return null;
+  if (typeof query !== 'string') return 'The search text must be text.';
+  if (query.length > GO_TO_TABLE_QUERY_MAX) return `The search text can be at most ${GO_TO_TABLE_QUERY_MAX} characters.`;
+  if (/[\r\n\0]/.test(query)) return 'The search text must be one line.';
+  return null;
+}
+
+/**
+ * A table context-menu action's payload (`showTableOnOtherDiagrams`,
+ * `moveTable`, `copyTablePath`, `revealTableInLibrary`): `{ modelName }`,
+ * held to the path-safety rule as `openModelFile` is (a table drawn from dbt
+ * may carry any name dbt allows).
+ */
+export function validateTableActionPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'This action needs a table name.';
+  }
+  return validateTableNameSafety((value as { modelName?: unknown }).modelName);
 }

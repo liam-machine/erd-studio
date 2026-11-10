@@ -17,35 +17,56 @@ import { readFileSync, readdirSync } from 'node:fs';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const stripComments = (sql) => sql.replace(/--[^\n]*/g, '');
 
-/** Column names of `CREATE TABLE … heartbeats (…)`, in order. */
-function createdColumns(sql) {
-  const body = /CREATE TABLE IF NOT EXISTS heartbeats \(([\s\S]*?)\n\);/.exec(stripComments(sql))?.[1];
-  assert.ok(body, 'no CREATE TABLE heartbeats');
-  return body
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => part && !/^PRIMARY KEY/i.test(part) && !/^\w+\)$/.test(part))
-    .map((part) => part.split(/\s+/)[0]);
+/** `{ table: [column, …] }` of every `CREATE TABLE IF NOT EXISTS … (…)` in `sql`, columns in order. */
+function createdTables(sql) {
+  const tables = {};
+  for (const [, table, body] of stripComments(sql).matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\n\);/g)) {
+    tables[table] = body
+      .split('\n')
+      .map((line) => line.trim().replace(/,$/, ''))
+      .filter((line) => line && !/^PRIMARY KEY/i.test(line))
+      .map((line) => line.split(/\s+/)[0]);
+  }
+  return tables;
+}
+
+/** The `PRIMARY KEY (…)` columns of `table` in `sql`. */
+function primaryKey(sql, table) {
+  const body = new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\n\\);`).exec(stripComments(sql))?.[1] ?? '';
+  return (/PRIMARY KEY \(([^)]*)\)/i.exec(body)?.[1] ?? '').split(',').map((c) => c.trim()).filter(Boolean);
 }
 
 const addedColumns = (sql) =>
-  [...stripComments(sql).matchAll(/ALTER TABLE heartbeats ADD COLUMN (\w+)/g)].map((m) => m[1]);
+  [...stripComments(sql).matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)/g)].map((m) => ({ table: m[1], column: m[2] }));
 const indexes = (sql) =>
-  [...stripComments(sql).matchAll(/CREATE INDEX IF NOT EXISTS (\w+) ON heartbeats\((\w+)\)/g)].map((m) => `${m[1]}(${m[2]})`);
+  [...stripComments(sql).matchAll(/CREATE INDEX IF NOT EXISTS (\w+) ON (\w+)\((\w+)\)/g)].map((m) => `${m[1]}:${m[2]}(${m[3]})`);
 
 const migrationFiles = readdirSync(new URL('../migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).sort();
 
-/** What applying every migration in wrangler's order produces. */
+/** What applying every migration in wrangler's order produces: columns per table, and the indexes. */
 function migratedShape() {
-  const columns = [];
+  const tables = {};
   const idx = [];
   for (const file of migrationFiles) {
     const sql = read(`migrations/${file}`);
-    if (/CREATE TABLE/.test(stripComments(sql))) columns.push(...createdColumns(sql));
-    columns.push(...addedColumns(sql));
+    for (const [table, columns] of Object.entries(createdTables(sql))) {
+      assert.ok(!tables[table], `${file} creates ${table} a second time`);
+      tables[table] = [...columns];
+    }
+    for (const { table, column } of addedColumns(sql)) {
+      assert.ok(tables[table], `${file} alters ${table} before any migration creates it`);
+      tables[table].push(column);
+    }
     idx.push(...indexes(sql));
   }
-  return { columns, indexes: idx };
+  return { tables, indexes: idx };
+}
+
+/** The columns of `INSERT INTO <table> (…)` in the Worker source. */
+function insertedColumns(table) {
+  const insert = new RegExp(`INSERT INTO ${table} \\(([\\s\\S]*?)\\) VALUES`).exec(read('src/index.js'))?.[1];
+  assert.ok(insert, `no INSERT INTO ${table} in src/index.js`);
+  return insert.split(',').map((c) => c.trim()).filter(Boolean);
 }
 
 describe('database files', () => {
@@ -65,16 +86,28 @@ describe('database files', () => {
   it('schema.sql is exactly what the migrations add up to', () => {
     const schema = read('schema.sql');
     const migrated = migratedShape();
-    assert.deepEqual(createdColumns(schema), migrated.columns);
+    assert.deepEqual(createdTables(schema), migrated.tables);
     assert.deepEqual(indexes(schema).sort(), migrated.indexes.sort());
+    assert.deepEqual(Object.keys(migrated.tables).sort(), ['heartbeats', 'worker_daily']);
   });
 
   it('every column the Worker writes is created by a migration', () => {
-    const insert = /INSERT INTO heartbeats \(([\s\S]*?)\) VALUES/.exec(read('src/index.js'))?.[1];
-    assert.ok(insert, 'no INSERT INTO heartbeats in src/index.js');
-    const bound = insert.split(',').map((c) => c.trim()).filter(Boolean);
-    const { columns } = migratedShape();
-    assert.deepEqual(bound.filter((c) => !columns.includes(c)), []);
-    assert.equal(new Set(columns).size, columns.length, 'a column is added twice');
+    const { tables } = migratedShape();
+    for (const table of ['heartbeats', 'worker_daily']) {
+      const columns = tables[table];
+      assert.deepEqual(insertedColumns(table).filter((c) => !columns.includes(c)), [], table);
+      assert.equal(new Set(columns).size, columns.length, `a column of ${table} is added twice`);
+    }
+  });
+
+  it('the ledger upsert conflicts on exactly the worker_daily primary key', () => {
+    const conflict = /INSERT INTO worker_daily[\s\S]*?ON CONFLICT\(([^)]*)\)/.exec(read('src/index.js'))?.[1];
+    assert.ok(conflict, 'no ON CONFLICT on the worker_daily insert');
+    const key = conflict.split(',').map((c) => c.trim());
+    for (const file of migrationFiles) {
+      const pk = primaryKey(read(`migrations/${file}`), 'worker_daily');
+      if (pk.length) assert.deepEqual(key, pk);
+    }
+    assert.deepEqual(primaryKey(read('schema.sql'), 'worker_daily'), key);
   });
 });

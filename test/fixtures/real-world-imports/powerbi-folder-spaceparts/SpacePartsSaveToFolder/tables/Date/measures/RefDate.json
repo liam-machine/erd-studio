@@ -1,0 +1,7 @@
+{
+  "name": "RefDate",
+  "expression": "CALCULATE ( MAX ( 'Invoices'[Billing Date] ), REMOVEFILTERS ( ) )",
+  "isHidden": true,
+  "displayFolder": "Measures",
+  "lineageTag": "75027a89-68f7-4e3f-9d0b-abbb14b92094"
+}

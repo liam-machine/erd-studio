@@ -98,24 +98,37 @@ export const SyncBulkBar: React.FC<SyncBulkBarProps> = ({ allKeys }) => {
 interface SyncFooterProps {
   /** Total number of discrepancy keys available. */
   totalKeys: number;
+  /**
+   * The keys of the differences on screen. When given, only decisions for
+   * these count and are sent, so a decision left over from an earlier report
+   * (the difference has since gone) never inflates "Apply Changes (N)".
+   */
+  keys?: readonly string[];
 }
 
-export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys }) => {
+export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys, keys }) => {
   const syncSelections = useEditorStore((s) => s.syncSelections);
   const syncPlanGenerated = useEditorStore((s) => s.syncPlanGenerated);
   const vscode = useVsCodeApi();
 
-  const selectedCount = useMemo(
-    () => Object.keys(syncSelections).length,
-    [syncSelections],
-  );
+  const selections = useMemo(() => {
+    if (!keys) return syncSelections;
+    const current: Record<string, GroundTruth> = {};
+    for (const k of keys) {
+      const choice = syncSelections[k];
+      if (choice) current[k] = choice;
+    }
+    return current;
+  }, [keys, syncSelections]);
+
+  const selectedCount = Object.keys(selections).length;
 
   const remaining = totalKeys - selectedCount;
 
   const handleGenerate = useCallback(() => {
     if (selectedCount === 0) return;
-    vscode.postMessage({ type: 'generateSyncPlan', payload: { selections: syncSelections } });
-  }, [selectedCount, syncSelections, vscode]);
+    vscode.postMessage({ type: 'generateSyncPlan', payload: { selections } });
+  }, [selectedCount, selections, vscode]);
 
   const handleLaunchClaude = useCallback(() => {
     vscode.postMessage({ type: 'launchClaudeSync' });

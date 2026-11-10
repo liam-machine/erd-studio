@@ -1,0 +1,9 @@
+Table "customer contacts" {
+  "contact id" int            [pk]
+  "full name"  varchar(255)   [not null]
+  email        varchar(320)   [unique, note: 'Lower case']
+  created_at   timestamp      [default: `now()`]
+  amount       decimal(10, 2) [default: 0]
+  tags         text[]
+  status       myschema.contact_status
+}

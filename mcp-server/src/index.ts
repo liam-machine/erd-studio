@@ -33,7 +33,8 @@ Install: https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studi
 Or call the \`get_editor_setup\` tool for canonical install instructions.
 
 Every tool takes \`project_path\`: the absolute path to the dbt project root (the
-directory containing dbt_project.yml). If the project hasn't been initialized with a
+directory containing dbt_project.yml), or to a folder with no dbt project that holds
+.erd-studio/ (list_manifest_models then lists nothing). If the project hasn't been initialized with a
 .erd-studio/ directory yet, list-tools return empty results with a \`tip\` field pointing
 to the install path; read-tools throw a friendly error doing the same.
 

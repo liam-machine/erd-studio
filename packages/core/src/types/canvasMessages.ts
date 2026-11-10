@@ -251,13 +251,95 @@ export interface RemoveAnnotationMessage {
 /**
  * Request to open a model's `logical-models` file in a text editor, with the
  * cursor on its load error when it has one. Writes nothing — the node posts
- * it from the "Open file" button shown on a model whose file is broken.
+ * it from the "Open file" button shown on a model whose file is broken, and
+ * the detail panel from its File line's "Open".
  */
 export interface OpenModelFileMessage {
   type: 'openModelFile';
   payload: {
     modelName: string;
   };
+}
+
+/**
+ * Request to add an existing model (from the Table Library, or from dbt) to
+ * the open diagram. Posted by the Add Existing Table dialog and by the detail
+ * panel's "Not on this diagram" list ("+ Add").
+ */
+export interface AddExistingModelMessage {
+  type: 'addExistingModel';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * Add several picked models to the diagram in one edit (#160): the Add
+ * Existing Table dialog with more than one row ticked, or the detail panel's
+ * "Add all related". Library models are referenced; dbt-only ones are seeded
+ * into the library, as with `addExistingModel`. Names already in the diagram
+ * are skipped. One WorkspaceEdit, one undo step. v5 domains and later only;
+ * the extension caps how many names one request may carry.
+ */
+export interface AddExistingModelsMessage {
+  type: 'addExistingModels';
+  payload: {
+    modelNames: string[];
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Canvas context (host → canvas, editing hosts only)
+// ---------------------------------------------------------------------------
+
+/**
+ * One relationship between a table on the open diagram and a table that is
+ * not on it, read from the Table Library. Seen from the diagram's table:
+ * `out` when it holds the foreign key, `in` when the other table does.
+ */
+export interface OffDiagramRelationship {
+  /** The table that is not on the diagram. */
+  otherTable: string;
+  /**
+   * The layer the other table lives in, as the user reads it (its
+   * layers.json label), when that is not the diagram's own layer.
+   */
+  otherLayer?: string;
+  /**
+   * The joining columns as one line: `store_key`, `(region_code,
+   * country_code)` for a composite, or `ship_date_key → date_key` when the
+   * two ends are named differently. Foreign-key end first.
+   */
+  columns: string;
+  /** As stored, read from the foreign-key end (as the panel's other rows show it). */
+  cardinality: Cardinality;
+  direction: 'out' | 'in';
+}
+
+/**
+ * Request to open the project's field list (`<semanticDir>/fields.yml`) in a
+ * text editor: the Detail panel's "Customise fields" link, editor only (never
+ * a viewer, never the read-only physical stage). Writes nothing — with no
+ * file the host opens an unsaved document holding the starting set.
+ */
+export interface OpenFieldsFileMessage {
+  type: 'openFieldsFile';
+}
+
+/**
+ * What an editing host knows about the project beyond the diagram itself,
+ * sent beside (never inside) the `DisplaySubjectArea`, logical stage only.
+ * Keyed by the diagram's table names. A viewer never gets one: the canvas
+ * then shows none of what it feeds (the detail panel's File line and "Not on
+ * this diagram" list, the node's "+n" chip).
+ */
+export interface CanvasContext {
+  /** Each diagram table's file, project-relative with `/` separators. */
+  tableFiles: Record<string, string>;
+  /** Each diagram table's relationships to tables not on the diagram; a table with none is left out. */
+  offDiagram: Record<string, OffDiagramRelationship[]>;
+  /** Who reviews a change to each table's file (CODEOWNERS), as one line; a table with none is left out. */
+  owners?: Record<string, string>;
 }
 
 /** Union of every edit message the canvas components can post to their host. */
@@ -279,4 +361,7 @@ export type CanvasEditMessage =
   | ReorderColumnsMessage
   | UpdateAnnotationMessage
   | RemoveAnnotationMessage
-  | OpenModelFileMessage;
+  | OpenModelFileMessage
+  | OpenFieldsFileMessage
+  | AddExistingModelMessage
+  | AddExistingModelsMessage;

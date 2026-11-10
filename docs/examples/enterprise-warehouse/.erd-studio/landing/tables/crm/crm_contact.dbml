@@ -1,0 +1,10 @@
+Table crm.crm_contact [owner: 'data-engineering'] {
+  Note: 'Contact details and consent from the CRM.'
+
+  contact_id        STRING    [pk, natural_key: 'true']
+  customer_no       STRING    [note: 'The core banking CIF, when the CRM knows it']
+  email             STRING
+  phone             STRING
+  marketing_consent BOOLEAN
+  _loaded_at        TIMESTAMP [note: 'When the loader landed the row']
+}

@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { findOwningDbtProject, resolveDbtProject, samePath } from '../../src/services/projectDiscovery';
+import { findDbtProjectAbove, findDbtProjectsBelow, sortDbtCandidates } from '../../src/services/dbtProjectSearch';
 
 let root: string;
 
@@ -84,9 +85,78 @@ describe('resolveDbtProject', () => {
     expect(resolveDbtProject([a], { projectPath: file })).toMatchObject({ root: a, source: 'auto', invalidSetting: file });
   });
 
-  it('returns no root for a workspace without dbt projects', () => {
-    fs.mkdirSync(path.join(root, 'docs'));
-    expect(resolveDbtProject([path.join(root, 'docs')])).toMatchObject({ root: undefined, candidates: [] });
+  it('reports hasDbt for a dbt root and for a projectPath plain folder (#111)', () => {
+    const a = dbt('a', true);
+    expect(resolveDbtProject([a])).toMatchObject({ root: a, source: 'auto', hasDbt: true });
+    const diagrams = path.join(root, 'diagrams');
+    fs.mkdirSync(diagrams);
+    expect(resolveDbtProject([a], { projectPath: diagrams })).toMatchObject({ root: diagrams, source: 'setting', hasDbt: false });
+  });
+});
+
+describe('resolveDbtProject — logical-only roots', () => {
+  function folder(rel: string, withErd: false | '.erd-studio' | 'erd-studio' = false): string {
+    const dir = path.join(root, rel);
+    fs.mkdirSync(dir, { recursive: true });
+    if (withErd) { fs.mkdirSync(path.join(dir, withErd)); }
+    return dir;
+  }
+
+  it('a plain folder with no dbt project opens as the root, source folder', () => {
+    const docs = folder('docs');
+    expect(resolveDbtProject([docs])).toMatchObject({
+      root: docs, source: 'folder', hasDbt: false, candidates: [], autoRoot: undefined,
+    });
+  });
+
+  it('a folder holding .erd-studio beats the first folder', () => {
+    const first = folder('first');
+    const second = folder('second', '.erd-studio');
+    expect(resolveDbtProject([first, second])).toMatchObject({ root: second, source: 'erdData', hasDbt: false });
+  });
+
+  it('the legacy erd-studio/ folder counts as ERD data too', () => {
+    const first = folder('first');
+    const legacy = folder('legacy', 'erd-studio');
+    fs.writeFileSync(path.join(legacy, 'erd-studio', 'layers.json'), '{}');
+    expect(resolveDbtProject([first, legacy])).toMatchObject({ root: legacy, source: 'erdData' });
+  });
+
+  it('a configured semanticDir is what counts as ERD data', () => {
+    const first = folder('first', '.erd-studio');
+    const custom = folder('custom');
+    fs.mkdirSync(path.join(custom, 'diagrams'));
+    expect(resolveDbtProject([first, custom], { semanticDir: 'diagrams' })).toMatchObject({ root: custom, source: 'erdData' });
+  });
+
+  it('any dbt project beats a folder with .erd-studio', () => {
+    const plain = folder('plain', '.erd-studio');
+    const project = dbt('project');
+    expect(resolveDbtProject([plain, project])).toMatchObject({ root: project, source: 'auto', hasDbt: true, candidates: [project] });
+  });
+
+  it('a nested dbt project beats a workspace folder with .erd-studio', () => {
+    const ws = folder('ws', '.erd-studio');
+    const nested = dbt('ws/analytics');
+    expect(resolveDbtProject([ws])).toMatchObject({ root: nested, source: 'auto', hasDbt: true });
+  });
+
+  it('no folders → no root (the empty-window branch)', () => {
+    const r = resolveDbtProject([]);
+    expect(r.root).toBeUndefined();
+    expect(r.hasDbt).toBe(false);
+  });
+
+  it('an invalid projectPath falls back to the plain folder and is still reported', () => {
+    const docs = folder('docs');
+    expect(resolveDbtProject([docs], { projectPath: path.join(root, 'nowhere') })).toMatchObject({
+      root: docs, source: 'folder', invalidSetting: path.join(root, 'nowhere'),
+    });
+  });
+
+  it('the logical-only fixture opens as erdData, with its decoy models/ ignored', () => {
+    const fixture = path.resolve(__dirname, '../fixtures/logical-only');
+    expect(resolveDbtProject([fixture])).toMatchObject({ root: fixture, source: 'erdData', hasDbt: false, candidates: [] });
   });
 });
 
@@ -134,5 +204,65 @@ describe('samePath', () => {
     expect(samePath('/Proj/A', '/proj/a', 'darwin')).toBe(true);
     expect(samePath('/Proj/A', '/proj/a', 'linux')).toBe(false);
     expect(samePath('/proj/x/../a', '/proj/a', 'linux')).toBe(true);
+  });
+});
+
+describe('the dbt search rules (dbtProjectSearch: discovery, findDbtProjectDir and the CLI share them)', () => {
+  it('looks up from a dbt project\'s models/ opened on its own', () => {
+    const project = dbt('repo/analytics');
+    const models = path.join(project, 'models', 'marts');
+    fs.mkdirSync(models, { recursive: true });
+    expect(resolveDbtProject([models])).toMatchObject({ root: project, source: 'auto', hasDbt: true });
+    expect(findDbtProjectAbove(models)).toBe(project);
+  });
+
+  it('never looks up past a design folder (it is its own root), nor into the home folder', () => {
+    const project = dbt('repo');
+    const design = path.join(project, 'design');
+    fs.mkdirSync(path.join(design, '.erd-studio'), { recursive: true });
+    expect(resolveDbtProject([design])).toMatchObject({ root: design, source: 'erdData', hasDbt: false });
+    // Inside a home folder holding dbt_project.yml: the home folder itself is never taken.
+    const home = dbt('home');
+    const inside = path.join(home, 'work', 'x');
+    fs.mkdirSync(inside, { recursive: true });
+    expect(findDbtProjectAbove(inside, undefined, home)).toBeUndefined();
+    expect(findDbtProjectAbove(inside, undefined, '')).toBe(home);
+  });
+
+  it('walks six folders deep, hidden folders other than tools\' own (after the visible ones), and follows symbolic links once', () => {
+    const six = dbt('a/b/c/d/e/six');
+    dbt('a/b/c/d/e/f/seven');
+    const hidden = dbt('.dbt-project');
+    dbt('.venv/lib/pkg');
+    dbt('node_modules/pkg');
+    dbt('site-packages/pkg');
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-discovery-linked-'));
+    try {
+      fs.writeFileSync(path.join(outside, 'dbt_project.yml'), 'name: x\n');
+      fs.mkdirSync(path.join(root, 'w'));
+      fs.symlinkSync(outside, path.join(root, 'w', 'transform'));
+      fs.symlinkSync(root, path.join(root, 'w', 'loop')); // a cycle: each real folder once
+      expect(findDbtProjectsBelow([root])).toEqual([hidden, path.join(root, 'w', 'transform'), six]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('a pick deeper than the walk still opens while it is a dbt project in the workspace', () => {
+    const deep = dbt('a/b/c/d/e/f/g/deep');
+    expect(resolveDbtProject([root], { picked: deep })).toMatchObject({ root: deep, source: 'picked', hasDbt: true });
+    expect(resolveDbtProject([root], { picked: path.join(root, 'gone') })).toMatchObject({ source: 'folder', hasDbt: false });
+  });
+
+  it('orders the host\'s results as the walk would, dropping those inside skipped folders', () => {
+    const w = path.join(root, 'w');
+    const rows = sortDbtCandidates([
+      path.join(w, 'b', 'c', 'dbt_project.yml'),
+      path.join(w, '.hidden', 'dbt_project.yml'),
+      path.join(w, 'a', 'dbt_project.yml'),
+      path.join(w, 'target', 'x', 'dbt_project.yml'),
+      path.join(w, 'a', 'dbt_project.yml'),
+    ], [w]);
+    expect(rows).toEqual([path.join(w, 'a'), path.join(w, '.hidden'), path.join(w, 'b', 'c')]);
   });
 });

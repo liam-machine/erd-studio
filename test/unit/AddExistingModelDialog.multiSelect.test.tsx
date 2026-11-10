@@ -155,3 +155,25 @@ describe('AddExistingTableDialog multi-select (#160)', () => {
     expect(sent.payload.modelNames).toHaveLength(ADD_EXISTING_TABLES_LIMIT);
   });
 });
+
+describe('AddExistingTableDialog empty state', () => {
+  beforeEach(() => {
+    useEditorStore.getState().setExistingModels([]);
+    useEditorStore.getState().setManifestModels([]);
+  });
+  afterEach(() => { cleanup(); useEditorStore.getState().setLogicalOnly(false); });
+
+  it('suggests dbt (yml files, dbt compile) in a dbt project', () => {
+    render(<AddExistingTableDialog />);
+    expect(screen.getByText('No tables available to add.')).toBeTruthy();
+    expect(document.body.textContent).toContain('dbt compile');
+  });
+
+  it('says nothing about dbt without a dbt project (logicalOnly)', () => {
+    useEditorStore.getState().setLogicalOnly(true);
+    render(<AddExistingTableDialog />);
+    expect(screen.getByText('No tables available to add.')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('dbt');
+    expect(document.body.textContent).toContain('Table Library');
+  });
+});

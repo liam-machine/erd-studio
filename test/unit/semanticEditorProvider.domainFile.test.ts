@@ -21,7 +21,7 @@ import { SubjectAreaValidationError } from '@erd-studio/core';
 import { classifySubjectAreaLoadFailure, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { SubjectAreaFileError, SubjectAreaService } from '../../src/services/domainService';
 import { telemetry } from '../../src/services/telemetryService';
-import { subjectAreaLoadErrorCode } from '../../src/services/telemetryPayload';
+import { ERROR_CODES, subjectAreaLoadErrorCode, subjectAreaLoadStepCode, type SubjectAreaLoadStep } from '../../src/services/telemetryPayload';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -393,7 +393,7 @@ describe('a JSON file under the semantic dir that is not a domain', () => {
     const payload = errors(panel)[0].payload;
     expect(payload.kind).toBe('not-a-domain');
     expect(payload.message).toContain('fact.json');
-    expect(payload.message).toContain('not an ERD Studio subject area file');
+    expect(payload.message).toContain('not an ERD Studio diagram file');
     expect(types(panel)).not.toContain('domainLoaded');
   });
 
@@ -499,5 +499,90 @@ describe('domainLoad telemetry carries a fixed reason', () => {
 
     await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
     expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadNotDomain']);
+  });
+});
+
+describe('a diagram ERD Studio reads but cannot accept (#261)', () => {
+  it('says the file is the user\'s to fix, project-relative, never the absolute path', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    fs.writeFileSync(file, JSON.stringify({ ...doc, schemaVersion: 'five' }));
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    const payload = errors(panel)[0].payload;
+    expect(payload.kind).toBe('invalid');
+    expect(payload.newerSchema).toBeUndefined();
+    expect(payload.message).toContain('.erd-studio/silver/showcase.json');
+    expect(payload.message).toContain('schemaVersion');
+    expect(payload.message).not.toContain(root);
+  });
+
+  it('flags a diagram saved by a newer ERD Studio, so the screen offers Update', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    fs.writeFileSync(file, JSON.stringify({ ...doc, schemaVersion: 99 }));
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    const payload = errors(panel)[0].payload;
+    expect(payload).toMatchObject({ kind: 'invalid', newerSchema: true });
+    expect(payload.message).not.toContain(root);
+  });
+});
+
+describe('a diagram that fails to load for a reason of ours (#261, #262)', () => {
+  it('says it is ERD Studio\'s problem, with the paths redacted, and records the step that threw', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    vi.spyOn(SubjectAreaService, 'toLogicalStage').mockImplementation(() => {
+      throw new TypeError(`Cannot read properties of undefined (reading 'columns') at ${file}`);
+    });
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    const payload = errors(panel)[0].payload;
+    expect(payload.kind).toBe('internal');
+    expect(payload.message).toContain("Cannot read properties of undefined (reading 'columns')");
+    expect(payload.message).not.toContain(root);
+    expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadInternal', 'domainLoadInternalDisplay']);
+  });
+
+  it('records a manifest read that throws as domainLoadInternalManifest', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    vi.spyOn(ManifestService.prototype, 'loadManifest').mockRejectedValue(new Error('worker exploded'));
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    expect(errors(panel)[0].payload).toMatchObject({ kind: 'internal', message: 'worker exploded' });
+    expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadInternal', 'domainLoadInternalManifest']);
+  });
+
+  it('records no step for a file the user has to fix', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    fs.writeFileSync(file, JSON.stringify({ nope: true }));
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    expect(error.mock.calls.map((c) => c[0]).filter((c) => c.startsWith('domainLoadInternal'))).toEqual([]);
+  });
+
+  it('maps every step to its own listed error code', () => {
+    const steps: SubjectAreaLoadStep[] = ['manifest', 'yml', 'catalog', 'read', 'positions', 'physical', 'display', 'other'];
+    const codes = steps.map(subjectAreaLoadStepCode);
+    expect(new Set(codes).size).toBe(steps.length);
+    for (const code of codes) expect(ERROR_CODES).toContain(code);
   });
 });

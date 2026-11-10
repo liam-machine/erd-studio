@@ -323,3 +323,42 @@ describe('nameUtils', () => {
     });
   });
 });
+
+describe('extractManifestData — not_null on a versioned model', () => {
+  const versions = (nodes: Record<string, unknown>): Record<string, unknown> => ({
+    nodes: {
+      'model.p.dim.v1': modelNode('model.p.dim.v1', 'dim', ['id', 'email'], { version: 1, latest_version: 2 }),
+      'model.p.dim.v2': modelNode('model.p.dim.v2', 'dim', ['id', 'email'], { version: 2, latest_version: 2 }),
+      ...nodes,
+    },
+  });
+
+  it('a not_null only an older version has does not make the latest version\'s column required', () => {
+    const r = extractManifestData(versions({
+      'test.p.not_null_dim_v1_email': testNode('not_null', { column_name: 'email' }, 'model.p.dim.v1', ['model.p.dim.v1']),
+      'test.p.not_null_dim_v2_id': testNode('not_null', { column_name: 'id' }, 'model.p.dim.v2', ['model.p.dim.v2']),
+    }));
+    expect(r.notNullColumns).toEqual({ dim: ['id'] });
+  });
+
+  it('a contract constraint on an older version only is not the latest version\'s, whatever order the nodes come in', () => {
+    const r = extractManifestData({
+      nodes: {
+        'test.p.not_null_dim_v2_id': testNode('not_null', { column_name: 'id' }, null, ['model.p.dim.v2']),
+        'model.p.dim.v1': modelNode('model.p.dim.v1', 'dim', ['id', 'email'], { version: 1, latest_version: 2, constraints: [{ type: 'not_null', columns: ['email'] }] }),
+        'model.p.dim.v2': modelNode('model.p.dim.v2', 'dim', ['id', 'email'], { version: 2, latest_version: 2 }),
+      },
+    });
+    expect(r.notNullColumns).toEqual({ dim: ['id'] });
+  });
+
+  it('an unversioned model keeps every not_null it has', () => {
+    const r = extractManifestData({
+      nodes: {
+        'model.p.fct': modelNode('model.p.fct', 'fct', ['a', 'b'], { constraints: [{ type: 'not_null', columns: ['b'] }] }),
+        'test.p.not_null_fct_a': testNode('not_null', { column_name: 'a' }, 'model.p.fct', ['model.p.fct']),
+      },
+    });
+    expect(r.notNullColumns).toEqual({ fct: ['b', 'a'] });
+  });
+});

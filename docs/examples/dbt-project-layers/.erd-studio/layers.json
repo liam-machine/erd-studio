@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "staging",
+      "label": "Staging",
+      "abbreviation": "STG",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "intermediate",
+      "label": "Intermediate",
+      "abbreviation": "INT",
+      "color": "#8b5cf6",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "marts",
+      "label": "Marts",
+      "abbreviation": "MRT",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 3
+    }
+  ]
+}

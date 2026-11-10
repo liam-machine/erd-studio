@@ -1,0 +1,8 @@
+Table raw_vault.hub_policy [vault_type: 'hub'] {
+  Note: 'One row per policy number.'
+
+  policy_hk     BINARY    [pk, note: 'Hash of policy_bk']
+  policy_bk     STRING    [natural_key: 'true', note: 'The policy number']
+  load_datetime TIMESTAMP [note: 'When the row was loaded']
+  record_source STRING    [note: 'The system the row came from']
+}

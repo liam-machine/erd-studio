@@ -579,3 +579,24 @@ describe('YmlParserService — composite foreign keys (#133 L2)', () => {
     expect(data.compositeForeignKeys).toEqual([]);
   });
 });
+
+describe('YmlParserService — disabled (logical-only, no dbt_project.yml)', () => {
+  const LOGICAL_ONLY_PATH = path.resolve(__dirname, '../fixtures/logical-only');
+
+  it('the fixture decoy models/customer.yml is parsed when enabled (so the disabled test means something)', async () => {
+    const data = await new YmlParserService().loadYmlData(LOGICAL_ONLY_PATH);
+    expect(data.models.has('customer')).toBe(true);
+  });
+
+  it('never walks models/: empty data even with a dbt-looking schema file on disk', async () => {
+    const service = new YmlParserService({ enabled: false });
+    const data = await service.loadYmlData(LOGICAL_ONLY_PATH);
+    expect(data.models.size).toBe(0);
+    expect(data.relationshipTests).toEqual([]);
+    expect(data.sourceFiles.size).toBe(0);
+    expect(data.resourceDocs.size).toBe(0);
+    expect(data.compositeForeignKeys).toEqual([]);
+    expect((await service.loadYmlData(LOGICAL_ONLY_PATH, 'models')).models.size).toBe(0);
+    expect(service.getModelFolders(LOGICAL_ONLY_PATH)).toEqual([]);
+  });
+});

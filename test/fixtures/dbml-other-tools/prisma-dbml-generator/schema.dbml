@@ -1,0 +1,57 @@
+//// ------------------------------------------------------
+//// THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+//// ------------------------------------------------------
+
+Table User {
+  id Int [pk, increment]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  email String [unique, not null]
+  name String
+  posts Post [not null]
+  profile Profile
+}
+
+Table Profile {
+  id Int [pk, increment]
+  bio String
+  user User [not null]
+  userId Int [unique, not null]
+
+  Note: 'User profile'
+}
+
+Table Post {
+  id Int [pk, increment]
+  title String [not null, default: '']
+  content String
+  published Boolean [not null, default: false]
+  author User
+  authorId Int
+  categories Category [not null]
+}
+
+Table Category {
+  id Int [pk, increment]
+  name String [not null]
+  posts Post [not null]
+}
+
+Table Token {
+  id Int [pk, increment]
+  device String [not null]
+  operatingSystem String [not null]
+
+  indexes {
+    (device, operatingSystem) [unique]
+  }
+}
+
+Table CategoryToPost {
+  categoriesId Int [ref: > Category.id]
+  postsId Int [ref: > Post.id]
+}
+
+Ref: Profile.userId - User.id [delete: Cascade]
+
+Ref: Post.authorId > User.id [delete: Set Null]

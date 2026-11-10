@@ -1,0 +1,15 @@
+{
+  "name": "Measure",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "Name",
+  "sortByColumn": "Ordinal",
+  "lineageTag": "5ac136e4-db61-4d9b-a51a-6f8c4d835f03",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

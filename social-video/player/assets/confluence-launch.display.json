@@ -1,0 +1,293 @@
+{
+ "schemaVersion": 5,
+ "layer": "gold",
+ "stage": "logical",
+ "domain": "sales",
+ "description": "Sales",
+ "models": [
+  {
+   "name": "customers",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "customer_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "name",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "email",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "stores",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "store_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "name",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "city",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "products",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "product_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "name",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "price",
+     "dataType": "numeric(12,2)",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "orders",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "order_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "customer_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "store_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "order_date",
+     "dataType": "date",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "status",
+     "dataType": "text",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "order_items",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "order_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "line_no",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "product_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "quantity",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "payments",
+   "schema": "sales",
+   "description": "",
+   "columns": [
+    {
+     "name": "payment_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "order_id",
+     "dataType": "integer",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "amount",
+     "dataType": "numeric(12,2)",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "paid_at",
+     "dataType": "timestamp",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  }
+ ],
+ "relationships": [
+  {
+   "fromModel": "orders",
+   "fromColumn": "customer_id",
+   "toModel": "customers",
+   "toColumn": "customer_id",
+   "cardinality": "many-to-one"
+  },
+  {
+   "fromModel": "orders",
+   "fromColumn": "store_id",
+   "toModel": "stores",
+   "toColumn": "store_id",
+   "cardinality": "many-to-one"
+  },
+  {
+   "fromModel": "order_items",
+   "fromColumn": "order_id",
+   "toModel": "orders",
+   "toColumn": "order_id",
+   "cardinality": "many-to-one"
+  },
+  {
+   "fromModel": "order_items",
+   "fromColumn": "product_id",
+   "toModel": "products",
+   "toColumn": "product_id",
+   "cardinality": "many-to-one"
+  },
+  {
+   "fromModel": "payments",
+   "fromColumn": "order_id",
+   "toModel": "orders",
+   "toColumn": "order_id",
+   "cardinality": "many-to-one"
+  }
+ ],
+ "viewConfig": {
+  "positions": {
+   "customers": {
+    "x": 0,
+    "y": 0
+   },
+   "stores": {
+    "x": 0,
+    "y": 250
+   },
+   "orders": {
+    "x": 380,
+    "y": 70
+   },
+   "payments": {
+    "x": 380,
+    "y": 400
+   },
+   "order_items": {
+    "x": 760,
+    "y": 0
+   },
+   "products": {
+    "x": 760,
+    "y": 215
+   }
+  },
+  "annotations": []
+ }
+}

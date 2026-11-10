@@ -1,0 +1,1075 @@
+{
+  "samples": [
+    {
+      "slug": "dbml-qut-workbench",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 49,
+        "columns": 466,
+        "primaryKeys": 45,
+        "relationships": 96,
+        "descriptions": 32
+      },
+      "imported": {
+        "tables": 49,
+        "columns": 466,
+        "primaryKeys": 45,
+        "relationships": 96,
+        "descriptions": 32
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 40
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 3
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "postgres-pagila",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 16,
+        "columns": 94,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 16,
+        "columns": 94,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "column": 1
+        },
+        "changed": {
+          "relationship": 21,
+          "table": 55,
+          "column": 1,
+          "constraint": 22
+        },
+        "repaired": {
+          "column": 1
+        },
+        "skipped": {
+          "object": 1,
+          "statement": 205
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "postgres-pagila-partitions-kept",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 71,
+        "columns": 479,
+        "primaryKeys": 71,
+        "relationships": 37,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 71,
+        "columns": 479,
+        "primaryKeys": 71,
+        "relationships": 37,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "column": 1
+        },
+        "changed": {
+          "relationship": 36,
+          "table": 55,
+          "column": 1,
+          "constraint": 37
+        },
+        "repaired": {
+          "column": 1
+        },
+        "skipped": {
+          "object": 1,
+          "statement": 205
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "mysql-sakila",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 16,
+        "columns": 90,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 16,
+        "columns": 90,
+        "primaryKeys": 16,
+        "relationships": 22,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "column": 15
+        },
+        "changed": {
+          "relationship": 20,
+          "constraint": 22
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 1,
+          "statement": 86
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "sqlserver-adventureworks",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 71,
+        "columns": 486,
+        "primaryKeys": 71,
+        "relationships": 90,
+        "descriptions": 530
+      },
+      "imported": {
+        "tables": 71,
+        "columns": 486,
+        "primaryKeys": 71,
+        "relationships": 90,
+        "descriptions": 530
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 74,
+          "column": 52,
+          "constraint": 90
+        },
+        "repaired": {
+          "statement": 5,
+          "column": 6
+        },
+        "skipped": {
+          "statement": 462
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "snowflake-grid-reliability",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 18,
+        "columns": 237,
+        "primaryKeys": 18,
+        "relationships": 12,
+        "descriptions": 13
+      },
+      "imported": {
+        "tables": 18,
+        "columns": 237,
+        "primaryKeys": 18,
+        "relationships": 12,
+        "descriptions": 13
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 12,
+          "constraint": 8
+        },
+        "repaired": {
+          "statement": 5,
+          "table": 9,
+          "column": 8
+        },
+        "skipped": {
+          "statement": 105
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "databricks-open-retail-data-model",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 34,
+        "columns": 635,
+        "primaryKeys": 34,
+        "relationships": 43,
+        "descriptions": 669
+      },
+      "imported": {
+        "tables": 34,
+        "columns": 635,
+        "primaryKeys": 34,
+        "relationships": 43,
+        "descriptions": 669
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "constraint": 43
+        },
+        "repaired": {
+          "statement": 256
+        },
+        "skipped": {
+          "statement": 180
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "migrations-harbor",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 48,
+        "columns": 397,
+        "primaryKeys": 47,
+        "relationships": 14,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 48,
+        "columns": 397,
+        "primaryKeys": 47,
+        "relationships": 14,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "uniqueKey": 1
+        },
+        "changed": {
+          "relationship": 13,
+          "constraint": 4
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 195
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "powerbi-tmdl-salessense",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 10,
+        "columns": 88,
+        "primaryKeys": 3,
+        "relationships": 5,
+        "descriptions": 8
+      },
+      "imported": {
+        "tables": 8,
+        "columns": 84,
+        "primaryKeys": 3,
+        "relationships": 5,
+        "descriptions": 7
+      },
+      "reported": {
+        "tables": 2,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 30,
+          "setting": 139,
+          "column": 2,
+          "table": 3
+        },
+        "changed": {
+          "type": 11,
+          "table": 5,
+          "primaryKey": 1
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 38,
+          "table": 2
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "2 item(s) left out and reported"
+      ]
+    },
+    {
+      "slug": "powerbi-bim-adventureworks",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 9,
+        "columns": 174,
+        "primaryKeys": 7,
+        "relationships": 13,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 9,
+        "columns": 174,
+        "primaryKeys": 7,
+        "relationships": 13,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 11,
+          "setting": 4,
+          "column": 10
+        },
+        "changed": {
+          "table": 9,
+          "primaryKey": 7
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 21
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "1 unique key(s) not in the source"
+      ]
+    },
+    {
+      "slug": "powerbi-folder-spaceparts",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 30,
+        "columns": 186,
+        "primaryKeys": 1,
+        "relationships": 22,
+        "descriptions": 7
+      },
+      "imported": {
+        "tables": 23,
+        "columns": 172,
+        "primaryKeys": 1,
+        "relationships": 22,
+        "descriptions": 7
+      },
+      "reported": {
+        "tables": 7,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 13,
+          "setting": 378,
+          "table": 9,
+          "column": 4
+        },
+        "changed": {
+          "type": 9,
+          "table": 14,
+          "primaryKey": 9
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 180,
+          "table": 13,
+          "relationship": 5
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "7 item(s) left out and reported"
+      ]
+    },
+    {
+      "slug": "powerbi-tmdl-bc-purchase",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 34,
+        "columns": 511,
+        "primaryKeys": 8,
+        "relationships": 55,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 34,
+        "columns": 511,
+        "primaryKeys": 8,
+        "relationships": 55,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "object": 771,
+          "setting": 856,
+          "column": 7,
+          "table": 34
+        },
+        "changed": {
+          "type": 20,
+          "table": 3,
+          "uniqueKey": 1,
+          "primaryKey": 7
+        },
+        "repaired": {},
+        "skipped": {
+          "object": 778
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "dbt-synthea-omop",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 37,
+        "columns": 421,
+        "primaryKeys": 28,
+        "relationships": 174,
+        "descriptions": 344
+      },
+      "imported": {
+        "tables": 15,
+        "columns": 247,
+        "primaryKeys": 15,
+        "relationships": 113,
+        "descriptions": 223
+      },
+      "reported": {
+        "tables": 22,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 61,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "constraint": 32
+        },
+        "changed": {
+          "relationship": 38
+        },
+        "repaired": {},
+        "skipped": {
+          "relationship": 5,
+          "table": 29
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "83 item(s) left out and reported"
+      ]
+    },
+    {
+      "slug": "oracle-hr",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 7,
+        "columns": 35,
+        "primaryKeys": 7,
+        "relationships": 10,
+        "descriptions": 42
+      },
+      "imported": {
+        "tables": 7,
+        "columns": 35,
+        "primaryKeys": 7,
+        "relationships": 10,
+        "descriptions": 42
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 3,
+          "constraint": 10
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 33
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "bigquery-cloud-learning-platform",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 11,
+        "columns": 129,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 54
+      },
+      "imported": {
+        "tables": 11,
+        "columns": 129,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 54
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {},
+        "repaired": {},
+        "skipped": {},
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "redshift-tpch",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 8,
+        "columns": 61,
+        "primaryKeys": 8,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 8,
+        "columns": 61,
+        "primaryKeys": 8,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {},
+        "repaired": {},
+        "skipped": {
+          "statement": 32
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "sqlite-chinook",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 11,
+        "columns": 64,
+        "primaryKeys": 11,
+        "relationships": 11,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 11,
+        "columns": 64,
+        "primaryKeys": 11,
+        "relationships": 11,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 7
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 46
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "snowflake-realtime-datavault",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 12,
+        "columns": 87,
+        "primaryKeys": 8,
+        "relationships": 6,
+        "descriptions": 0
+      },
+      "imported": {
+        "tables": 10,
+        "columns": 76,
+        "primaryKeys": 8,
+        "relationships": 6,
+        "descriptions": 0
+      },
+      "reported": {
+        "tables": 2,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 3,
+          "table": 3,
+          "constraint": 6
+        },
+        "repaired": {
+          "table": 4
+        },
+        "skipped": {
+          "statement": 73
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "2 item(s) left out and reported"
+      ]
+    },
+    {
+      "slug": "snowflake-sqldbm-adventureworksdw",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 23,
+        "columns": 284,
+        "primaryKeys": 15,
+        "relationships": 36,
+        "descriptions": 25
+      },
+      "imported": {
+        "tables": 23,
+        "columns": 284,
+        "primaryKeys": 15,
+        "relationships": 36,
+        "descriptions": 25
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 28,
+          "constraint": 36
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 3
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "databricks-uc-catalog-as-code",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 22,
+        "columns": 118,
+        "primaryKeys": 21,
+        "relationships": 16,
+        "descriptions": 140
+      },
+      "imported": {
+        "tables": 22,
+        "columns": 118,
+        "primaryKeys": 21,
+        "relationships": 16,
+        "descriptions": 140
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {
+          "relationship": 6,
+          "constraint": 16
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 29
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "databricks-adidas-table-manager",
+      "verdict": "Clean",
+      "expected": {
+        "tables": 3,
+        "columns": 24,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 16
+      },
+      "imported": {
+        "tables": 3,
+        "columns": 24,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 16
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {},
+        "changed": {},
+        "repaired": {},
+        "skipped": {
+          "statement": 12
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": []
+    },
+    {
+      "slug": "bigquery-shibarium",
+      "verdict": "With gaps",
+      "expected": {
+        "tables": 8,
+        "columns": 87,
+        "primaryKeys": 8,
+        "relationships": 23,
+        "descriptions": 95
+      },
+      "imported": {
+        "tables": 8,
+        "columns": 87,
+        "primaryKeys": 8,
+        "relationships": 19,
+        "descriptions": 95
+      },
+      "reported": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 4,
+        "descriptions": 0
+      },
+      "silentLoss": {
+        "tables": 0,
+        "columns": 0,
+        "primaryKeys": 0,
+        "relationships": 0,
+        "descriptions": 0
+      },
+      "ledger": {
+        "lost": {
+          "relationship": 4
+        },
+        "changed": {
+          "relationship": 10
+        },
+        "repaired": {},
+        "skipped": {
+          "statement": 46
+        },
+        "problem": {}
+      },
+      "problems": 0,
+      "reasons": [
+        "4 item(s) left out and reported"
+      ]
+    }
+  ]
+}

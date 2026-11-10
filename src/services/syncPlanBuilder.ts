@@ -7,7 +7,8 @@
  * `erd-studio diff` CLI builds its plan here too (with `allSelections(report,
  * 'physical')`), so the fixes it reports are the ones the canvas would write.
  *
- * Pure: no I/O and no `vscode` — bundled into `dist/cli.js`.
+ * `buildSyncPlan` is pure: no I/O and no `vscode` — bundled into `dist/cli.js`.
+ * `syncPlanLibraryLookups` only reads through the table library it is given.
  */
 
 import * as path from 'path';
@@ -36,6 +37,10 @@ import {
   resolveGroundTruthDataType,
 } from '../types/syncPlan';
 import type { YmlData } from '../types/ymlData';
+import { subjectAreaStorageOf } from '@erd-studio/core';
+import { catalogColumnName, configuredSchemaOf } from './dbtDraft';
+import { normaliseName } from './nameUtils';
+import type { TableLibraryService } from './logicalModelService';
 
 export interface SyncPlanContext {
   manifest: ManifestData;
@@ -67,6 +72,86 @@ export interface SyncPlanContext {
    * Default `logical-models`.
    */
   newTableLibraryDir?: string;
+  /**
+   * Where a table with no file yet would get one, relative to the semantic
+   * dir (`tables/gold/x.dbml` in a project that writes DBML, §5.7). Wins
+   * over `newTableLibraryDir` and `modelFolder` for a table with no file.
+   * The host passes `TableLibraryService.pathForNewTable` at the diagram's
+   * home ({@link syncPlanLibraryLookups}).
+   */
+  newTableFilePath?: (modelName: string) => string | undefined;
+  /**
+   * Where a new Ref of a DBML foreign-key table goes, relative to the
+   * semantic dir (`relationshipsFileForNewRef`), or undefined for a YAML
+   * table. Feeds `modelContext[…].relationshipsPath`.
+   */
+  relationshipsFile?: (modelName: string) => string | undefined;
+  /**
+   * The relationships file holding a relationship now, relative to the
+   * semantic dir (`relationshipsFileHolding`), or undefined when none does.
+   * Feeds each relationship's `storedIn`.
+   */
+  relationshipStoredIn?: (rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }) => string | undefined;
+  /**
+   * True when a table's file is there but does not read (a YAML or DBML
+   * error, merge conflict markers). Such a table loads with no columns and
+   * none of its Refs, so every column and relationship entry touching it is
+   * an artefact of the failed read ("add it" on one side, "remove it" on the
+   * other): they are left out of the plan and the table is listed in
+   * `unreadableTables` instead. The host passes
+   * `TableLibraryService.getTableFileError` ({@link syncPlanLibraryLookups}).
+   */
+  tableUnreadable?: (modelName: string) => boolean;
+}
+
+/** The table library calls {@link syncPlanLibraryLookups} makes. */
+export type SyncPlanLibrary = Pick<TableLibraryService,
+  'tableFolder' | 'tableLibraryFile' | 'newTableLibraryDirName' | 'newTableHomeFor' | 'pathForNewTable'
+  | 'libraryRelativePath' | 'relationshipsFileForNewRef' | 'relationshipsFileForNewTable' | 'relationshipsFileHolding'
+  | 'getTableFileError'>;
+
+/**
+ * The library lookups of a {@link SyncPlanContext} for the diagram at
+ * `where.diagramFile`, the one place the canvas (`generateSyncPlan`) and the
+ * CLI (`diff`) take them from, so both name the same files. A table with no
+ * file goes where a table created from that diagram goes
+ * (`newTableHomeFor`: its layer), and on a DBML diagram in its dbt custom
+ * schema's folder when the developer configured one, as Import from dbt and Add
+ * Tables from dbt place it (§2.4). `layerIds`: the layers in `layers.json`.
+ */
+export function syncPlanLibraryLookups(
+  library: SyncPlanLibrary,
+  where: { diagramFile: string; layerIds: ReadonlySet<string>; manifest?: ManifestData; ymlData?: YmlData },
+): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn' | 'tableUnreadable'> {
+  const dbmlDiagram = subjectAreaStorageOf(where.diagramFile) === 'dbml';
+  let home: ReturnType<SyncPlanLibrary['newTableHomeFor']> | null = null;
+  const relative = (file: string | undefined): string | undefined => (file === undefined ? undefined : library.libraryRelativePath(file));
+  const newTableFile = (name: string): string | undefined => {
+    try {
+      if (home === null) home = library.newTableHomeFor(where.diagramFile, where.layerIds);
+      const configuredSchema = dbmlDiagram ? configuredSchemaOf(name, where.ymlData, where.manifest) : undefined;
+      return library.pathForNewTable(name, home, configuredSchema !== undefined ? { configuredSchema } : {});
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    modelFolder: (name) => library.tableFolder(name),
+    tableLibraryFile: (name) => library.tableLibraryFile(name),
+    newTableLibraryDir: library.newTableLibraryDirName(),
+    newTableFilePath: (name) => relative(newTableFile(name)),
+    // A table with no file yet (a diagram member the library lacks) has its
+    // new Refs placed from the DBML file it will get, so the plan and diff
+    // name a relationships file for it too, never the table file.
+    relationshipsFile: (name) => {
+      const placed = library.relationshipsFileForNewRef(name);
+      if (placed !== undefined) return relative(placed);
+      const future = library.tableLibraryFile(name) === null ? newTableFile(name) : undefined;
+      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future));
+    },
+    relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding(rel)),
+    tableUnreadable: (name) => library.getTableFileError(name) !== null,
+  };
 }
 
 /** Actions that edit dbt files, after which `dbt compile` is needed. */
@@ -122,6 +207,28 @@ export function buildSyncPlan(
   const columns: ColumnResolution[] = [];
   const relationships: RelationshipResolution[] = [];
   const referencedModels = new Set<string>();
+  // Every path is project-relative with forward slashes on every platform —
+  // the CLI's JSON promises that, and the Claude sync consumer reads either.
+  const toSlash = (p: string): string => p.replace(/\\/g, '/');
+  // Tables whose file does not read, and whose entries were therefore left out.
+  const unreadable = new Map<string, boolean>();
+  const skipped = new Set<string>();
+  const isUnreadable = (name: string): boolean => {
+    if (!ctx.tableUnreadable) return false;
+    let known = unreadable.get(name);
+    if (known === undefined) { known = ctx.tableUnreadable(name); unreadable.set(name, known); }
+    if (known) skipped.add(name);
+    return known;
+  };
+
+  // Whether the schema yml or the manifest declares a column (any case):
+  // otherwise only catalog.json, i.e. the warehouse, reports it.
+  const declaredInDbt = (modelName: string, columnName: string): boolean => {
+    const key = normaliseName(columnName);
+    const yml = ctx.ymlData.models.get(modelName);
+    const man = ctx.manifest.models.get(modelName);
+    return [...(yml?.columns ?? []), ...(man?.columns ?? [])].some((c) => normaliseName(c.name) === key);
+  };
 
   for (const [key, groundTruth] of Object.entries(selections)) {
     const parts = key.split(':');
@@ -151,10 +258,15 @@ export function buildSyncPlan(
 
       const action = deriveColumnAction(colDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
+      if (isUnreadable(modelName)) continue;
 
       columns.push({
         modelName,
-        columnName,
+        // A column only the warehouse reports is written as Import from dbt
+        // seeds it (`LOADED_AT` → `loaded_at`); a declared one as declared.
+        columnName: action === 'add-column-to-logical' && !declaredInDbt(modelName, columnName)
+          ? catalogColumnName(columnName)
+          : columnName,
         discrepancyStatus: colDisc.status,
         groundTruth,
         action,
@@ -181,9 +293,13 @@ export function buildSyncPlan(
 
       let action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
+      // Evaluate both ends, so each unreadable one is listed.
+      const fromUnreadable = isUnreadable(fromModel);
+      if (isUnreadable(toModel) || fromUnreadable) continue;
       // A composite the logical model draws and dbt does not declare as one
       // (#133 L2) is not wrong in the logical model: dbt is asked to declare it.
       if (relDisc.composite && action === 'remove-relationship-from-logical') action = 'add-relationship-test-to-physical';
+      const storedIn = ctx.relationshipStoredIn?.({ fromModel, fromColumn, toModel, toColumn });
 
       relationships.push({
         fromModel,
@@ -198,40 +314,51 @@ export function buildSyncPlan(
         ...(relDisc.pairs ? { pairs: relDisc.pairs.map((p) => ({ ...p })) } : {}),
         ...(relDisc.compositeKey ? { compositeKey: relDisc.compositeKey } : {}),
         ...(relDisc.composite ? { composite: true as const } : {}),
+        ...(storedIn !== undefined ? { storedIn: toSlash(path.join(ctx.semanticDir, storedIn)) } : {}),
       });
       referencedModels.add(fromModel);
       referencedModels.add(toModel);
     }
   }
 
-  // Build model context with file paths (prefer yml source, fall back to manifest heuristic).
-  // Every path is project-relative with forward slashes on every platform —
-  // the CLI's JSON promises that, and the Claude sync consumer reads either.
-  const toSlash = (p: string): string => p.replace(/\\/g, '/');
+  // Build model context with file paths. The schema yml is the one that
+  // declares the model, else a guess next to the manifest's SQL file (where a
+  // new one would go). The SQL file is only ever one that is on disk, i.e. in
+  // the yml walker's listing of the configured model paths (`sourceFiles`):
+  // the manifest's `original_file_path` when it is listed (exact, and right
+  // for a versioned model's `_v2.sql`), else the `.sql` file named after the
+  // model. Never a name guessed from the yml's path: a model with only a yml
+  // has no SQL file, and gets null.
+  const listedSourceFiles = new Set([...(ctx.ymlData.sourceFiles?.values() ?? [])].map(toSlash));
   const modelContext: Record<string, TableContext> = {};
   for (const modelName of referencedModels) {
     const manifestModel = ctx.manifest.models.get(modelName);
     const ymlModel = ctx.ymlData.models.get(modelName);
-    let dbtSqlPath: string | null = null;
     let dbtSchemaPath: string | null = null;
 
     if (ymlModel?.filePath) {
       // Use the actual yml file path from YmlParserService
       dbtSchemaPath = toSlash(path.relative(ctx.projectRoot, ymlModel.filePath));
-      // Heuristic: SQL file is next to the YAML file with .sql extension
-      dbtSqlPath = dbtSchemaPath.replace(/\.ya?ml$/, '.sql');
     } else if (manifestModel?.originalFilePath) {
-      dbtSqlPath = toSlash(manifestModel.originalFilePath);
-      dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
+      dbtSchemaPath = toSlash(manifestModel.originalFilePath).replace(/\.(sql|py)$/i, '.yml');
     }
+    const compiledFrom = manifestModel?.originalFilePath ? toSlash(manifestModel.originalFilePath) : undefined;
+    const sourceFile = compiledFrom && listedSourceFiles.has(compiledFrom)
+      ? compiledFrom
+      : ctx.ymlData.sourceFiles?.get(normaliseName(modelName));
+    const dbtSqlPath = sourceFile && /\.sql$/i.test(sourceFile) ? toSlash(sourceFile) : null;
 
+    const relationshipsFile = ctx.relationshipsFile?.(modelName);
     modelContext[modelName] = {
       modelName,
       // The file where it actually is — top level or a layer folder.
       logicalModelPath: toSlash(path.join(
         ctx.semanticDir,
-        ctx.tableLibraryFile?.(modelName) ?? path.join(ctx.newTableLibraryDir ?? 'logical-models', ctx.modelFolder?.(modelName) ?? '', `${modelName}.yml`),
+        ctx.tableLibraryFile?.(modelName)
+          ?? ctx.newTableFilePath?.(modelName)
+          ?? path.join(ctx.newTableLibraryDir ?? 'logical-models', ctx.modelFolder?.(modelName) ?? '', `${modelName}.yml`),
       )),
+      ...(relationshipsFile !== undefined ? { relationshipsPath: toSlash(path.join(ctx.semanticDir, relationshipsFile)) } : {}),
       dbtSqlPath,
       dbtSchemaPath,
     };
@@ -255,5 +382,6 @@ export function buildSyncPlan(
     columns,
     relationships,
     requiresCompile,
+    ...(skipped.size > 0 ? { unreadableTables: [...skipped].sort((a, b) => a.localeCompare(b)) } : {}),
   };
 }

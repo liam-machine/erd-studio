@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "live",
+      "label": "Live",
+      "abbreviation": "LIV",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "stable",
+      "label": "Stable",
+      "abbreviation": "STB",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "derived",
+      "label": "Derived",
+      "abbreviation": "DRV",
+      "color": "#8b5cf6",
+      "creatable": true,
+      "order": 3
+    },
+    {
+      "id": "views",
+      "label": "User-facing views",
+      "abbreviation": "VW",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 4
+    }
+  ]
+}

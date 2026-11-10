@@ -4,11 +4,17 @@
  *
  *   - The transform effect rebuilds every node and edge when the domain (or
  *     the discrepancy overlay) changes, preserving measured sizes, the
- *     current selection and valid edge selections.
+ *     current selection and valid edge selections, and keeps the existing
+ *     object for every node and edge that came out the same
+ *     (`reuseUnchanged`), so a drag re-renders only what moved.
  *   - The overlay effect updates only the `dimmed` / `isExpanded` flags when
  *     selection, search or column expansion changes.
  *   - The handlers open the detail panel on a model click, select annotations,
  *     highlight an FK edge's columns and clear selection on a pane click.
+ *
+ * Hover preview and the moving relationship arrows are `useHoverFocus`, a
+ * separate hook: it needs React Flow's store, and this one must keep working
+ * without a `ReactFlowProvider`. Hover never comes through the overlay pass.
  *
  * Must run inside a `CanvasStoreProvider`.
  */
@@ -21,6 +27,7 @@ import { useColumnExpansion } from '../hooks/useColumnExpansion';
 import { transformSubjectArea } from '../lib/graphTransformer';
 import { applyNodeOverlays } from '../lib/nodeOverlays';
 import { columnPairs } from '../lib/relationshipDisplayKey';
+import { reuseUnchanged } from '../lib/reuseUnchanged';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 
 export interface UseCanvasGraphOptions {
@@ -65,6 +72,7 @@ export function useCanvasGraph({
   const selectedEdge = useEditorStore((s) => s.selectedEdge);
   const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
   const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
+  const setHoverFocus = useEditorStore((s) => s.setHoverFocus);
   const searchQuery = useEditorStore((s) => s.searchQuery);
 
   const { isExpanded, toggleExpansion } = useColumnExpansion();
@@ -151,6 +159,13 @@ export function useCanvasGraph({
         setSelectedEdge(null);
       }
 
+      // Hand back the objects already in the store for every node and edge
+      // the rebuild left as it was: after a drag only the moved tables and
+      // the edges whose sides moved are new, so React Flow and the memoised
+      // node components re-render those alone instead of the whole canvas.
+      newNodes = reuseUnchanged(state.nodes, newNodes);
+      newEdges = reuseUnchanged(state.edges, newEdges);
+
       onTransformedRef.current?.(newNodes, newEdges);
       setNodes(newNodes);
       setEdges(newEdges);
@@ -217,13 +232,16 @@ export function useCanvasGraph({
   );
 
   // Handle clicks on blank canvas to close the detail panel and clear selection.
+  // The pointer is on the blank canvas, so no table is hovered either: the
+  // hover preview and its moving arrows stop now, not after the leave grace.
   const onPaneClick = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
     selectAnnotation(null);
     setHighlightedColumns(new Set());
     setSelectedEdge(null);
-  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge]);
+    setHoverFocus(null);
+  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge, setHoverFocus]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).

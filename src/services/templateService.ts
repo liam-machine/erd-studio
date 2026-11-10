@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { ColumnDef, TableTemplate } from '../types/semantic';
+import { log } from './logger';
 
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 const TEMPLATES_DIR = 'templates';
@@ -132,7 +133,7 @@ export class TemplateService {
     try {
       entries = fs.readdirSync(templatesPath);
     } catch (err) {
-      console.warn(
+      log.warn(
         `[TemplateService] Unable to read templates directory ${templatesPath}: ` +
         `${err instanceof Error ? err.message : String(err)}`
       );
@@ -155,7 +156,7 @@ export class TemplateService {
           // and uses it as a React key. First file (alphabetically) wins.
           const firstFile = seenIds.get(template.id);
           if (firstFile) {
-            console.warn(
+            log.warn(
               `[TemplateService] Skipping template ${file}: id "${template.id}" ` +
               `is already defined by ${firstFile}`
             );
@@ -165,7 +166,7 @@ export class TemplateService {
           templates.push(template);
         }
       } catch (err) {
-        console.warn(
+        log.warn(
           `[TemplateService] Failed to load template ${file}: ` +
           `${err instanceof Error ? err.message : String(err)}`
         );

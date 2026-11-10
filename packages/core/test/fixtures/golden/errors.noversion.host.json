@@ -1,6 +1,7 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
+    "message": "Subject area file .erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field.",
+    "kind": "invalid"
   }
 }

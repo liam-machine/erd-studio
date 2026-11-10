@@ -386,3 +386,18 @@ describe('CatalogService', () => {
   });
 
 });
+
+describe('CatalogService — disabled (logical-only, no dbt_project.yml)', () => {
+  it('answers no catalog without reading the disk or reporting a failure', async () => {
+    const onReadFailure = vi.fn();
+    const statSpy = vi.spyOn(fs.promises, 'stat');
+    try {
+      const service = new CatalogService({ enabled: false, onReadFailure });
+      expect(await service.loadCatalog(FIXTURE_PROJECT_PATH)).toBeUndefined();
+      expect(statSpy).not.toHaveBeenCalled();
+      expect(onReadFailure).not.toHaveBeenCalled();
+    } finally {
+      statSpy.mockRestore();
+    }
+  });
+});

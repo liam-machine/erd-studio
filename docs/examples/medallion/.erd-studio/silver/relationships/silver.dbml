@@ -1,0 +1,13 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table silver.customers }     from '../tables/silver/customers.dbml'
+use { table silver.order_lines }   from '../tables/silver/order_lines.dbml'
+use { table silver.payments }      from '../tables/silver/payments.dbml'
+use { table silver.products }      from '../tables/silver/products.dbml'
+use { table silver.silver_orders } from '../tables/silver/silver_orders.dbml'
+
+Ref: silver.order_lines.product_id >? silver.products.product_id
+Ref: silver.order_lines.order_id >? silver.silver_orders.order_id
+
+Ref: silver.payments.customer_id >? silver.customers.customer_id
+
+Ref: silver.silver_orders.customer_id >? silver.customers.customer_id

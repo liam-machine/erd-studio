@@ -1,0 +1,11 @@
+Table raw_vault.hub_customer [vault_type: 'hub'] {
+  Note: 'One row per customer number, from any source.'
+
+  customer_hk   BINARY    [pk, note: 'Hash of customer_bk']
+  customer_bk   STRING    [
+    natural_key: 'true',
+    note: 'The customer number: the same in the policy system and the CRM'
+  ]
+  load_datetime TIMESTAMP [note: 'When the row was loaded']
+  record_source STRING    [note: 'The system the row came from']
+}

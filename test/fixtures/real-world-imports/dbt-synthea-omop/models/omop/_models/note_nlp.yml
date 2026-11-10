@@ -1,0 +1,151 @@
+models:
+  - name: note_nlp
+    description: The NOTE_NLP table encodes all output of NLP on clinical notes. Each row represents
+      a single extracted term from a note.
+    columns:
+      - name: note_nlp_id
+        description: A unique identifier for the NLP record.
+        data_type: integer
+        tests:
+          - not_null
+          - unique
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: note_id
+        description: This is the NOTE_ID for the NOTE record the NLP record is associated to.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: section_concept_id
+        description: ''
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: section_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: snippet
+        description: A small window of text surrounding the term
+        data_type: varchar(250)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 250
+              row_condition: snippet is not null
+              strictly: false
+      - name: offset
+        description: Character offset of the extracted term in the input note
+        data_type: varchar(50)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+      - name: lexical_variant
+        description: Raw text extracted from the NLP tool.
+        data_type: varchar(250)
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 250
+              row_condition: lexical_variant is not null
+              strictly: false
+      - name: note_nlp_concept_id
+        description: ''
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+          - dbt_utils.relationships_where:
+              to: ref('concept')
+              field: concept_id
+              from_condition: note_nlp_concept_id != 0
+              to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+      - name: note_nlp_source_concept_id
+        description: ''
+        data_type: integer
+        tests:
+          - relationships:
+              to: ref('concept')
+              field: concept_id
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_type_variants(['bigint', 'integer']) }}"
+      - name: nlp_system
+        description: ''
+        data_type: varchar(250)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 250
+              row_condition: nlp_system is not null
+              strictly: false
+      - name: nlp_date
+        description: The date of the note processing.
+        data_type: date
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('date') }}"
+      - name: nlp_datetime
+        description: The date and time of the note processing.
+        data_type: datetime
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('timestamp') }}"
+      - name: term_exists
+        description: ''
+        data_type: varchar(1)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 1
+              row_condition: term_exists is not null
+              strictly: false
+      - name: term_temporal
+        description: ''
+        data_type: varchar(50)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 50
+              row_condition: term_temporal is not null
+              strictly: false
+      - name: term_modifiers
+        description: ''
+        data_type: varchar(2000)
+        tests:
+          - dbt_expectations.expect_column_to_exist
+          - dbt_expectations.expect_column_values_to_be_in_type_list:
+              column_type_list: "{{ get_equivalent_types('varchar') }}"
+          - dbt_expectations.expect_column_value_lengths_to_be_between:
+              max_value: 2000
+              row_condition: term_modifiers is not null
+              strictly: false

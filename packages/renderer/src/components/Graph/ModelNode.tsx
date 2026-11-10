@@ -31,11 +31,16 @@ import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import { useHoverTip } from './HoverTip';
 import { metaRows } from '../../lib/metaFormat';
+import { tableFocusRole } from '../../lib/canvasFocus';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
+import { layerAbbreviation } from '../../lib/layerCues';
+import { offDiagramChipTip, offDiagramRows } from '../../lib/canvasContext';
 import {
   SOURCE_LABEL,
+  SOURCE_LABEL_NEUTRAL,
   SOURCE_PHRASE,
+  SOURCE_PHRASE_NEUTRAL,
   SCD_BADGE,
   SCD_TITLE,
   ADDITIVE_BADGE,
@@ -46,20 +51,6 @@ import './ModelNode.css';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-// Fallback abbreviations for when layerConfig is not available
-const LAYER_BADGE_FALLBACK: Record<string, string> = {
-  bronze: 'BRZ',
-  silver: 'SLV',
-  gold: 'GLD',
-};
-
-// Abbreviations for common database schema names
-const SCHEMA_BADGE: Record<string, string> = {
-  bronze: 'BRZ',
-  silver: 'SLV',
-  gold: 'GLD',
-};
 
 /**
  * What a ghosted node is actually telling the user. A ghost used to mean only
@@ -73,9 +64,16 @@ const GHOST_REASON_TITLE: Record<NonNullable<TableNodeData['ghostReason']>, stri
   'missing-in-comparison': 'not present in the stage being compared against',
 };
 
+/** The viewer's twin: a page outside VS Code cannot know the project uses dbt. */
+const GHOST_REASON_TITLE_NEUTRAL: Record<NonNullable<TableNodeData['ghostReason']>, string> = {
+  'not-in-project': 'not found in the project (no source file, schema .yml entry or manifest node)',
+  'disabled': 'disabled in the project (enabled: false), so it is not built',
+  'missing-in-comparison': 'not present in the stage being compared against',
+};
+
 /** Join a contributor list as prose: "a", "a and b", "a, b and c". */
-function joinPhrases(sources: PhysicalColumnSource[]): string {
-  const phrases = sources.map((s) => SOURCE_PHRASE[s]);
+function joinPhrases(sources: PhysicalColumnSource[], phrase: Record<PhysicalColumnSource, string>): string {
+  const phrases = sources.map((s) => phrase[s]);
   if (phrases.length <= 1) { return phrases[0] ?? ''; }
   return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
 }
@@ -86,9 +84,11 @@ function joinPhrases(sources: PhysicalColumnSource[]): string {
  * blank?" is the one question the chip has to be able to answer, and the
  * answer is `dataType === ''`.
  */
-function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[]): string {
+function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[], viewer: boolean): string {
   const untyped = columns.filter((c) => !c.dataType).length;
-  const base = `${SOURCE_LABEL[provenance.types]} \u2014 types from ${SOURCE_PHRASE[provenance.types]}; columns from ${joinPhrases(provenance.columns)}`;
+  const label = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
+  const phrase = viewer ? SOURCE_PHRASE_NEUTRAL : SOURCE_PHRASE;
+  const base = `${label[provenance.types]} \u2014 types from ${phrase[provenance.types]}; columns from ${joinPhrases(provenance.columns, phrase)}`;
   return untyped > 0
     ? `${base} \u00b7 ${untyped} column${untyped === 1 ? ' has' : 's have'} no type`
     : base;
@@ -556,9 +556,12 @@ function describeLoadError(error: TableLoadError): string {
       ? `Unresolved git merge conflict on line ${error.line} — ERD Studio can't read this file.`
       : "Unresolved git merge conflict — ERD Studio can't read this file.";
   }
+  // A `.dbml` table file (native DBML storage); an older core never sends
+  // these kinds, so its nodes read exactly as before.
+  const format = typeof error.kind === 'string' && error.kind.startsWith('dbml') ? 'DBML' : 'YAML';
   return error.line !== undefined
-    ? `YAML error on line ${error.line} — ERD Studio can't read this file.`
-    : "YAML error — ERD Studio can't read this file.";
+    ? `${format} error on line ${error.line} — ERD Studio can't read this file.`
+    : `${format} error — ERD Studio can't read this file.`;
 }
 
 /** The node's one line for a model read from a file that needs fixing (#164). */
@@ -567,9 +570,12 @@ function describeLoadWarning(warning: TableLoadWarning): string {
   return `${key} is written twice (line ${warning.line}) — the last one is shown. Remove the other copy to edit this table.`;
 }
 
-function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
-  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
+  const { modelName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  // Hover preview (useHoverFocus): the hovered table and its related tables
+  // stay bright. A primitive, so a table outside the focus never re-renders.
+  const focusRole = useEditorStore((s) => tableFocusRole(s.hoverFocus, id));
   const send = useSend();
   const viewer = useIsViewer();
 
@@ -644,29 +650,54 @@ function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
   // Header hover tips. `title` is not a usable tooltip on a React Flow node —
   // the node is a drag surface and the browser shows the grab cursor instead —
   // so the header uses the same portal hover card the column rows use.
-  // An aliased model reads as its table name; the tip says which model it is.
-  const title = label ? `${label} (table ${modelName})` : modelName;
+  // The header reads as the sidebar does: the model name, with the warehouse
+  // name (alias) after it. The tip names the warehouse table in full.
+  // A label without an alias or a schema prefix (older node data) keeps the
+  // label-first header: the label, then the model name beside it.
+  const labelFirst = !!label && !shownSchema && !alias;
+  const qualified = `${shownSchema ? `${shownSchema}.` : ''}${modelName}`;
+  const title = alias ? `${qualified} (warehouse table ${alias})` : labelFirst ? `${label} (table ${modelName})` : qualified;
   const modelMeta = useMemo(() => metaRows(meta), [meta]);
   const nameTip = useHoverTip<HTMLSpanElement>(
     ghostReason
-      ? `${title} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
+      ? `${title} \u2014 ${(viewer ? GHOST_REASON_TITLE_NEUTRAL : GHOST_REASON_TITLE)[ghostReason]}`
       : isDiscExtra
         ? `${title} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
         : title,
     modelMeta,
   );
+  // Relationships to tables not on this diagram: the editing host's context
+  // only (a primitive, so other tables never re-render). Never in the viewer.
+  const offDiagramCount = useEditorStore((s) => (viewer ? 0 : offDiagramRows(s.canvasContext, s.domain, modelName).length));
+  const offDiagramTip = useHoverTip<HTMLSpanElement>(offDiagramCount > 0 ? offDiagramChipTip(offDiagramCount) : '');
   const sourceTip = useHoverTip<HTMLSpanElement>(
-    provenance ? sourceTitle(provenance, columns) : '',
+    provenance ? sourceTitle(provenance, columns, viewer) : '',
   );
+  // The badge has one meaning: the layer the table lives in — its own when
+  // known (DBML storage), else the diagram's. The schema is in the hover card
+  // and, when it is not the layer's name, a prefix of the name.
+  const ownLayer = tableLayer !== undefined;
+  const badgeLayer = ownLayer ? tableLayer : layer;
+  const badgeConfig = ownLayer ? tableLayerConfig : layerConfig;
+  const badgeText = badgeLayer ? layerAbbreviation(badgeLayer, badgeConfig) : '';
+  // A single-layer project has nothing to tell apart: no badge, no strip.
+  const showBadge = !singleLayer && badgeText !== '';
+  const layered = !singleLayer && ownLayer && !!tableLayerConfig?.color;
   const badgeTip = useHoverTip<HTMLSpanElement>(
-    schema
-      ? `Database schema: ${schema}`
-      : `Layer: ${layerConfig?.label ?? layer} \u2014 no dbt schema resolved (run dbt compile or dbt docs generate)`,
+    [
+      `Layer: ${badgeConfig?.label ?? badgeLayer}`,
+      ...(schema ? [`Schema: ${schema}`] : []),
+      ...(otherLayer ? [`From another layer: this diagram is in ${layerConfig?.label ?? layer}.`] : []),
+      ...(stage === 'physical' && !schema
+        ? [viewer ? 'No schema resolved.' : 'No dbt schema resolved (run dbt compile or dbt docs generate).']
+        : []),
+    ].join('\n'),
   );
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
+      className={`model-node model-node--${stageClass} model-node--stage-${stage}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}${focusRole ? ` model-node--focus-${focusRole}` : ''}${layered ? ' model-node--layered' : ''}${otherLayer ? ' model-node--other-layer' : ''}`}
+      style={layered ? ({ '--model-node-layer-color': tableLayerConfig!.color } as CSSProperties) : undefined}
       data-model-name={modelName}
       // Viewer: no context menu, so leave right-click to the browser.
       onContextMenu={viewer ? undefined : handleContextMenu}
@@ -684,32 +715,48 @@ function TableNodeComponent({ data, selected }: NodeProps<TableFlowNode>) {
       {/* Header */}
       <div className="model-node__header">
         <span className="model-node__name" {...nameTip.anchorProps}>
-          {label ?? modelName}
-          {label && <span className="model-node__model-id">{modelName}</span>}
+          {!labelFirst ? (
+            <>
+              {shownSchema && <span className="model-node__schema">{shownSchema}.</span>}
+              {modelName}
+              {alias && <span className="model-node__model-id">as {alias}</span>}
+            </>
+          ) : (
+            <>
+              {label}
+              <span className="model-node__model-id">{modelName}</span>
+            </>
+          )}
         </span>
         {nameTip.tip}
+        {offDiagramCount > 0 && (
+          <span className="model-node__off-diagram" {...offDiagramTip.anchorProps}>
+            +{offDiagramCount}
+          </span>
+        )}
+        {offDiagramCount > 0 && offDiagramTip.tip}
         {provenance && (
           <span
             className={`model-node__source model-node__source--${provenance.types}`}
             {...sourceTip.anchorProps}
           >
-            {SOURCE_LABEL[provenance.types]}
+            {(viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL)[provenance.types]}
           </span>
         )}
         {sourceTip.tip}
-        <span
-          className={`model-node__badge${schema ? '' : ' model-node__badge--layer'}`}
-          style={layerConfig?.color ? {
-            backgroundColor: `${layerConfig.color}33`,
-            color: layerConfig.color,
-          } : undefined}
-          {...badgeTip.anchorProps}
-        >
-          {schema
-            ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()
-            : layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
-        </span>
-        {badgeTip.tip}
+        {showBadge && (
+          <span
+            className="model-node__badge"
+            style={badgeConfig?.color ? {
+              backgroundColor: `${badgeConfig.color}33`,
+              color: badgeConfig.color,
+            } : undefined}
+            {...badgeTip.anchorProps}
+          >
+            {badgeText}
+          </span>
+        )}
+        {showBadge && badgeTip.tip}
       </div>
 
       {/* Grain subtitle */}

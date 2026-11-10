@@ -6,7 +6,15 @@
       "script": "watch",
       "problemMatcher": [
         {
-          "base": "$esbuild-watch",
+          "owner": "esbuild",
+          "fileLocation": "absolute",
+          "pattern": {
+            "regexp": "^ERROR: (.*):(\\d+):(\\d+): (.*)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "message": 4
+          },
           "background": {
             "activeOnStart": true,
             "beginsPattern": "^\\[watch\\] build started",

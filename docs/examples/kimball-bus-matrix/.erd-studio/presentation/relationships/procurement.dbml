@@ -1,0 +1,13 @@
+// Procurement relationships, owned by the buying team.
+use { table conformed.dim_date }       from '../tables/conformed/dim_date.dbml'
+use { table conformed.dim_product }    from '../tables/conformed/dim_product.dbml'
+use { table conformed.dim_store }      from '../tables/conformed/dim_store.dbml'
+use { table procurement.dim_supplier } from '../tables/procurement/dim_supplier.dbml'
+use { table procurement.fct_purchase_order_pipeline } from '../tables/procurement/fct_purchase_order_pipeline.dbml'
+
+Ref "invoiced date": procurement.fct_purchase_order_pipeline.invoiced_date_key >? conformed.dim_date.date_key
+Ref "ordered date": procurement.fct_purchase_order_pipeline.ordered_date_key >? conformed.dim_date.date_key
+Ref "received date": procurement.fct_purchase_order_pipeline.received_date_key >? conformed.dim_date.date_key
+Ref: procurement.fct_purchase_order_pipeline.product_key >? conformed.dim_product.product_key
+Ref: procurement.fct_purchase_order_pipeline.store_key >? conformed.dim_store.store_key
+Ref: procurement.fct_purchase_order_pipeline.supplier_key >? procurement.dim_supplier.supplier_key

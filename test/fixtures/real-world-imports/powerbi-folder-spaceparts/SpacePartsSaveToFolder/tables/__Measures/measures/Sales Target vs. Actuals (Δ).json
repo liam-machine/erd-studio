@@ -1,0 +1,10 @@
+{
+  "name": "Sales Target vs. Actuals (Δ)",
+  "expression": [
+    "",
+    "[Actuals] - [Sales Target]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "1. Total\\Sales Target",
+  "lineageTag": "79869441-9511-4efb-b95a-147eb3d14926"
+}

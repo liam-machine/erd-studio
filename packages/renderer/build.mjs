@@ -3,6 +3,8 @@
 //      every entry point sees the same module instances (one store context,
 //      one set of components). Component `.css` imports are dropped here
 //      (`empty` loader); consumers load the single dist/styles.css instead.
+//      The line-routing worker is bundled into a string and inlined
+//      (`__ERD_EDGE_ROUTING_WORKER__`, scripts/edgeRoutingWorker.cjs).
 //   2. CSS — src/styles.css, bundled in its explicit order into
 //      dist/styles.css. The React Flow base stylesheet stays an `@import` for
 //      the consumer's bundler to resolve.
@@ -13,6 +15,7 @@ import { build } from 'esbuild';
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import workerBuild from './scripts/edgeRoutingWorker.cjs';
 
 const coreDir = fileURLToPath(new URL('../core/', import.meta.url));
 if (!existsSync(new URL('../core/dist/index.d.ts', import.meta.url))) {
@@ -31,6 +34,8 @@ await build({
   jsx: 'automatic',
   loader: { '.css': 'empty' },
   external: ['react', 'react-dom', 'react/jsx-runtime', '@xyflow/react', 'zustand', '@erd-studio/core'],
+  // The line-routing worker, inlined (scripts/edgeRoutingWorker.cjs).
+  define: workerBuild.edgeRoutingWorkerDefine(),
   logLevel: 'warning',
 });
 

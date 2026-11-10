@@ -1,0 +1,18 @@
+use { table shipping.shipment }         from '../tables/shipping/shipment.dbml'
+use { table shipping.tracking_event }   from '../tables/shipping/tracking_event.dbml'
+use { table shipping.carrier }          from '../tables/shipping/carrier.dbml'
+use { table orders.customer_order }     from '../tables/orders/customer_order.dbml'
+use { table customer.customer_profile } from '../../aggregate/tables/customer/customer_profile.dbml'
+use * from '../relationships/shipping.dbml'
+
+Project shipping {
+  Note: 'The shipping data product. customer_order is the orders domain\'s, drawn to show the link.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    carrier 852 12
+    customer_order 147 363
+    customer_profile 587 -182
+    shipment 408 29
+    tracking_event 12 17
+  '''
+}

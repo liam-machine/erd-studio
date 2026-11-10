@@ -1,0 +1,17 @@
+{
+  "name": "Lines",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT ('1) Selected Metric'[Select a Measure]),",
+    "        'Z01CG4 - Lines'[Measure]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Total\\Actuals",
+  "lineageTag": "70efca37-c432-410e-a447-3025e4237852"
+}

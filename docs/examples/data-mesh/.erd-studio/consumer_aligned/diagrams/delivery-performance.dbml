@@ -1,0 +1,14 @@
+use { table delivery_insights.fct_shipment_delivery } from '../tables/delivery_insights/fct_shipment_delivery.dbml'
+use { table customer.customer_profile } from '../../aggregate/tables/customer/customer_profile.dbml'
+use { table shipping.carrier }          from '../../source_aligned/tables/shipping/carrier.dbml'
+use * from '../relationships/delivery_insights.dbml'
+
+Project "delivery-performance" {
+  Note: 'On-time delivery, for operations.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    carrier 456 28
+    customer_profile 456 250
+    fct_shipment_delivery 12 12
+  '''
+}

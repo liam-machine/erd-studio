@@ -7,6 +7,10 @@ import { parse as yamlParse } from 'yaml';
 import { SelectorsService } from '../../src/services/selectorsService';
 import type { SelectorsServiceHooks, SkipInfo } from '../../src/services/selectorsService';
 import type { SubjectAreaService } from '../../src/services/domainService';
+import { SubjectAreaService as RealSubjectAreaService } from '../../src/services/domainService';
+import { LayerService } from '../../src/services/layerService';
+import { TableLibraryService } from '../../src/services/logicalModelService';
+import { DBT_FIXTURES, copyDbtFixture, diagramPath } from './helpers/dbtFixtures';
 
 interface FakeSubjectArea {
   domain: string;
@@ -59,6 +63,8 @@ describe('SelectorsService', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selectors-svc-'));
+    // selectors.yml is a dbt file: every case below runs in a dbt project root.
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), 'name: test_project\n', 'utf-8');
   });
 
   afterEach(() => {
@@ -889,5 +895,162 @@ describe('SelectorsService', () => {
     const names = parsed.selectors.map((s) => s.name);
     expect(names).toContain('my_user');
     expect(names).toContain('domain_silver_d');
+  });
+});
+
+describe('SelectorsService in a folder that is not a dbt project (#111)', () => {
+  let tmpDir: string;
+  const domains: FakeSubjectArea[] = [
+    { domain: 'customer-360', layer: 'silver', filePath: '/dummy/silver/customer-360.json', models: ['dim_customer', 'fct_orders'] },
+  ];
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selectors-plain-'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes nothing, even with subject areas that have tables', () => {
+    const onWritten = vi.fn();
+    const onSkipped = vi.fn();
+    const isFileDirtyInEditor = vi.fn(() => false);
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', {
+      onWritten, onSkipped, isFileDirtyInEditor,
+    });
+
+    const result = svc.regenerate();
+
+    expect(result).toEqual({ status: 'not-dbt-project', filePath: path.join(tmpDir, 'selectors.yml') });
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+    expect(onWritten).not.toHaveBeenCalled();
+    expect(onSkipped).not.toHaveBeenCalled();
+  });
+
+  it('leaves an existing selectors.yml untouched, even a malformed one', () => {
+    const content = 'selectors: [unclosed\n';
+    writeSelectors(tmpDir, content);
+    const onSkipped = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onSkipped });
+
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+    expect(fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8')).toBe(content);
+    expect(onSkipped).not.toHaveBeenCalled();
+  });
+
+  it('scheduleRegenerate (activation and post-edit path) writes nothing', () => {
+    vi.useFakeTimers();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+
+    svc.scheduleRegenerate();
+    vi.runAllTimers();
+
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('a dbt_project.yml directory does not count as a dbt project', () => {
+    fs.mkdirSync(path.join(tmpDir, 'dbt_project.yml'));
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('writes as before once the folder becomes a dbt project', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.regenerate().status).toBe('not-dbt-project');
+
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), 'name: now_dbt\n', 'utf-8');
+
+    const result = svc.regenerate();
+    expect(result.status).toBe('written');
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_silver_customer_360']);
+  });
+});
+
+// The real subject areas of the dbt fixture, on both storages: selectors come
+// from the diagrams (`<layer>/<name>.json` on YAML, `<layer>/diagrams/<name>.dbml`
+// on DBML) through the real SubjectAreaService, and the user's own selectors stay.
+describe.each(DBT_FIXTURES)('SelectorsService on the dbt fixture (%s storage)', (storage, fixture) => {
+  let root: string;
+  const realService = (): SubjectAreaService => {
+    const layerService = new LayerService(root, '.erd-studio');
+    const subjectAreaService = new RealSubjectAreaService(layerService);
+    subjectAreaService.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
+    return subjectAreaService;
+  };
+
+  beforeEach(() => { root = copyDbtFixture(fixture, 'selectors-fixture'); });
+  afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+  it('regenerating the committed selectors.yml rewrites it byte for byte', () => {
+    const before = fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8');
+    const result = new SelectorsService(realService(), root, '.erd-studio').regenerate();
+    expect(result).toMatchObject({ status: 'written', selectorsWritten: 2, modelsReferenced: 7 });
+    expect(fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8')).toBe(before);
+  });
+
+  it('an up-to-date selectors.yml is not written at all: same mtime and inode, still reported as written', () => {
+    // Activation regenerates on every window: rewriting identical bytes changed
+    // the mtime and fired every watcher on the file.
+    const file = path.join(root, 'selectors.yml');
+    const past = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file, past, past);
+    const { ino } = fs.statSync(file);
+    const onWritten = vi.fn();
+    const result = new SelectorsService(realService(), root, '.erd-studio', { onWritten }).regenerate();
+    // Callers read 'written' as "selectors.yml now matches the diagrams".
+    expect(result).toMatchObject({ status: 'written', selectorsWritten: 2, modelsReferenced: 7 });
+    expect(onWritten).toHaveBeenCalledTimes(1);
+    // atomicWrite renames a temp file over it: a write would change both.
+    expect(fs.statSync(file).mtimeMs).toBe(past.getTime());
+    expect(fs.statSync(file).ino).toBe(ino);
+    expect(fs.readdirSync(root).filter((f) => f.startsWith('selectors.yml.tmp'))).toEqual([]);
+  });
+
+  it('a stale selectors.yml is still rewritten', () => {
+    const file = path.join(root, 'selectors.yml');
+    const before = fs.readFileSync(file, 'utf-8');
+    fs.writeFileSync(file, before.replace(/domain_silver_showcase/, 'domain_silver_old'));
+    const past = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file, past, past);
+    const result = new SelectorsService(realService(), root, '.erd-studio').regenerate();
+    expect(result.status).toBe('written');
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    expect(fs.statSync(file).mtimeMs).not.toBe(past.getTime());
+  });
+
+  it('a new diagram gets its domain_ selector, in member order; the user selector and its comments stay', () => {
+    const file = diagramPath(root, storage, 'gold', 'reporting');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, storage === 'yaml'
+      ? JSON.stringify({ schemaVersion: 5, domain: 'reporting', layer: 'gold', description: '', logical: { models: ['fct_sale', 'dim_customer'], relationships: [] }, viewConfig: {} }, null, 2)
+      : [
+        "use { table silver.fct_sale }     from '../../silver/tables/silver/fct_sale.dbml'",
+        "use { table silver.dim_customer } from '../../silver/tables/silver/dim_customer.dbml'",
+        '',
+        'Project reporting {',
+        "  erd_schema_version: '7'",
+        '}',
+        '',
+      ].join('\n'));
+
+    const result = new SelectorsService(realService(), root, '.erd-studio').regenerate();
+    expect(result.status).toBe('written');
+    const parsed = readSelectors(root);
+    const reporting = parsed.selectors.find((s) => s.name === 'domain_gold_reporting')!;
+    expect(reporting.definition.union.map((u) => u.value)).toEqual(['fct_sale', 'dim_customer']);
+    expect(parsed.selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_scroll_test', 'domain_silver_showcase', 'incremental_critical']);
+    const text = fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8');
+    expect(text).toContain('# Keep in sync with airflow DAG `incrementals_v2`');
+  });
+
+  it('a deleted diagram loses its selector', () => {
+    fs.rmSync(diagramPath(root, storage, 'silver', 'scroll-test'));
+    const result = new SelectorsService(realService(), root, '.erd-studio').regenerate();
+    expect(result.status).toBe('written');
+    expect(readSelectors(root).selectors.map((s) => s.name)).toEqual(['domain_silver_showcase', 'incremental_critical']);
   });
 });

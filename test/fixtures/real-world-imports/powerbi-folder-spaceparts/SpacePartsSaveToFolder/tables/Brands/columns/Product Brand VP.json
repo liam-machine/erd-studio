@@ -1,0 +1,14 @@
+{
+  "name": "Product Brand VP",
+  "dataType": "string",
+  "sourceColumn": "product_brand_vp",
+  "displayFolder": "3. Managers",
+  "lineageTag": "cd36ed0c-b7f0-404f-b8a0-ced180569814",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

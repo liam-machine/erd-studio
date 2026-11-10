@@ -1,0 +1,8 @@
+Table bronze.shopify_products {
+  Note: 'The product catalogue as Shopify sends it.'
+
+  id           BIGINT    [pk]
+  title        STRING
+  product_type STRING
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

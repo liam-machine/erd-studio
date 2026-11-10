@@ -1,0 +1,14 @@
+{
+  "name": "Budget MTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Budget MTD]",
+    "VAR _DELTA  = [MTD Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\ii. MTD",
+  "lineageTag": "8eb42713-706d-436a-a1c4-dda1c25494e1"
+}

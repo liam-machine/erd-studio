@@ -1,0 +1,31 @@
+{
+  "name": "Product Hierarchy",
+  "displayFolder": "1. Product Hierarchy",
+  "lineageTag": "be3e77c0-e9ee-4ef7-947d-d4d075eeee9a",
+  "levels": [
+    {
+      "name": "Type",
+      "ordinal": 0,
+      "column": "Type",
+      "lineageTag": "5dc23be4-9e7d-4d9c-9125-29fff24963af"
+    },
+    {
+      "name": "Subtype",
+      "ordinal": 1,
+      "column": "Subtype",
+      "lineageTag": "aad230ae-d02b-40ca-909f-912eb59dbd84"
+    },
+    {
+      "name": "Product Name",
+      "ordinal": 2,
+      "column": "Product Name",
+      "lineageTag": "2faa8a87-f034-4a37-ae57-78226ae641ee"
+    },
+    {
+      "name": "Material",
+      "ordinal": 3,
+      "column": "Material",
+      "lineageTag": "3f546d11-2759-4b51-bd76-87db29036a7b"
+    }
+  ]
+}

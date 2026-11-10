@@ -1,0 +1,37 @@
+{
+  "name": "Regional Hierarchy",
+  "displayFolder": "1. Region Hierarchy",
+  "lineageTag": "8ce16331-fb01-4dfb-bd38-da99652a4893",
+  "levels": [
+    {
+      "name": "All",
+      "ordinal": 0,
+      "column": "All",
+      "lineageTag": "d0892c44-a314-4400-a33c-1c9e05de3679"
+    },
+    {
+      "name": "System",
+      "ordinal": 1,
+      "column": "System",
+      "lineageTag": "eb24e180-a00e-4f4f-9b9f-03f0c2c33521"
+    },
+    {
+      "name": "Interplanetary Region",
+      "ordinal": 2,
+      "column": "Interplanetary Region",
+      "lineageTag": "df0d47d9-4330-4447-8fc4-7a3dead1f50d"
+    },
+    {
+      "name": "Territory",
+      "ordinal": 3,
+      "column": "Territory",
+      "lineageTag": "006fd1c2-f102-4ed6-b80b-677e2e392747"
+    },
+    {
+      "name": "Station",
+      "ordinal": 4,
+      "column": "Station",
+      "lineageTag": "d6c1f01c-580a-45be-ba9f-a0ce66a12255"
+    }
+  ]
+}

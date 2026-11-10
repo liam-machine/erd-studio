@@ -1,0 +1,5891 @@
+{
+ "sample": "databricks-open-retail-data-model",
+ "engine": "Apache Spark 4.3.0 SQL parser (no catalog)",
+ "loaded": [
+  "databricks-open-retail-data-model/canonical-core/calendar/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/calendar/tables/fiscal_calendar.sql",
+  "databricks-open-retail-data-model/canonical-core/calendar/tables/fx_rate.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/account.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/channel_preference.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/consent.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/contact.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/household.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/identity_link.sql",
+  "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+  "databricks-open-retail-data-model/canonical-core/equipment/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/equipment/tables/equipment.sql",
+  "databricks-open-retail-data-model/canonical-core/equipment/tables/equipment_reading.sql",
+  "databricks-open-retail-data-model/canonical-core/interaction/masks.sql",
+  "databricks-open-retail-data-model/canonical-core/interaction/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/interaction/tables/touchpoint.sql",
+  "databricks-open-retail-data-model/canonical-core/inventory/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/inventory/tables/inventory_position.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/employee.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/employee_availability.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/employee_skill.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/employee_store_eligibility.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/labor_actuals.sql",
+  "databricks-open-retail-data-model/canonical-core/labor/tables/labor_schedule.sql",
+  "databricks-open-retail-data-model/canonical-core/logistics/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/logistics/tables/lane.sql",
+  "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment.sql",
+  "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment_line.sql",
+  "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment_tracking.sql",
+  "databricks-open-retail-data-model/canonical-core/marketing/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/marketing/tables/audience.sql",
+  "databricks-open-retail-data-model/canonical-core/marketing/tables/promotion.sql",
+  "databricks-open-retail-data-model/canonical-core/order/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/order/tables/customer_order_line.sql",
+  "databricks-open-retail-data-model/canonical-core/payment/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/payment/tables/payment.sql",
+  "databricks-open-retail-data-model/canonical-core/procurement/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/procurement/tables/purchase_order_line.sql",
+  "databricks-open-retail-data-model/canonical-core/product/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/product/tables/product.sql",
+  "databricks-open-retail-data-model/canonical-core/product/tables/product_price.sql",
+  "databricks-open-retail-data-model/canonical-core/store/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/store/tables/store.sql",
+  "databricks-open-retail-data-model/canonical-core/supplier/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/supplier/tables/supplier.sql",
+  "databricks-open-retail-data-model/canonical-core/transaction/relationships.sql",
+  "databricks-open-retail-data-model/canonical-core/transaction/tables/sales.sql"
+ ],
+ "statementsParsed": 182,
+ "setAside": {
+  "AddCheckConstraint": 101,
+  "CreateUserDefinedFunction": 4
+ },
+ "errors": [
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/calendar/tables/fiscal_calendar.sql",
+   "line": 59,
+   "statement": "ALTER TABLE ${catalog}.${calendar_schema}.fiscal_calendar",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 56)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/calendar/tables/fx_rate.sql",
+   "line": 48,
+   "statement": "ALTER TABLE ${catalog}.${calendar_schema}.fx_rate",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 28,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 29,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 30,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 31,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 32,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 33,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 36,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 37,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 38,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 39,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 42,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.contact",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 45,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.account",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 81)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 46,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.account",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 81)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 49,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.household",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/masks.sql",
+   "line": 52,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.identity_link",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 89)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/account.sql",
+   "line": 59,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.account",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/account.sql",
+   "line": 63,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.account",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 81)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/account.sql",
+   "line": 64,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.account",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 81)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+   "line": 64,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+   "line": 67,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+   "line": 68,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+   "line": 69,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/address.sql",
+   "line": 70,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.address",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/channel_preference.sql",
+   "line": 80,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.channel_preference",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 59)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/consent.sql",
+   "line": 66,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.consent",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/contact.sql",
+   "line": 52,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.contact",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/contact.sql",
+   "line": 56,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.contact",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/household.sql",
+   "line": 55,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.household",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 50)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/household.sql",
+   "line": 60,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.household",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/identity_link.sql",
+   "line": 76,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.identity_link",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 54)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/identity_link.sql",
+   "line": 80,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.identity_link",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 89)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 67,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 48)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 70,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 74)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 71,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 74)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 72,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 74)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 73,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 75)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 74,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 74)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/customer/tables/profile.sql",
+   "line": 75,
+   "statement": "ALTER TABLE ${catalog}.${customer_schema}.profile",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 74)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/equipment/tables/equipment.sql",
+   "line": 58,
+   "statement": "ALTER TABLE ${catalog}.${equipment_schema}.equipment",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 51)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/equipment/tables/equipment_reading.sql",
+   "line": 51,
+   "statement": "ALTER TABLE ${catalog}.${equipment_schema}.equipment_reading",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 59)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/interaction/masks.sql",
+   "line": 16,
+   "statement": "ALTER TABLE ${catalog}.${interaction_schema}.touchpoint",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'MASK'. SQLSTATE: 42601 (line 1, pos 82)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/interaction/tables/touchpoint.sql",
+   "line": 112,
+   "statement": "ALTER TABLE ${catalog}.${interaction_schema}.touchpoint",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 54)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/interaction/tables/touchpoint.sql",
+   "line": 115,
+   "statement": "ALTER TABLE ${catalog}.${interaction_schema}.touchpoint",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 82)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/inventory/tables/inventory_position.sql",
+   "line": 54,
+   "statement": "ALTER TABLE ${catalog}.${inventory_schema}.inventory_position",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 60)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee.sql",
+   "line": 64,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 46)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee.sql",
+   "line": 66,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 71)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee.sql",
+   "line": 70,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 77)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_availability.sql",
+   "line": 40,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_availability",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 59)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_availability.sql",
+   "line": 41,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_availability",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 84)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_skill.sql",
+   "line": 40,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_skill",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 52)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_skill.sql",
+   "line": 41,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_skill",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 77)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_store_eligibility.sql",
+   "line": 40,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_store_eligibility",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 64)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/employee_store_eligibility.sql",
+   "line": 41,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.employee_store_eligibility",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 89)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/labor_actuals.sql",
+   "line": 47,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.labor_actuals",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 51)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/labor_actuals.sql",
+   "line": 48,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.labor_actuals",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 76)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/labor_schedule.sql",
+   "line": 49,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.labor_schedule",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 52)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/labor/tables/labor_schedule.sql",
+   "line": 50,
+   "statement": "ALTER TABLE ${catalog}.${labor_schema}.labor_schedule",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 77)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/logistics/tables/lane.sql",
+   "line": 56,
+   "statement": "ALTER TABLE ${catalog}.${logistics_schema}.lane",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 46)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment.sql",
+   "line": 50,
+   "statement": "ALTER TABLE ${catalog}.${logistics_schema}.shipment",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 50)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment_line.sql",
+   "line": 46,
+   "statement": "ALTER TABLE ${catalog}.${logistics_schema}.shipment_line",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 55)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment_tracking.sql",
+   "line": 84,
+   "statement": "ALTER TABLE ${catalog}.${logistics_schema}.shipment_tracking",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 59)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/logistics/tables/shipment_tracking.sql",
+   "line": 85,
+   "statement": "ALTER TABLE ${catalog}.${logistics_schema}.shipment_tracking",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 82)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/marketing/tables/audience.sql",
+   "line": 72,
+   "statement": "ALTER TABLE ${catalog}.${marketing_schema}.audience",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 50)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/marketing/tables/promotion.sql",
+   "line": 60,
+   "statement": "ALTER TABLE ${catalog}.${marketing_schema}.promotion",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 51)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/order/tables/customer_order_line.sql",
+   "line": 53,
+   "statement": "ALTER TABLE ${catalog}.${order_schema}.customer_order_line",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 57)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/payment/tables/payment.sql",
+   "line": 53,
+   "statement": "ALTER TABLE ${catalog}.${payment_schema}.payment",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 47)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/procurement/tables/purchase_order_line.sql",
+   "line": 59,
+   "statement": "ALTER TABLE ${catalog}.${procurement_schema}.purchase_order_line",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 63)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/product/tables/product.sql",
+   "line": 61,
+   "statement": "ALTER TABLE ${catalog}.${product_schema}.product",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 47)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/product/tables/product_price.sql",
+   "line": 56,
+   "statement": "ALTER TABLE ${catalog}.${product_schema}.product_price",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 53)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/store/tables/store.sql",
+   "line": 52,
+   "statement": "ALTER TABLE ${catalog}.${store_schema}.store",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 43)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/supplier/tables/supplier.sql",
+   "line": 50,
+   "statement": "ALTER TABLE ${catalog}.${supplier_schema}.supplier",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 49)"
+  },
+  {
+   "file": "databricks-open-retail-data-model/canonical-core/transaction/tables/sales.sql",
+   "line": 63,
+   "statement": "ALTER TABLE ${catalog}.${transaction_schema}.sales",
+   "error": "[PARSE_SYNTAX_ERROR] Syntax error at or near 'TAGS'. SQLSTATE: 42601 (line 1, pos 49)"
+  }
+ ],
+ "tables": [
+  {
+   "catalog": "catalog",
+   "schema": "calendar_schema",
+   "name": "fiscal_calendar",
+   "comment": "ORDM canonical-core NRF 4-5-4 retail fiscal calendar (day grain). Conformed time dimension.",
+   "pk": [
+    "date_sk"
+   ],
+   "columns": [
+    {
+     "name": "date_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "date_key",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "The calendar date (ISO 8601). Natural key; join target for the sales fact."
+    },
+    {
+     "name": "date_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable STRING business key: the date rendered ISO 8601 (yyyy-MM-dd). Version-independent, stable across reloads; the _id counterpart to the surrogate date_sk."
+    },
+    {
+     "name": "calendar_year",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Gregorian calendar year."
+    },
+    {
+     "name": "calendar_month",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Gregorian month (1-12)."
+    },
+    {
+     "name": "calendar_day",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Day of month (1-31)."
+    },
+    {
+     "name": "day_of_week",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "ISO day of week (1=Monday .. 7=Sunday)."
+    },
+    {
+     "name": "day_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Day name (monday .. sunday)."
+    },
+    {
+     "name": "is_weekend",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE for Saturday/Sunday."
+    },
+    {
+     "name": "is_holiday",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE if a recognized retail holiday."
+    },
+    {
+     "name": "fiscal_year",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "NRF 4-5-4 fiscal year."
+    },
+    {
+     "name": "fiscal_quarter",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "NRF fiscal quarter (1-4)."
+    },
+    {
+     "name": "fiscal_period",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "NRF fiscal period / retail month (1-12), following the 4-5-4 week pattern."
+    },
+    {
+     "name": "fiscal_season",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Retail merchandising half-year season derived from fiscal_period: spring for periods 1-6 (fiscal H1), fall for periods 7-12 (fiscal H2). Labels follow the northern-hemisphere retail-season convention; they name the fiscal half, not a local meteorological season. Allowed values: spring, fall."
+    },
+    {
+     "name": "fiscal_week",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "NRF fiscal week within the fiscal year (1-53)."
+    },
+    {
+     "name": "fiscal_week_id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Week identifier = fiscal_year * 100 + fiscal_week (e.g. 202614). Week-level join key."
+    },
+    {
+     "name": "fiscal_week_index",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Globally monotonic week counter across the whole calendar; use for trailing N-week windows."
+    },
+    {
+     "name": "fiscal_week_start_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "First date (Sunday, NRF convention) of the fiscal week."
+    },
+    {
+     "name": "fiscal_week_end_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Last date (Saturday) of the fiscal week."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601). Required on reference tables (standard §8)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601). Required on reference tables (standard §8)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "calendar_schema",
+   "name": "fx_rate",
+   "comment": "ORDM canonical-core daily FX rates (from -> base). Conversion reference for single-currency normalization.",
+   "pk": [
+    "fx_rate_sk"
+   ],
+   "columns": [
+    {
+     "name": "fx_rate_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "fx_rate_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key (date_key|from|to)."
+    },
+    {
+     "name": "date_key",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Rate date. Logical join key to fiscal_calendar.date_key (not a declared UC FK; ISO 8601)."
+    },
+    {
+     "name": "from_currency_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Source currency, ISO 4217 alpha-3."
+    },
+    {
+     "name": "to_currency_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Target/reporting currency, ISO 4217 alpha-3 (the base_currency)."
+    },
+    {
+     "name": "rate",
+     "type": "decimal(18,8)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Multiply a from-currency amount by rate to get the to-currency amount. 1.0 when from = to."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601). Required on reference tables (standard §8)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601). Required on reference tables (standard §8)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "account",
+   "comment": "ORDM canonical-core B2B organization account (SCD2). Optional; used when customers transact on behalf of a business.",
+   "pk": [
+    "account_sk"
+   ],
+   "columns": [
+    {
+     "name": "account_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version."
+    },
+    {
+     "name": "account_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the organization account."
+    },
+    {
+     "name": "account_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Registered / legal name of the organization."
+    },
+    {
+     "name": "account_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Organization type. Allowed values: business, government, education, nonprofit, reseller."
+    },
+    {
+     "name": "registration_number",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Business registration / company number (jurisdiction-dependent)."
+    },
+    {
+     "name": "tax_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Tax registration identifier for the organization."
+    },
+    {
+     "name": "gln",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "GS1 Global Location Number (13 digits) identifying the primary location of the organization."
+    },
+    {
+     "name": "industry_classification_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Standard industry classification code (e.g. NAICS/SIC-style); stored as code, not name."
+    },
+    {
+     "name": "parent_account_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Business key of the parent organization account for hierarchies; NULL for top-level (self-FK on the business key; profile/account are SCD2 so the business key is not unique, hence no surrogate self-FK)."
+    },
+    {
+     "name": "primary_contact_profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (foreign surrogate; nullable, not a PK). The primary-contact profile version resolved AS OF the effective_from_date of this account version (profile is SCD2 — the standard ORDM as-of surrogate resolution, matching how product_price/sales/inventory resolve their _sk FKs, and how address/contact/consent carry profile_sk). Declared as informational FK fk_account_profile in relationships.sql."
+    },
+    {
+     "name": "primary_contact_profile_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable business key of the individual (profile) who is the primary contact for the account. Retained for lineage/current-version joins alongside primary_contact_profile_sk; under SCD2 the business key is not unique, so the declared UC FK is on the surrogate."
+    },
+    {
+     "name": "account_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: prospect, active, inactive, closed."
+    },
+    {
+     "name": "credit_limit_amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Assigned credit limit for the account, in the reporting/base currency."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; the canonical core is single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original account/billing currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "enrollment_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the account was established (ISO 8601 date)."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version of this account."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "address",
+   "comment": "ORDM canonical-core customer postal addresses (SCD2).",
+   "pk": [
+    "address_sk"
+   ],
+   "columns": [
+    {
+     "name": "address_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version."
+    },
+    {
+     "name": "address_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the address."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (the profile version this address attaches to)."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the owning customer (join on current profile version)."
+    },
+    {
+     "name": "address_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Role of this address. Allowed values: billing, shipping, home, work, other."
+    },
+    {
+     "name": "address_line_1",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Primary street address line."
+    },
+    {
+     "name": "address_line_2",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Secondary address line (unit, suite, floor)."
+    },
+    {
+     "name": "city",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "City / locality."
+    },
+    {
+     "name": "state_province",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "State, province, or region."
+    },
+    {
+     "name": "postal_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Postal or ZIP code."
+    },
+    {
+     "name": "country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Country, ISO 3166-1 alpha-2 code."
+    },
+    {
+     "name": "latitude",
+     "type": "decimal(9,6)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Geocoded latitude (decimal degrees, WGS84)."
+    },
+    {
+     "name": "longitude",
+     "type": "decimal(9,6)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Geocoded longitude (decimal degrees, WGS84)."
+    },
+    {
+     "name": "is_primary",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE if this is the primary address of its type for the customer."
+    },
+    {
+     "name": "address_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Status of the address. Allowed values: active, inactive."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version of this address."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "channel_preference",
+   "comment": "ORDM canonical-core customer communication preferences (SCD2). Soft preferences only — legal permissions live in consent.",
+   "pk": [
+    "channel_preference_sk"
+   ],
+   "columns": [
+    {
+     "name": "channel_preference_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version."
+    },
+    {
+     "name": "channel_preference_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the preference record."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (the profile version this preference attaches to)."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the owning customer (join on current profile version)."
+    },
+    {
+     "name": "channel",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Communication channel the preference applies to. For preference_type = preferred_channel this is the CHOSEN channel (not a scope). Allowed values: email, sms, phone, postal, push, in_app, web."
+    },
+    {
+     "name": "preference_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "What the preference governs. Allowed values: contact_frequency, topic_subscription, format, preferred_channel."
+    },
+    {
+     "name": "preference_value",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The preference value, interpreted per preference_type: topic name (topic_subscription), format code (format). Unused (NULL) for preferred_channel (the chosen channel is in `channel`) and contact_frequency (see frequency_cap_per_period)."
+    },
+    {
+     "name": "is_subscribed",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Soft enrolment flag for THIS preference (topic/format/channel), by customer choice. Non-legal: a false value is a soft targeting opt-out, NOT a consent withdrawal — legal permission lives only in consent, which still governs lawful contact."
+    },
+    {
+     "name": "frequency_cap_per_period",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Maximum desired contacts per frequency_period for this channel (NULL = no cap expressed)."
+    },
+    {
+     "name": "frequency_period",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Period the frequency cap applies over. Allowed values: day, week, month."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version. Current-row grain by type: (profile, channel, preference_type) for contact_frequency/format; + preference_value for topic_subscription (multi-valued); (profile) alone for preferred_channel (a single cross-channel choice)."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "consent",
+   "comment": "ORDM canonical-core customer consent — the single source of truth for opt-ins and processing permissions.",
+   "pk": [
+    "consent_sk"
+   ],
+   "columns": [
+    {
+     "name": "consent_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per consent version."
+    },
+    {
+     "name": "consent_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the consent record."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the customer giving/withholding consent."
+    },
+    {
+     "name": "consent_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "What the consent governs. third_party_sharing = disclosure of personal information for cross-context behavioral advertising (CCPA/CPRA do-not-SHARE); data_sale = disclosure for monetary or other valuable consideration (CCPA/CPRA do-not-SELL) - the two are legally distinct opt-outs (the mandated link reads Do Not Sell or Share), so they are separate types, not one. Allowed values: marketing_email, marketing_sms, marketing_phone, marketing_postal, data_processing, third_party_sharing, data_sale, profiling, cookies."
+    },
+    {
+     "name": "consent_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Current decision. Allowed values: granted, withdrawn, pending, expired."
+    },
+    {
+     "name": "legal_basis",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lawful basis for processing. Allowed values: consent, contract, legitimate_interest, legal_obligation, vital_interest, public_task."
+    },
+    {
+     "name": "capture_channel",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Channel where consent was captured (vendor-neutral). Allowed values: web, mobile_app, store, call_center, email."
+    },
+    {
+     "name": "disclosure_version",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Identifier/version of the consent statement or privacy notice presented at capture."
+    },
+    {
+     "name": "jurisdiction_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Region/law scope this decision applies under. May be an ISO 3166-1 country (GB), an ISO 3166-2 subdivision (US-CA), or a reserved regional code (EU) — not alpha-2-only, since regulatory scope does not map cleanly to countries. Lets one customer hold different consent per jurisdiction (GDPR vs CCPA/CPRA). NULL = global/unspecified."
+    },
+    {
+     "name": "suppression_indicator",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Operational do-not-activate overlay for this consent scope. TRUE = suppress activation on this purpose x channel even when consent_status is granted (suppression OVERRIDES consent). Distinct from withdrawal (consent_status=withdrawn is the customer revoking permission; suppression is an operational/legal do-not-contact signal, e.g. hard bounce or a direct-marketing objection). NULL/FALSE = not suppressed."
+    },
+    {
+     "name": "suppression_reason_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Why this scope is suppressed (set only when suppression_indicator is TRUE). Two scopes: CHANNEL-level reasons block only this consent scope (unsubscribe, hard_bounce, spam_complaint, list_hygiene); PERSON-level reasons block every plane for the profile (deceased, fraud, do_not_contact, legal_objection) via the shared UCV gold_person_do_not_target_current view, which both the owned activation gate and any paid/non-owned plane consult (ADR 0028). Allowed values: unsubscribe, hard_bounce, spam_complaint, legal_objection, deceased, fraud, do_not_contact, list_hygiene."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this consent version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL while still in effect."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently effective consent record per (profile, consent_type, jurisdiction_code)."
+    },
+    {
+     "name": "decision_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Legal-grade instant the consent decision was given/withdrawn (UTC, ISO 8601)."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "contact",
+   "comment": "ORDM canonical-core customer contact points (email/phone), operational current-state.",
+   "pk": [
+    "contact_sk"
+   ],
+   "columns": [
+    {
+     "name": "contact_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "contact_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the contact point."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the owning customer."
+    },
+    {
+     "name": "contact_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Type of contact point. Allowed values: email, mobile_phone, landline_phone, fax."
+    },
+    {
+     "name": "contact_value",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The email address or phone number (PII). Format depends on contact_type."
+    },
+    {
+     "name": "country_calling_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "For phone types: country calling code without the + prefix (e.g. 1, 44)."
+    },
+    {
+     "name": "is_primary",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE if this is the primary contact point of its type for the customer."
+    },
+    {
+     "name": "is_verified",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE if the contact point has been verified (e.g. confirmed email / SMS)."
+    },
+    {
+     "name": "verified_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp the contact point was verified (UTC, ISO 8601); NULL if unverified."
+    },
+    {
+     "name": "contact_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Deliverability/consent status. Allowed values: active, inactive, bounced, opted_out."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "household",
+   "comment": "ORDM canonical-core household master (SCD2). Conformed household grouping shared by all outcome packages.",
+   "pk": [
+    "household_sk"
+   ],
+   "columns": [
+    {
+     "name": "household_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version. FK target for profile.household_sk."
+    },
+    {
+     "name": "household_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the household. Referenced by profile.household_id. Treated as PII."
+    },
+    {
+     "name": "household_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Nature of the household grouping. Allowed values: family, single, shared, business, other."
+    },
+    {
+     "name": "formation_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the household grouping was first established/observed (ISO 8601 date)."
+    },
+    {
+     "name": "household_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: active, inactive."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version of this household."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "identity_link",
+   "comment": "ORDM canonical-core resolved identity links — pseudonymized identifier→profile assertions with match confidence.",
+   "pk": [
+    "identity_link_sk"
+   ],
+   "columns": [
+    {
+     "name": "identity_link_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version."
+    },
+    {
+     "name": "identity_link_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the assertion, stable per (source_system, identifier_type, identifier_value_hash) across SCD2 versions."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (the profile version this identifier resolves to)."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the resolved customer (join on current profile version)."
+    },
+    {
+     "name": "source_system",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system that asserted the identifier (vendor-neutral label)."
+    },
+    {
+     "name": "identifier_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Type of identifier. Allowed values: email_hash, phone_hash, device_id, cookie_id, maid, loyalty_id, login_id, customer_id."
+    },
+    {
+     "name": "identifier_value_hash",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Canonical hashed/tokenized identifier value. Never a raw email/phone/device id (PII, pseudonymized)."
+    },
+    {
+     "name": "match_method",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "How the link was established. Allowed values: deterministic, probabilistic, declared, manual."
+    },
+    {
+     "name": "match_confidence",
+     "type": "decimal(5,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Resolution confidence in [0,1]. 1.0000 = asserted/deterministic."
+    },
+    {
+     "name": "link_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle of the link. Allowed values: active, superseded, suppressed."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this link version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL while still in effect."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently effective version of this identity link."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "customer_schema",
+   "name": "profile",
+   "comment": "ORDM canonical-core individual-customer master (SCD2). Conformed identity shared by all outcome packages.",
+   "pk": [
+    "profile_sk"
+   ],
+   "columns": [
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version. Used as the join/FK target for downstream dimensional models."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the individual customer. Stable across SCD2 versions; pseudonymous identifier, not a name."
+    },
+    {
+     "name": "name_prefix",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Honorific prefix. Common values include mr, mrs, ms, mx, dr."
+    },
+    {
+     "name": "first_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Given name."
+    },
+    {
+     "name": "middle_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Middle name(s) or initial."
+    },
+    {
+     "name": "last_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Family / surname."
+    },
+    {
+     "name": "name_suffix",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Generational/qualification suffix. Common values include jr, sr, ii, iii."
+    },
+    {
+     "name": "date_of_birth",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date of birth (ISO 8601 date)."
+    },
+    {
+     "name": "gender",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Self-described gender. Free text; common values include female, male, non_binary, prefer_not_to_say."
+    },
+    {
+     "name": "preferred_language_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Preferred communication language, ISO 639-1 alpha-2 (e.g. en, fr, es)."
+    },
+    {
+     "name": "nationality_country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Nationality, ISO 3166-1 alpha-2 country code."
+    },
+    {
+     "name": "loyalty_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Loyalty/membership program identifier for the individual. Treated as PII."
+    },
+    {
+     "name": "household_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to household.household_sk (the household version this profile is a member of). Resolved as-of the profile version."
+    },
+    {
+     "name": "household_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable household grouping key linking related individuals; joins household.household_id (current version). Treated as PII."
+    },
+    {
+     "name": "customer_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: prospect, active, inactive, closed."
+    },
+    {
+     "name": "enrollment_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the individual first became a known customer (ISO 8601 date)."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date this version stopped being effective; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version of this profile."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "equipment_schema",
+   "name": "equipment",
+   "comment": "ORDM canonical-core in-store equipment master dimension (SCD2). Store-level assets requiring maintenance: refrigeration, HVAC, POS, ovens, etc.",
+   "pk": [
+    "equipment_sk"
+   ],
+   "columns": [
+    {
+     "name": "equipment_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "equipment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the equipment asset."
+    },
+    {
+     "name": "equipment_name",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Display name of the equipment (e.g. \"Walk-in Cooler A\", \"POS Terminal 3\")."
+    },
+    {
+     "name": "equipment_type",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Category of equipment. Allowed values: refrigeration, hvac, pos_terminal, self_checkout, oven, lighting, shelving, security, other."
+    },
+    {
+     "name": "manufacturer",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Equipment manufacturer or brand."
+    },
+    {
+     "name": "model_number",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Manufacturer model number."
+    },
+    {
+     "name": "serial_number",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unique serial number from the manufacturer."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the store where this equipment is installed."
+    },
+    {
+     "name": "installation_zone",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Zone or area within the store. Allowed values: sales_floor, backroom, exterior, loading_dock, office, kitchen, pharmacy."
+    },
+    {
+     "name": "install_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the equipment was installed or placed in service (ISO 8601)."
+    },
+    {
+     "name": "warranty_expiry_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the manufacturer warranty expires (ISO 8601)."
+    },
+    {
+     "name": "expected_lifespan_years",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Expected useful life of the equipment in years."
+    },
+    {
+     "name": "equipment_status",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Current operational status. Allowed values: operational, degraded, out_of_service, decommissioned."
+    },
+    {
+     "name": "criticality",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Impact level if the equipment fails. Allowed values: critical, high, medium, low."
+    },
+    {
+     "name": "asset_tag",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Internal asset tag or barcode identifier."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "equipment_schema",
+   "name": "equipment_reading",
+   "comment": "ORDM canonical-core equipment sensor readings (append-only). Telemetry from in-store assets: temperature, power, vibration, error codes.",
+   "pk": [
+    "equipment_reading_sk"
+   ],
+   "columns": [
+    {
+     "name": "equipment_reading_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "equipment_reading_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key (equipment_id|reading_type|sequence). Row grain is one sensor reading; sequence disambiguates successive readings of the same (equipment_id, reading_type)."
+    },
+    {
+     "name": "equipment_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to equipment.equipment_sk (version-specific)."
+    },
+    {
+     "name": "equipment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable equipment business key."
+    },
+    {
+     "name": "reading_type",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Type of sensor reading. Allowed values: temperature, humidity, power_kw, vibration, runtime_hours, error_code, door_open_count, pressure."
+    },
+    {
+     "name": "reading_value",
+     "type": "double",
+     "notNull": false,
+     "identity": false,
+     "comment": "Numeric value of the reading (units depend on reading_type)."
+    },
+    {
+     "name": "reading_unit",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit of measure (e.g. celsius, fahrenheit, kw, mm_s, hours, count, psi)."
+    },
+    {
+     "name": "error_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Equipment error or fault code (populated when reading_type = error_code)."
+    },
+    {
+     "name": "error_message",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Human-readable description of the error code."
+    },
+    {
+     "name": "is_anomaly",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Whether this reading was flagged as anomalous by the ingestion pipeline."
+    },
+    {
+     "name": "threshold_breached",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Which threshold was breached, if any. Allowed values: low, high, critical_low, critical_high."
+    },
+    {
+     "name": "event_timestamp",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "When the reading was captured at the sensor (UTC, ISO 8601)."
+    },
+    {
+     "name": "ingest_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this reading was ingested into the lakehouse (UTC, ISO 8601)."
+    },
+    {
+     "name": "latency_seconds",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Seconds between event_timestamp and ingest_timestamp."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system or IoT platform."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "interaction_schema",
+   "name": "touchpoint",
+   "comment": "ORDM canonical-core conformed omnichannel customer-interaction fact (append-only). The time-series touch class of the two-class CDP shape, online + offline, kept separate from the customer profile.",
+   "pk": [
+    "touchpoint_sk"
+   ],
+   "columns": [
+    {
+     "name": "touchpoint_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per interaction row."
+    },
+    {
+     "name": "touchpoint_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the interaction, unique at row grain."
+    },
+    {
+     "name": "device_id_hash",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Hashed/tokenized device/cookie/app identifier — the anonymous digital actor key. Never a raw device id, cookie, or IP (PII, pseudonymized). NULL for offline touches (identity-first)."
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Session/visit grouping key for sessionization (degenerate attribute; vendor-neutral, no PII). NULL for touches with no session (e.g. a single call-center contact)."
+    },
+    {
+     "name": "identity_link_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to customer.identity_link.identity_link_sk — the assertion that stitched this device/actor to a profile, if resolved."
+    },
+    {
+     "name": "identity_link_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable identity-link business key."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to customer.profile.profile_sk (resolved as-of event_date), if the touch is stitched to a known customer."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable customer business key (pseudonymous; NULL while the touch is anonymous). Resolved AT INGEST: this fact is append-only, so a touch that was anonymous when written stays profile_id=NULL even after the device is later stitched - late resolution is re-derived at query time by joining device_id_hash through customer.identity_link (touchpoint_resolved_rate is therefore an at-ingest rate, not lifetime)."
+    },
+    {
+     "name": "interaction_type",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "The kind of touch. Digital: page_view, product_view, search, add_to_cart, remove_from_cart, cart_view, checkout_start, wishlist_add, app_open, session_start, session_end. Offline: store_visit, call_center_contact, kiosk_session, offline_marketing_response, phone_activation."
+    },
+    {
+     "name": "channel_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Channel the touch occurred on (omnichannel discriminator). The coarse MEDIUM. Allowed values: web, mobile_app, in_store, kiosk, call_center, direct_mail, other."
+    },
+    {
+     "name": "source_application",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The specific application / property / data stream the touch came from (degenerate attribute; vendor-neutral, no PII). The SOURCE that pairs with channel_code (the medium), mirroring how a CDP pairs channel with source/data-stream on each event. Allowed values: ios_app, android_app, web_desktop, web_mobile, loyalty_kiosk, in_store_pos, call_center_app, email_platform, other."
+    },
+    {
+     "name": "touch_origin",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Whether the touch is customer-initiated or brand-initiated. Allowed values: inbound, outbound."
+    },
+    {
+     "name": "event_timestamp",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "When the touch occurred at source (UTC, ISO 8601)."
+    },
+    {
+     "name": "event_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business date of the touch (cluster key). This IS the date_key-role natural key (the same calendar-join role sales.date_key plays), joined to fiscal_calendar.date_key (ISO 8601); it is named event_date for event semantics (ADR 0011 permits role-named stems). Guarded by the touchpoint_calendar_coverage DQ check. No surrogate FK, matching the sales convention."
+    },
+    {
+     "name": "ingest_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this touch was ingested into the lakehouse (UTC, ISO 8601)."
+    },
+    {
+     "name": "latency_seconds",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Seconds between event_timestamp and ingest_timestamp (freshness monitoring)."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version as-of event_date) — set for product_view / cart touches."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk — in-store / kiosk / store-visit context, or the fulfilling store."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable store business key."
+    },
+    {
+     "name": "page_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Page/screen class for digital touches. Allowed values: home, category, product, search, cart, checkout, account, content, other."
+    },
+    {
+     "name": "page_url",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "De-identified/normalized page path (source contract: no PII, no PII-bearing query params). NULL for offline touches."
+    },
+    {
+     "name": "referrer_url",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "De-identified/normalized referrer path (source contract: no PII)."
+    },
+    {
+     "name": "search_term_text",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Shopper search query for search touches (degenerate attribute; vendor-neutral; source contract: de-identified, no PII - a shopper may type a name/email, so ingest must scrub)."
+    },
+    {
+     "name": "dwell_seconds",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Engagement depth: seconds spent on the touch, if known. CROSS-MODAL by interaction_type - page dwell (digital), call duration (call_center), or visit length (store_visit) - so these are NOT the same unit of comparability. A consumer averaging dwell across interaction_type blends incomparable durations; restrict to one modality (e.g. digital page_view/product_view) for a comparable engagement metric. NULL if not captured."
+    },
+    {
+     "name": "cart_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Cart correlation key linking cart touches within a shopping journey (degenerate; no FK)."
+    },
+    {
+     "name": "order_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Order correlation key when a checkout touch converts (degenerate business key to the order; no surrogate FK, header-grain)."
+    },
+    {
+     "name": "event_value_amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Monetary value the touch carries, if any (e.g. cart value), in the reporting/base currency."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of event_value_amount, ISO 4217 alpha-3 (single-currency by construction)."
+    },
+    {
+     "name": "consent_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Consent state at touch time. Allowed values: granted, denied, unknown."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "inventory_schema",
+   "name": "inventory_position",
+   "comment": "ORDM canonical-core daily inventory position fact (product x store x day).",
+   "pk": [
+    "inventory_position_sk"
+   ],
+   "columns": [
+    {
+     "name": "inventory_position_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key for the daily position record."
+    },
+    {
+     "name": "inventory_position_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key (date|store|product)."
+    },
+    {
+     "name": "date_key",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Snapshot date. Logical reference to fiscal_calendar.date_key (ISO 8601)."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version-specific)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key."
+    },
+    {
+     "name": "units_on_hand_sod",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units on hand at start of day."
+    },
+    {
+     "name": "units_on_hand_eod",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units on hand at end of day."
+    },
+    {
+     "name": "units_in_transit",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units in transit from DC or supplier."
+    },
+    {
+     "name": "units_on_order",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units ordered but not yet received."
+    },
+    {
+     "name": "units_received_today",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units received today."
+    },
+    {
+     "name": "is_stockout",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Flag indicating if the product was out of stock."
+    },
+    {
+     "name": "stockout_pct_day",
+     "type": "decimal(5,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Percentage of day the product was out of stock."
+    },
+    {
+     "name": "size_availability_pct",
+     "type": "decimal(5,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Availability of sizes for this style."
+    },
+    {
+     "name": "replenishment_flag",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Flag indicating a replenishment order was triggered."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "employee",
+   "comment": "ORDM canonical-core pseudonymous associate master (SCD2). Workforce supply attributes for scheduling; no personal names or contact PII.",
+   "pk": [
+    "employee_sk"
+   ],
+   "columns": [
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous business key for the associate. Not a legal name or government ID."
+    },
+    {
+     "name": "home_store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk for the associate home store (version-specific)."
+    },
+    {
+     "name": "home_store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key of the home store."
+    },
+    {
+     "name": "primary_role_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Primary role. Allowed values: cashier, sales_associate, fulfillment, inventory, supervisor."
+    },
+    {
+     "name": "employment_status",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Employment status. Allowed values: active, leave, terminated."
+    },
+    {
+     "name": "employment_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Engagement type. Allowed values: full_time, part_time, seasonal, contractor."
+    },
+    {
+     "name": "hourly_labor_cost",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Fully-loaded hourly labor cost in base currency (unit-grain rate; DECIMAL scale 4)."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "ISO 4217 alpha-3 for hourly_labor_cost; constant base_currency (USD) per single-reporting-currency rule."
+    },
+    {
+     "name": "max_daily_hours",
+     "type": "decimal(6,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Maximum scheduled hours in a single calendar day."
+    },
+    {
+     "name": "max_weekly_hours",
+     "type": "decimal(6,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Maximum scheduled hours in a calendar week (Mon-Sun UTC)."
+    },
+    {
+     "name": "min_rest_hours",
+     "type": "decimal(6,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Minimum rest hours required between the end of one shift and the start of the next."
+    },
+    {
+     "name": "preferred_shift_start_local",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Preferred local shift start as HH:mm (store-local); advisory only."
+    },
+    {
+     "name": "preferred_shift_end_local",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Preferred local shift end as HH:mm (store-local); advisory only."
+    },
+    {
+     "name": "hire_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date employment began (ISO 8601)."
+    },
+    {
+     "name": "termination_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date employment ended; NULL while active (ISO 8601)."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "employee_availability",
+   "comment": "Associate availability and time-off windows. end must be after start; used as hard constraints by the schedule recommender.",
+   "pk": [
+    "employee_availability_sk"
+   ],
+   "columns": [
+    {
+     "name": "employee_availability_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "employee_availability_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key for the availability window."
+    },
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to employee.employee_sk (version-specific)."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous employee business key."
+    },
+    {
+     "name": "availability_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Local business date the window applies to (ISO 8601)."
+    },
+    {
+     "name": "available_start_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inclusive availability start (UTC, ISO 8601)."
+    },
+    {
+     "name": "available_end_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Exclusive availability end (UTC, ISO 8601)."
+    },
+    {
+     "name": "is_available",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "TRUE = can work this window; FALSE = explicitly unavailable (e.g. PTO block)."
+    },
+    {
+     "name": "availability_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Window type. Allowed values: preferred, available, unavailable, time_off."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "employee_skill",
+   "comment": "Associate skill eligibility bridge. Role scheduling must not assign an employee lacking the required skill_code.",
+   "pk": [
+    "employee_skill_sk"
+   ],
+   "columns": [
+    {
+     "name": "employee_skill_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "employee_skill_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key (e.g. \"<employee_id>|<skill_code>\")."
+    },
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to employee.employee_sk (version-specific)."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous employee business key."
+    },
+    {
+     "name": "skill_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Skill / qualification code. Allowed values: cashier, sales_associate, fulfillment, inventory, supervisor, food_handler, pharmacy_tech."
+    },
+    {
+     "name": "proficiency_level",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Proficiency. Allowed values: trainee, qualified, expert."
+    },
+    {
+     "name": "is_active",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "TRUE when the skill is currently usable for scheduling."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inclusive date the skill became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Exclusive end date; NULL while active."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "employee_store_eligibility",
+   "comment": "Employee × store eligibility bridge for multi-location associates.",
+   "pk": [
+    "employee_store_eligibility_sk"
+   ],
+   "columns": [
+    {
+     "name": "employee_store_eligibility_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "employee_store_eligibility_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key (e.g. \"<employee_id>|<store_id>\")."
+    },
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to employee.employee_sk (version-specific)."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous employee business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key the associate may work."
+    },
+    {
+     "name": "is_primary",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "TRUE when this is the primary / home eligibility row."
+    },
+    {
+     "name": "is_active",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "TRUE when the eligibility is currently usable."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inclusive eligibility start date."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Exclusive eligibility end date; NULL while active."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "labor_actuals",
+   "comment": "Worked timecard intervals for associates. end after start; feeds adherence and labor-risk actuals.",
+   "pk": [
+    "labor_actuals_sk"
+   ],
+   "columns": [
+    {
+     "name": "labor_actuals_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "labor_actuals_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key for the worked interval."
+    },
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to employee.employee_sk (version-specific)."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous employee business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key where time was worked."
+    },
+    {
+     "name": "labor_schedule_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to labor_schedule.labor_schedule_sk when the punch maps to a planned shift."
+    },
+    {
+     "name": "labor_schedule_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable schedule business key when mapped."
+    },
+    {
+     "name": "role_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Role worked. Allowed values: cashier, sales_associate, fulfillment, inventory, supervisor."
+    },
+    {
+     "name": "department_or_zone",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Department or zone worked (free STRING; common values include storewide, front_end, grocery, backroom)."
+    },
+    {
+     "name": "business_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Local business date of the worked interval (ISO 8601)."
+    },
+    {
+     "name": "clock_in_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inclusive clock-in (UTC, ISO 8601)."
+    },
+    {
+     "name": "clock_out_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Exclusive clock-out (UTC, ISO 8601)."
+    },
+    {
+     "name": "worked_hours",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Paid / worked hours for the interval (non-negative)."
+    },
+    {
+     "name": "actuals_status",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Status. Allowed values: approved, pending, rejected, adjusted."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "labor_schema",
+   "name": "labor_schedule",
+   "comment": "Planned associate shifts. end after start; used as supply baseline and double-booking constraint.",
+   "pk": [
+    "labor_schedule_sk"
+   ],
+   "columns": [
+    {
+     "name": "labor_schedule_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "labor_schedule_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key for the scheduled shift."
+    },
+    {
+     "name": "employee_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to employee.employee_sk (version-specific)."
+    },
+    {
+     "name": "employee_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable pseudonymous employee business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key where the shift is worked."
+    },
+    {
+     "name": "role_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Role for the shift. Allowed values: cashier, sales_associate, fulfillment, inventory, supervisor."
+    },
+    {
+     "name": "department_or_zone",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Department or zone label (e.g. front_end, grocery, backroom, storewide). Free STRING; common values include storewide, front_end, grocery, general_merchandise, backroom."
+    },
+    {
+     "name": "business_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Local business date of the shift (ISO 8601)."
+    },
+    {
+     "name": "shift_start_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Inclusive shift start (UTC, ISO 8601)."
+    },
+    {
+     "name": "shift_end_ts",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "Exclusive shift end (UTC, ISO 8601)."
+    },
+    {
+     "name": "scheduled_hours",
+     "type": "decimal(8,2)",
+     "notNull": true,
+     "identity": false,
+     "comment": "Scheduled duration in hours (must be non-negative)."
+    },
+    {
+     "name": "schedule_status",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Status. Allowed values: draft, published, cancelled."
+    },
+    {
+     "name": "schedule_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Origin. Allowed values: workforce_system, manager, recommendation_accepted, other."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "logistics_schema",
+   "name": "lane",
+   "comment": "ORDM canonical-core origin-to-destination lane dimension (SCD2). Directed route used for shipment planning and transit-time benchmarking.",
+   "pk": [
+    "lane_sk"
+   ],
+   "columns": [
+    {
+     "name": "lane_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "lane_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the lane (origin|destination|mode)."
+    },
+    {
+     "name": "origin_location_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business key of the origin location (store, DC, supplier site)."
+    },
+    {
+     "name": "origin_location_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Display name of the origin."
+    },
+    {
+     "name": "origin_country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Origin country, ISO 3166-1 alpha-2."
+    },
+    {
+     "name": "origin_location_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Type of origin. Allowed values: supplier_site, distribution_center, port, store, warehouse."
+    },
+    {
+     "name": "destination_location_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Business key of the destination location."
+    },
+    {
+     "name": "destination_location_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Display name of the destination."
+    },
+    {
+     "name": "destination_country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Destination country, ISO 3166-1 alpha-2."
+    },
+    {
+     "name": "destination_location_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Type of destination. Allowed values: distribution_center, store, port, warehouse, customer."
+    },
+    {
+     "name": "transport_mode",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Primary transport mode. Allowed values: road, rail, ocean, air, intermodal."
+    },
+    {
+     "name": "planned_transit_days",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Standard planned transit time for this lane (calendar days)."
+    },
+    {
+     "name": "distance_km",
+     "type": "decimal(10,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Approximate distance in kilometers."
+    },
+    {
+     "name": "is_active",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Whether the lane is actively used for shipment planning."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "logistics_schema",
+   "name": "shipment",
+   "comment": "ORDM canonical-core shipment/ASN transactional header. Links a purchase order to a lane and carrier.",
+   "pk": [
+    "shipment_sk"
+   ],
+   "columns": [
+    {
+     "name": "shipment_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "shipment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the shipment (ASN number or shipment reference)."
+    },
+    {
+     "name": "po_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Purchase-order header business key this shipment fulfills."
+    },
+    {
+     "name": "supplier_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to supplier.supplier_sk (version-specific)."
+    },
+    {
+     "name": "supplier_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable supplier business key."
+    },
+    {
+     "name": "lane_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to lane.lane_sk (version-specific)."
+    },
+    {
+     "name": "lane_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable lane business key."
+    },
+    {
+     "name": "destination_store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk for the ship-to location (version-specific)."
+    },
+    {
+     "name": "destination_store_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable store business key for the ship-to location."
+    },
+    {
+     "name": "carrier_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Carrier or logistics provider name (free text, vendor-neutral)."
+    },
+    {
+     "name": "transport_mode",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Transport mode for this shipment. Allowed values: road, rail, ocean, air, intermodal."
+    },
+    {
+     "name": "shipment_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Current lifecycle status. Allowed values: planned, in_transit, delivered, cancelled."
+    },
+    {
+     "name": "ship_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the shipment departed origin (ISO 8601)."
+    },
+    {
+     "name": "estimated_arrival_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Estimated arrival date at destination, set at load time (ISO 8601). Real-time ETA revisions are tracked via shipment_tracking.carrier_eta_date."
+    },
+    {
+     "name": "original_eta_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original ETA at time of dispatch, before any revisions (ISO 8601)."
+    },
+    {
+     "name": "actual_arrival_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Actual arrival date; NULL if not yet delivered (ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "logistics_schema",
+   "name": "shipment_line",
+   "comment": "ORDM canonical-core shipment line fact (shipment x product). Item-level detail within a shipment.",
+   "pk": [
+    "shipment_line_sk"
+   ],
+   "columns": [
+    {
+     "name": "shipment_line_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "shipment_line_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the shipment line."
+    },
+    {
+     "name": "shipment_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to shipment.shipment_sk (version-specific)."
+    },
+    {
+     "name": "shipment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable shipment business key."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version-specific)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "po_line_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to purchase_order_line.po_line_sk (foreign surrogate; nullable, not a PK). The purchase-order line this shipment line fulfills. purchase_order_line is an append-only transactional fact (NOT SCD2), so this is a straight surrogate FK with no version ambiguity. Declared as informational FK fk_shipment_line_purchase_order_line in relationships.sql; the durable po_line_id business key is retained below."
+    },
+    {
+     "name": "po_line_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable purchase-order line business key this shipment line fulfills. Retained alongside po_line_sk; the declared UC FK is on the surrogate."
+    },
+    {
+     "name": "shipped_quantity",
+     "type": "integer",
+     "notNull": true,
+     "identity": false,
+     "comment": "Units shipped on this line."
+    },
+    {
+     "name": "received_quantity",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units actually received; NULL if not yet delivered."
+    },
+    {
+     "name": "damaged_quantity",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units received damaged."
+    },
+    {
+     "name": "unit_weight_kg",
+     "type": "decimal(10,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Weight per unit in kilograms."
+    },
+    {
+     "name": "line_weight_kg",
+     "type": "decimal(12,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Total line weight in kilograms."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "logistics_schema",
+   "name": "shipment_tracking",
+   "comment": "ORDM canonical-core carrier tracking message fact (append-only). Raw checkpoint data from carriers: scans, GPS pings, customs events, delivery confirmations.",
+   "pk": [
+    "shipment_tracking_sk"
+   ],
+   "columns": [
+    {
+     "name": "shipment_tracking_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "shipment_tracking_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the tracking message (carrier_code|tracking_number|sequence)."
+    },
+    {
+     "name": "shipment_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to shipment.shipment_sk (version-specific)."
+    },
+    {
+     "name": "shipment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable shipment business key."
+    },
+    {
+     "name": "carrier_code",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Standardized carrier identifier (e.g. a SCAC or BIC code)."
+    },
+    {
+     "name": "carrier_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Display name of the carrier."
+    },
+    {
+     "name": "tracking_number",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Carrier-assigned tracking or waybill number."
+    },
+    {
+     "name": "carrier_service_level",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Service level (e.g. express, standard, economy, ltl, ftl, ocean_fcl)."
+    },
+    {
+     "name": "checkpoint_type",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Type of tracking checkpoint. Allowed values: pickup, hub_scan, in_transit, out_for_delivery, delivered, attempted_delivery, customs_entry, customs_release, exception, return_to_sender, info."
+    },
+    {
+     "name": "checkpoint_status_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Carrier-native status code (free text, carrier-specific)."
+    },
+    {
+     "name": "checkpoint_message",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Raw carrier message text describing the event."
+    },
+    {
+     "name": "facility_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Name of the facility or hub where the scan occurred."
+    },
+    {
+     "name": "city",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "City of the checkpoint location."
+    },
+    {
+     "name": "state_province",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "State or province of the checkpoint location."
+    },
+    {
+     "name": "country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Country of the checkpoint, ISO 3166-1 alpha-2."
+    },
+    {
+     "name": "postal_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Postal/ZIP code of the checkpoint location."
+    },
+    {
+     "name": "latitude",
+     "type": "double",
+     "notNull": false,
+     "identity": false,
+     "comment": "Latitude of the checkpoint location."
+    },
+    {
+     "name": "longitude",
+     "type": "double",
+     "notNull": false,
+     "identity": false,
+     "comment": "Longitude of the checkpoint location."
+    },
+    {
+     "name": "signed_by",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Name of the person who signed for delivery (if delivered)."
+    },
+    {
+     "name": "is_signature_required",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "Whether signature was required for this shipment (shipment-level attribute, populated on delivered checkpoint only)."
+    },
+    {
+     "name": "delivery_location_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Where delivered. Allowed values: dock, front_door, mailroom, locker, neighbor, other."
+    },
+    {
+     "name": "scanned_weight_kg",
+     "type": "decimal(10,3)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Weight recorded at this scan point, in kilograms."
+    },
+    {
+     "name": "piece_count",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Number of pieces scanned at this checkpoint."
+    },
+    {
+     "name": "exception_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Carrier exception code (free text, carrier-specific)."
+    },
+    {
+     "name": "exception_reason",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reason for the exception (e.g. address_unknown, refused, damaged, weather_delay)."
+    },
+    {
+     "name": "carrier_eta_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Carrier-provided revised ETA as of this checkpoint (ISO 8601); NULL if not revised."
+    },
+    {
+     "name": "event_timestamp",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "When the tracking event occurred at the carrier (UTC, ISO 8601)."
+    },
+    {
+     "name": "ingest_timestamp",
+     "type": "timestamp",
+     "notNull": true,
+     "identity": false,
+     "comment": "When this message was ingested into the lakehouse (UTC, ISO 8601)."
+    },
+    {
+     "name": "latency_seconds",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Ingest latency = ingest_timestamp - event_timestamp, in seconds."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating carrier or tracking aggregator (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "marketing_schema",
+   "name": "audience",
+   "comment": "ORDM canonical-core marketing audience/segment-definition dimension (SCD2) — the single source of truth for a segment definition, shared by retail media and customer-intelligence segmentation.",
+   "pk": [
+    "audience_sk"
+   ],
+   "columns": [
+    {
+     "name": "audience_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "audience_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the audience/segment. The stable key consumers reference and reverse-ETL diffs on."
+    },
+    {
+     "name": "audience_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Human-readable audience/segment name."
+    },
+    {
+     "name": "audience_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "How the segment is defined. Allowed values: first_party, modeled, lookalike, demographic, behavioral, contextual, retargeting, custom."
+    },
+    {
+     "name": "audience_origin",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Where the segment originates. Allowed values: crm, loyalty, modeled, third_party, platform, survey."
+    },
+    {
+     "name": "definition_description",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Vendor-neutral description of the membership criteria (no PII, no member lists)."
+    },
+    {
+     "name": "size_estimate",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "Approximate member count as of this SCD2 version — a point-in-time snapshot attribute (>= 0), not a refreshed rollup of another table."
+    },
+    {
+     "name": "is_addressable_flag",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "TRUE if the audience can be targeted/activated for delivery."
+    },
+    {
+     "name": "segmentation_basis",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "The axis the definition is built on. Allowed values: behavioral, value_rfm, lifecycle, demographic, geographic, predictive, lookalike, contextual."
+    },
+    {
+     "name": "definition_origin",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "How the definition was authored. Allowed values: canned, custom, agent_generated."
+    },
+    {
+     "name": "definition_method",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "How membership is computed. Allowed values: rule, ml_score, imported."
+    },
+    {
+     "name": "criteria_expression",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Portable, vendor-neutral predicate/SQL text describing the membership rule. No PII, no member lists."
+    },
+    {
+     "name": "evaluation_mode",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Refresh latency of the definition (an attribute, not a schema fork). Allowed values: batch, streaming, edge."
+    },
+    {
+     "name": "iab_taxonomy_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Optional IAB Audience Taxonomy tier code for cross-platform interoperability (NULL if unmapped). Kept on the shared audience dimension (not a CMN/activation extension) because it is a standards-based interoperability attribute OF the audience concept itself — any activation consumer benefits, so it belongs with the entity, not one outcome package."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version of this audience."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "marketing_schema",
+   "name": "promotion",
+   "comment": "Trade-promotion dimension (SCD2) for the Promote with Purpose outcome package.",
+   "pk": [
+    "promo_sk"
+   ],
+   "columns": [
+    {
+     "name": "promo_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "promo_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the promotion. The reserved value NO_PROMO marks the no-promotion member."
+    },
+    {
+     "name": "promo_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Human-readable promotion name."
+    },
+    {
+     "name": "promo_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Promotion mechanic. Allowed values: TPR, FEATURE, DISPLAY, FEATURE_AND_DISPLAY, BOGO, COUPON, BUNDLE. NULL only for the NO_PROMO member."
+    },
+    {
+     "name": "funding_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "How the promotion is funded. Allowed values: OFF_INVOICE, BILL_BACK, SCAN_DOWN, LUMP_SUM. NULL only for the NO_PROMO member."
+    },
+    {
+     "name": "funded_by",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Who funds the promotion. Allowed values: SUPPLIER, RETAILER, SHARED. NULL only for the NO_PROMO member."
+    },
+    {
+     "name": "supplier_share_pct",
+     "type": "decimal(5,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Percent of trade spend funded by the supplier (0-100). Required when funded_by <> RETAILER."
+    },
+    {
+     "name": "start_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Promotion start date, inclusive (ISO 8601)."
+    },
+    {
+     "name": "end_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Promotion end date, inclusive (ISO 8601)."
+    },
+    {
+     "name": "fiscal_week_start",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Fiscal week id (fiscal_calendar.fiscal_week_id) containing start_date."
+    },
+    {
+     "name": "fiscal_week_end",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Fiscal week id (fiscal_calendar.fiscal_week_id) containing end_date."
+    },
+    {
+     "name": "planned_discount_pct",
+     "type": "decimal(5,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Planned price discount percent (0-100)."
+    },
+    {
+     "name": "planned_lift_pct",
+     "type": "decimal(6,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Planned incremental unit lift percent over baseline."
+    },
+    {
+     "name": "planned_trade_spend",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Planned total trade spend for the promotion, in the reporting/base currency (single-currency by construction)."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "order_schema",
+   "name": "customer_order_line",
+   "comment": "ORDM canonical-core customer-attributed order line fact. Feeds customer lifetime value (CLV/RFM).",
+   "pk": [
+    "order_line_sk"
+   ],
+   "columns": [
+    {
+     "name": "order_line_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "order_line_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the order line."
+    },
+    {
+     "name": "order_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Order (purchase occasion) business key; one order has several lines."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (version-specific)."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable customer business key (pseudonymous; not direct PII)."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version-specific)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key."
+    },
+    {
+     "name": "order_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Order date (calendar day). FK to fiscal_calendar.date_key (ISO 8601)."
+    },
+    {
+     "name": "event_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Instant the order line was placed (UTC, ISO 8601) — event-time, distinct from load_timestamp (processing-time)."
+    },
+    {
+     "name": "units",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units purchased on this line."
+    },
+    {
+     "name": "gross_amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Gross line amount before discount, in the reporting/base currency."
+    },
+    {
+     "name": "net_amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Net line amount after discount, in the reporting/base currency."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; the canonical core is single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original transaction currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "payment_schema",
+   "name": "payment",
+   "comment": "ORDM canonical-core payment fact (sale / refund / adjustment / chargeback). Tender + settlement side of customer orders.",
+   "pk": [
+    "payment_sk"
+   ],
+   "columns": [
+    {
+     "name": "payment_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "payment_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the payment event."
+    },
+    {
+     "name": "order_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to customer_order_line.order_id (the order this payment settles)."
+    },
+    {
+     "name": "profile_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to profile.profile_sk (version-specific)."
+    },
+    {
+     "name": "profile_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable customer business key (pseudonymous; not direct PII)."
+    },
+    {
+     "name": "payment_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Direction/kind of the event. Allowed values: sale, refund, adjustment, chargeback."
+    },
+    {
+     "name": "payment_method",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Tender used. Allowed values: card, cash, wallet, bank_transfer, gift_card, voucher."
+    },
+    {
+     "name": "payment_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Settlement status. Allowed values: authorized, captured, settled, declined, refunded, voided."
+    },
+    {
+     "name": "amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Event amount (magnitude, >= 0), in the reporting/base currency. payment_type carries the direction."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original tender currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "event_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Instant the payment event occurred (UTC, ISO 8601) — the event-time, distinct from load_timestamp (processing-time)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "procurement_schema",
+   "name": "purchase_order_line",
+   "comment": "ORDM canonical-core purchase-order line fact (order + receipt + defect + price). Feeds the supplier scorecard.",
+   "pk": [
+    "po_line_sk"
+   ],
+   "columns": [
+    {
+     "name": "po_line_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "po_line_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the purchase-order line."
+    },
+    {
+     "name": "po_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Purchase-order header business key (a PO groups several lines)."
+    },
+    {
+     "name": "supplier_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to supplier.supplier_sk (version-specific)."
+    },
+    {
+     "name": "supplier_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable supplier business key."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version-specific)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (ship-to location, version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key (ship-to location)."
+    },
+    {
+     "name": "order_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the line was ordered. FK to fiscal_calendar.date_key (ISO 8601)."
+    },
+    {
+     "name": "promised_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Supplier-promised delivery date (ISO 8601)."
+    },
+    {
+     "name": "actual_delivery_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Actual delivery/receipt date (ISO 8601); NULL if not yet received."
+    },
+    {
+     "name": "ordered_qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Quantity ordered (units)."
+    },
+    {
+     "name": "received_qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Quantity actually received (units)."
+    },
+    {
+     "name": "defective_qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units received defective."
+    },
+    {
+     "name": "returned_qty",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units returned to the supplier."
+    },
+    {
+     "name": "unit_price",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Invoiced unit price, in the reporting/base currency. Unit-grain price: DECIMAL(18,4) (principle #9d)."
+    },
+    {
+     "name": "contract_price",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Agreed contract unit price (basis for price compliance), in the reporting/base currency. Unit-grain price: DECIMAL(18,4) (principle #9d)."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; the canonical core is single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original purchasing currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "order_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Line status. Allowed values: open, received, closed, cancelled."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "product_schema",
+   "name": "product",
+   "comment": "ORDM canonical-core product master (SCD2). Conformed product entity shared across outcome packages.",
+   "pk": [
+    "product_sk"
+   ],
+   "columns": [
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the product."
+    },
+    {
+     "name": "gtin",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "GS1 Global Trade Item Number (UPC/EAN). Not PII."
+    },
+    {
+     "name": "sku",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Stock keeping unit code. Not PII."
+    },
+    {
+     "name": "style_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Parent style/model this SKU is a variant of. SKUs sharing a style_id are variants (e.g. colour/size). NULL for non-variant products."
+    },
+    {
+     "name": "color",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Variant-defining attribute: colour (free text). NULL if not applicable."
+    },
+    {
+     "name": "size",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Variant-defining attribute: size (free text, e.g. S/M/L, 500ml). NULL if not applicable."
+    },
+    {
+     "name": "product_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Display name of the product."
+    },
+    {
+     "name": "brand",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Brand name (free text)."
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Merchandising category (top level)."
+    },
+    {
+     "name": "subcategory",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Merchandising subcategory."
+    },
+    {
+     "name": "department",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Store department the product belongs to."
+    },
+    {
+     "name": "unit_of_measure",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Selling unit of measure. Allowed values: each, kg, g, l, ml, pack."
+    },
+    {
+     "name": "list_price",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Standard list (shelf) price, in the reporting/base currency (normalized at ingest). Unit-grain price: DECIMAL(18,4) (principle #9d)."
+    },
+    {
+     "name": "unit_cost",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Standard unit cost (COGS), in the reporting/base currency. Basis for margin = revenue - units * unit_cost. A master cost attribute, not a derived metric. Unit-grain cost: DECIMAL(18,4) (principle #9d)."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; the canonical core is single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original sourcing currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "product_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: active, inactive, discontinued."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "product_schema",
+   "name": "product_price",
+   "comment": "ORDM canonical-core product price history (SCD2 per product x price_type). Read price AS OF a date here; product dim carries the current snapshot.",
+   "pk": [
+    "product_price_sk"
+   ],
+   "columns": [
+    {
+     "name": "product_price_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per price version."
+    },
+    {
+     "name": "product_price_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable business key (product_id|price_type|effective_from)."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (foreign surrogate; nullable, not a PK). Resolved AS OF effective_from_date — the product SCD2 version in effect when this price applied — matching how sales/inventory/shipment resolve their _sk FKs. Declared as informational FK fk_product_price_product in relationships.sql (the durable product_id business key is retained below)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key. The priced product. Retained alongside product_sk; the declared UC FK is on product_sk (under SCD2 the business key is not unique, so the FK must be on the surrogate)."
+    },
+    {
+     "name": "price_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "What the amount represents. Allowed values: list, cost, promotional, contract."
+    },
+    {
+     "name": "amount",
+     "type": "decimal(18,4)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Unit-grain price/cost (principle #9d), in the reporting/base currency."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency, ISO 4217 alpha-3. Equals the deploy base_currency; single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this price became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current price."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently effective price per (product, price_type)."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "store_schema",
+   "name": "store",
+   "comment": "ORDM canonical-core store/location master (SCD2). Conformed store entity shared across outcome packages.",
+   "pk": [
+    "store_sk"
+   ],
+   "columns": [
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the store."
+    },
+    {
+     "name": "gln",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "GS1 Global Location Number (13 digits) for the store location."
+    },
+    {
+     "name": "store_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Display name of the store."
+    },
+    {
+     "name": "store_format",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Format. Allowed values: hypermarket, supermarket, convenience, drugstore, online."
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sales region / area."
+    },
+    {
+     "name": "district",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "District within the region."
+    },
+    {
+     "name": "city",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "City / locality of the store."
+    },
+    {
+     "name": "state_province",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "State, province, or region code."
+    },
+    {
+     "name": "country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Country, ISO 3166-1 alpha-2 code."
+    },
+    {
+     "name": "open_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the store opened (ISO 8601 date)."
+    },
+    {
+     "name": "store_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: active, inactive, closed."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "supplier_schema",
+   "name": "supplier",
+   "comment": "ORDM canonical-core supplier/vendor master (SCD2). Conformed supplier entity shared across supply-chain outcome packages.",
+   "pk": [
+    "supplier_sk"
+   ],
+   "columns": [
+    {
+     "name": "supplier_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key. Unique per SCD2 version; the join/FK target."
+    },
+    {
+     "name": "supplier_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the supplier."
+    },
+    {
+     "name": "gln",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "GS1 Global Location Number (13 digits) identifying the supplier party/location."
+    },
+    {
+     "name": "supplier_name",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Registered / legal name of the supplier."
+    },
+    {
+     "name": "supplier_type",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Type of supplier. Allowed values: manufacturer, distributor, wholesaler, importer, broker."
+    },
+    {
+     "name": "country_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Country of the supplier, ISO 3166-1 alpha-2."
+    },
+    {
+     "name": "region",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Sourcing region / area."
+    },
+    {
+     "name": "onboarding_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "Date the supplier was onboarded (ISO 8601 date)."
+    },
+    {
+     "name": "supplier_status",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Lifecycle status. Allowed values: active, inactive, suspended."
+    },
+    {
+     "name": "effective_from_date",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: inclusive start date this version became effective."
+    },
+    {
+     "name": "effective_to_date",
+     "type": "date",
+     "notNull": false,
+     "identity": false,
+     "comment": "SCD2: exclusive end date; NULL for the current version."
+    },
+    {
+     "name": "is_current",
+     "type": "boolean",
+     "notNull": true,
+     "identity": false,
+     "comment": "SCD2: TRUE for the currently active version."
+    },
+    {
+     "name": "created_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was created in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "source_updated_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When the record was last modified in the source system (UTC, ISO 8601)."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "When this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  },
+  {
+   "catalog": "catalog",
+   "schema": "transaction_schema",
+   "name": "sales",
+   "comment": "ORDM canonical-core POS sales fact (product x store x day). Carries promo_sk for promotion attribution.",
+   "pk": [
+    "sales_sk"
+   ],
+   "columns": [
+    {
+     "name": "sales_sk",
+     "type": "long",
+     "notNull": true,
+     "identity": true,
+     "comment": "Surrogate key."
+    },
+    {
+     "name": "sales_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable natural/business key for the daily sales record."
+    },
+    {
+     "name": "date_key",
+     "type": "date",
+     "notNull": true,
+     "identity": false,
+     "comment": "Selling date. FK to fiscal_calendar.date_key (ISO 8601)."
+    },
+    {
+     "name": "product_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to product.product_sk (version-specific)."
+    },
+    {
+     "name": "product_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable product business key."
+    },
+    {
+     "name": "store_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to store.store_sk (version-specific)."
+    },
+    {
+     "name": "store_id",
+     "type": "string",
+     "notNull": true,
+     "identity": false,
+     "comment": "Durable store business key."
+    },
+    {
+     "name": "promo_sk",
+     "type": "long",
+     "notNull": false,
+     "identity": false,
+     "comment": "FK to promotion.promo_sk. Non-promoted rows carry the NO_PROMO member surrogate."
+    },
+    {
+     "name": "promo_id",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Durable promotion business key; equals NO_PROMO when the sale was not on promotion."
+    },
+    {
+     "name": "units",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "Units sold (count)."
+    },
+    {
+     "name": "gross_revenue",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Gross sales amount before promotional discount, in the reporting/base currency."
+    },
+    {
+     "name": "discount_amount",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Promotional discount amount applied, in the reporting/base currency."
+    },
+    {
+     "name": "net_revenue",
+     "type": "decimal(18,2)",
+     "notNull": false,
+     "identity": false,
+     "comment": "Net sales amount after discount (gross_revenue - discount_amount), in the reporting/base currency."
+    },
+    {
+     "name": "currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Reporting/base currency of ALL monetary columns, ISO 4217 alpha-3. Equals the deploy base_currency; the canonical core is single-currency by construction."
+    },
+    {
+     "name": "transaction_currency_code",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Original transaction currency before normalization (lineage only), ISO 4217 alpha-3. Convert with fx_rate."
+    },
+    {
+     "name": "record_source",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "Originating system of record (vendor-neutral label)."
+    },
+    {
+     "name": "load_timestamp",
+     "type": "timestamp",
+     "notNull": false,
+     "identity": false,
+     "comment": "Timestamp this row was loaded into the canonical core (UTC, ISO 8601)."
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": [
+  {
+   "schema": "customer_schema",
+   "table": "account",
+   "name": "fk_account_profile",
+   "columns": [
+    "primary_contact_profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "address",
+   "name": "fk_address_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "channel_preference",
+   "name": "fk_channel_preference_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "consent",
+   "name": "fk_consent_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "contact",
+   "name": "fk_contact_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "identity_link",
+   "name": "fk_identity_link_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "customer_schema",
+   "table": "profile",
+   "name": "fk_profile_household",
+   "columns": [
+    "household_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "household",
+   "refColumns": [
+    "household_sk"
+   ]
+  },
+  {
+   "schema": "equipment_schema",
+   "table": "equipment",
+   "name": "fk_equipment_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "equipment_schema",
+   "table": "equipment_reading",
+   "name": "fk_reading_equipment",
+   "columns": [
+    "equipment_sk"
+   ],
+   "refSchema": "equipment_schema",
+   "refTable": "equipment",
+   "refColumns": [
+    "equipment_sk"
+   ]
+  },
+  {
+   "schema": "interaction_schema",
+   "table": "touchpoint",
+   "name": "fk_touchpoint_identity_link",
+   "columns": [
+    "identity_link_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "identity_link",
+   "refColumns": [
+    "identity_link_sk"
+   ]
+  },
+  {
+   "schema": "interaction_schema",
+   "table": "touchpoint",
+   "name": "fk_touchpoint_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "interaction_schema",
+   "table": "touchpoint",
+   "name": "fk_touchpoint_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "interaction_schema",
+   "table": "touchpoint",
+   "name": "fk_touchpoint_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "inventory_schema",
+   "table": "inventory_position",
+   "name": "fk_inv_pos_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "inventory_schema",
+   "table": "inventory_position",
+   "name": "fk_inv_pos_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "employee",
+   "name": "fk_employee_home_store",
+   "columns": [
+    "home_store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "employee_availability",
+   "name": "fk_emp_avail_employee",
+   "columns": [
+    "employee_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "employee",
+   "refColumns": [
+    "employee_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "employee_skill",
+   "name": "fk_emp_skill_employee",
+   "columns": [
+    "employee_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "employee",
+   "refColumns": [
+    "employee_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "employee_store_eligibility",
+   "name": "fk_emp_store_elig_employee",
+   "columns": [
+    "employee_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "employee",
+   "refColumns": [
+    "employee_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "employee_store_eligibility",
+   "name": "fk_emp_store_elig_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "labor_actuals",
+   "name": "fk_la_employee",
+   "columns": [
+    "employee_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "employee",
+   "refColumns": [
+    "employee_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "labor_actuals",
+   "name": "fk_la_schedule",
+   "columns": [
+    "labor_schedule_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "labor_schedule",
+   "refColumns": [
+    "labor_schedule_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "labor_actuals",
+   "name": "fk_la_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "labor_schedule",
+   "name": "fk_ls_employee",
+   "columns": [
+    "employee_sk"
+   ],
+   "refSchema": "labor_schema",
+   "refTable": "employee",
+   "refColumns": [
+    "employee_sk"
+   ]
+  },
+  {
+   "schema": "labor_schema",
+   "table": "labor_schedule",
+   "name": "fk_ls_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment",
+   "name": "fk_shipment_lane",
+   "columns": [
+    "lane_sk"
+   ],
+   "refSchema": "logistics_schema",
+   "refTable": "lane",
+   "refColumns": [
+    "lane_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment",
+   "name": "fk_shipment_store",
+   "columns": [
+    "destination_store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment",
+   "name": "fk_shipment_supplier",
+   "columns": [
+    "supplier_sk"
+   ],
+   "refSchema": "supplier_schema",
+   "refTable": "supplier",
+   "refColumns": [
+    "supplier_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment_line",
+   "name": "fk_shipment_line_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment_line",
+   "name": "fk_shipment_line_purchase_order_line",
+   "columns": [
+    "po_line_sk"
+   ],
+   "refSchema": "procurement_schema",
+   "refTable": "purchase_order_line",
+   "refColumns": [
+    "po_line_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment_line",
+   "name": "fk_shipment_line_shipment",
+   "columns": [
+    "shipment_sk"
+   ],
+   "refSchema": "logistics_schema",
+   "refTable": "shipment",
+   "refColumns": [
+    "shipment_sk"
+   ]
+  },
+  {
+   "schema": "logistics_schema",
+   "table": "shipment_tracking",
+   "name": "fk_shipment_tracking_shipment",
+   "columns": [
+    "shipment_sk"
+   ],
+   "refSchema": "logistics_schema",
+   "refTable": "shipment",
+   "refColumns": [
+    "shipment_sk"
+   ]
+  },
+  {
+   "schema": "order_schema",
+   "table": "customer_order_line",
+   "name": "fk_col_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "order_schema",
+   "table": "customer_order_line",
+   "name": "fk_col_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "order_schema",
+   "table": "customer_order_line",
+   "name": "fk_col_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "payment_schema",
+   "table": "payment",
+   "name": "fk_payment_profile",
+   "columns": [
+    "profile_sk"
+   ],
+   "refSchema": "customer_schema",
+   "refTable": "profile",
+   "refColumns": [
+    "profile_sk"
+   ]
+  },
+  {
+   "schema": "procurement_schema",
+   "table": "purchase_order_line",
+   "name": "fk_pol_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "procurement_schema",
+   "table": "purchase_order_line",
+   "name": "fk_pol_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  },
+  {
+   "schema": "procurement_schema",
+   "table": "purchase_order_line",
+   "name": "fk_pol_supplier",
+   "columns": [
+    "supplier_sk"
+   ],
+   "refSchema": "supplier_schema",
+   "refTable": "supplier",
+   "refColumns": [
+    "supplier_sk"
+   ]
+  },
+  {
+   "schema": "product_schema",
+   "table": "product_price",
+   "name": "fk_product_price_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "transaction_schema",
+   "table": "sales",
+   "name": "fk_sales_product",
+   "columns": [
+    "product_sk"
+   ],
+   "refSchema": "product_schema",
+   "refTable": "product",
+   "refColumns": [
+    "product_sk"
+   ]
+  },
+  {
+   "schema": "transaction_schema",
+   "table": "sales",
+   "name": "fk_sales_promotion",
+   "columns": [
+    "promo_sk"
+   ],
+   "refSchema": "marketing_schema",
+   "refTable": "promotion",
+   "refColumns": [
+    "promo_sk"
+   ]
+  },
+  {
+   "schema": "transaction_schema",
+   "table": "sales",
+   "name": "fk_sales_store",
+   "columns": [
+    "store_sk"
+   ],
+   "refSchema": "store_schema",
+   "refTable": "store",
+   "refColumns": [
+    "store_sk"
+   ]
+  }
+ ]
+}

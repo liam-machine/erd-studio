@@ -12,8 +12,10 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '@erd-studio/renderer/editor';
 import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
+import type { WebviewMessage } from '../../../src/types/messages';
 import { swapCardinality } from '@erd-studio/renderer/editor';
 import { ANNOTATION_COLORS } from '@erd-studio/renderer/editor';
+import { CARDINALITY_NAMES } from '../../lib/relationshipDialog';
 import './ContextMenu.css';
 
 // ---------------------------------------------------------------------------
@@ -24,12 +26,39 @@ import './ContextMenu.css';
 const VIEWPORT_PADDING = 8;
 
 /** All supported cardinality types with display labels. */
-const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = [
-  { value: 'many-to-one', label: 'Many → One' },
-  { value: 'one-to-one', label: 'One → One' },
-  { value: 'one-to-many', label: 'One → Many' },
-  { value: 'many-to-many', label: 'Many → Many' },
-];
+const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = (
+  ['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many'] as const
+).map((value) => ({ value, label: CARDINALITY_NAMES[value] }));
+
+/** One item of a table's context menu: the message it posts with `{ modelName }`. */
+export interface TableMenuAction {
+  id: 'openModelFile' | 'showTableOnOtherDiagrams' | 'moveTable' | 'copyTablePath' | 'revealTableInLibrary' | 'removeModel';
+  label: string;
+  title: string;
+}
+
+/**
+ * A table's context-menu items, in order. A read-only canvas (the physical
+ * stage) keeps only the ones that write nothing; Move Table… is for a DBML
+ * table (one with a layer of its own). Remove from Diagram asks twice.
+ */
+export function tableMenuActions(options: { readOnly: boolean; dbml: boolean }): TableMenuAction[] {
+  const actions: TableMenuAction[] = [
+    { id: 'openModelFile', label: 'Open Table File', title: "Open the table's file" },
+    { id: 'showTableOnOtherDiagrams', label: 'Show on Other Diagrams…', title: 'Open another diagram that shows this table' },
+  ];
+  if (!options.readOnly && options.dbml) {
+    actions.push({ id: 'moveTable', label: 'Move Table…', title: 'Move the table to another layer or schema folder' });
+  }
+  actions.push(
+    { id: 'copyTablePath', label: 'Copy Path', title: "Copy the path of the table's file" },
+    { id: 'revealTableInLibrary', label: 'Reveal in Table Library', title: 'Select the table in the sidebar' },
+  );
+  if (!options.readOnly) {
+    actions.push({ id: 'removeModel', label: 'Remove from Diagram', title: 'Remove this table from this diagram. Its file stays in the Table Library.' });
+  }
+  return actions;
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -222,6 +251,20 @@ export function ContextMenu() {
 
     const displayX = adjustedPosition?.x ?? contextMenu.x;
     const displayY = adjustedPosition?.y ?? contextMenu.y;
+    const actions = tableMenuActions({
+      readOnly: isReadOnly,
+      // Move Table moves DBML table files: only a table with a layer of its own has one.
+      dbml: domain?.models.find((m) => m.name === modelName)?.layer !== undefined,
+    });
+
+    const runAction = (action: TableMenuAction) => {
+      if (action.id === 'removeModel' && !confirmingDelete) {
+        setConfirmingDelete(true);
+        return;
+      }
+      vscode.postMessage({ type: action.id, payload: { modelName } } as WebviewMessage);
+      closeContextMenu();
+    };
 
     return (
       <div
@@ -233,10 +276,25 @@ export function ContextMenu() {
           visibility: adjustedPosition ? 'visible' : 'hidden',
         }}
         role="menu"
+        aria-label={`${modelName} actions`}
       >
         <div className="context-menu__header">
           <span className="context-menu__title">{modelName}</span>
         </div>
+        {actions.length > 0 && <div className="context-menu__divider" />}
+        {actions.map((action) => (
+          <div key={action.id}>
+            {action.id === 'removeModel' && <div className="context-menu__divider" />}
+            <button
+              className={`context-menu__item${action.id === 'removeModel' ? ' context-menu__item--danger' : ''}`}
+              onClick={() => runAction(action)}
+              role="menuitem"
+              title={action.title}
+            >
+              {action.id === 'removeModel' && confirmingDelete ? 'Click again to remove' : action.label}
+            </button>
+          </div>
+        ))}
       </div>
     );
   }
@@ -420,7 +478,7 @@ export function ContextMenu() {
 
         {/* Cardinality with dropdown (editable) or label (read-only) */}
         <div className="context-menu__row context-menu__row--cardinality">
-          <span className="context-menu__label">Cardinality</span>
+          <span className="context-menu__label">How many</span>
           {!isEditable ? (
             <span className="context-menu__value">{cardinalityLabel}</span>
           ) : (

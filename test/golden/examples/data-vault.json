@@ -1,0 +1,274 @@
+{
+  "example": "data-vault",
+  "layers": [
+    {
+      "id": "raw_vault",
+      "label": "Raw Vault",
+      "abbreviation": "RV"
+    },
+    {
+      "id": "business_vault",
+      "label": "Business Vault",
+      "abbreviation": "BV"
+    },
+    {
+      "id": "information_mart",
+      "label": "Information Marts",
+      "abbreviation": "IM"
+    }
+  ],
+  "tables": {
+    "business_vault.bridge_customer_policy": {
+      "layer": "business_vault",
+      "schema": "business_vault",
+      "grain": "One row per customer, policy and snapshot date",
+      "columns": [
+        "customer_hk BINARY pk fk",
+        "policy_hk BINARY pk fk",
+        "customer_policy_hk BINARY fk",
+        "snapshot_date DATE pk"
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
+    },
+    "business_vault.pit_customer": {
+      "layer": "business_vault",
+      "schema": "business_vault",
+      "grain": "One row per customer per snapshot date",
+      "columns": [
+        "customer_hk BINARY pk fk",
+        "snapshot_date DATE pk",
+        "sat_customer_crm_ldts TIMESTAMP fk",
+        "sat_customer_policy_admin_ldts TIMESTAMP fk",
+        "sat_customer_risk_score_ldts TIMESTAMP fk"
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
+    },
+    "business_vault.sat_customer_risk_score": {
+      "layer": "business_vault",
+      "schema": "business_vault",
+      "columns": [
+        "customer_hk BINARY pk fk",
+        "load_datetime TIMESTAMP pk",
+        "risk_score DECIMAL(5,2)",
+        "risk_band STRING",
+        "rule_version STRING"
+      ],
+      "newRelationshipsFile": "business_vault/relationships/business_vault.dbml"
+    },
+    "raw_vault.hub_customer": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "customer_hk BINARY pk",
+        "customer_bk STRING nk",
+        "load_datetime TIMESTAMP",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.hub_policy": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "policy_hk BINARY pk",
+        "policy_bk STRING nk",
+        "load_datetime TIMESTAMP",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.link_customer_policy": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "customer_policy_hk BINARY pk",
+        "customer_hk BINARY fk",
+        "policy_hk BINARY fk",
+        "load_datetime TIMESTAMP",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.sat_customer_crm": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "customer_hk BINARY pk fk",
+        "load_datetime TIMESTAMP pk",
+        "hashdiff BINARY",
+        "full_name STRING",
+        "email STRING",
+        "phone STRING",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.sat_customer_policy_admin": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "customer_hk BINARY pk fk",
+        "load_datetime TIMESTAMP pk",
+        "hashdiff BINARY",
+        "date_of_birth DATE",
+        "postcode STRING",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.sat_customer_policy_effectivity": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "customer_policy_hk BINARY pk fk",
+        "load_datetime TIMESTAMP pk",
+        "start_datetime TIMESTAMP",
+        "end_datetime TIMESTAMP",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "raw_vault.sat_policy_policy_admin": {
+      "layer": "raw_vault",
+      "schema": "raw_vault",
+      "columns": [
+        "policy_hk BINARY pk fk",
+        "load_datetime TIMESTAMP pk",
+        "hashdiff BINARY",
+        "product_code STRING",
+        "start_date DATE",
+        "end_date DATE",
+        "annual_premium DECIMAL(12,2)",
+        "record_source STRING"
+      ],
+      "newRelationshipsFile": "raw_vault/relationships/raw_vault.dbml"
+    },
+    "shared.dim_date": {
+      "layer": "information_mart",
+      "schema": "shared",
+      "role": "conformed-dim",
+      "grain": "One row per calendar day",
+      "columns": [
+        "date_key INT pk",
+        "calendar_date DATE",
+        "month_start_date DATE",
+        "is_month_end BOOLEAN"
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
+    },
+    "underwriting.dim_customer": {
+      "layer": "information_mart",
+      "schema": "underwriting",
+      "role": "conformed-dim",
+      "grain": "One row per customer",
+      "columns": [
+        "customer_key BINARY pk",
+        "customer_number STRING nk",
+        "full_name STRING scd1",
+        "postcode STRING scd1",
+        "risk_band STRING scd1"
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
+    },
+    "underwriting.dim_policy": {
+      "layer": "information_mart",
+      "schema": "underwriting",
+      "role": "domain-dim",
+      "grain": "One row per policy",
+      "columns": [
+        "policy_key BINARY pk",
+        "policy_number STRING nk",
+        "product_code STRING scd1",
+        "start_date DATE",
+        "end_date DATE"
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
+    },
+    "underwriting.fct_policy_month": {
+      "layer": "information_mart",
+      "schema": "underwriting",
+      "role": "periodic-snapshot",
+      "grain": "One row per policy per month",
+      "columns": [
+        "policy_key BINARY pk fk",
+        "customer_key BINARY fk",
+        "month_date_key INT pk fk",
+        "earned_premium DECIMAL(12,2) additive",
+        "is_in_force BOOLEAN"
+      ],
+      "newRelationshipsFile": "information_mart/relationships/information_mart.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "business_vault/diagrams/query-helpers.dbml",
+      "name": "query-helpers",
+      "layer": "business_vault",
+      "tables": [
+        "business_vault.bridge_customer_policy",
+        "business_vault.pit_customer",
+        "business_vault.sat_customer_risk_score",
+        "raw_vault.hub_customer",
+        "raw_vault.hub_policy",
+        "raw_vault.link_customer_policy",
+        "raw_vault.sat_customer_crm",
+        "raw_vault.sat_customer_policy_admin"
+      ],
+      "relationships": [
+        "bridge_customer_policy.customer_hk -> hub_customer.customer_hk many-to-one",
+        "bridge_customer_policy.customer_policy_hk -> link_customer_policy.customer_policy_hk many-to-one",
+        "bridge_customer_policy.policy_hk -> hub_policy.policy_hk many-to-one",
+        "link_customer_policy.customer_hk -> hub_customer.customer_hk many-to-one",
+        "link_customer_policy.policy_hk -> hub_policy.policy_hk many-to-one",
+        "pit_customer.customer_hk -> hub_customer.customer_hk many-to-one",
+        "pit_customer.customer_hk -> sat_customer_crm.customer_hk many-to-one role:crm composite",
+        "pit_customer.customer_hk -> sat_customer_policy_admin.customer_hk many-to-one role:policy admin composite",
+        "pit_customer.customer_hk -> sat_customer_risk_score.customer_hk many-to-one role:risk score composite",
+        "pit_customer.sat_customer_crm_ldts -> sat_customer_crm.load_datetime many-to-one role:crm composite",
+        "pit_customer.sat_customer_policy_admin_ldts -> sat_customer_policy_admin.load_datetime many-to-one role:policy admin composite",
+        "pit_customer.sat_customer_risk_score_ldts -> sat_customer_risk_score.load_datetime many-to-one role:risk score composite",
+        "sat_customer_crm.customer_hk -> hub_customer.customer_hk many-to-one",
+        "sat_customer_policy_admin.customer_hk -> hub_customer.customer_hk many-to-one",
+        "sat_customer_risk_score.customer_hk -> hub_customer.customer_hk many-to-one"
+      ]
+    },
+    {
+      "file": "information_mart/diagrams/underwriting.dbml",
+      "name": "underwriting",
+      "layer": "information_mart",
+      "tables": [
+        "shared.dim_date",
+        "underwriting.dim_customer",
+        "underwriting.dim_policy",
+        "underwriting.fct_policy_month"
+      ],
+      "relationships": [
+        "fct_policy_month.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_policy_month.month_date_key -> dim_date.date_key many-to-one",
+        "fct_policy_month.policy_key -> dim_policy.policy_key many-to-one"
+      ]
+    },
+    {
+      "file": "raw_vault/diagrams/customer-and-policy.dbml",
+      "name": "customer-and-policy",
+      "layer": "raw_vault",
+      "tables": [
+        "raw_vault.hub_customer",
+        "raw_vault.hub_policy",
+        "raw_vault.link_customer_policy",
+        "raw_vault.sat_customer_crm",
+        "raw_vault.sat_customer_policy_admin",
+        "raw_vault.sat_customer_policy_effectivity",
+        "raw_vault.sat_policy_policy_admin"
+      ],
+      "relationships": [
+        "link_customer_policy.customer_hk -> hub_customer.customer_hk many-to-one",
+        "link_customer_policy.policy_hk -> hub_policy.policy_hk many-to-one",
+        "sat_customer_crm.customer_hk -> hub_customer.customer_hk many-to-one",
+        "sat_customer_policy_admin.customer_hk -> hub_customer.customer_hk many-to-one",
+        "sat_customer_policy_effectivity.customer_policy_hk -> link_customer_policy.customer_policy_hk many-to-one",
+        "sat_policy_policy_admin.policy_hk -> hub_policy.policy_hk many-to-one"
+      ]
+    }
+  ]
+}

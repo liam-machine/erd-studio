@@ -1,0 +1,16 @@
+Table gold.fct_inspections_bim_018 [
+  role: 'fact',
+  grain: 'One row per inspections bim 018'
+] {
+  inspections_bim_018_key BIGINT [pk, note: 'Primary key of fct_inspections_bim_018']
+  unit_price DOUBLE [note: 'unit price of the inspections bim 018 row', additive_type: 'non-additive']
+  score INT [note: 'score of the inspections bim 018 row', additive_type: 'additive']
+  country_code INT [note: 'country code of the inspections bim 018 row']
+  quantity BIGINT [note: 'quantity of the inspections bim 018 row', additive_type: 'semi-additive']
+  category STRING [note: 'category of the inspections bim 018 row']
+  owner_name DATE [note: 'owner name of the inspections bim 018 row']
+  priority BOOLEAN [note: 'priority of the inspections bim 018 row']
+  category_7 DOUBLE [note: 'category 7 of the inspections bim 018 row']
+  accounts_000_key BIGINT [note: 'FK to dim_accounts_000', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_inspections_bim_018'
+}

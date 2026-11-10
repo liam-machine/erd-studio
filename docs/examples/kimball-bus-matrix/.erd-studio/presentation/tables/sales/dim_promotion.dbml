@@ -1,0 +1,13 @@
+Table sales.dim_promotion [
+  role: 'domain-dim',
+  grain: 'One row per promotion'
+] {
+  Note: 'Promotions. Only sales uses it, so it lives in the sales schema, not conformed.'
+
+  promotion_key  INT    [pk, note: 'Surrogate key; 0 is No promotion']
+  promotion_code STRING [natural_key: 'true']
+  promotion_name STRING
+  discount_type  STRING
+  start_date     DATE
+  end_date       DATE
+}

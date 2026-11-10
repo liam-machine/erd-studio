@@ -1,0 +1,9 @@
+Table silver.order_lines [grain: 'One row per order line'] {
+  Note: 'Order lines, typed.'
+
+  order_line_id BIGINT          [pk, natural_key: 'true']
+  order_id      BIGINT          [foreign_key: 'true']
+  product_id    BIGINT          [foreign_key: 'true']
+  quantity      INT
+  unit_price    "DECIMAL(12,2)" [note: 'In AUD']
+}

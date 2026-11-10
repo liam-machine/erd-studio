@@ -1,0 +1,8 @@
+// Tables carry their version in the name: a breaking change is a new table, clients_first_seen_v2.
+Table atlas_derived.clients_first_seen_v1 [grain: 'One row per client'] {
+  Note: 'When each client was first seen.'
+
+  client_id       STRING [pk, natural_key: 'true']
+  first_seen_date DATE
+  country         STRING
+}

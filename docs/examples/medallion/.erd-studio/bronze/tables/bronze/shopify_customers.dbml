@@ -1,0 +1,10 @@
+Table bronze.shopify_customers {
+  Note: 'Customers as Shopify sends them, appended on every sync.'
+
+  id           BIGINT    [pk, note: 'Shopify customer id']
+  email        STRING
+  first_name   STRING
+  last_name    STRING
+  created_at   STRING    [note: 'Text as the API sends it; typed in silver']
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

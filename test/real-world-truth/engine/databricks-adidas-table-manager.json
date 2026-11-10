@@ -1,0 +1,202 @@
+{
+ "sample": "databricks-adidas-table-manager",
+ "engine": "Apache Spark 4.3.0 SQL parser (no catalog)",
+ "loaded": [
+  "databricks-adidas-table-manager/table/test_table_complex_default_scenario.sql",
+  "databricks-adidas-table-manager/table/test_table_simple_split_scenario.sql"
+ ],
+ "statementsParsed": 3,
+ "setAside": {},
+ "errors": [],
+ "tables": [
+  {
+   "catalog": null,
+   "schema": "test_db",
+   "name": "DummyTableBronzeComplexDefaultScenario1",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "id with special (< characters ;"
+    },
+    {
+     "name": "col1",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "col1 with >) special character \" and ;"
+    },
+    {
+     "name": "col2",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "col2 with () special character \" and ;"
+    },
+    {
+     "name": "col3",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "col3 with special <> character \" and ;"
+    },
+    {
+     "name": "col4",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "col4 with special /* character ;"
+    },
+    {
+     "name": "year",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "year with */ special character ;"
+    },
+    {
+     "name": "month",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "month with special -- character ;"
+    },
+    {
+     "name": "day",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "day with special \" character ;"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "test_db",
+   "name": "DummyTableBronzeComplexDefaultScenario2",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "id with special (< characters ;"
+    },
+    {
+     "name": "col1",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "col1 with >) special character \" and ;"
+    },
+    {
+     "name": "col2",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "col2 with () special character \" and ;"
+    },
+    {
+     "name": "col3",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false,
+     "comment": "col3 with special <> character \" and ;"
+    },
+    {
+     "name": "col4",
+     "type": "string",
+     "notNull": false,
+     "identity": false,
+     "comment": "col4 with special /* character ;"
+    },
+    {
+     "name": "year",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "year with */ special character ;"
+    },
+    {
+     "name": "month",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "month with special -- character ;"
+    },
+    {
+     "name": "day",
+     "type": "integer",
+     "notNull": false,
+     "identity": false,
+     "comment": "day with special \" character ;"
+    }
+   ]
+  },
+  {
+   "catalog": null,
+   "schema": "test_db",
+   "name": "DummyTableBronzeSimpleSplitScenario",
+   "comment": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "col1",
+     "type": "string",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "col2",
+     "type": "integer",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "col3",
+     "type": "boolean",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "col4",
+     "type": "string",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "year",
+     "type": "integer",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "month",
+     "type": "integer",
+     "notNull": false,
+     "identity": false
+    },
+    {
+     "name": "day",
+     "type": "integer",
+     "notNull": false,
+     "identity": false
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [],
+ "foreignKeys": []
+}

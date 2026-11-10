@@ -1,0 +1,34 @@
+Project sales {
+  Note: 'Sales star schema'
+  erd_schema_version: '7'
+  erd_show_fk_edges: 'false'
+  erd_layout_options: '{"elk.direction":"RIGHT"}'
+  erd_layout: '''
+    bridge_empty 760 400
+    customer_profile 40 640
+    dim_customer 40 40
+    dim_date 40 360
+    dim_region 760 40
+    fct_order 400 200
+    note/3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c 1120 40 220 120
+    note/9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f 1120 200
+  '''
+}
+
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'
+use { table gold.dim_region } from '../tables/gold/dim_region.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.bridge_empty } from '../tables/gold/bridge_empty.dbml'
+use * from '../../silver/relationships/calendar.dbml'
+use * from '../relationships/customers.dbml'
+use * from '../relationships/gold.dbml'
+
+Note "3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c" [color: #f59e0b, linked_table: 'fct_order'] {
+  'Check the grain with finance'
+}
+
+Note "9a0d2b77-1c55-4e0b-8f3e-5a6b7c8d9e0f" [color: #3b82f6] {
+  ''
+}

@@ -4,7 +4,7 @@ A ~68 s, 1080×1350 portrait LinkedIn video for **analytics / data engineers who
 shows the first run after the onboarding release, as a user would really see it:
 
 > Install ERD Studio, open your dbt project, and the Get started guide opens by itself. Click
-> **Draw from dbt**, pick a folder like your marts, and it reads your models and relationship
+> **Import from dbt**, pick a folder like your marts, and it reads your models and relationship
 > tests and lays out the diagram for you — no AI needed. Switch to Physical to see what dbt really
 > built, Compare to spot drift. Then ask your AI assistant to enrich it (keys, grain, the reason
 > behind every table), saved as plain files next to your code. No dbt project? Open the sample
@@ -30,13 +30,13 @@ wording if it differs):
 - Walkthrough (package.json `contributes.walkthroughs`, id `erdStudio.getStarted`): title
   **"Get started with ERD Studio"**, description "Draw your dbt project as an ERD in a minute, then enrich it with your AI
   assistant.", steps in order: "Watch the one-minute tour", "No dbt project? Try the sample", "Open
-  your dbt project", "Draw your dbt project — no AI needed" (button **Draw from dbt**), "Enrich it
+  your dbt project", "Draw your dbt project — no AI needed" (button **Import from dbt**), "Enrich it
   with your AI assistant" (button **Set Up My AI Helper**). It appears in VS Code's Welcome editor: a left column of step rows
   (a circle that fills when done, the title, the open step expanded with its description and a
   blue button) and the step's image on the right (`media/walkthrough/*.svg` — you may inline a
   simplified version of the real SVG).
-- Command: **"ERD Studio: Draw from dbt…"** (`erdStudio.drawFromDbt`). Its QuickPick has the
-  title "Draw from dbt", placeholder "Which dbt models should the diagram start from?", one row
+- Command: **"ERD Studio: Import from dbt…"** (`erdStudio.drawFromDbt`). Its QuickPick has the
+  title "Import from dbt", placeholder "Which dbt models should the diagram start from?", one row
   per folder with a folder icon (`marts` · "6 models", `staging` · "6 models", detail = the first
   model names) and a last row "Choose models…" with a checklist icon. After picking, a second
   QuickPick "Which layer is this diagram for?" (Bronze / Silver / Gold) and an input box for the
@@ -79,10 +79,10 @@ layer badge `GLD`, domain file `.erd-studio/gold/orders.json`. The real grain of
    `models/`, `target/`. On `guide` the Welcome editor slides in: the real walkthrough — title
    "Get started with ERD Studio", the five step rows, "Draw your dbt project — no AI needed"
    highlighted as next, its image on the right.
-3. **onboard/draw** (14.24 · 7.00 · click 0.35, pick 1.96, blue). *"Click Draw from dbt. / Pick a
+3. **onboard/draw** (14.24 · 7.00 · click 0.35, pick 1.96, blue). *"Click Import from dbt. / Pick a
    folder, like your marts."* Zoom on the walkthrough step "Draw your dbt project — no AI
-   needed" with its blue **Draw from dbt** button; the pointer clicks it on `click` +0.6. On
-   `pick` the command palette QuickPick drops from the top: title "Draw from dbt", placeholder
+   needed" with its blue **Import from dbt** button; the pointer clicks it on `click` +0.6. On
+   `pick` the command palette QuickPick drops from the top: title "Import from dbt", placeholder
    "Which dbt models should the diagram start from?", rows `marts` · 6 models (highlighted),
    `staging` · 6 models, "Choose models…"; the pointer/selection lands on `marts` at ~+1.4 and it confirms (a brief
    press). Keep the rows big (≥ 30 px).

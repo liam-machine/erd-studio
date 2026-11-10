@@ -47,6 +47,69 @@ export interface YmlRelationshipTest {
   toModel: string;
   /** PK column name (from the `field` kwarg) */
   toColumn: string;
+  /**
+   * The test holds only for some rows: `relationships_where` /
+   * `dbt_utils.relationships_where` (`from_condition`, `to_condition`), or a
+   * `relationships` test with a `where:` config. A relationship drawn from it
+   * does not keep the condition (the draft says so). Absent: unconditional.
+   */
+  conditional?: true;
+  /** The condition's text as written (`from_condition`, `to_condition`, `where`), when the test has one. */
+  condition?: RelationshipTestCondition;
+  /** Where the test is written: the schema file, project-relative with forward slashes, and its 1-based line. */
+  file?: string;
+  line?: number;
+}
+
+/**
+ * The rows a conditional relationships test holds for, as the yml (or the
+ * manifest's kwargs) writes them: dbt_utils' `relationships_where`
+ * `from_condition` / `to_condition`, and a `where:` config. Text the user
+ * wrote; shown in the draft, never sent anywhere.
+ */
+export interface RelationshipTestCondition {
+  from?: string;
+  to?: string;
+  where?: string;
+}
+
+/**
+ * A relationship test whose `to:` is a dbt source (`source('raw', 'customers')`),
+ * not a model: no draft can draw it, so it is kept to be said (Import from
+ * dbt's Not drawn), never dropped without a word.
+ */
+export interface YmlSourceRelationshipTest {
+  fromModel: string;
+  fromColumn: string;
+  /** `raw.customers`: the source's name and its table. */
+  source: string;
+  toColumn: string;
+  file?: string;
+  line?: number;
+}
+
+/**
+ * One table of a dbt `sources:` block. A source is a table dbt reads but does
+ * not build, so Import from dbt never draws one (the draft lists them); it is
+ * kept here so none is dropped without a word.
+ */
+export interface YmlSourceTable {
+  /** The source's `name` (`raw` in `source('raw', 'customers')`). */
+  source: string;
+  /** The table's `name` (`customers`). */
+  name: string;
+  /** The warehouse table name, when `identifier:` sets one that differs from `name`. */
+  identifier?: string;
+  /** `quoting: identifier: true` (on the table, else its source). */
+  quoted?: boolean;
+  description: string;
+  columns: YmlColumn[];
+  /** Project-relative, forward slashes (the manifest's: relative to its package's root). */
+  file: string;
+  /** 1-based line of the table's entry. */
+  line?: number;
+  /** The dbt project that defines it (the manifest's `package_name`); absent from the yml. */
+  projectName?: string;
 }
 
 /** Model info extracted from a dbt schema .yml file. */
@@ -63,6 +126,19 @@ export interface YmlModelInfo {
   tags: string[];
   /** dbt `meta:` (merged with `config: meta:`), when non-empty. CLI inventory only. */
   meta?: Meta;
+  /**
+   * The custom schema the model's `config: schema:` sets, when it does: the
+   * schema the developer wrote, the same on every machine (a DBML table's
+   * schema folder, §2.4). Absent when none is set.
+   */
+  configSchema?: string;
+  /** `config: enabled: false` (or `enabled: false`) on the model's yml entry: dbt does not build it. */
+  disabled?: true;
+  /**
+   * A versioned model (`versions:`): the version whose columns `columns` holds
+   * (`latest_version`, else the highest `v`). Absent for an unversioned model.
+   */
+  version?: number;
 }
 
 /**
@@ -133,4 +209,27 @@ export interface YmlData {
    * hand-built literals stay valid.
    */
   compositeForeignKeys?: CompositeForeignKey[];
+  /**
+   * Columns dbt declares required, indexed by model name: a `not_null` test
+   * (scalar, a map with `config:`, or the `test_name: not_null` format; not
+   * one with a `where:` condition or `enabled: false`, which holds for only
+   * some rows or none), dbt_expectations'
+   * `expect_column_values_to_not_be_null` (not with a `row_condition:`),
+   * under `tests:` or `data_tests:` (aliases read as what they name), and a
+   * contract's `not_null` or `primary_key` constraint (on the column, or the
+   * model's `constraints:` with `columns:`). Not
+   * `dbt_utils.not_null_proportion`: it allows some nulls. Optional so
+   * hand-built literals stay valid.
+   */
+  notNullColumns?: Map<string, Set<string>>;
+  /**
+   * Relationship tests to a dbt source rather than a model
+   * ({@link YmlSourceRelationshipTest}). Optional so hand-built literals stay valid.
+   */
+  sourceRelationshipTests?: YmlSourceRelationshipTest[];
+  /**
+   * Every enabled table of the project's `sources:` blocks
+   * ({@link YmlSourceTable}). Optional so hand-built literals stay valid.
+   */
+  sources?: YmlSourceTable[];
 }

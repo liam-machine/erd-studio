@@ -1,0 +1,16 @@
+{
+  "name": "Delivery Margin (Value)",
+  "description": "The delivery margin only considers the revenue and costs associated with freights, delivery and shipments.",
+  "expression": [
+    "CALCULATE (",
+    "    SUMX (",
+    "        'Invoices',",
+    "        'Invoices'[Freight] - 'Invoices'[Delivery Cost]",
+    "    ),",
+    "    'Invoice Document Type'[Billing Document Type Code] IN { \"invoice\", \"express\" }",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\d. Margins\\III. Delivery Margin\\$",
+  "lineageTag": "adf032e2-a94e-4c64-b116-3bae16b40c1c"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Total Late Delivery Penalties",
+  "description": "Late Delivery penalties occur when we fail to meet the SLA for deliveries. If the products take longer than a certain number of days to deliver after the requested delivery date, a Late Delivery Penalty is levied.",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Late Delivery Penalties]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\II. Penalties and Adjustments",
+  "lineageTag": "3ee42063-2a45-4ef0-8135-189b387479ee"
+}

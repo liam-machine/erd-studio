@@ -1,0 +1,9 @@
+Table web.web_session [owner: 'data-engineering'] {
+  Note: 'Online banking sessions from web analytics.'
+
+  session_id  STRING    [pk, natural_key: 'true']
+  customer_no STRING    [note: 'Set once the visitor logs in']
+  started_at  TIMESTAMP
+  device      STRING
+  _loaded_at  TIMESTAMP [note: 'When the loader landed the row']
+}

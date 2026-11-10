@@ -1,0 +1,54 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: ledger (layer silver, logical stage)
+%% Description: Rationale and meta as model files held them before context fields
+
+  %% Table dim_account
+  %%   schema: silver
+  %%   role: conformed-dim
+  %%   grain: One row per account, per version
+  %%   description: One row per customer account
+  %%   Purpose: Shared account reference for finance reporting
+  %%   Design: Conformed dimension so every mart joins the same account
+  %%   Grain choice: Versioned rows, because credit limits change and finance reports on history
+  %%   Role choice: Conformed rather than domain-owned, since three marts use it
+  %%   SCD strategy: credit_limit is type 2; account_name overwrites
+  %%   Measures: None here; the balances live in fct_balance
+  %%   meta owner: finance-data
+  %%   meta certified: true
+  %%   meta purpose: Kept in meta, next to the rationale purpose
+  %%   meta not exported (a list, a map or empty): tags
+  %%   account_code meta pii: false
+  %%   account_code meta classification: internal
+  %%   account_name meta pii: true
+  %%   account_name meta business_rule: Trimmed, title case
+  %%   account_name meta not exported (a list, a map or empty): sources
+  "dim_account" {
+    INT account_key PK "Surrogate key, one per version"
+    VARCHAR account_code UK "The account number customers see; SCD type 0"
+    VARCHAR account_name "Name on the account; SCD type 1"
+    DECIMAL_18_2 credit_limit "Credit limit at the time; type DECIMAL(18,2); SCD type 2"
+  }
+
+  %% Table fct_balance
+  %%   schema: silver
+  %%   role: periodic-snapshot
+  %%   grain: One row per account per month end
+  %%   description: Month-end balance per account
+  %%   Purpose: Month-end balances for the finance close
+  %%   Measures: balance is semi-additive (never sum across months); txn_count is additive
+  %%   meta owner: finance-data
+  %%   meta refresh: daily
+  %%   balance meta business_rule: Ledger balance after the last posting of the month
+  %%   balance meta unit: AUD
+  "fct_balance" {
+    INT account_key FK "Account at month end"
+    DATE month_end "Last day of the month"
+    DECIMAL_18_2 balance "Closing balance; type DECIMAL(18,2); semi-additive"
+    INT txn_count "Transactions in the month; additive"
+  }
+
+  %% fct_balance.account_key -> dim_account.account_key, many-to-one
+  "fct_balance" }o--|| "dim_account" : "account_key"

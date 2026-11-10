@@ -1,6 +1,7 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/hybrid.json mixes inline table objects with table name references (or declares schemaVersion 5 with inline tables). Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to repair it, or edit the file so every entry in \"logical.models\" is a table name string."
+    "message": "Subject area file .erd-studio/silver/hybrid.json mixes inline table objects with table name references (or declares schemaVersion 5 with inline tables). Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to repair it, or edit the file so every entry in \"logical.models\" is a table name string.",
+    "kind": "invalid"
   }
 }

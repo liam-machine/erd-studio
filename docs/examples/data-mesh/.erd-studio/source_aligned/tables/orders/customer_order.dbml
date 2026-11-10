@@ -1,0 +1,12 @@
+Table orders.customer_order [
+  grain: 'One row per order',
+  owner: 'orders-team'
+] {
+  Note: 'Orders, published by the orders domain.'
+
+  order_id       STRING [pk, natural_key: 'true']
+  account_id     STRING [foreign_key: 'true', note: 'Owned by the accounts domain']
+  placed_at      TIMESTAMP
+  parcel_count   INT
+  declared_value "DECIMAL(12,2)"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "On-Time Delivery",
+  "lineageTag": "fa6fb917-28ce-4d34-97ad-9fff4d086e1c",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

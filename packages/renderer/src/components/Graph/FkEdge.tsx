@@ -1,7 +1,9 @@
 /**
  * FkEdge — custom React Flow edge for displaying FK relationships.
  *
- * Renders a smooth-step path with Power BI-style cardinality labels:
+ * Draws its route from the one-pass line router (`EdgeRouter`, in the canvas
+ * store's `edgeRoutes`) when it has one, else a smooth-step path, with Power
+ * BI-style cardinality labels:
  * `*` for "many" and `1` for "one", positioned near each endpoint.
  * Built relationships are blue; design relationships are orange.
  * All edges use a solid line style.
@@ -12,12 +14,16 @@
  * Edges connect to node-level handles (top/right/bottom/left) rather
  * than column-specific handles, choosing the side that creates the
  * least bends.
+ *
+ * Edges of the hovered or selected table carry moving arrows from the 1 end
+ * to the * end; one-to-one shows two dots meeting (`EdgeFlow`). While a hover
+ * preview is active, the hovered table's lines are marked lit so the root
+ * `erd-flow--hover-focus` class can fade every other line (`useHoverFocus`).
  */
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
   getSmoothStepPath,
-  EdgeLabelRenderer,
   Position,
   useStore,
   useStoreApi,
@@ -27,6 +33,11 @@ import {
 import type { FkFlowEdge } from '../../types/graph';
 import { backwardsRelationshipNote } from '@erd-studio/core';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
+import { useEditorStoreOr } from '../../store/editorStore';
+import { edgeFocusRole } from '../../lib/canvasFocus';
+import { flowModeFor } from '../../lib/edgeFlow';
+import { EdgeFlow } from './EdgeFlow';
+import { EdgeLabels } from './EdgeLabels';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import { edgeHoverText } from '../../lib/badgeLabels';
 import {
@@ -57,6 +68,15 @@ const LABEL_OFFSET = 8;
 const SELF_LOOP_RADIUS = 55;
 /** How much wider each further self-loop on one node is drawn, so they nest (#133 L3). */
 const SELF_LOOP_STEP = 18;
+
+/**
+ * Routed anchor side → React Flow position. Position's values are the side
+ * names, so this is a cast (no runtime read of `Position`, so tests that mock
+ * @xyflow/react without it still import).
+ */
+function sidePosition(side: 'top' | 'right' | 'bottom' | 'left'): Position {
+  return side as Position;
+}
 
 /** Stable empty sibling group for edges whose handle side is unknown. */
 const NO_SIBLINGS: readonly import('@xyflow/react').Edge[] = Object.freeze([]);
@@ -173,8 +193,18 @@ function FkEdgeComponent({
     [host, data],
   );
 
+  // This edge's part in the hover preview / flowing focus. A primitive, so an
+  // edge outside the focus never re-renders when the focus moves elsewhere.
+  const focusRole = useEditorStoreOr((s) => edgeFocusRole(s.flowFocus, s.hoverFocus, id), null);
+  // This line's route from the one-pass router (EdgeRouter), if any. Without
+  // one (a self-loop, routing off or held during a drag) the smooth-step
+  // fallback below is drawn.
+  const storedRoute = useEditorStoreOr((s) => s.edgeRoutes?.get(id), undefined);
+
   if (!data) return null;
   const { cardinality, role, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
+  // A self-loop always draws its own loop.
+  const route = isSelfLoop ? undefined : storedRoute;
   const loopRadius = SELF_LOOP_RADIUS + SELF_LOOP_STEP * (data.loopIndex ?? 0);
 
   // For cardinality mismatch edges, pull the mismatch details from the report
@@ -224,7 +254,7 @@ function FkEdgeComponent({
   // Both control points are pulled diagonally north-east so the curve sweeps
   // *around* the corner instead of sagging through it — perpendicular-only
   // control points let the midsection collapse onto the node corner.
-  const edgePath = isSelfLoop
+  const fallbackPath = isSelfLoop
     ? `M ${src.x},${src.y} C ${src.x + loopRadius},${src.y - loopRadius} ${tgt.x + loopRadius},${tgt.y - loopRadius} ${tgt.x},${tgt.y}`
     : getSmoothStepPath({
         sourceX: src.x,
@@ -235,10 +265,30 @@ function FkEdgeComponent({
         targetPosition,
         borderRadius: 8,
       })[0];
+  const edgePath = route ? route.d : fallbackPath;
+  // The halo style: the visible line (and its casing) is broken where it
+  // passes under another, so the line on top is the same whatever order the
+  // edges are drawn in; EdgeFlow and the hit area keep the whole path.
+  const strokePath = route?.strokeD ?? edgePath;
 
-  const statusClass = discrepancyStatus
-    ? `fk-edge--discrepancy-${discrepancyStatus}`
-    : `fk-edge--${stage ?? 'logical'}`;
+  const statusKey = discrepancyStatus
+    ? `discrepancy-${discrepancyStatus}`
+    : (stage ?? 'logical');
+  const statusClass = `fk-edge--${statusKey}`;
+
+  // Flow: on the focused table's lines, unless the line is `missing` here or
+  // one of its tables is being dragged (the path moves every frame).
+  const flowing = focusRole === 'flow' || focusRole === 'flow-static';
+  // Every focused line is marked lit. The lit rules only apply under the root
+  // `erd-flow--hover-focus` class, so a click-only flow looks as before (its
+  // lines are already bright through `dimmed`), and no edge has to subscribe
+  // to whether a hover is active.
+  const lit = focusRole !== null;
+  const flowMode = flowing ? flowModeFor(cardinality, discrepancyStatus) : null;
+  const showFlow = flowMode !== null && !(sourceNode?.dragging || targetNode?.dragging);
+  const focusClass = `${lit ? ' fk-edge--lit' : ''}${flowing ? ' fk-edge--flowing' : ''}`;
+  // Labels, chips and badges in the HTML layer fade with the hover preview too.
+  const adornClass = ` fk-edge__adornment${lit ? ' fk-edge__adornment--lit' : ''}`;
 
   const edgeTitle = edgeHoverText({
     fromModel, fromColumn, toModel, toColumn, cardinality, role, discrepancyStatus, pairs: data.pairs,
@@ -282,28 +332,45 @@ function FkEdgeComponent({
 
   // Labels sit close to the node, in the gap before the shortened path.
   // Use adjusted coordinates so labels align with distributed connection points.
-  const srcLabel = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
-  const tgtLabel = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
+  const srcLabel = route
+    ? offsetPoint(route.sourceAnchor.x, route.sourceAnchor.y, sidePosition(route.sourceAnchor.side), LABEL_OFFSET)
+    : offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
+  const tgtLabel = route
+    ? offsetPoint(route.targetAnchor.x, route.targetAnchor.y, sidePosition(route.targetAnchor.side), LABEL_OFFSET)
+    : offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
 
   // Midpoint for cardinality mismatch badge / swap button.
   // For self-loops the straight midpoint falls inside the node; instead we
   // compute the bezier's exact midpoint at t=0.5, which sits northeast of
   // the top-right corner. (Derived from B(0.5) with diagonal control points:
   // the R terms aggregate to 0.75·R along each axis.)
-  const midX = isSelfLoop
+  const midX = route
+    ? route.mid.x
+    : isSelfLoop
     ? (src.x + tgt.x) / 2 + loopRadius * 0.75
     : (adjustedSourceX + adjustedTargetX) / 2;
-  const midY = isSelfLoop
+  const midY = route
+    ? route.mid.y
+    : isSelfLoop
     ? (src.y + tgt.y) / 2 - loopRadius * 0.75
     : (adjustedSourceY + adjustedTargetY) / 2;
 
   return (
     <>
+      {route?.halo && <path d={strokePath} className={`fk-edge__halo${dimmed ? ' fk-edge--dimmed' : ''}`} />}
       <path
         id={id}
-        d={edgePath}
-        className={`fk-edge ${statusClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
+        d={strokePath}
+        className={`fk-edge ${statusClass}${dimmed ? ' fk-edge--dimmed' : ''}${focusClass}`}
       />
+      {showFlow && flowMode && (
+        <EdgeFlow
+          d={edgePath}
+          mode={flowMode}
+          animate={focusRole === 'flow'}
+          statusKey={statusKey}
+        />
+      )}
       {/* Invisible wider path for easier hover/click targeting. It also carries
           the edge's only hover text: the `*`/`1` glyphs are pointer-events:none
           so the line is the one part of an edge that can hold a <title>. */}
@@ -316,9 +383,9 @@ function FkEdgeComponent({
       >
         <title>{edgeTitle}</title>
       </path>
-      <EdgeLabelRenderer>
+      <EdgeLabels>
         <span
-          className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}${adornClass}`}
           style={{
             transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
@@ -326,7 +393,7 @@ function FkEdgeComponent({
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label ${labelColorClass}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}${adornClass}`}
           style={{
             transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}
@@ -335,7 +402,7 @@ function FkEdgeComponent({
         </span>
         {role && (
           <span
-            className={`fk-edge__role ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+            className={`fk-edge__role ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}${adornClass}`}
             style={{
               transform: `translate(-50%, calc(-100% - 10px)) translate(${midX}px, ${midY}px)`,
             }}
@@ -345,7 +412,7 @@ function FkEdgeComponent({
         )}
         {compositeSize > 0 && (
           <span
-            className={`fk-edge__composite ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+            className={`fk-edge__composite ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}${adornClass}`}
             style={{
               transform: `translate(-50%, calc(100% + 6px)) translate(${midX}px, ${midY}px)`,
             }}
@@ -356,7 +423,7 @@ function FkEdgeComponent({
         )}
         {discrepancyStatus === 'cardinality-mismatch' && (
           <span
-            className="fk-edge__mismatch-badge"
+            className={`fk-edge__mismatch-badge${adornClass}`}
             style={{
               transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
             }}
@@ -367,7 +434,7 @@ function FkEdgeComponent({
         )}
         {viewer ? null : (data.keysContradict && !readOnly && discrepancyStatus !== 'missing' && (
           <span
-            className={`fk-edge__backwards${dimmed ? ' fk-edge__backwards--dimmed' : ''}`}
+            className={`fk-edge__backwards${dimmed ? ' fk-edge__backwards--dimmed' : ''}${adornClass}`}
             // On the midpoint, in place of the ⇄ zone (Turn round is ⇄): the icon
             // is centred on the line and Turn round opens to its right, clear of
             // the role above and the composite chip below.
@@ -415,7 +482,7 @@ function FkEdgeComponent({
             )}
           </span>
         )}
-      </EdgeLabelRenderer>
+      </EdgeLabels>
     </>
   );
 }

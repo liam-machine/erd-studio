@@ -7,13 +7,13 @@ export const list_domains = {
   config: {
     title: 'List ERD domains',
     description:
-      'List all ERD Studio domains (diagrams) in a dbt project, grouped by layer. ' +
+      'List all ERD Studio domains (diagrams) in a dbt project, grouped by layer: .dbml diagrams, or .json ones in a project from before ERD Studio 2.0 (file_format says which). ' +
       'Each domain represents one ERD with its own models and relationships. ' +
       'Returns lightweight summaries — call read_domain for full details.',
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root (directory containing dbt_project.yml).'),
+        .describe('Absolute path to the dbt project root (directory containing dbt_project.yml), or a folder holding .erd-studio/ with no dbt project.'),
       layer: z
         .string()
         .optional()
@@ -61,6 +61,7 @@ export const list_domains = {
                 domain: s.domain,
                 layer: s.layer,
                 file_path: s.filePath,
+                file_format: s.storage ?? 'json',
               })),
             },
             null,

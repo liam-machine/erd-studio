@@ -15,12 +15,33 @@ import * as path from 'path';
 import { SubjectAreaFileError, SubjectAreaValidationError, type JsonSyntaxProblem } from '@erd-studio/core';
 
 import { redactPaths, type FeedbackKind } from '../types/feedback';
+import { cutCrashDetail, type WebviewErrorArea } from '../types/webviewError';
 
 /** The button that opens Send Feedback prefilled with the failure. */
 export const SEND_FEEDBACK_BUTTON = 'Send Feedback';
 
 /** The button that opens the user's file at the problem. */
 export const OPEN_FILE_BUTTON = 'Open File';
+
+/** The buttons the commands' errors share (#204, #219), so each says the same thing. */
+export const TRY_AGAIN_BUTTON = 'Try Again';
+export const SHOW_FILE_BUTTON = 'Show File';
+export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
+export const SAVE_ALL_BUTTON = 'Save All';
+export const RELOAD_WINDOW_BUTTON = 'Reload Window';
+
+/** The buttons and words every way of making a diagram shares (#204, #229). */
+export const ADD_LAYER_BUTTON = 'Add Layer';
+export const OPEN_IT_BUTTON = 'Open It';
+/** A diagram was written, but opening it failed (#236): open it again. */
+export const OPEN_DIAGRAM_BUTTON = 'Open Diagram';
+export const CHOOSE_ANOTHER_NAME_BUTTON = 'Choose Another Name';
+export const NO_LAYERS_MESSAGE = 'No layers are configured for new diagrams. Add a layer first.';
+
+/** A diagram with this name appeared since the name box checked it (another window, git). */
+export function diagramNameTakenMessage(name: string, layerLabel: string): string {
+  return `A diagram named "${name}" already exists in the ${layerLabel} layer.`;
+}
 
 /** A failure's buttons, by label, and what each one does. */
 export type ErrorActions = Readonly<Record<string, () => unknown>>;
@@ -74,6 +95,56 @@ export function feedbackPrefill(title: string, doing: string, err: unknown): Fee
   };
 }
 
+/** Where a canvas crash started, in the words of the report (`other`: not said). */
+const CRASH_AREA_WORDS: Readonly<Record<WebviewErrorArea, string | undefined>> = {
+  canvas: 'the canvas',
+  detailPanel: 'the Detail panel',
+  toolbar: 'the toolbar',
+  dialogs: 'a dialog',
+  compare: 'the compare view',
+  guide: 'the Show Me Around guide',
+  other: undefined,
+};
+
+/**
+ * Send Feedback's prefill for the crash screen's **Send Feedback** (the
+ * canvas's or the draft page's): which page crashed, where on the canvas it
+ * started, and the crash's first line as the page sent it, through
+ * `redactPaths()` again here (the page already did) and cut to
+ * `CRASH_DETAIL_MAX`. The user reads it in Send Feedback before anything is
+ * sent, and nothing analyses it: the canvas-less flow has no model.
+ */
+export function crashFeedbackPrefill(
+  surface: 'canvas' | 'draft',
+  crash: { area?: WebviewErrorArea; detail?: string } = {},
+): FeedbackPrefill {
+  const page = surface === 'draft' ? 'The draft preview' : 'The diagram canvas';
+  const where = crash.area ? CRASH_AREA_WORDS[crash.area] : undefined;
+  const detail = cutCrashDetail(redactPaths(crash.detail ?? '')).trim();
+  return {
+    kind: 'bug',
+    title: `${surface === 'draft' ? 'The draft preview' : 'The canvas'} stopped working`,
+    description: redactPaths(
+      `${page} crashed and showed the "stopped working" screen${where ? `; it started in ${where}` : ''}.`
+      + `\n\nError: ${detail || '(no message)'}`,
+    ),
+  };
+}
+
+/**
+ * Send Feedback's prefill when a canvas or the draft preview never finished
+ * opening (no `ready` 30 s after it was shown; `askNoReadyRecovery`): which
+ * page, and nothing else. There was no crash screen and no error text.
+ */
+export function noReadyFeedbackPrefill(surface: 'canvas' | 'draft'): FeedbackPrefill {
+  const page = surface === 'draft' ? 'The draft preview' : 'The diagram canvas';
+  return {
+    kind: 'bug',
+    title: `${surface === 'draft' ? 'The draft preview' : 'The canvas'} did not open`,
+    description: `${page} stayed blank and never finished opening.\n\nError: (no message)`,
+  };
+}
+
 /** Why a write failed, as far as the user can do something about it. */
 export type WriteFailure = 'permission' | 'disk-full' | 'other';
 
@@ -87,6 +158,12 @@ const PERMISSION_CODES = new Set(['EACCES', 'EPERM', 'EROFS', 'NoPermissions']);
 const DISK_FULL_CODES = new Set(['ENOSPC', 'EDQUOT']);
 
 export function classifyWriteFailure(err: unknown): WriteFailure {
+  // A DBML write that could not be put back (`FileWriteRollbackFailed`) carries the fs error as its cause.
+  const cause = causeOf(err);
+  if (cause !== undefined) {
+    const inner = classifyWriteFailure(cause);
+    if (inner !== 'other') return inner;
+  }
   const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
   if (PERMISSION_CODES.has(code)) return 'permission';
   if (DISK_FULL_CODES.has(code)) return 'disk-full';
@@ -99,7 +176,15 @@ export function classifyWriteFailure(err: unknown): WriteFailure {
 /** The file a Node `fs` error names (`err.path`), when it names one. */
 export function failedPath(err: unknown): string | undefined {
   const p = err && typeof err === 'object' && 'path' in err ? (err as { path: unknown }).path : undefined;
-  return typeof p === 'string' && p.length > 0 ? p : undefined;
+  if (typeof p === 'string' && p.length > 0) return p;
+  const cause = causeOf(err);
+  return cause === undefined ? undefined : failedPath(cause);
+}
+
+/** The error a wrapper names as its `cause` (one level), when it is an object. */
+function causeOf(err: unknown): object | undefined {
+  const cause = err && typeof err === 'object' && 'cause' in err ? (err as { cause: unknown }).cause : undefined;
+  return cause && typeof cause === 'object' && cause !== err ? cause : undefined;
 }
 
 /** `filePath` relative to `root` with `/` separators; the base name when it is outside `root`. */
@@ -128,8 +213,23 @@ export function describeJsonMistake(shown: string, err: Pick<SubjectAreaFileErro
   return at ? `${shown} has a mistake ${at}.` : `${shown} is not valid JSON.`;
 }
 
+/**
+ * The sentence for a `.dbml` diagram that does not parse (`invalid-dbml`):
+ * "<shown> has a mistake at line L, column C: <the parser's words> [code]."
+ * when core located it, else "<shown> is not valid DBML.". The parser's
+ * words are taken from core's message, after its "column C: ".
+ */
+export function describeDbmlMistake(shown: string, err: Pick<SubjectAreaFileError, 'line' | 'column' | 'message'>): string {
+  if (err.line === undefined || err.column === undefined) return `${shown} is not valid DBML.`;
+  const marker = `line ${err.line}, column ${err.column}: `;
+  const at = err.message.indexOf(marker);
+  const detail = at === -1 ? '' : err.message.slice(at + marker.length).trim();
+  const ended = detail === '' ? '' : `: ${detail}${/[.!?]$/.test(detail) ? '' : '.'}`;
+  return `${shown} has a mistake at line ${err.line}, column ${err.column}${ended || '.'}`;
+}
+
 /** "at line L, column C: <hint>" for a located JSON mistake, else undefined. */
-function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
+export function jsonMistakeAt(err: Pick<SubjectAreaFileError, 'line' | 'column' | 'syntaxProblem'>): string | undefined {
   if (err.line === undefined || err.column === undefined || err.syntaxProblem === undefined) return undefined;
   return `at line ${err.line}, column ${err.column}: ${JSON_MISTAKE_HINTS[err.syntaxProblem]}`;
 }
@@ -158,12 +258,24 @@ export function describeDiagramFileProblem(err: unknown, filePath: string, shown
         return { reason: 'ERD Studio could not read it. Check that the file is not locked or blocked by permissions', openable: false };
       case 'empty':
         return { reason: 'it has no content', openable: true };
-      case 'invalid-json': {
+      case 'invalid-json':
+      case 'invalid-dbml': {
         if (err.mergeConflict) {
           return {
             reason: `it has unresolved git merge conflicts${err.line !== undefined ? `, first at line ${err.line}` : ''}. Keep one side of each conflict, then try again`,
             openable: true,
             ...(err.line !== undefined ? { line: err.line } : {}),
+          };
+        }
+        if (err.reason === 'invalid-dbml') {
+          const where = err.line !== undefined
+            ? ` at line ${err.line}${err.column !== undefined ? `, column ${err.column}` : ''}`
+            : '';
+          return {
+            reason: where ? `there is a DBML mistake${where}` : 'it is not valid DBML',
+            openable: true,
+            ...(err.line !== undefined ? { line: err.line } : {}),
+            ...(err.column !== undefined ? { column: err.column } : {}),
           };
         }
         const at = jsonMistakeAt(err);

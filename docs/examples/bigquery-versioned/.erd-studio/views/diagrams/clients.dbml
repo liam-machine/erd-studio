@@ -1,0 +1,14 @@
+use { table atlas.clients_first_seen } from '../tables/atlas/clients_first_seen.dbml'
+use { table atlas.clients_daily }      from '../tables/atlas/clients_daily.dbml'
+use { table atlas.clients_last_seen }  from '../tables/atlas/clients_last_seen.dbml'
+use * from '../relationships/views.dbml'
+
+Project clients {
+  Note: 'What analysts query: unversioned views of the derived tables.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    clients_daily 127 259
+    clients_first_seen 423 50
+    clients_last_seen 12 12
+  '''
+}

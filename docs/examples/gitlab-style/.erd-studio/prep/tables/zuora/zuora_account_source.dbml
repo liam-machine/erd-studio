@@ -1,0 +1,8 @@
+Table zuora.zuora_account_source [grain: 'One row per Zuora account'] {
+  Note: 'Zuora accounts, renamed and typed.'
+
+  account_id     STRING [pk, natural_key: 'true']
+  account_number STRING
+  crm_id         STRING [note: 'The Salesforce account id']
+  currency       STRING
+}

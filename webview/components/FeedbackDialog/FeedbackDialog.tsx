@@ -194,6 +194,8 @@ export function FeedbackDialog() {
   const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
+  // The recent ERD Studio log: opt-in every time the dialog opens, never remembered.
+  const [includeLog, setIncludeLog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [titleFromAnalysis, setTitleFromAnalysis] = useState(false);
@@ -297,6 +299,7 @@ export function FeedbackDialog() {
     lastRequestedRef.current = null;
     setContext('');
     setIncludeDiagnostics(true);
+    setIncludeLog(false);
     setBusy(false);
     setSubmitError(null);
     setTitleFromAnalysis(false);
@@ -641,6 +644,7 @@ export function FeedbackDialog() {
           description: description.trim(),
           steps: context.trim() || undefined,
           includeDiagnostics,
+          includeLog: includeDiagnostics && includeLog,
           webviewErrors: useEditorStore.getState().recentErrors,
           regressionOf,
           commentOnIssue: options?.commentOnIssue,
@@ -656,6 +660,7 @@ export function FeedbackDialog() {
       description,
       context,
       includeDiagnostics,
+      includeLog,
       regressionOf,
       domainSummary,
     ],
@@ -698,11 +703,12 @@ export function FeedbackDialog() {
         description: description.trim(),
         steps: context.trim() || undefined,
         includeDiagnostics,
+        includeLog: includeDiagnostics && includeLog,
         webviewErrors: useEditorStore.getState().recentErrors,
         domain: domainSummary,
       },
     });
-  }, [send, kind, title, description, context, includeDiagnostics, domainSummary]);
+  }, [send, kind, title, description, context, includeDiagnostics, includeLog, domainSummary]);
 
   // -------------------------------------------------------------------------
   // Readiness & routing
@@ -943,6 +949,8 @@ export function FeedbackDialog() {
               view={diagnostics}
               included={includeDiagnostics}
               onToggle={() => setIncludeDiagnostics((current) => !current)}
+              includeLog={includeLog}
+              onToggleLog={() => setIncludeLog((current) => !current)}
             />
           </div>
 

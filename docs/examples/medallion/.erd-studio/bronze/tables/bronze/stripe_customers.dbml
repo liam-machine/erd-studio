@@ -1,0 +1,8 @@
+Table bronze.stripe_customers {
+  Note: 'Customers as Stripe sends them.'
+
+  id           STRING    [pk, note: 'Stripe customer id (cus_…)']
+  email        STRING
+  metadata     STRING    [note: 'JSON text; carries shopify_customer_id when checkout set it']
+  _ingested_at TIMESTAMP [note: 'When the loader landed the row']
+}

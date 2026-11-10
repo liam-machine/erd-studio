@@ -1,0 +1,19 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "QTD",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[QTD]",
+  "sortByColumn": "Order",
+  "displayFolder": "Columns\\0. Select a Period",
+  "lineageTag": "32c56d15-bb0d-4567-b661-75ae39b13044",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -31,7 +31,11 @@ import { dirtyFiles } from '../providers/dirtyDocuments';
 import { saveDocumentByUri } from '../providers/documentSave';
 import {
   OPEN_FILE_BUTTON,
+  RELOAD_WINDOW_BUTTON,
+  SAVE_AND_TRY_AGAIN_BUTTON,
   SEND_FEEDBACK_BUTTON,
+  SHOW_FILE_BUTTON,
+  TRY_AGAIN_BUTTON,
   classifyWriteFailure,
   failedPath,
   feedbackPrefill,
@@ -59,15 +63,22 @@ import { detectSubjectAreaFormat } from '../types/semantic';
 import type { Relationship, SemanticTable } from '../types/semantic';
 import type { SubjectAreaService } from '../services/domainService';
 import type { TableLibraryService } from '../services/logicalModelService';
+import { log } from '../services/logger';
 
 const TITLE = 'Move Relationships to Table Library';
+
+/** Move Relationships in a DBML project (§5.7): there is nothing a diagram file can hold. */
+export const DBML_NOTHING_TO_MOVE_MESSAGE = 'Nothing to move: relationships in a DBML project are already in the table library.';
+
+/** A mixed project's way to move a diagram's relationships onto DBML tables (§6.3). */
+const MIXED_DBML_OWNER_HINT = 'Convert the project to DBML (ERD Studio: Convert Project to DBML) to move them.';
 
 export interface MoveRelationshipsDeps {
   workspaceRoot: string;
   semanticDir: string;
   subjectAreaService: Pick<SubjectAreaService, 'listSubjectAreas'>;
   tableLibraryService: Pick<TableLibraryService, 'getTable' | 'listTables' | 'tablePath' | 'invalidateCache' | 'getTablesDir'>
-    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile'>>;
+    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile' | 'projectStorage'>>;
   /** Refresh the trees, open canvases and selectors once the files are written. */
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
@@ -85,7 +96,11 @@ export interface SubjectAreaRelationships {
   relationships: Relationship[];
 }
 
-/** Every readable v5 and v6 domain file's models and `logical.relationships`. */
+/**
+ * Every readable v5 and v6 domain file's models and `logical.relationships`.
+ * A DBML diagram is skipped by its storage, not by failing to parse as JSON:
+ * it holds no relationships (they live in the library's relationships files).
+ */
 export function readSubjectAreaRelationships(
   subjectAreaService: Pick<SubjectAreaService, 'listSubjectAreas'>,
   workspaceRoot: string,
@@ -93,6 +108,7 @@ export function readSubjectAreaRelationships(
 ): SubjectAreaRelationships[] {
   const domains: SubjectAreaRelationships[] = [];
   for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
+    if (summary.storage === 'dbml') continue;
     try {
       const file = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as Record<string, unknown>;
       const format = detectSubjectAreaFormat(file);
@@ -137,12 +153,9 @@ export function writeFileAtomic(filePath: string, text: string): void {
   }
 }
 
-/** The buttons the move's errors offer (#204). */
-export const TRY_AGAIN_BUTTON = 'Try Again';
-export const SHOW_FILE_BUTTON = 'Show File';
-export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
+/** The buttons the move's errors offer (#204); the shared ones live in commandErrors. */
+export { TRY_AGAIN_BUTTON, SHOW_FILE_BUTTON, SAVE_AND_TRY_AGAIN_BUTTON, RELOAD_WINDOW_BUTTON };
 export const OPEN_SOURCE_CONTROL_BUTTON = 'Open Source Control';
-export const RELOAD_WINDOW_BUTTON = 'Reload Window';
 
 /**
  * The move stopped before writing anything, because of what is in the user's
@@ -163,7 +176,7 @@ class MoveStopped extends Error {
  */
 function showErrorWithActions(message: string, actions: ErrorActions): void {
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
-    console.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });
@@ -225,7 +238,7 @@ export async function moveRelationshipsToLibrary(deps: MoveRelationshipsDeps): P
     await runMove(deps, progress, retry);
   } catch (err) {
     telemetry.error('relMoveFailed');
-    console.error('[moveRelationshipsToLibrary] failed:', err);
+    log.error('[moveRelationshipsToLibrary] failed:', err);
     if (err instanceof MoveStopped) {
       showErrorWithActions(`${TITLE}: ${err.message}`, {
         ...(err.filePath ? { [OPEN_FILE_BUTTON]: openFile(err.filePath) } : {}),
@@ -254,6 +267,12 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   const { workspaceRoot, semanticDir, subjectAreaService, tableLibraryService } = deps;
   const writeFile = deps.writeFile ?? writeFileAtomic;
   telemetry.feature('relMoveStarted');
+  // Hidden by its `when` clause in a DBML project, where relationships only live in the library (D5).
+  if (tableLibraryService.projectStorage?.() === 'dbml') {
+    telemetry.feature('relMoveNothingToMove');
+    void vscode.window.showInformationMessage(DBML_NOTHING_TO_MOVE_MESSAGE);
+    return;
+  }
   // Read the library fresh: a cached copy may predate an edit made on disk.
   tableLibraryService.invalidateCache();
   const domains = readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)
@@ -304,7 +323,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
     void vscode.window.showInformationMessage(
       `${TITLE}: nothing to move — ${domains.length === 0
         ? 'no diagram file holds a relationship of its own, and every relationship in the Table Library is stored with the table holding the foreign key.'
-        : 'every relationship in the diagram files starts at a table with no readable file in logical-models/.'}`,
+        : 'every relationship in the diagram files starts at a table with no readable file in the Table Library.'}`,
     );
     return;
   }
@@ -387,6 +406,10 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   for (const target of moveTargets(plan)) {
     const name = libraryModel(target)?.name ?? target;
     const filePath = tableLibraryService.tablePath(name);
+    if (filePath.toLowerCase().endsWith('.dbml')) {
+      // A mixed project: a DBML table's relationships are Refs in its folder's relationships file.
+      throw new MoveStopped(`${relPath(filePath)} is a DBML table, and this command moves relationships into YAML table files only. ${MIXED_DBML_OWNER_HINT} Nothing was changed.`, filePath);
+    }
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {
       throw new MoveStopped(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.`, filePath);
@@ -426,7 +449,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   const broken = checkLibraryRewrite(readModels, nextModels, [...plan.toLibrary, ...plan.rehome.map((r) => r.to)]);
   if (broken.length > 0) {
     telemetry.relationshipInvariants(broken);
-    console.warn(`[moveRelationshipsToLibrary] relationship self-check: ${broken.join(', ')}`);
+    log.warn(`[moveRelationshipsToLibrary] relationship self-check: ${broken.join(', ')}`);
   }
 
   // All or nothing: if one write fails, every file already written is put back.
@@ -451,7 +474,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
       return;
     }
     written.push(write);
-    // Recorded once the bytes are on disk (the tracker stats the file), so
+    // Recorded once the bytes are on disk (the tracker reads what the file holds), so
     // the watchers skip this write; the caller issues the refreshes.
     ownWrites.recordWrite(write.filePath);
   }
@@ -462,7 +485,7 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
     await deps.onWritten(domainPaths);
   } catch (err) {
     // The files are written; a failed refresh must not report the move as failed.
-    console.error('[moveRelationshipsToLibrary] refresh after the move failed:', err);
+    log.error('[moveRelationshipsToLibrary] refresh after the move failed:', err);
   }
 
   const moved = plan.toLibrary.length;

@@ -1,0 +1,12 @@
+Table marts.users [
+  role: 'domain-dim',
+  grain: 'One row per user'
+] {
+  Note: 'Users and how active they are, for marketing.'
+
+  user_id           STRING [pk, natural_key: 'true']
+  customer_id       STRING [foreign_key: 'true']
+  role              STRING
+  days_since_active INT
+  is_power_user     BOOLEAN
+}

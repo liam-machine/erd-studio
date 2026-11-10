@@ -1,0 +1,71 @@
+{
+  "name": "Invoices",
+  "lineageTag": "fba0b030-ca72-44ec-a0e3-98ad3bba0508",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Table"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": [
+        "[",
+        "  {",
+        "    \"name\": \"0e6e4252-95c4-4e0e-a4c8-874e5463ec4c\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Billing Date\",",
+        "    \"toTable\": \"Date\",",
+        "    \"toColumn\": \"Date\"",
+        "  },",
+        "  {",
+        "    \"name\": \"7dacb5b5-3b77-45fe-85f9-cdebc76b1d56\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Billing Document Type Code\",",
+        "    \"toTable\": \"Invoice Document Type\",",
+        "    \"toColumn\": \"Billing Document Type Code\"",
+        "  },",
+        "  {",
+        "    \"name\": \"9a0268c1-ab7d-d96d-ab2f-c4ba28aaae5c\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Customer Key\",",
+        "    \"toTable\": \"Customers\",",
+        "    \"toColumn\": \"Customer Key\"",
+        "  },",
+        "  {",
+        "    \"name\": \"7a4bdc99-ebb9-4dc1-92bd-c20e0460b638\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Local Currency\",",
+        "    \"toTable\": \"Budget Rate\",",
+        "    \"toColumn\": \"From Currency\"",
+        "  },",
+        "  {",
+        "    \"name\": \"4eade231-e4d9-4b9f-8568-0f8dd9162e6f\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"OTD Indicator\",",
+        "    \"toTable\": \"On-Time Delivery\",",
+        "    \"toColumn\": \"OTD Indicator\"",
+        "  },",
+        "  {",
+        "    \"name\": \"a9b264e6-c155-4643-adc9-e01ad2b308ea\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Product Key\",",
+        "    \"toTable\": \"Products\",",
+        "    \"toColumn\": \"Product Key\"",
+        "  },",
+        "  {",
+        "    \"name\": \"7572bf1a-bc25-432d-8287-8a015e4ddeab\",",
+        "    \"fromTable\": \"Invoices\",",
+        "    \"fromColumn\": \"Ship Date\",",
+        "    \"toTable\": \"LocalDateTable_6b2c9e31-0c64-4034-8869-3404e703fc01\",",
+        "    \"toColumn\": \"Date\",",
+        "    \"joinOnDateBehavior\": \"datePartOnly\"",
+        "  }",
+        "]"
+      ]
+    }
+  ]
+}

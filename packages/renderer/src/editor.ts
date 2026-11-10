@@ -20,33 +20,39 @@ export {
 
 // Canvas
 export { useCanvasGraph } from './canvas/useCanvasGraph';
+export { useHoverFocus, type UseHoverFocusResult, type HoverFocusHandlers } from './canvas/useHoverFocus';
 export { CanvasBackdrop, ANNOTATION_MINIMAP_COLORS } from './canvas/CanvasBackdrop';
 export { canvasNodeTypes, canvasEdgeTypes } from './canvas/flowTypes';
 
 // Components
 export { TableNode } from './components/Graph/ModelNode';
 export { FkEdge } from './components/Graph/FkEdge';
+export { EdgeFlow, EdgeFlowGlyphs, type EdgeFlowProps } from './components/Graph/EdgeFlow';
 export { AnnotationNode } from './components/Graph/AnnotationNode';
 export { AnnotationEdge } from './components/Graph/AnnotationEdge';
 export { DetailPanel } from './components/DetailPanel/DetailPanel';
-export { Legend } from './components/Legend/Legend';
+export { Legend, legendEntries, type LegendEntries } from './components/Legend/Legend';
+export { StatusBar, statusBarStats, type StatusBarStats, type StatusBarLayer } from './components/StatusBar/StatusBar';
 export { KeyBadge } from './components/common/KeyBadge';
 export { KeyBadgeGroup } from './components/common/KeyBadgeGroup';
 export { DataTypeSelect } from './components/common/DataTypeSelect';
-export { ColumnRowEditor } from './components/common/ColumnRowEditor';
+export { ColumnRowEditor, type ColumnFieldVisibility } from './components/common/ColumnRowEditor';
 
 // Hooks
 export * from './hooks/useColumnExpansion';
 export * from './hooks/useColumnReorder';
 export * from './hooks/useFocusWithinRow';
 export * from './hooks/useLongPressDrag';
+export { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 
 // Helpers
 export { applyNodeOverlays, type GraphNode, type GraphEdge } from './lib/nodeOverlays';
+export { computeCanvasFocus, sameFocus, type CanvasFocus } from './lib/canvasFocus';
 export * from './lib/stageColors';
 export * from './lib/dataTypeColors';
 export * from './lib/badgeLabels';
 export { swapCardinality } from './lib/cardinalityUtils';
 export { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './lib/relationshipDisplayKey';
 export { computeTableLabels, matchesTableSearch, type LabelledTable } from './lib/modelLabels';
+export { LAYER_BADGE_FALLBACK, layerAbbreviation, isSingleLayerProject } from './lib/layerCues';
 export { ANNOTATION_COLORS } from './lib/annotationColors';

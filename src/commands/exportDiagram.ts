@@ -1,6 +1,6 @@
 /**
  * **Export Diagram…** (`erdStudio.exportDiagram`) — a domain's logical
- * (design) stage as Mermaid or DBML text, one way out. Nothing about how ERD
+ * (design) stage as Mermaid, DBML or rich DBML (`dbml-rich`). Nothing about how ERD
  * Studio stores a diagram changes: the text comes from `@erd-studio/core`'s
  * `exportDiagram` through `exportSubjectAreaFile` (`src/services/diagramExport.ts`),
  * the same read the `erd-studio export` CLI and the canvas's logical stage
@@ -16,7 +16,9 @@
  *
  * Writes no ERD Studio file. Save As… writes only the file the user named in
  * the save dialog, through `workspace.fs` — an export, not a domain write, so
- * it is not an `applySubjectAreaEdit` and records no own write.
+ * it is not an `applySubjectAreaEdit` and records no own write. Every export
+ * is one file: rich DBML carries the table positions in its Project's
+ * `erd_layout`, so Copy, Open and Save As… all give the same text.
  *
  * Every vscode call goes through `ExportDiagramUi`, so the flow is unit-tested
  * with plain fakes; `vscodeExportUi()` is the real one `activate()` uses.
@@ -43,15 +45,25 @@ import {
 import { telemetry } from '../services/telemetryService';
 import { openTableFileAt } from './openModelFile';
 import type { SubjectAreaExport } from '../services/diagramExport';
+import { log } from '../services/logger';
 
 export const EXPORT_DIAGRAM_COMMAND = 'erdStudio.exportDiagram';
 
 /** Every title says which stage is exported: the canvas also offers it on the physical stage. */
 export const EXPORT_TITLE = 'Export Diagram (logical design)';
 
-export const FORMAT_LABELS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'Mermaid', dbml: 'DBML' };
+export const FORMAT_LABELS: Readonly<Record<DiagramExportFormat, string>> = {
+  mermaid: 'Mermaid',
+  dbml: 'DBML',
+  'dbml-rich': 'Rich DBML',
+};
 
-/** The format QuickPick, in `DIAGRAM_EXPORT_FORMATS` order. */
+/**
+ * The format QuickPick, in `DIAGRAM_EXPORT_FORMATS` order. The two DBML
+ * choices say what each keeps, so the difference reads at a glance: plain
+ * DBML works everywhere; rich DBML keeps every ERD Studio field and the
+ * table positions (in `erd_layout`) but needs a newer DBML reader.
+ */
 export const FORMAT_ITEMS: ReadonlyArray<vscode.QuickPickItem & { format: DiagramExportFormat }> = [
   {
     label: 'Mermaid',
@@ -62,10 +74,23 @@ export const FORMAT_ITEMS: ReadonlyArray<vscode.QuickPickItem & { format: Diagra
   {
     label: 'DBML',
     description: `.${DIAGRAM_EXPORT_FILE_EXTENSIONS.dbml}`,
-    detail: 'Opens in dbdiagram.io and other DBML tools',
+    detail: "Opens in any DBML tool. ERD Studio's fields go in notes; no table positions",
     format: 'dbml',
   },
+  {
+    label: FORMAT_LABELS['dbml-rich'],
+    description: `.${DIAGRAM_EXPORT_FILE_EXTENSIONS['dbml-rich']}`,
+    detail: 'Every ERD Studio field, positions in erd_layout. Needs DBML 9.1 or later, as dbdiagram.io and dbdocs read',
+    format: 'dbml-rich',
+  },
 ];
+
+/** The usage counter each format's export adds to. */
+export const FORMAT_FEATURES = {
+  mermaid: 'exportMermaid',
+  dbml: 'exportDbml',
+  'dbml-rich': 'exportDbmlRich',
+} as const satisfies Readonly<Record<DiagramExportFormat, string>>;
 
 export type ExportAction = 'copy' | 'open' | 'save';
 
@@ -76,16 +101,29 @@ export const ACTION_ITEMS: ReadonlyArray<vscode.QuickPickItem & { action: Export
 ];
 
 /** The language id an untitled export opens with, when the editor knows it. */
-const LANGUAGE_IDS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'mermaid', dbml: 'dbml' };
+const LANGUAGE_IDS: Readonly<Record<DiagramExportFormat, string>> = { mermaid: 'mermaid', dbml: 'dbml', 'dbml-rich': 'dbml' };
 
 export const MERMAID_COPIED_MESSAGE =
   'Copied the diagram as Mermaid. On GitHub or GitLab, paste it inside a ```mermaid code block to see it drawn.';
 export const DBML_COPIED_MESSAGE =
   'Copied the diagram as DBML. Paste it into dbdiagram.io or any other DBML tool.';
+export const DBML_RICH_COPIED_MESSAGE =
+  'Copied the diagram as rich DBML. Paste it into dbdiagram.io or any tool that reads DBML 9.1 or later.';
 export const NO_DIAGRAMS_MESSAGE = 'There are no diagrams to export yet.';
 
 export { OPEN_FILE_BUTTON };
 export const CHOOSE_ANOTHER_LOCATION_BUTTON = 'Choose Another Location';
+
+/** A Save As… target inside the semantic dir (§5.7): refused, in every project. */
+export function exportInsideSemanticDirMessage(semanticRoot: string): string {
+  return `Save the export outside ${path.basename(semanticRoot)}/: files there are your diagrams' own storage.`;
+}
+
+/** Whether `filePath` is `folder` or inside it (compared without case, so a differently cased path on macOS or Windows counts). */
+export function isInsideFolder(folder: string, filePath: string): boolean {
+  const rel = path.relative(path.resolve(folder).toLowerCase(), path.resolve(filePath).toLowerCase());
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
 
 /** The name the "ours" message gives the command. */
 const COMMAND_NAME = 'Export Diagram';
@@ -119,8 +157,15 @@ export interface ExportDiagramDeps {
   hasDiagrams: () => boolean;
   /** The picker `erdStudio.openDomain` uses; undefined when cancelled. */
   pickDomain: () => Promise<string | undefined>;
-  /** Where Save As… starts (the project root); the domain's own folder without it. */
+  /** Where Save As… starts (the project root); without it, the project root for a diagram in the semantic dir, else the diagram's own folder. */
   defaultSaveFolder?: string;
+  /**
+   * The semantic dir (`<root>/.erd-studio`), absolute. A Save As… target
+   * inside it is refused (§5.7): files there are the diagrams' own storage,
+   * and an export saved as `<layer>/<name>.dbml` would overwrite one or show
+   * up as a diagram.
+   */
+  semanticRoot?: string;
   /** The dbt project root, which messages name files relative to; just the file name without it. */
   projectRoot?: string;
   ui?: ExportDiagramUi;
@@ -191,7 +236,7 @@ function oursFailure(err: unknown, ui: ExportDiagramUi, doing = 'while exporting
 function showFailure(ui: ExportDiagramUi, failure: ShownFailure): void {
   // A button that fails (Open File on a file deleted since) still says so, rather than seeming to do nothing.
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
-    console.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }
@@ -268,7 +313,7 @@ async function runExportDiagram(
   switch (action) {
     case 'copy': {
       await ui.writeClipboard(exported.content);
-      void ui.showInformationMessage(format === 'mermaid' ? MERMAID_COPIED_MESSAGE : DBML_COPIED_MESSAGE);
+      void ui.showInformationMessage(COPIED_MESSAGES[format]);
       break;
     }
     case 'open': {
@@ -278,17 +323,26 @@ async function runExportDiagram(
       break;
     }
     case 'save': {
-      const folder = deps.defaultSaveFolder ?? path.dirname(domainPath);
-      const savedTo = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)));
-      if (!savedTo) { return cancelled(); }
-      result.savedTo = savedTo;
+      const folder = deps.defaultSaveFolder
+        ?? (deps.semanticRoot !== undefined && isInsideFolder(deps.semanticRoot, domainPath)
+          ? deps.projectRoot ?? path.dirname(deps.semanticRoot)
+          : path.dirname(domainPath));
+      const saved = await saveAs(ui, format, exported, vscode.Uri.file(path.join(folder, exported.fileName)), deps.semanticRoot);
+      if (!saved) { return cancelled(); }
+      result.savedTo = saved;
       break;
     }
   }
 
-  telemetry.feature(format === 'mermaid' ? 'exportMermaid' : 'exportDbml');
+  telemetry.feature(FORMAT_FEATURES[format]);
   return result;
 }
+
+const COPIED_MESSAGES: Readonly<Record<DiagramExportFormat, string>> = {
+  mermaid: MERMAID_COPIED_MESSAGE,
+  dbml: DBML_COPIED_MESSAGE,
+  'dbml-rich': DBML_RICH_COPIED_MESSAGE,
+};
 
 /**
  * Save As…, starting at `startAt`: the saved path, or undefined when
@@ -300,6 +354,7 @@ async function saveAs(
   format: DiagramExportFormat,
   exported: SubjectAreaExport,
   startAt: vscode.Uri,
+  semanticRoot?: string,
 ): Promise<string | undefined> {
   const target = await ui.showSaveDialog({
     title: `${EXPORT_TITLE}: Save ${FORMAT_LABELS[format]}`,
@@ -308,22 +363,35 @@ async function saveAs(
     saveLabel: 'Export',
   });
   if (!target) { return undefined; }
+  const name = path.basename(target.fsPath);
+  // Never into the diagrams' own storage (§5.7), in every project: nothing is written.
+  if (semanticRoot !== undefined && isInsideFolder(semanticRoot, target.fsPath)) {
+    const outside = vscode.Uri.file(path.join(path.dirname(semanticRoot), name));
+    showFailure(ui, {
+      message: exportInsideSemanticDirMessage(semanticRoot),
+      actions: { [CHOOSE_ANOTHER_LOCATION_BUTTON]: () => retrySave(ui, format, exported, outside, semanticRoot) },
+    });
+    return undefined;
+  }
+
+  const retry = () => retrySave(ui, format, exported, target, semanticRoot);
   try {
     await ui.writeFile(target, exported.content);
   } catch (err) {
-    throw new ExportFailure(saveFailure(ui, target, err, () => retrySave(ui, format, exported, target)));
+    throw new ExportFailure(saveFailure(ui, target, err, retry));
   }
-  void ui.showInformationMessage(`Exported ${path.basename(target.fsPath)}.`, 'Open').then((choice) => {
+
+  void ui.showInformationMessage(`Exported ${name}.`, 'Open').then((choice) => {
     if (choice === 'Open') { void ui.openFile(target); }
   });
   return target.fsPath;
 }
 
 /** Choose Another Location: the save step again, counted and shown as the first one was. */
-async function retrySave(ui: ExportDiagramUi, format: DiagramExportFormat, exported: SubjectAreaExport, previous: vscode.Uri): Promise<void> {
+async function retrySave(ui: ExportDiagramUi, format: DiagramExportFormat, exported: SubjectAreaExport, previous: vscode.Uri, semanticRoot?: string): Promise<void> {
   try {
-    if (await saveAs(ui, format, exported, previous)) {
-      telemetry.feature(format === 'mermaid' ? 'exportMermaid' : 'exportDbml');
+    if (await saveAs(ui, format, exported, previous, semanticRoot)) {
+      telemetry.feature(FORMAT_FEATURES[format]);
     } else {
       cancelled();
     }

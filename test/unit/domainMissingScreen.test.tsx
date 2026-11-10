@@ -76,4 +76,11 @@ describe('the deleted-or-renamed screen', () => {
     expect(screen.getByText('Open as Text')).toBeTruthy();
     expect(screen.queryByText('Close')).toBeNull();
   });
+
+  it('a load error offers Show Logs, which asks the host to open the ERD Studio log', () => {
+    render(<App />);
+    postFromHost({ type: 'error', payload: { message: 'Invalid JSON in domain file', kind: 'domain-file' } });
+    fireEvent.click(screen.getByText('Show Logs'));
+    expect(mockVsCode.postMessage).toHaveBeenLastCalledWith({ type: 'showLogs' });
+  });
 });

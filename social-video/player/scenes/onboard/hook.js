@@ -3,7 +3,7 @@
 // a "60 s" stopwatch tile whose ring sweeps round on "…in under a minute"; below, the finished
 // blue ERD of the four marts tables from the real sample, in the same dims-left / facts-right
 // arrangement onboard/canvas lands on (rows pulled closer so the whole stack fits the stage). The
-// columns are untyped, as a first Draw from dbt of the sample really is (its schema yml declares
+// columns are untyped, as a first Import from dbt of the sample really is (its schema yml declares
 // no data_type). Under the ERD, in their own row (never over an edge): "Runs locally, no AI" is
 // there from frame 0 (the strongest muted promise), centred; on "No setup" it slides left and
 // "Reads your dbt project" lands beside it; on "No AI required" the first one pulses.

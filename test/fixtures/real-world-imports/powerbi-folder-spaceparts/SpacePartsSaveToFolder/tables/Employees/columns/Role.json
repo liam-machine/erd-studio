@@ -1,0 +1,15 @@
+{
+  "name": "Role",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "role",
+  "displayFolder": "Columns",
+  "lineageTag": "3d1387dd-01f0-4f13-ab38-811f06cd1359",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

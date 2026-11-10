@@ -108,6 +108,45 @@ describe('toMermaid', () => {
     expect(text).not.toContain('"orders"');
   });
 
+  it('carries every context-field rationale key as a %% line, in RATIONALE_LABELS order', async () => {
+    const { text } = await exportAndParse(
+      subjectArea([
+        tableDef('dim_account', [col('id')], {
+          rationale: {
+            retention: 'Seven years',
+            knownIssues: 'Codes reused',
+            freshness: 'Daily',
+            sourceOfTruth: 'CRM',
+            measures: 'm',
+            scdStrategy: 's',
+            roleChoice: 'rc',
+            grainChoice: 'gc',
+            design: 'd',
+            openQuestions: 'Do closed accounts stay?',
+            decisions: 'Kept the CRM code',
+            purpose: 'p',
+          },
+        }),
+      ]),
+    );
+    const block = text.slice(text.indexOf('  %% Table dim_account'), text.indexOf('  "dim_account" {'));
+    expect(block.split('\n').filter(Boolean)).toEqual([
+      '  %% Table dim_account',
+      '  %%   Purpose: p',
+      '  %%   Decisions: Kept the CRM code',
+      '  %%   Open questions: Do closed accounts stay?',
+      '  %%   Design: d',
+      '  %%   Grain choice: gc',
+      '  %%   Role choice: rc',
+      '  %%   SCD strategy: s',
+      '  %%   Measures: m',
+      '  %%   Source of truth: CRM',
+      '  %%   Freshness: Daily',
+      '  %%   Known issues: Codes reused',
+      '  %%   Retention: Seven years',
+    ]);
+  });
+
   it.each([
     ['many-to-one', 'ONLY_ONE', 'ZERO_OR_MORE', '}o--||'],
     ['one-to-many', 'ZERO_OR_MORE', 'ONLY_ONE', '||--o{'],

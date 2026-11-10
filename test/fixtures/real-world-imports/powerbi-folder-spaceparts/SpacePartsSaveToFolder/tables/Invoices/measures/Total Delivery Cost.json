@@ -1,0 +1,16 @@
+{
+  "name": "Total Delivery Cost",
+  "description": "The cost of the delivery only",
+  "expression": [
+    "SUMX (",
+    "    'Invoices',",
+    "    'Invoices'[Delivery Cost]",
+    "        / RELATED ( 'Budget Rate'[Rate] )",
+    ")",
+    "    * MAX ( 'Exchange Rate'[Rate] )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\I. Cost",
+  "lineageTag": "3e145aa8-d957-4b79-b7af-55cda240d83d"
+}

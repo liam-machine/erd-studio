@@ -163,6 +163,25 @@ describe('release-packages.mjs — package list', () => {
     expect(rendererManifest.dependencies['@erd-studio/core']).toBe(coreManifest.version);
   });
 
+  it('keeps a pinned version in every place a release would write it', async () => {
+    // A MINOR is pinned by hand in the PR (docs/dev/releasing.md): the
+    // packages, the renderer's exact core pin, the root dependencies and the
+    // lockfile must all name the same version, or the pin is half applied.
+    const fs = await import('node:fs');
+    const read = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
+    const core = read('packages/core/package.json').version;
+    const renderer = read('packages/renderer/package.json').version;
+    const root = read('package.json');
+    const lock = read('package-lock.json');
+    expect(root.dependencies['@erd-studio/core']).toBe(core);
+    expect(root.dependencies['@erd-studio/renderer']).toBe(renderer);
+    expect(lock.packages[''].dependencies['@erd-studio/core']).toBe(core);
+    expect(lock.packages[''].dependencies['@erd-studio/renderer']).toBe(renderer);
+    expect(lock.packages['packages/core'].version).toBe(core);
+    expect(lock.packages['packages/renderer'].version).toBe(renderer);
+    expect(lock.packages['packages/renderer'].dependencies['@erd-studio/core']).toBe(core);
+  });
+
   it('excludes tests from the shipped-files diff', () => {
     expect(shippedPathspec('packages/core')).toEqual([
       '--',

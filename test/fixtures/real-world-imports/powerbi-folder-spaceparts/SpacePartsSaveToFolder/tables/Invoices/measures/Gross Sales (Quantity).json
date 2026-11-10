@@ -1,0 +1,10 @@
+{
+  "name": "Gross Sales (Quantity)",
+  "expression": [
+    "",
+    "[Total Net Invoice Quantity]"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "2. Quantity\\b. Gross Sales Actuals",
+  "lineageTag": "3adb6c1c-0186-4a30-90b0-a60040b44316"
+}

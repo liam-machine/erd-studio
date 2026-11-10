@@ -15,6 +15,7 @@ import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
 import { normaliseCompositeKey, normaliseRelationshipRole } from './relationships.js';
 import { findConflictMarkers } from './mergeConflict.js';
+import { RATIONALE_FIELD_KEYS } from './fields.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -30,7 +31,13 @@ export const TABLES_DIR = 'tables';
 /** The library folders, in the order a table name is looked up. */
 export const TABLE_LIBRARY_DIRS: readonly string[] = [LOGICAL_MODELS_DIR, TABLES_DIR];
 
-/** Rationale keys ERD Studio reads from (and writes to) a model file. */
+/**
+ * Legacy: the six rationale keys of the releases before context fields, kept
+ * exported (and unchanged) for hosts that list them. A model file's
+ * `rationale:` map is read for every catalogue rationale key,
+ * `RATIONALE_FIELD_KEYS` (`fields.ts`), which starts with these six in this
+ * relative order.
+ */
 export const RATIONALE_KEYS = ['purpose', 'design', 'grainChoice', 'roleChoice', 'scdStrategy', 'measures'] as const;
 
 /**
@@ -451,7 +458,9 @@ function yamlToTable(raw: YamlTable, fallbackName: string): SemanticTable {
   if (modelRole) model.modelRole = modelRole as SemanticTable['modelRole'];
   if (raw.rationale && typeof raw.rationale === 'object') {
     model.rationale = {};
-    for (const key of RATIONALE_KEYS) {
+    // Every catalogue rationale key, camelCase only (`openQuestions`; a
+    // snake_case `open_questions:` is not the field). Other keys are not read.
+    for (const key of RATIONALE_FIELD_KEYS) {
       const value = str((raw.rationale as Record<string, unknown>)[key]);
       if (value) model.rationale[key] = value;
     }

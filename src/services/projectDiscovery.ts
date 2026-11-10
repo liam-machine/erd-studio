@@ -12,7 +12,17 @@
  *      `workspaceState` so a personal choice never lands in a settings file
  *      a team commits;
  *   3. auto-detection: the first dbt project that already holds ERD data,
- *      else the first dbt project found.
+ *      else the first dbt project found;
+ *   4. no dbt project anywhere (logical-only mode): the first workspace
+ *      folder that already holds ERD data (`.erd-studio`, or the legacy
+ *      `erd-studio/`);
+ *   5. else the first workspace folder — any folder works, and nothing is
+ *      written there until the user asks for a diagram.
+ *
+ * Any dbt project still beats a plain folder with ERD data, and the picker,
+ * `candidates`, `autoRoot` and the multi-project context key stay dbt-only.
+ * `hasDbt` says whether the chosen root holds `dbt_project.yml`; without it
+ * the host runs logical-only (no Physical stage, no dbt services).
  *
  * Pure (no vscode import) so it is unit-testable and safe to share with the
  * editor provider.
@@ -20,22 +30,24 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import {
+  findDbtProjectAbove,
+  findDbtProjectsBelow,
+  hasDbtProjectFile,
+  sortDbtCandidates,
+} from './dbtProjectSearch';
 import { findLegacySemanticDir } from './migrationService';
 import { pathKey } from './pathKey';
 
-/** Directories never descended into when searching for a nested dbt project. */
-const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
+/** Import from dbt in a folder with no dbt_project.yml (logical-only mode). */
+export const DRAW_FROM_DBT_NEEDS_DBT_MESSAGE =
+  'Import from dbt needs a dbt project. Open the folder that holds dbt_project.yml, or start with New Diagram / Import DBML.';
 
-/** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
-const DBT_SEARCH_MAX_DEPTH = 3;
+/** The canvas's Add Tables from dbt in a folder with no dbt_project.yml (logical-only mode). */
+export const ADD_FROM_DBT_NEEDS_DBT_MESSAGE =
+  'Adding tables from dbt needs a dbt project. Open the folder that holds dbt_project.yml to compare your design with what dbt built.';
 
-export function hasDbtProjectFile(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
-  } catch {
-    return false;
-  }
-}
+export { hasDbtProjectFile };
 
 function isDirectory(dir: string): boolean {
   try {
@@ -47,48 +59,41 @@ function isDirectory(dir: string): boolean {
 
 /**
  * Every folder that holds a dbt_project.yml, in auto-detection priority
- * order: the workspace folders themselves (in workspace order), then a
- * depth-limited breadth-first search below each of them (skipping
- * node_modules, dbt_packages, .git, target, .venv and dot-directories),
- * shallowest first. The search depth matches the recursive
- * `workspaceContains` activation event, so activation never lands on "no
- * project found" for a monorepo with dbt in a subfolder.
+ * order: the workspace folders themselves (in workspace order); then, for a
+ * workspace folder that is not one, the dbt project it sits inside (a dbt
+ * project's `models/` opened on its own; never past a folder holding the ERD
+ * Studio folder, see `findDbtProjectAbove`); then the projects below the
+ * workspace folders, shallowest first: the bounded walk's
+ * (`findDbtProjectsBelow`: six folders deep, hidden folders other than
+ * tools' own, symbolic links followed) together with `hostCandidates`, the
+ * host's own search when it answered (`vscode.workspace.findFiles`, no depth
+ * limit, like the recursive `workspaceContains:**\/dbt_project.yml`
+ * activation event). Without `hostCandidates`, a project deeper than the
+ * walk goes is not found here; the host says so in its log
+ * (`noteUnusedDbtProject` in `extension.ts`).
  */
-export function findDbtProjectCandidates(folderPaths: readonly string[]): string[] {
+export function findDbtProjectCandidates(
+  folderPaths: readonly string[],
+  options: { hostCandidates?: readonly string[]; semanticDir?: string } = {},
+): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
-  const add = (dir: string): void => {
-    if (!seen.has(dir) && hasDbtProjectFile(dir)) {
-      seen.add(dir);
+  const add = (dir: string | undefined): void => {
+    if (dir === undefined) return;
+    const key = pathKey(dir);
+    if (!seen.has(key) && hasDbtProjectFile(dir)) {
+      seen.add(key);
       found.push(dir);
     }
   };
 
   folderPaths.forEach(add);
-
-  // Breadth-first so the shallowest match comes first.
-  let frontier = [...folderPaths];
-  for (let depth = 1; depth <= DBT_SEARCH_MAX_DEPTH && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
-          continue;
-        }
-        const child = path.join(dir, entry.name);
-        add(child);
-        next.push(child);
-      }
-    }
-    frontier = next;
+  for (const folder of folderPaths) {
+    if (!hasDbtProjectFile(folder)) add(findDbtProjectAbove(folder, options.semanticDir ?? '.erd-studio'));
   }
+  const walked = findDbtProjectsBelow(folderPaths);
+  const below = options.hostCandidates ? sortDbtCandidates([...walked, ...options.hostCandidates], folderPaths) : walked;
+  below.forEach(add);
   return found;
 }
 
@@ -110,13 +115,21 @@ export function autoDetectProject(candidates: readonly string[], semanticDir: st
   return candidates.find(c => hasErdStudioData(c, semanticDir)) ?? candidates[0];
 }
 
-export type DbtProjectSource = 'setting' | 'picked' | 'auto';
+/**
+ * Which rule chose the root: `setting` (erdStudio.projectPath), `picked`
+ * (Select dbt Project…), `auto` (a detected dbt project), `erdData` (no dbt
+ * project; the first workspace folder holding ERD data) or `folder` (no dbt
+ * project and no ERD data; the first workspace folder).
+ */
+export type DbtProjectSource = 'setting' | 'picked' | 'auto' | 'erdData' | 'folder';
 
 export interface DbtProjectResolution {
-  /** The project to open, or undefined when the workspace holds none. */
+  /** The project to open, or undefined when the window has no folder (and no valid projectPath). */
   root: string | undefined;
   /** Which rule chose `root`. */
   source: DbtProjectSource;
+  /** Whether `root` holds `dbt_project.yml`. False for a plain folder (logical-only) and for no root. */
+  hasDbt: boolean;
   /** Every dbt project in the workspace, in auto-detection order. */
   candidates: string[];
   /** Where auto-detection alone would land — what the picker's "Auto-detect" row means. */
@@ -131,15 +144,16 @@ export interface DbtProjectResolution {
  *
  * `projectPath` may be absolute or relative to any workspace folder (the
  * first folder that resolves wins), and need not be a dbt project (#111). `picked` is honoured only while it is
- * still one of the workspace's dbt projects, so a removed folder quietly
- * falls back to auto-detection.
+ * still a dbt project in the workspace, so a removed folder quietly falls
+ * back to auto-detection. With no dbt project in the workspace, the
+ * first folder holding ERD data opens, else the first folder (logical-only).
  */
 export function resolveDbtProject(
   folderPaths: readonly string[],
-  opts: { projectPath?: string; picked?: string; semanticDir?: string } = {},
+  opts: { projectPath?: string; picked?: string; semanticDir?: string; hostCandidates?: readonly string[] } = {},
 ): DbtProjectResolution {
   const semanticDir = opts.semanticDir ?? '.erd-studio';
-  const candidates = findDbtProjectCandidates(folderPaths);
+  const candidates = findDbtProjectCandidates(folderPaths, { hostCandidates: opts.hostCandidates, semanticDir });
   const autoRoot = autoDetectProject(candidates, semanticDir);
 
   const configured = (opts.projectPath ?? '').trim();
@@ -154,21 +168,38 @@ export function resolveDbtProject(
     // wherever the setting points, and without dbt_project.yml it simply has
     // no manifest to compare against.
     const hit = tries.find(hasDbtProjectFile) ?? tries.find(isDirectory);
-    if (hit) { return { root: hit, source: 'setting', candidates, autoRoot }; }
+    if (hit) { return { root: hit, source: 'setting', hasDbt: hasDbtProjectFile(hit), candidates, autoRoot }; }
     invalidSetting = configured;
   }
 
-  if (opts.picked && candidates.includes(opts.picked)) {
-    return { root: opts.picked, source: 'picked', candidates, autoRoot, invalidSetting };
+  // A pick deeper than this search went (Select dbt Project… lists the host's
+  // whole search) still counts while it is a dbt project inside a workspace folder.
+  const picked = opts.picked;
+  if (picked && (candidates.includes(picked) || (hasDbtProjectFile(picked) && folderPaths.some(f => isInsideFolder(picked, f))))) {
+    const all = candidates.includes(picked) ? candidates : [...candidates, picked];
+    return { root: picked, source: 'picked', hasDbt: true, candidates: all, autoRoot, invalidSetting };
   }
 
-  return { root: autoRoot, source: 'auto', candidates, autoRoot, invalidSetting };
+  if (autoRoot) {
+    return { root: autoRoot, source: 'auto', hasDbt: true, candidates, autoRoot, invalidSetting };
+  }
+
+  // No dbt project anywhere: logical-only. A folder that already holds ERD
+  // data first, then simply the first folder. Only the workspace folders
+  // themselves are considered — no search below them.
+  const withData = folderPaths.find(folder => hasErdStudioData(folder, semanticDir));
+  if (withData) {
+    return { root: withData, source: 'erdData', hasDbt: false, candidates, autoRoot, invalidSetting };
+  }
+  const first = folderPaths.find(isDirectory);
+  return { root: first, source: first ? 'folder' : 'auto', hasDbt: false, candidates, autoRoot, invalidSetting };
 }
 
 /**
- * Resolve the dbt project root from the workspace folder paths and the
+ * Resolve the project root from the workspace folder paths and the
  * `erdStudio.projectPath` setting. Thin wrapper over {@link resolveDbtProject}
- * for callers that only need the path.
+ * for callers that only need the path — which may be a plain folder when the
+ * workspace holds no dbt project.
  */
 export function resolveDbtProjectRoot(
   folderPaths: readonly string[],
@@ -194,6 +225,12 @@ export function findOwningDbtProject(filePath: string, stopAt?: string): string 
     if (parent === dir) { return undefined; }
     dir = parent;
   }
+}
+
+/** Whether `child` is `folder` or inside it. */
+function isInsideFolder(child: string, folder: string): boolean {
+  const rel = path.relative(path.resolve(folder), path.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 /** Whether two paths name the same location once resolved, ignoring case where the file system does. */

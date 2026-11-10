@@ -15,8 +15,11 @@
 
 import { createContext, createElement, useContext, type ReactNode } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
-import type { DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
+import type { CanvasContext, DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
 import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
+import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
+import type { RoutedEdge } from '../lib/edgeRouting/types';
+import { DEFAULT_LINE_STYLE, type LineStyle } from '../lib/edgeRouting/lineStyle';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,6 +116,44 @@ export interface CanvasState {
   editingColumn: string | null;
   /** Currently selected annotation ID, or null. */
   selectedAnnotation: string | null;
+  /**
+   * Hover preview focus: the table the pointer rests on, its related tables
+   * and lines (`useHoverFocus`). Ephemeral UI state: never persisted, never
+   * posted to the host, never written to a file.
+   */
+  hoverFocus: CanvasFocus | null;
+  /**
+   * What carries the moving relationship arrows: `hoverFocus`, else the
+   * focus of the clicked table or line. Ephemeral, like `hoverFocus`.
+   */
+  flowFocus: CanvasFocus | null;
+  /**
+   * The project has no dbt project, so there is one stage only: the canvas
+   * drops the stage colours (`editor-canvas--neutral`) and the legend its
+   * Physical, ghost and comparison entries. Default false, today's look. The
+   * extension's store sets it from the host's `logicalOnly` flag; ErdCanvas
+   * from its `logicalOnly` prop.
+   */
+  logicalOnly: boolean;
+  /**
+   * What the editing host knows beyond the diagram (`CanvasContext`): each
+   * table's file, its relationships to tables not on the diagram, who reviews
+   * it. Logical stage only. Null by default and in the viewer, which never
+   * gets one: then the detail panel has no File line or "Not on this
+   * diagram" list and no node shows a "+n" chip.
+   */
+  canvasContext: CanvasContext | null;
+  /**
+   * How FK lines are drawn (`curved` or `hops`), a reader's view preference.
+   * The extension's store sets it from the host's `lineStyle` message (the
+   * `erdStudio.canvas.lineStyle` setting); ErdCanvas from its `lineStyle` prop.
+   */
+  lineStyle: LineStyle;
+  /**
+   * The routed FK lines by edge id, from `EdgeRouter`'s last pass. Null (or
+   * a line missing from it) means `FkEdge` draws its smooth-step fallback.
+   */
+  edgeRoutes: Map<string, RoutedEdge> | null;
 }
 
 export interface CanvasActions {
@@ -175,6 +216,16 @@ export interface CanvasActions {
   setEditingColumn: (name: string | null) => void;
   /** Select an annotation (clears model selection). */
   selectAnnotation: (annotationId: string | null) => void;
+  /** Set the hover preview focus; a focus equal by value is not written. */
+  setHoverFocus: (focus: CanvasFocus | null) => void;
+  /** Set the flowing focus; a focus equal by value is not written. */
+  setFlowFocus: (focus: CanvasFocus | null) => void;
+  /** Store the host's canvas context, or clear it (null). */
+  setCanvasContext: (context: CanvasContext | null) => void;
+  /** Change how FK lines are drawn. */
+  setLineStyle: (lineStyle: LineStyle) => void;
+  /** Store the router's latest routes (null: every line on the fallback). */
+  setEdgeRoutes: (routes: Map<string, RoutedEdge> | null) => void;
 }
 
 export type CanvasStore = CanvasState & CanvasActions;
@@ -215,6 +266,12 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     lastSelectedColumn: null,
     editingColumn: null,
     selectedAnnotation: null,
+    hoverFocus: null,
+    flowFocus: null,
+    logicalOnly: false,
+    canvasContext: null,
+    lineStyle: DEFAULT_LINE_STYLE,
+    edgeRoutes: null,
 
     // Actions
     setSearchQuery: (query) => set({ searchQuery: query }),
@@ -326,6 +383,17 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
       lastSelectedColumn: null,
       editingColumn: null,
     }),
+
+    // Hover focus and relationship flow (ephemeral, see useHoverFocus)
+    setHoverFocus: (focus) => set((s) => (sameFocus(s.hoverFocus, focus) ? s : { hoverFocus: focus })),
+    setFlowFocus: (focus) => set((s) => (sameFocus(s.flowFocus, focus) ? s : { flowFocus: focus })),
+
+    // Host context (editing hosts only)
+    setCanvasContext: (context) => set({ canvasContext: context }),
+
+    // Line routing (EdgeRouter writes the routes; FkEdge and EdgeOverlay read them)
+    setLineStyle: (lineStyle) => set((s) => (s.lineStyle === lineStyle ? s : { lineStyle })),
+    setEdgeRoutes: (routes) => set((s) => (s.edgeRoutes === routes ? s : { edgeRoutes: routes })),
   };
 }
 
@@ -360,4 +428,23 @@ export function useEditorStoreApi(): CanvasStoreApi {
 /** Select a value from the nearest canvas store; re-renders when it changes. */
 export function useEditorStore<T>(selector: (s: CanvasStore) => T): T {
   return useStore(useEditorStoreApi(), selector);
+}
+
+const NO_STORE = {
+  getState: () => undefined,
+  getInitialState: () => undefined,
+  subscribe: () => () => {},
+};
+
+/**
+ * Like `useEditorStore`, but returns `fallback` instead of throwing when no
+ * `CanvasStoreProvider` is above. For presentation-only reads in components
+ * that are also rendered on their own (an `FkEdge` in a unit test).
+ */
+export function useEditorStoreOr<T>(selector: (s: CanvasStore) => T, fallback: T): T {
+  const store = useContext(CanvasStoreContext);
+  return useStore(
+    (store ?? NO_STORE) as unknown as CanvasStoreApi,
+    store ? selector : () => fallback,
+  );
 }

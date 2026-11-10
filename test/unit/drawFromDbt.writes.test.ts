@@ -1,5 +1,5 @@
 /**
- * What Draw from dbt writes to model files that already exist: it saves them
+ * What Import from dbt writes to model files that already exist: it saves them
  * straight to disk, so it must stop over a tab with unsaved edits (as a canvas
  * edit does) and keep each file's own line endings.
  */
@@ -78,7 +78,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('Draw from dbt — model files it rewrites', () => {
+describe('Import from dbt — model files it rewrites', () => {
   it('refuses, naming the file, when one is open with unsaved edits, and writes nothing', async () => {
     const tab = createMockTextDocument(fctPath, FCT_ORDER);
     tab._setText(`${FCT_ORDER}# my unsaved note\r\n`);
@@ -88,7 +88,7 @@ describe('Draw from dbt — model files it rewrites', () => {
     await expect(drawFromDbt(deps())).resolves.toBeUndefined();
 
     expect(error.mock.calls.map((c) => String(c[0]))).toEqual([
-      'Draw from dbt: logical-models/fct_order.yml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
+      'Import from dbt: logical-models/fct_order.yml has unsaved changes. Save or revert it, then try again. Nothing was changed.',
     ]);
     expect(fs.readFileSync(fctPath, 'utf-8')).toBe(FCT_ORDER);
     expect(lms.tableExists('dim_customer')).toBe(false);
@@ -110,6 +110,20 @@ describe('Draw from dbt — model files it rewrites', () => {
     expect(text.replace(/\r\n/g, '')).not.toMatch(/\n/);
   });
 
+  it('hands the changed library table on for a refresh, as well as the new one', async () => {
+    const written: Array<Parameters<DrawFromDbtDeps['onWritten']>[0]> = [];
+
+    await drawFromDbt({ ...deps(), onWritten: (w) => { written.push(w); } });
+
+    // fct_order's save was an own write, so the watcher skips it: open
+    // diagrams holding both ends are refreshed from onWritten instead.
+    expect(written).toEqual([{
+      domainPath: path.join(tmp, '.erd-studio', 'silver', 'orders.json'),
+      modelNames: ['dim_customer'],
+      changedModelNames: ['fct_order'],
+    }]);
+  });
+
   it('says it is ERD Studio\'s problem when it cannot read the library to plan the diagram, and writes nothing', async () => {
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
     const d = deps();
@@ -119,7 +133,7 @@ describe('Draw from dbt — model files it rewrites', () => {
 
     // The raw error goes to Send Feedback's report, never the toast (#189).
     expect(error.mock.calls.map((c) => String(c[0]))).toEqual([
-      "Draw from dbt hit a problem in ERD Studio while reading your Table Library, so nothing was changed. This isn't something you did. Please send us a report.",
+      "Import from dbt hit a problem in ERD Studio while reading your Table Library, so nothing was changed. This isn't something you did. Please send us a report.",
     ]);
     expect(fs.readFileSync(fctPath, 'utf-8')).toBe(FCT_ORDER);
     expect(lms.tableExists('dim_customer')).toBe(false);

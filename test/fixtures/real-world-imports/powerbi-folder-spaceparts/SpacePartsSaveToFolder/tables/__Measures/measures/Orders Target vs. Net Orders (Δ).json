@@ -1,0 +1,11 @@
+{
+  "name": "Orders Target vs. Net Orders (Δ)",
+  "description": "Net orders exclude cancellation document types",
+  "expression": [
+    "",
+    "[Net Orders] - [Orders Target]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "1. Total\\Orders Target",
+  "lineageTag": "baee51d7-d773-4a52-9486-6aed36e264c0"
+}

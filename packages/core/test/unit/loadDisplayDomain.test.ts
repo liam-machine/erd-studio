@@ -116,6 +116,33 @@ describe('mapWithLimit limits', () => {
 });
 
 describe('loadDisplaySubjectArea', () => {
+  it('keeps a meta key named __proto__ as an own entry, on a model and a column', async () => {
+    // The model file reader keeps it (`setMetaEntry`); the copy each listing
+    // gets used to drop it (a text value) or make it the meta's prototype (a map).
+    const { result } = load({
+      [SUBJECT_AREA]: v5(['dim_a']),
+      '.erd-studio/logical-models/dim_a.yml': [
+        'name: dim_a',
+        'meta:',
+        '  __proto__: not a prototype',
+        '  owner: me',
+        'columns:',
+        '  - name: id',
+        '    dataType: INT',
+        '    meta:',
+        '      __proto__: { polluted: yes }',
+        '',
+      ].join('\n'),
+    });
+    const [model] = (await result).models;
+    expect(Object.getOwnPropertyNames(model.meta)).toEqual(['__proto__', 'owner']);
+    expect(Object.getOwnPropertyDescriptor(model.meta, '__proto__')?.value).toBe('not a prototype');
+    const meta = model.columns[0].meta!;
+    expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(meta, '__proto__')?.value).toEqual({ polluted: 'yes' });
+    expect('polluted' in meta).toBe(false);
+  });
+
   it('reads the domain, then layers.json, then each model once, all inside the semantic dir', async () => {
     const { reads, result } = load({
       [SUBJECT_AREA]: v5(['dim_a', 'fct_b']),
@@ -416,7 +443,7 @@ describe('loadDisplaySubjectArea', () => {
       { maxYamlChars: 200, warn },
     ).result;
     expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['big', 0], ['small', 1]]);
-    expect(warn).toHaveBeenCalledWith('Model "big" not found in logical-models/');
+    expect(warn).toHaveBeenCalledWith('Model "big" not found in the table library', 'modelNotFound');
   });
 
   it('shows a model over maxYamlNodes, or with a YAML error, as a placeholder', async () => {
@@ -459,6 +486,7 @@ describe('loadDisplaySubjectArea', () => {
     expect(domain.models[0].columns).toHaveLength(0);
     expect(warn).toHaveBeenCalledWith(
       'Failed to read model "wide": YAML document expands to more than 1048576 characters of text',
+      'modelUnreadable',
     );
     expect(JSON.stringify(domain).length).toBeLessThan(yml.length);
   });
@@ -480,6 +508,7 @@ describe('loadDisplaySubjectArea', () => {
       expect(domain.models[1].columns).toEqual([]);
       expect(warn).toHaveBeenCalledWith(
         'Model "m" is listed more times than its file\'s budget allows; only the first 1 are read',
+        'other',
       );
       expect(warn.mock.calls.filter(([m]) => String(m).includes('listed more times'))).toHaveLength(1);
       expect(() => JSON.stringify(domain)).not.toThrow();
@@ -567,6 +596,7 @@ describe('loadDisplaySubjectArea', () => {
     }
     expect(warn).toHaveBeenCalledWith(
       `.erd-studio/layers.json is ${layers.length} characters long; at most ${layers.length - 1} are read. Using the default layers`,
+      'layersFile',
     );
     const silver = await load(files, { domainPath: '.erd-studio/silver/s.json', maxDomainChars: layers.length - 1 }).result;
     expect(silver.layerConfig?.id).toBe('silver');

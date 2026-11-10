@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "YYYYMMDD",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[YYYYMMDD]",
+  "displayFolder": "6. Calendar Date",
+  "lineageTag": "b8f541e5-acb5-4fdf-83b9-c031aee1e282",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

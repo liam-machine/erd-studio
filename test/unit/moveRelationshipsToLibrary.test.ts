@@ -586,7 +586,66 @@ describe('canvas edits save the documents they edited (#126 hardening)', () => {
     expect(canvas.errors()).toHaveLength(1);
     expect(canvas.errors()[0]).toContain('Could not save .erd-studio/logical-models/fct_order.yml');
     expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedRefused');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedThrew');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRename');
     expect(fs.readFileSync(modelPath, 'utf-8')).not.toMatch(/^relationships:/m);
+  });
+
+  it('records a document it could not re-open to save as saveFailedReopen, beside saveFailed', async () => {
+    const canvas = await openCanvas();
+    const modelPath = tableLibraryService.tablePath('fct_order');
+    const openTextDocument = vscode.workspace.openTextDocument;
+    const applyEdit = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const ok = await applyEdit(edit);
+      // Re-opening the model file after the edit throws (a file system error).
+      vi.spyOn(vscode.workspace, 'openTextDocument').mockImplementation(async (uri: any) => {
+        if (path.resolve(uri.fsPath ?? uri) === path.resolve(modelPath)) throw new Error('EACCES');
+        return openTextDocument(uri);
+      });
+      return ok;
+    });
+    const telemetryError = vi.spyOn(telemetry, 'error');
+
+    await canvas.addRelationship();
+
+    expect(canvas.errors()).toHaveLength(1);
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedReopen');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedThrew');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRefused');
+  });
+
+  it('records a save() that threw (e.g. a closed document) as saveFailedThrew, not saveFailedReopen', async () => {
+    const canvas = await openCanvas();
+    const modelPath = tableLibraryService.tablePath('fct_order');
+    const openTextDocument = vscode.workspace.openTextDocument;
+    const applyEdit = vscode.workspace.applyEdit;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const ok = await applyEdit(edit);
+      // Re-opening works, but the document it returns rejects its save.
+      vi.spyOn(vscode.workspace, 'openTextDocument').mockImplementation(async (uri: any) => {
+        const doc = await openTextDocument(uri);
+        if (path.resolve(uri.fsPath ?? uri) === path.resolve(modelPath)) {
+          vi.spyOn(doc, 'save').mockRejectedValue(new Error('Document has been closed'));
+        }
+        return doc;
+      });
+      return ok;
+    });
+    const telemetryError = vi.spyOn(telemetry, 'error');
+
+    await canvas.addRelationship();
+
+    expect(canvas.errors()).toHaveLength(1);
+    expect(telemetryError).toHaveBeenCalledWith('saveFailed');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedThrew');
+    expect(telemetryError).toHaveBeenCalledWith('saveFailedModelFile');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedReopen');
+    expect(telemetryError).not.toHaveBeenCalledWith('saveFailedRefused');
   });
 });
 
@@ -608,6 +667,30 @@ describe('readSubjectAreaRelationships', () => {
         '.erd-studio',
       );
       expect(domains[0].relationships[0].cardinality).toBe('many-to-one');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('readSubjectAreaRelationships skips a DBML diagram by its storage', () => {
+  it('never reads a .dbml diagram as JSON, even one whose text would parse', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-read-rels-'));
+    try {
+      const filePath = path.join(dir, 'orders.dbml');
+      fs.writeFileSync(filePath, JSON.stringify({
+        schemaVersion: 5, domain: 'orders', layer: 'gold', description: '',
+        logical: { models: ['fct_order'], relationships: [
+          { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+        ] },
+      }));
+      // Its text parses as a v5 domain: only the storage skip keeps it out (before, a parse failure did).
+      const domains = readSubjectAreaRelationships(
+        { listSubjectAreas: () => [{ domain: 'orders', layer: 'gold', filePath, storage: 'dbml' as const }] },
+        dir,
+        '.erd-studio',
+      );
+      expect(domains).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -854,6 +937,8 @@ describe('moveRelationshipsToLibrary — composite keys move as one (#133 L2)', 
   beforeEach(() => {
     _resetMockWorkspace();
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-move-group-'));
+    // A YAML project (an empty logical-models/ is YAML evidence): a new project would write DBML (§3.2).
+    fs.mkdirSync(path.join(root, SEMANTIC_DIR, 'logical-models'), { recursive: true });
     tableLibraryService = new TableLibraryService(root, SEMANTIC_DIR);
     tableLibraryService.saveTable(PIT);
     tableLibraryService.saveTable(SAT);

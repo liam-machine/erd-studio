@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <style>
+    .ew-bg{fill:var(--vscode-editor-background,#1e1e1e)}
+    .ew-card{fill:var(--vscode-editorWidget-background,#252526);stroke:var(--vscode-panel-border,#555555);stroke-width:1.5}
+    .ew-fg{fill:var(--vscode-foreground,#cccccc)}
+    .ew-muted{fill:var(--vscode-descriptionForeground,#999999)}
+    .ew-btn{fill:var(--vscode-button-background,#0e639c)}
+    .ew-btnfg{fill:var(--vscode-button-foreground,#ffffff)}
+    .ew-folder{fill:var(--vscode-textLink-foreground,#3794ff);fill-opacity:0.18;stroke:var(--vscode-textLink-foreground,#3794ff);stroke-width:1.5}
+  </style>
+  <!-- the files the diagram is saved as: the layer-first tree, with the DBML language icons -->
+  <rect x="16" y="24" width="150" height="252" rx="8" class="ew-card"/>
+  <g transform="translate(28 38)">
+    <path d="M0 4a2 2 0 0 1 2-2h6l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" class="ew-folder"/>
+    <text x="30" y="15" font-size="11" font-weight="600" class="ew-fg">.erd-studio/</text>
+  </g>
+  <g font-size="9.5" class="ew-muted">
+    <g transform="translate(40 64)">
+      <path d="M0 2a2 2 0 0 1 2-2h8l4 4v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="18" y="11">layers.json</text>
+    </g>
+    <g transform="translate(40 81)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">gold/</text>
+    </g>
+    <g transform="translate(50 98)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">diagrams/</text>
+    </g>
+    <g transform="translate(60 115)">
+      <g transform="scale(.875)"><rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="#0D9488"/><rect x="3" y="3" width="4" height="3" rx=".5" fill="#0D9488"/><rect x="9" y="10" width="4" height="3" rx=".5" fill="#0D9488"/><path d="M5.5 6v5.5H9" fill="none" stroke="#0D9488"/></g>
+      <text x="18" y="11" class="ew-fg">sales.dbml</text>
+    </g>
+    <g transform="translate(50 132)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">tables/</text>
+    </g>
+    <g transform="translate(60 149)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">gold/</text>
+    </g>
+    <g transform="translate(70 166)">
+      <g transform="scale(.875)"><path fill="#3B82F6" fill-rule="evenodd" d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM3 6h3v3H3zm4 0h6v3H7zM3 10h3v3H3zm4 0h6v3H7z"/></g>
+      <text x="18" y="11" class="ew-fg">customer.dbml</text>
+    </g>
+    <g transform="translate(50 183)">
+      <path d="M0 3a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="21" y="11">relationships/</text>
+    </g>
+    <g transform="translate(60 200)">
+      <g transform="scale(.875)" fill="none" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.75 8h12.5M4.5 4.75v6.5M14.25 4.25 10 8l4.25 3.75"/></g>
+      <text x="18" y="11" class="ew-fg">gold.dbml</text>
+    </g>
+  </g>
+  <!-- a git commit marker -->
+  <g transform="translate(40 222)">
+    <line x1="0" y1="10" x2="110" y2="10" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <circle cx="16" cy="10" r="6" class="ew-bg" stroke="#22c55e" stroke-width="2"/>
+    <text x="30" y="30" font-size="10" class="ew-muted">commit and review</text>
+  </g>
+  <!-- canvas -->
+  <rect x="182" y="24" width="282" height="252" rx="10" class="ew-bg" stroke="#60a5fa" stroke-width="1.5"/>
+  <g fill="var(--vscode-descriptionForeground,#999999)" opacity="0.35">
+    <circle cx="202" cy="44" r="1"/><circle cx="222" cy="44" r="1"/><circle cx="242" cy="44" r="1"/><circle cx="202" cy="64" r="1"/><circle cx="444" cy="256" r="1"/><circle cx="424" cy="256" r="1"/><circle cx="444" cy="236" r="1"/>
+  </g>
+  <!-- the first table -->
+  <g font-size="9" font-weight="600" class="ew-fg">
+    <g transform="translate(214 70)">
+      <rect width="112" height="66" rx="4" class="ew-card" stroke="#60a5fa" stroke-width="2"/>
+      <path d="M0 4a4 4 0 0 1 4-4h104a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">customer</text>
+      <text x="8" y="30" font-size="8" fill="#f59e0b">PK</text>
+      <rect x="24" y="25" width="52" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="39" width="66" height="4" rx="2" class="ew-muted"/>
+      <rect x="24" y="53" width="44" height="4" rx="2" class="ew-muted"/>
+    </g>
+  </g>
+  <!-- placeholder for the next table -->
+  <g transform="translate(340 168)">
+    <rect width="104" height="60" rx="4" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <path d="M52 20 V40 M42 30 H62" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <!-- New Table button -->
+  <g transform="translate(214 222)">
+    <rect width="104" height="28" rx="14" class="ew-btn"/>
+    <path d="M18 14 H28 M23 9 V19" fill="none" stroke="var(--vscode-button-foreground,#ffffff)" stroke-width="2" stroke-linecap="round"/>
+    <text x="36" y="18" font-size="11" font-weight="600" class="ew-btnfg">New Table</text>
+  </g>
+</svg>

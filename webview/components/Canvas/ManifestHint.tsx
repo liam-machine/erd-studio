@@ -26,9 +26,12 @@ export const ManifestHint: React.FC = () => {
   const manifestMissing = useEditorStore((s) => s.manifestMissing);
   const dismissed = useEditorStore((s) => s.manifestHintDismissed);
   const dismiss = useEditorStore((s) => s.dismissManifestHint);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   const send = useSend();
 
-  if (!manifestMissing || dismissed) { return null; }
+  // No dbt project, nothing for `dbt parse` to do (the host never sets the
+  // flag then either; this keeps the two from disagreeing).
+  if (!manifestMissing || dismissed || logicalOnly) { return null; }
   if (domain?.stage !== 'logical' || domain.models.length === 0) { return null; }
 
   const onDismiss = () => {
@@ -44,7 +47,7 @@ export const ManifestHint: React.FC = () => {
           dbt hasn&apos;t parsed this project yet. Your diagram is fine, but the Physical view can&apos;t
           show columns and tests without it.
         </span>{' '}
-        <span className="manifest-hint__hint">Needs a working dbt profile.</span>
+        <span className="manifest-hint__hint">No dbt profile? Run dbt parse can parse without your credentials when dbt Core and your adapter are installed.</span>
       </span>
       <button
         type="button"

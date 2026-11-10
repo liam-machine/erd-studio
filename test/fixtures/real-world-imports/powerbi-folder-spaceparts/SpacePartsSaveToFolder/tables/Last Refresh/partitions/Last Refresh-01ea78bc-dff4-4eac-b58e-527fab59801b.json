@@ -1,0 +1,14 @@
+{
+  "name": "Last Refresh-01ea78bc-dff4-4eac-b58e-527fab59801b",
+  "mode": "import",
+  "queryGroup": "Scalar Values",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = DateTimeZone.FixedLocalNow()",
+      "in",
+      "    Source"
+    ]
+  }
+}

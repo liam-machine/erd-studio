@@ -1,0 +1,17 @@
+Table delivery_insights.fct_shipment_delivery [
+  role: 'accumulating-snapshot',
+  grain: 'One row per shipment',
+  purpose: 'The on-time delivery dashboard the operations team uses every morning.',
+  decisions: 'Built from shipping.shipment and its tracking events, not joined to them: that is lineage, so there is no Ref.',
+  owner: 'delivery-insights-team'
+] {
+  Note: 'Each shipment from pick-up to delivery.'
+
+  shipment_id            STRING [pk, natural_key: 'true']
+  account_id             STRING [foreign_key: 'true']
+  carrier_code           STRING [foreign_key: 'true']
+  promised_delivery_date DATE
+  delivered_at           TIMESTAMP
+  days_late              INT
+  is_on_time             BOOLEAN
+}

@@ -1,0 +1,12 @@
+Table conformed.dim_store [
+  role: 'conformed-dim',
+  grain: 'One row per store'
+] {
+  Note: 'Stores and distribution centres. Conformed across all three processes.'
+
+  store_key    INT    [pk, note: 'Surrogate key']
+  store_number STRING [natural_key: 'true']
+  store_name   STRING [scd_type: '1']
+  region       STRING [scd_type: '2']
+  store_format STRING [scd_type: '1', note: 'Supermarket, express or distribution centre']
+}

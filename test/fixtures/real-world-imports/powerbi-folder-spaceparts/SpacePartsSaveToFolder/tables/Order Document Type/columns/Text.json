@@ -1,0 +1,18 @@
+{
+  "name": "Text",
+  "dataType": "string",
+  "sourceColumn": "text",
+  "displayFolder": "1. Order Doc. Type",
+  "lineageTag": "dd298654-70aa-4357-a16e-7cf6eebe5e0f",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

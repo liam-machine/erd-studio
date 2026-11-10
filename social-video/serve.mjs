@@ -11,7 +11,7 @@ const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), '..'));
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2',
-  '.wav': 'audio/wav', '.svg': 'image/svg+xml',
+  '.wav': 'audio/wav', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg',
 };
 
 export function startServer(port = 0) {

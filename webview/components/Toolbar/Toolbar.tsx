@@ -5,10 +5,13 @@
  * - Domain info (name + layer badge)
  * - Zoom controls (in/out/level/fit)
  * - Auto Layout button
+ * - Line style (Curved / Hops), on every stage
  * - New Model button (Phase 2)
  *
  * Stage tabs sit above the controls in a stacked two-row layout, all within
  * a single top-center Panel to avoid overlap when the sidebar narrows the editor.
+ * Without a dbt project (`logicalOnly`) there is no Physical stage: the tabs,
+ * Diff (and with it Sync) and the manifest refresh are not rendered at all.
  *
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
@@ -18,18 +21,26 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
+import { GUIDE_TARGETS } from '../../../src/types/onboardingGuide';
 import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
+import { useRevealRelationship } from '../../hooks/useRevealRelationship';
+import { useRevealTable } from '../../hooks/useRevealTable';
+import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
+import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
 import {
   runElkLayout,
+  classifyLayoutFailure,
   detectLayerBound,
   detectStrategy,
-  SPACING_PRESETS,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
 } from '../../lib/elkLayout';
+import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
-import { matchesTableSearch } from '@erd-studio/renderer/editor';
+import { LineStyleSwitch } from './LineStyleSwitch';
+import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
+import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
@@ -41,6 +52,31 @@ import './Toolbar.css';
  * panels, so "touching" already reads as broken.
  */
 const CORNER_MIN_GAP = 16;
+
+/** Why "+ Add → New Relationship" is greyed out on a diagram with no tables. */
+export const NO_TABLES_FOR_RELATIONSHIP = 'This diagram has no tables yet — add one first';
+
+/**
+ * The layout popover's "Max per …" row, worded for the flow direction: a
+ * left-to-right layout (`RIGHT`) stacks each layer as a column, a
+ * top-to-bottom one (`DOWN`) as a row.
+ */
+export function layerBoundWording(direction: LayoutDirection): { label: string; unit: string; hint: string } {
+  return direction === 'DOWN'
+    ? { label: 'Max per row', unit: 'per row', hint: 'lower = taller layout, higher = wider layout' }
+    : { label: 'Max per column', unit: 'per column', hint: 'lower = wider layout, higher = taller layout' };
+}
+
+/** The Compare button's words on each stage: the design against dbt, or dbt against the design. */
+export function compareButtonWording(stage: Stage, comparing: boolean, against?: Stage | null): { label: string; title: string } {
+  if (comparing) {
+    const other = (against ?? (stage === 'physical' ? 'logical' : 'physical')) === 'logical' ? 'your design' : 'dbt';
+    return { label: 'Stop comparing', title: `Comparing with ${other} — click to stop` };
+  }
+  return stage === 'physical'
+    ? { label: 'Compare with design', title: 'Compare what dbt has with your design' }
+    : { label: 'Compare with dbt', title: 'Compare this design with the dbt project' };
+}
 
 // ---------------------------------------------------------------------------
 // Layer badge display
@@ -90,6 +126,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -98,10 +135,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const [isLayouting, setIsLayouting] = useState(false);
   const [layoutOptionsOpen, setLayoutOptionsOpen] = useState(false);
   const [layoutDirty, setLayoutDirty] = useState(false);
-  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>('auto');
-  const [layerBound, setLayerBound] = useState(5);
-  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('RIGHT');
-  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>('M');
+  // The popover starts on the first-open layout's choices (lib/firstOpenLayout.ts,
+  // shared with the draft preview so a draft is laid out as its diagram will be).
+  const [partitionStrategy, setPartitionStrategy] = useState<PartitionStrategy>(FIRST_OPEN_LAYOUT.partitionStrategy);
+  const [layerBound, setLayerBound] = useState(FIRST_OPEN_LAYOUT.layerBound);
+  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>(FIRST_OPEN_LAYOUT.direction);
+  const [spacingPreset, setSpacingPreset] = useState<SpacingPreset>(FIRST_OPEN_LAYOUT.spacing);
   const layoutGroupRef = useRef<HTMLDivElement>(null);
 
   // Refresh manifest state
@@ -160,6 +199,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       .map((node) => node.id);
   }, [searchQuery, nodes]);
 
+  // A search that finds no table here but some elsewhere in the project:
+  // the hint opens Go to Table with it filled in (logical stage only, where
+  // the host lists the project's tables).
+  const elsewhereCount = useMemo(() => {
+    if (!searchQuery.trim() || matchingNodeIds.length > 0 || domain?.stage !== 'logical') return 0;
+    return otherProjectMatches(domain.existingModels, nodes.map((n) => n.id), searchQuery);
+  }, [searchQuery, matchingNodeIds, domain, nodes]);
+
   // Update zoom percentage display
   useEffect(() => {
     setZoomPercent(Math.round(zoom * 100));
@@ -175,8 +222,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     zoomOut({ duration: 200 });
   }, [zoomOut]);
 
+  // Top padding = the toolbar's own bottom edge, so Fit never leaves the top
+  // row of cards under it (Logical and Physical alike).
   const handleFitView = useCallback(() => {
-    fitView({ padding: 0.1, duration: 200 });
+    fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM, duration: 200 });
   }, [fitView]);
 
   // --- Layout options click-outside handler --------------------------------
@@ -322,7 +371,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
   /** Get comparison options for the active stage. */
   const discrepancyOptions = useMemo((): { stage: Stage; label: string }[] => {
-    if (!domain) return [];
+    // No dbt project, nothing to compare against: no Diff control at all.
+    if (!domain || logicalOnly) return [];
     switch (domain.stage) {
       case 'physical':
         return [{ stage: 'logical', label: 'Compare to Logical' }];
@@ -331,7 +381,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       default:
         return [];
     }
-  }, [domain]);
+  }, [domain, logicalOnly]);
 
   const handleDiscrepancySelect = useCallback(
     (compareAgainst: Stage) => {
@@ -431,30 +481,37 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
     setIsLayouting(true);
     const startedAt = performance.now();
-    const reportLayout = (ok: boolean) => {
+    // Usage telemetry (2.0 B17): the stack-safe fallback, and a failure's class (never its text).
+    let fallback = false;
+    const reportLayout = (ok: boolean, err?: unknown) => {
       const ms = Math.round(performance.now() - startedAt);
-      const done: WebviewMessage = { type: 'layoutFinished', payload: firstOpen ? { ms, ok, firstOpen } : { ms, ok } };
+      const done: WebviewMessage = {
+        type: 'layoutFinished',
+        payload: {
+          ms,
+          ok,
+          ...(firstOpen ? { firstOpen } : {}),
+          ...(!ok ? { failure: classifyLayoutFailure(err) } : {}),
+          ...(fallback ? { fallback: true as const } : {}),
+        },
+      };
       vscode.postMessage(done);
     };
 
     try {
-      const sp = SPACING_PRESETS[spacingPreset];
       // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
       const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
       const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
-      const effectiveBound = partitionStrategy === 'auto'
-        ? detectLayerBound(modelNodes.length)
-        : layerBound;
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
-        {
-          ...domain.viewConfig.layoutOptions,
-          'elk.direction': layoutDirection,
-          ...sp,
-          'elk.layered.layering.coffmanGraham.layerBound': String(effectiveBound),
-        },
+        buildLayoutOptions(
+          { partitionStrategy, layerBound, direction: layoutDirection, spacing: spacingPreset },
+          modelNodes.length,
+          domain.viewConfig.layoutOptions,
+        ),
         partitionStrategy,
+        { onStackFallback: () => { fallback = true; } },
       );
 
       // Optimistic update: update domain in store so React Flow re-renders
@@ -469,7 +526,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
       // Wait one frame for React to flush, then fit viewport
       requestAnimationFrame(() => {
-        fitView({ padding: 0.1 });
+        fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM });
       });
 
       // Persist to extension host
@@ -481,7 +538,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       reportLayout(true);
       setLayoutDirty(false);
     } catch (err) {
-      reportLayout(false);
+      reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
       const detail = err instanceof Error ? err.message : String(err);
       setToastMessage(`Auto layout failed: ${detail}`);
@@ -502,6 +559,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
    * `domainLoaded.autoLayout`): run the same layout once, persisted the same way.
    */
   useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
+
+  /** The sidebar's Open in Diagram: select and centre a relationship once the layout above has settled. */
+  useRevealRelationship(isLayouting);
+  useRevealTable(isLayouting);
 
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {
@@ -568,13 +629,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const isReadOnly = domain.readOnly;
   const exportTitle = domain.stage === 'physical'
     ? 'Export the logical design as Mermaid or DBML (the physical stage is not exported)'
-    : 'Export as Mermaid or DBML';
+    : 'Export as DBML or Mermaid';
 
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation
     ?? LAYER_ABBREV_FALLBACK[domain.layer]
     ?? domain.layer.substring(0, 3).toUpperCase();
   const layerColor = domain.layerConfig?.color;
+  const layerLabel = domain.layerConfig?.label ?? domain.layer;
 
   // --- Render --------------------------------------------------------------
 
@@ -586,15 +648,26 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         {/* Domain info */}
         <div className="toolbar__section toolbar__domain">
           <span className="toolbar__domain-name">{domain.domain}</span>
-          <span
-            className={`toolbar__layer-badge${layerColor ? '' : ` toolbar__layer-badge--${domain.layer}`}`}
-            style={layerColor ? {
-              backgroundColor: `${layerColor}33`, // 20% opacity
-              color: layerColor,
-            } : undefined}
-          >
-            {layerAbbrev}
-          </span>
+          {/* "[GLD] Gold layer": the abbreviation the table badges use, then
+              the label. Not in a single-layer project, which has nothing to
+              tell apart. */}
+          {!isSingleLayerProject(domain) && (
+            <span
+              className="toolbar__layer-badge"
+              title={`This diagram belongs to the ${layerLabel} layer. It can show tables from any layer.`}
+            >
+              <span
+                className={`toolbar__layer-abbrev${layerColor ? '' : ` toolbar__layer-abbrev--${domain.layer}`}`}
+                style={layerColor ? {
+                  backgroundColor: `${layerColor}33`, // 20% opacity
+                  color: layerColor,
+                } : undefined}
+              >
+                {layerAbbrev}
+              </span>
+              {layerLabel} layer
+            </span>
+          )}
         </div>
 
         {/* Divider */}
@@ -659,7 +732,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
         {/* Auto Layout + options + Refresh Manifest */}
         <div className="toolbar__section">
-          <div className="toolbar__split-group" ref={layoutGroupRef}>
+          <div className="toolbar__split-group" ref={layoutGroupRef} data-guide={GUIDE_TARGETS.canvasLayout}>
             <button
               className={`toolbar__split-main${layoutDirty ? ' toolbar__split-main--dirty' : ''}`}
               onClick={handleAutoLayout}
@@ -773,9 +846,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                   </div>
                 </div>
 
-                {/* Max per layer */}
+                {/* Max per column (left to right) or row (top to bottom) */}
                 <div className="toolbar__lp-section">
-                  <span className="toolbar__lp-label">Max per layer</span>
+                  <span className="toolbar__lp-label">{layerBoundWording(layoutDirection).label}</span>
                   <div className="toolbar__lp-layer-row">
                     <input
                       type="number"
@@ -787,9 +860,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       onChange={(e) => { setLayerBound(Math.max(1, Math.min(20, Number(e.target.value)))); setLayoutDirty(true); }}
                     />
                     {partitionStrategy === 'auto' ? (
-                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.filter((n) => n.type === 'model').length)} for {nodes.filter((n) => n.type === 'model').length} tables</span>
+                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.filter((n) => n.type === 'model').length)} {layerBoundWording(layoutDirection).unit} for {nodes.filter((n) => n.type === 'model').length} tables</span>
                     ) : (
-                      <span className="toolbar__lp-desc">lower = wider layout, higher = taller layout</span>
+                      <span className="toolbar__lp-desc">{layerBoundWording(layoutDirection).hint}</span>
                     )}
                   </div>
                 </div>
@@ -807,16 +880,18 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             )}
           </div>
 
-          {/* Refresh Manifest */}
-          <button
-            className="toolbar__button toolbar__button--tooltip"
-            onClick={handleRefreshManifest}
-            disabled={isRefreshing}
-            data-tooltip="Refresh"
-            aria-label="Refresh manifest data"
-          >
-            {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
-          </button>
+          {/* Refresh Manifest — dbt data only, so not without a dbt project */}
+          {!logicalOnly && (
+            <button
+              className="toolbar__button toolbar__button--tooltip"
+              onClick={handleRefreshManifest}
+              disabled={isRefreshing}
+              data-tooltip="Refresh"
+              aria-label="Refresh manifest data"
+            >
+              {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
+            </button>
+          )}
         </div>
 
         {/* Search (F402) */}
@@ -836,6 +911,16 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               {matchingNodeIds.length}
             </span>
           )}
+          {elsewhereCount > 0 && (
+            <button
+              type="button"
+              className="toolbar__search-elsewhere"
+              onClick={() => vscode.postMessage({ type: 'goToTable', payload: { query: searchQuery.trim().slice(0, GO_TO_TABLE_QUERY_MAX) } })}
+              title="Go to Table… with this search"
+            >
+              {searchElsewhereLabel(elsewhereCount)}
+            </button>
+          )}
         </div>
 
         {/* Divider */}
@@ -851,6 +936,11 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           >
             {allExpanded ? '⊟' : '⊞'}
           </button>
+        </div>
+
+        {/* Line style — a view preference, so on every stage and read-only diagram too */}
+        <div className="toolbar__section">
+          <LineStyleSwitch />
         </div>
 
         {/* Canvas mode — select vs pan */}
@@ -885,14 +975,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       setDiscrepancyDropdownOpen(!discrepancyDropdownOpen);
                     }
                   }}
-                  title={discrepancyVisible
-                    ? `Comparing to ${discrepancyCompareStage ?? ''} — click to disable`
-                    : 'Compare across stages'}
-                  aria-label="Toggle cross-stage comparison"
+                  title={compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).title}
+                  aria-label={compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}
                   aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
                   aria-expanded={discrepancyDropdownOpen}
                 >
-                  {discrepancyVisible ? '⊘ Diff' : '⊕ Diff'}
+                  {compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}
                   {!discrepancyVisible && discrepancyOptions.length > 1 && (
                     <span className="toolbar__dropdown-arrow">▾</span>
                   )}
@@ -924,6 +1012,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               <div className="toolbar__dropdown" ref={modelDropdownRef}>
                 <button
                   className="toolbar__dropdown-trigger"
+                  data-guide={GUIDE_TARGETS.canvasAdd}
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                   title="Add table or relationship"
                   aria-label="Add table or relationship"
@@ -940,19 +1029,21 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       onClick={handleNewModel}
                       role="menuitem"
                     >
-                      New Design Table
+                      New Table
                     </button>
                     <button
                       className="toolbar__dropdown-item"
                       onClick={handleAddExistingModel}
                       role="menuitem"
                     >
-                      Add Existing Table
+                      Add Existing Tables
                     </button>
                     <button
                       className="toolbar__dropdown-item"
                       onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
                       role="menuitem"
+                      disabled={domain.models.length === 0}
+                      title={domain.models.length === 0 ? NO_TABLES_FOR_RELATIONSHIP : undefined}
                     >
                       New Relationship
                     </button>
@@ -973,8 +1064,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         )}
         </div>
 
-        {/* Row 2: Stage tabs (attached below toolbar) */}
-        <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
+        {/* Row 2: Stage tabs (attached below toolbar) — a lone Logical tab says nothing */}
+        {!logicalOnly && <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />}
       </Panel>
 
       {/*
@@ -988,6 +1079,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             <div className="toolbar__corner-menu" ref={cornerMenuRef}>
               <button
                 className={`toolbar__corner-trigger${cornerMenuOpen ? ' toolbar__corner-trigger--active' : ''}`}
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={() => setCornerMenuOpen((open) => !open)}
                 title="More actions"
                 aria-label="More actions"
@@ -1017,9 +1109,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                     className="toolbar__dropdown-item"
                     onClick={handleViewFile}
                     role="menuitem"
-                    title="Open the underlying JSON file in a text editor"
+                    title="Open the diagram's file in a text editor"
                   >
-                    {'{ }'} Open as JSON file
+                    {'{ }'} Open file
                   </button>
                 </div>
               )}
@@ -1044,9 +1136,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               </button>
               <button
                 className="toolbar__corner-button"
+                data-guide={GUIDE_TARGETS.canvasFile}
                 onClick={handleViewFile}
-                title="Open as JSON file"
-                aria-label="Open underlying JSON file in text editor"
+                title="Open file"
+                aria-label="Open the diagram's file in a text editor"
               >
                 {'{ }'} View File
               </button>

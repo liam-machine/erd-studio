@@ -12,6 +12,7 @@ import {
   validateColumnDefs,
   validateTableName,
   validateTableNameSafety,
+  validateNewDbmlTableName,
   validateAnnotationPositions,
   validateAnnotationUpdate,
   validatePoint,
@@ -24,7 +25,10 @@ import {
   validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
+  validateImportEmbeddedTablesPayload,
   validateExportDiagramPayload,
+  validateNoRelationshipsFile,
+  validateRelationshipsFileChoice,
 } from '../../src/providers/payloadValidation';
 import { TABLE_NAME_PATTERN } from '../../src/types/naming';
 import { ADD_EXISTING_TABLES_LIMIT } from '../../src/types/messages';
@@ -302,6 +306,17 @@ describe('validateDismissManifestHintPayload (#113)', () => {
   });
 });
 
+describe('validateImportEmbeddedTablesPayload (native DBML storage, §2.5)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateImportEmbeddedTablesPayload(undefined)).toBeNull();
+    expect(validateImportEmbeddedTablesPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { file: '/etc/passwd' }])('rejects %j', (value) => {
+    expect(validateImportEmbeddedTablesPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
 describe('validateExportDiagramPayload', () => {
   it('accepts no payload or an empty object', () => {
     expect(validateExportDiagramPayload(undefined)).toBeNull();
@@ -386,5 +401,99 @@ describe('validateExtraPairs — a composite key\'s other column pairs (#133 L2)
     expect(validateMarkKey({ model: 'sat', columns: ['load_date', 'HK'] }, composite)).toBeNull();
     expect(validateMarkKey({ model: 'sat', columns: ['hk'] }, composite)).not.toBeNull();
     expect(validateRelationshipEnds({ ...composite, toModel: 'pit', extraPairs: [{ fromColumn: 'as_of', toColumn: 'AS_OF' }] })).toBe("a column can't point at itself.");
+  });
+});
+
+describe('validateNewDbmlTableName (the layer-first tree reserves no table name)', () => {
+  it('keeps the path-safety rule only: `_relationships` is an ordinary name', () => {
+    expect(validateNewDbmlTableName('_relationships')).toBeNull();
+    expect(validateNewDbmlTableName('_Relationships')).toBeNull();
+    expect(validateNewDbmlTableName('dim_customer')).toBeNull();
+    expect(validateNewDbmlTableName('../x')).toBe(validateTableNameSafety('../x'));
+    expect(validateNewDbmlTableName('')).not.toBeNull();
+  });
+});
+
+describe("validateRelationshipsFileChoice — New Relationship's \"Stored in\" (DBML)", () => {
+  it('absent, or a relationships file relative to the semantic dir, passes', () => {
+    expect(validateRelationshipsFileChoice(undefined)).toBeNull();
+    expect(validateRelationshipsFileChoice('marts/relationships/marketing.dbml')).toBeNull();
+    expect(validateRelationshipsFileChoice('gold/relationships/gold.dbml')).toBeNull();
+  });
+
+  it('refuses anything that is not text, or too long', () => {
+    for (const value of [null, 42, {}, [], '', `gold/relationships/${'x'.repeat(1100)}.dbml`]) {
+      expect(validateRelationshipsFileChoice(value)).toBe("the relationships file must be a path inside the project's ERD Studio folder.");
+    }
+  });
+
+  it('refuses a path that could leave the semantic dir, or is not written plainly', () => {
+    for (const value of [
+      '../outside/relationships/x.dbml', 'gold/relationships/../relationships/x.dbml', './gold/relationships/x.dbml',
+      '/abs/gold/relationships/x.dbml', 'C:/gold/relationships/x.dbml', 'gold\\relationships\\x.dbml', 'gold//relationships/x.dbml',
+      'gold/relationships/x.dbml\u0000',
+    ]) {
+      expect(validateRelationshipsFileChoice(value)).toBe(`"${value}" is not a path inside the project's ERD Studio folder.`);
+    }
+  });
+
+  it('refuses a path that is not a relationships file', () => {
+    for (const value of ['gold/tables/gold/fct_order.dbml', 'gold/diagrams/sales.dbml', 'gold/relationships/x.DBML', 'gold/relationships/x.yml', 'tables/relationships/x.dbml', 'gold/relationships/sub/x.dbml', 'layers.json']) {
+      expect(validateRelationshipsFileChoice(value)).toBe(`"${value}" is not a relationships file (<layer>/relationships/<name>.dbml).`);
+    }
+  });
+});
+
+describe('validateNoRelationshipsFile — an edit keeps its relationship where it is', () => {
+  it('refuses an editRelationship payload that names a relationships file', () => {
+    expect(validateNoRelationshipsFile({ fromModel: 'a', relationshipsFile: 'gold/relationships/gold.dbml' }))
+      .toBe('an existing relationship stays in the file that holds it; a relationships file can be chosen only for a new one.');
+    expect(validateNoRelationshipsFile({ fromModel: 'a' })).toBeNull();
+    expect(validateNoRelationshipsFile({ fromModel: 'a', relationshipsFile: undefined })).toBeNull();
+    expect(validateNoRelationshipsFile(undefined)).toBeNull();
+  });
+});
+
+describe('context fields: updateModelRationale and openFieldsFile payloads', async () => {
+  const { RATIONALE_FIELD_KEYS, TABLE_ROLE_VALUES } = await import('@erd-studio/core');
+  const { TABLE_ROLES, validateOpenFieldsFilePayload, validateRationalePayload } = await import('../../src/providers/payloadValidation');
+
+  it('accepts every catalogue rationale key, text or null (clear), and an empty patch', () => {
+    for (const key of RATIONALE_FIELD_KEYS) {
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: 'text' } }), key).toBeNull();
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: '' } }), key).toBeNull();
+      expect(validateRationalePayload({ modelName: 'dim', rationale: { [key]: null } }), key).toBeNull();
+    }
+    expect(validateRationalePayload({ modelName: 'dim', rationale: {} })).toBeNull();
+  });
+
+  it.each([
+    [undefined, 'Missing payload.'],
+    [null, 'Missing payload.'],
+    [[], 'Missing payload.'],
+    [{ rationale: { purpose: 'x' } }, 'Table name is required.'],
+    [{ modelName: '../x', rationale: { purpose: 'x' } }, 'Table name cannot contain path separators.'],
+    [{ modelName: 'dim', rationale: 'after' }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim', rationale: ['purpose'] }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim' }, 'The fields to change must be an object.'],
+    [{ modelName: 'dim', rationale: { notes: 'x' } }, '"notes" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: { open_questions: 'x' } }, '"open_questions" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: JSON.parse('{"__proto__": "x"}') }, '"__proto__" is not a built-in text field.'],
+    [{ modelName: 'dim', rationale: { openQuestions: 7 } }, 'Value of "open_questions" must be text.'],
+    [{ modelName: 'dim', rationale: { purpose: { a: 1 } } }, 'Value of "purpose" must be text.'],
+  ])('refuses %j', (payload, message) => {
+    expect(validateRationalePayload(payload)).toBe(message);
+  });
+
+  it('openFieldsFile takes no payload', () => {
+    expect(validateOpenFieldsFilePayload(undefined)).toBeNull();
+    expect(validateOpenFieldsFilePayload({})).toBeNull();
+    for (const bad of [null, [], 'x', { path: '/etc' }]) {
+      expect(validateOpenFieldsFilePayload(bad)).toBe('Customise fields takes no payload.');
+    }
+  });
+
+  it('the table roles are core\'s one list (the Table role field\'s choices)', () => {
+    expect(TABLE_ROLES).toEqual(TABLE_ROLE_VALUES);
   });
 });

@@ -913,6 +913,66 @@ describe('a relationship 1.6.7 saved backwards (#163)', () => {
     expect(read()).toEqual(before);
   });
 
+  describe('when Turn Round fails (#219)', () => {
+    /** Answer the offer with Turn Round, running `then` first. */
+    const turnRound = (then: () => void = () => undefined) => vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (text: string) => {
+        if (!String(text).startsWith(OFFER)) return undefined;
+        then();
+        return 'Turn Round';
+      }) as never);
+
+    it('an unexpected failure is ours: never the raw error, a notification with Send Feedback, the error only in the report', async () => {
+      await backwards();
+      const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue('Send Feedback' as never);
+      const execute = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      turnRound(() => {
+        vi.spyOn(h.tableLibraryService, 'listTables').mockImplementation(() => { throw new Error(`boom in ${h.tableLibraryService.getTablesDir()}`); });
+      });
+      const orders = await h.open('orders');
+      await orders.send({ type: 'ready' });
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(error.mock.calls[0]).toEqual([
+        "Couldn't turn the relationships round: that's a problem in ERD Studio, not your diagram. Nothing was changed.",
+        'Send Feedback',
+      ]);
+      expect(orders.errors()).toEqual([]);
+      expect(_appliedEdits).toHaveLength(0);
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledWith('erdStudio.reportBug', expect.objectContaining({ title: 'Turn Round failed' })));
+      const prefill = execute.mock.calls.find((c) => c[0] === 'erdStudio.reportBug')![1] as { description: string };
+      expect(prefill.description).toContain('boom');
+      expect(prefill.description).not.toContain(h.tableLibraryService.getTablesDir());
+    });
+
+    it('an edit VS Code rejects says so in plain words on the canvas', async () => {
+      await backwards();
+      turnRound(() => { vscode._mockWorkspaceState.applyEditResult = false; });
+      const orders = await h.open('orders');
+      await orders.send({ type: 'ready' });
+      await vi.waitFor(() => expect(orders.errors()).toHaveLength(1));
+      expect(orders.errors()).toEqual(["Couldn't turn the relationships round: VS Code didn't accept the change, so nothing was changed."]);
+    });
+
+    it('a refusal the user can act on keeps its own words, with no blame on ERD Studio', async () => {
+      await backwards();
+      const error = vi.spyOn(vscode.window, 'showErrorMessage');
+      turnRound(() => {
+        const file = h.tableLibraryService.tablePath('fct_order');
+        const doc = createMockTextDocument(file, fs.readFileSync(file, 'utf-8'));
+        doc.isDirty = true;
+        vscode.workspace.textDocuments.push(doc as never);
+      });
+      const orders = await h.open('orders');
+      await orders.send({ type: 'ready' });
+      await vi.waitFor(() => expect(orders.errors()).toHaveLength(1));
+      expect(orders.errors()[0]).toMatch(/^Couldn't turn the relationships round: .*fct_order\.yml has unsaved changes\. Save or revert it, then try again\.$/);
+      expect(error).not.toHaveBeenCalled();
+      expect(_appliedEdits).toHaveLength(0);
+    });
+  });
+
   it('Turn Round after the link changed meanwhile turns nothing round, and reports no error', async () => {
     await backwards();
     let pick: (choice: string) => void = () => undefined;

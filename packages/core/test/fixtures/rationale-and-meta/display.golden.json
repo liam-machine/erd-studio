@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 5,
+  "domain": "ledger",
+  "layer": "silver",
+  "stage": "logical",
+  "description": "Rationale and meta as model files held them before context fields",
+  "models": [
+    {
+      "name": "dim_account",
+      "schema": "silver",
+      "description": "One row per customer account",
+      "columns": [
+        {
+          "name": "account_key",
+          "dataType": "INT",
+          "description": "Surrogate key, one per version",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "account_code",
+          "dataType": "VARCHAR",
+          "description": "The account number customers see",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": true,
+          "scdType": 0,
+          "meta": {
+            "pii": false,
+            "classification": "internal"
+          }
+        },
+        {
+          "name": "account_name",
+          "dataType": "VARCHAR",
+          "description": "Name on the account",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false,
+          "scdType": 1,
+          "meta": {
+            "pii": true,
+            "business_rule": "Trimmed, title case",
+            "sources": [
+              "crm",
+              "billing"
+            ]
+          }
+        },
+        {
+          "name": "credit_limit",
+          "dataType": "DECIMAL(18,2)",
+          "description": "Credit limit at the time",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false,
+          "scdType": 2
+        }
+      ],
+      "rationale": {
+        "purpose": "Shared account reference for finance reporting",
+        "design": "Conformed dimension so every mart joins the same account",
+        "grainChoice": "Versioned rows, because credit limits change and finance reports on history",
+        "roleChoice": "Conformed rather than domain-owned, since three marts use it",
+        "scdStrategy": "credit_limit is type 2; account_name overwrites",
+        "measures": "None here; the balances live in fct_balance"
+      },
+      "grain": "One row per account, per version",
+      "modelRole": "conformed-dim",
+      "meta": {
+        "owner": "finance-data",
+        "certified": true,
+        "tags": [
+          "finance",
+          "conformed"
+        ],
+        "purpose": "Kept in meta, next to the rationale purpose"
+      }
+    },
+    {
+      "name": "fct_balance",
+      "schema": "silver",
+      "description": "Month-end balance per account",
+      "columns": [
+        {
+          "name": "account_key",
+          "dataType": "INT",
+          "description": "Account at month end",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        },
+        {
+          "name": "month_end",
+          "dataType": "DATE",
+          "description": "Last day of the month",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "balance",
+          "dataType": "DECIMAL(18,2)",
+          "description": "Closing balance",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false,
+          "additiveType": "semi-additive",
+          "meta": {
+            "business_rule": "Ledger balance after the last posting of the month",
+            "unit": "AUD"
+          }
+        },
+        {
+          "name": "txn_count",
+          "dataType": "INT",
+          "description": "Transactions in the month",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false,
+          "additiveType": "additive"
+        }
+      ],
+      "rationale": {
+        "purpose": "Month-end balances for the finance close",
+        "measures": "balance is semi-additive (never sum across months); txn_count is additive"
+      },
+      "grain": "One row per account per month end",
+      "modelRole": "periodic-snapshot",
+      "meta": {
+        "owner": "finance-data",
+        "refresh": "daily"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "fromModel": "fct_balance",
+      "fromColumn": "account_key",
+      "toModel": "dim_account",
+      "toColumn": "account_key",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "viewConfig": {
+    "positions": {
+      "dim_account": {
+        "x": 0,
+        "y": 0
+      },
+      "fct_balance": {
+        "x": 400,
+        "y": 0
+      }
+    }
+  },
+  "layerConfig": {
+    "id": "silver",
+    "label": "Silver",
+    "abbreviation": "SLV",
+    "color": "#a0a0a0",
+    "creatable": true,
+    "order": 0
+  },
+  "readOnly": false,
+  "positionDraggable": true
+}

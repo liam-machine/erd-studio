@@ -2,8 +2,8 @@
  * dbtEnv — where the dbt project, its Python environment, the `dbt`
  * executable and `profiles.yml` are, and which dbt this is.
  *
- * Used by the canvas (venv activation before `dbt compile` / Claude sync) and
- * by the `erd-studio doctor` CLI. Every function takes its environment
+ * Used by the canvas (the dbt Run dbt parse / compile spawn, venv activation
+ * for Claude sync) and by the `erd-studio doctor` CLI. Every function takes its environment
  * (env vars, platform, home dir) as optional inputs so it can be tested
  * without touching the real machine.
  *
@@ -19,68 +19,35 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
 
+import {
+  DBT_SEARCH_MAX_DEPTH,
+  DBT_SEARCH_SKIP_DIRS,
+  findDbtProjectAbove,
+  findDbtProjectsBelow,
+  hasDbtProjectFile,
+} from './dbtProjectSearch';
+
 // ---------------------------------------------------------------------------
 // Project discovery
 // ---------------------------------------------------------------------------
 
 /**
- * Directories never descended into when searching down for a dbt project.
- * Same list as `DBT_SEARCH_SKIP_DIRS` in `extension.ts`; dot-directories are
- * skipped as well.
+ * The search rules (skipped folders, depth) are `dbtProjectSearch.ts`'s, shared
+ * with the extension's discovery and the CLI; re-exported for older importers.
  */
-export const DBT_SEARCH_SKIP_DIRS: ReadonlySet<string> = new Set([
-  'node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv',
-]);
-
-/** Maximum depth below the start directory searched for `dbt_project.yml`. */
-export const DBT_SEARCH_MAX_DEPTH = 3;
-
-function hasDbtProjectFile(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
-  } catch {
-    return false;
-  }
-}
+export { DBT_SEARCH_MAX_DEPTH, DBT_SEARCH_SKIP_DIRS };
 
 /**
  * Find the dbt project a command run from `start` belongs to: `start` itself,
- * then each ancestor up to the filesystem root, then a breadth-first search
- * up to `DBT_SEARCH_MAX_DEPTH` levels below `start` (shallowest match wins,
- * siblings in name order). Null when there is none.
+ * then the nearest ancestor holding one (`findDbtProjectAbove`), then the
+ * shallowest one below `start` (`findDbtProjectsBelow`: up to `maxDepth`
+ * folders deep, siblings in name order, hidden folders other than tools' own
+ * after the rest, symbolic links followed). Null when there is none.
  */
 export function findDbtProjectDir(start: string, maxDepth = DBT_SEARCH_MAX_DEPTH): string | null {
   const origin = path.resolve(start);
-
-  for (let dir = origin; ; dir = path.dirname(dir)) {
-    if (hasDbtProjectFile(dir)) { return dir; }
-    if (path.dirname(dir) === dir) { break; }
-  }
-
-  let frontier = [origin];
-  for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
-          continue;
-        }
-        const child = path.join(dir, entry.name);
-        if (hasDbtProjectFile(child)) { return child; }
-        next.push(child);
-      }
-    }
-    frontier = next;
-  }
-
-  return null;
+  if (hasDbtProjectFile(origin)) { return origin; }
+  return findDbtProjectAbove(origin) ?? findDbtProjectsBelow([origin], { maxDepth, first: true })[0] ?? null;
 }
 
 export interface DbtProjectIdentity {
@@ -236,16 +203,43 @@ function envBinDirs(prefix: string, platform: NodeJS.Platform): string[] {
 }
 
 /**
+ * The folders whose `.venv` / `venv` / `env` may hold the project's dbt, nearest
+ * first: the dbt project itself, then each parent up to and including `upTo`
+ * (the workspace folder the project was found in), never above it. A monorepo
+ * often keeps one venv at its root with the dbt project in a subfolder
+ * (`repo/.venv` + `repo/transform/dbt_project.yml`). Without `upTo`, or when
+ * `root` is not inside it, only `root`.
+ */
+export function venvSearchDirs(root: string, upTo?: string, platform: NodeJS.Platform = process.platform): string[] {
+  const p = pathFor(platform);
+  const start = p.resolve(root);
+  if (!upTo) { return [start]; }
+  const rel = p.relative(p.resolve(upTo), start);
+  if (rel.startsWith('..') || p.isAbsolute(rel)) { return [start]; }
+  const dirs = [start];
+  let cur = start;
+  for (let up = rel ? rel.split(/[\\/]+/).length : 0; up > 0; up--) {
+    cur = p.dirname(cur);
+    dirs.push(cur);
+  }
+  return dirs;
+}
+
+/**
  * Every dbt executable worth trying, most specific first, de-duplicated:
  * an explicit `override` path (an executable, or a directory holding one),
- * the project venv, `$VIRTUAL_ENV`, `$CONDA_PREFIX`, the first `dbt` on
+ * the project venv (then a venv in each parent up to `venvSearchUpTo`), `$VIRTUAL_ENV`, `$CONDA_PREFIX`, the first `dbt` on
  * `$PATH`, then pyenv shims and `~/.local/bin` (pipx) when those are not
  * already on `$PATH`. Only files that exist (and are executable off
  * Windows) are returned. Never runs anything.
  */
 export function dbtExecutableCandidates(
   root: string,
-  opts: DbtEnvOptions & { override?: string | null } = {},
+  opts: DbtEnvOptions & {
+    override?: string | null;
+    /** Also look for a venv in each parent of `root` up to this folder (see `venvSearchDirs`). */
+    venvSearchUpTo?: string;
+  } = {},
 ): DbtCandidate[] {
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
@@ -274,9 +268,11 @@ export function dbtExecutableCandidates(
     add(isExecutable(override) ? override : dbtIn(override, platform, env, isExecutable), 'override');
   }
 
-  for (const dir of VENV_CANDIDATES) {
-    for (const bin of envBinDirs(p.join(root, dir), platform)) {
-      add(dbtIn(bin, platform, env, isExecutable), 'venv');
+  for (const base of venvSearchDirs(root, opts.venvSearchUpTo, platform)) {
+    for (const dir of VENV_CANDIDATES) {
+      for (const bin of envBinDirs(p.join(base, dir), platform)) {
+        add(dbtIn(bin, platform, env, isExecutable), 'venv');
+      }
     }
   }
 
@@ -327,6 +323,11 @@ export interface DbtVersionInfo {
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
+/** `text` without terminal colour / cursor escapes (dbt colours piped output too). */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE, '');
+}
+
 /**
  * Classify `dbt --version` output.
  *
@@ -337,7 +338,7 @@ const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
  *   anything else                           → unknown
  */
 export function classifyDbtVersion(output: string): DbtVersionInfo {
-  const text = output.replace(ANSI_ESCAPE, '').replace(/\r\n?/g, '\n');
+  const text = stripAnsi(output).replace(/\r\n?/g, '\n');
 
   const cloud = /^\s*(dbt )?Cloud CLI - (\S+)/m.exec(text);
   if (cloud) { return { flavour: 'cloud-cli', version: cloud[2] }; }
@@ -441,21 +442,46 @@ export interface DbtVersionRun {
   error?: string;
 }
 
+/** cmd.exe cannot quote these inside `"…"`: `%VAR%` and `!VAR!` (delayed expansion) still expand, and `"` / line breaks end the quoting. */
+const CMD_UNQUOTABLE = /["%!\r\n]/;
+/** An argument cmd.exe would split or act on unless it is double-quoted. */
+const CMD_NEEDS_QUOTES = /[\s&|<>^(),;=]/;
+
 /**
- * How to spawn `<executable> --version`. `.cmd` / `.bat` shims (pyenv-win's
- * are `.bat`) cannot be spawned without a shell on Windows, and with
- * `shell: true` Node hands cmd.exe the command and its arguments joined by
- * spaces — so the path is double-quoted (a space in `C:\Users\John Smith`
- * would otherwise split it, and `&` in a folder name would start a second
- * command). Inside double quotes cmd still expands `%VAR%`, and a `"` or a
- * line break cannot be quoted at all, so such a path is refused (null).
+ * How to spawn `<executable> <args…>`.
+ *
+ * An ordinary executable is spawned directly (`shell: false`) and never
+ * refused: Node quotes argv for `CreateProcess` itself. A `.cmd` / `.bat`
+ * shim (pyenv-win's are `.bat`) cannot be spawned without a shell on
+ * Windows, and with `shell: true` Node hands cmd.exe the command and its
+ * arguments joined by spaces — so the path is double-quoted (a space in
+ * `C:\Users\John Smith` would otherwise split it, and `&` in a folder name
+ * would start a second command), as is every argument that is empty or holds
+ * whitespace or any of `& | < > ^ ( ) , ; =`, with a trailing run of
+ * backslashes doubled so it cannot escape the closing quote. Inside double
+ * quotes cmd still expands `%VAR%` (and `!VAR!` when delayed expansion is on),
+ * and a `"` or a line break cannot be quoted at all, so a shim whose path or
+ * arguments hold one is refused (null). Refusal applies to shims only.
  */
-export function dbtVersionSpawn(executable: string): { file: string; args: string[]; shell: boolean } | null {
+export function dbtSpawnCommand(
+  executable: string,
+  args: readonly string[],
+): { file: string; args: string[]; shell: boolean } | null {
   if (!/\.(cmd|bat)$/i.test(executable)) {
-    return { file: executable, args: ['--version'], shell: false };
+    return { file: executable, args: [...args], shell: false };
   }
-  if (/["%\r\n]/.test(executable)) { return null; }
-  return { file: `"${executable}"`, args: ['--version'], shell: true };
+  if (CMD_UNQUOTABLE.test(executable) || args.some((a) => CMD_UNQUOTABLE.test(a))) { return null; }
+  const quoteArg = (a: string): string => {
+    if (a !== '' && !CMD_NEEDS_QUOTES.test(a)) { return a; }
+    const trailing = /\\*$/.exec(a)?.[0] ?? '';
+    return `"${a}${trailing}"`;
+  };
+  return { file: `"${executable}"`, args: args.map(quoteArg), shell: true };
+}
+
+/** How to spawn `<executable> --version` ({@link dbtSpawnCommand}). */
+export function dbtVersionSpawn(executable: string): { file: string; args: string[]; shell: boolean } | null {
+  return dbtSpawnCommand(executable, ['--version']);
 }
 
 /**

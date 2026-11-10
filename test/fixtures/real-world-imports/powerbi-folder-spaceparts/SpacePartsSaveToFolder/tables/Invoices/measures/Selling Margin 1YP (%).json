@@ -1,0 +1,13 @@
+{
+  "name": "Selling Margin 1YP (%)",
+  "description": "The selling margin is the margin earned when considering only the revenue and costs associated with the product, before delivery",
+  "expression": [
+    "CALCULATE (",
+    "    [Selling Margin (%)],",
+    "    DATEADD ('Date'[Date], -1, YEAR)",
+    ") "
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "1. Value\\d. Margins\\II. Selling Margin\\%",
+  "lineageTag": "2463193f-b427-4961-b506-cabae06dc450"
+}

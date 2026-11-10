@@ -1,0 +1,15 @@
+{
+  "name": "Doc. Type Ordinal",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "doc_type_ordinal",
+  "displayFolder": "3. Ordinal",
+  "lineageTag": "f010755d-dc7c-4add-8bfd-a679f33ef0e5",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

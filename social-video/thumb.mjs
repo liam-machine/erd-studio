@@ -4,12 +4,15 @@
 // frame), so it needs only a built timeline (tts + timeline), not a capture or an encode.
 //
 //   VARIANT=readme node thumb.mjs                      -> ../docs/assets/how-it-works-play.jpg
-//   VARIANT=readme node thumb.mjs --t 77.2 --out x.jpg  another frame / another file
+//   VARIANT=readme node thumb.mjs --t 40.5 --out x.jpg  another frame / another file
+//   VARIANT=launch node thumb.mjs --plain --out out/x.jpg  a feed poster: the frame itself, undimmed,
+//        with its headline; the caption and chapter bar give way to a brand footer (--sub), no
+//        play button (the feed draws its own)
 //
 // The JPEG quality steps down from 88 until the file is under --max-kb (default 250), because
 // the README serves it through jsDelivr on every page view.
 import { chromium } from 'playwright';
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
@@ -21,13 +24,20 @@ const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 ? dflt : argv[i + 1]; };
 
 const timeline = JSON.parse(readFileSync(join(BUILD, 'timeline.json'), 'utf8'));
-// Default frame: the Diff scene once all three differences are lit (its `lights` beat + 5 s).
-const diff = timeline.scenes.find((s) => s.id === 'diff');
-const T = Number(opt('t', diff ? diff.start + diff.beats.lights.t + 5 : timeline.total / 2));
+// Default frame: a scene can name its poster moment (`props.poster: { beat, offset }` in the
+// script); the README cut picks the canvas with its .dbml file open beneath it. Otherwise the
+// middle of the video.
+// --scene <id> picks that scene's poster moment instead of the first one the script names.
+const SCENE = opt('scene', null);
+const posterScene = timeline.scenes.find((s) => s.props?.poster && (!SCENE || s.id === SCENE));
+const T = Number(opt('t', posterScene
+  ? posterScene.start + posterScene.beats[posterScene.props.poster.beat].t + (posterScene.props.poster.offset ?? 0)
+  : timeline.total / 2));
 const OUT = opt('out', join(HERE, '..', 'docs', 'assets', 'how-it-works-play.jpg'));
 const TITLE = opt('title', 'How ERD Studio works');
-const SUB = opt('sub', 'Logical design, dbt reality, and the diff between them');
+const SUB = opt('sub', 'Your logical data model in Git, stored as DBML');
 const MAX_KB = Number(opt('max-kb', 250));
+const PLAIN = argv.includes('--plain');
 const secs = Math.round(timeline.total);
 const DURATION = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
@@ -39,6 +49,19 @@ await page.goto(`http://127.0.0.1:${server.address().port}/social-video/player/i
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
 await page.evaluate(async () => { await Promise.all([...document.fonts].map((f) => f.load())); await document.fonts.ready; });
 
+if (PLAIN) {
+  await page.evaluate(async ({ t, sub }) => {
+    window.render(t);
+    await Promise.all([...document.images].map((im) => im.decode().catch(() => {})));
+    for (const id of ['caption', 'chapters', 'hud']) document.getElementById(id).style.display = 'none';
+    const o = document.createElement('div');
+    o.style.cssText = 'position:absolute;left:0;right:0;top:1130px;display:flex;justify-content:center;align-items:center;gap:22px;pointer-events:none';
+    o.innerHTML = `<img src="/media/icon.png" width="76" height="76" style="display:block;border-radius:17px;box-shadow:0 8px 24px #0009">
+      <span style="font-size:44px;font-weight:800;letter-spacing:-.02em;color:var(--text);white-space:nowrap">${sub}</span>`;
+    document.body.appendChild(o);
+    await Promise.all([...document.images].map((im) => im.decode().catch(() => {})));
+  }, { t: T, sub: SUB });
+} else {
 await page.evaluate(async ({ t, title, sub, duration }) => {
   window.render(t);
   await Promise.all([...document.images].map((im) => im.decode().catch(() => {})));
@@ -67,7 +90,9 @@ await page.evaluate(async ({ t, title, sub, duration }) => {
   document.body.appendChild(o);
   await Promise.all([...document.images].map((im) => im.decode().catch(() => {})));
 }, { t: T, title: TITLE, sub: SUB, duration: DURATION });
+}
 
+mkdirSync(dirname(OUT), { recursive: true });
 let q = 88, bytes = 0;
 for (; q >= 50; q -= 4) {
   const buf = await page.screenshot({ type: 'jpeg', quality: q, animations: 'disabled', caret: 'hide' });

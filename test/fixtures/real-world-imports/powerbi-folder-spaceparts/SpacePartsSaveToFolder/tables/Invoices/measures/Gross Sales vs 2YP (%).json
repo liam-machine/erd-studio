@@ -1,0 +1,14 @@
+{
+  "name": "Gross Sales vs 2YP (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Gross Sales 2YP]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\III. 2YP\\Daily",
+  "lineageTag": "9362a185-8dd0-41c5-b77a-0b65c6183416"
+}

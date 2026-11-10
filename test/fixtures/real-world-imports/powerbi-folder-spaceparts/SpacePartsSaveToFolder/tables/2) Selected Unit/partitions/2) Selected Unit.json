@@ -1,0 +1,15 @@
+{
+  "name": "2) Selected Unit",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "SELECTCOLUMNS(",
+      "    'Z02CG1 - Unit',",
+      "        \"Select a Unit\", 'Z02CG1 - Unit'[Unit],",
+      "        \"Order\", 'Z02CG1 - Unit'[Ordinal]",
+      ") "
+    ]
+  }
+}

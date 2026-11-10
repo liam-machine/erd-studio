@@ -149,7 +149,7 @@ describe('SubjectAreaService', () => {
 
     it('handles missing files with descriptive error', () => {
       expect(() => service.getSubjectArea('/nonexistent/domain.json')).toThrow(
-        'Subject area file not found'
+        'Diagram file not found'
       );
     });
 
@@ -415,6 +415,27 @@ describe('SubjectAreaService', () => {
       const customer = result.models.find(m => m.name === 'dim_customer');
       const pkCol = customer!.columns.find(c => c.name === 'customer_id');
       expect(pkCol!.isPrimaryKey).toBe(true);
+    });
+
+    it('shows the design\'s fields kept in meta (table and column) and its rationale on the physical stage (A18)', () => {
+      const unified = createUnifiedSubjectArea();
+      const [customer, orders] = unified.logical.models;
+      customer.rationale = { purpose: 'Who buys', decisions: 'One row per person' };
+      customer.meta = { owner: 'crm-team', pii: true };
+      customer.columns![1].meta = { business_rule: 'As typed by the customer' };
+      orders.meta = { owner: 'finance' };
+      const result = service.buildPhysicalSubjectArea(unified, EMPTY_YML_DATA, createManifest());
+
+      const found = result.models.find(m => m.name === 'dim_customer')!;
+      expect(found.rationale).toEqual({ purpose: 'Who buys', decisions: 'One row per person' });
+      expect(found.meta).toEqual({ owner: 'crm-team', pii: true });
+      expect(found.columns.find(c => c.name === 'customer_name')!.meta).toEqual({ business_rule: 'As typed by the customer' });
+      // A column the design does not have (from the manifest) carries none.
+      expect(found.columns.find(c => c.name === 'customer_email')!.meta).toBeUndefined();
+      // A phantom (not in the dbt project) shows them too.
+      expect(result.models.find(m => m.name === 'fct_orders')!.meta).toEqual({ owner: 'finance' });
+      // A table with no meta gets no meta key.
+      expect(Object.keys(service.buildPhysicalSubjectArea(createUnifiedSubjectArea(), EMPTY_YML_DATA, createManifest()).models[0])).not.toContain('meta');
     });
 
     it('emits a model found in no physical source as a phantom rather than dropping it', () => {

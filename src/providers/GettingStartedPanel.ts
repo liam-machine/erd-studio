@@ -1,14 +1,21 @@
 /**
- * GettingStartedPanel — the "Welcome to ERD Studio" webview panel: the
- * getting-started video, a one-line project summary, then a diagram first
- * (Open your diagrams, or Draw from dbt — no AI needed) and the optional AI
- * cards (your AI assistant, set up the AI helper, start the guided setup).
+ * GettingStartedPanel — the "ERD Studio Tour" webview panel (the Welcome tab): the
+ * getting-started video (the tour), a one-line project summary, the optional
+ * AI cards (your AI assistant, set up the AI helper, start the guided setup)
+ * and a **Show Me Around** button (the interactive guide). Draft-first (`docs/dev/draft-first.md`
+ * §10): it holds no start, Convert or "Open your diagrams" card — the draft,
+ * the sidebar and the Convert offer are the starts.
  *
  * A singleton, independent of the domain canvas: it has its own protocol
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
- * bundle. Project-specific behaviour is injected through `GettingStartedDeps`
- * so the panel also opens with no dbt project (`workspaceRoot: null`), where
- * the steps collapse to "Open a folder containing dbt_project.yml".
+ * bundle. Project-specific behaviour is injected through `GettingStartedDeps`.
+ * The page has three states (`GettingStartedPageMode`): no folder open
+ * (`workspaceRoot: null`: "Open the folder your data model lives in", or an
+ * example), a folder without dbt (`logicalOnly`: the AI cards with the guided
+ * setup's no-dbt wording — no dbt text at all), and a dbt project (the
+ * guided setup and the sample project).
+ * The dbt page plays the default cut (the DBML tour plus a short dbt beat); the other two play the logical-first cut
+ * (`GETTING_STARTED_MEDIA`). It autoplays in an open folder.
  *
  * Also home to the host-side pieces the panel and `erdStudio.setupAiHelper`
  * share: AI assistant detection (installed extensions, a PATH scan and the
@@ -25,24 +32,39 @@ import * as vscode from 'vscode';
 
 import {
   GETTING_STARTED_EXTERNAL_URLS,
+  GETTING_STARTED_PASSIVE_TYPES,
   SAMPLE_REPO_CLONE_URL,
   SAMPLE_REPO_URL,
   SAMPLE_REPO_ZIP_URL,
   SETUP_PROMPT,
   buildGettingStartedHtml,
   describeWrittenFiles,
+  gettingStartedPageMode,
   formatProjectSummary,
   isGettingStartedToHost,
   setupReadyMessage,
   type ClaudeAvailability,
+  type GettingStartedPageMode,
   type GettingStartedStatus,
   type GettingStartedToHost,
   type GettingStartedToWebview,
   type ProjectSummary,
   type SetupOutcome,
+  GETTING_STARTED_TAB_TITLE,
+  SHOW_ME_AROUND_COMMAND,
 } from '../types/gettingStarted';
+import {
+  START_ACTION_COMMANDS,
+  startActionArgs,
+  startActionsForIntent,
+  startIntentFor,
+  type StartIntent,
+} from '../types/startActions';
+import { recordStart } from '../commands/start';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
+import { LOGICAL_GETTING_STARTED_CUES, LOGICAL_GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedLogicalTranscript';
 import type { RecommendedInstallResult } from '../types/harness';
+import { describeSkippedAssistantHook } from '../services/assistantHooks';
 import {
   AI_ASSISTANTS,
   detectAssistants,
@@ -52,22 +74,48 @@ import {
 } from '../types/aiAssistants';
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
+import { harnessFailureKeys, hookSkippedFeatures, welcomeFailureCode } from '../services/runtimeTelemetry';
+import { ReadyWatch } from '../services/readyWatch';
 import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
 import { detectConventions, type ConventionModel } from '../cli/conventions';
+import { log } from '../services/logger';
+import { hasDbtProjectFile } from '../services/projectDiscovery';
+import { venvActivateCommand } from '../services/dbtEnv';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
-/** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
-export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
-export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
+export const GETTING_STARTED_TITLE = GETTING_STARTED_TAB_TITLE;
 
-/** Shipped media, relative to the extension root (spec addendum V4/V5). */
+/**
+ * Shipped media, relative to the extension root (spec addendum V4/V5): the
+ * default cut, the DBML tour plus a short dbt beat (`video`, `poster`), for the dbt page, and the logical-first cut
+ * (`logicalVideo`, `logicalPoster`) for the no-folder and logical pages.
+ */
 export const GETTING_STARTED_MEDIA = {
   dir: ['media', 'onboarding'],
   video: 'getting-started.mp4',
   poster: 'getting-started-poster.jpg',
+  logicalVideo: 'getting-started-logical.mp4',
+  logicalPoster: 'getting-started-logical-poster.jpg',
 } as const;
+
+/** The cut, poster, captions and transcript a page plays: the default cut (with its dbt beat) only on the dbt page. */
+export function gettingStartedCut(mode: GettingStartedPageMode): {
+  video: string;
+  poster: string;
+  cues: ReadonlyArray<{ start: number; end: number; text: string }>;
+  transcript: string;
+} {
+  return mode === 'dbt'
+    ? { video: GETTING_STARTED_MEDIA.video, poster: GETTING_STARTED_MEDIA.poster, cues: GETTING_STARTED_CUES, transcript: GETTING_STARTED_TRANSCRIPT }
+    : {
+      video: GETTING_STARTED_MEDIA.logicalVideo,
+      poster: GETTING_STARTED_MEDIA.logicalPoster,
+      cues: LOGICAL_GETTING_STARTED_CUES,
+      transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
+    };
+}
 
 /** Marketplace id of the Claude Code VS Code extension. */
 export const CLAUDE_CODE_EXTENSION_ID = 'anthropic.claude-code';
@@ -139,10 +187,13 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
   if (await gitCloneAvailable()) {
     try {
       await vscode.commands.executeCommand('git.clone', SAMPLE_REPO_CLONE_URL);
+      // The command resolves with nothing to tell a clone from a folder dialog
+      // the user closed, so this counts a git.clone that did not throw.
+      telemetry.feature('trySampleCloned');
       return 'cloned';
     } catch (err) {
       telemetry.error('sampleCloneFailed');
-      console.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
+      log.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
     }
   } else {
     telemetry.feature('trySampleNoGit');
@@ -154,8 +205,10 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     SAMPLE_OPEN_ON_GITHUB_ACTION,
   );
   if (pick === SAMPLE_DOWNLOAD_ZIP_ACTION) {
+    telemetry.feature('trySampleZip');
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_ZIP_URL));
   } else if (pick === SAMPLE_OPEN_ON_GITHUB_ACTION) {
+    telemetry.feature('trySampleGithub');
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_URL));
   }
   return 'fallback';
@@ -166,7 +219,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
 // ---------------------------------------------------------------------------
 
 export interface ProjectSummaryInput {
-  /** `listDraftModels()` — the dbt models Draw from dbt can offer (yml ∪ manifest, minus disabled). */
+  /** `listDraftModels()` — the dbt models Import from dbt can offer (yml ∪ manifest, minus disabled). */
   models: readonly DraftModelEntry[];
   /** For each model's schema (a medallion schema token counts as a layer). */
   manifest?: ManifestData;
@@ -307,37 +360,95 @@ export function detectClaude(): { availability: ClaudeAvailability; command: str
 }
 
 /**
- * How the terminal starts the guided setup. On PATH, `claude "/erd-studio-setup"`
- * is typed into the user's shell — that one line parses the same in bash,
- * zsh, PowerShell and cmd. An absolute path found off PATH is instead run as
- * the terminal's own process (`shellPath` + `shellArgs`), so no shell ever
- * parses it: `& "…"` would be PowerShell-only (a syntax error in cmd and Git
- * Bash) and any quoting would still expand `$` in some shell. `display` is
- * what the confirmation modal shows.
+ * How a terminal starts Claude Code with a first prompt (the guided setup's
+ * `/erd-studio-setup`, or Execute with Claude's sync instruction). The prompt
+ * is always Claude Code's positional initial-prompt argument, never text typed
+ * into its TUI later: a first run in a folder shows the folder-trust prompt
+ * ("No, exit" preselected) first, and typed text would be lost there while
+ * its newline confirmed the highlighted option.
+ *
+ * On PATH, `claude [flags] "<prompt>"` is typed into the user's shell (after
+ * the project venv's activation, when `venvDir` is given). That line parses
+ * the same in bash, zsh, fish, PowerShell and cmd only because the prompt
+ * holds nothing any of them expands inside double quotes
+ * (`isShellNeutralPrompt`). An absolute path found off PATH, or a prompt that
+ * is not shell-neutral, is instead run as the terminal's own process
+ * (`shellPath` + `shellArgs`), so no shell ever parses it: `& "…"` would be
+ * PowerShell-only (a syntax error in cmd and Git Bash) and any quoting would
+ * still expand `$` in some shell. The venv is then applied as the
+ * environment its activation sets. `display` is what the confirmation modal shows.
  */
 export type ClaudeTerminalLaunch =
   | { kind: 'sendText'; display: string; line: string }
-  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[] };
+  | { kind: 'process'; display: string; shellPath: string; shellArgs: string[]; env?: Record<string, string> };
 
-export function claudeTerminalLaunch(command: string, platform: NodeJS.Platform): ClaudeTerminalLaunch {
-  if (command === 'claude') {
-    const line = `claude "${SETUP_PROMPT}"`;
+export interface ClaudeLaunchOptions {
+  /** The initial prompt; defaults to the guided setup's `/erd-studio-setup`. */
+  prompt?: string;
+  /** Flags placed before the prompt, such as `--dangerously-skip-permissions`. */
+  args?: string[];
+  /** A project venv to activate first, so Claude's shell finds the project's dbt. */
+  venvDir?: string | null;
+  /** The `PATH` a process launch extends with the venv's bin folder (default: this process's). */
+  envPath?: string;
+}
+
+/** Characters no shell this extension types into (bash, zsh, fish, PowerShell, cmd) treats specially inside double quotes. */
+const SHELL_NEUTRAL_PROMPT = /^[A-Za-z0-9 _.,:/+=@-]+$/;
+const SHELL_NEUTRAL_FLAG = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+/** Whether `prompt` can be typed as `"<prompt>"` and reach claude unchanged in every shell. */
+export function isShellNeutralPrompt(prompt: string): boolean {
+  return SHELL_NEUTRAL_PROMPT.test(prompt);
+}
+
+export function claudeTerminalLaunch(
+  command: string,
+  platform: NodeJS.Platform,
+  opts: ClaudeLaunchOptions = {},
+): ClaudeTerminalLaunch {
+  const prompt = opts.prompt ?? SETUP_PROMPT;
+  const args = opts.args ?? [];
+  const venvDir = opts.venvDir ?? null;
+  if (command === 'claude' && isShellNeutralPrompt(prompt) && args.every((a) => SHELL_NEUTRAL_FLAG.test(a))) {
+    const claudeLine = ['claude', ...args, `"${prompt}"`].join(' ');
+    const line = venvDir ? `${venvActivateCommand(venvDir, platform)} && ${claudeLine}` : claudeLine;
     return { kind: 'sendText', display: line, line };
   }
-  return { kind: 'process', display: claudeLaunchLine(command, platform), shellPath: command, shellArgs: [SETUP_PROMPT] };
+  const launch: ClaudeTerminalLaunch = {
+    kind: 'process', display: claudeLaunchLine(command, platform, prompt, args), shellPath: command, shellArgs: [...args, prompt],
+  };
+  if (venvDir) {
+    const p = platform === 'win32' ? path.win32 : path.posix;
+    const bin = p.join(venvDir, platform === 'win32' ? 'Scripts' : 'bin');
+    const basePath = opts.envPath ?? process.env.PATH ?? '';
+    launch.env = { VIRTUAL_ENV: venvDir, PATH: basePath ? `${bin}${p.delimiter}${basePath}` : bin };
+  }
+  return launch;
 }
 
 /** The command as the modal shows it: an absolute CLI path quoted for reading, not for a shell. */
-export function claudeLaunchLine(command: string, platform: NodeJS.Platform): string {
+export function claudeLaunchLine(
+  command: string,
+  platform: NodeJS.Platform,
+  prompt: string = SETUP_PROMPT,
+  args: string[] = [],
+): string {
   const exe = command === 'claude'
     ? 'claude'
     : platform === 'win32' ? `"${command}"` : `'${command.replace(/'/g, `'\\''`)}'`;
-  return `${exe} "${SETUP_PROMPT}"`;
+  return [exe, ...args, `"${prompt}"`].join(' ');
 }
 
 // ---------------------------------------------------------------------------
 // Open Claude Code
 // ---------------------------------------------------------------------------
+
+/** "dbt project" in a dbt project, "project" in a folder without one: dbt is named only where it is. */
+function projectNoun(root: string, logicalOnly: boolean | undefined): string {
+  const hasDbt = logicalOnly === undefined ? hasDbtProjectFile(root) : !logicalOnly;
+  return hasDbt ? 'dbt project' : 'project';
+}
 
 /**
  * "Open Claude Code". With the CLI: a modal naming the exact command (the
@@ -345,8 +456,12 @@ export function claudeLaunchLine(command: string, platform: NodeJS.Platform): st
  * `claude` takes the first prompt as an argument, so nothing is typed into
  * its TUI later. With only the VS Code extension: open its panel and put the
  * prompt on the clipboard. With neither: the install page.
+ *
+ * `logicalOnly`: the root has no dbt_project.yml, so the nested-folder note
+ * says "your project" rather than "your dbt project". Omitted, it is read
+ * from disk (`hasDbtProjectFile`, the check `erdStudio.hasDbtProject` and the harness use).
  */
-export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string }): Promise<void> {
+export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: string; logicalOnly?: boolean }): Promise<void> {
   const { availability, command } = detectClaude();
   if (availability === 'cli' && command) {
     const launch = claudeTerminalLaunch(command, process.platform);
@@ -388,7 +503,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
         await vscode.commands.executeCommand(open);
       } catch (err) {
         telemetry.error('claudeOpenFailed');
-        console.warn('[GettingStarted] Could not open Claude Code:', err);
+        log.warn('[GettingStarted] Could not open Claude Code:', err);
       }
     } else {
       // CLAUDE_CODE_OPEN_COMMANDS are best guesses: this says they have gone stale.
@@ -399,16 +514,16 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     const folder = path.basename(opts.dbtRoot);
     if (opts.clipboardText === SETUP_PROMPT) {
       void vscode.window.showInformationMessage(
-        `${lead}Skill not listed? Claude Code must run in your dbt project folder, ${folder}; restart it if it was already open.`,
+        `${lead}Skill not listed? Claude Code must run in your project folder, ${folder}; restart it if it was already open.`,
       );
       return;
     }
     // Nested project: the extension's panel starts in the open workspace
     // folder and cannot be pointed elsewhere, so the only route is to open
-    // the dbt folder itself as the workspace.
+    // the project folder itself as the workspace.
     const OPEN_FOLDER = `Open ${folder}`;
     const pick = await vscode.window.showInformationMessage(
-      `${lead}Your dbt project, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
+      `${lead}Your ${projectNoun(opts.dbtRoot, opts.logicalOnly)}, ${folder}, is a subfolder here, and Claude Code's panel starts in the folder VS Code has open. ` +
         `If the skill isn't listed, open ${folder} itself (File > Open Folder…) and start Claude Code again.`,
       OPEN_FOLDER,
     );
@@ -445,7 +560,7 @@ export const COPILOT_CHAT_OPENED_MESSAGE =
  * still says how to switch. Editors whose chat command takes no argument get
  * a bare open; with no chat command at all, the Copilot setup page.
  */
-export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null }): Promise<void> {
+export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceFolder: string | null; logicalOnly?: boolean }): Promise<void> {
   await vscode.env.clipboard.writeText(SETUP_PROMPT);
   const available = new Set(await vscode.commands.getCommands(true));
   if (!available.has(COPILOT_CHAT_OPEN_COMMAND)) {
@@ -461,13 +576,13 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
       telemetry.feature('copilotChatNoArgs');
     } catch (err) {
       telemetry.error('copilotChatOpenFailed');
-      console.warn('[GettingStarted] Could not open Copilot Chat:', err);
+      log.warn('[GettingStarted] Could not open Copilot Chat:', err);
     }
   }
   const nested = opts.dbtRoot && opts.workspaceFolder
     && path.resolve(opts.dbtRoot) !== path.resolve(opts.workspaceFolder);
   void vscode.window.showInformationMessage(nested
-    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your dbt project, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
+    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your ${projectNoun(opts.dbtRoot!, opts.logicalOnly)}, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
       `Copilot looks for skills in the folder VS Code has open — if the guide isn't found, open ` +
       `${path.basename(opts.dbtRoot!)} itself (File > Open Folder…).`
     : COPILOT_CHAT_OPENED_MESSAGE);
@@ -492,6 +607,8 @@ export interface SetupAiHelperDeps {
   launcherOptions: CliLauncherOptions;
   /** Detected assistants: which skill folders to install (`recommendedSkillTargets`) and whom the message names. */
   assistants: readonly AiAssistantId[];
+  /** The root has no dbt_project.yml: the success message says the guided setup designs the model with the user. */
+  logicalOnly?: boolean;
   /** The Replace / Keep mine modal; undefined when dismissed. */
   confirmReplace(unmanaged: string[], targets: SkillHarnessTarget[]): Promise<ReplaceChoice>;
 }
@@ -550,8 +667,15 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
         ? deps.harness.installRecommended(deps.root, { replaceUnmanaged: true, assistants })
         : deps.harness.installRecommended(deps.root, { replaceUnmanaged: false, keepUnmanaged: true, assistants });
     }
+    // AI helper hooks left out on purpose: why, and for which tool (B16; presence flags).
+    for (const key of hookSkippedFeatures(result.skippedHooks)) telemetry.featureOnce(key);
     if (result.status === 'failed' || result.status === 'needs-confirmation') {
       telemetry.error('setupHarnessFailed');
+      if (result.status === 'failed') {
+        const keys = harnessFailureKeys(result.failedTarget, result.errno);
+        for (const code of keys.errors) telemetry.error(code);
+        for (const key of keys.features) telemetry.feature(key);
+      }
       return {
         ok: false,
         filesWritten: result.filesWritten,
@@ -577,12 +701,16 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
       };
     }
     telemetry.feature('setupAiHelper');
+    // A safety check left out on purpose (a commented settings file, a script of the user's own) is said once, in plain words.
+    const skipped = (result.skippedHooks ?? []).map(describeSkippedAssistantHook).join(' ');
+    const ready = setupReadyMessage(assistants, { logicalOnly: deps.logicalOnly });
+    const message = result.status === 'unchanged' && filesWritten.length === 0
+      ? `Everything was already up to date. ${ready}`
+      : ready;
     return {
       ok: true,
       filesWritten,
-      message: result.status === 'unchanged' && filesWritten.length === 0
-        ? `Everything was already up to date. ${setupReadyMessage(assistants)}`
-        : setupReadyMessage(assistants),
+      message: skipped ? `${message} ${skipped}` : message,
     };
   } catch (err) {
     telemetry.error('setupFailed');
@@ -608,13 +736,35 @@ export interface GettingStartedDeps {
   clipboardText(assistant?: AiAssistantId): string;
   /** The first workspace folder, for the nested-project hint in "Open Copilot Chat". */
   workspaceFolder?: string | null;
-  /** Open a domain canvas, or start the first one. */
-  openCanvas(): Promise<void>;
   /**
    * The one-line project summary (`computeProjectSummary`). Optional: without
-   * it, or when it throws, the line is simply not shown.
+   * it, or when it throws, the line is simply not shown. Never asked for in
+   * the logical-only state (it describes dbt models).
    */
   getProjectSummary?(): Promise<ProjectSummary | null>;
+  /**
+   * The start the folder suggests, from the host's `StartIntentTracker`:
+   * `known()` at once (the first status), `refresh()` after the bounded look
+   * at the folder (a second status when it changed the suggestion).
+   * Optional: without it, the suggestion comes from the status alone
+   * (Convert, Import from dbt or a blank diagram; no look).
+   */
+  startIntent?: {
+    known(): StartIntent | undefined;
+    refresh(): Promise<StartIntent | undefined>;
+  };
+  /**
+   * The open folder has no `dbt_project.yml` (contract 9): the page shows its
+   * logical-only state. Used as the status's `logicalOnly` when `getStatus()`
+   * does not set it, and to pick the first page before any status arrives.
+   * Absent: a dbt project, as before logical-only mode.
+   */
+  logicalOnly?: boolean;
+}
+
+/** The page the panel expects from its deps alone (a `status` can still change it). */
+export function pageModeForDeps(deps: Pick<GettingStartedDeps, 'workspaceRoot' | 'logicalOnly'>): GettingStartedPageMode {
+  return gettingStartedPageMode({ hasProject: deps.workspaceRoot !== null, logicalOnly: deps.logicalOnly });
 }
 
 export class GettingStartedPanel {
@@ -627,6 +777,11 @@ export class GettingStartedPanel {
   private statusSeq = 0;
   /** Setups in flight from this panel; no status is posted meanwhile (it would re-enable the button). */
   private setupsRunning = 0;
+  /** The viewer chose something on the page (any message but the page's own: `GETTING_STARTED_PASSIVE_TYPES`). */
+  private choseSomething = false;
+  private disposed = false;
+  /** Did the page come up (2.0 B13)? Timed while the panel is visible. */
+  private readonly readyWatch: ReadyWatch;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -661,30 +816,43 @@ export class GettingStartedPanel {
     deps: GettingStartedDeps,
   ) {
     this.deps = deps;
-    panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri);
+    panel.webview.html = GettingStartedPanel.renderHtml(panel.webview, extensionUri, pageModeForDeps(deps));
+    this.readyWatch = new ReadyWatch(panel.visible !== false, {
+      ready: (slow) => {
+        telemetry.feature('welcomePanelReady');
+        if (slow) telemetry.feature('readySlowOver10s');
+      },
+      noReady: () => telemetry.error('webviewNoReadyWelcome'),
+    });
     this.disposables.push(
+      panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
           telemetry.error('welcomePanelFailed');
-          console.error('[GettingStarted] Message handler failed:', err);
+          // Which button broke (B18): the message type, mapped to a fixed code.
+          telemetry.error(welcomeFailureCode(isGettingStartedToHost(message) ? message.type : undefined));
+          log.error('[GettingStarted] Message handler failed:', err);
         });
       }),
       panel.onDidDispose(() => this.dispose()),
     );
   }
 
-  private static renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  private static renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri, mode: GettingStartedPageMode): string {
     const media = (file: string): string | null => {
       const uri = vscode.Uri.joinPath(extensionUri, ...GETTING_STARTED_MEDIA.dir, file);
       return fs.existsSync(uri.fsPath) ? webview.asWebviewUri(uri).toString() : null;
     };
+    // The mode is fixed for the window (dbt or not is decided at activation), so the cut is picked once.
+    const cut = gettingStartedCut(mode);
     return buildGettingStartedHtml({
       cspSource: webview.cspSource,
       nonce: crypto.randomBytes(16).toString('base64'),
-      videoUri: media(GETTING_STARTED_MEDIA.video),
-      posterUri: media(GETTING_STARTED_MEDIA.poster),
-      cues: GETTING_STARTED_CUES,
-      transcript: GETTING_STARTED_TRANSCRIPT,
+      videoUri: media(cut.video),
+      posterUri: media(cut.poster),
+      cues: cut.cues,
+      transcript: cut.transcript,
+      mode,
     });
   }
 
@@ -698,20 +866,47 @@ export class GettingStartedPanel {
     // fresh status postSetupResult sends when it ends is the one that counts.
     const current = (): boolean => seq === this.statusSeq && this.setupsRunning === 0;
     try {
-      const status = await this.deps.getStatus();
+      const fetched = await this.deps.getStatus();
       if (!current()) { return; }
-      // The cards go out at once; the summary line can need a manifest parse
-      // (seconds on a large project), so it follows in a second status when
-      // there is one, rather than holding the whole panel back. That second
-      // message is dropped if a newer postStatus (or a setup) started while
-      // the summary was being worked out — its `status` would be stale.
+      const logicalOnly = fetched.hasProject && (fetched.logicalOnly ?? this.deps.logicalOnly === true);
+      const tracker = fetched.hasProject ? this.deps.startIntent : undefined;
+      // What the folder suggests (the same rule the walkthrough and the sidebar follow); no storage reads as dbml.
+      const intentNow: StartIntent | undefined = !fetched.hasProject
+        ? undefined
+        : tracker?.known() ?? startIntentFor({
+          hasProject: true, hasDbt: !logicalOnly, storage: fetched.storage, hasDiagrams: fetched.domainCount > 0,
+        });
+      const withIntent = (intent: StartIntent | undefined): GettingStartedStatus => {
+        const s: GettingStartedStatus = { ...fetched, logicalOnly, starts: startActionsForIntent(intent, fetched.hasProject && !logicalOnly) };
+        if (intent) { s.intent = intent; }
+        return s;
+      };
+      // The cards go out at once. Two things can follow in a second status
+      // rather than hold the whole panel back: the bounded look at the folder
+      // (it can change the suggestion), and the summary line, which can need
+      // a manifest parse (seconds on a large project). That second message is
+      // dropped if a newer postStatus (or a setup) started meanwhile — its
+      // `status` would be stale.
+      const status = withIntent(intentNow);
       this.post({ type: 'status', payload: { ...status, summary: null } });
-      if (!status.hasProject) { return; }
-      const summary = await this.projectSummary();
-      if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
+      // No suggestion is shown here any more (no start card): nothing is counted as suggested.
+      const wantsSummary = gettingStartedPageMode(status) === 'dbt';
+      if (!tracker) {
+        if (!wantsSummary) { return; }
+        const summaryOnly = await this.projectSummary();
+        if (summaryOnly && current()) { this.post({ type: 'status', payload: { ...status, summary: summaryOnly } }); }
+        return;
+      }
+      const [intent, summary] = await Promise.all([
+        tracker.refresh().catch(() => intentNow),
+        wantsSummary ? this.projectSummary() : Promise.resolve(null),
+      ]);
+      if (!current()) { return; }
+      if (intent !== intentNow || summary) { this.post({ type: 'status', payload: { ...withIntent(intent), summary } }); }
     } catch (err) {
       telemetry.error('welcomePanelFailed');
-      console.error('[GettingStarted] Status check failed:', err);
+      telemetry.error('welcomeFailedStatus');
+      log.error('[GettingStarted] Status check failed:', err);
     }
   }
 
@@ -721,7 +916,7 @@ export class GettingStartedPanel {
     try {
       return await this.deps.getProjectSummary();
     } catch (err) {
-      console.warn('[GettingStarted] Project summary unavailable:', err);
+      log.warn('[GettingStarted] Project summary unavailable:', err);
       return null;
     }
   }
@@ -740,7 +935,8 @@ export class GettingStartedPanel {
 
   /** Show a setup outcome (from the panel's button or the palette command) and refresh the cards. */
   async postSetupResult(outcome: SetupOutcome): Promise<void> {
-    this.post({ type: 'setupResult', payload: { ...outcome, groups: describeWrittenFiles(outcome.filesWritten) } });
+    const groups = describeWrittenFiles(outcome.filesWritten, { logicalOnly: this.deps.logicalOnly === true });
+    this.post({ type: 'setupResult', payload: { ...outcome, groups } });
     await this.postStatus();
   }
 
@@ -768,13 +964,15 @@ export class GettingStartedPanel {
   /** Every `GettingStartedToHost` type is handled here; anything else is warned about and ignored. */
   async handleMessage(message: unknown): Promise<void> {
     if (!isGettingStartedToHost(message)) {
-      console.warn('[GettingStarted] Ignoring unknown message:', message);
+      log.warn('[GettingStarted] Ignoring unknown message:', message);
       return;
     }
     const msg: GettingStartedToHost = message;
+    if (!GETTING_STARTED_PASSIVE_TYPES.includes(msg.type)) { this.choseSomething = true; }
     switch (msg.type) {
       case 'ready':
       case 'refreshStatus':
+        if (msg.type === 'ready') { this.readyWatch.ready(); }
         await this.postStatus();
         break;
       case 'setupAiHelper':
@@ -787,23 +985,29 @@ export class GettingStartedPanel {
       case 'openClaude':
         telemetry.feature('openClaude');
         if (this.deps.workspaceRoot && await this.helperInstalledOrOffer()) {
-          await openClaudeCode({ dbtRoot: this.deps.workspaceRoot, clipboardText: this.deps.clipboardText('claude') });
+          await openClaudeCode({
+            dbtRoot: this.deps.workspaceRoot,
+            clipboardText: this.deps.clipboardText('claude'),
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
       case 'openCopilotChat':
         telemetry.feature('openCopilotChat');
         if (await this.helperInstalledOrOffer()) {
-          await openCopilotChat({ dbtRoot: this.deps.workspaceRoot, workspaceFolder: this.deps.workspaceFolder ?? null });
+          await openCopilotChat({
+            dbtRoot: this.deps.workspaceRoot,
+            workspaceFolder: this.deps.workspaceFolder ?? null,
+            logicalOnly: this.deps.logicalOnly === true,
+          });
         }
         break;
-      case 'openDomain':
-        telemetry.feature('welcomeOpenDiagram');
-        await this.deps.openCanvas();
-        break;
-      case 'drawFromDbt':
-        telemetry.feature('welcomeDrawFromDbt');
-        await vscode.commands.executeCommand(DRAW_FROM_DBT_COMMAND);
-        // The draft opens in its own tab; this one should now lead with "Open your diagrams".
+      case 'start':
+        recordStart(msg.action, 'welcome');
+        // A fixed command per start (never an id from the webview), with a fixed argument:
+        // a direct import's quick path, nothing for the others.
+        await vscode.commands.executeCommand(START_ACTION_COMMANDS[msg.action], ...startActionArgs(msg.action));
+        // A new diagram opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();
         break;
       case 'openExternal':
@@ -817,20 +1021,30 @@ export class GettingStartedPanel {
         break;
       case 'videoError':
         telemetry.feature('videoError');
-        console.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
+        log.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
         break;
       case 'videoProgress':
         telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
         break;
+      case 'showMeAround':
+        // The fixed command (never one from the webview); it counts its own use.
+        await vscode.commands.executeCommand(SHOW_ME_AROUND_COMMAND);
+        break;
       default: {
         const unhandled: never = msg;
-        console.warn('[GettingStarted] Unhandled message:', unhandled);
+        log.warn('[GettingStarted] Unhandled message:', unhandled);
       }
     }
   }
 
   dispose(): void {
+    this.readyWatch.dispose();
     if (GettingStartedPanel.current === this) { GettingStartedPanel.current = undefined; }
+    if (!this.disposed) {
+      this.disposed = true;
+      // Closed without choosing anything (a start, Open your diagrams, the AI steps, a link): the bounce signal.
+      if (!this.choseSomething) { telemetry.feature('welcomeLeftNoChoice'); }
+    }
     while (this.disposables.length) {
       try {
         this.disposables.pop()?.dispose();

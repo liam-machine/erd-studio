@@ -1,0 +1,14 @@
+Table arrangement.account_party_role [
+  grain: 'One row per party per account per role',
+  owner: 'data-architecture'
+] {
+  Note: 'Who holds, shares or guarantees each account: an account can have joint owners, and a person can hold many accounts (many-to-many).'
+
+  account_id BIGINT [foreign_key: 'true']
+  party_id   BIGINT [foreign_key: 'true']
+  role_code  STRING [note: 'owner, joint_owner, guarantor, signatory']
+  valid_from DATE
+  indexes {
+    (account_id, party_id, role_code) [pk]
+  }
+}

@@ -1,0 +1,9 @@
+Table silver.payments [grain: 'One row per Stripe charge'] {
+  Note: 'Payments from Stripe, in dollars.'
+
+  payment_id  STRING          [pk, natural_key: 'true', note: 'The Stripe charge id']
+  customer_id BIGINT          [foreign_key: 'true', note: 'Matched through silver customers']
+  amount      "DECIMAL(12,2)" [note: 'In AUD, converted from cents']
+  status      STRING
+  paid_at     TIMESTAMP
+}

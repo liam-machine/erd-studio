@@ -1,0 +1,20 @@
+{
+  "name": "Net Invoice COGS",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "net_invoice_cogs",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "ef6eafe9-cb4f-4a7f-a28f-1a00be6f86a2",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

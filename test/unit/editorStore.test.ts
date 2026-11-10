@@ -292,6 +292,46 @@ describe('editorStore discrepancy and sync', () => {
   });
 });
 
+describe('editorStore logical-only mode (no dbt project)', () => {
+  it('starts off, so an older host that never sends the flag keeps the Physical stage', () => {
+    expect(state().logicalOnly).toBe(false);
+  });
+
+  it('turning it on drops Diff, the report and every piece of sync state', () => {
+    state().setDomain(subjectArea('logical'));
+    startSyncSession();
+
+    state().setLogicalOnly(true);
+
+    const s = state();
+    expect(s.logicalOnly).toBe(true);
+    expect(s.discrepancyVisible).toBe(false);
+    expect(s.discrepancyCompareStage).toBeNull();
+    expect(s.discrepancyReport).toBeNull();
+    expect(s.syncMode).toBe(false);
+    expect(s.syncSelections).toEqual({});
+    expect(s.manifestStale).toBe(false);
+    expect(s.syncPlanGenerated).toBeNull();
+  });
+
+  it('turning it off touches nothing else', () => {
+    state().setLogicalOnly(true);
+    startSyncSession();
+    state().setLogicalOnly(false);
+    const s = state();
+    expect(s.logicalOnly).toBe(false);
+    expect(s.discrepancyVisible).toBe(true);
+    expect(s.syncMode).toBe(true);
+  });
+
+  it('setDomain leaves it alone (it also runs locally after a drag)', () => {
+    state().setLogicalOnly(true);
+    state().setDomain(subjectArea('logical'));
+    state().setDomain(subjectArea('logical', { description: 'reloaded' }));
+    expect(state().logicalOnly).toBe(true);
+  });
+});
+
 describe('editorStore column expansion', () => {
   it('expandAll / toggle / expandNew / collapseAll / setExpandedNodes', () => {
     const s = state();
@@ -458,7 +498,6 @@ describe('editorStore transient interaction state', () => {
     s.setViewport({ x: 10, y: 20, zoom: 2 });
     s.setToastMessage('Saved');
     s.setLegendOpen(true);
-    s.setWelcomeModalOpen(true);
     s.setNewModelDialogOpen(true);
     s.setAddExistingModelDialogOpen(true);
     s.setEditingAnnotationId('note-1');
@@ -469,7 +508,6 @@ describe('editorStore transient interaction state', () => {
     expect(after.viewport).toEqual({ x: 10, y: 20, zoom: 2 });
     expect(after.toastMessage).toBe('Saved');
     expect(after.legendOpen).toBe(true);
-    expect(after.welcomeModalOpen).toBe(true);
     expect(after.newModelDialogOpen).toBe(true);
     expect(after.addExistingModelDialogOpen).toBe(true);
     expect(after.editingAnnotationId).toBe('note-1');

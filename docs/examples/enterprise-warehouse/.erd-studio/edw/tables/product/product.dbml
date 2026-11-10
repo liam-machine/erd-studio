@@ -1,0 +1,12 @@
+Table product.product [
+  grain: 'One row per product or product family',
+  owner: 'data-architecture'
+] {
+  Note: 'Products and the families they belong to (a product points at its family in the same table).'
+
+  product_id        BIGINT [pk]
+  product_code      STRING [natural_key: 'true']
+  product_name      STRING
+  product_type      STRING [note: 'transaction, savings, home_loan, credit_card']
+  parent_product_id BIGINT [foreign_key: 'true', note: 'The product family']
+}

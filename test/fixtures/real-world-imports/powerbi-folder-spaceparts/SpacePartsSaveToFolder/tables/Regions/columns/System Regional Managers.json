@@ -1,0 +1,14 @@
+{
+  "name": "System Regional Managers",
+  "dataType": "string",
+  "sourceColumn": "system_regional_managers",
+  "displayFolder": "3. Managers",
+  "lineageTag": "b59ca628-8da1-4052-aa67-ab015c55aaa1",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "# Accounts",
+  "expression": "1",
+  "formatString": "#,##0.00",
+  "displayFolder": "Measures\\Numbers",
+  "lineageTag": "be41049e-f8e5-48dd-8d7f-9c14dd274b1a"
+}

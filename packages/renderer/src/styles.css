@@ -20,7 +20,10 @@
 @import './components/common/KeyBadgeGroup.css';
 @import './components/common/ColumnRowEditor.css';
 @import './components/DetailPanel/BulkColumnActions.css';
+@import './components/DetailPanel/FieldsSection.css';
 @import './components/DetailPanel/ColumnEditor.css';
 @import './components/DetailPanel/DetailPanel.css';
 @import './components/Legend/Legend.css';
+@import './components/StatusBar/StatusBar.css';
 @import './styles/theme.css';
+@import './canvas/EdgeRouting.css';

@@ -12,7 +12,9 @@
 import type {
   DisplaySubjectArea,
   DisplayTable,
+  LayerConfig,
   Meta,
+  Rationale,
 } from '@erd-studio/core';
 import type {
   DiscrepancyReport,
@@ -25,9 +27,11 @@ import type {
   AnnotationFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
+import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeTableLabels } from './modelLabels';
+import { isSingleLayerProject } from './layerCues';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -65,6 +69,13 @@ export interface TransformOptions {
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 const hasMeta = (meta: Meta | undefined): meta is Meta => !!meta && Object.keys(meta).length > 0;
+
+/** Whether any rationale-home field (every catalogue text field, retired ones included) has text. */
+const hasRationaleText = (rationale: Rationale | undefined): boolean =>
+  !!rationale && RATIONALE_FIELD_KEYS.some((key) => {
+    const text = (rationale as Record<string, unknown>)[key];
+    return typeof text === 'string' && text.trim() !== '';
+  });
 
 /**
  * Convert a DisplayTable's columns to ColumnDisplay[].
@@ -181,6 +192,10 @@ export function transformSubjectArea(
   // --- Nodes ---------------------------------------------------------------
 
   const labels = computeTableLabels(models);
+  // One layer in the project: the per-table layer badge and strip are left off.
+  const singleLayer = isSingleLayerProject(domain);
+  const layerConfigOf = (id: string): LayerConfig | undefined =>
+    domain.layerConfigs?.find((l) => l.id === id) ?? (id === layer ? layerConfig : undefined);
   const nodes: (TableFlowNode | AnnotationFlowNode)[] = models.map((model) => {
     const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
@@ -197,9 +212,20 @@ export function transformSubjectArea(
         layer,
         layerConfig,
         ...(model.schema ? { schema: model.schema } : {}),
+        // A table's own layer (DBML storage): its badge and strip.
+        ...(model.layer ? {
+          tableLayer: model.layer,
+          ...(layerConfigOf(model.layer) ? { tableLayerConfig: layerConfigOf(model.layer) } : {}),
+          ...(model.layer !== layer ? { otherLayer: true as const } : {}),
+        } : {}),
+        // The schema prefix, on every stage, whenever the schema is not the
+        // badge's layer (the table's own, else the diagram's).
+        ...(model.schema && model.schema.toLowerCase() !== (model.layer ?? layer ?? '').toLowerCase() ? { shownSchema: model.schema } : {}),
+        ...(singleLayer ? { singleLayer: true as const } : {}),
+        ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== model.name.toLowerCase() ? { alias: model.alias.trim() } : {}),
         columns,
         isStub: domain.stubColumns?.includes(model.name) ?? false,
-        ...(model.rationale && (model.rationale.purpose || model.rationale.design || model.rationale.grainChoice || model.rationale.roleChoice || model.rationale.scdStrategy || model.rationale.measures) ? { hasRationale: true } : {}),
+        ...(hasRationaleText(model.rationale) ? { hasRationale: true } : {}),
         ...(model.grain ? { grain: model.grain } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         ...(hasMeta(model.meta) ? { meta: model.meta } : {}),
@@ -250,6 +276,7 @@ export function transformSubjectArea(
             stage,
             layer,
             layerConfig,
+            ...(singleLayer ? { singleLayer: true as const } : {}),
             columns: [],
             isStub: false,
             isGhost: true,

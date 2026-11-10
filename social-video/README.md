@@ -8,16 +8,20 @@ never publishes a release), and no build, tsconfig or test run refers to it.
 |---|---|---|---|---|
 | **pro** | `pro` (default) | `script.yaml`, `SCENES.md`, `player/scenes/*.js` | data engineers: logical vs physical, dbt, YAML/JSON, Diff, PRs | ~121 s |
 | **simple** | `simple` | `script.simple.yaml`, `SCENES.simple.md`, `player/scenes/simple/*.js` | anyone: no jargon, one analogy (blueprints in a different city to the building site) | ~85 s |
-| **readme** | `readme` | `script.readme.yaml`, the pro cut's scenes | README visitors: "How ERD Studio works" — the pro story without the social-only scenes (Confluence, "not on dbt?", launch traction, "link in the comments") | ~102 s |
+| **readme** | `readme` | `script.readme.yaml`, `SCENES.readme.md`, `player/scenes/readme/*.js` | README visitors: "How ERD Studio works" — an argument, then a tour. ERD Studio is a free-to-use VS Code extension; why keep the data model in a separate tool or remote database, versioned apart from the code, when it can be DBML files (an open format) next to that code, reviewed in the same PR? Then the layer-first `.dbml` files, editing either side, a `.dbml` diff in a PR, the imports that build the logical model (DBML, SQL DDL incl. DDL exported from Snowflake or Databricks, Power BI or Fabric, Import from dbt, the import guide — official logos) and the draft, Set Up My AI Helper, shown where it lives in the ERD Studio sidebar (Help & Feedback; a markdown skill for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; in Claude Code, GitHub Copilot, Codex and Gemini CLI a pre-tool hook), then, if you use dbt (the first physical source, more to follow), dbt parse → `manifest.json` → Compare with dbt, and ERD Studio for Confluence reading the GitHub repo as the single source of truth. **Voice only**, no music | ~187 s |
+| **launch** | `launch` | `script.launch.yaml`, `SCENES.launch.md`, `player/scenes/launch/*.js`, `scale-clip.mjs` | the 2.0 LinkedIn post, the pro cut's arc with 2.0 facts: THE PROBLEM (built backwards, drift, an AI that guesses), THE FIX (DBML in the repo, the canvas, by hand or with your AI, a real 2,000-table `ErdCanvas` take with the hover flow and no seconds on screen, one PR, ERD Studio for Confluence), GET STARTED (every source on one logo wall, the DDL out in one step, a draft, dbt Compare). **Voice only**. `npm run all:launch`, `qa:launch`, `thumb:launch` (poster: the hover; second still: the wall) | ~140 s |
 
 `VARIANT` selects the script, the build folder (`build/` or `build-simple/`) and the output
-names (`erd-studio-explainer[-simple].*`). Both cuts share the player, `lib.js`, the voice, the
-music, and the `stars` and `endCard` scenes (a script can pass `props`, e.g. the end card's
-tagline). Finished renders are kept, gitignored, in `renders/` (see below).
+names (`erd-studio-explainer[-simple].*`). The cuts share the player, `lib.js`, the voice and
+the `stars` and `endCard` scenes (a script can pass `props`, e.g. the end card's tagline); the
+LinkedIn cuts (pro, simple) also share the music. A script with `music: false` (the README cut) is voice only: `music.py` writes no bed
+and removes a stale one, and `encode.sh` mixes none, normalising the voice alone to −14 LUFS and
+failing if the track has no quiet gaps between lines (which a music bed would fill). Finished renders are kept, gitignored, in `renders/` (see below).
 
-It is the getting-started video's pipeline ([`../video/`](../video/README.md): same Kokoro `af_heart` voice, same synthesised
-underscore `music/synth_music.py`, same pure `render(t)` player captured frame by frame with
-Playwright), re-laid out for a phone feed:
+It is the getting-started video's pipeline ([`../video/`](../video/README.md): same Kokoro `af_heart` voice, same pure
+`render(t)` player captured frame by frame with Playwright), re-laid out for a phone feed; the
+LinkedIn cuts add the synthesised underscore `music/synth_music.py` (the getting-started video
+and the README cut are voice only):
 
 - **Portrait frame** — `FRAME` in `player/lib.js`: headline on top, scene content in
   `FRAME.stage` (y 300–1090), burned-in captions (y 1112–1232), chapter bar at the bottom.
@@ -32,6 +36,9 @@ Playwright), re-laid out for a phone feed:
 
 The narration is `script.yaml`; the per-scene direction is `SCENES.md`; the example every scene
 uses (tables, YAML, JSON, drift, PR) is `STORY` in `player/lib.js`, in the real v5 file formats.
+The README cut tells its own story in the 2.0 format: its example (a gold layer, `dim_customer`,
+`fct_order`, the `sales` diagram, in the DBML layout ERD Studio writes) is `R` and the file
+excerpts in `player/scenes/readme/story.js`.
 
 ## Render
 
@@ -59,17 +66,20 @@ Outputs, in `out/` (gitignored; `-simple` for the plain cut):
 ## The README cut
 
 `VARIANT=readme` is the only cut that is committed: the README embeds it from
-`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**; ~13 MB now)
+`docs/assets/how-it-works.mp4` (served by jsDelivr, so it must stay **under 18 MB**, which `npm run size:readme` checks; the 3:07 cut is 17.6 MB (`size:readme` counts 1 MB as 10⁶ bytes), so only ~0.4 MB is left: trim a hold or drop the readme cut to CRF 20 before lengthening it. It is encoded at CRF 19 with 128 kb/s AAC — `all:readme` passes `CRF=19 ABR=128k` to `encode.sh`, whose defaults stay CRF 17 and 192k for the LinkedIn cuts)
 behind the poster `docs/assets/how-it-works-play.jpg`.
 
 ```bash
-npm run readme        # all:readme, copy the mp4 into docs/assets/, then thumb:readme
+npm run readme        # all:readme, copy the mp4 into docs/assets/, size:readme, then thumb:readme
+npm run size:readme   # fails if docs/assets/how-it-works.mp4 is 18 MB or more
 npm run qa:readme     # contact sheet + A/V onset check, as for the other cuts
 npm run thumb:readme  # just the poster (needs only tts + timeline)
+node confluence-shot.mjs  # re-render player/assets/confluence-sales.png and confluence-sales-before.png (the Confluence scene's diagram, after and before its commit)
 ```
 
-`thumb.mjs` renders the poster in the player page itself: the Diff scene once all three
-differences are lit (`--t` picks another time), the headline, caption and chapter chrome hidden,
+`thumb.mjs` renders the poster in the player page itself: the frame a scene names with
+`props.poster: { beat, offset }` in the script (the README cut: the canvas with its `.dbml` file
+open beneath it; `--t` picks another time), the headline, caption and chapter chrome hidden,
 the scene dimmed, then the title, a play button dead centre and the real running time from
 `timeline.json`. The JPEG quality steps down until the file is under 250 KB (`--max-kb`).
 `--out`, `--title` and `--sub` override the rest. Re-run it whenever the cut's length changes.
@@ -84,4 +94,6 @@ is 10–15 MB and git would keep every version for ever).
 
 As for the getting-started video: Kokoro-82M (Apache-2.0), espeak-ng (GPL-3.0, build-time tool
 only), Inter and JetBrains Mono (OFL 1.1, `player/fonts/OFL.txt`), Playwright (Apache-2.0),
-yaml (ISC). The underscore is generated by `music/synth_music.py`, the maintainer's own.
+yaml (ISC). The underscore is generated by `music/synth_music.py`, the maintainer's own. The
+README cut's third-party logos (Power BI, SQL Server, the SQL dialects, dbt, Confluence, GitHub)
+are listed with their sources and terms in `player/assets/logos/LOGOS.md`.

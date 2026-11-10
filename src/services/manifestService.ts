@@ -26,6 +26,7 @@ import {
 } from './dbtProjectConfig';
 import { normaliseName } from './nameUtils';
 import { extractManifestData } from '../workers/manifestExtractor';
+import { log } from './logger';
 
 /** Default upper bound for a single worker parse before it is abandoned. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
@@ -43,6 +44,9 @@ export class ManifestMissingError extends Error {
 }
 
 /** A worker parse ran past {@link ManifestServiceOptions.parseTimeoutMs} and was abandoned. */
+/** Why a manifest load served stale data: see {@link ManifestService.staleReason}. */
+export type ManifestStaleReason = 'midWrite' | 'malformed' | 'timeout';
+
 export class ManifestParseTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Manifest parse timed out after ${timeoutMs}ms`);
@@ -70,6 +74,13 @@ export interface ManifestServiceOptions {
    * host counts these for usage telemetry; other callers leave it unset.
    */
   onLoadFailure?: (failure: ManifestLoadFailure) => void;
+  /**
+   * False when the open root has no `dbt_project.yml` (logical-only mode):
+   * every load answers an empty, non-missing manifest without touching the
+   * disk, and `onLoadFailure` is never told — there is no manifest to miss.
+   * Defaults to true.
+   */
+  enabled?: boolean;
 }
 
 /** Reconstruct Maps and Sets from the worker's plain-object result. */
@@ -95,6 +106,12 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
       Object.values(raw.resourceDocs ?? {}).map((info) => [normaliseName(info.name), info]),
     ),
     ...(raw.compositeForeignKeys ? { compositeForeignKeys: raw.compositeForeignKeys } : {}),
+    ...(raw.placeholderProfile === true ? { placeholderProfile: true } : {}),
+    ...(raw.notNullColumns
+      ? { notNullColumns: new Map(Object.entries(raw.notNullColumns).map(([model, cols]) => [model, new Set(cols)])) }
+      : {}),
+    ...(raw.sourceRelationshipTests ? { sourceRelationshipTests: raw.sourceRelationshipTests } : {}),
+    ...(raw.sources ? { sources: raw.sources } : {}),
   };
 }
 
@@ -110,6 +127,7 @@ export class ManifestService {
   private readonly parseTimeoutMs: number;
   private readonly parseInProcess: boolean;
   private readonly onLoadFailure?: (failure: ManifestLoadFailure) => void;
+  private readonly enabled: boolean;
 
   constructor(options: ManifestServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
@@ -123,6 +141,7 @@ export class ManifestService {
     this.parseTimeoutMs = options.parseTimeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS;
     this.parseInProcess = options.parseInProcess === true;
     this.onLoadFailure = options.onLoadFailure;
+    this.enabled = options.enabled !== false;
   }
 
   /**
@@ -141,6 +160,22 @@ export class ManifestService {
   }
 
   /**
+   * Why the most recent loadManifest() was stale (#263), or null when it was
+   * not: `midWrite` — it parsed but listed no models where the last good one
+   * had some (dbt part-way through writing it); `malformed` — it is not valid
+   * JSON; `timeout` — it took longer to read than ERD Studio allows.
+   */
+  private _staleReason: ManifestStaleReason | null = null;
+  get staleReason(): ManifestStaleReason | null {
+    return this._staleReason;
+  }
+
+  /** Whether an earlier good manifest is being shown in place of an unreadable one (#263). */
+  get hasLastKnownGood(): boolean {
+    return this.lastKnownGood !== null;
+  }
+
+  /**
    * True when the most recent loadManifest() found no manifest.json on disk.
    * Distinct from isStale: a missing file is definitive (not mid-write), so
    * no fallback data is served and no retry is scheduled.
@@ -148,6 +183,14 @@ export class ManifestService {
   private _isMissing = false;
   get isMissing(): boolean {
     return this._isMissing;
+  }
+
+  /**
+   * Whether the last good load was written by Parse without your
+   * credentials (its schemas are placeholders, blanked on load).
+   */
+  get placeholderProfile(): boolean {
+    return this.lastKnownGood?.placeholderProfile === true;
   }
 
   /** Absolute path of the manifest this service reads for `projectPath`. */
@@ -164,6 +207,12 @@ export class ManifestService {
    */
   async loadManifest(projectPath: string): Promise<ManifestData> {
     if (this.cache) {
+      return this.cache;
+    }
+
+    // Logical-only (no dbt_project.yml): nothing to read and nothing missing.
+    if (!this.enabled) {
+      this.cache = this.emptyManifest();
       return this.cache;
     }
 
@@ -187,18 +236,20 @@ export class ManifestService {
           this.lastKnownGood &&
           this.lastKnownGood.models.size > 0
         ) {
-          console.warn(
+          log.warn(
             '[ManifestService] Parse returned 0 models (previously had data). ' +
             'File likely mid-write. Returning last known good data.',
           );
           this.cache = this.lastKnownGood;
           this._isStale = true;
+          this._staleReason = 'midWrite';
           return this.lastKnownGood;
         }
 
         this.cache = result;
         this.lastKnownGood = result;
         this._isStale = false;
+        this._staleReason = null;
         this._isMissing = false;
       }
       return result;
@@ -207,13 +258,14 @@ export class ManifestService {
         // Definitive: the file is gone (dbt clean / never compiled). Serving
         // last-known-good here would show models from a manifest that no
         // longer exists, so drop it and report empty, non-stale data.
-        console.warn(`[ManifestService] ${err.message}`);
+        log.warn(`[ManifestService] ${err.message}`);
         const empty = this.emptyManifest();
         if (currentLoadId === this.loadId) {
           this.onLoadFailure?.('missing');
           this.lastKnownGood = null;
           this.cache = empty;
           this._isStale = false;
+          this._staleReason = null;
           this._isMissing = true;
         }
         return empty;
@@ -222,15 +274,17 @@ export class ManifestService {
       // Parse failed — likely manifest is mid-write by dbt.
       // Return stale data (or empty) so the graph stays visible.
       const message = err instanceof Error ? err.message : String(err);
-      console.warn(
+      log.warn(
         `[ManifestService] Parse failed (file may be mid-write): ${message}. ` +
         'Returning last known good data.',
       );
       const fallback = this.lastKnownGood ?? this.emptyManifest();
       if (currentLoadId === this.loadId) {
-        this.onLoadFailure?.(err instanceof ManifestParseTimeoutError ? 'timeout' : 'malformed');
+        const reason = err instanceof ManifestParseTimeoutError ? 'timeout' : 'malformed';
+        this.onLoadFailure?.(reason);
         this.cache = fallback;
         this._isStale = true;
+        this._staleReason = reason;
       }
       return fallback;
     } finally {
@@ -275,6 +329,7 @@ export class ManifestService {
     this.cache = null;
     this.loadPromise = null;
     this._isStale = false;
+    this._staleReason = null;
     this._isMissing = false;
     // Cancel any in-flight parse — its result would be discarded by the
     // loadId guard anyway, so don't let it keep chewing through a 60MB file.
@@ -371,7 +426,7 @@ export class ManifestService {
         settle();
         void worker.terminate();
         if ('error' in msg) {
-          console.error(`[ManifestService] Failed to parse manifest: ${(msg as ManifestWorkerError).error}`);
+          log.error(`[ManifestService] Failed to parse manifest: ${(msg as ManifestWorkerError).error}`);
           reject(new Error(`Failed to parse manifest.json: ${(msg as ManifestWorkerError).error}`));
           return;
         }
@@ -417,7 +472,7 @@ export class ManifestService {
       result = extractManifestData(JSON.parse(raw) as Record<string, unknown>);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[ManifestService] Failed to parse manifest: ${message}`);
+      log.error(`[ManifestService] Failed to parse manifest: ${message}`);
       throw new Error(`Failed to parse manifest.json: ${message}`);
     }
     return deserializeWorkerResult(result);

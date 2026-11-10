@@ -1,0 +1,14 @@
+{
+  "name": "Forecast vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Forecast]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "0f955ab8-28e0-4ac4-b335-23c88440db41"
+}

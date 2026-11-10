@@ -37,6 +37,17 @@ export interface PhysicalTooling {
 export const TOOLING_EXCLUDE =
   '**/{node_modules,.git,dbt_packages,dbt_modules,target,.venv,venv,site-packages,__pycache__,.tox,.erd-studio,erd-studio}/**';
 
+/**
+ * {@link TOOLING_EXCLUDE} plus the configured semantic dir (`erdStudio.semanticDir`),
+ * not only the literal `.erd-studio`: a project whose diagrams and tables are
+ * stored as `.dbml` must not count as one whose schema is built from DBML.
+ */
+export function toolingExclude(semanticDir?: string): string {
+  const dir = (semanticDir ?? '').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+  if (!dir || dir === '.erd-studio' || dir === 'erd-studio' || /[{}*?[\],]/.test(dir)) return TOOLING_EXCLUDE;
+  return TOOLING_EXCLUDE.replace('.erd-studio,erd-studio}', `.erd-studio,erd-studio,${dir}}`);
+}
+
 /** Files whose name alone says which tool builds the tables. */
 const MARKERS =
   '**/{dbt_project.yml,databricks.yml,databricks.yaml,workflow_settings.yaml,dataform.json,*.sqlproj,' +

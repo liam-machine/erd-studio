@@ -1,0 +1,12 @@
+// The party subject area's relationships, kept by the Customer Data team. This file is named after the party schema, so a party table's next new relationship is saved here too.
+use { table party.organisation }       from '../tables/party/organisation.dbml'
+use { table party.party }              from '../tables/party/party.dbml'
+use { table party.party_relationship } from '../tables/party/party_relationship.dbml'
+use { table party.person }             from '../tables/party/person.dbml'
+
+Ref: party.party.party_id ?- party.organisation.party_id
+
+Ref from_party: party.party_relationship.from_party_id >? party.party.party_id
+Ref to_party: party.party_relationship.to_party_id >? party.party.party_id
+
+Ref: party.party.party_id ?- party.person.party_id

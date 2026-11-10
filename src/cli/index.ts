@@ -1,22 +1,25 @@
 /**
  * `erd-studio` CLI entry point (dist/cli.js) — the read-only helper the
- * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `export`, `version`.
+ * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `export`, `version` — and
+ * `changes`, the model changes since a git ref, for a pull-request comment.
  *
  * Launched through the ~/.erd-studio-cli shims (cliLauncherService), under
  * plain Node or VS Code's own Electron with ELECTRON_RUN_AS_NODE. It never
  * writes a file (spec D5): Claude makes every `.erd-studio` edit itself.
  *
- * Exit codes: 0 ok · 1 diff found blocking drift · 2 usage · 3 environment
- * (no project, bad domain file, a project stored as DBML by a newer ERD
- * Studio) · 4 internal. 5 is reserved for the shim.
+ * Exit codes: 0 ok · 1 diff found blocking drift, or export --all skipped a
+ * subject area · 2 usage · 3 environment
+ * (no project, bad domain file) · 4 internal. 5 is reserved for the shim.
  */
 
 import { redactPaths } from '../types/feedback';
 import { parseArgs, USAGE, type CliOptions } from './args';
-import { buildCliContext, CLI_VERSION, CliEnvError, refuseDbmlStorage } from './context';
+import { runChanges } from './changes';
+import { formatChangesMarkdown, formatChangesText } from './changesFormat';
+import { buildCliContext, CLI_VERSION, CliEnvError } from './context';
 import { runDiff } from './diff';
 import { runDoctor, runtimeInfo } from './doctor';
-import { runExport } from './export';
+import { runExport, runExportAll } from './export';
 import { colourEnabled, formatDiff, formatDoctor, formatInventory, makePaint } from './format';
 import { runInventory } from './inventory';
 
@@ -96,12 +99,12 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
           cwd: io.cwd,
           env: io.env,
         });
-        out(result, () => formatDoctor(result, paint));
+        // A dbt flag says the user is after a dbt project: a missing one may say so.
+        out(result, () => formatDoctor(result, paint, { mentionDbt: opts.noDbt || opts.dbt !== undefined || opts.trustVenv }));
         return EXIT.ok;
       }
 
       case 'inventory': {
-        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
         const result = runInventory(ctx, { summary: opts.summary, models: opts.models });
         out(result, () => formatInventory(result, paint));
@@ -109,20 +112,38 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'diff': {
-        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
-        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
+        // diff compares with dbt, so a missing project says where dbt_project.yml was looked for.
+        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd, mentionDbt: true });
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
         return exitCode;
       }
 
       case 'export': {
-        refuseDbmlStorage(opts.project, opts.semanticDir, io.cwd);
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
-        // parseArgs guarantees exactly one --domain and a --format for export.
+        if (opts.all) {
+          const result = await runExportAll(ctx, { format: opts.format! });
+          // Human mode is the list of files and nothing else, so it can be
+          // piped (`| jq -c '.[]'`); what was skipped goes to stderr.
+          out(result, () => JSON.stringify(result.files.map(({ fileName, content }) => ({ fileName, content })), null, 2) + '\n');
+          if (!opts.json && !opts.quiet) {
+            for (const { domain, error } of result.skipped) {
+              io.stderr.write(`erd-studio: skipped ${domain}: ${redactPaths(error.message)}\n`);
+            }
+          }
+          return result.skipped.length > 0 ? EXIT.drift : EXIT.ok;
+        }
+        // parseArgs guarantees exactly one --domain (or --all) and a --format for export.
         const result = await runExport(ctx, { domain: opts.domains[0], format: opts.format!, cwd: io.cwd });
         // Human mode is the export text and nothing else, so `> schema.dbml` works.
         out(result, () => result.content);
+        return EXIT.ok;
+      }
+
+      case 'changes': {
+        // parseArgs guarantees --base, and folds --format json into --json.
+        const result = runChanges({ project: opts.project, semanticDir: opts.semanticDir, base: opts.base!, cwd: io.cwd });
+        out(result, () => (opts.changesFormat === 'markdown' ? formatChangesMarkdown(result) : formatChangesText(result)));
         return EXIT.ok;
       }
 

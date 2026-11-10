@@ -1,0 +1,30 @@
+// Sticky notes, table groups, a one-to-one and a self reference.
+
+Table employees [note: 'Staff'] {
+  id int [pk]
+  manager_id int [ref: > employees.id]
+  badge_id int
+}
+
+Table badges {
+  id int [pk]
+  code varchar
+}
+
+Ref: employees.badge_id - badges.id
+
+TableGroup people [color: #E74C3C, note: 'People data'] {
+  employees
+  badges
+}
+
+Note sticky_1 [color: #ffcc00] {
+  'Check the badge rules with HR'
+}
+
+Note todo {
+  '''
+  Multi-line note
+  second line
+  '''
+}

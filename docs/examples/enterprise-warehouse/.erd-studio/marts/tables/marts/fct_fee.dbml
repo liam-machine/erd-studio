@@ -1,0 +1,14 @@
+Table marts.fct_fee [
+  role: 'transaction-fact',
+  grain: 'One row per fee charged',
+  owner: 'finance-analytics'
+] {
+  Note: 'Fees charged to customers, for finance.'
+
+  fee_id       BIGINT          [pk, natural_key: 'true']
+  date_key     INT             [foreign_key: 'true']
+  customer_key BIGINT          [foreign_key: 'true']
+  product_key  BIGINT          [foreign_key: 'true']
+  fee_type     STRING
+  amount       "DECIMAL(18,2)" [additive_type: 'additive']
+}

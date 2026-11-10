@@ -1,0 +1,17 @@
+{
+  "name": "RangeStart",
+  "kind": "m",
+  "expression": "#datetime(2020, 1, 1, 0, 0, 0) meta [IsParameterQuery=true, Type=\"DateTime\", IsParameterQueryRequired=true]",
+  "queryGroup": "Parameters",
+  "lineageTag": "f5c9c445-899a-4c4a-be86-ec32fc7dfe18",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "DateTime"
+    }
+  ]
+}

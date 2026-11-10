@@ -1,0 +1,11 @@
+{
+  "name": "Date",
+  "lineageTag": "0bb45e29-3908-422d-ade4-4100434bdfa4",
+  "dataCategory": "Time",
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

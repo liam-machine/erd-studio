@@ -1,0 +1,12 @@
+Table marts.dim_product [
+  role: 'conformed-dim',
+  grain: 'One row per product',
+  owner: 'bi-platform'
+] {
+  Note: 'Products with their family flattened in.'
+
+  product_key    BIGINT [pk]
+  product_code   STRING [natural_key: 'true']
+  product_name   STRING
+  product_family STRING
+}

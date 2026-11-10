@@ -1,0 +1,12 @@
+use { table orders.customer_order } from '../tables/orders/customer_order.dbml'
+use { table accounts.account }      from '../tables/accounts/account.dbml'
+use * from '../relationships/orders.dbml'
+
+Project orders {
+  Note: 'The orders data product, with the account it belongs to.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    account 461 24
+    customer_order 12 12
+  '''
+}

@@ -1,0 +1,28 @@
+{
+  "name": "On-Time Delivery",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "ADDCOLUMNS (",
+      "    FILTER (",
+      "        DISTINCT ('Invoices'[OTD Indicator]),",
+      "        NOT ISBLANK ('Invoices'[OTD Indicator])",
+      "    ),",
+      "    \"OTD Status\",",
+      "        SWITCH (",
+      "            TRUE (),",
+      "            'Invoices'[OTD Indicator] = TRUE, \"On Time\",",
+      "            \"Late\"",
+      "        ),",
+      "    \"OTD Sort Order\",",
+      "        SWITCH (",
+      "            TRUE (),",
+      "            'Invoices'[OTD Indicator] = TRUE, 1,",
+      "            2",
+      "        )",
+      ")"
+    ]
+  }
+}

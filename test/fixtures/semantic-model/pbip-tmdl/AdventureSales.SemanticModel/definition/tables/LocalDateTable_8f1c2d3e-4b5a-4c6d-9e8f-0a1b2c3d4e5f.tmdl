@@ -1,0 +1,40 @@
+table LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f
+	isHidden
+	showAsVariationsOnly
+	lineageTag: be2f3041-0006-4000-8000-000000000000
+
+	column Date
+		dataType: dateTime
+		isHidden
+		lineageTag: 708192a3-0006-4000-8000-000000000001
+		dataCategory: PaddedDateTableDates
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Date]
+
+		annotation SummarizationSetBy = User
+
+	column Year = YEAR([Date])
+		dataType: int64
+		isHidden
+		lineageTag: 708192a3-0006-4000-8000-000000000002
+		dataCategory: Years
+		summarizeBy: none
+
+		annotation SummarizationSetBy = User
+
+		annotation TemplateId = Year
+
+	hierarchy 'Date Hierarchy'
+		lineageTag: 708192a3-0006-4000-8000-0000000000aa
+
+		level Year
+			lineageTag: 708192a3-0006-4000-8000-0000000000ab
+			column: Year
+
+	partition LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f = calculated
+		mode: import
+		source = Calendar(Date(Year(MIN('Sales'[OrderDate])), 1, 1), Date(Year(MAX('Sales'[OrderDate])), 12, 31))
+
+	annotation __PBI_LocalDateTable = true
+

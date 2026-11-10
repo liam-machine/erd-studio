@@ -1,0 +1,12 @@
+Table silver.customers [
+  grain: 'One row per customer, matched across Shopify and Stripe',
+  decisions: 'Deduplicated from bronze shopify_customers and stripe_customers: matched on the Shopify id in Stripe metadata, else on email.'
+] {
+  Note: 'Every customer once, whichever system they came through.'
+
+  customer_id        BIGINT [pk, natural_key: 'true', note: 'The Shopify customer id']
+  email              STRING
+  full_name          STRING
+  stripe_customer_id STRING [note: 'The matched Stripe customer, when there is one']
+  first_seen_at      TIMESTAMP
+}

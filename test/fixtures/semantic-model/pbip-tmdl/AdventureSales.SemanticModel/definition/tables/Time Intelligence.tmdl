@@ -1,0 +1,32 @@
+table 'Time Intelligence'
+	lineageTag: ad1e2f30-0005-4000-8000-000000000000
+
+	calculationGroup
+		precedence: 1
+
+		calculationItem Current = SELECTEDMEASURE ()
+
+		calculationItem YTD =
+				CALCULATE ( SELECTEDMEASURE (), DATESYTD ( 'Date Table'[Date] ) )
+
+		calculationItem PY = CALCULATE ( SELECTEDMEASURE (), SAMEPERIODLASTYEAR ( 'Date Table'[Date] ) )
+
+	column 'Time Calculation'
+		dataType: string
+		lineageTag: 6f708192-0005-4000-8000-000000000001
+		summarizeBy: none
+		sourceColumn: Name
+		sortByColumn: Ordinal
+
+		annotation SummarizationSetBy = Automatic
+
+	column Ordinal
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 6f708192-0005-4000-8000-000000000002
+		summarizeBy: sum
+		sourceColumn: Ordinal
+
+		annotation SummarizationSetBy = Automatic
+

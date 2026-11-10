@@ -1,0 +1,12 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table staging.stg_app__accounts }         from '../tables/staging/stg_app__accounts.dbml'
+use { table staging.stg_app__users }            from '../tables/staging/stg_app__users.dbml'
+use { table staging.stg_stripe__customers }     from '../tables/staging/stg_stripe__customers.dbml'
+use { table staging.stg_stripe__invoices }      from '../tables/staging/stg_stripe__invoices.dbml'
+use { table staging.stg_stripe__subscriptions } from '../tables/staging/stg_stripe__subscriptions.dbml'
+
+Ref: staging.stg_app__users.account_id >? staging.stg_app__accounts.account_id
+
+Ref: staging.stg_stripe__invoices.subscription_id >? staging.stg_stripe__subscriptions.subscription_id
+
+Ref: staging.stg_stripe__subscriptions.customer_id >? staging.stg_stripe__customers.customer_id

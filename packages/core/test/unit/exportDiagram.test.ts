@@ -14,22 +14,30 @@ import {
   diagramExportFileName,
   exportDiagram,
   toDbml,
+  toDbmlRich,
   toMermaid,
   type DiagramExportFormat,
 } from '../../src/exportDiagram';
 import { RATIONALE_KEYS } from '../../src/logicalModel';
 import { RATIONALE_LABELS } from '../../src/exportShared';
+import { RATIONALE_FIELD_KEYS } from '../../src/fields';
 import type { DisplaySubjectArea } from '../../src/types/display';
-import { DBML_PARSERS, MERMAID_PARSERS, col, subjectArea, tableDef, rel } from '../exportParsers';
+import { DBML_PARSERS, MERMAID_PARSERS, RICH_DBML_PARSERS, col, subjectArea, tableDef, rel } from '../exportParsers';
 
 describe('diagram export API', () => {
   it('is exported from the package entry', () => {
     expect(core.toDbml).toBe(toDbml);
     expect(core.toMermaid).toBe(toMermaid);
+    expect(core.toDbmlRich).toBe(toDbmlRich);
     expect(core.exportDiagram).toBe(exportDiagram);
     expect(core.diagramExportFileName).toBe(diagramExportFileName);
-    expect(core.DIAGRAM_EXPORT_FORMATS).toEqual(['mermaid', 'dbml']);
-    expect(core.DIAGRAM_EXPORT_FILE_EXTENSIONS).toEqual({ mermaid: 'mmd', dbml: 'dbml' });
+    // The dbdiagram.io export sidecar is gone: the rich export carries its positions in erd_layout.
+    for (const gone of ['toDbdiagramLayout', 'serializeDbdiagramLayout', 'dbdiagramLayoutFileName']) {
+      expect(core, gone).not.toHaveProperty(gone);
+    }
+    expect(core.DBML_RICH_EXPORT_HEADER).toMatch(/^\/\/ erd-studio dbml-export v2/);
+    expect(core.DIAGRAM_EXPORT_FORMATS).toEqual(['mermaid', 'dbml', 'dbml-rich']);
+    expect(core.DIAGRAM_EXPORT_FILE_EXTENSIONS).toEqual({ mermaid: 'mmd', dbml: 'dbml', 'dbml-rich': 'dbml' });
   });
 
   it('keeps its constants frozen', () => {
@@ -41,6 +49,7 @@ describe('diagram export API', () => {
     const d = subjectArea([tableDef('a', [col('id')]), tableDef('b', [col('a_id')])], [rel('b.a_id', 'a.id')]);
     expect(exportDiagram(d, 'dbml')).toBe(toDbml(d));
     expect(exportDiagram(d, 'mermaid')).toBe(toMermaid(d));
+    expect(exportDiagram(d, 'dbml-rich')).toBe(toDbmlRich(d));
     expect(() => exportDiagram(d, 'svg' as DiagramExportFormat)).toThrow('Unknown diagram export format: svg');
   });
 
@@ -62,18 +71,23 @@ describe('diagram export API', () => {
     }
   });
 
-  it('leaves positions out of every format', () => {
+  it('leaves positions out of every format but rich DBML, which carries them in erd_layout', () => {
     const d = subjectArea([tableDef('a', [col('id')])], [], { viewConfig: { positions: { a: { x: 123456, y: 654321 } } } });
     for (const format of DIAGRAM_EXPORT_FORMATS) {
       const text = exportDiagram(d, format);
-      expect(text).not.toContain('123456');
-      expect(text).not.toContain('654321');
+      if (format === 'dbml-rich') {
+        expect(text).toContain("  erd_layout: '''\n    a 123456 654321\n  '''\n");
+      } else {
+        expect(text).not.toContain('123456');
+        expect(text).not.toContain('654321');
+      }
     }
   });
 
   it.each([
     ['showcase', 'dbml', 'showcase.dbml'],
     ['showcase', 'mermaid', 'showcase.mmd'],
+    ['showcase', 'dbml-rich', 'showcase.dbml'],
     ['customer 360', 'dbml', 'customer 360.dbml'],
     ['a/b\\c:d*e?f"g<h>i|j', 'mermaid', 'a-b-c-d-e-f-g-h-i-j.mmd'],
     ['line\nbreak', 'dbml', 'line-break.dbml'],
@@ -102,17 +116,41 @@ describe('diagram export API', () => {
     }
   });
 
-  it('keeps the rationale labels in step with the rationale keys', () => {
-    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([...RATIONALE_KEYS]);
+  it('keeps the rationale labels in step with the catalogue rationale keys, in their one order', () => {
+    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([...RATIONALE_FIELD_KEYS]);
+    expect(RATIONALE_LABELS.map(([key]) => key)).toEqual([
+      'purpose', 'decisions', 'openQuestions', 'design', 'grainChoice', 'roleChoice',
+      'scdStrategy', 'measures', 'sourceOfTruth', 'freshness', 'knownIssues', 'retention',
+    ]);
   });
 
-  it('adds no runtime dependency: core still depends on yaml alone', () => {
+  it('keeps the six first-release keys in their relative order, with the labels they always printed', () => {
+    const legacy = RATIONALE_LABELS.filter(([key]) => (RATIONALE_KEYS as readonly string[]).includes(key));
+    expect(legacy).toEqual([
+      ['purpose', 'Purpose'],
+      ['design', 'Design'],
+      ['grainChoice', 'Grain choice'],
+      ['roleChoice', 'Role choice'],
+      ['scdStrategy', 'SCD strategy'],
+      ['measures', 'Measures'],
+    ]);
+    expect(Object.fromEntries(RATIONALE_LABELS.filter(([key]) => !(RATIONALE_KEYS as readonly string[]).includes(key)))).toEqual({
+      decisions: 'Decisions',
+      openQuestions: 'Open questions',
+      sourceOfTruth: 'Source of truth',
+      freshness: 'Freshness',
+      knownIssues: 'Known issues',
+      retention: 'Retention',
+    });
+  });
+
+  it('depends at runtime on yaml and the pinned DBML parser alone (the parser only behind @erd-studio/core/dbml)', () => {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
       dependencies?: Record<string, string>;
       peerDependencies?: Record<string, string>;
       optionalDependencies?: Record<string, string>;
     };
-    expect(Object.keys(pkg.dependencies ?? {})).toEqual(['yaml']);
+    expect(pkg.dependencies).toEqual({ '@dbml/parse': '11.0.0', yaml: '^2.9.0' });
     expect(pkg.peerDependencies).toBeUndefined();
     expect(pkg.optionalDependencies).toBeUndefined();
   });
@@ -121,8 +159,15 @@ describe('diagram export API', () => {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
       devDependencies: Record<string, string>;
     };
+    const pkgAll = pkg as { devDependencies: Record<string, string>; dependencies: Record<string, string> };
+    // The pin itself is a runtime dependency (D13); 9.1.1 and 10.3.1 are test aliases.
+    expect(pkgAll.dependencies['@dbml/parse']).toBe('11.0.0');
+    expect(pkg.devDependencies['@dbml/parse']).toBeUndefined();
+    // Exactly the two older-release aliases: no alias of the pin itself.
+    expect(Object.keys(pkg.devDependencies).filter((name) => name.startsWith('dbml-parse-')).sort()).toEqual(['dbml-parse-v10', 'dbml-parse-v9']);
     const parsers: Record<string, string> = {
-      '@dbml/parse': '10.2.0',
+      'dbml-parse-v9': 'npm:@dbml/parse@9.1.1',
+      'dbml-parse-v10': 'npm:@dbml/parse@10.3.1',
       'dbml-core-v3': 'npm:@dbml/core@3.13.4',
       'dbml-core-v2': 'npm:@dbml/core@2.6.1',
       'dbml-core-v24': 'npm:@dbml/core@2.4.2',
@@ -133,18 +178,24 @@ describe('diagram export API', () => {
     for (const [name, version] of Object.entries(parsers)) expect(pkg.devDependencies[name], name).toBe(version);
     // The labels the harness reports name the same versions.
     const versionOf = (spec: string): string => spec.replace(/^npm:.+@/, '');
+    const pinned = pkgAll.dependencies['@dbml/parse'];
     expect(DBML_PARSERS).toEqual([
-      `@dbml/parse ${parsers['@dbml/parse']}`,
+      `@dbml/parse ${pinned}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v3'])}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v2'])}`,
       `@dbml/core ${versionOf(parsers['dbml-core-v24'])}`,
+    ]);
+    expect(RICH_DBML_PARSERS).toEqual([
+      `@dbml/parse ${versionOf(parsers['dbml-parse-v9'])}`,
+      `@dbml/parse ${versionOf(parsers['dbml-parse-v10'])}`,
+      `@dbml/parse ${pinned}`,
     ]);
     expect(MERMAID_PARSERS).toEqual([`mermaid ${parsers.mermaid}`, `mermaid ${versionOf(parsers['mermaid-current'])}`]);
   });
 
   it('imports nothing outside core in the export sources', () => {
     const src = path.resolve(__dirname, '../../src');
-    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportMermaid.ts', 'exportShared.ts']) {
+    for (const file of ['exportDiagram.ts', 'exportDbml.ts', 'exportDbmlRich.ts', 'exportMermaid.ts', 'exportShared.ts', 'exportFileName.ts', 'erdLayout.ts', 'dbmlRichProperties.ts']) {
       const text = fs.readFileSync(path.join(src, file), 'utf-8');
       const specs = [...text.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
       expect(specs.filter((s) => !s.startsWith('./')), file).toEqual([]);

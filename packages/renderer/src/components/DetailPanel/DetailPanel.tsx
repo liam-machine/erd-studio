@@ -2,28 +2,40 @@
  * DetailPanel — floating detail view for the selected model.
  *
  * Displays at top-right when a node is clicked. Shows:
- * - Model metadata (name, schema, description)
+ * - Model metadata (its file, when the editing host says, then name, schema, description)
  * - Editable column list
- * - Incoming and outgoing FK relationships
+ * - Incoming and outgoing FK relationships, then (editing host only) the
+ *   relationships to tables not on this diagram, each with "+ Add"
+ * - "Modelling detail (optional)": the table's Fields (its context fields,
+ *   from the project's field list), folded until one of them has a value
+ *
+ * The viewer (`useIsViewer`) never has the host's context and keeps the
+ * layout it always had, in the old order, with the Fields where the role,
+ * grain, meta and rationale sections were: a section folded to its heading
+ * and count until the reader opens it (it sits above Columns, so a few long
+ * rationale values would push the columns and relationships out of a short
+ * embedded canvas), and remembered from table to table. Its close button hides the
+ * panel but keeps the table selected (its relationships stay lit; a click on
+ * the table opens the panel again, and the empty canvas or Escape clears it),
+ * its relationship rows wrap instead of cutting names off, and it is never
+ * taller than the canvas it floats over.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Panel } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Panel, useStoreApi } from '@xyflow/react';
 
-import { TableRationale, hasRationaleContent } from './ModelRationale';
 import { DescriptionEditor } from './DescriptionEditor';
-import { GrainEditor } from './GrainEditor';
 import { AliasEditor } from './AliasEditor';
-import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
-import { MetaEditor } from './MetaEditor';
+import { FieldsSection, fieldRows, tableFieldsShown, type FieldsTable } from './FieldsSection';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
-import { backwardsRelationshipNote } from '@erd-studio/core';
-import type { ColumnPair, DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
+import { STARTING_FIELD_LIST, backwardsRelationshipNote } from '@erd-studio/core';
+import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
+import { cardinalityLabel, offDiagramRows, offDiagramTables, ownValue } from '../../lib/canvasContext';
 import './DetailPanel.css';
 
 /** A relationship row: a composite foreign key carries all its column pairs. */
@@ -33,6 +45,15 @@ type PanelRelationship = DisplayRelationship & { pairs?: ColumnPair[] };
 function columnsText(rel: PanelRelationship, end: 'from' | 'to'): string {
   const cols = columnPairs(rel).map((p) => (end === 'from' ? p.fromColumn : p.toColumn));
   return cols.length === 1 ? cols[0] : `(${cols.join(', ')})`;
+}
+
+/**
+ * A name the viewer's wrapping rows may break: a line break opportunity
+ * (`<wbr>`) after each `_`, `.` and `, `, so a long identifier breaks at a
+ * word boundary before `overflow-wrap: anywhere` has to cut it mid-word.
+ */
+function breakable(text: string): ReactNode[] {
+  return text.split(/(?<=[_.]|, )/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +72,14 @@ const SOURCE_NAME: Record<PhysicalColumnSource, string> = {
   file: '.sql file only',
 };
 
+/** The viewer's twin: a page outside VS Code cannot know the project uses dbt. */
+const SOURCE_NAME_NEUTRAL: Record<PhysicalColumnSource, string> = {
+  catalog: 'warehouse catalog',
+  yml: 'schema .yml',
+  manifest: 'compiled manifest',
+  file: 'source file only',
+};
+
 /**
  * One line describing where a physical model's shape came from.
  *
@@ -59,20 +88,59 @@ const SOURCE_NAME: Record<PhysicalColumnSource, string> = {
  * it differs, which happens when the principal supplier contributed column
  * names but no data types.
  */
-function describeProvenance(provenance: PhysicalProvenance, untyped: number): string {
-  const names = provenance.columns.map((c) => SOURCE_NAME[c]);
+function describeProvenance(provenance: PhysicalProvenance, untyped: number, viewer = false): string {
+  const sourceName = viewer ? SOURCE_NAME_NEUTRAL : SOURCE_NAME;
+  const names = provenance.columns.map((c) => sourceName[c]);
   const parts = [
     names.length > 1
       ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-      : names[0] ?? SOURCE_NAME[provenance.types],
+      : names[0] ?? sourceName[provenance.types],
   ];
   if (provenance.types !== provenance.columns[0]) {
-    parts.push(`types from ${SOURCE_NAME[provenance.types]}`);
+    parts.push(`types from ${sourceName[provenance.types]}`);
   }
   if (untyped > 0) {
     parts.push(`${untyped} untyped`);
   }
   return parts.join(' \u00b7 ');
+}
+
+// ---------------------------------------------------------------------------
+// Remove confirmation
+// ---------------------------------------------------------------------------
+
+/**
+ * The detail panel's "Remove from Diagram" question. A table's relationships
+ * go with it only when the diagram file holds them itself (a YAML/JSON
+ * domain's own list); in the Table Library (every DBML diagram) they stay.
+ * `inDiagramFile` is absent from an older core: then every relationship the
+ * table draws is counted, the old warning.
+ */
+export function removeConfirmText(
+  tableName: string,
+  relationshipsInDiagramFile: boolean | undefined,
+  outgoing: readonly Pick<DisplayRelationship, 'inDiagramFile'>[],
+  incoming: readonly Pick<DisplayRelationship, 'inDiagramFile'>[],
+): string {
+  const question = `Remove ${tableName} from this diagram?`;
+  if (relationshipsInDiagramFile === false) {
+    return `${question} The table and its relationships stay in the Table Library.`;
+  }
+  const all = [...outgoing, ...incoming];
+  const going = relationshipsInDiagramFile === true ? all.filter((r) => r.inDiagramFile).length : all.length;
+  if (going === 0) return question;
+  return `${question} ${going === 1 ? 'Its 1 relationship in this diagram file' : `Its ${going} relationships in this diagram file`} will also be removed.`;
+}
+
+/** Most tables one "Add all related" asks for (the host's `addExistingModels` limit). */
+const ADD_ALL_RELATED_LIMIT = 200;
+
+/**
+ * Whether any of the table's fields has a value, so "Modelling detail" opens
+ * by itself. Import DBML's bookkeeping (`meta.dbml`) is not a field.
+ */
+export function hasModellingDetail(model: FieldsTable, list: FieldList = STARTING_FIELD_LIST): boolean {
+  return fieldRows(model, undefined, list).some((row) => row.value !== undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,10 +159,16 @@ export function DetailPanel() {
   const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  // No dbt project: the warehouse name (dbt's alias) shows only when set.
+  const logicalOnly = useEditorStore((s) => s.logicalOnly) === true;
+  // The editing host's context (never set in the viewer).
+  const canvasContext = useEditorStore((s) => s.canvasContext);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [nameError, setNameError] = useState('');
+  // The viewer's Fields fold: closed until the reader opens it, then kept open for the next table.
+  const [viewerFieldsOpen, setViewerFieldsOpen] = useState(false);
 
   // Handle pending delete confirmation from keyboard shortcut
   useEffect(() => {
@@ -116,6 +190,19 @@ export function DetailPanel() {
     selectNode(null);
     setConfirmingDelete(false);
   }, [setDetailPanelOpen, selectNode]);
+
+  // The viewer's close: hide the panel, keep the selection (and its
+  // highlight), and give the focus to the selected table so a keyboard user
+  // keeps their place (Enter on it opens the panel again).
+  const flowStore = useStoreApi();
+  const handleHide = useCallback(() => {
+    const id = selectedNode;
+    setDetailPanelOpen(false);
+    if (!id) return;
+    const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&');
+    const el = flowStore.getState().domNode?.querySelector<HTMLElement>(`.react-flow__node[data-id="${escaped}"]`);
+    el?.focus({ preventScroll: true });
+  }, [selectedNode, setDetailPanelOpen, flowStore]);
 
   const validateModelName = useCallback(
     (value: string): string => {
@@ -271,6 +358,40 @@ export function DetailPanel() {
   }, [domain, selectedNode]);
 
   const isReadOnly = domain?.readOnly ?? false;
+  // The project's field list; absent (no fields.yml, or an older core) is the starting set.
+  const fieldList = domain?.fields ?? STARTING_FIELD_LIST;
+
+  // Relationships to tables not on this diagram (the host's context, logical stage).
+  const offRows = useMemo(
+    () => (selectedNode ? offDiagramRows(canvasContext, domain, selectedNode) : []),
+    [canvasContext, domain, selectedNode],
+  );
+
+  // "Modelling detail (optional)": open when any field is set, else folded.
+  // It opens by itself once one is set and only a new selection folds it
+  // again, so it never shuts while someone is filling it in.
+  const hasModelling = model ? hasModellingDetail(model, fieldList) : false;
+  const [modellingOpen, setModellingOpen] = useState(hasModelling);
+  useEffect(() => {
+    setModellingOpen(hasModelling);
+    // Only a new selection resets it; `hasModelling` turning true opens it below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNode]);
+  useEffect(() => {
+    if (hasModelling) setModellingOpen(true);
+  }, [hasModelling]);
+
+  const handleAddTables = useCallback(
+    (names: readonly string[]) => {
+      if (names.length === 0) return;
+      if (names.length === 1) {
+        host.postMessage({ type: 'addExistingModel', payload: { modelName: names[0] } });
+      } else {
+        host.postMessage({ type: 'addExistingModels', payload: { modelNames: names.slice(0, ADD_ALL_RELATED_LIMIT) } });
+      }
+    },
+    [host],
+  );
 
   // --- Early returns -----------------------------------------------------
 
@@ -285,10 +406,226 @@ export function DetailPanel() {
   const { outgoing, incoming } = relationships;
   const totalRelationships = outgoing.length + incoming.length;
 
+  // Editing host, logical stage only: the viewer never has a context, and shows nothing it feeds.
+  const hostContext = domain.stage === 'logical' ? canvasContext : null;
+  const tableFile = viewer ? undefined : ownValue(hostContext?.tableFiles, model.name);
+  const reviewers = viewer ? undefined : ownValue(hostContext?.owners, model.name);
+  const showOffDiagram = viewer ? false : !isReadOnly && offRows.length > 0;
+
+  // The sections, placed below in the viewer's order or the editor's.
+  // A read-only panel (viewer, physical stage) shows the Fields only when one has a value.
+  const fieldsShown = viewer ? tableFieldsShown(model, fieldList) : (isReadOnly ? tableFieldsShown(model, fieldList) : true);
+  const fieldsSection = fieldsShown ? (
+    <div className="detail-panel__section">
+      <FieldsSection
+        modelName={model.name}
+        table={model}
+        fields={fieldList}
+        readOnly={isReadOnly}
+        logicalOnly={logicalOnly}
+        {...(viewer ? { open: viewerFieldsOpen, onOpenChange: setViewerFieldsOpen } : {})}
+      />
+    </div>
+  ) : null;
+  const removeSection = (
+    <>
+      {/* Remove from Diagram button */}
+      {!isReadOnly && (
+        <div className="detail-panel__section detail-panel__section--actions">
+          {confirmingDelete ? (
+            <>
+              <span className="detail-panel__confirm-label">
+                {removeConfirmText(model.name, domain.relationshipsInDiagramFile, outgoing, incoming)}
+              </span>
+              <div className="detail-panel__confirm-actions">
+                <button
+                  className="detail-panel__button detail-panel__button--danger"
+                  onClick={handleDeleteModel}
+                  aria-label="Confirm remove table"
+                >
+                  Yes, Remove
+                </button>
+                <button
+                  className="detail-panel__button"
+                  onClick={() => setConfirmingDelete(false)}
+                  aria-label="Cancel"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              className="detail-panel__button detail-panel__button--danger"
+              onClick={() => setConfirmingDelete(true)}
+              title="Remove this table from this diagram"
+              aria-label="Remove this table from this diagram"
+            >
+              Remove from Diagram
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+  const columnsSection = (
+    <>
+      {/* Columns (editable) */}
+      <div className="detail-panel__section">
+        <ColumnEditor
+          modelName={model.name}
+          columns={model.columns}
+          readOnly={isReadOnly}
+          modelRole={model.modelRole}
+          fields={fieldList}
+          logicalOnly={logicalOnly}
+        />
+      </div>
+    </>
+  );
+  const relationshipsSection = (
+    <>
+      {/* Relationships */}
+      {totalRelationships > 0 && (
+        <div className="detail-panel__section">
+          <h4 className="detail-panel__section-title">
+            Relationships ({totalRelationships})
+          </h4>
+          <div className="detail-panel__relationships">
+            {/* The viewer can't edit cardinality, so its rows are plain (not clickable). */}
+            {/* Outgoing: this model references others */}
+            {outgoing.map((rel) => (
+              <div
+                key={`out-${relationshipEdgeId(rel)}`}
+                className={viewer ? 'detail-panel__relationship detail-panel__relationship--wrap' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role={viewer ? undefined : 'button'}
+                tabIndex={viewer ? undefined : 0}
+                onKeyDown={viewer ? undefined : (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
+                  }
+                }}
+                title={viewer ? undefined : 'Click to edit cardinality'}
+              >
+                <span className="detail-panel__rel-direction" title={rel.toModel === rel.fromModel ? 'Self-reference' : 'Outgoing FK'}>
+                  {rel.toModel === rel.fromModel ? '↻' : '→'}
+                </span>
+                <span className="detail-panel__rel-columns">
+                  <span className="detail-panel__rel-local" title={columnsText(rel, 'from')}>
+                    {viewer ? breakable(columnsText(rel, 'from')) : columnsText(rel, 'from')}
+                  </span>
+                  {viewer ? null : <span className="detail-panel__rel-arrow">→</span>}
+                  <span className="detail-panel__rel-target" title={`${rel.toModel}.${columnsText(rel, 'to')}`}>
+                    {/* The viewer keeps the arrow with the name it points at (a no-break space), so it never wraps onto a line alone. */}
+                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{'\u00a0'}</> : null}
+                    {viewer ? breakable(`${rel.toModel}.${columnsText(rel, 'to')}`) : <>{rel.toModel}.{columnsText(rel, 'to')}</>}
+                  </span>
+                  {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
+                </span>
+                <span className="detail-panel__rel-cardinality">
+                  {rel.cardinality}
+                </span>
+                {viewer ? null : (!isReadOnly && rel.keysContradict && (
+                  <button
+                    className="detail-panel__rel-backwards"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTurnRound(rel);
+                    }}
+                    title={`${backwardsRelationshipNote(rel, rel.pairs ?? [rel])} Click to turn it round.`}
+                  >
+                    &#x26A0; Turn round
+                  </button>
+                ))}
+                {!isReadOnly && (
+                  <button
+                    className="detail-panel__rel-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteRelationship(rel);
+                    }}
+                    title="Delete relationship"
+                    aria-label="Delete relationship"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            {/* Incoming: others reference this model */}
+            {incoming.map((rel) => (
+              <div
+                key={`in-${relationshipEdgeId(rel)}`}
+                className={viewer ? 'detail-panel__relationship detail-panel__relationship--wrap' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role={viewer ? undefined : 'button'}
+                tabIndex={viewer ? undefined : 0}
+                onKeyDown={viewer ? undefined : (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
+                  }
+                }}
+                title={viewer ? undefined : 'Click to edit cardinality'}
+              >
+                <span className="detail-panel__rel-direction" title="Incoming FK">
+                  ←
+                </span>
+                <span className="detail-panel__rel-columns">
+                  <span className="detail-panel__rel-target" title={`${rel.fromModel}.${columnsText(rel, 'from')}`}>
+                    {viewer ? breakable(`${rel.fromModel}.${columnsText(rel, 'from')}`) : <>{rel.fromModel}.{columnsText(rel, 'from')}</>}
+                  </span>
+                  {viewer ? null : <span className="detail-panel__rel-arrow">→</span>}
+                  <span className="detail-panel__rel-local" title={columnsText(rel, 'to')}>
+                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{'\u00a0'}</> : null}
+                    {viewer ? breakable(columnsText(rel, 'to')) : columnsText(rel, 'to')}
+                  </span>
+                  {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
+                </span>
+                <span className="detail-panel__rel-cardinality">
+                  {rel.cardinality}
+                </span>
+                {viewer ? null : (!isReadOnly && rel.keysContradict && (
+                  <button
+                    className="detail-panel__rel-backwards"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTurnRound(rel);
+                    }}
+                    title={`${backwardsRelationshipNote(rel, rel.pairs ?? [rel])} Click to turn it round.`}
+                  >
+                    &#x26A0; Turn round
+                  </button>
+                ))}
+                {!isReadOnly && (
+                  <button
+                    className="detail-panel__rel-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteRelationship(rel);
+                    }}
+                    title="Delete relationship"
+                    aria-label="Delete relationship"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   // --- Render ------------------------------------------------------------
 
   return (
-    <Panel position="top-right" className="detail-panel">
+    <Panel position="top-right" className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}>
       {/* Header */}
       <div className="detail-panel__header">
         {editingName ? (
@@ -341,8 +678,8 @@ export function DetailPanel() {
         )}
         <button
           className="detail-panel__close"
-          onClick={handleClose}
-          title="Close detail panel"
+          onClick={viewer ? handleHide : handleClose}
+          title={viewer ? 'Close the panel (the table stays selected)' : 'Close detail panel'}
           aria-label="Close detail panel"
         >
           ×
@@ -352,11 +689,41 @@ export function DetailPanel() {
       {/* Metadata */}
       <div className="detail-panel__section">
         <div className="detail-panel__metadata">
+          {/* Editing host only: the table's file, and who reviews a change to it. */}
+          {tableFile !== undefined && (
+            <div className="detail-panel__metadata-row detail-panel__metadata-row--file">
+              <span className="detail-panel__label detail-panel__label--wide">File</span>
+              <span className="detail-panel__value detail-panel__file-path" title={tableFile}>{tableFile}</span>
+              <button
+                type="button"
+                className="detail-panel__file-open"
+                onClick={() => host.postMessage({ type: 'openModelFile', payload: { modelName: model.name } })}
+                title={`Open ${tableFile}`}
+                aria-label="Open this table's file"
+              >
+                Open
+              </button>
+            </div>
+          )}
+          {reviewers !== undefined && (
+            <div className="detail-panel__metadata-row">
+              <span className="detail-panel__label detail-panel__label--wide">Reviewed by</span>
+              <span className="detail-panel__value detail-panel__value--provenance" title={reviewers}>{reviewers}</span>
+            </div>
+          )}
           <div className="detail-panel__metadata-row">
             <span className="detail-panel__label detail-panel__label--wide">Schema</span>
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
-          <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly || viewer} />
+          {/* Without a dbt project the row shows only for a table that already
+              has a warehouse name, so it can be seen and cleared. The viewer
+              keeps the row it always had, worded without dbt: a page outside
+              VS Code cannot know whether the project uses it. */}
+          {viewer ? (
+            <AliasEditor modelName={model.name} alias={model.alias} readOnly dbtWording={false} />
+          ) : (!logicalOnly || model.alias?.trim()) ? (
+            <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
+          ) : null}
           {/* Physical stage only — logical models never carry provenance, so the
               logical panel does not sprout an empty row. */}
           {model.provenance && (
@@ -366,6 +733,7 @@ export function DetailPanel() {
                 {describeProvenance(
                   model.provenance,
                   model.columns.filter((c) => !c.dataType).length,
+                  viewer,
                 )}
               </span>
             </div>
@@ -380,215 +748,87 @@ export function DetailPanel() {
         )}
       </div>
 
-      {/* Model role */}
-      {!isReadOnly && (
-        <div className="detail-panel__section">
-          <RoleEditor modelName={model.name} modelRole={model.modelRole} />
-        </div>
-      )}
-
-      {/* Grain statement */}
-      {!isReadOnly && (
-        <div className="detail-panel__section">
-          <GrainEditor modelName={model.name} grain={model.grain} />
-        </div>
-      )}
-
-      {/* Structured metadata (a read-only panel shows it only when there is some) */}
-      {((!isReadOnly && !viewer) || (model.meta && Object.keys(model.meta).length > 0)) && (
-        <div className="detail-panel__section">
-          <MetaEditor modelName={model.name} meta={model.meta} readOnly={isReadOnly} />
-        </div>
-      )}
-
-      {/* Design Rationale (the viewer shows the section only when there is some) */}
-      {(!viewer || hasRationaleContent(model.rationale)) && (
-        <div className="detail-panel__section">
-          <TableRationale
-            modelName={model.name}
-            rationale={model.rationale}
-            modelRole={model.modelRole}
-            grain={model.grain}
-          />
-        </div>
-      )}
-
-      {/* Remove from Domain button */}
-      {!isReadOnly && (
-        <div className="detail-panel__section detail-panel__section--actions">
-          {confirmingDelete ? (
-            <>
-              <span className="detail-panel__confirm-label">
-                Remove table from subject area?{totalRelationships > 0 ? ` (${totalRelationships} relationship(s) will also be removed)` : ''}
-              </span>
-              <div className="detail-panel__confirm-actions">
+      {viewer ? (
+        <>
+          {fieldsSection}
+          {removeSection}
+          {columnsSection}
+          {relationshipsSection}
+        </>
+      ) : (
+        <>
+          {columnsSection}
+          {relationshipsSection}
+          {/* Editing host, logical stage: relationships to tables not on this diagram. */}
+          {showOffDiagram && (
+            <div className="detail-panel__section detail-panel__off-diagram">
+              <div className="detail-panel__off-diagram-head">
+                <h4 className="detail-panel__section-title detail-panel__off-diagram-title">
+                  Not on this diagram ({offRows.length})
+                </h4>
                 <button
-                  className="detail-panel__button detail-panel__button--danger"
-                  onClick={handleDeleteModel}
-                  aria-label="Confirm remove table"
+                  type="button"
+                  className="detail-panel__off-add-all"
+                  onClick={() => handleAddTables(offDiagramTables(offRows))}
+                  title="Add every table listed here to this diagram"
                 >
-                  Yes, Remove
-                </button>
-                <button
-                  className="detail-panel__button"
-                  onClick={() => setConfirmingDelete(false)}
-                  aria-label="Cancel"
-                >
-                  Cancel
+                  Add all related
                 </button>
               </div>
-            </>
-          ) : (
-            <button
-              className="detail-panel__button detail-panel__button--danger"
-              onClick={() => setConfirmingDelete(true)}
-              title="Remove this table from the subject area"
-              aria-label="Remove this table from the subject area"
-            >
-              Remove from Subject Area
-            </button>
+              <div className="detail-panel__relationships">
+                {offRows.map((row) => {
+                  const text = [row.columns, cardinalityLabel(row.cardinality), ...(row.otherLayer ? [`in ${row.otherLayer}`] : [])].join(' \u00b7 ');
+                  return (
+                    <div
+                      key={`off-${row.direction}-${row.otherTable}-${row.columns}`}
+                      className="detail-panel__relationship detail-panel__off-row"
+                    >
+                      <span className="detail-panel__rel-direction" title={row.direction === 'out' ? 'Outgoing FK' : 'Incoming FK'}>
+                        {row.direction === 'out' ? '\u2192' : '\u2190'}
+                      </span>
+                      <span className="detail-panel__off-text" title={`${row.otherTable} \u00b7 ${text}`}>
+                        <span className="detail-panel__rel-target">{row.otherTable}</span>
+                        <span className="detail-panel__off-detail">{` \u00b7 ${text}`}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="detail-panel__off-add"
+                        onClick={() => handleAddTables([row.otherTable])}
+                        title={`Add ${row.otherTable} to this diagram`}
+                        aria-label={`Add ${row.otherTable} to this diagram`}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
-        </div>
-      )}
 
-      {/* Columns (editable) */}
-      <div className="detail-panel__section">
-        <ColumnEditor
-          modelName={model.name}
-          columns={model.columns}
-          readOnly={isReadOnly}
-          modelRole={model.modelRole}
-        />
-      </div>
+          {/* The table's Fields: folded until one has a value (a read-only stage shows the fold only when one has). */}
+          {fieldsSection && (
+            <div className="detail-panel__section detail-panel__modelling">
+              <button
+                type="button"
+                className="detail-panel__modelling-toggle"
+                aria-expanded={modellingOpen}
+                onClick={() => setModellingOpen((open) => !open)}
+              >
+                <span className="detail-panel__modelling-chevron" aria-hidden="true">{modellingOpen ? '\u25be' : '\u25b8'}</span>
+                <span className="detail-panel__modelling-title">Modelling detail</span>{' '}
+                <span className="detail-panel__modelling-optional">(optional)</span>
+              </button>
+            </div>
+          )}
+          {fieldsSection && modellingOpen && (
+            <div className="detail-panel__modelling-body">
+              {fieldsSection}
+            </div>
+          )}
 
-      {/* Relationships */}
-      {totalRelationships > 0 && (
-        <div className="detail-panel__section">
-          <h4 className="detail-panel__section-title">
-            Relationships ({totalRelationships})
-          </h4>
-          <div className="detail-panel__relationships">
-            {/* The viewer can't edit cardinality, so its rows are plain (not clickable). */}
-            {/* Outgoing: this model references others */}
-            {outgoing.map((rel) => (
-              <div
-                key={`out-${relationshipEdgeId(rel)}`}
-                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
-                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
-                role={viewer ? undefined : 'button'}
-                tabIndex={viewer ? undefined : 0}
-                onKeyDown={viewer ? undefined : (e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
-                  }
-                }}
-                title={viewer ? undefined : 'Click to edit cardinality'}
-              >
-                <span className="detail-panel__rel-direction" title={rel.toModel === rel.fromModel ? 'Self-reference' : 'Outgoing FK'}>
-                  {rel.toModel === rel.fromModel ? '↻' : '→'}
-                </span>
-                <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-local" title={columnsText(rel, 'from')}>
-                    {columnsText(rel, 'from')}
-                  </span>
-                  <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-target" title={`${rel.toModel}.${columnsText(rel, 'to')}`}>
-                    {rel.toModel}.{columnsText(rel, 'to')}
-                  </span>
-                </span>
-                <span className="detail-panel__rel-cardinality">
-                  {rel.cardinality}
-                </span>
-                {viewer ? null : (!isReadOnly && rel.keysContradict && (
-                  <button
-                    className="detail-panel__rel-backwards"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTurnRound(rel);
-                    }}
-                    title={`${backwardsRelationshipNote(rel, rel.pairs ?? [rel])} Click to turn it round.`}
-                  >
-                    &#x26A0; Turn round
-                  </button>
-                ))}
-                {!isReadOnly && (
-                  <button
-                    className="detail-panel__rel-delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteRelationship(rel);
-                    }}
-                    title="Delete relationship"
-                    aria-label="Delete relationship"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-            {/* Incoming: others reference this model */}
-            {incoming.map((rel) => (
-              <div
-                key={`in-${relationshipEdgeId(rel)}`}
-                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
-                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
-                role={viewer ? undefined : 'button'}
-                tabIndex={viewer ? undefined : 0}
-                onKeyDown={viewer ? undefined : (e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
-                  }
-                }}
-                title={viewer ? undefined : 'Click to edit cardinality'}
-              >
-                <span className="detail-panel__rel-direction" title="Incoming FK">
-                  ←
-                </span>
-                <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-target" title={`${rel.fromModel}.${columnsText(rel, 'from')}`}>
-                    {rel.fromModel}.{columnsText(rel, 'from')}
-                  </span>
-                  <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-local" title={columnsText(rel, 'to')}>
-                    {columnsText(rel, 'to')}
-                  </span>
-                </span>
-                <span className="detail-panel__rel-cardinality">
-                  {rel.cardinality}
-                </span>
-                {viewer ? null : (!isReadOnly && rel.keysContradict && (
-                  <button
-                    className="detail-panel__rel-backwards"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTurnRound(rel);
-                    }}
-                    title={`${backwardsRelationshipNote(rel, rel.pairs ?? [rel])} Click to turn it round.`}
-                  >
-                    &#x26A0; Turn round
-                  </button>
-                ))}
-                {!isReadOnly && (
-                  <button
-                    className="detail-panel__rel-delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteRelationship(rel);
-                    }}
-                    title="Delete relationship"
-                    aria-label="Delete relationship"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+          {removeSection}
+        </>
       )}
     </Panel>
   );

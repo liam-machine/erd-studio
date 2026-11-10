@@ -1,0 +1,26 @@
+# Who reviews a change to Bellbird Bank's data model (an invented bank).
+# A real project keeps this file in its repository's .github/ folder (or its root, or docs/).
+# The last line that matches a file wins, so the general lines come first.
+
+# Everything, unless a line below says otherwise: the data architecture team
+/.erd-studio/                                                    @bellbird-bank/data-architecture
+
+# Landing: the data engineers who load the sources
+/.erd-studio/landing/                                            @bellbird-bank/data-engineering
+
+# The party subject area has its own stewards: its schema folder and its relationships file
+/.erd-studio/edw/tables/party/                                   @bellbird-bank/customer-data
+/.erd-studio/edw/relationships/party.dbml                        @bellbird-bank/customer-data
+
+# Marts: one schema, three teams. The folders can't tell them apart, so each team's files are listed.
+/.erd-studio/marts/                                              @bellbird-bank/bi-platform
+/.erd-studio/marts/relationships/finance.dbml                    @bellbird-bank/finance-analytics
+/.erd-studio/marts/diagrams/finance.dbml                         @bellbird-bank/finance-analytics
+/.erd-studio/marts/tables/marts/fct_account_balance_daily.dbml   @bellbird-bank/finance-analytics
+/.erd-studio/marts/tables/marts/fct_fee.dbml                     @bellbird-bank/finance-analytics
+/.erd-studio/marts/relationships/marketing.dbml                  @bellbird-bank/marketing-analytics
+/.erd-studio/marts/diagrams/marketing.dbml                       @bellbird-bank/marketing-analytics
+/.erd-studio/marts/tables/marts/*campaign*.dbml                  @bellbird-bank/marketing-analytics
+
+# Reporting: the BI platform team
+/.erd-studio/reporting/                                          @bellbird-bank/bi-platform

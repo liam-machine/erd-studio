@@ -1,0 +1,18 @@
+// Leading comment: hand-written notes survive every save.
+   /* A block comment
+         keeps its own inside */
+Table orders [schema: 'gold'] {   // trailing on the header
+// own-line comment, to be indented
+  id int [pk]   // the key
+  customer_id   int   [ /* inline block */ foreign_key: 'true',
+      // own-line comment inside the settings
+      note: 'Who ordered' ]
+      amount decimal(18,2) [note: 'Total'] /* trailing block */
+
+
+  // a comment after a blank-line run
+  status varchar
+  Note: 'Orders'   // trailing on the note
+  // last comment in the body
+}
+// end of file

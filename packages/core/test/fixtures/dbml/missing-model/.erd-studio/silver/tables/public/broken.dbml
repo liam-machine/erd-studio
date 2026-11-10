@@ -1,0 +1,5 @@
+// A table file with a DBML syntax error: a setting list that is never closed.
+Table public.broken {
+  customer_key INT
+  other VARCHAR [note: 'never closed'
+}

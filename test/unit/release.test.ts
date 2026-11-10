@@ -1,6 +1,8 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import {
   parseVersion,
@@ -11,6 +13,8 @@ import {
   pinnedReleaseVersion,
   resolveReleaseVersion,
   updateChangelog,
+  RELEASE_NOTES_MAX_BYTES,
+  capReleaseNotes,
   extractReleaseNotes,
   isPreReleaseEntry,
   marketplaceVersions,
@@ -132,6 +136,22 @@ describe('release.mjs — changelog-pinned releases', () => {
     expect(rejected[0]).toMatch(/not ahead of v0\.6\.53; releasing v0\.6\.54/);
   });
 
+  it('accepts the native DBML storage release pin, 2.0.0, as CHANGELOG.md writes it', () => {
+    // A copy of the heading, not the real file: the release renames it (deploy.yml), and a test
+    // tied to the pre-release state would fail on every run after 2.0.0 ships.
+    const changelog = '# Changelog\n\n## Unreleased — 2.0.0\n\n**ERD Studio 2.0 is a major release.**\n\n### Added\n- **ERD Studio: Convert Project to DBML** moves an existing YAML/JSON project to DBML.\n\n## 1.7.2 — 2026-10-23\n\n### Changed\n- Older note\n';
+    expect(pinnedReleaseVersion(changelog)).toBe('2.0.0');
+    expect(resolveReleaseVersion('1.7.2', '1.7.2', pinnedReleaseVersion(changelog))).toBe('2.0.0');
+    const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-01' });
+    expect(released).toMatch(/^## 2\.0\.0 — 2026-11-01$/m);
+    expect(extractReleaseNotes(released, '2.0.0')).toContain('Convert Project to DBML');
+  });
+
+  it('finds 2.0.0 in the real CHANGELOG.md, pinned before the release or released after it', () => {
+    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
+    expect(changelog).toMatch(/^## (Unreleased — 2\.0\.0|2\.0\.0 — \d{4}-\d{2}-\d{2})$/m);
+  });
+
   it('renames a pinned Unreleased heading like any other', () => {
     const content = '# Changelog\n\n## Unreleased — 1.0.0\n\n### Added\n\n- Thing\n';
     expect(updateChangelog(content, { version: '1.0.0', date: '2026-09-12' })).toContain(
@@ -186,6 +206,40 @@ describe('release.mjs — updateChangelog', () => {
 
   it('rejects an invalid version', () => {
     expect(() => updateChangelog('', { ...opts, version: 'latest' })).toThrow(/Invalid release version/);
+  });
+});
+
+describe('release.mjs — capReleaseNotes (GitHub refuses a body over 125,000 characters)', () => {
+  const bullet = (i: number) => `- **Change ${i} — with an ellipsis…** ${'detail '.repeat(40)}\n  continued on an indented line.`;
+  const long = ['### Added', ...Array.from({ length: 400 }, (_, i) => bullet(i)), '### Fixed', '- Last fix'].join('\n');
+
+  it('leaves notes that fit unchanged', () => {
+    expect(capReleaseNotes('### Fixed\n\n- One thing')).toBe('### Fixed\n\n- One thing');
+  });
+
+  it('cuts long notes at a whole bullet under the budget, and links the full CHANGELOG', () => {
+    const capped = capReleaseNotes(long, { maxBytes: 20_000 });
+    expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(20_000);
+    expect(capped.startsWith('### Added\n- **Change 0')).toBe(true);
+    // The last kept bullet is whole, continuation line included.
+    expect(capped).toMatch(/continued on an indented line\.\n\n_These notes are cut short to fit on GitHub\. The full list is in \[CHANGELOG\.md\]\(https:\/\/github\.com\/liam-machine\/erd-studio\/blob\/main\/CHANGELOG\.md\)\._$/);
+  });
+
+  it('drops a heading the cut leaves with nothing under it', () => {
+    const notes = ['### Added', `- ${'a'.repeat(900)}`, '### Fixed', `- ${'b'.repeat(900)}`].join('\n');
+    const capped = capReleaseNotes(notes, { maxBytes: 1_100 });
+    expect(capped).not.toContain('### Fixed');
+    expect(capped).toContain('- aaa');
+  });
+
+  it('keeps the real 2.0 notes, and the pre-release notes built from them, under the budget', () => {
+    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
+    const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-10' });
+    for (const notes of [capReleaseNotes(extractReleaseNotes(released, '2.0.0')), capReleaseNotes(prereleaseNotes(changelog, '1.9.11'))]) {
+      expect(Buffer.byteLength(notes, 'utf8')).toBeLessThanOrEqual(RELEASE_NOTES_MAX_BYTES);
+      expect(notes.length).toBeGreaterThan(50_000);
+    }
+    expect(RELEASE_NOTES_MAX_BYTES + 2_000).toBeLessThan(125_000);
   });
 });
 

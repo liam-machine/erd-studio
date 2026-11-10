@@ -1,0 +1,15 @@
+{
+  "name": "Region Territory",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "region_territory",
+  "displayFolder": "2. Keys",
+  "lineageTag": "864f2700-e020-4b14-98ce-7e5b4154275d",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

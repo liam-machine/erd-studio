@@ -86,6 +86,21 @@ describe('useStatePersistence restore', () => {
     });
   });
 
+  it('restores which table decisions were inferred, only where the selection still holds that side', () => {
+    mockVsCode.getState.mockReturnValue({
+      selectedNode: null, viewport: { x: 0, y: 0, zoom: 1 }, detailPanelOpen: false, expandedNodes: [], allExpanded: false,
+      discrepancyVisible: true, discrepancyCompareStage: 'physical', syncMode: true,
+      syncSelections: { 'model:a': 'logical', 'model:b': 'physical' },
+      // model:b's selection no longer holds the inferred side; model:c has none.
+      syncInferredTableKeys: { 'model:a': 'logical', 'model:b': 'logical', 'model:c': 'physical' },
+    } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    expect(useEditorStore.getState().syncInferredTableKeys).toEqual({ 'model:a': 'logical' });
+  });
+
   it('does not touch overlay state or request a report when the overlay was off', () => {
     mockVsCode.getState.mockReturnValue({
       selectedNode: null,
@@ -106,6 +121,30 @@ describe('useStatePersistence restore', () => {
     expect(s.syncMode).toBe(false);
     expect(s.syncSelections).toEqual({});
     expect(s.canvasMode).toBe('pan');
+    expect(mockVsCode.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not restore Diff or ask for a report without a dbt project (logicalOnly)', () => {
+    mockVsCode.getState.mockReturnValue({
+      selectedNode: null,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      detailPanelOpen: false,
+      expandedNodes: [],
+      allExpanded: false,
+      discrepancyVisible: true,
+      discrepancyCompareStage: 'physical',
+      syncMode: true,
+      syncSelections: { 'model:a': 'logical' },
+    } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea, logicalOnly: true });
+
+    renderHook(() => useStatePersistence());
+
+    const s = useEditorStore.getState();
+    expect(s.discrepancyVisible).toBe(false);
+    expect(s.discrepancyCompareStage).toBeNull();
+    expect(s.syncMode).toBe(false);
+    expect(s.syncSelections).toEqual({});
     expect(mockVsCode.postMessage).not.toHaveBeenCalled();
   });
 
@@ -135,6 +174,7 @@ describe('useStatePersistence persist', () => {
       useEditorStore.getState().setDiscrepancyVisible(true);
       useEditorStore.getState().setSyncMode(true);
       useEditorStore.getState().setSyncSelection('model:a', 'physical');
+      useEditorStore.getState().setInferredTableChoice('model:b', 'logical');
     });
     act(() => {
       vi.advanceTimersByTime(300);
@@ -146,7 +186,8 @@ describe('useStatePersistence persist', () => {
       discrepancyVisible: true,
       discrepancyCompareStage: 'physical',
       syncMode: true,
-      syncSelections: { 'model:a': 'physical' },
+      syncSelections: { 'model:a': 'physical', 'model:b': 'logical' },
+      syncInferredTableKeys: { 'model:b': 'logical' },
     });
   });
 

@@ -1,0 +1,19 @@
+# Written by an AI helper set up before 2.0.
+name: fct_visit
+columns:
+  - name: visit_key
+    dataType: INT
+    isPrimaryKey: true
+  - name: region_key
+    dataType: INT
+  - name: customer_key
+    dataType: INT
+relationships:
+  - fromColumn: region_key
+    toTable: dim_region
+    toColumn: region_key
+    cardinality: many-to-one
+  - fromColumn: customer_key
+    toTable: dim_customer
+    toColumn: customer_key
+    cardinality: many-to-one

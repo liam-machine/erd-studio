@@ -1,34 +1,72 @@
 /**
- * The getting-started video ships as two files plus a generated caption module. These checks
- * guard the shipped artefacts only — the render pipeline under video/ has its own tests and is
- * never loaded here (video/README.md).
+ * The getting-started video ships as two cuts — the dbt tour (the dbt page) and the
+ * logical-first cut (the no-folder and logical pages) — each an mp4, a poster and a generated
+ * caption module. These checks guard the shipped artefacts only — the render pipeline under
+ * video/ has its own tests and is never loaded here (video/README.md).
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../../src/types/gettingStartedTranscript';
+import {
+  LOGICAL_GETTING_STARTED_CUES,
+  LOGICAL_GETTING_STARTED_TRANSCRIPT,
+} from '../../src/types/gettingStartedLogicalTranscript';
 
 const ROOT = path.join(__dirname, '..', '..');
+
+/**
+ * MP3 and AAC share the `mp4a` sample entry; the esds DecoderConfigDescriptor's
+ * objectTypeIndication tells them apart (0x6B = MPEG-1 audio / MP3, 0x40 = AAC).
+ */
+function audioObjectType(head: Buffer): number | undefined {
+  const esds = head.indexOf(Buffer.from('esds'));
+  if (esds < 0) return undefined;
+  const dcd = head.indexOf(0x04, esds + 4 + 4 + 2); // after box type, version/flags, ES_Descriptor tag+len
+  let i = dcd + 1;
+  while (head[i] & 0x80) { i++; } // variable-length size field
+  return head[i + 1];
+}
+
 const MEDIA = path.join(ROOT, 'media', 'onboarding');
 
-describe('getting-started captions', () => {
+const CUTS = [
+  {
+    name: 'dbt tour',
+    video: 'getting-started.mp4',
+    poster: 'getting-started-poster.jpg',
+    module: 'gettingStartedTranscript.ts',
+    cues: GETTING_STARTED_CUES,
+    transcript: GETTING_STARTED_TRANSCRIPT,
+  },
+  {
+    name: 'logical-first cut',
+    video: 'getting-started-logical.mp4',
+    poster: 'getting-started-logical-poster.jpg',
+    module: 'gettingStartedLogicalTranscript.ts',
+    cues: LOGICAL_GETTING_STARTED_CUES,
+    transcript: LOGICAL_GETTING_STARTED_TRANSCRIPT,
+  },
+] as const;
+
+describe.each(CUTS)('getting-started captions: $name', (cut) => {
   it('has ordered, non-overlapping cues of caption size', () => {
-    expect(GETTING_STARTED_CUES.length).toBeGreaterThan(10);
+    expect(cut.cues.length).toBeGreaterThan(10);
     let prevEnd = 0;
-    for (const cue of GETTING_STARTED_CUES) {
+    for (const cue of cut.cues) {
       expect(cue.start).toBeGreaterThanOrEqual(prevEnd);
       expect(cue.end).toBeGreaterThan(cue.start);
       expect(cue.text.trim()).toBe(cue.text);
       expect(cue.text.length).toBeLessThanOrEqual(84);
       prevEnd = cue.end;
     }
-    expect(prevEnd).toBeLessThanOrEqual(65); // video/script.yaml maxDuration
+    expect(prevEnd).toBeLessThanOrEqual(200); // the scripts' maxDuration (video/script*.yaml): "Watch the Tour" names no length
   });
 
   it('transcript carries every cue, in order', () => {
     let from = 0;
-    const flat = GETTING_STARTED_TRANSCRIPT.replace(/\s+/g, ' ');
-    for (const cue of GETTING_STARTED_CUES) {
+    const flat = cut.transcript.replace(/\s+/g, ' ');
+    for (const cue of cut.cues) {
       const at = flat.indexOf(cue.text, from);
       expect(at, cue.text).toBeGreaterThanOrEqual(0);
       from = at + cue.text.length;
@@ -36,43 +74,62 @@ describe('getting-started captions', () => {
   });
 
   it('is pure data (safe in both tsconfigs and the mcp-server build)', () => {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'types', 'gettingStartedTranscript.ts'), 'utf8');
+    const src = fs.readFileSync(path.join(ROOT, 'src', 'types', cut.module), 'utf8');
     expect(src).toMatch(/do not edit/);
     expect(src).not.toMatch(/^import /m);
   });
 });
 
 describe('getting-started media', () => {
-  it('ships exactly the mp4 and the jpeg poster', () => {
-    expect(fs.readdirSync(MEDIA).sort()).toEqual(['getting-started-poster.jpg', 'getting-started.mp4']);
+  it('ships exactly the two cuts, each an mp4 and a jpeg poster: no other file or folder (the per-start clips are gone)', () => {
+    expect(fs.readdirSync(MEDIA).filter((f) => f !== '.DS_Store').sort()).toEqual([
+      'getting-started-logical-poster.jpg',
+      'getting-started-logical.mp4',
+      'getting-started-poster.jpg',
+      'getting-started.mp4',
+    ]);
+    expect(fs.existsSync(path.join(MEDIA, 'stories'))).toBe(false);
   });
 
-  it('keeps the mp4 under the 8 MB ceiling and fast-start (moov before mdat)', () => {
-    const buf = fs.readFileSync(path.join(MEDIA, 'getting-started.mp4'));
-    expect(buf.length).toBeLessThanOrEqual(8 * 1024 * 1024);
-    const moov = buf.indexOf('moov');
-    const mdat = buf.indexOf('mdat');
-    expect(moov).toBeGreaterThan(0);
-    expect(moov).toBeLessThan(mdat);
-  });
+  // Each check runs on whichever of the agreed files exist; the listing above requires all four.
+  const present = (file: string) => fs.existsSync(path.join(MEDIA, file));
 
-  it('uses MP3 audio, never AAC (VS Code documents MP3 and has no AAC decoder)', () => {
-    const head = fs.readFileSync(path.join(MEDIA, 'getting-started.mp4')).subarray(0, 64 * 1024);
-    expect(head.includes(Buffer.from('avc1'))).toBe(true);
-    // MP3 and AAC share the `mp4a` sample entry; the esds DecoderConfigDescriptor's
-    // objectTypeIndication tells them apart (0x6B = MPEG-1 audio / MP3, 0x40 = AAC).
-    expect(head.includes(Buffer.from('mp4a'))).toBe(true);
-    const esds = head.indexOf(Buffer.from('esds'));
-    expect(esds).toBeGreaterThan(0);
-    const dcd = head.indexOf(0x04, esds + 4 + 4 + 2); // after box type, version/flags, ES_Descriptor tag+len
-    let i = dcd + 1;
-    while (head[i] & 0x80) { i++; } // variable-length size field
-    expect(head[i + 1]).toBe(0x6b);
-  });
+  describe.each(CUTS)('$name', (cut) => {
+    it.runIf(present(cut.video))('keeps the mp4 under the 12 MiB ceiling and fast-start (moov before mdat)', () => {
+      const buf = fs.readFileSync(path.join(MEDIA, cut.video));
+      // 12 MiB (video/encode.sh): the recorded default cut is ~175 s of real UI (a 2,000-table diagram among it), whose small text needs CRF 24
+      expect(buf.length).toBeLessThanOrEqual(12 * 1024 * 1024);
+      const moov = buf.indexOf('moov');
+      const mdat = buf.indexOf('mdat');
+      expect(moov).toBeGreaterThan(0);
+      expect(moov).toBeLessThan(mdat);
+    });
 
-  it('poster is a JPEG', () => {
-    const buf = fs.readFileSync(path.join(MEDIA, 'getting-started-poster.jpg'));
-    expect(buf[0]).toBe(0xff);
-    expect(buf[1]).toBe(0xd8);
+    it.runIf(present(cut.video))('uses MP3 audio, never AAC (VS Code documents MP3 and has no AAC decoder)', () => {
+      // the moov (faststart) holds the sample entries; a 3-minute cut's sample tables run past 64 KiB
+      const head = fs.readFileSync(path.join(MEDIA, cut.video)).subarray(0, 512 * 1024);
+      expect(head.includes(Buffer.from('avc1'))).toBe(true);
+      // MP3 and AAC share the `mp4a` sample entry: audioObjectType reads which (0x6B = MP3).
+      expect(head.includes(Buffer.from('mp4a'))).toBe(true);
+      expect(head.indexOf(Buffer.from('esds'))).toBeGreaterThan(0);
+      expect(audioObjectType(head)).toBe(0x6b);
+    });
+
+    it.runIf(present(cut.video))('lasts the tour (50–200 s), and its last caption ends inside it', () => {
+      // mvhd (version 0): size, 'mvhd', version/flags, creation, modification, timescale, duration
+      const buf = fs.readFileSync(path.join(MEDIA, cut.video));
+      const mvhd = buf.indexOf('mvhd');
+      expect(buf[mvhd + 4]).toBe(0);
+      const seconds = buf.readUInt32BE(mvhd + 20) / buf.readUInt32BE(mvhd + 16);
+      expect(seconds).toBeGreaterThanOrEqual(50);
+      expect(seconds).toBeLessThanOrEqual(200);
+      expect(cut.cues[cut.cues.length - 1].end).toBeLessThanOrEqual(seconds);
+    });
+
+    it.runIf(present(cut.poster))('poster is a JPEG', () => {
+      const buf = fs.readFileSync(path.join(MEDIA, cut.poster));
+      expect(buf[0]).toBe(0xff);
+      expect(buf[1]).toBe(0xd8);
+    });
   });
 });

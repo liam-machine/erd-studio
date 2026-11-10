@@ -21,9 +21,10 @@ import {
   KNOWN_LAYER_DEFAULTS,
   LAYERS_SCHEMA_VERSION,
 } from '../types/layer';
-import { LAYERS_CONFIG_FILE, validateLayersConfig } from '@erd-studio/core';
+import { LAYERS_CONFIG_FILE, isReservedLayerName, validateLayersConfig } from '@erd-studio/core';
 import { LOGICAL_MODELS_DIR, TABLES_DIR, hasTablesLibrary } from './logicalModelService';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
+import { log } from './logger';
 
 // Validation of layers.json lives in @erd-studio/core; the file name is
 // re-exported so existing imports of this module keep working.
@@ -42,6 +43,14 @@ const STAGE_DIR_NAMES = new Set(['logical', 'physical']);
  */
 const RESERVED_DIR_NAMES = new Set(['templates', LOGICAL_MODELS_DIR, TABLES_DIR]);
 
+/**
+ * Why Add Layer (and Convert) refuse a name in core's `RESERVED_LAYER_NAMES`
+ * (`tables`, `templates`, `logical-models`, compared case-insensitively).
+ */
+export function reservedLayerNameMessage(name: string): string {
+  return `"${name}" is reserved for ERD Studio's own folders; pick another name.`;
+}
+
 /** Sentinel signature used when layers.json is absent. */
 const NO_FILE_SIGNATURE = 'missing';
 
@@ -49,12 +58,44 @@ const NO_FILE_SIGNATURE = 'missing';
  * Copy a layer list so the caller can mutate it freely. LayerConfig holds only
  * primitives, so a shallow copy per layer fully detaches it from the cache.
  */
-function cloneLayers(layers: LayerConfig[]): LayerConfig[] {
+function cloneLayers(layers: readonly LayerConfig[]): LayerConfig[] {
   return layers.map(l => ({ ...l }));
 }
 
+/** How `loadFromFile` starts the reason for a layers.json it could not read at all. */
+const READ_FAILURE_PREFIX = 'Failed to read layers config';
+
+/**
+ * `saveConfig` refused to overwrite a layers.json it could not read (a JSON
+ * mistake, an invalid layer): the user's file to fix, not ERD Studio's (#229).
+ */
+export class LayersFileUnreadableError extends Error {
+  /** The file could not be read at all (permissions, a lock), rather than had a mistake in it. */
+  readonly cannotRead: boolean;
+
+  constructor(readonly reason: string) {
+    super(`${LAYERS_CONFIG_FILE} could not be loaded (${reason}). Fix or remove the file before changing layers.`);
+    this.name = 'LayersFileUnreadableError';
+    this.cannotRead = reason.startsWith(READ_FAILURE_PREFIX);
+  }
+}
+
+/**
+ * The layer a brand-new project without dbt starts with (no `.erd-studio/`
+ * yet): one neutral layer, so the first diagram needs no layer question and
+ * no warehouse vocabulary. Written to layers.json by the first create, like
+ * the defaults; a project with dbt, or one that already has `.erd-studio/`,
+ * keeps core's `DEFAULT_LAYERS` (silver, gold), which is also what the
+ * Confluence app reads when a repo has no layers.json.
+ */
+export const NEW_PROJECT_LAYERS_WITHOUT_DBT: readonly LayerConfig[] = [
+  { id: 'main', label: 'Main', abbreviation: 'MAIN', color: '#6366f1', creatable: true, order: 1 },
+];
+
 export class LayerService {
   private config: LayersConfigFile | null = null;
+  /** The layers used while there is no layers.json (see {@link useDefaultLayers}). */
+  private defaults: readonly LayerConfig[] = DEFAULT_LAYERS;
   private readonly configPath: string;
   private readonly semanticPath: string;
 
@@ -75,6 +116,15 @@ export class LayerService {
   ) {
     this.semanticPath = path.join(projectPath, semanticDir);
     this.configPath = path.join(this.semanticPath, LAYERS_CONFIG_FILE);
+  }
+
+  /**
+   * Use `layers` instead of core's defaults while there is no layers.json
+   * (a new project without dbt, {@link NEW_PROJECT_LAYERS_WITHOUT_DBT}).
+   */
+  useDefaultLayers(layers: readonly LayerConfig[]): void {
+    this.defaults = layers;
+    this.invalidateCache();
   }
 
   /**
@@ -141,7 +191,7 @@ export class LayerService {
       // Use defaults
       this.config = {
         schemaVersion: LAYERS_SCHEMA_VERSION,
-        layers: cloneLayers(DEFAULT_LAYERS),
+        layers: cloneLayers(this.defaults),
       };
     }
     this.loadedSignature = signature;
@@ -155,7 +205,7 @@ export class LayerService {
    * saveConfig can refuse to overwrite the broken file with these defaults.
    */
   private fallbackToDefaults(reason: string): LayersConfigFile {
-    console.error(`[LayerService] ${reason}`);
+    log.error(`[LayerService] ${reason}`);
     this.loadError = reason;
     return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: cloneLayers(DEFAULT_LAYERS) };
   }
@@ -169,7 +219,7 @@ export class LayerService {
       raw = fs.readFileSync(this.configPath, 'utf-8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return this.fallbackToDefaults(`Failed to read layers config: ${message}`);
+      return this.fallbackToDefaults(`${READ_FAILURE_PREFIX}: ${message}`);
     }
 
     let parsed: unknown;
@@ -188,7 +238,7 @@ export class LayerService {
    * Returns valid config or falls back to defaults on error.
    */
   private validateConfig(data: unknown): LayersConfigFile {
-    const r = validateLayersConfig(data, (m) => console.warn(`[LayerService] ${m}`));
+    const r = validateLayersConfig(data, (m) => log.warn(`[LayerService] ${m}`));
     return r.ok ? r.config : this.fallbackToDefaults(r.reason);
   }
 
@@ -205,7 +255,7 @@ export class LayerService {
     try {
       entries = fs.readdirSync(this.semanticPath, { withFileTypes: true });
     } catch (err) {
-      console.warn(
+      log.warn(
         `[LayerService] Unable to read directory ${this.semanticPath}: ` +
         `${err instanceof Error ? err.message : String(err)}`,
       );
@@ -217,7 +267,7 @@ export class LayerService {
       .filter(entry =>
         entry.isDirectory() &&
         !entry.name.startsWith('.') &&
-        (!RESERVED_DIR_NAMES.has(entry.name) || (entry.name === TABLES_DIR && !hasTablesLibrary(this.semanticPath))) &&
+        (!RESERVED_DIR_NAMES.has(entry.name) || (entry.name === TABLES_DIR && !hasTablesLibrary(this.semanticPath) && !this.tablesHoldsDbml())) &&
         !STAGE_DIR_NAMES.has(entry.name),
       )
       .map(entry => entry.name)
@@ -259,6 +309,30 @@ export class LayerService {
     }
 
     return layers;
+  }
+
+  /**
+   * Whether `tables/` holds a `.dbml` at its top or one folder down: a 1.9
+   * pre-release leftover (§1.8), so `tables` is never offered as a layer
+   * (restoring the YAML beside it must not turn its tables into a layer).
+   */
+  private tablesHoldsDbml(): boolean {
+    const dir = path.join(this.semanticPath, TABLES_DIR);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    return entries.some((e) => {
+      if (e.isFile()) return e.name.endsWith('.dbml');
+      if (!e.isDirectory() || e.name.startsWith('.')) return false;
+      try {
+        return fs.readdirSync(path.join(dir, e.name)).some((f) => f.endsWith('.dbml'));
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**
@@ -366,10 +440,7 @@ export class LayerService {
     // are defaults, and writing them would silently destroy the user's file.
     this.loadConfig();
     if (this.loadError && this.fileSignature() !== NO_FILE_SIGNATURE) {
-      throw new Error(
-        `${LAYERS_CONFIG_FILE} could not be loaded (${this.loadError}). ` +
-        'Fix or remove the file before changing layers.',
-      );
+      throw new LayersFileUnreadableError(this.loadError);
     }
 
     // Ensure semantic directory exists
@@ -408,6 +479,15 @@ export class LayerService {
    */
   async addLayer(layer: Omit<LayerConfig, 'order'>): Promise<void> {
     const layers = this.loadConfig();
+
+    // A `_` name is never a layer (kept from 1.9, whose relationships files were `_relationships.dbml`).
+    if (layer.id.startsWith('_')) {
+      throw new Error(`Layer ID "${layer.id}" may not start with "_"`);
+    }
+    // ERD Studio's own folders (`tables`, `templates`, `logical-models`), in any case (§1.1).
+    if (isReservedLayerName(layer.id)) {
+      throw new Error(reservedLayerNameMessage(layer.id));
+    }
 
     // Check for duplicate ID
     if (layers.some(l => l.id === layer.id)) {

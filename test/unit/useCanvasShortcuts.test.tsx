@@ -270,4 +270,12 @@ describe('useCanvasShortcuts', () => {
       { type: 'switchStage', payload: { stage: 'physical', requestId: expect.any(Number) } },
     ]);
   });
+
+  it('Alt+2 does nothing without a dbt project (logicalOnly)', () => {
+    useEditorStore.setState({ logicalOnly: true });
+    renderHook(() => useCanvasShortcuts());
+    const e = press('™', { altKey: true, code: 'Digit2' });
+    expect(sent()).toEqual([]);
+    expect(e.defaultPrevented).toBe(false);
+  });
 });

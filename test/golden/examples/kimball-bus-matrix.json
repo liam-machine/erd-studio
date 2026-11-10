@@ -1,0 +1,205 @@
+{
+  "example": "kimball-bus-matrix",
+  "layers": [
+    {
+      "id": "presentation",
+      "label": "Presentation",
+      "abbreviation": "PRS"
+    }
+  ],
+  "tables": {
+    "conformed.dim_date": {
+      "layer": "presentation",
+      "schema": "conformed",
+      "role": "conformed-dim",
+      "grain": "One row per calendar day",
+      "columns": [
+        "date_key INT pk",
+        "calendar_date DATE",
+        "day_of_week STRING",
+        "week_start_date DATE",
+        "fiscal_period STRING",
+        "is_holiday BOOLEAN"
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
+    },
+    "conformed.dim_product": {
+      "layer": "presentation",
+      "schema": "conformed",
+      "role": "conformed-dim",
+      "grain": "One row per product per version",
+      "columns": [
+        "product_key INT pk",
+        "sku STRING nk",
+        "product_description STRING scd1",
+        "brand STRING scd2",
+        "category STRING scd2",
+        "department STRING scd2",
+        "valid_from DATE",
+        "valid_to DATE"
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
+    },
+    "conformed.dim_store": {
+      "layer": "presentation",
+      "schema": "conformed",
+      "role": "conformed-dim",
+      "grain": "One row per store",
+      "columns": [
+        "store_key INT pk",
+        "store_number STRING nk",
+        "store_name STRING scd1",
+        "region STRING scd2",
+        "store_format STRING scd1"
+      ],
+      "newRelationshipsFile": "presentation/relationships/presentation.dbml"
+    },
+    "inventory.fct_inventory_snapshot": {
+      "layer": "presentation",
+      "schema": "inventory",
+      "role": "periodic-snapshot",
+      "grain": "One row per product per store per day",
+      "columns": [
+        "date_key INT pk fk",
+        "product_key INT pk fk",
+        "store_key INT pk fk",
+        "quantity_on_hand INT semi-additive",
+        "inventory_value DECIMAL(12,2) semi-additive",
+        "days_of_supply DECIMAL(8,2) non-additive"
+      ],
+      "newRelationshipsFile": "presentation/relationships/inventory.dbml"
+    },
+    "procurement.dim_supplier": {
+      "layer": "presentation",
+      "schema": "procurement",
+      "role": "domain-dim",
+      "grain": "One row per supplier",
+      "columns": [
+        "supplier_key INT pk",
+        "supplier_number STRING nk",
+        "supplier_name STRING scd1",
+        "payment_terms STRING scd1"
+      ],
+      "newRelationshipsFile": "presentation/relationships/procurement.dbml"
+    },
+    "procurement.fct_purchase_order_pipeline": {
+      "layer": "presentation",
+      "schema": "procurement",
+      "role": "accumulating-snapshot",
+      "grain": "One row per purchase order line, updated as it moves",
+      "columns": [
+        "po_line_id STRING pk nk",
+        "product_key INT fk",
+        "store_key INT fk",
+        "supplier_key INT fk",
+        "ordered_date_key INT fk",
+        "received_date_key INT fk",
+        "invoiced_date_key INT fk",
+        "ordered_quantity INT additive",
+        "received_quantity INT additive",
+        "invoice_amount DECIMAL(12,2) additive"
+      ],
+      "newRelationshipsFile": "presentation/relationships/procurement.dbml"
+    },
+    "sales.dim_promotion": {
+      "layer": "presentation",
+      "schema": "sales",
+      "role": "domain-dim",
+      "grain": "One row per promotion",
+      "columns": [
+        "promotion_key INT pk",
+        "promotion_code STRING nk",
+        "promotion_name STRING",
+        "discount_type STRING",
+        "start_date DATE",
+        "end_date DATE"
+      ],
+      "newRelationshipsFile": "presentation/relationships/sales.dbml"
+    },
+    "sales.fct_retail_sales": {
+      "layer": "presentation",
+      "schema": "sales",
+      "role": "transaction-fact",
+      "grain": "One row per product on a checkout transaction",
+      "columns": [
+        "date_key INT fk",
+        "product_key INT pk fk",
+        "store_key INT fk",
+        "promotion_key INT fk",
+        "pos_transaction_number STRING pk nk",
+        "sales_quantity INT additive",
+        "sales_amount DECIMAL(12,2) additive",
+        "cost_amount DECIMAL(12,2) additive",
+        "gross_profit_amount DECIMAL(12,2) additive"
+      ],
+      "newRelationshipsFile": "presentation/relationships/sales.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "presentation/diagrams/conformed-dimensions.dbml",
+      "name": "conformed-dimensions",
+      "layer": "presentation",
+      "tables": [
+        "conformed.dim_date",
+        "conformed.dim_product",
+        "conformed.dim_store"
+      ],
+      "relationships": []
+    },
+    {
+      "file": "presentation/diagrams/inventory.dbml",
+      "name": "inventory",
+      "layer": "presentation",
+      "tables": [
+        "conformed.dim_date",
+        "conformed.dim_product",
+        "conformed.dim_store",
+        "inventory.fct_inventory_snapshot"
+      ],
+      "relationships": [
+        "fct_inventory_snapshot.date_key -> dim_date.date_key many-to-one",
+        "fct_inventory_snapshot.product_key -> dim_product.product_key many-to-one",
+        "fct_inventory_snapshot.store_key -> dim_store.store_key many-to-one"
+      ]
+    },
+    {
+      "file": "presentation/diagrams/procurement.dbml",
+      "name": "procurement",
+      "layer": "presentation",
+      "tables": [
+        "conformed.dim_date",
+        "conformed.dim_product",
+        "conformed.dim_store",
+        "procurement.dim_supplier",
+        "procurement.fct_purchase_order_pipeline"
+      ],
+      "relationships": [
+        "fct_purchase_order_pipeline.invoiced_date_key -> dim_date.date_key many-to-one role:invoiced date",
+        "fct_purchase_order_pipeline.ordered_date_key -> dim_date.date_key many-to-one role:ordered date",
+        "fct_purchase_order_pipeline.product_key -> dim_product.product_key many-to-one",
+        "fct_purchase_order_pipeline.received_date_key -> dim_date.date_key many-to-one role:received date",
+        "fct_purchase_order_pipeline.store_key -> dim_store.store_key many-to-one",
+        "fct_purchase_order_pipeline.supplier_key -> dim_supplier.supplier_key many-to-one"
+      ]
+    },
+    {
+      "file": "presentation/diagrams/retail-sales.dbml",
+      "name": "retail-sales",
+      "layer": "presentation",
+      "tables": [
+        "conformed.dim_date",
+        "conformed.dim_product",
+        "conformed.dim_store",
+        "sales.dim_promotion",
+        "sales.fct_retail_sales"
+      ],
+      "relationships": [
+        "fct_retail_sales.date_key -> dim_date.date_key many-to-one",
+        "fct_retail_sales.product_key -> dim_product.product_key many-to-one",
+        "fct_retail_sales.promotion_key -> dim_promotion.promotion_key many-to-one",
+        "fct_retail_sales.store_key -> dim_store.store_key many-to-one"
+      ]
+    }
+  ]
+}

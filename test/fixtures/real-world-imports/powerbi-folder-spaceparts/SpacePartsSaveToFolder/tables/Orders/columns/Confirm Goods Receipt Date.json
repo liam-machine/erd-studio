@@ -1,0 +1,31 @@
+{
+  "name": "Confirm Goods Receipt Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "confirm_goods_receipt_date",
+  "formatString": "Long Date",
+  "displayFolder": "Columns\\3. Keys\\Dates",
+  "lineageTag": "76a947d9-cf88-49b9-945e-9034a3c2ce17",
+  "summarizeBy": "none",
+  "variations": [
+    {
+      "name": "Variation",
+      "relationship": "0cb7c41d-deae-4c82-b01a-5dbeb9ed834b",
+      "defaultHierarchy": {
+        "table": "LocalDateTable_579bd8be-fc8b-4a18-a637-ab748ff358e0",
+        "hierarchy": "Date Hierarchy"
+      },
+      "isDefault": true
+    }
+  ],
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

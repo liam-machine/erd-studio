@@ -1,0 +1,122 @@
+{
+  "id": "draft-example-1",
+  "source": "example",
+  "title": "Example: Coffee shop",
+  "banner": {
+    "headline": "Example: a coffee-shop star schema · 2 tables, 1 relationship · not saved",
+    "detail": "Open a folder to keep a copy of it.",
+    "primary": "openFolder",
+    "changeOptions": false,
+    "shownStarts": []
+  },
+  "otherStarts": [
+    {
+      "id": "openFolder",
+      "label": "Open Folder…"
+    }
+  ],
+  "scopes": {
+    "label": "Example",
+    "current": "example:coffee-shop",
+    "options": [
+      {
+        "id": "example:coffee-shop",
+        "label": "Coffee shop",
+        "description": "6 tables"
+      },
+      {
+        "id": "exampleProject:retail",
+        "label": "Retail",
+        "description": "31 tables"
+      }
+    ]
+  },
+  "summary": {
+    "tables": 2,
+    "relationships": 1,
+    "newTables": 2,
+    "reusedTables": 0,
+    "changedTables": 0,
+    "schemas": [
+      {
+        "schema": "",
+        "tables": 2
+      }
+    ],
+    "notes": 0,
+    "leftOut": 0
+  },
+  "display": {
+    "schemaVersion": 5,
+    "domain": "coffee_shop",
+    "layer": "main",
+    "stage": "logical",
+    "description": "",
+    "models": [
+      {
+        "name": "orders",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "order_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "drink_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "drinks",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "drink_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "name",
+            "dataType": "varchar",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "orders",
+        "fromColumn": "drink_id",
+        "toModel": "drinks",
+        "toColumn": "drink_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {}
+    },
+    "readOnly": true,
+    "positionDraggable": false
+  },
+  "autoLayout": true,
+  "logicalOnly": true,
+  "panelOpen": false,
+  "details": []
+}

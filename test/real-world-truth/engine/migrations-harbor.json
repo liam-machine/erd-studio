@@ -1,0 +1,3297 @@
+{
+ "sample": "migrations-harbor",
+ "engine": "PostgreSQL 18.6 (Homebrew)",
+ "loaded": [
+  "migrations-harbor/make/migrations/postgresql/0001_initial_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0002_1.7.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0003_add_replication_op_uuid.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0004_1.8.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0005_1.8.2_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0010_1.9.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0011_1.9.1_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0012_1.9.4_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0015_1.10.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0030_2.0.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0031_2.0.3_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0040_2.1.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0041_2.1.4_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0050_2.2.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0051_2.2.1_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0052_2.2.2_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0053_2.2.3_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0060_2.3.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0061_2.3.4_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0070_2.4.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0071_2.4.2_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0080_2.5.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0081_2.5.2_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0082_2.5.3_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0090_2.6.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0091_2.6.2_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0100_2.7.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0110_2.8.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0111_2.8.1_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0120_2.9.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0130_2.10.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0140_2.11.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0150_2.12.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0160_2.13.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0170_2.14.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0171_2.14.1_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0180_2.15.0_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0181_2.15.3_schema.up.sql",
+  "migrations-harbor/make/migrations/postgresql/0190_2.16.0_schema.up.sql"
+ ],
+ "setup": "CREATE TABLE IF NOT EXISTS schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL);",
+ "hidden": [
+  "public.schema_migrations"
+ ],
+ "errors": [],
+ "tables": [
+  {
+   "schema": "public",
+   "name": "access",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "access_id"
+   ],
+   "columns": [
+    {
+     "name": "access_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "access_code",
+     "type": "character(1)",
+     "notNull": false
+    },
+    {
+     "name": "comment",
+     "type": "character varying(30)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "alembic_version",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": null,
+   "columns": [
+    {
+     "name": "version_num",
+     "type": "character varying(32)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "artifact",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "repository_name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "digest",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "pull_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "push_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "repository_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "media_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "manifest_media_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "size",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "extra_attrs",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "annotations",
+     "type": "jsonb",
+     "notNull": false
+    },
+    {
+     "name": "icon",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "artifact_type",
+     "type": "character varying(255)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "artifact_accessory",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "artifact_id",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "subject_artifact_id",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "type",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "size",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "digest",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "subject_artifact_digest",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "subject_artifact_repo",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "source",
+     "type": "character varying(50)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "artifact_blob",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "digest_af",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "digest_blob",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "artifact_reference",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "parent_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "child_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "child_digest",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "platform",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "urls",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "annotations",
+     "type": "jsonb",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "artifact_trash",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "media_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "manifest_media_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "repository_name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "digest",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "audit_log",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "operation",
+     "type": "character varying(20)",
+     "notNull": true
+    },
+    {
+     "name": "resource_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "resource",
+     "type": "character varying(1024)",
+     "notNull": true
+    },
+    {
+     "name": "username",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "op_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "audit_log_ext",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "operation",
+     "type": "character varying(50)",
+     "notNull": false
+    },
+    {
+     "name": "resource_type",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "resource",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "username",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "op_desc",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "op_result",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "payload",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "source_ip",
+     "type": "character varying(50)",
+     "notNull": false
+    },
+    {
+     "name": "op_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "blob",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "digest",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "content_type",
+     "type": "character varying(1024)",
+     "notNull": true
+    },
+    {
+     "name": "size",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "status",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "version",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "cve_allowlist",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "expires_at",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "items",
+     "type": "text",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "data_migrations",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "version",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "execution",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "vendor_type",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "vendor_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "status",
+     "type": "character varying(16)",
+     "notNull": false
+    },
+    {
+     "name": "status_message",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "trigger",
+     "type": "character varying(16)",
+     "notNull": true
+    },
+    {
+     "name": "extra_attrs",
+     "type": "json",
+     "notNull": false
+    },
+    {
+     "name": "start_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "end_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "revision",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "harbor_label",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(128)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "color",
+     "type": "character varying(16)",
+     "notNull": false
+    },
+    {
+     "name": "level",
+     "type": "character(1)",
+     "notNull": true
+    },
+    {
+     "name": "scope",
+     "type": "character(1)",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "deleted",
+     "type": "boolean",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "harbor_user",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "user_id"
+   ],
+   "columns": [
+    {
+     "name": "user_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "username",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "email",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "password",
+     "type": "character varying(40)",
+     "notNull": true
+    },
+    {
+     "name": "realname",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "comment",
+     "type": "character varying(30)",
+     "notNull": false
+    },
+    {
+     "name": "deleted",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "reset_uuid",
+     "type": "character varying(40)",
+     "notNull": false
+    },
+    {
+     "name": "salt",
+     "type": "character varying(40)",
+     "notNull": false
+    },
+    {
+     "name": "sysadmin_flag",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "password_version",
+     "type": "character varying(16)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "immutable_tag_rule",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "tag_filter",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "disabled",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "job_log",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "log_id"
+   ],
+   "columns": [
+    {
+     "name": "log_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "job_uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "content",
+     "type": "text",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "job_queue_status",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "job_type",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "paused",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "label_reference",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "label_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "artifact_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "notification_policy",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "enabled",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "targets",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "event_types",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "creator",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "oidc_user",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "user_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "secret",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "subiss",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "token",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "p2p_preheat_instance",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "vendor",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "endpoint",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "auth_mode",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "auth_data",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "enabled",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "is_default",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "insecure",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "setup_timestamp",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "p2p_preheat_policy",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "provider_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "filters",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "trigger",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "enabled",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "extra_attrs",
+     "type": "text",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "permission_policy",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "scope",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "resource",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "action",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "effect",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "project",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "project_id"
+   ],
+   "columns": [
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "owner_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "deleted",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "registry_id",
+     "type": "integer",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "project_blob",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "blob_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "project_member",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "entity_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "entity_type",
+     "type": "character(1)",
+     "notNull": true
+    },
+    {
+     "name": "role",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "project_metadata",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "value",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "properties",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "k",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "v",
+     "type": "text",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "quota",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "reference",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "reference_id",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "hard",
+     "type": "jsonb",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "version",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "quota_usage",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "reference",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "reference_id",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "used",
+     "type": "jsonb",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "version",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "registry",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "url",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "access_key",
+     "type": "character varying(4096)",
+     "notNull": false
+    },
+    {
+     "name": "access_secret",
+     "type": "character varying(4096)",
+     "notNull": false
+    },
+    {
+     "name": "insecure",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "credential_type",
+     "type": "character varying(16)",
+     "notNull": false
+    },
+    {
+     "name": "type",
+     "type": "character varying(32)",
+     "notNull": false
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "health",
+     "type": "character varying(16)",
+     "notNull": false
+    },
+    {
+     "name": "ca_certificate",
+     "type": "text",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "replication_policy",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "dest_registry_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "enabled",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "deleted",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "trigger",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "filters",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "replicate_deletion",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "start_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "creator",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "src_registry_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "dest_namespace",
+     "type": "character varying(256)",
+     "notNull": false
+    },
+    {
+     "name": "override",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "dest_namespace_replace_count",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "speed_kb",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "copy_by_chunk",
+     "type": "boolean",
+     "notNull": false
+    },
+    {
+     "name": "single_active_replication",
+     "type": "boolean",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "report_vulnerability_record",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "report_uuid",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "vuln_record_id",
+     "type": "bigint",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "repository",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "repository_id"
+   ],
+   "columns": [
+    {
+     "name": "repository_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "pull_count",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "star_count",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "retention_policy",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "scope_level",
+     "type": "character varying(20)",
+     "notNull": false
+    },
+    {
+     "name": "scope_reference",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "trigger_kind",
+     "type": "character varying(20)",
+     "notNull": false
+    },
+    {
+     "name": "data",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "create_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "robot",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "description",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "project_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "expiresat",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "disabled",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "visible",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "secret",
+     "type": "character varying(2048)",
+     "notNull": false
+    },
+    {
+     "name": "salt",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "duration",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "creator_ref",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "creator_type",
+     "type": "character varying(255)",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "role",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "role_id"
+   ],
+   "columns": [
+    {
+     "name": "role_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "role_mask",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "role_code",
+     "type": "character varying(20)",
+     "notNull": false
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "is_builtin",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "modified",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "created_by",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "created_at",
+     "type": "timestamp with time zone",
+     "notNull": false
+    },
+    {
+     "name": "modified_by",
+     "type": "character varying(255)",
+     "notNull": false
+    },
+    {
+     "name": "modified_at",
+     "type": "timestamp with time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "role_permission",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "role_type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "role_id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "permission_policy_id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "sbom_report",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "artifact_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "registration_uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "mime_type",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "media_type",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "report",
+     "type": "json",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "scan_report",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "digest",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "registration_uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "mime_type",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "report",
+     "type": "json",
+     "notNull": false
+    },
+    {
+     "name": "critical_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "high_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "medium_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "low_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "none_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "unknown_cnt",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "fixable_cnt",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "scanner_registration",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "character varying(64)",
+     "notNull": true
+    },
+    {
+     "name": "url",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(128)",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "character varying(1024)",
+     "notNull": false
+    },
+    {
+     "name": "auth",
+     "type": "character varying(16)",
+     "notNull": true
+    },
+    {
+     "name": "access_cred",
+     "type": "character varying(512)",
+     "notNull": false
+    },
+    {
+     "name": "disabled",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "is_default",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "use_internal_addr",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "immutable",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "skip_cert_verify",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "create_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "schedule",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "vendor_type",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "vendor_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "cron",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "callback_func_name",
+     "type": "character varying(128)",
+     "notNull": false
+    },
+    {
+     "name": "callback_func_param",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "cron_type",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "extra_attrs",
+     "type": "json",
+     "notNull": false
+    },
+    {
+     "name": "revision",
+     "type": "bigint",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "system_artifact",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "repository",
+     "type": "character varying(256)",
+     "notNull": true
+    },
+    {
+     "name": "digest",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "size",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "vendor",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "type",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "create_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "extra_attrs",
+     "type": "text",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "tag",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "repository_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "artifact_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "push_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "pull_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "task",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "execution_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "job_id",
+     "type": "character varying(64)",
+     "notNull": false
+    },
+    {
+     "name": "status",
+     "type": "character varying(16)",
+     "notNull": true
+    },
+    {
+     "name": "status_code",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "status_revision",
+     "type": "bigint",
+     "notNull": false
+    },
+    {
+     "name": "status_message",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "run_count",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "extra_attrs",
+     "type": "json",
+     "notNull": false
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "start_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "end_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "vendor_type",
+     "type": "character varying(64)",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "user_group",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "group_name",
+     "type": "character varying(255)",
+     "notNull": true
+    },
+    {
+     "name": "group_type",
+     "type": "smallint",
+     "notNull": false
+    },
+    {
+     "name": "ldap_group_dn",
+     "type": "character varying(512)",
+     "notNull": true
+    },
+    {
+     "name": "creation_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    },
+    {
+     "name": "update_time",
+     "type": "timestamp without time zone",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "vulnerability_record",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "id"
+   ],
+   "columns": [
+    {
+     "name": "id",
+     "type": "bigint",
+     "notNull": true
+    },
+    {
+     "name": "cve_id",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "registration_uuid",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "package",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "package_version",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "package_type",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "severity",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "fixed_version",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "urls",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "cvss_score_v3",
+     "type": "double precision",
+     "notNull": false
+    },
+    {
+     "name": "cvss_score_v2",
+     "type": "double precision",
+     "notNull": false
+    },
+    {
+     "name": "cvss_vector_v3",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "cvss_vector_v2",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "cwe_ids",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "vendor_attributes",
+     "type": "json",
+     "notNull": false
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "notNull": false
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [
+  {
+   "schema": "public",
+   "table": "artifact",
+   "name": "unique_artifact",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "repository_id",
+    "digest"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "artifact_accessory",
+   "name": "unique_artifact_accessory",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "artifact_id",
+    "subject_artifact_digest"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "artifact_blob",
+   "name": "unique_artifact_blob",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "digest_af",
+    "digest_blob"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "artifact_reference",
+   "name": "unique_reference",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "parent_id",
+    "child_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "artifact_trash",
+   "name": "unique_artifact_trash",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "repository_name",
+    "digest"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "blob",
+   "name": "blob_digest_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "digest"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "cve_allowlist",
+   "name": "cve_whitelist_project_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "project_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "harbor_label",
+   "name": "unique_label",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name",
+    "scope",
+    "project_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "harbor_user",
+   "name": "harbor_user_email_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "email"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "harbor_user",
+   "name": "harbor_user_username_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "username"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "immutable_tag_rule",
+   "name": "immutable_tag_rule_project_id_tag_filter_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "project_id",
+    "tag_filter"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "job_log",
+   "name": "job_log_uuid",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "job_uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "job_queue_status",
+   "name": "job_queue_status_job_type_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "job_type"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "label_reference",
+   "name": "unique_label_reference",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "label_id",
+    "artifact_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "notification_policy",
+   "name": "notification_policy_name_project_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name",
+    "project_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "oidc_user",
+   "name": "oidc_user_subiss_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "subiss"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "p2p_preheat_instance",
+   "name": "p2p_preheat_instance_name_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "p2p_preheat_policy",
+   "name": "p2p_preheat_policy_name_project_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name",
+    "project_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "permission_policy",
+   "name": "unique_rbac_policy",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "scope",
+    "resource",
+    "action",
+    "effect"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "project",
+   "name": "project_name_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "project_blob",
+   "name": "unique_project_blob",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "project_id",
+    "blob_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "project_member",
+   "name": "unique_project_entity_type",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "project_id",
+    "entity_id",
+    "entity_type"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "project_metadata",
+   "name": "unique_project_id_and_name",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "project_id",
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "properties",
+   "name": "properties_k_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "k"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "quota",
+   "name": "quota_reference_reference_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "reference",
+    "reference_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "quota_usage",
+   "name": "quota_usage_reference_reference_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "reference",
+    "reference_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "registry",
+   "name": "unique_target_name",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "replication_policy",
+   "name": "unique_policy_name",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "report_vulnerability_record",
+   "name": "report_vulnerability_record_report_uuid_vuln_record_id_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "report_uuid",
+    "vuln_record_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "repository",
+   "name": "repository_name_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "robot",
+   "name": "unique_robot",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name",
+    "project_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "role",
+   "name": "uq_role_name",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "lower(name::text)"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "role_permission",
+   "name": "unique_role_permission",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "role_type",
+    "role_id",
+    "permission_policy_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "sbom_report",
+   "name": "sbom_report_artifact_id_registration_uuid_mime_type_media_t_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "artifact_id",
+    "registration_uuid",
+    "mime_type",
+    "media_type"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "sbom_report",
+   "name": "sbom_report_uuid_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "scan_report",
+   "name": "scan_report_digest_registration_uuid_mime_type_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "digest",
+    "registration_uuid",
+    "mime_type"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "scan_report",
+   "name": "scan_report_uuid_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "scanner_registration",
+   "name": "scanner_registration_name_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "scanner_registration",
+   "name": "scanner_registration_url_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "url"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "scanner_registration",
+   "name": "scanner_registration_uuid_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "schedule",
+   "name": "unique_schedule",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "vendor_type",
+    "vendor_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "system_artifact",
+   "name": "system_artifact_repository_digest_vendor_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "repository",
+    "digest",
+    "vendor"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "tag",
+   "name": "unique_tag",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "repository_id",
+    "name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "user_group",
+   "name": "unique_group_name",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "group_name"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "vulnerability_record",
+   "name": "vulnerability_record_cve_id_registration_uuid_package_packa_key",
+   "kind": "constraint",
+   "partial": false,
+   "columns": [
+    "cve_id",
+    "registration_uuid",
+    "package",
+    "package_version"
+   ]
+  }
+ ],
+ "foreignKeys": [
+  {
+   "schema": "public",
+   "table": "artifact_accessory",
+   "name": "artifact_accessory_artifact_id_fkey",
+   "columns": [
+    "artifact_id"
+   ],
+   "refSchema": "public",
+   "refTable": "artifact",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "artifact_reference",
+   "name": "artifact_reference_child_id_fkey",
+   "columns": [
+    "child_id"
+   ],
+   "refSchema": "public",
+   "refTable": "artifact",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "artifact_reference",
+   "name": "artifact_reference_parent_id_fkey",
+   "columns": [
+    "parent_id"
+   ],
+   "refSchema": "public",
+   "refTable": "artifact",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "label_reference",
+   "name": "label_reference_artifact_id_fkey",
+   "columns": [
+    "artifact_id"
+   ],
+   "refSchema": "public",
+   "refTable": "artifact",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "label_reference",
+   "name": "label_reference_label_id_fkey",
+   "columns": [
+    "label_id"
+   ],
+   "refSchema": "public",
+   "refTable": "harbor_label",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "oidc_user",
+   "name": "oidc_user_user_id_fkey",
+   "columns": [
+    "user_id"
+   ],
+   "refSchema": "public",
+   "refTable": "harbor_user",
+   "refColumns": [
+    "user_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "project",
+   "name": "project_owner_id_fkey",
+   "columns": [
+    "owner_id"
+   ],
+   "refSchema": "public",
+   "refTable": "harbor_user",
+   "refColumns": [
+    "user_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "project_member",
+   "name": "fk_project_member_role",
+   "columns": [
+    "role"
+   ],
+   "refSchema": "public",
+   "refTable": "role",
+   "refColumns": [
+    "role_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "project_metadata",
+   "name": "project_metadata_project_id_fkey",
+   "columns": [
+    "project_id"
+   ],
+   "refSchema": "public",
+   "refTable": "project",
+   "refColumns": [
+    "project_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "report_vulnerability_record",
+   "name": "fk_report_uuid",
+   "columns": [
+    "report_uuid"
+   ],
+   "refSchema": "public",
+   "refTable": "scan_report",
+   "refColumns": [
+    "uuid"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "report_vulnerability_record",
+   "name": "fk_vuln_record_id",
+   "columns": [
+    "vuln_record_id"
+   ],
+   "refSchema": "public",
+   "refTable": "vulnerability_record",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "tag",
+   "name": "tag_artifact_id_fkey",
+   "columns": [
+    "artifact_id"
+   ],
+   "refSchema": "public",
+   "refTable": "artifact",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "task",
+   "name": "task_execution_id_fkey",
+   "columns": [
+    "execution_id"
+   ],
+   "refSchema": "public",
+   "refTable": "execution",
+   "refColumns": [
+    "id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "vulnerability_record",
+   "name": "fk_registration_uuid",
+   "columns": [
+    "registration_uuid"
+   ],
+   "refSchema": "public",
+   "refTable": "scanner_registration",
+   "refColumns": [
+    "uuid"
+   ],
+   "inherited": false
+  }
+ ]
+}

@@ -7,15 +7,15 @@ export const list_models = {
   config: {
     title: 'List logical models',
     description:
-      'List all logical model definitions in the table library — .erd-studio/logical-models/, or .erd-studio/tables/ ' +
-      'in a project on the new file naming — files at the top level and one folder down (per-layer folders such as gold/). ' +
+      'List all logical model definitions in the table library — one .dbml table file per table, in .erd-studio/<layer>/tables/<schema>/ ' +
+      '(or older .yml files in .erd-studio/logical-models/ or tables/, from before ERD Studio 2.0, at the top level and one folder down). ' +
       'Names are unique across folders. ' +
       'Each model is one table (dimension, fact, bridge, etc.) reusable across domains. ' +
       'Returns model names + light metadata. Call read_model for full column-level detail.',
     inputSchema: {
       project_path: z
         .string()
-        .describe('Absolute path to the dbt project root.'),
+        .describe('Absolute path to the dbt project root, or a folder holding .erd-studio/ with no dbt project.'),
     },
     annotations: {
       readOnlyHint: true,
@@ -41,6 +41,7 @@ export const list_models = {
     }
 
     const models = tableLibraryService.listTables();
+    const formatOf = (name: string): 'dbml' | 'yaml' => tableLibraryService.tableStorage(name) ?? 'yaml';
     return {
       content: [
         {
@@ -55,6 +56,7 @@ export const list_models = {
                 grain: m.grain ?? null,
                 model_role: m.modelRole ?? null,
                 column_count: m.columns?.length ?? 0,
+                file_format: formatOf(m.name),
               })),
             },
             null,

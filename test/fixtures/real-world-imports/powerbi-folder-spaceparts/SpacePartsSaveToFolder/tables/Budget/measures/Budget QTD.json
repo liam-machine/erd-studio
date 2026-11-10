@@ -1,0 +1,19 @@
+{
+  "name": "Budget QTD",
+  "expression": [
+    "",
+    "VAR _DATES_QTD =",
+    "    CALCULATETABLE (",
+    "        DATESQTD ('Date'[Date]),",
+    "        'Date'[IsThisMonth] = FALSE",
+    "    )",
+    "VAR _CURRENT_MONTH_Budget = [Budget MTD]",
+    "VAR QTD_BUDGET_BEFORE_THIS_MONTH = CALCULATE ([Budget], _DATES_QTD)",
+    "VAR _RESULT = _CURRENT_MONTH_Budget + QTD_BUDGET_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\iii. QTD",
+  "lineageTag": "377282fa-8f79-4de5-b02c-9ed97ed804ff"
+}

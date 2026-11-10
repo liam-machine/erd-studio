@@ -19,6 +19,8 @@
   font-size: 12px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
   overflow: hidden;
+  /* On the base so un-dimming fades too, not just dimming. */
+  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 /* -----------------------------------------------------------------------
@@ -31,6 +33,32 @@
 
 .model-node--physical {
   border-color: var(--stage-physical);
+}
+
+/* The selection ring's colour: the stage being viewed (a ghost on the
+   Physical tab included), or the theme's focus colour on a logical-only
+   canvas (`editor-canvas--neutral`, below). */
+.model-node {
+  --model-node-ring: var(--stage-logical);
+  --model-node-ring-glow: var(--stage-logical-ring);
+}
+
+.model-node--stage-physical {
+  --model-node-ring: var(--stage-physical);
+  --model-node-ring-glow: var(--stage-physical-ring);
+}
+
+/* A project with no dbt project has one stage, so stage colours tell nothing
+   apart: tables take a neutral border and the selection ring the theme's
+   focus colour. The layer badge and strip carry the colour. Lines and their
+   labels go neutral through the --stage-logical override in theme.css. */
+.editor-canvas--neutral .model-node--logical {
+  border-color: var(--canvas-neutral-border);
+}
+
+.editor-canvas--neutral .model-node {
+  --model-node-ring: var(--canvas-selection);
+  --model-node-ring-glow: var(--canvas-selection-glow);
 }
 
 .model-node--ghost {
@@ -53,17 +81,17 @@
   box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
 }
 
-/* Selected — stage-coloured ring + glow. Applies to single and multi-select. */
-.model-node--selected {
-  box-shadow: 0 0 0 2px var(--stage-logical), 0 0 10px 1px rgba(96, 165, 250, 0.4);
-}
-
-.model-node--physical.model-node--selected {
-  box-shadow: 0 0 0 2px var(--stage-physical), 0 0 10px 1px rgba(34, 197, 94, 0.4);
+/* Selected — stage-coloured ring + glow (--model-node-ring, above). Applies
+   to single and multi-select; React Flow's own `.selected` on the wrapper
+   draws the same ring. */
+.model-node--selected,
+.react-flow__node.selected .model-node {
+  box-shadow: 0 0 0 2px var(--model-node-ring), 0 0 10px 1px var(--model-node-ring-glow);
 }
 
 /* Discrepancy-extra takes visual priority over selected so the amber glow wins. */
-.model-node--disc-extra.model-node--selected {
+.model-node--disc-extra.model-node--selected,
+.react-flow__node.selected .model-node--disc-extra {
   box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
 }
 
@@ -71,7 +99,6 @@
 .model-node--dimmed {
   opacity: 0.25;
   filter: grayscale(0.4);
-  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 .model-node--dimmed:hover {
@@ -104,7 +131,22 @@
   white-space: nowrap;
 }
 
-/* The model name beside an alias label — the identity, not the headline. */
+/* A table's schema before its name (`sales.` of sales.fct_order), when it is
+   not the layer's own name: read as SQL would qualify it, quieter than the name. */
+.model-node__schema {
+  font-weight: 400;
+  color: var(--dim-fg);
+}
+
+/* A table whose layer is known: a strip in that layer's colour along the top
+   of the header, so the tables of each layer can be told apart at a glance
+   on a diagram that borrows tables from other layers. */
+.model-node--layered .model-node__header {
+  box-shadow: inset 0 3px 0 var(--model-node-layer-color);
+}
+
+/* The warehouse name after the model name (`as orders`), or the model name
+   after an older label — the identity, not the headline. */
 .model-node__model-id {
   margin-left: 8px;
   font-family: var(--vscode-editor-font-family, monospace);
@@ -143,13 +185,6 @@
 .model-node__source--catalog {
   background: var(--ok-bg);
   color: var(--ok-fg);
-}
-
-/* A layer abbreviation standing in for an unresolved dbt schema — the badge
-   means "schema" everywhere else, so it must not read as one here. */
-.model-node__badge--layer {
-  opacity: 0.7;
-  font-style: italic;
 }
 
 .model-node__discrepancy-badge {
@@ -630,12 +665,8 @@
    Selection state
    ----------------------------------------------------------------------- */
 
-/* React Flow adds .selected class to the node container when selected. */
-.react-flow__node.selected .model-node {
-  box-shadow:
-    0 0 0 2px var(--vscode-focusBorder, #007fd4),
-    0 2px 8px rgba(0, 127, 212, 0.3);
-}
+/* React Flow adds .selected class to the node container when selected; the
+   ring is drawn by the .model-node--selected rule above, in the stage's colour. */
 
 /* -----------------------------------------------------------------------
    Dragging state
@@ -650,4 +681,66 @@
   box-shadow:
     0 0 0 2px var(--vscode-focusBorder, #007fd4),
     0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* -----------------------------------------------------------------------
+   Hover preview (useHoverFocus)
+   The root .erd-flow--hover-focus class is on while the pointer rests on a
+   table: it and its related tables stay bright, the rest fade. Kept at the
+   end of the file so these rules win over --dimmed, --dimmed:hover and
+   --ghost.--dimmed (test/unit/hoverFocusCss.test.ts pins the order). No
+   grayscale here (a filter transition would repaint every node each frame),
+   and none left over from click dimming either, so every faded table has
+   the same tint.
+   ----------------------------------------------------------------------- */
+
+.erd-flow--hover-focus .model-node {
+  opacity: 0.22;
+  filter: none;
+}
+
+/* The clicked table stays findable while a hover fades it, without competing
+   with the hovered group. */
+.erd-flow--hover-focus .model-node--selected {
+  opacity: 0.4;
+}
+
+.erd-flow--hover-focus .model-node.model-node--focus-origin,
+.erd-flow--hover-focus .model-node.model-node--focus-related {
+  opacity: 1;
+  filter: none;
+}
+
+.erd-flow--hover-focus .model-node--ghost.model-node--focus-related {
+  opacity: 0.65;
+}
+
+/* The hovered table's ring. Never over the selection ring, and never over
+   the amber discrepancy-extra glow, which keeps priority as it does over
+   selected: hovering an extra table must not hide why it is amber. */
+.model-node--logical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
+  box-shadow: 0 0 0 3px var(--stage-logical-ring);
+}
+
+.model-node--physical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
+  box-shadow: 0 0 0 3px var(--stage-physical-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-node {
+    transition: none;
+  }
+}
+
+/* "+3": relationships to tables not on this diagram (editing host only). Muted:
+   it says there is more, it does not ask for anything. */
+.model-node__off-diagram {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--dim-fg);
 }

@@ -1,0 +1,14 @@
+{
+  "name": "Standard Margin (%)",
+  "description": [
+    "The standard margin is the selling margin + the delivery margin",
+    "It takes into account all revenues and costs."
+  ],
+  "expression": [
+    "",
+    "DIVIDE ( [Standard Margin (Value)], [Net Sales] ) "
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "1. Value\\d. Margins\\I. Std. Margin\\%",
+  "lineageTag": "b83ec207-e4f4-4f0d-919d-c3b1a17e900e"
+}

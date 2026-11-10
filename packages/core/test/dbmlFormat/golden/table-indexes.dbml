@@ -1,0 +1,10 @@
+Table fct_order_line [schema: 'gold'] {
+  order_id bigint [note: 'Order']
+  line_no int [note: 'Line']
+  sku varchar
+  indexes {
+    ( order_id,line_no ) [ pk ]
+    sku [name:'ix_sku' , unique]
+    `lower(sku)`   [ name : 'ix_sku_lower' ]
+  }
+}

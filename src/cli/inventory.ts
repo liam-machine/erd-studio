@@ -1,6 +1,11 @@
 /**
  * `erd-studio inventory` — what the dbt project has, shaped for building a
- * logical model from it.
+ * logical model from it, and the tables already designed (`logicalTables`).
+ *
+ * In a logical-only folder (no dbt_project.yml) there is no dbt project to
+ * list: `models`, `relationships` and `clusters` are empty, `conventions`
+ * holds the "nothing detected" values, and the logical files — `domains` and
+ * `logicalTables` — are the inventory.
  *
  * The heavy lifting is `SubjectAreaService.buildPhysicalSubjectArea`, run over a
  * synthetic domain holding the chosen names: the columns, types, provenance
@@ -13,14 +18,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { DisplaySubjectArea, PhysicalColumnSource } from '../types/display';
-import { TABLE_NAME_PATTERN } from '../types/naming';
+import { sameName, TABLE_NAME_PATTERN } from '../types/naming';
 import { readMeta } from '@erd-studio/core';
 import type { Cardinality, Meta, UnifiedSubjectArea } from '../types/semantic';
-import { getRawSubjectAreaTableNames } from '../types/semantic';
-import { mergeCompositeGroups, mergeUniqueMaps } from '../services/domainService';
+import { mergeCompositeGroups, mergeUniqueMaps, subjectAreaTableNames } from '../services/domainService';
 import { normaliseName } from '../services/nameUtils';
 import { catalogNodeFor } from '../services/columnTypes';
 import { inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
+import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
 import {
   detectConventions,
   findSnapshotNames,
@@ -66,6 +71,33 @@ export interface InventoryModel {
   foreignKeys: string[];
 }
 
+/** A table in the ERD Studio library (the design), as `logicalTables` lists it. */
+export interface InventoryLogicalTable {
+  name: string;
+  /**
+   * Its file, project-relative: a `.dbml` table file
+   * (`.erd-studio/<layer>/tables/<schema>/<name>.dbml`), or a `.yml` in a
+   * project from before 2.0.
+   */
+  file: string;
+  /** The file's format (additive). */
+  format: 'yaml' | 'dbml';
+  /** Folder under the library (`''` at the top level); a DBML table's schema folder. */
+  folder: string;
+  description: string;
+  /** "One row per …", or null when not written yet. */
+  grain: string | null;
+  columnCount: number;
+  /** The primary key columns, in file order. */
+  primaryKey: string[];
+  /** Omitted with --summary. */
+  columns?: Array<{ name: string; dataType: string }>;
+  /** The subject area files that draw it, project-relative. */
+  domains: string[];
+  /** The file does not parse (doctor names the problem); its other fields are empty. */
+  unreadable?: true;
+}
+
 export interface InventoryResult extends Envelope {
   inputs: { manifest: ArtifactStatus; catalog: ArtifactStatus };
   models: InventoryModel[];
@@ -74,7 +106,17 @@ export interface InventoryResult extends Envelope {
   clusters: string[][];
   /** Inventory names that already have a logical-models/*.yml. */
   alreadyModelled: string[];
-  domains: Array<{ file: string; layer: string; domain: string; models: string[] }>;
+  /**
+   * Every diagram (`<layer>/<name>.json`, or `<layer>/diagrams/<name>.dbml`):
+   * its file, `format` (`json` or `dbml`, additive) and the tables it lists
+   * (a DBML diagram's table `use` lines).
+   */
+  domains: Array<{ file: string; layer: string; domain: string; models: string[]; format: 'json' | 'dbml' }>;
+  /**
+   * Every table in the ERD Studio library (restricted to `--models` when
+   * given), by name — in a logical-only folder, the inventory itself.
+   */
+  logicalTables: InventoryLogicalTable[];
   skipped: Array<{ name: string; reason: 'invalid-name' | 'disabled' }>;
   /**
    * The modelling conventions the whole project follows (layering, table
@@ -82,6 +124,12 @@ export interface InventoryResult extends Envelope {
    * under `--models`. See `src/cli/conventions.ts`.
    */
   conventions: ProjectConventions;
+  /**
+   * Set when the semantic dir holds an ERD Studio 1.9 pre-release tree,
+   * which 2.0 does not read (its diagrams and tables are not listed): the
+   * message `doctor` gives for it (additive).
+   */
+  legacyDbmlTree?: string;
 }
 
 export interface InventoryOptions {
@@ -194,11 +242,12 @@ export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'
   return ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir).map((d) => {
     let models: string[] = [];
     try {
-      models = getRawSubjectAreaTableNames(JSON.parse(fs.readFileSync(d.filePath, 'utf-8')));
+      // The one raw membership reader: a JSON file's models, a DBML diagram's `use` lines.
+      models = subjectAreaTableNames(fs.readFileSync(d.filePath, 'utf-8'), d.filePath) ?? [];
     } catch {
-      // Unreadable or invalid JSON: listed with no models; `diff` reports the error.
+      // Unreadable or invalid: listed with no models; `diff` reports the error.
     }
-    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models };
+    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models, format: d.storage ?? 'json' };
   });
 }
 
@@ -346,7 +395,64 @@ export function projectConventions(
   });
 }
 
+/** The library's tables (the first file of each name; a shadowed duplicate is never read). */
+export function listLogicalTables(
+  ctx: CliContext,
+  domains: InventoryResult['domains'],
+  opts: { summary?: boolean; models?: string[] } = {},
+): InventoryLogicalTable[] {
+  const wanted = opts.models && opts.models.length > 0 ? opts.models : null;
+  const out: InventoryLogicalTable[] = [];
+  for (const entry of ctx.tableLibraryService.listTableFiles()) {
+    if (entry.shadowedBy) { continue; }
+    if (wanted && !wanted.some((n) => sameName(n, entry.name))) { continue; }
+    const table = ctx.tableLibraryService.getTable(entry.name);
+    const unreadable = ctx.tableLibraryService.getTableFileError(entry.name) !== null;
+    const columns = unreadable ? [] : table?.columns ?? [];
+    const item: InventoryLogicalTable = {
+      name: entry.name,
+      file: relPath(ctx.root, entry.filePath),
+      format: entry.storage,
+      folder: entry.folder,
+      description: (unreadable ? undefined : table?.description) ?? '',
+      grain: (unreadable ? undefined : table?.grain) || null,
+      columnCount: columns.length,
+      primaryKey: columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
+      domains: domains.filter((d) => d.models.some((m) => sameName(m, entry.name))).map((d) => d.file),
+    };
+    if (!opts.summary) { item.columns = columns.map((c) => ({ name: c.name, dataType: c.dataType ?? '' })); }
+    if (unreadable) { item.unreadable = true; }
+    out.push(item);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Inventory of a logical-only folder: no dbt project, so only the logical files. */
+function logicalOnlyInventory(ctx: CliContext, opts: InventoryOptions): InventoryResult {
+  const domains = listSubjectAreaFiles(ctx);
+  return {
+    ...ctx.envelope,
+    inputs: inputsOf(ctx),
+    models: [],
+    relationships: [],
+    clusters: [],
+    alreadyModelled: [],
+    domains,
+    logicalTables: listLogicalTables(ctx, domains, opts),
+    skipped: [],
+    conventions: detectConventions({ models: [], packages: [], snapshots: [], relationships: [] }),
+    ...legacyTreeNote(ctx),
+  };
+}
+
+/** `legacyDbmlTree`, when the semantic dir is a 1.9 pre-release tree. */
+function legacyTreeNote(ctx: CliContext): { legacyDbmlTree?: string } {
+  const tree = detectLegacyDbmlTree(path.join(ctx.root, ctx.semanticDir));
+  return tree ? { legacyDbmlTree: legacyDbmlTreeMessage(tree) } : {};
+}
+
 export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): InventoryResult {
+  if (!ctx.hasDbt) { return logicalOnlyInventory(ctx, opts); }
   const scoped = !!opts.models && opts.models.length > 0;
   const { names, skipped } = chooseNames(ctx, opts.models);
   // Columns are always described: conventions read their types and descriptions. `--summary` drops them below.
@@ -357,6 +463,7 @@ export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): Inve
   if (opts.summary) {
     for (const m of models) { delete m.columns; delete m.meta; }
   }
+  const domains = listSubjectAreaFiles(ctx);
   if (conventions.layering.style === 'medallion') {
     const layerIds = ctx.layerService.getValidLayerIds();
     for (const m of models) { m.suggestedLayer = suggestLayer(m.folder, layerIds, { schema: m.schema }); }
@@ -369,8 +476,10 @@ export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): Inve
     relationships,
     clusters: clustersOf(relationships),
     alreadyModelled: names.filter((n) => ctx.tableLibraryService.tableExists(n)).sort(),
-    domains: listSubjectAreaFiles(ctx),
+    domains,
+    logicalTables: listLogicalTables(ctx, domains, opts),
     skipped,
     conventions,
+    ...legacyTreeNote(ctx),
   };
 }

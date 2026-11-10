@@ -1,0 +1,14 @@
+use { table sfdc.sfdc_account }        from '../tables/sfdc/sfdc_account.dbml'
+use { table zuora.zuora_account }      from '../tables/zuora/zuora_account.dbml'
+use { table zuora.zuora_subscription } from '../tables/zuora/zuora_subscription.dbml'
+use * from '../relationships/raw.dbml'
+
+Project sources {
+  Note: 'What the extractors land, one schema per source.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    sfdc_account 12 12
+    zuora_account 728 49
+    zuora_subscription 282 12
+  '''
+}

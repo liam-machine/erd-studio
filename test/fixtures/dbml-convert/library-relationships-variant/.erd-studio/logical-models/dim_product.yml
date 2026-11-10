@@ -1,0 +1,18 @@
+# Top level of the library (a flat file next to the layer folder), holding the
+# 1.6.7 backwards many-to-one alone — the fact has no copy — with the
+# isForeignKey that 1.6.7's Draw from dbt left on the primary key.
+name: dim_product
+schema: gold
+modelRole: dimension
+columns:
+  - name: product_key
+    dataType: INT
+    isPrimaryKey: true
+    isForeignKey: true
+  - name: product_name
+    dataType: VARCHAR
+relationships:
+  - fromColumn: product_key
+    toModel: fct_order
+    toColumn: product_key
+    cardinality: many-to-one

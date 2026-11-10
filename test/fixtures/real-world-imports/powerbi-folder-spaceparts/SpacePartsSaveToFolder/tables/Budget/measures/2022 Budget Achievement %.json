@@ -1,0 +1,29 @@
+{
+  "name": "2022 Budget Achievement %",
+  "expression": [
+    "",
+    "VAR _Sales =",
+    "    CALCULATE (",
+    "        [Gross Sales],",
+    "        'Date'[Calendar Year Number (ie 2021)]",
+    "            = 2022,",
+    "        'Date'[IsDateInScope] = TRUE ( ),",
+    "        DATESYTD ( 'Date'[Date] )",
+    "    )",
+    "VAR _Budget =",
+    "    CALCULATE (",
+    "        [Total Budget],",
+    "        'Date'[Calendar Year Number (ie 2021)]",
+    "            = 2022,",
+    "        'Date'[IsDateInScope] = TRUE ( ),",
+    "        DATESYTD ( 'Date'[Date] )",
+    "    )",
+    "VAR _Delta = _Sales - _Budget",
+    "VAR _Perc = DIVIDE ( _Delta, _Budget )",
+    "RETURN",
+    "    _Perc"
+  ],
+  "formatString": "#,##0.0%",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "f1e22bd1-bd4f-487d-84e0-7a4b863f1088"
+}

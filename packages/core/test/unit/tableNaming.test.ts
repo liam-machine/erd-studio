@@ -11,6 +11,7 @@ import * as path from 'path';
 
 import {
   CURRENT_SCHEMA_VERSION,
+  CURRENT_JSON_SCHEMA_VERSION,
   LIBRARY_SCHEMA_VERSION,
   TABLE_NAMING_SCHEMA_VERSION,
   WRITTEN_SCHEMA_VERSION,
@@ -25,7 +26,8 @@ import {
 import { SubjectAreaValidationError, normaliseSubjectAreaDocument, validateSubjectAreaDocument } from '../../src/domain';
 import { parseTableText } from '../../src/logicalModel';
 import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
-import { DIAGRAM_EXPORT_FILE_EXTENSIONS, DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
+import { DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
+import { goldenFileName } from '../exportParsers';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
@@ -44,8 +46,9 @@ function fsReadFile(root: string) {
 }
 
 describe('schema versions', () => {
-  it('reads up to v6 and still writes v5', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(6);
+  it('reads JSON up to v6 (DBML diagrams up to v7) and still writes v5', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_JSON_SCHEMA_VERSION).toBe(6);
     expect(TABLE_NAMING_SCHEMA_VERSION).toBe(6);
     expect(LIBRARY_SCHEMA_VERSION).toBe(5);
     // Writers emit v5 keys; stamping 6 on them would make a half-v6 file.
@@ -243,12 +246,15 @@ describe('loadDisplaySubjectArea on the v6 and mixed fixtures', () => {
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
+      // The editor notes which relationships the diagram file holds (the Remove confirmation's); core does not.
+      delete expected.relationshipsInDiagramFile;
+      expected.relationships = (expected.relationships as Array<Record<string, unknown>>).map(({ inDiagramFile: _own, ...r }) => r);
       expect(JSON.parse(JSON.stringify(await load()))).toEqual({ ...expected, schemaVersion });
     });
 
     it.each(DIAGRAM_EXPORT_FORMATS)(`exports the ${golden} %s golden byte for byte`, async (format) => {
       const text = exportDiagram(await load(), format);
-      expect(text).toBe(fs.readFileSync(path.join(GOLDEN_DIR, `${golden}.${DIAGRAM_EXPORT_FILE_EXTENSIONS[format]}`), 'utf-8'));
+      expect(text).toBe(fs.readFileSync(path.join(GOLDEN_DIR, goldenFileName(golden, format)), 'utf-8'));
     });
   });
 });

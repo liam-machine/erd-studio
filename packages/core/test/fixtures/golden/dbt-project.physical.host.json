@@ -423,6 +423,5 @@
       "creatable": true,
       "order": 0
     }
-  },
-  "welcomeDismissed": false
+  }
 }

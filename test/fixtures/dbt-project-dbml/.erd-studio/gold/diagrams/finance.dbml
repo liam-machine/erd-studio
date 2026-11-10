@@ -1,0 +1,7 @@
+Project finance {
+  Note: 'Finance reporting domain'
+  erd_schema_version: '7'
+  erd_layout: '''
+    fct_transactions 12 12
+  '''
+}
