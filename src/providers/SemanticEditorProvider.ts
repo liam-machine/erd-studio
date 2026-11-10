@@ -345,6 +345,13 @@ interface TableFileOps {
   newRefFile?: NewRefFileChoice;
 }
 
+/** The open canvas a table file delete anchors on (see deleteTablesWithCascade, #274). */
+interface DeleteOrigin {
+  document: vscode.TextDocument;
+  /** `document.uri.toString()`: the canvas's edit queue and undo bookkeeping. */
+  panelKey: string;
+}
+
 /** A single yml write inside a {@link TableFileOps}. */
 interface TableFileSave {
   /** The model as it should end up in logical-models/{model.name}.yml. */
@@ -836,6 +843,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedTablePaths = new Map<string, Set<string>>();
+  /**
+   * Table files a canvas's own Delete Table File deleted, keyed like
+   * `editedTablePaths`: Cmd+Z there brings them back with no text event, so
+   * a rewind that left the diagram's text as it was still redraws (#274).
+   */
+  private readonly deletedTablePaths = new Map<string, Set<string>>();
 
   /** Tables changed outside ERD Studio, waiting for one batched canvas refresh (see queueTableRefresh). */
   private readonly queuedTableRefresh = new Set<string>();
@@ -3479,7 +3492,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // unless a file this canvas created is gone (the undo of a create deletes
     // it, with no text event).
     const diagramUnchanged = isDbml && document.getText() === diskText;
-    const nothingRewound = diagramUnchanged
+    // Nor when this canvas deleted a table file: its undo brings the file back, also with no text event.
+    const deletedHere = [...(this.deletedTablePaths.get(panelKey) ?? [])];
+    const nothingRewound = diagramUnchanged && deletedHere.length === 0
       && [...(this.editedTablePaths.get(panelKey) ?? [])].every((p) => fs.existsSync(p));
     const savedOthers: string[] = [];
     const expectation = this.ownWriteTracker.expectWrite(expected);
@@ -3510,7 +3525,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Only what this canvas wrote can have changed (an undo of a create
     // deletes, of a delete creates): those files' parses, and the library
     // index, which is rebuilt from one listing.
-    this.tableLibraryService.invalidatePaths([document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])]);
+    this.tableLibraryService.invalidatePaths([document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? []), ...deletedHere]);
     this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
@@ -5369,6 +5384,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
     if (this.lastActivePanelKey === panelKey && !this.openPanels.has(panelKey)) this.lastActivePanelKey = undefined;
     this.editedTablePaths.delete(panelKey);
+    this.deletedTablePaths.delete(panelKey);
     this.undoWhileHeld.delete(panelKey);
     clearTimeout(this.nativeUndoTimers.get(panelKey));
     this.nativeUndoTimers.delete(panelKey);
@@ -6461,6 +6477,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             : `Removed ${filesToOffer.length} tables from this diagram. They stay in the Table Library for other diagrams. Delete their table files too?${cascade}`;
           const deleteLabel = fileIsSingle ? 'Delete Table File' : 'Delete Table Files';
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
+          const panelKey = document.uri.toString();
           void vscode.window
             .showInformationMessage(prompt, deleteLabel, keepLabel)
             .then(async (choice) => {
@@ -6473,7 +6490,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
                   let result: { ok: boolean; unrestored: string[] };
                   try {
-                    result = await this.deleteTablesWithCascade(filesToOffer);
+                    // In this canvas's queue, anchored on its diagram while it is open:
+                    // Cmd+Z here then rewinds the delete before the remove (#274).
+                    result = await this.runQueued(panelKey, () =>
+                      this.deleteTablesWithCascade(filesToOffer, this.deleteOriginOf(document)));
                   } catch (err) {
                     void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
                     return;
@@ -6491,7 +6511,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 // Delete through one WorkspaceEdit (applyFileWrites, D23) so VS Code
                 // snapshots the files and the deletion is undoable, rather than a
                 // bare unlink; a partial apply is put back before anything is said.
-                const deleted = await applyFileWrites(filePaths.map((filePath): FileWrite => ({ kind: 'delete', path: filePath })));
+                // Anchored on this canvas's diagram like the DBML cascade (#274).
+                const deleted = await this.runQueued(panelKey, () =>
+                  this.deleteTableFilesFromCanvas(filePaths, this.deleteOriginOf(document)));
                 if (deleted.ok) {
                   vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
                   return;
@@ -6547,7 +6569,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * (D16): the relationships the cascade drops (the deleted tables' own and
    * other DBML owners' to them; a YAML owner keeps its own) and the DBML
    * diagrams that list them. `other` words them for the canvas, whose own
-   * diagram has just dropped them.
+   * diagram has just dropped them. A clause whose count is 0 is left out.
    */
   describeDbmlDeleteCascade(names: readonly string[], other = true): string {
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
@@ -6566,11 +6588,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const members = imports === null || imports === 'unreadable' ? [] : [...imports.members, ...imports.unlinked];
       if (members.some((m) => lowerNames.has(m.toLowerCase()))) diagrams++;
     }
-    const rels = `${relationships} relationship${relationships === 1 ? '' : 's'}`;
-    const places = `${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`;
-    return names.length === 1
-      ? ` This removes the table's file, its ${rels} and its place in ${places}.`
-      : ` This removes their files, their ${rels} and their places in ${places}.`;
+    // A count of 0 is left out, never shown (#274: "its place in 0 other diagrams").
+    const single = names.length === 1;
+    const parts = [single ? "the table's file" : 'their files'];
+    if (relationships > 0) parts.push(`${single ? 'its' : 'their'} ${relationships} relationship${relationships === 1 ? '' : 's'}`);
+    if (diagrams > 0) parts.push(`${single ? 'its place' : 'their places'} in ${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`);
+    const last = parts.pop()!;
+    return ` This removes ${parts.length > 0 ? `${parts.join(', ')} and ${last}` : last}.`;
   }
 
   /**
@@ -6582,8 +6606,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * one shows as a placeholder there, as for a YAML table. Returns false when
    * VS Code did not apply it (reconciled by applyFileWrites). A file that
    * could not be saved afterwards is reported, never ignored.
+   *
+   * `origin` is the canvas that asked (Delete Table File after Remove from
+   * Diagram), while it is still open: its diagram is then the edit's primary
+   * (its rewrite, or the one-character undo anchor when the cascade leaves it
+   * as it is), so the step tops the canvas's own undo stack. Cmd+Z there
+   * rewinds the delete first, and the remove only after it, so no undo ever
+   * brings back a `use` line for a file that is gone (#274). The caller runs
+   * it in that canvas's edit queue. The Table Library's Delete Table passes
+   * none: no canvas asked, and the cascade is its own step in each file.
    */
-  async deleteTablesWithCascade(names: readonly string[]): Promise<{ ok: boolean; unrestored: string[] }> {
+  async deleteTablesWithCascade(names: readonly string[], origin?: DeleteOrigin): Promise<{ ok: boolean; unrestored: string[] }> {
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
     let writes: FileWrite[];
@@ -6606,25 +6639,44 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       throw this.refusalOf(err);
     }
-    const dirty = dirtyFiles(writes.map((w) => w.path));
+    const originPath = origin?.document.uri.fsPath;
+    // The canvas's own diagram, when the settle pass rewrites it: its text is the primary's (a replace of the primary's path is never sent twice).
+    const originRewrite = origin ? writes.find((w) => w.kind === 'replace' && samePath(w.path, originPath!)) : undefined;
+    const originText = originRewrite?.kind === 'replace' ? originRewrite.text : origin?.document.getText();
+    const dirty = dirtyFiles([...writes.map((w) => w.path), ...(originPath ? [originPath] : [])]);
     if (dirty.length > 0) {
       throw new EditRefused(`${path.relative(this.workspaceRoot, dirty[0]).split(path.sep).join('/')} has unsaved changes. Save or revert it, then try again.`);
     }
     // The watchers wait for these files instead of deciding while the saves
     // run (one per diagram listing the table), so none is taken for an
     // outside change before its record is made.
-    const expectation = this.ownWriteTracker.expectWrite(writes.map((w) => w.path));
+    const expectation = this.ownWriteTracker.expectWrite([...writes.map((w) => w.path), ...(originPath ? [originPath] : [])]);
+    // The anchor's change event is this edit's, not an outside one to save and send again.
+    const hold = origin !== undefined && !this.pendingUpdates.get(origin.panelKey);
+    if (hold) this.pendingUpdates.set(origin!.panelKey, true);
     const unsaved: string[] = [];
     const saveFailures = new Set<SaveFailure>();
     let modelFileUnsaved = false;
     let applied: AppliedFileWrites;
     try {
-      applied = await applyFileWrites(writes, { semanticRoot: this.semanticRootDir() });
+      applied = await applyFileWrites(writes, {
+        semanticRoot: this.semanticRootDir(),
+        ...(origin ? { primary: { document: origin.document, text: originText! } } : {}),
+      });
       // Not applied: `unrestored` lists the files the reconcile could not put back (its modal already named them).
       if (!applied.ok) return { ok: false, unrestored: applied.unrestored };
       // Creates and deletes landed with the edit itself: recorded before the saves.
       for (const filePath of applied.created) this.ownWriteTracker.recordWrite(filePath);
       for (const filePath of applied.deleted) this.ownWriteTracker.recordDelete(filePath);
+      if (origin) {
+        // The anchor (or the rewrite) left the diagram dirty: saved like the rest.
+        if (await saveDocument(origin.document, (reason) => saveFailures.add(reason))) {
+          this.ownWriteTracker.recordWrite(originPath!);
+        } else {
+          unsaved.push(originPath!);
+        }
+        this.rememberCanvasWrites(origin.panelKey, applied);
+      }
       for (const uri of applied.replaced) {
         if (await saveDocumentByUri(uri, (reason) => saveFailures.add(reason))) {
           this.ownWriteTracker.recordWrite(uri.fsPath);
@@ -6635,16 +6687,102 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } finally {
       this.ownWriteTracker.settleWrites(expectation);
+      if (hold) this.pendingUpdates.delete(origin!.panelKey);
     }
     if (unsaved.length > 0) {
       for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
       void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));
     }
-    this.tableLibraryService.invalidatePaths(writtenPaths(applied));
-    this.tableLibraryService.primeRelationshipsFiles(writtenPaths(applied));
+    const written = [...writtenPaths(applied), ...(originRewrite ? [originPath!] : [])];
+    this.tableLibraryService.invalidatePaths(written);
+    this.tableLibraryService.primeRelationshipsFiles(written);
     await this.refreshAllOpenSubjectAreas();
     for (const uri of applied.replaced) this._onDidWriteSubjectArea.fire({ uri, modelLibraryChanged: true });
+    if (origin) this._onDidWriteSubjectArea.fire({ uri: origin.document.uri, modelLibraryChanged: true });
     return { ok: true, unrestored: [] };
+  }
+
+  /**
+   * The diagram a Delete Table File prompt came from, while a canvas is open
+   * on it and its file exists: the delete then anchors on it
+   * ({@link deleteTablesWithCascade}). Decided by the document, not by the
+   * webview that showed the prompt: a second canvas on the same diagram, or
+   * the canvas closed and reopened before the (non-modal) prompt is answered,
+   * shares its undo stack, so it anchors on the live canvas's document.
+   * Undefined when no canvas is open on it: a closed document is never
+   * reopened, dirtied and saved for an anchor, nor a deleted diagram
+   * recreated (#161).
+   */
+  private deleteOriginOf(document: vscode.TextDocument): DeleteOrigin | undefined {
+    const panelKey = document.uri.toString();
+    const open = this.openPanels.get(panelKey);
+    if (!open || this.disposedWebviews.has(open.webview) || this.forgetIfGone(panelKey)) return undefined;
+    const live = open.document;
+    if ((live as { isClosed?: boolean }).isClosed || !fs.existsSync(live.uri.fsPath)) return undefined;
+    return { document: live, panelKey };
+  }
+
+  /**
+   * Remember what a canvas's anchored edit wrote, so its Cmd+Z / toolbar
+   * Undo flushes exactly those documents ({@link saveDirtyTableDocuments})
+   * and redraws when a file it deleted comes back ({@link flushUndoRedo}).
+   */
+  private rememberCanvasWrites(panelKey: string, applied: Pick<AppliedFileWrites, 'replaced' | 'created' | 'deleted'>): void {
+    const ourPaths = this.editedTablePaths.get(panelKey) ?? new Set<string>();
+    for (const uri of applied.replaced) ourPaths.add(uri.fsPath);
+    for (const filePath of applied.created) ourPaths.add(filePath);
+    if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+    if (applied.deleted.length === 0) return;
+    const deleted = this.deletedTablePaths.get(panelKey) ?? new Set<string>();
+    for (const filePath of applied.deleted) deleted.add(filePath);
+    this.deletedTablePaths.set(panelKey, deleted);
+  }
+
+  /**
+   * Delete Table File for YAML tables after Remove from Diagram: the files,
+   * as one WorkspaceEdit anchored on the canvas's diagram while it is open
+   * (`origin`), so Cmd+Z there brings them back before it undoes the remove
+   * (#274). The diagram's anchor is saved with the edit; nothing else is
+   * written. The deletes are left to the library watcher, as before.
+   */
+  private async deleteTableFilesFromCanvas(filePaths: readonly string[], origin: DeleteOrigin | undefined): Promise<AppliedFileWrites> {
+    const writes = filePaths.map((filePath): FileWrite => ({ kind: 'delete', path: filePath }));
+    if (!origin || origin.document.isDirty) return applyFileWrites(writes);
+    const fsPath = origin.document.uri.fsPath;
+    const expectation = this.ownWriteTracker.expectWrite([fsPath]);
+    const hold = !this.pendingUpdates.get(origin.panelKey);
+    if (hold) this.pendingUpdates.set(origin.panelKey, true);
+    try {
+      const applied = await applyFileWrites(writes, { primary: { document: origin.document, text: origin.document.getText() } });
+      if (!applied.ok) return applied;
+      const saveFailures = new Set<SaveFailure>();
+      if (await saveDocument(origin.document, (reason) => saveFailures.add(reason))) {
+        this.ownWriteTracker.recordWrite(fsPath);
+      } else {
+        for (const code of saveFailureCodes(saveFailures, { modelFile: false })) telemetry.error(code);
+        void vscode.window.showErrorMessage(this.describeUnsaved([fsPath]));
+      }
+      this.rememberCanvasWrites(origin.panelKey, applied);
+      return applied;
+    } finally {
+      this.ownWriteTracker.settleWrites(expectation);
+      if (hold) this.pendingUpdates.delete(origin.panelKey);
+    }
+  }
+
+  /** Run `fn` in a panel's edit queue, after the edits already queued, and return its result. */
+  private runQueued<T>(panelKey: string, fn: () => Promise<T>): Promise<T> {
+    let outcome: { ok: true; value: T } | { ok: false; error: unknown } | undefined;
+    return this.queueEdit(panelKey, async () => {
+      try {
+        outcome = { ok: true, value: await fn() };
+      } catch (error) {
+        outcome = { ok: false, error };
+      }
+    }).then(() => {
+      if (!outcome!.ok) throw outcome!.error;
+      return outcome!.value;
+    });
   }
 
   /** Single-relationship removal — thin wrapper over the batch handler. */

@@ -8,6 +8,13 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **Undo after Remove from Diagram and Delete Table File puts things back in the right order.** Edit > Undo on the diagram now first brings back the deleted table file, with its relationships and its place in other diagrams, and only the next Undo puts the table back on the diagram. Before, the first Undo brought back the table's `use` line while its file was still deleted, so the diagram showed an empty "No columns" table that other DBML tools could not read. The files an Undo brings back are saved straight away, so you no longer need Save All. This works for YAML tables on JSON diagrams too.
+- **The Delete Table File question no longer says "its place in 0 other diagrams".** When nothing else uses the table, it now just says it removes the table's file. Delete Table in the Table Library leaves out a count of 0 the same way.
+
 ## 2.0.1 — 2026-11-10
 
 - Release: renderer 0.4.1 (routing worker file) — develop → main (#279)
