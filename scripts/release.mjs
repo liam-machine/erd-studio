@@ -454,6 +454,52 @@ export function extractReleaseNotes(content, version) {
   return (next ? rest.slice(0, next.index) : rest).trim();
 }
 
+/**
+ * The most release notes may hold, in UTF-8 bytes. GitHub refuses a release body
+ * over 125,000 characters (HTTP 422 "body is too long"); bytes are counted because
+ * the notes are full of — and …, and the workflows append a footer after this.
+ */
+export const RELEASE_NOTES_MAX_BYTES = 100_000;
+
+const FULL_CHANGELOG_URL = 'https://github.com/liam-machine/erd-studio/blob/main/CHANGELOG.md';
+
+/**
+ * `notes` cut to fit a GitHub Release: unchanged when they fit in `maxBytes`,
+ * else cut at the last whole bullet or `###` heading that fits (a heading left
+ * with nothing under it is dropped), then a line saying so with a link to the
+ * full CHANGELOG. 2.0.0's notes were 151,584 characters (prerelease-v1.9.10's
+ * GitHub Release failed on them).
+ */
+export function capReleaseNotes(notes, { maxBytes = RELEASE_NOTES_MAX_BYTES, url = FULL_CHANGELOG_URL } = {}) {
+  const text = String(notes ?? '');
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  const suffix = `\n\n_These notes are cut short to fit on GitHub. The full list is in [CHANGELOG.md](${url})._\n`;
+  const budget = maxBytes - Buffer.byteLength(suffix, 'utf8');
+  const lines = text.split('\n');
+  const kept = [];
+  let block = [];
+  let used = 0;
+  // A block is a bullet or heading line and the lines that continue it.
+  const flush = () => {
+    const piece = block.join('\n');
+    const size = Buffer.byteLength(piece, 'utf8') + (kept.length > 0 ? 1 : 0);
+    if (used + size > budget) return false;
+    kept.push(piece);
+    used += size;
+    block = [];
+    return true;
+  };
+  for (const line of lines) {
+    if (block.length > 0 && /^(- |#{1,6} |\S)/.test(line) && !/^\s/.test(line)) {
+      if (!flush()) { block = []; break; }
+    }
+    block.push(line);
+  }
+  if (block.length > 0) flush();
+  while (kept.length > 0 && /^\s*$|^#{1,6} /.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join('\n').trimEnd()}${suffix}`.replace(/\n$/, '');
+}
+
 /** Today's date as YYYY-MM-DD (UTC). */
 export function isoDate(now = new Date()) {
   return now.toISOString().slice(0, 10);
@@ -570,7 +616,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     }
     const changelogPath = args.changelog ?? path.join(cwd, 'CHANGELOG.md');
     const existing = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
-    process.stdout.write(prereleaseNotes(existing, version));
+    process.stdout.write(`${capReleaseNotes(prereleaseNotes(existing, version).trimEnd())}\n`);
     return 0;
   }
 
@@ -611,7 +657,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       process.stdout.write(`See [CHANGELOG.md](https://github.com/liam-machine/erd-studio/blob/main/CHANGELOG.md) for details.\n`);
       return 0;
     }
-    process.stdout.write(`${notes}\n`);
+    process.stdout.write(`${capReleaseNotes(notes)}\n`);
     return 0;
   }
 
@@ -621,5 +667,6 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 
 const isEntryPoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isEntryPoint) {
-  process.exit(main());
+  // exitCode, not exit(): exit() can cut stdout short when it is a pipe (at 64 KB).
+  process.exitCode = main();
 }

@@ -13,6 +13,8 @@ import {
   pinnedReleaseVersion,
   resolveReleaseVersion,
   updateChangelog,
+  RELEASE_NOTES_MAX_BYTES,
+  capReleaseNotes,
   extractReleaseNotes,
   isPreReleaseEntry,
   marketplaceVersions,
@@ -204,6 +206,40 @@ describe('release.mjs — updateChangelog', () => {
 
   it('rejects an invalid version', () => {
     expect(() => updateChangelog('', { ...opts, version: 'latest' })).toThrow(/Invalid release version/);
+  });
+});
+
+describe('release.mjs — capReleaseNotes (GitHub refuses a body over 125,000 characters)', () => {
+  const bullet = (i: number) => `- **Change ${i} — with an ellipsis…** ${'detail '.repeat(40)}\n  continued on an indented line.`;
+  const long = ['### Added', ...Array.from({ length: 400 }, (_, i) => bullet(i)), '### Fixed', '- Last fix'].join('\n');
+
+  it('leaves notes that fit unchanged', () => {
+    expect(capReleaseNotes('### Fixed\n\n- One thing')).toBe('### Fixed\n\n- One thing');
+  });
+
+  it('cuts long notes at a whole bullet under the budget, and links the full CHANGELOG', () => {
+    const capped = capReleaseNotes(long, { maxBytes: 20_000 });
+    expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(20_000);
+    expect(capped.startsWith('### Added\n- **Change 0')).toBe(true);
+    // The last kept bullet is whole, continuation line included.
+    expect(capped).toMatch(/continued on an indented line\.\n\n_These notes are cut short to fit on GitHub\. The full list is in \[CHANGELOG\.md\]\(https:\/\/github\.com\/liam-machine\/erd-studio\/blob\/main\/CHANGELOG\.md\)\._$/);
+  });
+
+  it('drops a heading the cut leaves with nothing under it', () => {
+    const notes = ['### Added', `- ${'a'.repeat(900)}`, '### Fixed', `- ${'b'.repeat(900)}`].join('\n');
+    const capped = capReleaseNotes(notes, { maxBytes: 1_100 });
+    expect(capped).not.toContain('### Fixed');
+    expect(capped).toContain('- aaa');
+  });
+
+  it('keeps the real 2.0 notes, and the pre-release notes built from them, under the budget', () => {
+    const changelog = fs.readFileSync(path.join(__dirname, '../../CHANGELOG.md'), 'utf8');
+    const released = updateChangelog(changelog, { version: '2.0.0', date: '2026-11-10' });
+    for (const notes of [capReleaseNotes(extractReleaseNotes(released, '2.0.0')), capReleaseNotes(prereleaseNotes(changelog, '1.9.11'))]) {
+      expect(Buffer.byteLength(notes, 'utf8')).toBeLessThanOrEqual(RELEASE_NOTES_MAX_BYTES);
+      expect(notes.length).toBeGreaterThan(50_000);
+    }
+    expect(RELEASE_NOTES_MAX_BYTES + 2_000).toBeLessThan(125_000);
   });
 });
 
