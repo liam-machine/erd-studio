@@ -10,8 +10,21 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+
+- **The canvas tells you what it is not drawing.** When something you wrote in a file cannot be drawn, a strip above the diagram now says so, with the file, the line and a link to open it, and it stays until the file is fixed. It covers a relationships file your diagram does not import (with an **Add the import** button, one edit you can undo), a `Ref` or `[ref: …]` written inside a table file, a relationships file with a syntax error or merge conflict, and a `.dbml` saved in a folder ERD Studio does not read (it says where the file belongs). Before, these were written only to the log, or shown once per session, so a hand edit could look like a reload that had failed.
+- **ERD Studio: Reload Diagrams from Disk** (Command Palette): reads every file again and redraws the open diagrams. You should not need it, since diagrams redraw by themselves when a file is saved; it is there for a folder where file changes do not reach VS Code (some network drives and containers). It writes nothing.
+
+### Changed
+
+- **A diagram whose file has a mistake keeps saying so.** The red message over the diagram now comes back on every save while the file is still broken, and the strip above the diagram says the picture is the last one that could be read, until the file reads again. Before, a dismissed message stayed gone and the old picture was left with no explanation.
+- **The "does not import it" message no longer says any edit to the diagram adds the import.** Moving a table saves only positions. The canvas now offers **Add the import**, and `erd-studio doctor` gives the line to write.
+
 ### Fixed
 
+- **Hand edits are picked up in more cases.** A change to `layers.json` (a layer's name or colour) now redraws the open diagrams, not only the sidebar. A diagram also checks its files when you click back into it, and redraws if a table or relationships file changed without VS Code telling ERD Studio.
+- **A diagram no longer gets stuck when its file could not be saved or changed behind an unsaved copy.** It is drawn from the file on disk and says that the open copy has unsaved changes.
+- **A redraw that fails inside ERD Studio is no longer silent.** The diagram says it may be out of date and offers **Reload from disk**.
 - **New Relationship:** on a short window the **Stored in** picker no longer runs into the Role field's hint. It sits in a band of its own above the buttons, with a divider where the fields above scroll away (#275).
 - **Convert Project to DBML, then Undo:** the undo now also removes the empty folders the conversion made for its new files (`gold/diagrams`, `silver/tables/public`, …), so the project is exactly as it was. A folder that existed before, or that you have put a file in since, stays (#275).
 - **Edits keep a DBML file's own layout:** renaming a table, Move Table, new relationships and deletes now change only the lines they must, in every `.dbml` file. They no longer re-align other columns or `use` lines (even when a new name is the longest in its group), add blank lines between Refs you kept together, leave two blank lines where a deleted line was, or put a new `use` line above the file's opening comment. In a file in ERD Studio's layout the lines an edit writes line up with their neighbours where they fit, and **Format Document** still re-aligns a whole file when you ask (#275).

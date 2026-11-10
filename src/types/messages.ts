@@ -7,7 +7,7 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted
+ *                         revealTable, libraryDragStarted, filesNotShown
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), dropTables, updatePositions, switchStage,
@@ -15,7 +15,9 @@
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
  *                         copyFeedbackReport, openFeedbackLink,
  *                         layoutFinished, webviewError (usage telemetry only),
- *                         crashFallback (the crash screen's two buttons)
+ *                         crashFallback (the crash screen's two buttons),
+ *                         openNotedFile, addRelationshipsImports, reloadFromDisk
+ *                         (the "not shown" strip's file links and buttons)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -39,6 +41,7 @@ import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
 import type { CrashFallbackPayload, LayoutFailure, WebviewErrorPayload } from './webviewError';
 import type { CanvasLineStyle } from './lineStyle';
+import type { FilesNotShownPayload } from './filesNotShown';
 import type {
   FeedbackAiProviderChoice,
   FeedbackAnalysis,
@@ -410,6 +413,22 @@ export interface CanvasContextMessage {
 }
 
 /**
+ * What the user's files hold that this canvas is not drawing (the "not
+ * shown" strip above the diagram; `src/types/filesNotShown.ts`): a
+ * relationships file the diagram does not import, a `Ref` written in a table
+ * file, a relationships file that does not read, a `.dbml` saved where no
+ * file is read, a diagram file that stopped reading over a live canvas, a
+ * redraw that failed. Posted after each logical-stage `domainLoaded` /
+ * `stageData`, and again whenever one of them starts or stops being true;
+ * an empty list clears the strip. Like {@link CanvasContextMessage} it is
+ * kept out of `DisplaySubjectArea`, so the viewer contract is unchanged.
+ */
+export interface FilesNotShownMessage {
+  type: 'filesNotShown';
+  payload: FilesNotShownPayload;
+}
+
+/**
  * Select and centre one table, with its detail panel open, as clicking it
  * does (Open in Diagram and Go to Table on a table, Add to Diagram…). Sent
  * once the canvas has loaded its diagram (`SemanticEditorProvider.revealTable`
@@ -481,6 +500,7 @@ export type ExtensionMessage =
   | SyncPlanGeneratedMessage
   | RevealRelationshipMessage
   | CanvasContextMessage
+  | FilesNotShownMessage
   | RevealTableMessage
   | LibraryDragStartedMessage
   | ErrorMessage;
@@ -972,6 +992,41 @@ export interface ImportEmbeddedTablesMessage {
 }
 
 /**
+ * Open a file a "not shown" note names ({@link FilesNotShownMessage}), as
+ * text, at its line. `file` is relative to the workspace folder; the host
+ * opens it only when it is inside the project's ERD Studio folder. Writes
+ * nothing, so it is allowed on the physical stage.
+ */
+export interface OpenNotedFileMessage {
+  type: 'openNotedFile';
+  payload: {
+    file: string;
+    /** 1-based. */
+    line?: number;
+  };
+}
+
+/**
+ * Add to this DBML diagram the `use *` line of every relationships file
+ * holding a relationship between two of its tables (the button of a
+ * `relationshipsNotImported` note). No payload: the host works out the files
+ * by the one import rule (`relationshipsImportsFor`). One edit through the
+ * edit pipeline, one undo step; a mutation, so not on the physical allowlist.
+ */
+export interface AddRelationshipsImportsMessage {
+  type: 'addRelationshipsImports';
+}
+
+/**
+ * Read every file again and redraw (the button of a `refreshFailed` note;
+ * the command **ERD Studio: Reload Diagrams from Disk**). No payload. Writes
+ * nothing, so it is allowed on the physical stage.
+ */
+export interface ReloadFromDiskMessage {
+  type: 'reloadFromDisk';
+}
+
+/**
  * Pick another diagram to open (`erdStudio.openDomain` with no file). Sent by
  * the "deleted or renamed" screen (#161) — the renamed copy is one pick away.
  * No payload; allowed on the physical stage.
@@ -1177,7 +1232,10 @@ export type WebviewMessage =
   | RevealTableInLibraryMessage
   | LayoutFinishedMessage
   | WebviewErrorMessage
-  | CrashFallbackMessage;
+  | CrashFallbackMessage
+  | OpenNotedFileMessage
+  | AddRelationshipsImportsMessage
+  | ReloadFromDiskMessage;
 
 // ---------------------------------------------------------------------------
 // Finding a table across the project (the canvas's ways out of one diagram)

@@ -70,7 +70,6 @@ import {
   isSubjectAreaFilePath,
   notADiagramMessage,
   subjectAreaTableNames,
-  unimportedRelationshipsMessage,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
@@ -92,6 +91,7 @@ import { SelectorsService } from '../services/selectorsService';
 import { computeNewTablePositions, findOpenPosition } from '../services/positionService';
 import {
   ERD_LAYOUT_NOTE_PREFIX,
+  FIELDS_FILE_NAME,
   classifySemanticFile,
   computeMissingPositions,
   diagramPathOf,
@@ -228,6 +228,9 @@ import type { RelationshipAudit } from '../services/relationshipHealth';
 import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
 import { tableHomesOf } from '../services/tableHomes';
 import { buildCanvasContext } from '../services/canvasContext';
+import { collectFilesNotShown } from '../services/filesNotShown';
+import type { FileNote } from '../types/filesNotShown';
+import type { RefreshKind } from '../services/runtimeTelemetry';
 import type { CodeOwnersReader } from '../services/codeOwners';
 import { newTableSchemaChoice } from '../services/newTableSchema';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
@@ -577,6 +580,9 @@ import {
   validateRelationshipsFileChoice,
   validateDismissManifestHintPayload,
   validateImportEmbeddedTablesPayload,
+  validateOpenNotedFilePayload,
+  validateAddRelationshipsImportsPayload,
+  validateReloadFromDiskPayload,
   validateExportDiagramPayload,
   validateGuidePayload,
   validateAnnotationUpdate,
@@ -712,6 +718,29 @@ interface NamingMigrationHooks {
 /** A backwards group as the turn-round offer matches it again after the toast (#163): its links and cardinality. */
 function backwardsGroupId(members: readonly Relationship[]): string {
   return `${members[0]?.cardinality}\u0002${members.map(linkKey).sort().join('\u0001')}`;
+}
+
+/** **ERD Studio: Reload Diagrams from Disk** (registered in `extension.ts`). */
+export const RELOAD_FROM_DISK_COMMAND = 'erdStudio.reloadFromDisk';
+
+/** What changed, in the words of a `refreshFailed` note. */
+const REFRESH_KIND_WORDS: Readonly<Record<RefreshKind, string>> = {
+  Table: 'a table or relationships file',
+  Diagram: 'a diagram file',
+  Layers: 'layers.json or fields.yml',
+  Manifest: 'the dbt manifest',
+  Catalog: 'the dbt catalog',
+  DbtYml: 'a dbt file',
+};
+
+/** The note for a redraw that failed inside ERD Studio: the picture may be old, and here is how to get a fresh one. */
+export function refreshFailedNote(kind: RefreshKind): FileNote {
+  return {
+    code: 'refreshFailed',
+    message: `ERD Studio could not redraw after a change to ${REFRESH_KIND_WORDS[kind]}. This diagram may be out of date. `
+      + 'The problem is in ERD Studio, not in your files.',
+    action: 'reloadFromDisk',
+  };
 }
 
 /** Buttons on the canvas's file and project warnings (#205). */
@@ -867,8 +896,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
-  /** Relationships files a DBML diagram does not import but needs, already warned about this session (diagram + file). */
-  private readonly importDriftWarningsShown = new Set<string>();
   /** Open holds from {@link holdRefreshes}; while above 0, outside refreshes and the duplicate warning wait. */
   private refreshHolds = 0;
   /** Canvas refreshes asked for while held, and so not made: a hold's release says whether any were. */
@@ -1043,6 +1070,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
        * `ready`): Send Feedback must not be routed to its dead dialog.
        */
       crashed?: boolean;
+      /**
+       * The "not shown" notes last worked out for this canvas from its files
+       * ({@link sendFilesNotShown}); the notes below are added in front when posted.
+       */
+      fileNotes?: FileNote[];
+      /** The diagram's own file stopped reading over this live canvas: the note that says so until it reads again. */
+      staleNote?: FileNote;
+      /** The diagram's document could not be saved, so the canvas (drawn from disk) is not showing its text. */
+      saveFailed?: boolean;
+      /**
+       * The tables this canvas was last drawn with, and what the library files
+       * it was drawn from looked like on disk then ({@link filesSignatureOf}).
+       */
+      drawnFrom?: { members: readonly string[]; signature: string };
+      /** The diagram file's signature the canvas was last re-read for because its document was not following the disk. */
+      resyncedFor?: string;
     }
   >();
 
@@ -1259,6 +1302,324 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The canvas works without it: no File line, no "Not on this diagram" list.
       log.warn(`[SemanticEditorProvider] Canvas context failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // "Not shown" notes: what the files hold that the canvas is not drawing
+  // -------------------------------------------------------------------------
+
+  /** Each webview's latest `filesNotShown` run: an older one still running posts nothing. */
+  private readonly filesNotShownRuns = new WeakMap<vscode.Webview, number>();
+
+  /**
+   * `.dbml` files saved this session where ERD Studio reads no file, relative
+   * to the semantic dir ({@link noteUnreadFile}). Only what the watcher saw
+   * being written: a file that has always been there (an export a team keeps
+   * in the folder) is `doctor`'s to report, not a note on every canvas.
+   */
+  private readonly unreadFiles = new Set<string>();
+
+  /** A redraw after a file change failed ({@link noteRefreshFailed}): what changed, until a redraw succeeds. */
+  private refreshFailure: RefreshKind | undefined;
+
+  /**
+   * Work out and post the "not shown" notes of a logical-stage diagram just
+   * posted (`collectFilesNotShown`): after the diagram has gone out, like the
+   * canvas context, and from readings the redraw already made (the table
+   * files of its members, the relationships files, the diagram's own import
+   * drift), so it costs a stat per file. Reads only; never throws.
+   */
+  private async sendFilesNotShown(webview: vscode.Webview, panelKey: string, document: vscode.TextDocument, members: readonly string[]): Promise<void> {
+    const run = (this.filesNotShownRuns.get(webview) ?? 0) + 1;
+    this.filesNotShownRuns.set(webview, run);
+    const current = (): boolean => this.filesNotShownRuns.get(webview) === run && !this.disposedWebviews.has(webview);
+    try {
+      await yieldToEventLoop();
+      if (!current()) return;
+      const entry = this.openPanels.get(panelKey);
+      if (!entry || entry.webview !== webview) return;
+      entry.fileNotes = this.collectFileNotes(document, members);
+      this.postFilesNotShown(panelKey);
+    } catch (err) {
+      // The canvas works without them; the log and doctor still say everything.
+      log.warn(`[SemanticEditorProvider] "Not shown" notes failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** The notes of one diagram, from its files as they are on disk now. A YAML/JSON diagram of a YAML project has none. */
+  private collectFileNotes(document: vscode.TextDocument, members: readonly string[]): FileNote[] {
+    const fsPath = document.uri.fsPath;
+    const library = this.tableLibraryService;
+    const semanticRoot = this.semanticRootDir();
+    const dbmlDiagram = subjectAreaStorageOf(fsPath) === 'dbml';
+    if (!dbmlDiagram && !this.libraryHoldsDbml()) return [];
+    const semanticRelative = (filePath: string): string => path.relative(semanticRoot, filePath).split(path.sep).join('/');
+    return library.withIndexSnapshot(() => {
+      let canAddImports = false;
+      if (dbmlDiagram) {
+        try {
+          const file = codecFor(fsPath).parse(document.getText(), this.shownSubjectAreaPath(fsPath));
+          canAddImports = file.writable !== false && !file.holdsOwnTables;
+        } catch {
+          canAddImports = false;
+        }
+      }
+      const memberTables: Array<{ file: string; problems: readonly import('@erd-studio/core').DbmlProblem[] }> = [];
+      for (const name of new Set(members.map((m) => m.toLowerCase()))) {
+        const found = library.dbmlTableProblems(name);
+        if (found && found.problems.length > 0) memberTables.push({ file: semanticRelative(found.filePath), problems: found.problems });
+      }
+      const relationshipsFiles: Array<{ file: string; reading: import('@erd-studio/core').DbmlRelationshipsReading }> = [];
+      for (const filePath of library.listRelationshipsFiles()) {
+        const reading = library.readRelationshipsFile(filePath);
+        if (reading && !reading.readable) relationshipsFiles.push({ file: semanticRelative(filePath), reading });
+      }
+      return collectFilesNotShown({
+        importDrift: dbmlDiagram ? this.subjectAreaService.relationshipsImportDrift(fsPath) : [],
+        canAddImports,
+        memberTables,
+        relationshipsFiles,
+        unreadFiles: this.currentUnreadFiles(),
+        shown: (rel) => projectRelative(this.workspaceRoot, path.join(semanticRoot, ...rel.split('/'))),
+      });
+    });
+  }
+
+  /** {@link unreadFiles} that are still there and still unread; the others are forgotten. */
+  private currentUnreadFiles(): string[] {
+    const semanticRoot = this.semanticRootDir();
+    const tablesDirIsLayer = this.tableLibraryService.tablesDirIsLayer();
+    for (const rel of [...this.unreadFiles]) {
+      const cls = classifySemanticFile(rel, { tablesDirIsLayer });
+      if (cls.kind !== 'other' || cls.legacy !== undefined || !fs.existsSync(path.join(semanticRoot, ...rel.split('/')))) this.unreadFiles.delete(rel);
+    }
+    return [...this.unreadFiles];
+  }
+
+  /** Post a canvas's notes: what is wrong with the picture itself first, then what its files hold. Logical stage only. */
+  private postFilesNotShown(panelKey: string): void {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry || entry.activeStage !== 'logical' || this.disposedWebviews.has(entry.webview)) return;
+    const items: FileNote[] = [
+      ...(entry.staleNote ? [entry.staleNote] : []),
+      ...(entry.saveFailed && entry.document.isDirty ? [this.unsavedDiagramNote(entry.document)] : []),
+      ...(this.refreshFailure ? [refreshFailedNote(this.refreshFailure)] : []),
+      ...(entry.fileNotes ?? []),
+    ];
+    this.post(entry.webview, { type: 'filesNotShown', payload: { items } });
+  }
+
+  private unsavedDiagramNote(document: vscode.TextDocument): FileNote {
+    const shown = this.shownSubjectAreaPath(document.uri.fsPath);
+    return {
+      code: 'diagramUnsaved',
+      message: `${shown} has changes that could not be saved. The canvas shows the file on disk: save or revert it in its tab.`,
+      file: shown,
+    };
+  }
+
+  /**
+   * A `.dbml` file was created, changed or deleted where ERD Studio reads no
+   * file (the watcher's `onUnreadFileChanged`): every open canvas says so
+   * until the file is moved or deleted. Nothing is redrawn (the file is not
+   * part of any diagram) and nothing is written.
+   */
+  noteUnreadFile(fsPath: string): void {
+    const semanticRoot = this.semanticRootDir();
+    const rel = path.relative(semanticRoot, fsPath).split(path.sep).join('/');
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel) || !/\.dbml$/i.test(rel)) return;
+    // A YAML/JSON project reads no .dbml anywhere: a stray one there is not a file the user expects drawn.
+    if (!this.libraryHoldsDbml() && this.tableLibraryService.listDbmlDiagrams().length === 0) return;
+    this.unreadFiles.add(rel);
+    this.refreshFilesNotShown();
+  }
+
+  /** Work the notes of every open, loaded canvas out again, without redrawing any diagram. Writes nothing. */
+  refreshFilesNotShown(): void {
+    for (const [panelKey, entry] of this.openPanels) {
+      if (!entry.loaded || entry.activeStage !== 'logical' || this.disposedWebviews.has(entry.webview)) continue;
+      const members = subjectAreaTableNames(entry.document.getText(), entry.document.uri.fsPath) ?? [];
+      void this.sendFilesNotShown(entry.webview, panelKey, entry.document, members);
+    }
+  }
+
+  /**
+   * A watcher's refresh threw (`guardRefresh`): the open canvases may be out
+   * of date, and they say so, with Reload from disk, until a redraw of every
+   * canvas goes through ({@link refreshAllOpenSubjectAreas}).
+   */
+  noteRefreshFailed(kind: RefreshKind): void {
+    this.refreshFailure = kind;
+    for (const panelKey of this.openPanels.keys()) this.postFilesNotShown(panelKey);
+  }
+
+  /**
+   * Read every file again and redraw every open canvas (**ERD Studio: Reload
+   * Diagrams from Disk**, and the "not shown" strip's Reload from disk): for
+   * a setup where file events do not arrive, and after a failed redraw. The
+   * library, layers and field list already check the disk on every read; the
+   * caches are dropped all the same, so nothing a reader remembered survives.
+   * A refresh path: it never writes.
+   */
+  async reloadFromDisk(): Promise<void> {
+    this.tableLibraryService.invalidateCache();
+    this.tableLibraryService.invalidateRelationships();
+    this.tableLibraryService.invalidateIndex();
+    this.layerService.invalidateCache();
+    this.fieldsReader?.invalidate();
+    this.ymlParserService.invalidate();
+    // A canvas showing an error is told again, even the same one: the user asked.
+    for (const panelKey of this.openPanels.keys()) this.lastLoadError.delete(panelKey);
+    this.syncSubjectAreaFilePresence();
+    await this.refreshAllOpenSubjectAreas();
+  }
+
+  /**
+   * What the files this canvas is drawn from look like on disk: its members'
+   * table files and every relationships file (`filesSignature`), `layers.json`
+   * and `fields.yml`. The diagram's own file is not in it: its document
+   * follows it ({@link revalidateAgainstDisk} checks that separately).
+   */
+  private filesSignatureOf(members: readonly string[]): string {
+    const statOf = (filePath: string): string => {
+      try {
+        const stat = fs.statSync(filePath);
+        return `${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return '';
+      }
+    };
+    const semanticRoot = this.semanticRootDir();
+    return [
+      this.tableLibraryService.filesSignature(members),
+      `layers@${statOf(this.layerService.getConfigPath())}`,
+      `fields@${statOf(path.join(semanticRoot, FIELDS_FILE_NAME))}`,
+    ].join('\n');
+  }
+
+  /**
+   * The safety net under the watchers: when a canvas gets the focus, check
+   * that it still shows its files, and redraw it when it does not. Two things
+   * are compared, with a stat per file and one read of the diagram:
+   *
+   * - the library files it was drawn from ({@link filesSignatureOf}) against
+   *   the disk now: a table or relationships file changed with no event
+   *   reaching us (a network drive, a container mount, a watcher limit);
+   * - the diagram's document against its file: a document left unsaved by a
+   *   failed save, or one VS Code stopped syncing, no longer follows the
+   *   disk, so no change to the file would ever reach the canvas through it.
+   *   Redrawn once per version of the file, never in a loop.
+   *
+   * Skipped while this canvas's own edit is under way or refreshes are held.
+   * A refresh path: it never writes, and never saves the document.
+   */
+  async revalidateAgainstDisk(panelKey: string): Promise<boolean> {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry || !entry.loaded || this.refreshHolds > 0 || this.pendingUpdates.get(panelKey) || this.disposedWebviews.has(entry.webview)) return false;
+    const { document, webview } = entry;
+    if (document.uri.scheme !== 'file') return false;
+    let stale = false;
+    try {
+      if (entry.drawnFrom !== undefined && this.filesSignatureOf(entry.drawnFrom.members) !== entry.drawnFrom.signature) stale = true;
+      const onDisk = this.diskTextAndSignature(document.uri.fsPath);
+      if (onDisk && onDisk.text !== document.getText().replace(/^﻿/, '') && entry.resyncedFor !== onDisk.signature) {
+        entry.resyncedFor = onDisk.signature;
+        stale = true;
+      }
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] Could not check ${document.uri.fsPath} against the disk: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+    if (!stale) return false;
+    log.debug(`[SemanticEditorProvider] ${document.uri.fsPath} no longer shows its files: redrawing`);
+    if (entry.activeStage === 'physical') await this.handleSwitchStage(panelKey, document, webview, 'physical');
+    else await this.sendSubjectAreaData(document, webview, panelKey);
+    return true;
+  }
+
+  /** A file's text (no byte-order mark) and `mtime:size`, or null when it cannot be read. */
+  private diskTextAndSignature(filePath: string): { text: string; signature: string } | null {
+    try {
+      const stat = fs.statSync(filePath);
+      return { text: fs.readFileSync(filePath, 'utf-8').replace(/^﻿/, ''), signature: `${stat.mtimeMs}:${stat.size}` };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A change to a diagram file on disk that ERD Studio did not write (the
+   * semantic watcher): normally the canvas has already redrawn through its
+   * document. When the document is not following the disk, redraw from the
+   * file ({@link revalidateAgainstDisk}). Writes nothing.
+   */
+  async syncSubjectAreaWithDisk(fsPath: string): Promise<void> {
+    for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
+      if (samePath(entry.document.uri.fsPath, fsPath)) await this.revalidateAgainstDisk(panelKey);
+    }
+  }
+
+  /**
+   * A "not shown" note's file link: open the file as text at its line. Only
+   * a file inside the project's ERD Studio folder is opened, whatever the
+   * webview sent. Writes nothing.
+   *
+   * Where: the group already showing that file, else the group right of the
+   * canvas (`canvasColumn + 1`). Never `ViewColumn.Beside` while the canvas's
+   * column is known: Beside is relative to the ACTIVE group, which is still
+   * the text editor the user last typed in when the click arrives, so every
+   * link would open yet another group further right.
+   */
+  private async handleOpenNotedFile(payload: { file: string; line?: number }, webview: vscode.Webview, canvasColumn?: vscode.ViewColumn): Promise<void> {
+    const filePath = path.resolve(this.workspaceRoot, ...payload.file.split('/'));
+    const inside = path.relative(this.semanticRootDir(), filePath);
+    if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {
+      this.post(webview, { type: 'error', payload: { message: 'That file is not inside this project.' } });
+      return;
+    }
+    if (!fs.existsSync(filePath)) {
+      this.post(webview, { type: 'error', payload: { message: `${payload.file} is no longer there.` } });
+      return;
+    }
+    const position = new vscode.Position(Math.max((payload.line ?? 1) - 1, 0), 0);
+    const shownIn = (vscode.window.visibleTextEditors ?? []).find((editor) => samePath(editor.document.uri.fsPath, filePath))?.viewColumn;
+    const viewColumn = shownIn ?? (canvasColumn !== undefined && canvasColumn > 0 ? canvasColumn + 1 : vscode.ViewColumn.Beside);
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), 'default', {
+      selection: new vscode.Range(position, position),
+      viewColumn,
+    });
+  }
+
+  /**
+   * A `relationshipsNotImported` note's Add the import: re-render this DBML
+   * diagram with the relationships imports the one rule gives it
+   * (`relationshipsImportsFor`, through the same storage edit every other
+   * diagram edit uses), so the lines its files already hold are drawn. One
+   * WorkspaceEdit, one save, one undo step; nothing else in the diagram
+   * changes, and no relationship is created, moved or rewritten.
+   */
+  private async handleAddRelationshipsImports(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+    if (!this.isDbmlDocument(document)) {
+      this.post(webview, { type: 'error', payload: { message: 'Only a DBML diagram imports relationships files.' } });
+      return;
+    }
+    this.refuseIfSubjectAreaFileGone(document);
+    const text = document.getText();
+    const file = this.parseSubjectAreaFile(document, text);
+    // Nothing to import (the file was fixed meanwhile): the strip is only out of date.
+    if (this.subjectAreaService.relationshipsImportDrift(document.uri.fsPath).length === 0) {
+      this.refreshFilesNotShown();
+      return;
+    }
+    if (file.writable === false || file.holdsOwnTables) {
+      this.post(webview, { type: 'error', payload: { message: `ERD Studio can't edit ${this.shownSubjectAreaPath(document.uri.fsPath)} as it is. Add the use * line to it by hand.` } });
+      return;
+    }
+    await this.applyStorageEdit(document, file, text, {
+      stage: 'logical',
+      webview,
+      errorLabel: 'Failed to add the import.',
+    });
   }
 
   /**
@@ -1730,6 +2091,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
           // mutation; it writes no project file, and the physical stage draws lines too.
           'setLineStyle',
+          // The "not shown" strip: open a file it names, or read every file again. Neither writes.
+          'openNotedFile', 'reloadFromDisk',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           telemetry.error('physicalEditDropped');
@@ -1829,6 +2192,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             telemetry.feature('dbmlEmbeddedTablesImport');
             await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
+            break;
+          }
+          case 'openNotedFile': {
+            // A "not shown" note's file link. Writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateOpenNotedFilePayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.handleOpenNotedFile(payload as { file: string; line?: number }, webviewPanel.webview, webviewPanel.viewColumn);
+            break;
+          }
+          case 'addRelationshipsImports': {
+            // A "not shown" note's Add the import: one edit of this diagram, through the edit pipeline.
+            const payloadError = validateAddRelationshipsImportsPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            try {
+              await this.handleAddRelationshipsImports(document, webviewPanel.webview);
+            } catch (err) {
+              const detail = err instanceof Error ? err.message : String(err);
+              if (!(err instanceof EditRefused)) logHandlerFailure(`[SemanticEditorProvider] Adding the relationships imports failed: ${detail}`, err);
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add the import: ${detail}` } });
+            }
+            break;
+          }
+          case 'reloadFromDisk': {
+            // A "not shown" note's Reload from disk: the palette command, which also refreshes the sidebar. Writes nothing.
+            const payloadError = validateReloadFromDiskPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await vscode.commands.executeCommand(RELOAD_FROM_DISK_COMMAND);
             break;
           }
           case 'dismissManifestHint': {
@@ -2649,9 +3049,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.contentChanges.length === 0) return;
       // A file deleted outside ERD Studio is not saved back into existence (#161).
       if (document.isDirty && fs.existsSync(document.uri.fsPath)) {
-        await saveWithoutFormatting(document);
+        // `save()` resolves false rather than throwing. The canvas is drawn
+        // from the file on disk, so an unsaved document is not what it shows:
+        // say so on the canvas until the document is saved or reverted.
+        const saved = await saveWithoutFormatting(document);
+        const entry = this.openPanels.get(panelKey);
+        if (entry?.webview === webviewPanel.webview) entry.saveFailed = !saved && document.isDirty;
+        if (!saved) log.warn(`[SemanticEditorProvider] ${document.uri.fsPath} could not be saved after a change: the canvas shows the file on disk`);
       }
-      await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey);
+      // The user (or a tool) just changed this very file: a file that is still
+      // broken says so again, even with the message it had before.
+      await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { reshowError: true });
     });
 
     // The onboarding trail: the canvas went behind another tab and came back, or closed.
@@ -2660,6 +3068,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       readyWatch.visibility(e.webviewPanel.visible);
       if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
         this.lastActivePanelKey = panelKey;
+        // The safety net under the watchers: a canvas that gets the focus checks it still shows its files.
+        void this.revalidateAgainstDisk(panelKey).catch((err) => {
+          log.warn(`[SemanticEditorProvider] Check against the disk failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
     });
     // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
@@ -4335,23 +4747,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * A warning, once per file and diagram in a session, for each
-   * relationships file holding a Ref (or a pending line) between two of this
-   * DBML diagram's tables that it does not import (§2.3): the canvas leaves those Refs
-   * out, as core and other DBML tools do, and the next edit of the diagram
-   * adds the import.
-   */
-  private warnAboutUnimportedRelationships(filePath: string): void {
-    if (this.refreshHolds > 0 || subjectAreaStorageOf(filePath) !== 'dbml') return;
-    for (const file of this.subjectAreaService.relationshipsImportDrift(filePath)) {
-      const key = `${path.resolve(filePath)}\0${file}`;
-      if (this.importDriftWarningsShown.has(key)) continue;
-      this.importDriftWarningsShown.add(key);
-      void vscode.window.showWarningMessage(unimportedRelationshipsMessage(file));
-    }
-  }
-
-  /**
    * Say so — once per session per file — when this domain uses a name that
    * two files in the library define. Only one of them can be used (names are
    * identities), so without this a gold canvas would quietly show the silver
@@ -4630,9 +5025,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey?: string,
-    options: { persistPositions?: boolean } = {},
+    options: { persistPositions?: boolean; reshowError?: boolean } = {},
   ): Promise<number | undefined> {
     const errorKey = panelKey ?? document.uri.toString();
+    const reshow = options.reshowError === true;
 
     // A JSON file under the semantic dir is not automatically a domain. The
     // custom editor's `**/.erd-studio/*/*.json` selector also matches
@@ -4686,7 +5082,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       timer.phase('reading the diagram and its tables');
       let unifiedDomain = await this.readSubjectAreaTolerantly(document.uri.fsPath, { dbtKeyIndex });
       this.warnAboutDuplicateTables(unifiedDomain);
-      this.warnAboutUnimportedRelationships(document.uri.fsPath);
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
@@ -4729,6 +5124,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
         step = 'other';
         this.cancelCanvasContext(webview);
+        this.noteDrawn(key, unifiedDomain.logical.models.map((m) => m.name));
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
         step = 'display';
@@ -4747,6 +5143,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         step = 'other';
         // What the canvas knows beyond the diagram, once the diagram has gone out.
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
+        // What the files hold that this picture does not show ("not shown" notes), worked out after it has gone out.
+        this.noteDrawn(key, displayDomain.models.map((m) => m.name));
+        void this.sendFilesNotShown(webview, key, document, displayDomain.models.map((m) => m.name));
         if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
@@ -4770,7 +5169,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       const fileProblem = err instanceof SubjectAreaFileError ? this.subjectAreaFileProblemPayload(err, document.uri.fsPath) : undefined;
       if (fileProblem) {
-        this.postLoadError(webview, errorKey, fileProblem, err, classifySubjectAreaLoadFailure(err));
+        this.postLoadError(webview, errorKey, fileProblem, err, classifySubjectAreaLoadFailure(err), undefined, reshow);
         return undefined;
       }
       if (err instanceof SubjectAreaFileError) {
@@ -4779,10 +5178,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           message: err.message,
           kind: 'domain-file',
           ...(err.mergeConflict ? { mergeConflict: true as const } : {}),
-        }, err, classifySubjectAreaLoadFailure(err));
+        }, err, classifySubjectAreaLoadFailure(err), undefined, reshow);
         return undefined;
       }
-      this.postLoadError(webview, errorKey, this.subjectAreaLoadFailurePayload(err, document.uri.fsPath), err, classifySubjectAreaLoadFailure(err), step);
+      this.postLoadError(webview, errorKey, this.subjectAreaLoadFailurePayload(err, document.uri.fsPath), err, classifySubjectAreaLoadFailure(err), step, reshow);
     }
     return undefined;
   }
@@ -4953,6 +5352,51 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * A diagram went out to this canvas: it shows its files again, so the note
+   * for a file that would not read goes, and what it was drawn from is
+   * remembered for {@link revalidateAgainstDisk}.
+   */
+  private noteDrawn(panelKey: string, members: readonly string[]): void {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry) return;
+    entry.staleNote = undefined;
+    if (!entry.document.isDirty) entry.saveFailed = false;
+    try {
+      entry.drawnFrom = { members: [...members], signature: this.filesSignatureOf(members) };
+    } catch {
+      entry.drawnFrom = undefined;
+    }
+  }
+
+  /**
+   * The diagram's file could not be read over a canvas that is already
+   * drawn: the old picture stays (a toast says why, and can be dismissed),
+   * so a note that cannot be dismissed says the picture is old for as long
+   * as that is true. Nothing for a canvas with no picture yet (it shows the
+   * error page) or a file that is gone (it shows "deleted or renamed").
+   */
+  private noteNotDrawn(panelKey: string, payload: ErrorMessage['payload'], failure: SubjectAreaLoadFailure): void {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry?.loaded || failure === 'missing' || failure === 'notDomain') return;
+    const shown = this.shownSubjectAreaPath(entry.document.uri.fsPath);
+    const note: FileNote = payload.kind === 'internal'
+      ? {
+        code: 'refreshFailed',
+        message: 'ERD Studio could not redraw this diagram. The canvas shows it as it was before. The problem is in ERD Studio, not in your files.',
+        action: 'reloadFromDisk',
+      }
+      : {
+        code: 'diagramNotRead',
+        message: `${payload.message} The canvas shows the last version that read, until the file is fixed.`,
+        file: shown,
+        ...(payload.line !== undefined ? { line: payload.line } : {}),
+      };
+    if (entry.staleNote?.message === note.message) return;
+    entry.staleNote = note;
+    this.postFilesNotShown(panelKey);
+  }
+
+  /**
    * Post a load failure to the canvas, at most once per distinct message.
    *
    * Issue #64 arrived with the same parse error fifteen times in six seconds:
@@ -4968,8 +5412,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     err: unknown,
     failure: SubjectAreaLoadFailure,
     step?: SubjectAreaLoadStep,
+    /**
+     * The diagram's own file just changed and failed the same way: the toast
+     * is shown again (it may have been dismissed), with no second log line or
+     * telemetry count. The #64 flood came from refreshes of OTHER files.
+     */
+    reshow = false,
   ): void {
+    this.noteNotDrawn(errorKey, payload, failure);
     if (this.lastLoadError.get(errorKey) === payload.message) {
+      if (reshow) this.post(webview, { type: 'error', payload });
       return;
     }
     this.lastLoadError.set(errorKey, payload.message);
@@ -5062,6 +5514,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   async refreshAllOpenSubjectAreas(): Promise<void> {
     // Held (holdRefreshes): the command that holds redraws every canvas once it releases.
     if (this.refreshHolds > 0) { this.droppedRefreshes++; return; }
+    let failed = false;
     for (const [panelKey, { document, webview, activeStage, lastCompareAgainst }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
@@ -5096,7 +5549,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           type: 'error',
           payload: { message: `Refresh failed: ${message}` },
         });
+        failed = true;
       }
+    }
+    // Every canvas was redrawn from the files as they are: an earlier failed redraw is made good.
+    if (!failed && this.refreshFailure !== undefined) {
+      this.refreshFailure = undefined;
+      for (const panelKey of this.openPanels.keys()) this.postFilesNotShown(panelKey);
     }
   }
 
@@ -7915,6 +8374,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
         this.cancelCanvasContext(webview);
+        this.noteDrawn(panelKey, unifiedDomain.logical.models.map((m) => m.name));
         // #113: where a missing manifest is met (once per day).
         if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
@@ -7923,6 +8383,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag(), ...this.logicalOnlyFlag() });
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
+        this.noteDrawn(panelKey, displayDomain.models.map((m) => m.name));
+        void this.sendFilesNotShown(webview, panelKey, document, displayDomain.models.map((m) => m.name));
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

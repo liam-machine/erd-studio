@@ -933,6 +933,44 @@ describe('FileWatcherService', () => {
       expect(domains).not.toHaveBeenCalled();
     });
 
+    it('a .dbml where no file is read raises onUnreadFileChanged, once per file, and no other event', () => {
+      const unread = vi.fn();
+      const tables = vi.fn();
+      const relationships = vi.fn();
+      const domains = vi.fn();
+      const deleted = vi.fn();
+      service.onUnreadFileChanged(unread);
+      service.onTableChanged(tables);
+      service.onRelationshipsChanged(relationships);
+      service.onSemanticFileChanged(domains);
+      service.onSemanticFileDeleted(deleted);
+      // A table with no schema folder, one a folder too deep, one beside the layer's folders.
+      const noSchema = vscode.Uri.file(`${ws}/gold/tables/dim_store.dbml`);
+      const tooDeep = vscode.Uri.file(`${ws}/gold/tables/gold/more/dim_shop.dbml`);
+      const beside = vscode.Uri.file(`${ws}/gold/notes/x.dbml`);
+      semanticWatcher()._simulateCreate(noSchema);
+      semanticWatcher()._simulateChange(noSchema);
+      semanticWatcher()._simulateChange(tooDeep);
+      vi.advanceTimersByTime(300);
+      expect(unread.mock.calls.map((c) => c[0].uri.fsPath)).toEqual([noSchema.fsPath, tooDeep.fsPath]);
+      // Deleting it is an event too: the canvases stop saying it is not read.
+      semanticWatcher()._simulateDelete(beside);
+      vi.advanceTimersByTime(300);
+      expect(unread).toHaveBeenCalledTimes(3);
+      expect(unread.mock.calls[2][0].uri.fsPath).toBe(beside.fsPath);
+      // A file that IS read never raises it, and neither does a .json that is no diagram.
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/tables/gold/fct_order.dbml`));
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/relationships/gold.dbml`));
+      semanticWatcher()._simulateChange(vscode.Uri.file(`${ws}/gold/diagrams/sales.dbml`));
+      semanticWatcher()._simulateDelete(vscode.Uri.file(`${ws}/templates/x.json`));
+      vi.advanceTimersByTime(300);
+      expect(unread).toHaveBeenCalledTimes(3);
+      expect(tables).not.toHaveBeenCalled();
+      expect(deleted).toHaveBeenCalledTimes(0);
+      expect(relationships).toHaveBeenCalledTimes(1);
+      expect(domains).toHaveBeenCalledTimes(1);
+    });
+
     it('a .dbml diagram change and create raise the domain events', () => {
       const listener = vi.fn();
       service.onSemanticFileChanged(listener);

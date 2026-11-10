@@ -180,7 +180,7 @@ function withDrift(): void {
 }
 
 describe('drift: a Ref between two of the diagram\'s tables in a file it does not import', () => {
-  it('is drawn by neither side, and the canvas warns once for that file', async () => {
+  it('is drawn by neither side, and the canvas says so in a note on every load (never a toast)', async () => {
     withDrift();
     const core = drawn(await coreOf('gold/diagrams/sales.dbml'));
     const canvas = drawn(await canvasOf('gold/diagrams/sales.dbml'));
@@ -189,14 +189,20 @@ describe('drift: a Ref between two of the diagram\'s tables in a file it does no
     expect(edges).not.toContain('customer_profile>dim_region');
     expect(edges).not.toContain('dim_customer>dim_customer');
     expect(edges).toContain('fct_order>dim_customer');
-    expect(warnings.filter((w) => w.includes('customers.dbml'))).toEqual([
-      'gold/relationships/customers.dbml holds a relationship between tables of this diagram, but the diagram does not import it; '
-      + 'other DBML tools do not draw it. Any edit to this diagram adds the import.',
-    ]);
-    // Once per file and diagram, not on every refresh.
+    // The "not shown" note, worked out after the diagram has gone out.
+    const noted = async (): Promise<Array<{ code: string; file?: string; action?: string }>> => {
+      for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      const all = lastPanel._postedMessages.filter((m) => (m as { type: string }).type === 'filesNotShown') as Array<{ payload: { items: Array<{ code: string; file?: string; action?: string }> } }>;
+      return all[all.length - 1]?.payload.items ?? [];
+    };
+    const note = { code: 'relationshipsNotImported', file: '.erd-studio/gold/relationships/customers.dbml', action: 'addRelationshipsImports' };
+    expect(await noted()).toEqual([expect.objectContaining(note)]);
+    expect(warnings.filter((w) => w.includes('customers.dbml'))).toEqual([]);
+    // On every load, for as long as it is true: not once per session.
     await lastPanel._simulateMessage({ type: 'ready' });
     expect(lastPanel._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded')).toHaveLength(2);
-    expect(warnings.filter((w) => w.includes('customers.dbml'))).toHaveLength(1);
+    expect(await noted()).toEqual([expect.objectContaining(note)]);
+    expect(warnings.filter((w) => w.includes('customers.dbml'))).toEqual([]);
   });
 
   it('the filter is display-only: the library (what an edit plans against) still holds the hidden Refs', async () => {

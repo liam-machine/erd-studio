@@ -55,6 +55,7 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
 import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
+import { FilesNotShownBanner } from './components/Canvas/FilesNotShownBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DragHint } from './components/Canvas/DragHint';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
@@ -69,6 +70,7 @@ import { CanvasGuide } from './components/Guide/CanvasGuide';
 import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
 import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import { isCanvasLineStyle } from '../src/types/lineStyle';
+import { isFileNote } from '../src/types/filesNotShown';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
@@ -308,6 +310,10 @@ function EditorCanvas() {
           if (useEditorStore.getState().domain?.stage === 'logical') {
             useEditorStore.getState().setCanvasContext(msg.payload);
           }
+          break;
+        case 'filesNotShown':
+          // What the files hold that the canvas is not drawing: the whole list each time (empty clears the strip).
+          useEditorStore.getState().setFilesNotShown(Array.isArray(msg.payload?.items) ? msg.payload.items.filter(isFileNote) : []);
           break;
         case 'revealRelationship':
           // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
@@ -797,6 +803,8 @@ function EditorCanvas() {
       <ManifestHint />
       {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
       <EmbeddedTablesBanner />
+      {/* What the files hold that the canvas is not drawing, each with its file and line. */}
+      <FilesNotShownBanner />
 
       <ReactFlow
         className={flowClassName}
