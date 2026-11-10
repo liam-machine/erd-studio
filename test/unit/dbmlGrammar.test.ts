@@ -26,6 +26,26 @@ import { BUILT_IN_FIELDS, DBML_SETTING_NAMES } from '../../packages/core/src/fie
 import { DBML_KIND_LANGUAGE_IDS, DBML_LANGUAGE_IDS, dbmlFileIconPath, type DbmlFileKind } from '../../src/providers/dbmlFileKinds';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
+
+/**
+ * The scopes that carry a token's meaning in an ERD Studio model: one colour
+ * per kind of thing, the same in every file. Each was picked so the default
+ * themes (Dark / Light 2026, Dark / Light Modern) paint it; `variable.other.*`
+ * is the foreground colour in the 2026 themes.
+ */
+const COLUMN = 'entity.name.variable.column.dbml';
+const TABLE = 'entity.name.type.table.dbml';
+const SCHEMA = 'meta.qualifier.schema.dbml';
+const FIELD = 'entity.name.tag.property.dbml';
+const FIELD_ERD = 'entity.name.tag.property.erd-studio.dbml';
+const KEY = 'keyword.other.setting.key.dbml';
+const KEY_ERD = 'keyword.other.setting.key.erd-studio.dbml';
+const CHOICE = 'variable.other.enummember.dbml';
+const BOOLEAN = 'constant.language.boolean.dbml';
+const RELATION = 'keyword.control.relation.dbml';
+
+/** Whether a token is one of ERD Studio's own names (a built-in field or key flag), as opposed to DBML's or a team's. */
+const isErdStudios = (scopes: string[]): boolean => scopes.some((s) => s.endsWith('.erd-studio.dbml'));
 const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
 const GRAMMAR_PATH = path.join(REPO_ROOT, 'syntaxes/dbml.tmLanguage.json');
 const CONFIG_PATH = path.join(REPO_ROOT, 'syntaxes/dbml.language-configuration.json');
@@ -183,29 +203,27 @@ describe('dbml.tmLanguage.json: a table file', () => {
   it('gives ERD Studio custom properties their own scope, apart from built-in settings', () => {
     const t = tokenize(TABLE_FILE);
     for (const key of ['schema', 'role', 'grain', 'rationale_purpose', 'meta_json']) {
-      expect(scopesOf(t, `  ${key}:`, key), key).toContain('variable.other.property.erd-studio.dbml');
+      expect(scopesOf(t, `  ${key}:`, key), key).toContain(FIELD_ERD);
     }
-    expect(scopesOf(t, 'customer_key  INT', 'foreign_key')).toContain('variable.other.property.erd-studio.dbml');
-    expect(scopesOf(t, 'additive_type:', 'additive_type')).toContain('variable.other.property.erd-studio.dbml');
-    expect(scopesOf(t, 'scd           INT', 'scd_type')).toContain('variable.other.property.erd-studio.dbml');
-    expect(scopesOf(t, 'scd           INT', 'natural_key')).toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'additive_type:', 'additive_type')).toContain(FIELD_ERD);
+    expect(scopesOf(t, 'scd           INT', 'scd_type')).toContain(FIELD_ERD);
     // Context fields: a built-in field's bare key is ERD Studio's; a team field's key is a plain custom property.
     for (const key of ['decisions', 'open_questions']) {
-      expect(scopesOf(t, `  ${key}:`, key), key).toContain('variable.other.property.erd-studio.dbml');
+      expect(scopesOf(t, `  ${key}:`, key), key).toContain(FIELD_ERD);
     }
-    expect(scopesOf(t, 'rule          INT', 'business_rule')).toContain('variable.other.property.erd-studio.dbml');
-    expect(scopesOf(t, "  owner: 'sales-data'", 'owner')).toContain('variable.other.property.dbml');
-    expect(scopesOf(t, "  owner: 'sales-data'", 'owner')).not.toContain('variable.other.property.erd-studio.dbml');
-    expect(scopesOf(t, 'rule          INT', 'pii')).toContain('variable.other.property.dbml');
-    expect(scopesOf(t, 'rule          INT', 'pii')).not.toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'rule          INT', 'business_rule')).toContain(FIELD_ERD);
+    expect(scopesOf(t, "  owner: 'sales-data'", 'owner')).toContain(FIELD);
+    expect(isErdStudios(scopesOf(t, "  owner: 'sales-data'", 'owner'))).toBe(false);
+    expect(scopesOf(t, 'rule          INT', 'pii')).toContain(FIELD);
+    expect(isErdStudios(scopesOf(t, 'rule          INT', 'pii'))).toBe(false);
 
-    expect(scopesOf(t, 'order_line_id BIGINT', 'pk')).toContain('keyword.other.setting.dbml');
-    expect(scopesOf(t, 'order_line_id BIGINT', 'note')).toContain('keyword.other.setting.dbml');
+    // Bare flags are keywords; a `label:` built into DBML reads like every other label.
     expect(scopesOf(t, 'price ', 'not null')).toContain('keyword.other.setting.dbml');
-    expect(scopesOf(t, 'price ', 'default')).toContain('keyword.other.setting.dbml');
     expect(scopesOf(t, 'loaded_at     timestamp', 'null')).toContain('keyword.other.setting.dbml');
     expect(scopesOf(t, 'loaded_at     timestamp', 'unique')).toContain('keyword.other.setting.dbml');
-    expect(scopesOf(t, "note: 'Line total'", 'note')).toContain('keyword.other.setting.dbml');
+    expect(scopesOf(t, 'order_line_id BIGINT', 'note')).toContain(FIELD);
+    expect(scopesOf(t, 'price ', 'default')).toContain(FIELD);
+    expect(scopesOf(t, "note: 'Line total'", 'note')).toContain(FIELD);
   });
 
   it('scopes every built-in field key of the catalogue as ERD Studio\'s, bare and with its old prefixes, and no DBML setting', () => {
@@ -213,22 +231,22 @@ describe('dbml.tmLanguage.json: a table file', () => {
       for (const key of [def.key, `erd_${def.key}`, `rationale_${def.key}`]) {
         const line = def.scope === 'table' ? `Table t [${key}: 'x'] {` : `  c INT [${key}: 'x']`;
         const t = tokenize(['Table t {', line, '}'].join('\n'));
-        expect(scopesOf(t, line, key), key).toContain('variable.other.property.erd-studio.dbml');
+        expect(isErdStudios(scopesOf(t, line, key)), key).toBe(true);
       }
     }
     for (const name of DBML_SETTING_NAMES.filter((n) => !n.includes(' '))) {
       const t = tokenize(['Table t {', `  c INT [${name}: 'x']`, '}'].join('\n'));
-      expect(scopesOf(t, `  c INT [${name}`, name), name).not.toContain('variable.other.property.erd-studio.dbml');
+      expect(isErdStudios(scopesOf(t, `  c INT [${name}`, name)), name).toBe(false);
     }
   });
 
   it('scopes column names, types and type arguments, aligned or not', () => {
     const t = tokenize(TABLE_FILE);
-    expect(scopesOf(t, 'order_line_id BIGINT', 'order_line_id')).toContain('variable.other.column.dbml');
+    expect(scopesOf(t, 'order_line_id BIGINT', 'order_line_id')).toContain(COLUMN);
     expect(scopesOf(t, 'order_line_id BIGINT', 'BIGINT')).toContain('support.type.dbml');
-    expect(scopesOf(t, 'customer_key  INT', 'customer_key')).toContain('variable.other.column.dbml');
+    expect(scopesOf(t, 'customer_key  INT', 'customer_key')).toContain(COLUMN);
     expect(scopesOf(t, 'customer_key  INT', 'INT')).toContain('support.type.dbml');
-    expect(scopesOf(t, 'amount ', 'amount')).toContain('variable.other.column.dbml');
+    expect(scopesOf(t, 'amount ', 'amount')).toContain(COLUMN);
     expect(scopesOf(t, 'amount ', '"DECIMAL(18,2)"')).toContain('support.type.dbml');
     expect(scopesOf(t, 'price ', 'decimal')).toContain('support.type.dbml');
     expect(scopesOf(t, 'price ', '18')).toContain('constant.numeric.dbml');
@@ -251,9 +269,9 @@ describe('dbml.tmLanguage.json: a table file', () => {
   it('scopes the indexes block, its columns and index settings', () => {
     const t = tokenize(TABLE_FILE);
     expect(scopesOf(t, 'indexes {', 'indexes')).toContain('keyword.other.indexes.dbml');
-    expect(scopesOf(t, '(order_line_id, loaded_at)', 'order_line_id')).toContain('variable.other.column.dbml');
-    expect(scopesOf(t, '(order_line_id, loaded_at)', 'pk')).toContain('keyword.other.setting.dbml');
-    expect(scopesOf(t, 'ix_loaded', 'type')).toContain('keyword.other.setting.dbml');
+    expect(scopesOf(t, '(order_line_id, loaded_at)', 'order_line_id')).toContain(COLUMN);
+    expect(scopesOf(t, '(order_line_id, loaded_at)', 'pk')).toContain(KEY);
+    expect(scopesOf(t, 'ix_loaded', 'type')).toContain(FIELD);
     expect(scopesOf(t, 'ix_loaded', 'btree')).toContain('support.constant.dbml');
   });
 });
@@ -272,16 +290,16 @@ describe('dbml.tmLanguage.json: a relationships file', () => {
     const t = tokenize(RELATIONSHIPS_FILE);
     expect(scopesOf(t, 'Ref: dim_customer', 'Ref')).toContain('keyword.other.ref.dbml');
     expect(scopesOf(t, 'Ref: dim_customer', 'dim_customer')).toContain('entity.name.type.table.dbml');
-    expect(scopesOf(t, 'Ref: dim_customer', 'customer_key')).toContain('variable.other.column.dbml');
-    expect(scopesOf(t, 'Ref: dim_customer', '?-')).toContain('keyword.operator.relation.dbml');
+    expect(scopesOf(t, 'Ref: dim_customer', 'customer_key')).toContain(COLUMN);
+    expect(scopesOf(t, 'Ref: dim_customer', '?-')).toContain(RELATION);
     expect(scopesOf(t, 'Ref "order date"', '"order date"')).toContain('entity.name.function.ref.dbml');
-    expect(scopesOf(t, 'Ref "order date"', '>?')).toContain('keyword.operator.relation.dbml');
-    expect(scopesOf(t, 'Ref "order date"', 'date_key', 1)).toContain('variable.other.column.dbml');
-    expect(scopesOf(t, 'Ref: fct_order.(region_code', 'country_code', 1)).toContain('variable.other.column.dbml');
+    expect(scopesOf(t, 'Ref "order date"', '>?')).toContain(RELATION);
+    expect(scopesOf(t, 'Ref "order date"', 'date_key', 1)).toContain(COLUMN);
+    expect(scopesOf(t, 'Ref: fct_order.(region_code', 'country_code', 1)).toContain(COLUMN);
     expect(scopesOf(t, 'Ref: fct_order.(region_code', 'dim_region')).toContain('entity.name.type.table.dbml');
-    expect(scopesOf(t, 'Ref: fct_order.(region_code', 'delete')).toContain('keyword.other.setting.dbml');
+    expect(scopesOf(t, 'Ref: fct_order.(region_code', 'delete')).toContain(FIELD);
     expect(scopesOf(t, 'Ref: fct_order.(region_code', 'cascade')).toContain('support.constant.dbml');
-    expect(scopesOf(t, '<>?', '<>?')).toContain('keyword.operator.relation.dbml');
+    expect(scopesOf(t, '<>?', '<>?')).toContain(RELATION);
   });
 
   it('keeps a pending relationship a comment from end to end', () => {
@@ -297,8 +315,8 @@ describe('dbml.tmLanguage.json: a diagram file', () => {
     expect(scopesOf(t, 'Project sales', 'Project')).toContain('keyword.other.project.dbml');
     expect(scopesOf(t, 'Project sales', 'sales')).toContain('entity.name.namespace.project.dbml');
     expect(scopesOf(t, "Note: 'Sales", 'Note')).toContain('keyword.other.note.dbml');
-    expect(scopesOf(t, 'database_type', 'database_type')).toContain('keyword.other.setting.dbml');
-    expect(scopesOf(t, 'erd_schema_version', 'erd_schema_version')).toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'database_type', 'database_type')).toContain(FIELD);
+    expect(scopesOf(t, 'erd_schema_version', 'erd_schema_version')).toContain(FIELD_ERD);
     expect(scopesOf(t, 'erd_schema_version', '7')).toContain('string.quoted.single.dbml');
   });
 
@@ -308,9 +326,9 @@ describe('dbml.tmLanguage.json: a diagram file', () => {
     expect(scopesOf(t, 'use *', 'use')).toContain('keyword.control.import.dbml');
     expect(scopesOf(t, 'Note "3f2b', 'Note')).toContain('keyword.other.note.dbml');
     expect(scopesOf(t, 'Note "3f2b', '"3f2b6c1e-8a4d-4f7e-9c1b-2d5e6f7a8b9c"')).toContain('entity.name.type.note.dbml');
-    expect(scopesOf(t, 'Note "3f2b', 'color')).toContain('keyword.other.setting.dbml');
+    expect(scopesOf(t, 'Note "3f2b', 'color')).toContain(FIELD);
     expect(scopesOf(t, 'Note "3f2b', '#f59e0b')).toContain('constant.other.color.rgb-value.hex.dbml');
-    expect(scopesOf(t, 'Note "3f2b', 'linked_table')).toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'Note "3f2b', 'linked_table')).toContain(FIELD_ERD);
     expect(scopesOf(t, 'Check the grain', '  Check the grain')).toContain('string.quoted.triple.dbml');
   });
 });
@@ -342,8 +360,8 @@ describe('dbml.tmLanguage.json: other DBML', () => {
     expect(scopesOf(t, 'TableGroup', 'TableGroup')).toContain('keyword.other.tablegroup.dbml');
     expect(scopesOf(t, '  fct_order', 'fct_order')).toContain('entity.name.type.table.dbml');
     expect(scopesOf(t, 'TablePartial', 'TablePartial')).toContain('keyword.other.tablepartial.dbml');
-    expect(scopesOf(t, 'team_flag', 'team_flag')).toContain('variable.other.property.dbml');
-    expect(scopesOf(t, 'team_flag', 'team_flag')).not.toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'team_flag', 'team_flag')).toContain(FIELD);
+    expect(isErdStudios(scopesOf(t, 'team_flag', 'team_flag'))).toBe(false);
     expect(scopesOf(t, '~audit', '~')).toContain('keyword.operator.partial-injection.dbml');
     expect(scopesOf(t, 'Records t', 'Records')).toContain('keyword.other.records.dbml');
     expect(scopesOf(t, '1, true', 'true')).toContain('constant.language.boolean.dbml');
@@ -353,15 +371,126 @@ describe('dbml.tmLanguage.json: other DBML', () => {
   it('recovers after an unterminated header or string', () => {
     const t = tokenize(['Table broken', 'Ref: a.b > c.d', 'Project p {', "  Note: 'open", "  erd_x: 'y'", '}'].join('\n'));
     expect(scopesOf(t, 'Ref: a.b', 'Ref')).toContain('keyword.other.ref.dbml');
-    expect(scopesOf(t, 'Ref: a.b', '>')).toContain('keyword.operator.relation.dbml');
+    expect(scopesOf(t, 'Ref: a.b', '>')).toContain(RELATION);
     // A single-quoted string cannot span lines in DBML: the next line is a key again.
-    expect(scopesOf(t, 'erd_x', 'erd_x')).toContain('variable.other.property.erd-studio.dbml');
+    expect(scopesOf(t, 'erd_x', 'erd_x')).toContain(FIELD_ERD);
   });
 
   it('a column named like a keyword is still a column', () => {
     const t = tokenize(['Table x {', '  note varchar', '  records int', '  indexes text', '}'].join('\n'));
     for (const name of ['note', 'records', 'indexes']) {
-      expect(scopesOf(t, `  ${name} `, name), name).toContain('variable.other.column.dbml');
+      expect(scopesOf(t, `  ${name} `, name), name).toContain(COLUMN);
+    }
+  });
+});
+
+describe('dbml.tmLanguage.json: one colour per kind of thing, in every file', () => {
+  const TABLE_SAMPLE = [
+    'Table silver.dim_customer [',
+    "  role: 'conformed-dim',",
+    "  grain: 'One row per customer'",
+    '] {',
+    '  customer_key  INT     [pk]',
+    "  customer_id   VARCHAR [natural_key: 'true', scd_type: '0']",
+    "  region_key    INT     [foreign_key: 'true', note: 'FK to dim_region']",
+    "  amount        DECIMAL [additive_type: 'semi-additive', pii: 'false']",
+    '}',
+  ].join('\n');
+  const RELATIONSHIPS_SAMPLE = [
+    "use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'",
+    'Ref: public.fct_order.customer_key >? silver.dim_customer.customer_key',
+  ].join('\n');
+  const DIAGRAM_SAMPLE = [
+    'Project showcase {',
+    "  erd_schema_version: '7'",
+    "  erd_layout: '''",
+    '    dim_customer 40 60',
+    '    dim_customer/sticky_1 10 -20 200 100',
+    "  '''",
+    '}',
+  ].join('\n');
+
+  it('the samples are DBML the pinned parser reads', () => {
+    expect(syntaxErrors(TABLE_SAMPLE)).toEqual([]);
+    expect(syntaxErrors(RELATIONSHIPS_SAMPLE)).toEqual([]);
+    expect(syntaxErrors(DIAGRAM_SAMPLE)).toEqual([]);
+  });
+
+  it('pk, natural_key and foreign_key are all key flags; the true after one is a boolean', () => {
+    const t = tokenize(TABLE_SAMPLE);
+    expect(scopesOf(t, 'customer_key  INT', 'pk')).toContain(KEY);
+    expect(scopesOf(t, 'customer_id', 'natural_key')).toContain(KEY_ERD);
+    expect(scopesOf(t, 'region_key', 'foreign_key')).toContain(KEY_ERD);
+    expect(scopesOf(t, 'customer_id', 'true')).toContain(BOOLEAN);
+    // Any yes / no value is a constant, a team field's too.
+    expect(scopesOf(t, 'amount', 'false')).toContain(BOOLEAN);
+    expect(scopesOf(t, 'amount', 'false')).not.toContain('string.quoted.single.dbml');
+  });
+
+  it('a choice field holds a coded value; a text field holds prose', () => {
+    const t = tokenize(TABLE_SAMPLE);
+    expect(scopesOf(t, '  role:', 'conformed-dim')).toContain(CHOICE);
+    expect(scopesOf(t, 'customer_id', '0')).toContain(CHOICE);
+    expect(scopesOf(t, 'amount', 'semi-additive')).toContain(CHOICE);
+    expect(scopesOf(t, '  grain:', 'One row per customer')).toContain('string.quoted.single.dbml');
+    expect(scopesOf(t, 'region_key', 'FK to dim_region')).toContain('string.quoted.single.dbml');
+    // A choice value that is not a plain string (an unterminated one) is still read as a string.
+    const open = tokenize(['Table t {', "  c INT [scd_type: '2", '}'].join('\n'));
+    expect(scopesOf(open, 'scd_type', '2')).toContain('string.quoted.single.dbml');
+  });
+
+  it('labels of every origin read as keys', () => {
+    const t = tokenize(TABLE_SAMPLE);
+    expect(scopesOf(t, '  role:', 'role')).toContain(FIELD_ERD);
+    expect(scopesOf(t, 'customer_id', 'scd_type')).toContain(FIELD_ERD);
+    expect(scopesOf(t, 'region_key', 'note')).toContain(FIELD);
+    expect(scopesOf(t, 'amount', 'pii')).toContain(FIELD);
+  });
+
+  it('a table is the table colour and a column the column colour wherever they appear; the schema stays plain', () => {
+    const table = tokenize(TABLE_SAMPLE);
+    expect(scopesOf(table, 'Table silver', 'silver')).toContain(SCHEMA);
+    expect(scopesOf(table, 'Table silver', 'silver')).not.toContain(TABLE);
+    expect(scopesOf(table, 'Table silver', 'dim_customer')).toContain(TABLE);
+    expect(scopesOf(table, 'customer_key  INT', 'customer_key')).toContain(COLUMN);
+
+    const rel = tokenize(RELATIONSHIPS_SAMPLE);
+    expect(scopesOf(rel, 'use {', 'silver')).toContain(SCHEMA);
+    expect(scopesOf(rel, 'use {', 'dim_customer')).toContain(TABLE);
+    expect(scopesOf(rel, 'Ref:', 'public')).toContain(SCHEMA);
+    expect(scopesOf(rel, 'Ref:', 'fct_order')).toContain(TABLE);
+    expect(scopesOf(rel, 'Ref:', 'customer_key')).toContain(COLUMN);
+    expect(scopesOf(rel, 'Ref:', '>?')).toContain(RELATION);
+    expect(scopesOf(rel, 'Ref:', 'silver')).toContain(SCHEMA);
+    expect(scopesOf(rel, 'Ref:', 'dim_customer')).toContain(TABLE);
+    expect(scopesOf(rel, 'Ref:', 'customer_key', 1)).toContain(COLUMN);
+
+    const diagram = tokenize(DIAGRAM_SAMPLE);
+    expect(scopesOf(diagram, '    dim_customer 40', 'dim_customer')).toContain(TABLE);
+  });
+
+  it('reads erd_layout as table x y, not as one string', () => {
+    const t = tokenize(DIAGRAM_SAMPLE);
+    expect(scopesOf(t, 'erd_layout', 'erd_layout')).toContain(FIELD_ERD);
+    expect(scopesOf(t, '    dim_customer 40', '40')).toContain('constant.numeric.dbml');
+    expect(scopesOf(t, '    dim_customer 40', '60')).toContain('constant.numeric.dbml');
+    expect(scopesOf(t, 'sticky_1', 'sticky_1')).toContain('entity.name.type.note.dbml');
+    expect(scopesOf(t, 'sticky_1', '-20')).toContain('constant.numeric.dbml');
+    for (const line of tokenize(DIAGRAM_SAMPLE).slice(3, 5)) {
+      for (const token of line.tokens) expect(token.scopes, token.text).not.toContain('string.quoted.triple.dbml');
+    }
+    // The block ends at its closing quotes: the Project closes after it.
+    expect(scopesOf(t, '}', '}')).toContain('punctuation.section.block.end.dbml');
+  });
+
+  it('uses no variable.other scope but enum members, which the 2026 default themes leave uncoloured', () => {
+    for (const text of [TABLE_FILE, RELATIONSHIPS_FILE, DIAGRAM_FILE, TABLE_SAMPLE, RELATIONSHIPS_SAMPLE, DIAGRAM_SAMPLE]) {
+      for (const line of tokenize(text)) {
+        for (const token of line.tokens) {
+          const leaf = token.scopes[token.scopes.length - 1];
+          if (leaf.startsWith('variable.other.')) expect(leaf, token.text).toBe(CHOICE);
+        }
+      }
     }
   });
 });
