@@ -26,7 +26,7 @@ Every DBML file lives under a **layer folder** (one per id in `layers.json`), at
 │   ├── relationships/
 │   │   └── calendar.dbml              Refs, split out by hand
 │   └── diagrams/
-│       └── staging.dbml               a diagram (no erd_layout: laid out automatically)
+│       └── staging.dbml               a diagram (no erd_layout yet: the first open lays it out and saves it)
 └── gold/
     ├── tables/
     │   └── gold/
@@ -257,7 +257,7 @@ Edit in place and never reformat a file: ERD Studio keeps whatever it does not c
 
 ### A complete DBML example
 
-The project in [`test/fixtures/dbml-native/`](../test/fixtures/dbml-native) is a complete, logical-only DBML project: `README.md`, `layers.json`, `silver/tables/calendar/dim_date.dbml` with `silver/relationships/calendar.dbml` (a self-reference) and `silver/diagrams/staging.dbml` (no `erd_layout`: automatic layout, a cross-layer import); `gold/tables/gold/` with five tables (a composite key, SCD types, an Enum, DBML-only settings, an empty table), `gold/relationships/gold.dbml` (a composite, roles, a cross-layer Ref) and the hand-split `gold/relationships/customers.dbml` (a one-to-one, a many-to-many, a self-reference), and `gold/diagrams/sales.dbml`, hand-written with its `Project` first, with `erd_layout` and two sticky notes. The snippets above are taken from it, with its fields in the bare spelling ERD Studio writes today; the fixture keeps the `rationale_` / `meta_` spellings of the 2.0 pre-releases, which read the same.
+The project in [`test/fixtures/dbml-native/`](../test/fixtures/dbml-native) is a complete, logical-only DBML project: `README.md`, `layers.json`, `silver/tables/calendar/dim_date.dbml` with `silver/relationships/calendar.dbml` (a self-reference) and `silver/diagrams/staging.dbml` (no `erd_layout`: the canvas lays it out on first open and saves the positions as one undoable edit; a cross-layer import); `gold/tables/gold/` with five tables (a composite key, SCD types, an Enum, DBML-only settings, an empty table), `gold/relationships/gold.dbml` (a composite, roles, a cross-layer Ref) and the hand-split `gold/relationships/customers.dbml` (a one-to-one, a many-to-many, a self-reference), and `gold/diagrams/sales.dbml`, hand-written with its `Project` first, with `erd_layout` and two sticky notes. The snippets above are taken from it, with its fields in the bare spelling ERD Studio writes today; the fixture keeps the `rationale_` / `meta_` spellings of the 2.0 pre-releases, which read the same.
 
 ## YAML/JSON projects (schema v4–v6, still read and edited)
 
