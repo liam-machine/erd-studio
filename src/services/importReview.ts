@@ -23,6 +23,7 @@ import {
   importPlanNotes,
   importSchemaCounts,
   importSchemaOf,
+  inLibraryRenameLines,
   renameEntries,
   summariseDbmlImportPlan,
   type DbmlImportPlan,
@@ -109,11 +110,14 @@ export function buildImportReview(plan: DbmlImportPlan, options: ImportReviewOpt
     ...report.reusedTables.map((r): ConvertReviewItem => ({
       path: r.name,
       tag: 'already in your Table Library',
-      text: r.missingColumns.length > 0
-        ? `Used as it is. Not added: ${r.missingColumns.join(', ')} (in the import, not in the library's table).`
-        : 'Used as it is.',
+      text: (r.layer ? `Used as it is, from the ${r.layer.label} layer.` : 'Used as it is.')
+        + (r.missingColumns.length > 0 ? ` Not added: ${r.missingColumns.join(', ')} (in the import, not in the library's table).` : ''),
     })),
-    ...plan.changedLibraryTables.map((t): ConvertReviewItem => ({ path: t.name, tag: 'gains relationships', text: 'Its table file gets the new relationships.' })),
+    ...plan.changedLibraryTables.map((t): ConvertReviewItem => {
+      // A reused table that gains a relationship may live in another layer (#269): say which.
+      const layer = report.reusedTables.find((r) => r.name.toLowerCase() === t.name.toLowerCase())?.layer;
+      return { path: t.name, tag: 'gains relationships', text: layer ? `Its table file, in the ${layer.label} layer, gets the new relationships.` : 'Its table file gets the new relationships.' };
+    }),
   ];
 
   const leftOut = importLeftOut(plan, options);
@@ -131,6 +135,13 @@ export function buildImportReview(plan: DbmlImportPlan, options: ImportReviewOpt
         : {}),
     },
     { id: 'library', title: 'Your Table Library', items: library },
+    {
+      id: 'kept-own',
+      title: 'Kept as their own tables',
+      items: inLibraryRenameLines(report.renamed).map((text) => ({ text })),
+      hint: 'Your project already has a table of the same name with other columns, so the file\'s table is imported under a new name and the project\'s is not changed.'
+        + (options.changeOptions === true ? ' To use the project\'s instead, choose Change options… and answer its question.' : ''),
+    },
     { id: 'renamed', title: 'Renamed to names ERD Studio can use', items: renames.map((text) => ({ text })) },
     {
       id: 'left',

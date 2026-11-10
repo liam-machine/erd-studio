@@ -41,6 +41,7 @@ import {
   countLinks,
   importLeftOut,
   importPlanNotes,
+  inLibraryRenames,
   planDbmlImport,
   suggestDbmlSubjectAreaName,
   dedupeLines,
@@ -168,6 +169,10 @@ export interface DraftDetailInput {
   keep?: DraftTarget;
   /** Library tables used as they are. */
   reusedTables?: number;
+  /** The layers those are in (labels), when they have one. */
+  reusedLayers?: readonly string[];
+  /** File tables kept as their own beside a same-named library table with other columns (#269). */
+  keptOwnTables?: number;
   /** Library tables that gain a relationship. */
   changedTables?: number;
   /** dbt over the cap: drawn of available. */
@@ -193,9 +198,17 @@ export function draftDetail(input: DraftDetailInput): string {
   }
   const reused = input.reusedTables ?? 0;
   if (reused > 0) {
+    const layers = input.reusedLayers ?? [];
+    const from = layers.length > 0 ? ` (${layers.join(', ')} ${layers.length === 1 ? 'layer' : 'layers'})` : '';
     parts.push(reused === 1
-      ? '1 table is already in your Table Library and is used as it is.'
-      : `${thousands(reused)} tables are already in your Table Library and are used as they are.`);
+      ? `1 table is already in your Table Library${from} and is used as it is.`
+      : `${thousands(reused)} tables are already in your Table Library${from} and are used as they are.`);
+  }
+  const keptOwn = input.keptOwnTables ?? 0;
+  if (keptOwn > 0) {
+    parts.push(keptOwn === 1
+      ? '1 table has the name of one in your project but other columns, so it is kept as its own.'
+      : `${thousands(keptOwn)} tables have the names of ones in your project but other columns, so they are kept as their own.`);
   }
   const changed = input.changedTables ?? 0;
   if (changed > 0) {
@@ -243,8 +256,9 @@ const REVIEW_TAGS: Readonly<Record<string, string>> = {
 };
 
 /** `buildImportReview`'s sections as the drawer's (§2.4): plain data, the page renders text only. */
-function detailsFromImportReview(plan: DbmlImportPlan, describe: DescribeDbmlImportOptions, diagramFile: string): DraftDetailSection[] {
-  const review = buildImportReview(plan, { ...describe, diagramFile });
+function detailsFromImportReview(plan: DbmlImportPlan, describe: DescribeDbmlImportOptions, diagramFile: string, changeOptions: boolean): DraftDetailSection[] {
+  // The drawer's hints may point at the banner's Change options… link only when it is there.
+  const review = buildImportReview(plan, { ...describe, diagramFile, changeOptions });
   return review.sections.map((section): DraftDetailSection => {
     const id = section.id.startsWith('schema:') ? `tables:${section.id.slice('schema:'.length)}` : section.id === 'left' ? 'leftOut' : section.id;
     return {
@@ -485,7 +499,18 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
   };
   const headline = draftHeadline(headlineInput);
   const from = draftFrom(headlineInput);
-  const detail = draftDetail({ keep: target, reusedTables: summary.reusedTables, changedTables: summary.changedTables });
+  const changedNames = new Set(plan.changedLibraryTables.map((t) => t.name.toLowerCase()));
+  const reusedLayers = [...new Set(report.reusedTables
+    .filter((r) => !changedNames.has(r.name.toLowerCase()))
+    .map((r) => r.layer?.label)
+    .filter((l): l is string => !!l))];
+  const detail = draftDetail({
+    keep: target,
+    reusedTables: summary.reusedTables,
+    ...(reusedLayers.length > 0 ? { reusedLayers } : {}),
+    keptOwnTables: inLibraryRenames(report.renamed).length,
+    changedTables: summary.changedTables,
+  });
   const notice = input.notice ?? describe.origin?.notice;
   const { banner, otherStarts } = source === 'example'
     ? exampleBanner(headline, detail, input.hasFolder, notice)
@@ -516,7 +541,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     autoLayout,
     logicalOnly: input.logicalOnly,
     ...largeDraft(summary),
-    details: detailsFromImportReview(plan, describe, target.diagramFile),
+    details: detailsFromImportReview(plan, describe, target.diagramFile, banner.changeOptions),
     keep,
     trigger: input.trigger,
     ...(source !== 'example' && input.importReportId !== undefined ? { importReportId: input.importReportId } : {}),

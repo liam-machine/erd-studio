@@ -156,7 +156,7 @@ export interface DraftDetailItem {
 }
 
 export interface DraftDetailSection {
-  /** Stable: `tables:<schema>` (one per schema, `tables:` for none), `relationships`, `library`, `renamed`, `leftOut`, `notes`. */
+  /** Stable: `tables:<schema>` (one per schema, `tables:` for none), `relationships`, `library`, `kept-own`, `renamed`, `leftOut`, `notes`. */
   id: string;
   title: string;
   /** The count the title shows, when it is not the number of items. */
