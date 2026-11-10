@@ -322,7 +322,7 @@ describe('the setup skill writes fields.yml', () => {
 });
 
 describe('the fixtures carry the current harness', () => {
-  it('test/fixtures/dbt-project has the v46 schema skill as install() writes it (npm run regen-fixtures)', () => {
+  it('test/fixtures/dbt-project has the current schema skill as install() writes it (npm run regen-fixtures)', () => {
     const dir = path.resolve(__dirname, '../fixtures/dbt-project/.claude/skills/erd-studio');
     for (const [name, text] of service.schemaSkillFiles()) {
       expect(fs.readFileSync(path.join(dir, name), 'utf-8'), name).toBe(text);

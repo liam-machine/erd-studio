@@ -38,7 +38,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '46';
+export const HARNESS_VERSION = '47';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -684,7 +684,7 @@ The project's own files are DBML; these commands bring other DBML in and send di
 - **Diagrams out** — **ERD Studio: Export Diagram…** (one diagram) or **ERD Studio: Export All Diagrams…** (every one, into a folder outside \`.erd-studio\`), with the choice **Rich DBML**: one self-contained \`<name>.dbml\` with ERD Studio's fields as DBML custom properties (\`role\`, \`grain\`, \`scd_type\`, \`natural_key\`, \`meta_*\`, …) and the positions in its Project's \`erd_layout\`. That single file is the route to dbdiagram.io. The plain **DBML** choice is the portable, notes-only form any DBML tool opens.
 - **From the CLI** (stdout only; it never writes a file): \`erd-studio export --domain <path> --format dbml-rich\` prints the single-file \`.dbml\`, and \`--all\` in place of \`--domain\` prints every diagram as a JSON list of \`{ fileName, content }\`. When the user asks you to save them, write each \`content\` to its \`fileName\` (outside \`.erd-studio\`) with your own file tools, so the writes stay visible.
 - **dbdiagram.io** — \`dbdiagram push <name>.dbml --name "<Name>"\` (dbdiagram's own CLI: \`npm install -g dbdiagram\`, then \`dbdiagram auth login\`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores \`erd_layout\`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
-- **\`meta.dbml\`** — an imported table or column may carry a \`dbml\` entry in its metadata (\`meta_json\` in DBML, \`meta.dbml\` in YAML): what the DBML file said that ERD Studio has no field for (\`not_null\`, \`unique\`, \`default\`, \`increment\`, \`checks\`, \`enum\`, \`indexes\`, \`header_color\`, the original \`name\` when it had to change, another tool's own \`properties\`). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.`;
+- **\`meta.dbml\`** — an imported table or column may carry a \`dbml\` entry in its metadata (\`meta_json\` in DBML, \`meta.dbml\` in YAML): what the DBML file said that ERD Studio has no field for (\`not_null\`, \`unique\`, \`default\`, \`increment\`, \`checks\`, \`enum\`, \`indexes\`, \`header_color\`, the original \`name\` when it had to change, another tool's own \`properties\`). In a \`.dbml\` table a column's \`not null\`, \`unique\`, \`increment\` and \`default\` are written as DBML's own settings and read back into \`meta.dbml\` (an older import kept them in \`meta_json\`: leave that as it is). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.`;
 
 const LEGACY_PART = `# ERD Studio — YAML and JSON files (projects before 2.0)
 

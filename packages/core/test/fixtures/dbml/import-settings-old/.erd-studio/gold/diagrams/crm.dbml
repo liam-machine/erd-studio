@@ -1,0 +1,9 @@
+use { table gold.customers } from '../tables/gold/customers.dbml'
+
+Project crm {
+  Note: 'An imported table, as the 2.0 pre-releases wrote it'
+  erd_schema_version: '7'
+  erd_layout: '''
+    customers 40 60
+  '''
+}
