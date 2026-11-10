@@ -27,7 +27,8 @@ vi.mock('../../src/store/editorStore', () => ({
   useEditorStore: (selector: (s: typeof mockStoreState) => unknown) => selector(mockStoreState),
 }));
 
-import { Legend } from '../../src/components/Legend/Legend';
+import { Legend, legendEntries } from '../../src/components/Legend/Legend';
+import { CanvasEnvironmentProvider, NOOP_CANVAS_HOST } from '../../src/host/canvasEnvironment';
 import {
   SOURCE_LABEL,
   SOURCE_LEGEND_DESC,
@@ -65,10 +66,12 @@ describe('Legend — physical provenance chips', () => {
     expect(yml.className).not.toContain('legend__badge--source-catalog');
   });
 
-  it('explains the schema abbreviation that shares the header row', () => {
+  it('explains the layer badge and the schema prefix that share the header row', () => {
     const { container } = render(<Legend />);
     const section = container.querySelector('.legend__section:has(.legend__items--sources)')!;
-    expect(section.textContent).toContain('Database schema');
+    expect(section.textContent).toContain('The layer the table lives in');
+    expect(section.textContent).not.toContain('Database schema');
+    expect(section.querySelector('.legend__schema-sample')!.textContent).toBe('sales.');
   });
 });
 
@@ -131,6 +134,13 @@ describe('Legend — stages, cardinality and comparison', () => {
     expect(section.querySelector('.legend__edge--logical')).not.toBeNull();
   });
 
+  it('names the comparison controls as the toolbar labels them (there is no "Diff" button any more)', () => {
+    const { container } = render(<Legend />);
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('Shown while a comparison is open (Compare with dbt or Compare with design).');
+    expect(text).not.toContain('(Diff)');
+  });
+
   it('explains the comparison colours, which had no entry at all', () => {
     const { container } = render(<Legend />);
     const section = container.querySelector('.legend__section:has(.legend__swatch)')!;
@@ -142,6 +152,39 @@ describe('Legend — stages, cardinality and comparison', () => {
   });
 });
 
+describe('Legend — relationship flow', () => {
+  it('explains the moving arrows with the canvas\'s own glyphs: one-way, many-to-many, one-to-one', () => {
+    const { container } = render(<Legend />);
+    const rows = container.querySelectorAll('.legend__items--flow .legend__item');
+    expect(Array.from(rows).map((r) => r.querySelector('.legend__item-desc')!.textContent)).toEqual([
+      'Arrows run 1 → *',
+      'Both ways: many-to-many',
+      'Dots meet: one-to-one',
+    ]);
+    // Each sample sits between the same 1 / * end labels as the cardinality rows.
+    expect(Array.from(rows).map((r) => Array.from(r.querySelectorAll('.legend__cardinality-label')).map((l) => l.textContent).join(' ')))
+      .toEqual(['1 *', '* *', '1 1']);
+    for (const row of rows) expect(row.querySelector('.fk-edge__flow')).not.toBeNull();
+    expect(rows[2].querySelectorAll('.fk-edge__flow-dot')).toHaveLength(2);
+    expect(container.querySelector('.legend__items--flow [repeatCount="indefinite"]')).not.toBeNull();
+  });
+
+  it('stands the arrows still under the reduce-motion setting', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('reduce'), media: query,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    }));
+    try {
+      const { container } = render(<Legend />);
+      const flows = container.querySelectorAll('.legend__items--flow .fk-edge__flow');
+      expect(flows).toHaveLength(3);
+      expect(container.querySelector('[repeatCount="indefinite"]')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('Legend — collapsed', () => {
   it('renders only the toggle when closed', () => {
     mockStoreState.legendOpen = false;
@@ -149,5 +192,146 @@ describe('Legend — collapsed', () => {
     expect(container.querySelector('.legend__content')).toBeNull();
     expect(container.querySelector('.legend-toggle__button')).not.toBeNull();
     mockStoreState.legendOpen = true;
+  });
+});
+
+describe('Legend — notes', () => {
+  it('calls them notes, as the toolbar and context menu do', () => {
+    const { container } = render(<Legend />);
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('Notes');
+    expect(text).not.toContain('Build Note');
+    expect(text).not.toContain('Annotations');
+  });
+});
+
+describe('Legend — a project without dbt (logicalOnly)', () => {
+  function renderLogicalOnly() {
+    mockStoreState.logicalOnly = true;
+    try {
+      return render(<Legend />);
+    } finally {
+      mockStoreState.logicalOnly = undefined;
+    }
+  }
+
+  it('leaves out the Physical stage, the ghosts, the provenance chips and the comparison colours', () => {
+    const { container } = renderLogicalOnly();
+    const text = container.querySelector('.legend__content')!.textContent!;
+
+    expect(text).toContain('Logical');
+    expect(container.querySelector('.legend__model-card--physical')).toBeNull();
+    expect(container.querySelector('.legend__model-card--ghost')).toBeNull();
+    expect(container.querySelector('.legend__items--sources')).toBeNull();
+    expect(container.querySelector('.legend__edge--physical')).toBeNull();
+    expect(container.querySelector('.legend__swatch')).toBeNull();
+    expect(text).not.toContain('dbt');
+  });
+
+  it('still explains the layer badge, the cardinalities and the column badges', () => {
+    const { container } = renderLogicalOnly();
+    const text = container.querySelector('.legend__content')!.textContent!;
+    expect(text).toContain('The layer the table lives in');
+    expect(container.querySelectorAll('.legend__items--cardinality .legend__item')).toHaveLength(4);
+    for (const label of ['PK', 'FK', 'NK']) expect(text).toContain(label);
+  });
+
+  it('keeps every entry with dbt, as before', () => {
+    const { container } = render(<Legend />);
+    expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+    expect(container.querySelector('.legend__items--sources')).not.toBeNull();
+    expect(container.querySelector('.legend__swatch')).not.toBeNull();
+  });
+});
+
+describe('Legend — a single-layer project', () => {
+  const ONLY = { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', order: 0, creatable: true };
+
+  it('leaves out the layer badge the canvas does not draw, and keeps the schema prefix', () => {
+    mockStoreState.domain = { layer: 'silver', layerConfigs: [ONLY], models: [{ name: 'a', layer: 'silver' }] };
+    try {
+      const { container } = render(<Legend />);
+      expect(container.querySelector('.legend__badge--layer')).toBeNull();
+      expect(container.querySelector('.legend__schema-sample')).not.toBeNull();
+    } finally {
+      mockStoreState.domain = undefined;
+    }
+  });
+
+  it('shows the layer badge when the domain lists no layers (an older core)', () => {
+    mockStoreState.domain = { layer: 'silver', models: [{ name: 'a' }] };
+    try {
+      const { container } = render(<Legend />);
+      expect(container.querySelector('.legend__badge--layer')).not.toBeNull();
+    } finally {
+      mockStoreState.domain = undefined;
+    }
+  });
+});
+
+describe('Legend — the viewer shows only what its stage can draw', () => {
+  function renderViewer(stage: 'logical' | 'physical' | undefined) {
+    mockStoreState.domain = stage === undefined ? undefined : { layer: 'silver', stage, models: [] };
+    try {
+      return render(
+        <CanvasEnvironmentProvider host={NOOP_CANVAS_HOST} viewer>
+          <Legend />
+        </CanvasEnvironmentProvider>,
+      );
+    } finally {
+      mockStoreState.domain = undefined;
+    }
+  }
+
+  for (const stage of ['logical', undefined] as const) {
+    it(`a logical diagram${stage ? '' : ' (no stage given)'}: Logical only, no physical, line-colour or comparison entries`, () => {
+      const { container } = renderViewer(stage);
+      expect(container.querySelector('.legend__model-card--logical')).not.toBeNull();
+      expect(container.querySelector('.legend__model-card--physical')).toBeNull();
+      expect(container.querySelector('.legend__model-card--ghost')).toBeNull();
+      expect(container.querySelector('.legend__items--sources')).toBeNull();
+      expect(container.querySelector('.legend__edge--physical')).toBeNull();
+      expect(container.querySelector('.legend__swatch')).toBeNull();
+      const text = container.querySelector('.legend__content')!.textContent!;
+      expect(text).not.toContain('Line colour follows the stage');
+      expect(text).not.toContain('Comparing Stages');
+      expect(container.querySelectorAll('.legend__items--cardinality .legend__item')).toHaveLength(4);
+    });
+  }
+
+  it('a physical diagram: Physical, both ghosts and the provenance chips, no Logical, line-colour or comparison entries', () => {
+    const { container } = renderViewer('physical');
+    expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+    expect(container.querySelector('.legend__model-card--ghost-disabled')).not.toBeNull();
+    expect(container.querySelectorAll('.legend__items--sources .legend__item')).toHaveLength(SOURCE_ORDER.length);
+    expect(container.querySelector('.legend__model-card--logical')).toBeNull();
+    expect(container.querySelector('.legend__swatch')).toBeNull();
+    expect(container.querySelector('.legend__content')!.textContent).not.toContain('Line colour follows the stage');
+  });
+
+  it('the editor keeps every entry on either stage', () => {
+    for (const stage of ['logical', 'physical'] as const) {
+      mockStoreState.domain = { layer: 'silver', stage, models: [] };
+      const { container, unmount } = render(<Legend />);
+      expect(container.querySelector('.legend__model-card--logical')).not.toBeNull();
+      expect(container.querySelector('.legend__model-card--physical')).not.toBeNull();
+      expect(container.querySelector('.legend__swatch')).not.toBeNull();
+      unmount();
+      mockStoreState.domain = undefined;
+    }
+  });
+});
+
+describe('legendEntries', () => {
+  it('editor: everything, less the physical and comparison groups without dbt', () => {
+    expect(legendEntries({ viewer: false, logicalOnly: false, stage: 'physical' })).toEqual({ logicalStage: true, physical: true, lineColours: true, comparison: true });
+    expect(legendEntries({ viewer: false, logicalOnly: true, stage: 'logical' })).toEqual({ logicalStage: true, physical: false, lineColours: false, comparison: false });
+  });
+
+  it('viewer: the stage shown, never a comparison', () => {
+    expect(legendEntries({ viewer: true, logicalOnly: false, stage: 'logical' })).toEqual({ logicalStage: true, physical: false, lineColours: false, comparison: false });
+    expect(legendEntries({ viewer: true, logicalOnly: false, stage: 'physical' })).toEqual({ logicalStage: false, physical: true, lineColours: false, comparison: false });
+    // logicalOnly on a physical domain: still one stage card, never an empty section.
+    expect(legendEntries({ viewer: true, logicalOnly: true, stage: 'physical' }).logicalStage).toBe(true);
   });
 });

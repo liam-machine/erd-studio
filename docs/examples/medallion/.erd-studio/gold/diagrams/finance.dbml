@@ -1,0 +1,14 @@
+use { table gold.fct_payment }  from '../tables/gold/fct_payment.dbml'
+use { table gold.dim_date }     from '../tables/gold/dim_date.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use * from '../relationships/finance.dbml'
+
+Project finance {
+  Note: 'Payments star schema. Shares dim_date and dim_customer with sales.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_customer 108 284
+    dim_date 12 12
+    fct_payment 442 30
+  '''
+}

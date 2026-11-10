@@ -1,0 +1,14 @@
+{
+  "name": "Sub Brand",
+  "dataType": "string",
+  "sourceColumn": "sub_brand",
+  "displayFolder": "1. Brand Hierarchy",
+  "lineageTag": "64d691d4-8f81-40ad-9626-f50a0fb25bfa",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

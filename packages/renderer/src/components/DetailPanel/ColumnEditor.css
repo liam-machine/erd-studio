@@ -200,3 +200,24 @@
 .column-editor__accept-all-btn:hover {
   background: rgba(204, 167, 0, 0.2);
 }
+
+/* ---------------------------------------------------------------------------
+   Long types in a narrow panel
+   The column name keeps room for itself (a short name is never squeezed to
+   one letter), and a long type (SET(...), character varying(255), a computed
+   expression) is cut with an ellipsis instead of pushing the name out.
+   --------------------------------------------------------------------------- */
+
+.column-editor .column-row-editor__name {
+  flex: 1 1 auto;
+  min-width: min(10ch, 40%);
+}
+
+.column-editor .column-row-editor__type {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

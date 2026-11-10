@@ -1,0 +1,19 @@
+{
+  "name": "Rate",
+  "dataType": "decimal",
+  "isHidden": true,
+  "sourceColumn": "rate",
+  "displayFolder": "2. Other Currency Fields",
+  "lineageTag": "c7c98d7b-101b-4fb0-b4b6-a1990adb1ecb",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

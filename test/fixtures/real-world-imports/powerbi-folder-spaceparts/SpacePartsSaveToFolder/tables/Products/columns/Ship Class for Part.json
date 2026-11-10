@@ -1,0 +1,14 @@
+{
+  "name": "Ship Class for Part",
+  "dataType": "string",
+  "sourceColumn": "ship_class_for_part",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "8b05870e-ec7e-4bee-b9cc-3998508fd4c9",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

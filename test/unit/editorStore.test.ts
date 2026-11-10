@@ -314,12 +314,6 @@ describe('editorStore logical-only mode (no dbt project)', () => {
     expect(s.syncPlanGenerated).toBeNull();
   });
 
-  it('closes the "Two Stages" modal without dismissing it', () => {
-    state().setWelcomeModalOpen(true);
-    state().setLogicalOnly(true);
-    expect(state().welcomeModalOpen).toBe(false);
-  });
-
   it('turning it off touches nothing else', () => {
     state().setLogicalOnly(true);
     startSyncSession();
@@ -504,7 +498,6 @@ describe('editorStore transient interaction state', () => {
     s.setViewport({ x: 10, y: 20, zoom: 2 });
     s.setToastMessage('Saved');
     s.setLegendOpen(true);
-    s.setWelcomeModalOpen(true);
     s.setNewModelDialogOpen(true);
     s.setAddExistingModelDialogOpen(true);
     s.setEditingAnnotationId('note-1');
@@ -515,7 +508,6 @@ describe('editorStore transient interaction state', () => {
     expect(after.viewport).toEqual({ x: 10, y: 20, zoom: 2 });
     expect(after.toastMessage).toBe('Saved');
     expect(after.legendOpen).toBe(true);
-    expect(after.welcomeModalOpen).toBe(true);
     expect(after.newModelDialogOpen).toBe(true);
     expect(after.addExistingModelDialogOpen).toBe(true);
     expect(after.editingAnnotationId).toBe('note-1');

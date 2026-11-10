@@ -1,0 +1,15 @@
+{
+  "name": "# Workdays in Selected Month",
+  "expression": [
+    "IF (",
+    "    HASONEVALUE ('Date'[Calendar Month Year (ie Jan 21)]),",
+    "    CALCULATE (",
+    "        MAX ('Date'[Workdays MTD]),",
+    "        VALUES ('Date'[Calendar Month Year (ie Jan 21)])",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "5. Weekday / Workday\\Measures\\# Workdays",
+  "lineageTag": "55924c9b-cb78-47d3-824e-92cb1a525706"
+}

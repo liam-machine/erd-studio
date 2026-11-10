@@ -1,0 +1,12 @@
+Table gold.fct_payment [
+  role: 'transaction-fact',
+  grain: 'One row per successful payment',
+  decisions: 'Successful charges only; failed charges stay in silver payments.'
+] {
+  Note: 'Cash received.'
+
+  payment_id       STRING          [pk]
+  payment_date_key INT             [foreign_key: 'true']
+  customer_key     BIGINT          [foreign_key: 'true']
+  amount           "DECIMAL(12,2)" [additive_type: 'additive', note: 'In AUD']
+}

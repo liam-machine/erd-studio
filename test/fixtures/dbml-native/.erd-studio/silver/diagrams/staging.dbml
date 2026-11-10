@@ -1,0 +1,9 @@
+Project staging {
+  Note: 'Orders by day, laid out automatically (no positions stored)'
+  erd_schema_version: '7'
+}
+
+use { table gold.fct_order } from '../../gold/tables/gold/fct_order.dbml'
+use { table calendar.dim_date } from '../tables/calendar/dim_date.dbml'
+use * from '../../gold/relationships/gold.dbml'
+use * from '../relationships/calendar.dbml'

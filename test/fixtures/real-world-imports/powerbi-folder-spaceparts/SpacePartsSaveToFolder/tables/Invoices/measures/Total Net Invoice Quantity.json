@@ -1,0 +1,8 @@
+{
+  "name": "Total Net Invoice Quantity",
+  "description": "This measure is theSumof column 'Invoices'[Net Invoice Quantity]",
+  "expression": "SUM ( 'Invoices'[Net Invoice Quantity] )",
+  "formatString": "#,##0",
+  "displayFolder": "2. Quantity\\b. Gross Sales Actuals",
+  "lineageTag": "0a56a159-aefd-4473-826e-b7bb61e1ddba"
+}

@@ -43,7 +43,7 @@ describe('PhysicalSourceNotice', () => {
     render(<PhysicalSourceNotice />);
     const text = document.body.textContent ?? '';
     expect(text).toContain("dbt hasn't been run in this project yet, so ERD Studio can't read your models' columns and tests.");
-    expect(text).toContain('Needs a working dbt profile. For real column types, run dbt docs generate afterwards.');
+    expect(text).toContain('No dbt profile? Run dbt parse can parse without your credentials when dbt Core and your adapter are installed. For real column types, run dbt docs generate afterwards (that one connects to your warehouse).');
     expect(text).not.toContain('dbt compile');
   });
 

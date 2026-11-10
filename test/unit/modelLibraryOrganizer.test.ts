@@ -177,23 +177,23 @@ describe('describeOrganizePlan', () => {
     };
     expect(describeOrganizePlan(plan)).toBe([
       'Move 3 tables into layer folders (1 → gold/, 2 → silver/).',
-      'Staying at the top of logical-models/: 1 table used by more than one layer (d); 2 unused tables (e, f); ' +
+      'Staying at the top of the Table Library: 1 table used by more than one layer (d); 2 unused tables (e, f); ' +
         '1 table whose layer folder already has a file of that name (g).',
-      'Subject area files reference tables by name, so no subject area file changes.',
+      'Diagram files reference tables by name, so no diagram file changes.',
     ].join('\n\n'));
   });
 
   it('uses the singular for one move and omits the staying line when nothing stays', () => {
     const text = describeOrganizePlan({ moves: [move('a', 'gold')], shared: [], unused: [], conflicts: [], otherFolders: [] });
     expect(text).toBe(
-      'Move 1 table into layer folders (1 → gold/).\n\nSubject area files reference tables by name, so no subject area file changes.',
+      'Move 1 table into layer folders (1 → gold/).\n\nDiagram files reference tables by name, so no diagram file changes.',
     );
   });
 
   it('describes a plan with nothing to move', () => {
     const text = describeOrganizePlan({ moves: [], shared: [], unused: ['x'], conflicts: [], otherFolders: [] });
     expect(text).not.toContain('Move ');
-    expect(text).toContain('Staying at the top of logical-models/: 1 unused table (x).');
+    expect(text).toContain('Staying at the top of the Table Library: 1 unused table (x).');
   });
 
   it('names at most three models per group', () => {
@@ -210,7 +210,7 @@ describe('describeOrganizePlan', () => {
       otherFolders: [{ folder: 'Staging', count: 2 }],
     });
     expect(text).toContain('Move 2 tables into layer folders (2 → silver/).');
-    expect(text).toContain("One is in another layer's folder, because the subject areas that use it are now in a different layer (rpt_sales: gold/ → silver/).");
+    expect(text).toContain("One is in another layer's folder, because the diagrams that use it are now in a different layer (rpt_sales: gold/ → silver/).");
     expect(text).toContain('Left alone: folders that are not a layer in layers.json — Staging/ (2).');
   });
 });

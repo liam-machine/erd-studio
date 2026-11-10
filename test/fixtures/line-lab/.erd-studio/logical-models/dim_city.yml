@@ -1,0 +1,25 @@
+name: dim_city
+schema: retail
+description: Cities we trade in
+grain: One row per city
+modelRole: domain-dim
+columns:
+  - name: city_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: city_name
+    dataType: VARCHAR
+    description: City name
+  - name: region_key
+    dataType: INT
+    description: FK to dim_region
+    isForeignKey: true
+  - name: population
+    dataType: INT
+    description: Latest census
+relationships:
+  - fromColumn: region_key
+    toModel: dim_region
+    toColumn: region_key
+    cardinality: many-to-one

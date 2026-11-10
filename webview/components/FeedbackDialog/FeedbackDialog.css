@@ -975,6 +975,42 @@
   overflow-x: auto;
 }
 
+/* The opt-in recent log: a checkbox, what it means, and (ticked) the exact lines. */
+.feedback__log {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.feedback__log--muted {
+  opacity: 0.5;
+}
+
+.feedback__log-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--editor-fg);
+  cursor: pointer;
+}
+
+.feedback__log-checkbox {
+  margin: 0;
+  accent-color: var(--button-bg);
+}
+
+.feedback__log-pre {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
 /* -----------------------------------------------------------------------
    Footer
    ----------------------------------------------------------------------- */

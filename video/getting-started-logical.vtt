@@ -1,0 +1,141 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:04.930
+Your data model as a diagram, saved as DBML files in your repo.
+
+2
+00:00:04.980 --> 00:00:07.546
+Edit it by hand, or with your AI assistant,
+
+3
+00:00:07.596 --> 00:00:10.562
+through a built-in skill it uses by itself.
+
+4
+00:00:11.012 --> 00:00:12.389
+Already have a model?
+
+5
+00:00:12.439 --> 00:00:16.057
+Bring it in from the tools most teams use: Databricks,
+
+6
+00:00:16.107 --> 00:00:20.193
+Snowflake, Power BI and the most popular SQL databases.
+
+7
+00:00:21.212 --> 00:00:25.413
+Getting the DDL out is one step, for a whole schema or database.
+
+8
+00:00:25.463 --> 00:00:28.845
+From PostgreSQL, pg_dump writes it to a file.
+
+9
+00:00:28.895 --> 00:00:34.239
+From Snowflake, it's one query, GET_DDL, saved as a .sql file.
+
+10
+00:00:34.689 --> 00:00:38.477
+Then click New, Import SQL DDL, and import the folder.
+
+11
+00:00:38.527 --> 00:00:42.929
+It works out the dialect: PostgreSQL, one of the nine it reads.
+
+12
+00:00:43.379 --> 00:00:46.189
+You get a draft of every table and relationship.
+
+13
+00:00:46.739 --> 00:00:48.691
+Keep it, and it's your diagram.
+
+14
+00:00:49.379 --> 00:00:54.917
+Each table is now a DBML file, an open format, next to the code that builds it.
+
+15
+00:00:54.967 --> 00:00:57.920
+Change it, and Git shows exactly what changed.
+
+16
+00:00:58.370 --> 00:01:04.552
+Big models stay readable: this one has 2,000 tables and 2,700 relationships.
+
+17
+00:01:04.602 --> 00:01:08.824
+Every line finds its way around the tables in the background, in seconds.
+
+18
+00:01:08.874 --> 00:01:13.102
+Zoom in, and hover a table: arrows flow along its relationships.
+
+19
+00:01:15.570 --> 00:01:17.284
+Edit it by hand, on the canvas.
+
+20
+00:01:17.334 --> 00:01:21.013
+Add a table, with starter columns if you like, and lay it out.
+
+21
+00:01:21.063 --> 00:01:23.131
+Every edit is saved to its file.
+
+22
+00:01:23.581 --> 00:01:27.212
+Or ask your AI assistant. Click Set Up My AI Helper.
+
+23
+00:01:27.262 --> 00:01:32.777
+It adds a skill: plain markdown files that teach your assistant ERD Studio's format.
+
+24
+00:01:33.227 --> 00:01:36.219
+Ask Claude Code for a change, in plain words.
+
+25
+00:01:36.369 --> 00:01:38.805
+It loads the ERD Studio skill by itself,
+
+26
+00:01:38.855 --> 00:01:42.423
+and a pre-tool hook makes sure it has, before any edit,
+
+27
+00:01:42.473 --> 00:01:45.771
+so what it writes is a diagram you can see, right away.
+
+28
+00:01:48.727 --> 00:01:53.449
+Here's the change: a new table file, and the line that links it to the orders table.
+
+29
+00:01:53.499 --> 00:01:56.460
+On the canvas, the new table and its relationship.
+
+30
+00:01:58.327 --> 00:02:02.491
+The design change goes in the same pull request as the code that builds it,
+
+31
+00:02:02.541 --> 00:02:04.689
+so your team reviews both together.
+
+32
+00:02:06.927 --> 00:02:12.578
+Your repo is the single source of truth: just DBML files, no modelling database.
+
+33
+00:02:12.628 --> 00:02:15.832
+ERD Studio for Confluence reads them from GitHub,
+
+34
+00:02:15.882 --> 00:02:18.888
+and shows the diagram to business users.
+
+35
+00:02:20.227 --> 00:02:23.386
+ERD Studio is free to use in VS Code.

@@ -1,0 +1,32 @@
+name: dim_product
+schema: retail
+description: Products we sell
+grain: One row per product version
+modelRole: domain-dim
+columns:
+  - name: product_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: sku
+    dataType: VARCHAR
+    description: Stock keeping unit
+    isNaturalKey: true
+  - name: product_name
+    dataType: VARCHAR
+    description: Display name
+  - name: category
+    dataType: VARCHAR
+    description: Merchandise category
+  - name: supplier_key
+    dataType: INT
+    description: FK to dim_supplier
+    isForeignKey: true
+  - name: unit_cost
+    dataType: DECIMAL
+    description: Standard cost
+relationships:
+  - fromColumn: supplier_key
+    toModel: dim_supplier
+    toColumn: supplier_key
+    cardinality: many-to-one

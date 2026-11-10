@@ -1,0 +1,21 @@
+Table silver.dim_location [
+  role: 'domain-dim',
+  grain: 'One row per location',
+  purpose: 'Site reference for location-scoped reporting'
+] {
+  Note: 'Location dimension — exists only in logical (missing from conceptual and physical)'
+
+  location_key  INT     [
+    pk,
+    scd_type: '0',
+    note: 'Surrogate key — warehouse-generated, one per row'
+  ]
+  location_code VARCHAR [
+    natural_key: 'true',
+    scd_type: '0',
+    note: 'Business location code from the source system'
+  ]
+  site_name     VARCHAR [scd_type: '1', note: 'Site name — not unique, so never a key']
+  latitude      JSON    [note: 'GPS latitude']
+  longitude     FLOAT   [note: 'GPS longitude']
+}

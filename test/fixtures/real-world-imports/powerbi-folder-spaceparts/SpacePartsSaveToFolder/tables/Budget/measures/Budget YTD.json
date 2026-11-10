@@ -1,0 +1,22 @@
+{
+  "name": "Budget YTD",
+  "expression": [
+    "",
+    "VAR _DATES_YTD =",
+    "    CALCULATETABLE (",
+    "        DATESYTD ( 'Date'[Date] ),",
+    "        'Date'[IsThisMonth] = FALSE",
+    "    )",
+    "VAR _CURRENT_MONTH_Budget = [Budget MTD]",
+    "VAR QTD_Budget_BEFORE_THIS_MONTH =",
+    "    CALCULATE ( [Budget], _DATES_YTD )",
+    "VAR _RESULT =",
+    "    _CURRENT_MONTH_Budget",
+    "        + QTD_Budget_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\iv. YTD",
+  "lineageTag": "4cfd4bbc-3ee3-4224-8224-89ba77bfd212"
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Customers",
+  "lineageTag": "c247ff24-c33b-4a9e-96f6-95d1e36e4be4",
+  "annotations": [
+    {
+      "name": "PBI_NavigationStepName",
+      "value": "Navigation"
+    },
+    {
+      "name": "PBI_ResultType",
+      "value": "Table"
+    },
+    {
+      "name": "TabularEditor_Relationships",
+      "value": [
+        "[",
+        "  {",
+        "    \"name\": \"03e537eb-3ddb-4c20-b5ad-9090c0aadd0d\",",
+        "    \"fromTable\": \"Customers\",",
+        "    \"fromColumn\": \"Station\",",
+        "    \"toTable\": \"Regions\",",
+        "    \"toColumn\": \"Station\"",
+        "  }",
+        "]"
+      ]
+    }
+  ]
+}

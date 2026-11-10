@@ -289,6 +289,38 @@ describe('LayerService', () => {
       expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['bronze']);
     });
 
+    it('offers the layer folders of the layer-first DBML tree', () => {
+      for (const dir of ['gold/tables/gold', 'gold/relationships', 'gold/diagrams', 'silver/tables/calendar']) {
+        fs.mkdirSync(path.join(semanticDir, dir), { recursive: true });
+      }
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'diagrams', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
+      expect(service.detectLayersFromFilesystem().map(l => l.id).sort()).toEqual(['gold', 'silver']);
+    });
+
+    it('never offers tables/ while it holds a .dbml: restored YAML beside a leftover 1.9 tree (§1.8)', () => {
+      // `git checkout <sha> -- .erd-studio` brings the YAML back and leaves the 1.9 files.
+      fs.mkdirSync(path.join(semanticDir, 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'logical-models', 'fct_order.yml'), 'name: fct_order\n');
+      fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.json'), '{}');
+      fs.writeFileSync(path.join(semanticDir, 'gold', 'sales.dbml'), "Project sales {\n  erd_schema_version: '7'\n}\n");
+      fs.mkdirSync(path.join(semanticDir, 'tables', 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', 'fct_order.dbml'), 'Table fct_order {\n  id INT\n}\n');
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'gold', '_relationships.dbml'), '// relationships\n');
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['gold']);
+      // A flat leftover too.
+      fs.rmSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.mkdirSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', '_relationships.dbml'), '// relationships\n');
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['gold']);
+    });
+
+    it('still offers a pre-v6 tables/ layer that holds diagrams and no .dbml', () => {
+      fs.mkdirSync(path.join(semanticDir, 'tables'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'tables', 'report.json'), '{}');
+      expect(service.detectLayersFromFilesystem().map(l => l.id)).toEqual(['tables']);
+    });
+
     it('uses known defaults for recognised layers and generated config otherwise', () => {
       fs.mkdirSync(path.join(semanticDir, 'gold'), { recursive: true });
       fs.mkdirSync(path.join(semanticDir, 'platinum'), { recursive: true });
@@ -300,6 +332,38 @@ describe('LayerService', () => {
       expect(platinum.label).toBe('Platinum');
       expect(platinum.abbreviation).toBe('PLA');
       expect(platinum.creatable).toBe(true);
+    });
+  });
+
+  describe('addLayer refuses a name starting with _ (native DBML storage, §5.5)', () => {
+    it('throws and writes nothing', async () => {
+      await expect(service.addLayer({ id: '_relationships', label: 'R', abbreviation: 'R', color: '#123456', creatable: true }))
+        .rejects.toThrow(/may not start with "_"/);
+      expect(fs.existsSync(configPath)).toBe(false);
+    });
+  });
+
+  describe('addLayer refuses ERD Studio\'s own folder names, in any case (§1.1)', () => {
+    it.each(['tables', 'templates', 'logical-models', 'Tables', 'TEMPLATES', 'Logical-Models'])('%s: throws and writes nothing', async (id) => {
+      await expect(service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true }))
+        .rejects.toThrow(`"${id}" is reserved for ERD Studio's own folders; pick another name.`);
+      expect(fs.existsSync(configPath)).toBe(false);
+    });
+
+    it.each(['templates', 'Logical-Models'])('%s is refused in a YAML/JSON project too (the one change it can see in 2.0)', async (id) => {
+      // A YAML project: a model library and a JSON diagram, no .dbml anywhere.
+      fs.mkdirSync(path.join(semanticDir, 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'logical-models', 'dim_customer.yml'), 'name: dim_customer\ncolumns: []\n');
+      fs.mkdirSync(path.join(semanticDir, 'silver'), { recursive: true });
+      fs.writeFileSync(path.join(semanticDir, 'silver', 'sales.json'), '{"schemaVersion":5,"domain":"sales","layer":"silver","logical":{"models":[]}}\n');
+      await expect(service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true }))
+        .rejects.toThrow(`"${id}" is reserved for ERD Studio's own folders; pick another name.`);
+      expect(fs.existsSync(configPath)).toBe(false);
+    });
+
+    it.each(['diagrams', 'relationships'])('%s is a valid layer name (the tree is read by depth)', async (id) => {
+      await service.addLayer({ id, label: 'X', abbreviation: 'X', color: '#123456', creatable: true });
+      expect(service.getAllLayers().map((l) => l.id)).toContain(id);
     });
   });
 });

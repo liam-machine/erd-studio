@@ -1,0 +1,14 @@
+Table arrangement.account [
+  grain: 'One row per account, from any system',
+  owner: 'data-architecture'
+] {
+  Note: 'Every account the bank holds, whichever system opened it.'
+
+  account_id        BIGINT [pk]
+  source_account_no STRING [natural_key: 'true', note: 'The account number in its source system']
+  product_id        BIGINT [foreign_key: 'true']
+  branch_id         BIGINT [foreign_key: 'true', note: 'The branch that holds it']
+  opened_on         DATE
+  closed_on         DATE
+  status            STRING
+}

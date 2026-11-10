@@ -1,0 +1,14 @@
+use { table atlas_derived.clients_first_seen_v1 } from '../tables/atlas_derived/clients_first_seen_v1.dbml'
+use { table atlas_derived.clients_daily_v6 }     from '../tables/atlas_derived/clients_daily_v6.dbml'
+use { table atlas_derived.clients_last_seen_v2 } from '../tables/atlas_derived/clients_last_seen_v2.dbml'
+use * from '../relationships/derived.dbml'
+
+Project clients {
+  Note: 'The versioned client tables the nightly jobs build.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    clients_daily_v6 127 259
+    clients_first_seen_v1 423 50
+    clients_last_seen_v2 12 12
+  '''
+}

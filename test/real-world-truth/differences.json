@@ -1,0 +1,469 @@
+{
+ "$comment": [
+  "Every difference between expected.json and the engines' read-back (test/real-world-truth/engine/*.json), with its resolution. Checked by test/unit/realWorldEngineTruth.test.ts; docs/dev/real-world-truth.md says how to rerun.",
+  "differences: what still differs, item by item (resolution engine-limit: the engine, not the truth, is short). resolved: what differed before this file and was fixed (truth from the engine, the importer where it was wrong); none may differ again. equivalences: one thing spelled two ways. modellingChoices: deliberate readings the truth keeps (handled by the comparison or outside the truth's scope). loadErrors: every statement an engine refused, by pattern and count."
+ ],
+ "differences": [
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "CV_DETECTIONS.BOUNDING_BOX",
+   "truth": "OBJECT",
+   "engine": "VARIANT",
+   "importer": "OBJECT",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "MAINTENANCE_LOG_DOCUMENTS.PARTS_MENTIONED",
+   "truth": "ARRAY",
+   "engine": "VARIANT",
+   "importer": "ARRAY",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "MAINTENANCE_LOG_DOCUMENTS.RECOMMENDED_ACTIONS",
+   "truth": "ARRAY",
+   "engine": "VARIANT",
+   "importer": "ARRAY",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "MAINTENANCE_LOG_DOCUMENTS.ROOT_CAUSE_KEYWORDS",
+   "truth": "ARRAY",
+   "engine": "VARIANT",
+   "importer": "ARRAY",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "TECHNICAL_MANUALS.APPLICABLE_TO_ASSETS",
+   "truth": "ARRAY",
+   "engine": "VARIANT",
+   "importer": "ARRAY",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "TECHNICAL_MANUALS.KEY_SPECIFICATIONS",
+   "truth": "OBJECT",
+   "engine": "VARIANT",
+   "importer": "OBJECT",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "item": "TECHNICAL_MANUALS.TABLE_OF_CONTENTS",
+   "truth": "ARRAY",
+   "engine": "VARIANT",
+   "importer": "ARRAY",
+   "resolution": "engine-limit",
+   "reason": "fakesnow stores every semi-structured column (VARIANT, ARRAY, OBJECT) as DuckDB JSON and its information_schema reads them all as VARIANT; Snowflake itself reports the declared ARRAY / OBJECT. The truth keeps the declared type (sqlglot's Snowflake parse agrees), so this stays a known emulator limit, not a truth or importer change."
+  }
+ ],
+ "resolved": [
+  {
+   "sample": "postgres-pagila-partitions-kept",
+   "kind": "primary-key",
+   "items": [
+    "payment_p2022_01",
+    "payment_p2022_02",
+    "payment_p2022_03",
+    "payment_p2022_04",
+    "payment_p2022_05",
+    "payment_p2022_06",
+    "payment_p2022_07",
+    "payment_p2022_08",
+    "payment_p2022_09",
+    "payment_p2022_10",
+    "payment_p2022_11",
+    "payment_p2022_12",
+    "payment_p2023_01",
+    "payment_p2023_02",
+    "payment_p2023_03",
+    "payment_p2023_04",
+    "payment_p2023_05",
+    "payment_p2023_06",
+    "payment_p2023_07",
+    "payment_p2023_08",
+    "payment_p2023_09",
+    "payment_p2023_10",
+    "payment_p2023_11",
+    "payment_p2023_12",
+    "payment_p2024_01",
+    "payment_p2024_02",
+    "payment_p2024_03",
+    "payment_p2024_04",
+    "payment_p2024_05",
+    "payment_p2024_06",
+    "payment_p2024_07",
+    "payment_p2024_08",
+    "payment_p2024_09",
+    "payment_p2024_10",
+    "payment_p2024_11",
+    "payment_p2024_12",
+    "payment_p2025_01",
+    "payment_p2025_02",
+    "payment_p2025_03",
+    "payment_p2025_04",
+    "payment_p2025_05",
+    "payment_p2025_06",
+    "payment_p2025_07",
+    "payment_p2025_08",
+    "payment_p2025_09",
+    "payment_p2025_10",
+    "payment_p2025_11",
+    "payment_p2025_12",
+    "payment_p2026_01",
+    "payment_p2026_02",
+    "payment_p2026_03",
+    "payment_p2026_04",
+    "payment_p2026_05",
+    "payment_p2026_06",
+    "payment_p2026_07"
+   ],
+   "oldTruth": "(none): \"partitions declare none\"",
+   "engine": "payment_date, payment_id on each of the 55 partitions",
+   "importerBefore": "(none)",
+   "importer": "payment_id, payment_date",
+   "resolution": "truth-fixed, importer-fixed",
+   "reason": "The dump writes the primary key only on payment (inline in its CREATE TABLE) and joins each partition with ALTER TABLE ONLY payment ATTACH PARTITION; PostgreSQL creates the parent's primary key on every partition it attaches. Truth: 55 more primary keys (counts.primaryKeys 16 -> 71, floor raised). Importer: a partition kept as a table now gets its parent's primary key, unique keys and foreign keys (sqlDdlPartitions.ts inheritPartitionKeys; not for ON ONLY / ALTER TABLE ONLY keys or INHERITS children; tests in sqlDdlPartitions.test.ts)."
+  },
+  {
+   "sample": "postgres-pagila-partitions-kept",
+   "kind": "unique-key",
+   "items": [
+    "payment_p2022_01 (uuid, payment_date)",
+    "payment_p2022_02 (uuid, payment_date)",
+    "payment_p2022_03 (uuid, payment_date)",
+    "payment_p2022_04 (uuid, payment_date)",
+    "payment_p2022_05 (uuid, payment_date)",
+    "payment_p2022_06 (uuid, payment_date)",
+    "payment_p2022_07 (uuid, payment_date)",
+    "payment_p2022_08 (uuid, payment_date)",
+    "payment_p2022_09 (uuid, payment_date)",
+    "payment_p2022_10 (uuid, payment_date)",
+    "payment_p2022_11 (uuid, payment_date)",
+    "payment_p2022_12 (uuid, payment_date)",
+    "payment_p2023_01 (uuid, payment_date)",
+    "payment_p2023_02 (uuid, payment_date)",
+    "payment_p2023_03 (uuid, payment_date)",
+    "payment_p2023_04 (uuid, payment_date)",
+    "payment_p2023_05 (uuid, payment_date)",
+    "payment_p2023_06 (uuid, payment_date)",
+    "payment_p2023_07 (uuid, payment_date)",
+    "payment_p2023_08 (uuid, payment_date)",
+    "payment_p2023_09 (uuid, payment_date)",
+    "payment_p2023_10 (uuid, payment_date)",
+    "payment_p2023_11 (uuid, payment_date)",
+    "payment_p2023_12 (uuid, payment_date)",
+    "payment_p2024_01 (uuid, payment_date)",
+    "payment_p2024_02 (uuid, payment_date)",
+    "payment_p2024_03 (uuid, payment_date)",
+    "payment_p2024_04 (uuid, payment_date)",
+    "payment_p2024_05 (uuid, payment_date)",
+    "payment_p2024_06 (uuid, payment_date)",
+    "payment_p2024_07 (uuid, payment_date)",
+    "payment_p2024_08 (uuid, payment_date)",
+    "payment_p2024_09 (uuid, payment_date)",
+    "payment_p2024_10 (uuid, payment_date)",
+    "payment_p2024_11 (uuid, payment_date)",
+    "payment_p2024_12 (uuid, payment_date)",
+    "payment_p2025_01 (uuid, payment_date)",
+    "payment_p2025_02 (uuid, payment_date)",
+    "payment_p2025_03 (uuid, payment_date)",
+    "payment_p2025_04 (uuid, payment_date)",
+    "payment_p2025_05 (uuid, payment_date)",
+    "payment_p2025_06 (uuid, payment_date)",
+    "payment_p2025_07 (uuid, payment_date)",
+    "payment_p2025_08 (uuid, payment_date)",
+    "payment_p2025_09 (uuid, payment_date)",
+    "payment_p2025_10 (uuid, payment_date)",
+    "payment_p2025_11 (uuid, payment_date)",
+    "payment_p2025_12 (uuid, payment_date)",
+    "payment_p2026_01 (uuid, payment_date)",
+    "payment_p2026_02 (uuid, payment_date)",
+    "payment_p2026_03 (uuid, payment_date)",
+    "payment_p2026_04 (uuid, payment_date)",
+    "payment_p2026_05 (uuid, payment_date)",
+    "payment_p2026_06 (uuid, payment_date)",
+    "payment_p2026_07 (uuid, payment_date)"
+   ],
+   "oldTruth": "(none)",
+   "engine": "unique index <partition>_uuid_payment_date_idx on each partition",
+   "importerBefore": "(none)",
+   "importer": "unique (uuid, payment_date)",
+   "resolution": "truth-fixed, importer-fixed",
+   "reason": "CREATE UNIQUE INDEX payment_uuid_key ON public.payment (not ON ONLY) builds the index on every partition. Truth: 55 more unique keys (floor 5 -> 60). Importer: as above."
+  },
+  {
+   "sample": "sqlserver-adventureworks",
+   "kind": "not-null",
+   "items": [
+    "Customer.AccountNumber",
+    "PurchaseOrderDetail.LineTotal",
+    "PurchaseOrderDetail.StockedQty",
+    "SalesOrderDetail.LineTotal",
+    "SalesOrderHeader.SalesOrderNumber",
+    "SalesOrderHeader.TotalDue",
+    "WorkOrder.StockedQty"
+   ],
+   "oldTruth": "nullable (no NOT NULL written)",
+   "engine": "NOT NULL (sys.columns.is_nullable = 0)",
+   "importerBefore": "nullable",
+   "importer": "not null",
+   "resolution": "truth-fixed, importer-fixed",
+   "reason": "Each is a computed column ISNULL(expr, <constant>), which SQL Server makes non-nullable (its documented way to a NOT NULL computed column). Truth: N flag added. Importer: sqlDdlColumns.ts isNullWithConstant reads ISNULL(expr, number) and ISNULL(string expr, string) as NOT NULL; other expressions stay nullable (checked case by case on SQL Server 2025, sqlDdlFidelity.test.ts)."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "kind": "type",
+   "items": [
+    "ASSET_STAGING.STAGING_ID",
+    "FEATURE_IMPORTANCE.IMPORTANCE_ID",
+    "MODEL_PREDICTIONS.PREDICTION_ID",
+    "SCADA_EVENTS.EVENT_ID",
+    "SENSOR_READINGS.READING_ID",
+    "SENSOR_STAGING.STAGING_ID",
+    "TRAINING_DATA.RECORD_ID",
+    "WEATHER_DATA.WEATHER_ID"
+   ],
+   "oldTruth": "NUMBER(38,0) AUTOINCREMENT",
+   "engine": "NUMBER(38,0)",
+   "importerBefore": "NUMBER(38,0) [increment]",
+   "importer": "NUMBER(38,0) [increment]",
+   "resolution": "truth-fixed",
+   "reason": "AUTOINCREMENT is the column's identity property, not part of its type (information_schema data_type NUMBER, precision 38, scale 0). The importer already kept the type and the increment; types verbatim 229 -> 237."
+  }
+ ],
+ "equivalences": [
+  {
+   "sample": "sqlserver-adventureworks",
+   "item": "42 columns of alias types",
+   "truth": "[Name], [Flag], [AccountNumber], [NameStyle], [OrderNumber], [Phone]",
+   "engine": "dbo.Name, dbo.Flag, …",
+   "importer": "Name, Flag, … kept by name (ledger: based on nvarchar(50) …)",
+   "reason": "An unqualified alias type is the dbo one: the same type, spelled with its schema (canonType strips dbo.)."
+  },
+  {
+   "sample": "migrations-harbor",
+   "item": "role (lower(name))",
+   "truth": "lower(name)",
+   "engine": "lower(name::text) (uq_role_name)",
+   "importer": "not kept, reported: \"expression unique index\" lost at 0190_2.16.0_schema.up.sql:45",
+   "reason": "PostgreSQL adds the ::text cast when it stores the expression; the same key. An expression is not a column key, so the scorecard does not count it."
+  },
+  {
+   "sample": "all",
+   "item": "type spellings",
+   "truth": "as written (SERIAL, varchar (30), INT(11), [nvarchar](60), NUMBER(12), STRING, BIGINT …)",
+   "engine": "canonical (integer, character varying(30), int, nvarchar(60), NUMBER(12,0), string, long …)",
+   "importer": "as written",
+   "reason": "One type spelled two ways: canonType (test/unit/realWorldEngineTruth.ts) brings each dialect's aliases to one form before comparing; anything else that differs is a difference."
+  },
+  {
+   "sample": "snowflake-sqldbm-adventureworksdw",
+   "item": "DimScenario.CreatedDate, DimScenario.UpdatedDate",
+   "truth": "TIMESTAMP_NTZ(9)",
+   "engine": "TIMESTAMP_NTZ",
+   "importer": "TIMESTAMP_NTZ(9)",
+   "reason": "9 (nanoseconds) is the default precision of Snowflake's TIMESTAMP types, which fakesnow does not keep: the same type (canonType drops a (9))."
+  },
+  {
+   "sample": "snowflake-sqldbm-adventureworksdw",
+   "item": "36 foreign keys",
+   "truth": "DimCustomer.GeographyKey -> DimGeography.GeographyKey",
+   "engine": "refColumns GEOGRAPHYKEY",
+   "importer": "GeographyKey",
+   "reason": "SqlDBM quotes every name but writes the referenced column unquoted, which Snowflake folds to upper case. The comparison matches names case-insensitively, as ERD Studio does, so both name the quoted column the key is on."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "item": "6 foreign keys with no column list",
+   "truth": "the referenced table's primary key column",
+   "engine": "DuckDB's referenced column (its primary key); the forward or cross-schema one from the parse, filled from the referenced table's primary key",
+   "importer": "the primary key column",
+   "reason": "REFERENCES hub_customer with no column list names the referenced table's primary key."
+  },
+  {
+   "sample": "databricks-adidas-table-manager",
+   "item": "6 column descriptions with \\\" in a string",
+   "truth": "the unescaped text (\")",
+   "engine": "Spark's parse (\")",
+   "importer": "\"",
+   "reason": "Spark SQL reads a backslash escape inside a string literal; the description holds the quote, not the backslash."
+  }
+ ],
+ "modellingChoices": [
+  {
+   "sample": "postgres-pagila",
+   "item": "payment's 55 partitions",
+   "engine": "71 tables (55 with relispartition, attached to payment)",
+   "truth": "16 tables: partitions folded into payment, their 18 FKs as 3 from payment",
+   "importer": "16 tables, 55 'folded into payment' ledger notes",
+   "reason": "Partition folding (the default import): a partition is payment's rows, not a table. The comparison folds the engine's partitions the same way (foldPartitions) and then finds no difference; postgres-pagila-partitions-kept holds the 71-table reading."
+  },
+  {
+   "sample": "all SQL samples",
+   "item": "required foreign keys (D18)",
+   "engine": "FK columns NOT NULL as declared",
+   "truth": "N flags as the engine",
+   "importer": "every relationship saved optional (?), with the one D18 sentence counting the required ones",
+   "reason": "D18 stays: ERD Studio saves every Ref optional and says how many were required; the truth keeps the engine nullability, so the scorecard measures the note."
+  },
+  {
+   "sample": "migrations-harbor",
+   "item": "schema_migrations",
+   "engine": "golang-migrate's own table (created by the tool before 0001; 0030 and 0040 alter it)",
+   "truth": "not counted",
+   "importer": "not drawn; its two ALTERs are said as not applied",
+   "reason": "The tool's bookkeeping table, never created by the files: the read-back creates it as golang-migrate does and leaves it out (hidden)."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "item": "UNSTRUCTURED.DOCUMENT_SEARCH_INDEX (CREATE OR REPLACE TABLE … AS SELECT, line 271)",
+   "engine": "Snowflake makes a 9-column table; fakesnow fails (DuckDB lambda binder), so it is not read back",
+   "truth": "not counted (no column types)",
+   "importer": "skipped: 'CREATE TABLE without a column list (AS SELECT, LIKE, CLONE)' at 03_unstructured_data_schema.sql:271",
+   "reason": "A CTAS has no declared columns to model; SOURCE.md excludes it."
+  },
+  {
+   "sample": "databricks-open-retail-data-model",
+   "item": "ALTER TABLE … SET TAGS (58) / ALTER COLUMN … SET MASK (16)",
+   "engine": "Unity Catalog statements open-source Spark's parser rejects (PARSE_SYNTAX_ERROR)",
+   "truth": "not schema",
+   "importer": "skipped, counted per file as 'ALTER TABLE setting (storage, triggers, tags, masks, row security…)' in the ledger (notDesign)",
+   "reason": "Governance tags and column masks change no table, column, key or relationship."
+  }
+ ],
+ "loadErrors": [
+  {
+   "sample": "snowflake-grid-reliability",
+   "match": "^GRANT ",
+   "count": 52,
+   "reason": "Access control: fakesnow has no GRANT; not schema."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "match": "^CREATE ROLE ",
+   "count": 5,
+   "reason": "Roles: not schema."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "match": "^CREATE WAREHOUSE ",
+   "count": 1,
+   "reason": "Compute: not schema."
+  },
+  {
+   "sample": "snowflake-grid-reliability",
+   "match": "^CREATE OR REPLACE .*failed to bind function",
+   "count": 1,
+   "reason": "DOCUMENT_SEARCH_INDEX, a CREATE TABLE … AS SELECT the truth does not count (see modellingChoices); DuckDB cannot bind its ARRAY lambda."
+  },
+  {
+   "sample": "databricks-open-retail-data-model",
+   "match": "^ALTER TABLE .*Syntax error at or near 'TAGS'",
+   "count": 58,
+   "reason": "Unity Catalog tags (see modellingChoices)."
+  },
+  {
+   "sample": "databricks-open-retail-data-model",
+   "match": "^ALTER TABLE .*Syntax error at or near 'MASK'",
+   "count": 16,
+   "reason": "Unity Catalog column masks (see modellingChoices)."
+  },
+  {
+   "sample": "sqlserver-adventureworks",
+   "match": "16202: Keyword or statement option 'CODEPAGE'",
+   "count": 68,
+   "reason": "The script's BULK INSERTs of the sample data, which is not part of the sample (and CODEPAGE is Windows-only); the schema does not depend on it."
+  },
+  {
+   "sample": "sqlserver-adventureworks",
+   "match": "7609: Full-Text Search is not installed",
+   "count": 3,
+   "reason": "Full-text catalog and indexes: the Linux image has no full-text search; not tables or keys."
+  },
+  {
+   "sample": "sqlserver-adventureworks",
+   "match": "7601: Cannot use a CONTAINS or FREETEXT",
+   "count": 1,
+   "reason": "A procedure using full-text search (as above)."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"WAREHOUSE\"",
+   "count": 2,
+   "reason": "Compute (CREATE WAREHOUSE): fakesnow has none; not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"STREAM\"",
+   "count": 3,
+   "reason": "Streams (change tracking on a table): fakesnow has none; not tables."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"PIPE\"",
+   "count": 2,
+   "reason": "Snowpipe: fakesnow has none; loading, not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*near \"TASK\"",
+   "count": 3,
+   "reason": "Tasks (scheduled MERGE bodies): fakesnow has none; not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^ALTER TASK ",
+   "count": 5,
+   "reason": "Resuming and suspending the tasks above: not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^ALTER PIPE ",
+   "count": 4,
+   "reason": "Refreshing the pipes above: not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^COPY INTO @",
+   "count": 4,
+   "reason": "Unloading sample rows to a stage (INCLUDE_QUERY_ID, which fakesnow does not know): data, not schema."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^CREATE OR REPLACE .*Table with name STG_(CUSTOMER|ORDERS)_STRM does not exist",
+   "count": 2,
+   "reason": "The two outbound views read the streams, which fakesnow could not create: views, not tables."
+  },
+  {
+   "sample": "snowflake-realtime-datavault",
+   "match": "^SELECT ",
+   "count": 7,
+   "reason": "Queries the walkthrough runs to look at the data (over streams, views, a stage and task history): not schema."
+  },
+  {
+   "sample": "databricks-uc-catalog-as-code",
+   "match": "^ALTER (SCHEMA|TABLE) .*near 'TAGS'",
+   "count": 16,
+   "reason": "SET TAGS (on schemas, tables and columns) is Databricks SQL, which open-source Spark's parser does not have: governance metadata, not schema."
+  }
+ ]
+}

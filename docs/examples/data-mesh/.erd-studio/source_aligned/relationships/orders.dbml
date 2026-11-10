@@ -1,0 +1,5 @@
+// The orders domain's relationships. CODEOWNERS: the orders team.
+use { table accounts.account }      from '../tables/accounts/account.dbml'
+use { table orders.customer_order } from '../tables/orders/customer_order.dbml'
+
+Ref: orders.customer_order.account_id >? accounts.account.account_id

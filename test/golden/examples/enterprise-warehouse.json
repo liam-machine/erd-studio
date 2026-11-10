@@ -1,0 +1,598 @@
+{
+  "example": "enterprise-warehouse",
+  "layers": [
+    {
+      "id": "landing",
+      "label": "Landing",
+      "abbreviation": "LND"
+    },
+    {
+      "id": "edw",
+      "label": "Enterprise warehouse",
+      "abbreviation": "EDW"
+    },
+    {
+      "id": "marts",
+      "label": "Marts",
+      "abbreviation": "MRT"
+    },
+    {
+      "id": "reporting",
+      "label": "Reporting",
+      "abbreviation": "RPT"
+    }
+  ],
+  "tables": {
+    "arrangement.account": {
+      "layer": "edw",
+      "schema": "arrangement",
+      "grain": "One row per account, from any system",
+      "columns": [
+        "account_id BIGINT pk",
+        "source_account_no STRING nk",
+        "product_id BIGINT fk",
+        "branch_id BIGINT fk",
+        "opened_on DATE",
+        "closed_on DATE",
+        "status STRING"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "arrangement.account_party_role": {
+      "layer": "edw",
+      "schema": "arrangement",
+      "grain": "One row per party per account per role",
+      "columns": [
+        "account_id BIGINT pk fk",
+        "party_id BIGINT pk fk",
+        "role_code STRING pk",
+        "valid_from DATE"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "branches.branches_site": {
+      "layer": "landing",
+      "schema": "branches",
+      "columns": [
+        "branch_code STRING pk nk",
+        "branch_name STRING",
+        "state STRING",
+        "opened_on DATE",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "call_centre.call_centre_call": {
+      "layer": "landing",
+      "schema": "call_centre",
+      "columns": [
+        "call_id STRING pk nk",
+        "customer_no STRING",
+        "reason STRING",
+        "started_at TIMESTAMP",
+        "handled_seconds INT",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "campaigns.campaigns_send": {
+      "layer": "landing",
+      "schema": "campaigns",
+      "columns": [
+        "send_id STRING pk nk",
+        "campaign_code STRING",
+        "customer_no STRING",
+        "channel STRING",
+        "sent_at TIMESTAMP",
+        "responded BOOLEAN",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "cards.cards_account": {
+      "layer": "landing",
+      "schema": "cards",
+      "columns": [
+        "card_account_id STRING pk nk",
+        "customer_no STRING",
+        "credit_limit DECIMAL(18,2)",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "cards.cards_transaction": {
+      "layer": "landing",
+      "schema": "cards",
+      "columns": [
+        "card_txn_id STRING pk nk",
+        "card_account_id STRING fk",
+        "merchant STRING",
+        "amount DECIMAL(18,2)",
+        "authorised_at TIMESTAMP",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "core_banking.core_account": {
+      "layer": "landing",
+      "schema": "core_banking",
+      "columns": [
+        "account_no STRING pk nk",
+        "customer_no STRING fk",
+        "product_code STRING",
+        "branch_code STRING",
+        "opened_on DATE",
+        "status STRING",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "core_banking.core_customer": {
+      "layer": "landing",
+      "schema": "core_banking",
+      "columns": [
+        "customer_no STRING pk nk",
+        "full_name STRING",
+        "date_of_birth DATE",
+        "customer_type STRING",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "core_banking.core_transaction": {
+      "layer": "landing",
+      "schema": "core_banking",
+      "columns": [
+        "txn_id STRING pk nk",
+        "account_no STRING fk",
+        "posted_at TIMESTAMP",
+        "amount DECIMAL(18,2)",
+        "channel STRING",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "crm.crm_contact": {
+      "layer": "landing",
+      "schema": "crm",
+      "columns": [
+        "contact_id STRING pk nk",
+        "customer_no STRING",
+        "email STRING",
+        "phone STRING",
+        "marketing_consent BOOLEAN",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "event.interaction_event": {
+      "layer": "edw",
+      "schema": "event",
+      "grain": "One row per contact with a party",
+      "columns": [
+        "interaction_id BIGINT pk",
+        "party_id BIGINT fk",
+        "channel STRING",
+        "occurred_at TIMESTAMP",
+        "reason STRING"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "event.transaction_event": {
+      "layer": "edw",
+      "schema": "event",
+      "grain": "One row per posted transaction or card authorisation",
+      "columns": [
+        "event_id BIGINT pk",
+        "account_id BIGINT fk",
+        "posted_at TIMESTAMP",
+        "amount DECIMAL(18,2)",
+        "channel STRING",
+        "source_system STRING"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "fraud.fraud_alert": {
+      "layer": "landing",
+      "schema": "fraud",
+      "columns": [
+        "alert_id STRING pk nk",
+        "card_txn_id STRING fk",
+        "rule STRING",
+        "raised_at TIMESTAMP",
+        "outcome STRING",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "loans.loans_application": {
+      "layer": "landing",
+      "schema": "loans",
+      "columns": [
+        "application_id STRING pk nk",
+        "customer_no STRING",
+        "product_code STRING",
+        "requested_amount DECIMAL(18,2)",
+        "decision STRING",
+        "decided_at TIMESTAMP",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    },
+    "location.branch": {
+      "layer": "edw",
+      "schema": "location",
+      "grain": "One row per branch",
+      "columns": [
+        "branch_id BIGINT pk",
+        "branch_code STRING nk",
+        "branch_name STRING",
+        "state STRING",
+        "opened_on DATE"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "marts.dim_branch": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "conformed-dim",
+      "grain": "One row per branch",
+      "columns": [
+        "branch_key BIGINT pk",
+        "branch_code STRING nk",
+        "branch_name STRING",
+        "state STRING"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.dim_campaign": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "domain-dim",
+      "grain": "One row per campaign",
+      "columns": [
+        "campaign_key BIGINT pk",
+        "campaign_code STRING nk",
+        "campaign_name STRING",
+        "channel STRING",
+        "starts_on DATE",
+        "ends_on DATE"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.dim_customer": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "conformed-dim",
+      "grain": "One row per customer version",
+      "columns": [
+        "customer_key BIGINT pk",
+        "party_id BIGINT nk",
+        "customer_name STRING scd2",
+        "segment STRING scd2",
+        "home_branch_key BIGINT fk",
+        "valid_from TIMESTAMP",
+        "valid_to TIMESTAMP"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.dim_date": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "conformed-dim",
+      "grain": "One row per calendar day",
+      "columns": [
+        "date_key INT pk",
+        "calendar_date DATE nk",
+        "month STRING",
+        "quarter STRING",
+        "financial_year STRING"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.dim_product": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "conformed-dim",
+      "grain": "One row per product",
+      "columns": [
+        "product_key BIGINT pk",
+        "product_code STRING nk",
+        "product_name STRING",
+        "product_family STRING"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.fct_account_balance_daily": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "periodic-snapshot",
+      "grain": "One row per account per day",
+      "columns": [
+        "date_key INT pk fk",
+        "account_id BIGINT pk fk",
+        "customer_key BIGINT fk",
+        "product_key BIGINT fk",
+        "branch_key BIGINT fk",
+        "closing_balance DECIMAL(18,2) semi-additive",
+        "interest_accrued DECIMAL(18,2) additive"
+      ],
+      "newRelationshipsFile": "marts/relationships/finance.dbml"
+    },
+    "marts.fct_campaign_cost": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "periodic-snapshot",
+      "grain": "One row per campaign per day",
+      "columns": [
+        "campaign_key BIGINT pk",
+        "date_key INT pk",
+        "spend DECIMAL(18,2) additive",
+        "impressions BIGINT additive"
+      ],
+      "newRelationshipsFile": "marts/relationships/marts.dbml"
+    },
+    "marts.fct_campaign_response": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "transaction-fact",
+      "grain": "One row per campaign message sent",
+      "columns": [
+        "send_id BIGINT pk nk",
+        "campaign_key BIGINT fk",
+        "customer_key BIGINT fk",
+        "date_key INT fk",
+        "channel STRING",
+        "responded BOOLEAN",
+        "response_value DECIMAL(18,2) additive"
+      ],
+      "newRelationshipsFile": "marts/relationships/marketing.dbml"
+    },
+    "marts.fct_fee": {
+      "layer": "marts",
+      "schema": "marts",
+      "role": "transaction-fact",
+      "grain": "One row per fee charged",
+      "columns": [
+        "fee_id BIGINT pk nk",
+        "date_key INT fk",
+        "customer_key BIGINT fk",
+        "product_key BIGINT fk",
+        "fee_type STRING",
+        "amount DECIMAL(18,2) additive"
+      ],
+      "newRelationshipsFile": "marts/relationships/finance.dbml"
+    },
+    "party.organisation": {
+      "layer": "edw",
+      "schema": "party",
+      "grain": "One row per organisation",
+      "columns": [
+        "party_id BIGINT pk fk",
+        "legal_name STRING",
+        "registration_no STRING nk",
+        "industry_code STRING"
+      ],
+      "newRelationshipsFile": "edw/relationships/party.dbml"
+    },
+    "party.party": {
+      "layer": "edw",
+      "schema": "party",
+      "grain": "One row per party: a person or an organisation the bank deals with",
+      "columns": [
+        "party_id BIGINT pk",
+        "party_type STRING",
+        "source_customer_no STRING nk",
+        "valid_from TIMESTAMP",
+        "valid_to TIMESTAMP"
+      ],
+      "newRelationshipsFile": "edw/relationships/party.dbml"
+    },
+    "party.party_relationship": {
+      "layer": "edw",
+      "schema": "party",
+      "grain": "One row per pair of parties per kind of relationship",
+      "columns": [
+        "from_party_id BIGINT pk fk",
+        "to_party_id BIGINT pk fk",
+        "relationship_type STRING pk",
+        "valid_from DATE"
+      ],
+      "newRelationshipsFile": "edw/relationships/party.dbml"
+    },
+    "party.person": {
+      "layer": "edw",
+      "schema": "party",
+      "grain": "One row per person",
+      "columns": [
+        "party_id BIGINT pk fk",
+        "given_name STRING",
+        "family_name STRING",
+        "date_of_birth DATE"
+      ],
+      "newRelationshipsFile": "edw/relationships/party.dbml"
+    },
+    "product.product": {
+      "layer": "edw",
+      "schema": "product",
+      "grain": "One row per product or product family",
+      "columns": [
+        "product_id BIGINT pk",
+        "product_code STRING nk",
+        "product_name STRING",
+        "product_type STRING",
+        "parent_product_id BIGINT fk"
+      ],
+      "newRelationshipsFile": "edw/relationships/edw.dbml"
+    },
+    "reporting.customer_activity": {
+      "layer": "reporting",
+      "schema": "reporting",
+      "role": "transaction-fact",
+      "grain": "One row per thing a customer did",
+      "columns": [
+        "activity_id STRING pk",
+        "customer_key BIGINT",
+        "ts TIMESTAMP",
+        "activity STRING",
+        "feature_1 STRING",
+        "feature_2 STRING",
+        "feature_3 STRING",
+        "revenue_impact DECIMAL(18,2) additive"
+      ],
+      "newRelationshipsFile": "reporting/relationships/reporting.dbml"
+    },
+    "reporting.obt_customer_360": {
+      "layer": "reporting",
+      "schema": "reporting",
+      "role": "gold-dim",
+      "grain": "One row per customer",
+      "columns": [
+        "customer_key BIGINT pk",
+        "customer_name STRING",
+        "segment STRING",
+        "home_branch_name STRING",
+        "product_count INT",
+        "total_balance DECIMAL(18,2) semi-additive",
+        "last_interaction_at TIMESTAMP",
+        "last_interaction_channel STRING",
+        "open_fraud_alerts INT",
+        "marketing_consent BOOLEAN",
+        "as_of_date DATE"
+      ],
+      "newRelationshipsFile": "reporting/relationships/reporting.dbml"
+    },
+    "web.web_session": {
+      "layer": "landing",
+      "schema": "web",
+      "columns": [
+        "session_id STRING pk nk",
+        "customer_no STRING",
+        "started_at TIMESTAMP",
+        "device STRING",
+        "_loaded_at TIMESTAMP"
+      ],
+      "newRelationshipsFile": "landing/relationships/landing.dbml"
+    }
+  },
+  "diagrams": [
+    {
+      "file": "edw/diagrams/events.dbml",
+      "name": "events",
+      "layer": "edw",
+      "tables": [
+        "arrangement.account",
+        "event.interaction_event",
+        "event.transaction_event",
+        "party.party"
+      ],
+      "relationships": [
+        "interaction_event.party_id -> party.party_id many-to-one",
+        "transaction_event.account_id -> account.account_id many-to-one"
+      ]
+    },
+    {
+      "file": "edw/diagrams/party-and-accounts.dbml",
+      "name": "party-and-accounts",
+      "layer": "edw",
+      "tables": [
+        "arrangement.account",
+        "arrangement.account_party_role",
+        "location.branch",
+        "party.organisation",
+        "party.party",
+        "party.party_relationship",
+        "party.person",
+        "product.product"
+      ],
+      "relationships": [
+        "account.branch_id -> branch.branch_id many-to-one",
+        "account.product_id -> product.product_id many-to-one",
+        "account_party_role.account_id -> account.account_id many-to-one",
+        "account_party_role.party_id -> party.party_id many-to-one",
+        "organisation.party_id -> party.party_id one-to-one",
+        "party_relationship.from_party_id -> party.party_id many-to-one role:from_party",
+        "party_relationship.to_party_id -> party.party_id many-to-one role:to_party",
+        "person.party_id -> party.party_id one-to-one",
+        "product.parent_product_id -> product.product_id many-to-one role:product_family"
+      ]
+    },
+    {
+      "file": "landing/diagrams/source-systems.dbml",
+      "name": "source-systems",
+      "layer": "landing",
+      "tables": [
+        "branches.branches_site",
+        "call_centre.call_centre_call",
+        "campaigns.campaigns_send",
+        "cards.cards_account",
+        "cards.cards_transaction",
+        "core_banking.core_account",
+        "core_banking.core_customer",
+        "core_banking.core_transaction",
+        "crm.crm_contact",
+        "fraud.fraud_alert",
+        "loans.loans_application",
+        "web.web_session"
+      ],
+      "relationships": [
+        "cards_transaction.card_account_id -> cards_account.card_account_id many-to-one",
+        "core_account.customer_no -> core_customer.customer_no many-to-one",
+        "core_transaction.account_no -> core_account.account_no many-to-one",
+        "fraud_alert.card_txn_id -> cards_transaction.card_txn_id many-to-one"
+      ]
+    },
+    {
+      "file": "marts/diagrams/finance.dbml",
+      "name": "finance",
+      "layer": "marts",
+      "tables": [
+        "arrangement.account",
+        "marts.dim_branch",
+        "marts.dim_customer",
+        "marts.dim_date",
+        "marts.dim_product",
+        "marts.fct_account_balance_daily",
+        "marts.fct_fee"
+      ],
+      "relationships": [
+        "dim_customer.home_branch_key -> dim_branch.branch_key many-to-one",
+        "fct_account_balance_daily.account_id -> account.account_id many-to-one role:account_of_record",
+        "fct_account_balance_daily.branch_key -> dim_branch.branch_key many-to-one",
+        "fct_account_balance_daily.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_account_balance_daily.date_key -> dim_date.date_key many-to-one",
+        "fct_account_balance_daily.product_key -> dim_product.product_key many-to-one",
+        "fct_fee.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_fee.date_key -> dim_date.date_key many-to-one",
+        "fct_fee.product_key -> dim_product.product_key many-to-one"
+      ]
+    },
+    {
+      "file": "marts/diagrams/marketing.dbml",
+      "name": "marketing",
+      "layer": "marts",
+      "tables": [
+        "marts.dim_campaign",
+        "marts.dim_customer",
+        "marts.dim_date",
+        "marts.fct_campaign_cost",
+        "marts.fct_campaign_response"
+      ],
+      "relationships": [
+        "fct_campaign_response.campaign_key -> dim_campaign.campaign_key many-to-one",
+        "fct_campaign_response.customer_key -> dim_customer.customer_key many-to-one",
+        "fct_campaign_response.date_key -> dim_date.date_key many-to-one"
+      ]
+    },
+    {
+      "file": "reporting/diagrams/customer-360.dbml",
+      "name": "customer-360",
+      "layer": "reporting",
+      "tables": [
+        "reporting.customer_activity",
+        "reporting.obt_customer_360"
+      ],
+      "relationships": []
+    }
+  ]
+}

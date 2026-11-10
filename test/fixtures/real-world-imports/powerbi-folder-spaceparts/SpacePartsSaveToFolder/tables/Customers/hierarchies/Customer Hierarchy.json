@@ -1,0 +1,31 @@
+{
+  "name": "Customer Hierarchy",
+  "displayFolder": "1. Customer Hierarchy",
+  "lineageTag": "21ce8263-4484-4671-9324-29eb1d5fb394",
+  "levels": [
+    {
+      "name": "Account Type",
+      "ordinal": 0,
+      "column": "Account Type",
+      "lineageTag": "63750788-6ce3-468b-acfb-48561f995e59"
+    },
+    {
+      "name": "Key Account Name",
+      "ordinal": 1,
+      "column": "Key Account Name",
+      "lineageTag": "695025d0-549e-4b7c-b020-926a32b43d89"
+    },
+    {
+      "name": "Account Name",
+      "ordinal": 2,
+      "column": "Account Name",
+      "lineageTag": "4701a595-a719-4c4c-a262-0961ea84c24b"
+    },
+    {
+      "name": "Customer Sold-To Name",
+      "ordinal": 3,
+      "column": "Customer Sold-To Name",
+      "lineageTag": "24730ed3-e089-46de-bd4c-26f648c4a791"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Order Status Code",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "order_status_code",
+  "sortByColumn": "Order Status Ordinal",
+  "displayFolder": "2. Keys",
+  "lineageTag": "a100afe0-dcbd-4d7c-99d8-a75db4331ab8",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

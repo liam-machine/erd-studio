@@ -1,0 +1,11 @@
+{
+  "name": "__Demo Measures",
+  "description": "5 measures usable without any selection; quick-start",
+  "lineageTag": "5bfcf671-969d-4907-942e-4ed897cbc246",
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

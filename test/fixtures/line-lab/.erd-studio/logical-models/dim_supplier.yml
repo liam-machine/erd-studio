@@ -1,0 +1,19 @@
+name: dim_supplier
+schema: retail
+description: Product suppliers
+grain: One row per supplier
+modelRole: domain-dim
+columns:
+  - name: supplier_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: supplier_name
+    dataType: VARCHAR
+    description: Legal name
+  - name: country_code
+    dataType: VARCHAR
+    description: ISO country code
+  - name: lead_time_days
+    dataType: INT
+    description: Usual lead time

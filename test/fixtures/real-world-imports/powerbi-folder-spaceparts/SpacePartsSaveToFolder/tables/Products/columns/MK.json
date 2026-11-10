@@ -1,0 +1,14 @@
+{
+  "name": "MK",
+  "dataType": "string",
+  "sourceColumn": "mk",
+  "displayFolder": "2. Product Attributes",
+  "lineageTag": "434ef8cd-463c-423c-98d0-133def571872",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

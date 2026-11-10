@@ -1,0 +1,91 @@
+{
+  "name": "Z01CG1 - Quantity",
+  "isHidden": true,
+  "lineageTag": "b6f842c2-82d7-4bb1-9831-491a409aec9b",
+  "calculationGroup": {
+    "calculationItems": [
+      {
+        "name": "Gross Sales",
+        "expression": [
+          "",
+          "[Total Net Invoice Quantity]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "Orders",
+        "expression": [
+          "",
+          "[Net Orders (Quantity)]"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "Invoices",
+        "expression": [
+          "",
+          "[Total Net Invoice Quantity]"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "Invoice Cost",
+        "description": "The Net Invoice Cost is",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 3
+      },
+      {
+        "name": "Delivery Cost",
+        "description": "The cost of the delivery only",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 4
+      },
+      {
+        "name": "Delivery Surcharge",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 5
+      },
+      {
+        "name": "Taxes",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 6
+      },
+      {
+        "name": "Overdue Payment Penalties",
+        "description": "Overdue Payments result when the customer hasn't paid their invoice within a certain number of days since the product was shipped.",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 7
+      },
+      {
+        "name": "Late Delivery Penalties",
+        "description": "Late Delivery penalties occur when we fail to meet the SLA for deliveries. If the products take longer than a certain number of days to deliver after the requested delivery date, a Late Delivery Penalty is levied.",
+        "expression": [
+          "",
+          "BLANK()"
+        ],
+        "ordinal": 8
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

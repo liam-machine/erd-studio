@@ -9,6 +9,7 @@ import { computeNewTablePositions } from './positions.js';
 import { tableLoadErrorOf, tableLoadWarningOf } from './types/semantic.js';
 import { foreignKeyEnd, keysContradictedRelationships } from './relationships.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
+import type { FieldList } from './fields.js';
 
 /**
  * Detect models in logical.models that lack entries in viewConfig.positions
@@ -55,6 +56,14 @@ export interface ToDisplaySubjectAreaOptions {
    * of it (`keysContradict`). Without it only the models' key flags count.
    */
   dbtKeyIndex?: DbtKeyIndex;
+  /**
+   * The project's field list (its `.erd-studio/fields.yml`, read with
+   * `parseFieldsText`), set as `DisplaySubjectArea.fields`. Pass it only when
+   * the project has the file: without it the result has no `fields`, which a
+   * renderer reads as the starting set, so a project without the file draws
+   * exactly what it drew before context fields.
+   */
+  fields?: FieldList;
 }
 
 /**
@@ -147,5 +156,6 @@ export function toDisplaySubjectArea(domain: SemanticSubjectArea, options: ToDis
     readOnly,
     positionDraggable: true,
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
+    ...(options.fields ? { fields: options.fields } : {}),
   };
 }

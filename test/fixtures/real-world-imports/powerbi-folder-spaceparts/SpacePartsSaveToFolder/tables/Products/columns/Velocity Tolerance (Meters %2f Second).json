@@ -1,0 +1,14 @@
+{
+  "name": "Velocity Tolerance (Meters / Second)",
+  "dataType": "int64",
+  "sourceColumn": "velocity_tolerance_meters__second",
+  "displayFolder": "4. Product Facts",
+  "lineageTag": "762198d6-0454-4be8-bd34-93a179964871",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

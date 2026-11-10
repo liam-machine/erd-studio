@@ -1,0 +1,15 @@
+{
+  "name": "Unit",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "Name",
+  "sortByColumn": "Ordinal",
+  "lineageTag": "2d7160af-d5c1-4676-b064-a01f4f8cd651",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

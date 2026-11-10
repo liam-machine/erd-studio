@@ -1,0 +1,92 @@
+{
+  "name": "Z01CG2 - Value (Budget Rate)",
+  "isHidden": true,
+  "lineageTag": "af94bf00-20d7-4871-a2d6-dbcc1e73ad88",
+  "calculationGroup": {
+    "precedence": 1,
+    "calculationItems": [
+      {
+        "name": "Gross Sales",
+        "expression": [
+          "",
+          "[Gross Sales]"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "Orders",
+        "expression": [
+          "",
+          "[Net Orders]"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "Invoices",
+        "expression": [
+          "",
+          "[Total Net Invoice Value]"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "Invoice Cost",
+        "description": "The Net Invoice Cost is",
+        "expression": [
+          "",
+          "[Total Net Invoice COGS]"
+        ],
+        "ordinal": 3
+      },
+      {
+        "name": "Delivery Cost",
+        "description": "The cost of the delivery only",
+        "expression": [
+          "",
+          "[Total Delivery Cost]"
+        ],
+        "ordinal": 4
+      },
+      {
+        "name": "Delivery Surcharge",
+        "expression": [
+          "",
+          "[Total Freight Surcharge]"
+        ],
+        "ordinal": 5
+      },
+      {
+        "name": "Taxes",
+        "expression": [
+          "",
+          "[Total Taxes & Commercial Fees]"
+        ],
+        "ordinal": 6
+      },
+      {
+        "name": "Overdue Payment Penalties",
+        "description": "Overdue Payments result when the customer hasn't paid their invoice within a certain number of days since the product was shipped.",
+        "expression": [
+          "",
+          "[Total Overdue Payment Penalties]"
+        ],
+        "ordinal": 7
+      },
+      {
+        "name": "Late Delivery Penalties",
+        "description": "Late Delivery penalties occur when we fail to meet the SLA for deliveries. If the products take longer than a certain number of days to deliver after the requested delivery date, a Late Delivery Penalty is levied.",
+        "expression": [
+          "",
+          "[Total Late Delivery Penalties]"
+        ],
+        "ordinal": 8
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

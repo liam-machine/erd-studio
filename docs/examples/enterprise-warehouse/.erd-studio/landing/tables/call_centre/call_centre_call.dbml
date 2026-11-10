@@ -1,0 +1,10 @@
+Table call_centre.call_centre_call [owner: 'data-engineering'] {
+  Note: 'Calls from the contact centre platform.'
+
+  call_id         STRING    [pk, natural_key: 'true']
+  customer_no     STRING
+  reason          STRING
+  started_at      TIMESTAMP
+  handled_seconds INT
+  _loaded_at      TIMESTAMP [note: 'When the loader landed the row']
+}

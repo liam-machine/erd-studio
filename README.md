@@ -2,16 +2,11 @@
 
 <p align="center">
   <strong>Design your data model in Git. Let your AI build from it.</strong><br />
-  A logical data modeling canvas for VS Code: plain YAML in your repo, DBML in and out, and a live comparison with your dbt project.
+  Logical data modelling in VS Code, stored as DBML in your repo.
 </p>
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/badge/Install%20in%20VS%20Code-0e639c?style=for-the-badge" alt="Install in VS Code" /></a>
-</p>
-
-<p align="center">
-  <strong>No dbt needed.</strong> Open any folder, then click <strong>New Diagram</strong> or <strong>Import DBML</strong>. <a href="#get-started">Get started</a><br />
-  <strong>Using dbt?</strong> Open its folder to compare your design with what dbt built. <a href="#using-dbt">How it works</a>
 </p>
 
 <p align="center">
@@ -22,90 +17,93 @@
   <sub>Free to use, source available under the <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE">PolyForm Shield License</a>.</sub>
 </p>
 
-<!-- TODO: re-shoot as a logical-only hero: a folder with no dbt_project.yml, no Physical tab, the Explorer showing .erd-studio/tables/*.yml beside the canvas, ideally one frame of the Import DBML summary. The current GIF is a dbt project and cycles to the Physical stage and the discrepancy overlay, which a reader without dbt will never see. Rewrite the alt text with it. -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio in VS Code: an orders diagram beside its .dbml files in the Explorer, then the DBML text of fct_order.dbml, a draft imported from sales.dbml, a hovered table's lines with moving arrows, and the lines switched from Curved to Hops." />
 </p>
 
-## Why ERD Studio
+## What it is
 
-- **In your repo.** Plain YAML and JSON, reviewed in the same pull request as your code. No account, server or database.
-- **Works with the AI you already use.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files. Review their proposals on the canvas before anyone writes SQL.
-- **No lock-in.** Import [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io, from any DBML tool. Export to DBML (keys, grain and notes, with table positions in a `.dbdiagram` layout file) or Mermaid any time.
-- **Checked against dbt.** A read-only **Physical** view shows what your dbt project has; **⊕ Diff** highlights every difference from your design and makes a sync plan your AI applies. More stacks later.
+ERD Studio is a canvas for logical data modelling in VS Code. You draw tables, keys and relationships; ERD Studio saves them as [DBML](https://dbml.dbdiagram.io/docs), the open-source schema language behind dbdiagram.io, in an `.erd-studio/` folder in your repo. DBML is an open format, so there is no lock-in: DBML parsers (9.1 and later) read your files as a multi-file project, and **Export Diagram…** writes a single file for dbdiagram.io, or Mermaid, any time ([DBML import and export](docs/leaving-erd-studio.md)).
 
-## Get started
+- **In your repo.** The design is reviewed in the same pull request as the code that builds it. No account, server or database.
+- **Logical first.** Grain, primary, foreign and natural keys, SCD types, table roles and design rationale, in any folder.
+- **Made for your AI.** Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor read and write the same files, and you review their changes on the canvas.
 
-1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) (VS Code 1.85+, or [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) for VSCodium, Cursor and Windsurf). Open any folder and click **ERD Studio** in the Activity Bar.
-2. Make your first diagram:
-   - **From scratch:** click **New Diagram** in the ERD Studio sidebar, choose a layer and a name, then use **+ Add → New Design Table** and **+ Add → New Relationship** on the canvas. (The commands call a diagram a *subject area*, so in the Command Palette it is **ERD Studio: New Subject Area**.)
-   - **From DBML:** click **Import DBML** in the sidebar (or run **ERD Studio: Import DBML…**) and pick a `.dbml` file. You see what it will create before anything is written. A `.dbdiagram` layout file beside it keeps your tables in place.
-   - **From an example:** run **ERD Studio: Open Example Diagram** for a coffee-shop model.
-3. Commit the `.erd-studio/` folder. That's your data model.
+## The ways to start
 
-To export, click **⤓** on the canvas toolbar or run **ERD Studio: Export All Diagrams…** ([what each format carries](docs/leaving-erd-studio.md)).
+[Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) (VS Code 1.85+, or [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) for VSCodium, Cursor and Windsurf), open any folder and click **ERD Studio** in the Activity Bar. ERD Studio takes a quick look at the folder, on your machine only, and puts the likeliest start first:
+
+- **New Diagram…** gives you an empty canvas: name it, then use **+ Add → New Table** and **+ Add → New Relationship**. In a new folder with nothing to import, it leads, and **Open an Example…** (a finished coffee-shop model) comes second.
+
+When the folder holds a model to bring in, that import leads instead (the first that applies):
+
+- **Import your Power BI semantic model**, for a Power BI or Fabric semantic model. Tables, columns and relationships come across; measures stay in Power BI.
+- **Import your SQL scripts**, for `CREATE TABLE` scripts (PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite). Keys, foreign keys and comments come across.
+- **Import your DBML file**, for a `.dbml` file from dbdiagram.io or any DBML tool.
+
+Every import opens as a draft: nothing is written until you press **Keep as Diagram**.
+
+**More ways to start…** lists the rest, including **Import…** and **Bring In Your Data Model…**: the export steps for Databricks, Snowflake, Fabric, SQL Server and more ([the guide](docs/import-existing-models.md)).
+
+<table align="center"><tr>
+<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the Tour (2:48): ERD Studio recorded in VS Code's light theme. It shows the tools it imports from, imports a PostgreSQL schema exported with one pg_dump command, shows its DBML files next to the code and a 2,000-table diagram, edits it by hand and with an AI assistant, reviews the DBML and SQL in one pull request, compares the design with what the code builds, and shows ERD Studio for Confluence drawing it from GitHub." /></a></td>
+<td><strong>Watch the Tour (2:48).</strong> A recording of ERD Studio in VS Code: import the data model you already have, see its DBML files beside your code and a 2,000-table diagram, edit it by hand or with your AI assistant, review DBML and SQL in one pull request, compare the design with what your code builds, then see it in Confluence with ERD Studio for Confluence. It's also in the sidebar's <strong>Help &amp; Feedback</strong>.</td>
+</tr></table>
 
 ## What's in your repo
 
+Commit the `.erd-studio/` folder: that's your data model.
+
 ```text
 .erd-studio/
-├── layers.json
-├── tables/
-│   ├── dim_customer.yml   ← one YAML per table, shared by every diagram
-│   └── fct_order.yml
-└── silver/
-    └── orders.json        ← one JSON per diagram, with its layout
+├── README.md                     ← what the folders are
+├── layers.json                   ← your layers, in order
+└── gold/                         ← a layer (silver, gold, …)
+    ├── tables/
+    │   └── gold/                 ← a schema
+    │       ├── dim_customer.dbml ← one file per table, shared by every diagram
+    │       └── fct_order.dbml
+    ├── relationships/
+    │   └── gold.dbml             ← one Ref line per relationship
+    └── diagrams/
+        └── orders.dbml           ← the tables a diagram shows, and where they sit
 ```
 
-```yaml
-# .erd-studio/tables/fct_order.yml
-name: fct_order
-grain: "One row per order"
-columns:
-  - name: order_id
-    dataType: "INTEGER"
-    isPrimaryKey: true
+```dbml
+// .erd-studio/gold/tables/gold/fct_order.dbml
+Table gold.fct_order [
+  role: 'transaction-fact',
+  grain: 'One row per order'
+] {
+  Note: 'Customer orders from the shop and the app.'
+
+  order_id    BIGINT          [pk]
+  customer_id BIGINT          [foreign_key: 'true']
+  order_total "DECIMAL(12,2)" [additive_type: 'additive']
+}
 ```
 
-Edit on the canvas or in the files, by hand or with AI, and the other follows. Every file has a JSON Schema for completion ([file format reference](docs/semantic-domain-json-reference.md)).
+Edit on the canvas or in the files, by hand or with AI, and the other follows. ERD Studio's edits are byte-preserving: your comments and hand edits stay. The diagram file keeps the positions ([file format reference](docs/semantic-domain-json-reference.md)). Layers, schema folders, diagrams and relationships files fit how your team works: [modelling patterns](docs/modelling-patterns.md) maps eight warehouse layouts, from medallion and Kimball to Data Vault and data mesh, each with an example project.
+
+Have a YAML/JSON project from before 2.0? It keeps working. [Common questions](docs/faq.md) covers converting it to DBML.
 
 ## Work with your AI assistant
 
-Run **ERD Studio: Set Up My AI Helper** (also on the Welcome tab). It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:
+In the ERD Studio sidebar, under **Help & Feedback**, click **Set Up My AI Helper**. It finds the assistants on your computer and teaches them ERD Studio's files. Then ask:
 
 > Propose a star schema for orders in ERD Studio, with grain, keys and design rationale. Let me review the diagram before we write any SQL.
 
-Its changes are file edits you review like any other. The helper also adds a guided setup (`/erd-studio-setup`) that designs a first diagram with you, or builds one from dbt. See [AI assistants](docs/ai-assistants.md).
+Its changes are file edits you review like any other. The helper also adds a guided setup (`/erd-studio-setup`) that designs a first diagram with you. See [AI assistants](docs/ai-assistants.md).
 
 ## Using dbt?
 
-Open the folder that holds your `dbt_project.yml` and ERD Studio also reads dbt. The canvas gets two tabs, **Logical** (your design) · **Physical** (read from dbt):
-
-- **ERD Studio: Draw from dbt…** turns your dbt models into a first diagram in under a minute, no AI needed.
-- The read-only **Physical** tab shows what dbt has, from your schema YAMLs (plus `manifest.json` and `catalog.json` when present). **⊕ Diff** highlights missing columns, type differences and relationship mismatches.
-
-<table align="center"><tr>
-<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play the getting-started video (1:00): install ERD Studio, open your dbt project, click Draw from dbt and get a laid-out diagram of your models, no AI needed. Click to watch." /></a></td>
-<td><strong>dbt project to diagram in a minute (1:00).</strong> Draw from dbt, then compare Logical with Physical.</td>
-</tr></table>
-
-No dbt project to hand? Run **ERD Studio: Try the Sample Project** ([on GitHub](https://github.com/liam-machine/erd-studio-sample)). [Using ERD Studio with dbt](docs/dbt.md) covers the rest. Another stack? [Propose an integration](https://github.com/liam-machine/erd-studio/issues).
+dbt is optional. Open the folder that holds your `dbt_project.yml` and the start screen leads with **Import from dbt**, which turns your dbt models into a first diagram to refine by hand or with your AI assistant. The canvas gets two tabs, **Logical** (your design) · **Physical** (read from dbt), and **Compare with dbt** highlights missing columns, type differences and relationship mismatches. No dbt project to hand? Run **ERD Studio: Try the Sample Project**. [Using ERD Studio with dbt](docs/dbt.md) covers the rest. Another stack? [Propose an integration](https://github.com/liam-machine/erd-studio/issues).
 
 ## Learn more
 
-- [Using ERD Studio with dbt](docs/dbt.md)
-- [AI assistants](docs/ai-assistants.md)
-- [DBML import and export](docs/leaving-erd-studio.md)
-- [Choosing the project folder](docs/project-folder.md)
+- [Common questions](docs/faq.md): upgrading to 2.0 and everyday tasks
+- [Bring in the data model you already have](docs/import-existing-models.md) · [DBML import and export](docs/leaving-erd-studio.md)
+- [Modelling patterns](docs/modelling-patterns.md), with eight [example projects](docs/examples/)
+- [AI assistants](docs/ai-assistants.md) · [Using ERD Studio with dbt](docs/dbt.md) · [Choosing the project folder](docs/project-folder.md)
 - [File format reference](docs/semantic-domain-json-reference.md) and [glossary](docs/glossary.md)
 - Bug or idea? Run **ERD Studio: Send Feedback**, or [open an issue](https://github.com/liam-machine/erd-studio/issues).
-
-## Star history
-
-<a href="https://star-history.com/#liam-machine/erd-studio&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" />
-    <img alt="Star history chart for liam-machine/erd-studio" src="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" />
-  </picture>
-</a>

@@ -12,22 +12,40 @@
   "domain-one-to-many.host": [],
   "domain-one-to-many.unified": [],
   "duplicate-key.host": [
-    "warn: [LogicalModelService] Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
+    "warn: [LogicalModelService] <root>/.erd-studio/logical-models/dim_customer.yml:4: Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
   ],
   "duplicate-key.unified": [
-    "warn: [LogicalModelService] Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
+    "warn: [LogicalModelService] <root>/.erd-studio/logical-models/dim_customer.yml:4: Model \"dim_customer\": \"description\" is written twice in one block (line 4); the last value is used"
   ],
   "errors.array.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/array.json does not contain a JSON object"
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/silver/array.json does not contain a JSON object."
   ],
   "errors.badlayer.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold"
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold."
   ],
   "errors.conflict-models.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/conflict-models.json has unresolved git merge conflicts (first at line 9). Resolve them in the file — if only positions conflict, either side is safe to keep."
   ],
   "errors.conflict-positions.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/conflict-positions.json has unresolved git merge conflicts (first at line 12). Resolve them in the file — if only positions conflict, either side is safe to keep."
+  ],
+  "errors.dbml-conflict.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/diagrams/dbml-conflict.dbml has unresolved git merge conflicts (first at line 7). Resolve them in the file — if only the layout conflicts, either side is safe to keep."
+  ],
+  "errors.dbml-future.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/diagrams/dbml-future.dbml has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension."
+  ],
+  "errors.dbml-legacy.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: gold/old.dbml was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. Run erd-studio doctor in the project for the steps to convert it again. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."
+  ],
+  "errors.dbml-not-a-diagram.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: <root>/.erd-studio/silver/tables/silver/dim_customer.dbml is a DBML table or relationships file, not a diagram. Open a diagram in silver/diagrams/. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."
+  ],
+  "errors.dbml-syntax.host": [
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/diagrams/dbml-syntax.dbml is invalid-dbml — re-reading in 150ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/diagrams/dbml-syntax.dbml is invalid-dbml — re-reading in 350ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/diagrams/dbml-syntax.dbml is invalid-dbml — re-reading in 700ms (likely mid-write)",
+    "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/diagrams/dbml-syntax.dbml has a mistake at line 6, column 1: Expect a closing brace '}' [1005]."
   ],
   "errors.empty.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 150ms (likely mid-write)",
@@ -36,10 +54,10 @@
     "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/empty.json has no content."
   ],
   "errors.future.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/future.json has schemaVersion 7 but this extension only supports up to version 6. Please update the extension."
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/silver/future.json has schemaVersion 7 but this extension only supports up to version 6. Please update the extension."
   ],
   "errors.hybrid.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/hybrid.json mixes inline table objects with table name references (or declares schemaVersion 5 with inline tables). Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to repair it, or edit the file so every entry in \"logical.models\" is a table name string."
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/silver/hybrid.json mixes inline table objects with table name references (or declares schemaVersion 5 with inline tables). Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to repair it, or edit the file so every entry in \"logical.models\" is a table name string."
   ],
   "errors.invalid.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/invalid.json is invalid-json — re-reading in 150ms (likely mid-write)",
@@ -48,30 +66,32 @@
     "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/invalid.json has a mistake at line 4, column 20: a comma is missing after this value."
   ],
   "errors.legacy.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/legacy.json uses a pre-v4 layout (schemaVersion < 4 or a top-level \"models\" array) that is no longer supported. Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to convert it, or move \"models\"/\"relationships\" under a \"logical\" section and set \"schemaVersion\" to 5."
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/silver/legacy.json uses a pre-v4 layout (schemaVersion < 4 or a top-level \"models\" array) that is no longer supported. Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to convert it, or move \"models\"/\"relationships\" under a \"logical\" section and set \"schemaVersion\" to 5."
   ],
   "errors.noversion.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
+    "error: [SemanticEditorProvider] Failed to load domain: Subject area file .erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field."
   ],
   "library-relationships.host": [],
   "library-relationships.unified": [],
   "missing-model.host": [
-    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
-    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "warn: [DomainService] Model \"dim_missing\" not found in the table library",
+    "error: [LogicalModelService] <root>/.erd-studio/logical-models/broken.yml:5:3: Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
-    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+    "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],
   "missing-model.unified": [
-    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
-    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "warn: [DomainService] Model \"dim_missing\" not found in the table library",
+    "error: [LogicalModelService] <root>/.erd-studio/logical-models/broken.yml:5:3: Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
     "warn: [DomainService] Model \"broken\": logical-models file has a YAML error on line 5",
-    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+    "warn: [DomainService] Model \"nameless\" not found in the table library"
   ],
   "missing-positions.host": [],
   "missing-positions.persist": [],
   "missing-positions.unified": [],
   "no-layers.host": [],
   "no-layers.unified": [],
+  "rationale-and-meta.host": [],
+  "rationale-and-meta.unified": [],
   "showcase.host": [],
   "showcase.stage-logical": [],
   "showcase.unified": [],

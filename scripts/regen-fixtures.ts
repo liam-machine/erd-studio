@@ -1,7 +1,8 @@
 /**
  * Regenerates test fixture harness files from the source generators.
  *
- * Usage (from the repo root; the bundle must sit in scripts/ so __dirname resolves):
+ * Usage (from the repo root): `npm run regen-fixtures`, which runs
+ * (the bundle must sit in scripts/ so __dirname resolves):
  *   npx esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs \
  *     --loader:.md=text --outfile=scripts/.regen-fixtures.cjs && node scripts/.regen-fixtures.cjs
  * (not tsx: the harness imports the setup skill's markdown as text, which only esbuild's
@@ -11,10 +12,16 @@
  * to the fixture dbt-project. No VS Code dependency required.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import { HarnessService } from '../src/services/harnessService';
 
 const FIXTURE_ROOT = path.resolve(__dirname, '../test/fixtures/dbt-project');
+// install() also writes the setup skill and the permission file; the fixture
+// tracks only .claude/skills/erd-studio/, so anything else it adds is removed.
+const EXTRAS = ['.claude/skills/erd-studio-setup', '.claude/settings.local.json']
+  .map((p) => path.join(FIXTURE_ROOT, p))
+  .filter((p) => !fs.existsSync(p));
 
 const service = new HarnessService();
 const result = service.install(
@@ -32,5 +39,7 @@ if (!result.success) {
   console.error('Failed to regenerate fixtures:', result.error);
   process.exit(1);
 }
+
+for (const p of EXTRAS) fs.rmSync(p, { recursive: true, force: true });
 
 console.log('Regenerated fixture harness files');

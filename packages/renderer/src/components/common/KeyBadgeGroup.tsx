@@ -20,7 +20,11 @@ export interface KeyBadgeGroupProps {
   onTogglePK?: () => void;
   onToggleFK?: () => void;
   onToggleNK?: () => void;
-  /** Show warning icon if multiple PKs exist in the model. */
+  /**
+   * Show a warning icon on a PK badge. Deprecated: several primary-key
+   * columns are one composite key (`indexes { (a, b) [pk] }`), never a fault,
+   * so the detail panel no longer sets it; kept for callers that pass it.
+   */
   showMultiplePKWarning?: boolean;
 }
 

@@ -1,0 +1,15 @@
+{
+  "name": "Billing Document Type Code",
+  "dataType": "string",
+  "sourceColumn": "billing_document_type_code",
+  "sortByColumn": "Doc. Type Ordinal",
+  "displayFolder": "2. Keys",
+  "lineageTag": "e9a08be0-7588-41c4-bc84-7d10ed0d5d0f",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

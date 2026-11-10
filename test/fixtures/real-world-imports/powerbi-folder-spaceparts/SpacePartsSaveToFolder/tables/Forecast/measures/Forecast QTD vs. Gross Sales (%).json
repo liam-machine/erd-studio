@@ -1,0 +1,14 @@
+{
+  "name": "Forecast QTD vs. Gross Sales (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [Forecast QTD]",
+    "VAR _DELTA  = [Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "Measures\\iii. QTD",
+  "lineageTag": "5fc59186-997c-4890-a18b-97e7662b0667"
+}

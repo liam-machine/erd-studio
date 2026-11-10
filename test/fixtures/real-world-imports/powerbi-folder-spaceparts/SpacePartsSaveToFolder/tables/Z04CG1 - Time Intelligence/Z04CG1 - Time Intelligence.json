@@ -1,0 +1,75 @@
+{
+  "name": "Z04CG1 - Time Intelligence",
+  "isHidden": true,
+  "lineageTag": "06d80604-395e-436b-8758-bf365cf9f944",
+  "calculationGroup": {
+    "precedence": 4,
+    "calculationItems": [
+      {
+        "name": "Daily",
+        "expression": [
+          "",
+          "SELECTEDMEASURE()"
+        ],
+        "ordinal": 0
+      },
+      {
+        "name": "MTD",
+        "expression": [
+          "",
+          "CALCULATE (",
+          "    SELECTEDMEASURE (), ",
+          "    CALCULATETABLE (",
+          "        DATESMTD ('Date'[Date]),",
+          "        'Date'[IsDateInScope]",
+          "    )",
+          ")"
+        ],
+        "ordinal": 1
+      },
+      {
+        "name": "QTD",
+        "expression": [
+          "",
+          "CALCULATE (",
+          "    SELECTEDMEASURE (), ",
+          "    CALCULATETABLE (",
+          "        DATESQTD ('Date'[Date]),",
+          "        'Date'[IsDateInScope]",
+          "    )",
+          ")"
+        ],
+        "ordinal": 2
+      },
+      {
+        "name": "YTD",
+        "expression": [
+          "",
+          "VAR _YTD =",
+          "    CALCULATE (",
+          "        SELECTEDMEASURE (),",
+          "        CALCULATETABLE (",
+          "            DATESYTD ('Date'[Date]),",
+          "            'Date'[IsDateInScope]",
+          "        )",
+          "    )",
+          "VAR _FULL_YTD =",
+          "    CALCULATE (SELECTEDMEASURE (), DATESYTD ('Date'[Date]))",
+          "RETURN",
+          "    IF (",
+          "        SEARCH (\"Actuals\", SELECTEDMEASURENAME (), , 999) <> 999,",
+          "        _YTD,",
+          "        _FULL_YTD",
+          "    )"
+        ],
+        "ordinal": 3
+      }
+    ]
+  },
+  "annotations": [
+    {
+      "name": "TabularEditor_Relationships",
+      "value": "[]"
+    }
+  ]
+}

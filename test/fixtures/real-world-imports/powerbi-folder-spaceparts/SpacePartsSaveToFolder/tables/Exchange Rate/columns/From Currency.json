@@ -1,0 +1,14 @@
+{
+  "name": "From Currency",
+  "dataType": "string",
+  "sourceColumn": "from_currency",
+  "displayFolder": "1. Select a Currency",
+  "lineageTag": "ee8bbaa9-0b3e-42bf-9d01-d907458159bc",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

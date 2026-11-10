@@ -1,0 +1,16 @@
+{
+  "name": "Actuals",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Blank],",
+    "    TREATAS (",
+    "        DISTINCT ('2) Selected Unit'[Select a Unit]),",
+    "        'Z02CG1 - Unit'[Unit]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Total\\Actuals",
+  "lineageTag": "0a6cef3d-e27e-4055-a718-50e2e16947d2"
+}

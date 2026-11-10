@@ -1,0 +1,229 @@
+{
+  "id": "draft-small-1",
+  "source": "sqlDdl",
+  "title": "Draft: sales",
+  "banner": {
+    "headline": "Draft from 4 SQL files (PostgreSQL) · 3 tables, 2 relationships · not saved",
+    "detail": "Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml).",
+    "keepLabel": "Keep as Diagram",
+    "primary": "keep",
+    "changeOptions": true,
+    "shownStarts": []
+  },
+  "otherStarts": [
+    {
+      "id": "blank",
+      "label": "New Diagram…"
+    },
+    {
+      "id": "import",
+      "label": "Import…"
+    },
+    {
+      "id": "guide",
+      "label": "Bring In Your Data Model…"
+    },
+    {
+      "id": "example",
+      "label": "Open an Example…"
+    }
+  ],
+  "summary": {
+    "tables": 3,
+    "relationships": 2,
+    "newTables": 3,
+    "reusedTables": 0,
+    "changedTables": 0,
+    "schemas": [
+      {
+        "schema": "sales",
+        "tables": 3
+      }
+    ],
+    "notes": 2,
+    "leftOut": 1
+  },
+  "display": {
+    "schemaVersion": 5,
+    "domain": "sales",
+    "layer": "main",
+    "stage": "logical",
+    "description": "",
+    "models": [
+      {
+        "name": "customers",
+        "schema": "sales",
+        "description": "",
+        "columns": [
+          {
+            "name": "customer_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "name",
+            "dataType": "varchar(200)",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "orders",
+        "schema": "sales",
+        "description": "",
+        "columns": [
+          {
+            "name": "order_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "product_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "products",
+        "schema": "sales",
+        "description": "",
+        "columns": [
+          {
+            "name": "product_id",
+            "dataType": "bigint",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "title",
+            "dataType": "text",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "orders",
+        "fromColumn": "customer_id",
+        "toModel": "customers",
+        "toColumn": "customer_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "orders",
+        "fromColumn": "product_id",
+        "toModel": "products",
+        "toColumn": "product_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "customers": {
+          "x": 0,
+          "y": 0
+        },
+        "orders": {
+          "x": 420,
+          "y": 0
+        },
+        "products": {
+          "x": 840,
+          "y": 0
+        }
+      }
+    },
+    "readOnly": true,
+    "positionDraggable": false
+  },
+  "autoLayout": false,
+  "logicalOnly": true,
+  "panelOpen": false,
+  "details": [
+    {
+      "id": "tables",
+      "title": "Tables",
+      "items": [
+        {
+          "text": "2 columns",
+          "path": "sales.customers",
+          "tag": "new"
+        },
+        {
+          "text": "3 columns",
+          "path": "sales.orders",
+          "tag": "new"
+        },
+        {
+          "text": "2 columns",
+          "path": "sales.products",
+          "tag": "new"
+        }
+      ]
+    },
+    {
+      "id": "relationships",
+      "title": "Relationships",
+      "items": [
+        {
+          "text": "orders.customer_id → customers.customer_id (many to one)"
+        },
+        {
+          "text": "orders.product_id → products.product_id (many to one)"
+        }
+      ]
+    },
+    {
+      "id": "leftOut",
+      "title": "Left out",
+      "items": [
+        {
+          "text": "CREATE VIEW is not a table",
+          "path": "sql/views.sql",
+          "tag": "left out"
+        }
+      ],
+      "hint": "Views, indexes and other statements are not tables."
+    },
+    {
+      "id": "notes",
+      "title": "Notes",
+      "items": [
+        {
+          "text": "<img src=x onerror=\"alert(1)\"> renamed to img_src",
+          "path": "sql/odd.sql"
+        },
+        {
+          "text": "orders.customer_id was taken as a key of customers"
+        }
+      ]
+    }
+  ]
+}

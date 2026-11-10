@@ -1,0 +1,408 @@
+/*
+ * The draft preview page (webview-draft/). BEM classes, colours only from the
+ * renderer's theme.css tokens (and the --vscode-* variables they map).
+ * Loaded after theme.css.
+ */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.draft-app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.draft-app--loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.draft-app__loading {
+  color: var(--dim-fg);
+}
+
+.draft-app__body {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* --- Banner -------------------------------------------------------------- */
+
+.draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+}
+
+/* Wide enough for a headline and a diagram path on one line each: past it the
+   controls wrap onto their own row rather than squeeze the text. */
+.draft-banner__text {
+  flex: 1 1 600px;
+  min-width: 0;
+}
+
+.draft-banner__headline {
+  margin: 0 0 4px;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+.draft-banner__detail,
+.draft-banner__links,
+.draft-banner__notice {
+  margin: 2px 0;
+}
+
+.draft-banner__detail,
+.draft-banner__counts,
+.draft-banner__separator {
+  color: var(--dim-fg);
+}
+
+.draft-banner__notice {
+  color: var(--warning-fg);
+}
+
+.draft-banner__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.draft-banner__link:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.draft-banner__link:disabled {
+  color: var(--dim-fg);
+  cursor: default;
+  text-decoration: none;
+}
+
+.draft-banner__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.draft-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.draft-banner__status {
+  color: var(--dim-fg);
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+
+.draft-button {
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.draft-button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.draft-button--primary:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+
+.draft-button--secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.draft-button--secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.draft-button--quiet {
+  background: none;
+  color: var(--vscode-textLink-foreground);
+}
+
+.draft-button--quiet:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.draft-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.draft-button:focus-visible,
+.draft-banner__link:focus-visible,
+.draft-menu__item:focus-visible,
+.draft-schemas__item:focus-visible,
+.draft-schemas__toggle:focus-visible,
+.draft-drawer__close:focus-visible,
+.draft-scope__select:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+/* --- Switcher ------------------------------------------------------------ */
+
+.draft-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.draft-scope__label {
+  color: var(--dim-fg);
+}
+
+.draft-scope__select {
+  padding: 3px 6px;
+  border: 1px solid var(--input-border);
+  background: var(--vscode-dropdown-background, var(--input-bg));
+  color: var(--vscode-dropdown-foreground, var(--input-fg));
+  font: inherit;
+}
+
+/* --- More ways to start ------------------------------------------------- */
+
+.draft-menu {
+  position: relative;
+}
+
+.draft-menu__caret {
+  margin-left: 6px;
+}
+
+.draft-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid var(--vscode-menu-border, var(--panel-border));
+  background: var(--vscode-menu-background, var(--panel-bg));
+  color: var(--vscode-menu-foreground, var(--editor-fg));
+}
+
+.draft-menu__item {
+  display: block;
+  width: 100%;
+  padding: 4px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.draft-menu__item:hover,
+.draft-menu__item:focus {
+  background: var(--vscode-menu-selectionBackground, var(--selection-bg));
+  color: var(--vscode-menu-selectionForeground, var(--editor-fg));
+}
+
+/* --- Schema panel -------------------------------------------------------- */
+
+.draft-schemas {
+  flex: 0 0 auto;
+  width: 32px;
+  overflow: hidden auto;
+  border-right: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+}
+
+.draft-schemas--open {
+  width: 220px;
+}
+
+.draft-schemas__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px 6px 10px;
+}
+
+.draft-schemas__title {
+  font-weight: 600;
+}
+
+.draft-schemas__toggle {
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--editor-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.draft-schemas__showing {
+  margin: 0 10px 6px;
+  color: var(--dim-fg);
+}
+
+.draft-schemas__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-schemas__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px;
+  border: none;
+  background: none;
+  color: var(--editor-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.draft-schemas__item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.draft-schemas__item--selected {
+  background: var(--vscode-list-activeSelectionBackground, var(--selection-bg));
+  color: var(--vscode-list-activeSelectionForeground, var(--editor-fg));
+}
+
+.draft-schemas__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-schemas__count {
+  color: var(--dim-fg);
+}
+
+/* --- Canvas -------------------------------------------------------------- */
+
+.draft-canvas {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+.draft-canvas__erd {
+  flex: 1 1 0;
+}
+
+.draft-canvas__placeholder {
+  margin: auto;
+  color: var(--dim-fg);
+}
+
+/* --- Details drawer ------------------------------------------------------ */
+
+.draft-drawer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: 45%;
+  border-left: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+}
+
+.draft-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.draft-drawer__heading {
+  font-weight: 600;
+}
+
+.draft-drawer__close {
+  border: none;
+  background: none;
+  color: var(--editor-fg);
+  font-size: 1.2em;
+  cursor: pointer;
+}
+
+.draft-drawer__body {
+  flex: 1 1 0;
+  overflow: auto;
+  padding: 4px 10px 12px;
+}
+
+.draft-drawer__title {
+  margin: 12px 0 4px;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.draft-drawer__count,
+.draft-drawer__hint {
+  color: var(--dim-fg);
+}
+
+.draft-drawer__hint {
+  margin: 0 0 4px;
+}
+
+.draft-drawer__items {
+  margin: 0;
+  padding: 0 0 0 16px;
+}
+
+.draft-drawer__item {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-drawer__path {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.draft-drawer__tag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 0.9em;
+}
+
+.draft-drawer__more {
+  margin-top: 4px;
+}

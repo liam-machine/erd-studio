@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import fs from 'fs';
 import path from 'path';
+// The same reader esbuild.js uses for the extension bundle's `__ERD_EXAMPLES__`.
+import { exampleBundleDefine } from './scripts/exampleBundle.cjs';
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')) as { version: string };
 // The workspace packages resolve to their TypeScript source here, the same way
@@ -9,6 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 
 // Exact-match regexes, so e.g. `@erd-studio/renderer/styles.css` is not caught.
 const alias = [
   { find: 'vscode', replacement: path.resolve(__dirname, 'test/__mocks__/vscode.ts') },
+  { find: /^@erd-studio\/core\/dbml$/, replacement: path.resolve(__dirname, 'packages/core/src/dbml/index.ts') },
   { find: /^@erd-studio\/core$/, replacement: path.resolve(__dirname, 'packages/core/src/index.ts') },
   { find: /^@erd-studio\/renderer$/, replacement: path.resolve(__dirname, 'packages/renderer/src/index.ts') },
   {
@@ -29,9 +32,11 @@ export default defineConfig({
       },
     },
   ],
-  // Mirrors the CLI bundle's esbuild `define` (esbuild.js, cliConfig).
+  // Mirrors the esbuild `define`s: the CLI bundle's version (cliConfig) and
+  // the extension bundle's example projects (extensionConfig).
   define: {
     __ERD_CLI_VERSION__: JSON.stringify(pkg.version),
+    __ERD_EXAMPLES__: exampleBundleDefine(),
   },
   test: {
     globals: true,

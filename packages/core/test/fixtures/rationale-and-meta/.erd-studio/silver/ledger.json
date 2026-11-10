@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 5,
+  "domain": "ledger",
+  "layer": "silver",
+  "description": "Rationale and meta as model files held them before context fields",
+  "logical": {
+    "models": [
+      "dim_account",
+      "fct_balance"
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_balance",
+        "fromColumn": "account_key",
+        "toModel": "dim_account",
+        "toColumn": "account_key",
+        "cardinality": "many-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_account": { "x": 0, "y": 0 },
+      "fct_balance": { "x": 400, "y": 0 }
+    }
+  }
+}

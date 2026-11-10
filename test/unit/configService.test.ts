@@ -7,6 +7,8 @@
  * user configured under dbtSemantic.<key>.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { USER_SCOPED_SETTINGS, getErdStudioSetting } from '../../src/services/configService';
@@ -134,6 +136,28 @@ describe('getErdStudioSetting: user-scoped feedback keys', () => {
       expect(getErdStudioSetting(key, 'unset')).toBe('unset');
     });
   }
+
+  // A cloned repo must not be able to turn off Claude Code's permission
+  // prompts for Execute with Claude by shipping a .vscode/settings.json.
+  it('ignores a workspace or folder claudeSync.skipPermissions and honours the user\'s own', () => {
+    vscode._setMockConfiguration('erdStudio', 'claudeSync.skipPermissions', { workspaceValue: true, workspaceFolderValue: true });
+    expect(getErdStudioSetting('claudeSync.skipPermissions', false)).toBe(false);
+    vscode._setMockConfiguration('erdStudio', 'claudeSync.skipPermissions', { globalValue: true, workspaceValue: false });
+    expect(getErdStudioSetting('claudeSync.skipPermissions', false)).toBe(true);
+  });
+
+  // The two halves CLAUDE.md names: "scope": "machine" in package.json, and the list.
+  it('lists exactly the settings package.json contributes as machine-scoped', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
+      contributes: { configuration: { properties: Record<string, { scope?: string }> } | Array<{ properties: Record<string, { scope?: string }> }> };
+    };
+    const sections = [pkg.contributes.configuration].flat();
+    const machine = sections.flatMap((s) => Object.entries(s.properties))
+      .filter(([, v]) => v.scope === 'machine')
+      .map(([k]) => k.replace(/^erdStudio\./, ''))
+      .sort();
+    expect(machine).toEqual([...USER_SCOPED_SETTINGS].sort());
+  });
 
   it('leaves every other setting on the folder > workspace > global order', () => {
     set('erdStudio', { globalValue: 'g', workspaceValue: 'w' });

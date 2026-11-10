@@ -1,0 +1,23 @@
+relationship 5e6f7a8b-0001-4000-8000-000000000001
+	fromColumn: Sales.CustomerKey
+	toColumn: Customer.CustomerKey
+
+relationship 5e6f7a8b-0002-4000-8000-000000000002
+	crossFilteringBehavior: bothDirections
+	fromColumn: Sales.ProductKey
+	toColumn: Product.ProductKey
+
+relationship 5e6f7a8b-0003-4000-8000-000000000003
+	fromColumn: Sales.OrderDateKey
+	toColumn: 'Date Table'.DateKey
+
+relationship 5e6f7a8b-0004-4000-8000-000000000004
+	isActive: false
+	fromColumn: Sales.ShipDateKey
+	toColumn: 'Date Table'.DateKey
+
+relationship 5e6f7a8b-0005-4000-8000-000000000005
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Sales.OrderDate
+	toColumn: 'LocalDateTable_8f1c2d3e-4b5a-4c6d-9e8f-0a1b2c3d4e5f'.Date
+

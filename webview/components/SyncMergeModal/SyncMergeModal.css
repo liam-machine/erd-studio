@@ -123,7 +123,7 @@
   padding: 0 8px;
 }
 
-.sync-modal__toolbar-toggle {
+.sync-modal__toolbar-btn {
   padding: 3px 10px;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
@@ -137,16 +137,15 @@
   white-space: nowrap;
 }
 
-.sync-modal__toolbar-toggle:hover {
+.sync-modal__toolbar-btn:hover:not(:disabled) {
   opacity: 1;
   background: var(--selection-bg);
 }
 
-.sync-modal__toolbar-toggle--active {
-  opacity: 1;
-  background: var(--button-bg);
-  color: var(--button-fg);
-  border-color: var(--button-bg);
+/* Reset with nothing decided yet */
+.sync-modal__toolbar-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .sync-modal__bulk-btn {
@@ -556,6 +555,21 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   background: var(--selection-bg);
 }
 
+/* Pressed: every item of the table keeps this side (click again to clear). */
+.sync-modal__model-bulk-btn--logical.sync-modal__model-bulk-btn--selected {
+  opacity: 1;
+  background: var(--stage-logical, #60a5fa);
+  border-color: var(--stage-logical, #60a5fa);
+  color: var(--button-fg, #fff);
+}
+
+.sync-modal__model-bulk-btn--physical.sync-modal__model-bulk-btn--selected {
+  opacity: 1;
+  background: var(--stage-physical, #22c55e);
+  border-color: var(--stage-physical, #22c55e);
+  color: var(--button-fg, #fff);
+}
+
 /* ---------------------------------------------------------------------------
    Item cell text elements
    --------------------------------------------------------------------------- */
@@ -622,6 +636,28 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   color: var(--editor-fg);
+}
+
+/* Column and relationship item cells: badge + label on one line that never
+   leaves its column. The label shrinks and ends in an ellipsis (its title
+   holds the full text) instead of running under the stage buttons. */
+.sync-modal__cell--item {
+  overflow: hidden;
+}
+
+.sync-modal__item-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sync-modal__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Relationship labels — structured with hierarchy */
@@ -801,57 +837,6 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 .sync-modal__footer .disc-panel__sync-footer {
   padding: 10px 16px;
-}
-
-/* ---------------------------------------------------------------------------
-   Resolved section — collapsed summary at bottom of table
-   --------------------------------------------------------------------------- */
-
-.sync-modal__resolved-section-header {
-  cursor: pointer;
-  border-top: 2px solid var(--panel-border);
-  transition: background 0.15s ease;
-}
-
-.sync-modal__resolved-section-header:hover {
-  background: var(--selection-bg);
-}
-
-.sync-modal__resolved-section-cell {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sync-modal__resolved-section-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  cursor: pointer;
-  opacity: 0.6;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.sync-modal__resolved-section-badge {
-  font-size: 13px;
-  color: var(--stage-physical, #22c55e);
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.sync-modal__resolved-section-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--editor-fg);
-  opacity: 0.6;
 }
 
 /* ---------------------------------------------------------------------------

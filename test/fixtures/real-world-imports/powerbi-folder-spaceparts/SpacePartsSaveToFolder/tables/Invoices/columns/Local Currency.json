@@ -1,0 +1,16 @@
+{
+  "name": "Local Currency",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "local_currency",
+  "sourceProviderType": "nvarchar(max)",
+  "displayFolder": "Columns",
+  "lineageTag": "cb9f4c47-d859-423b-b802-c8a178d57440",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

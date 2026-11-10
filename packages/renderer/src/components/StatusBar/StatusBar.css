@@ -1,0 +1,105 @@
+/**
+ * StatusBar styles.
+ *
+ * Positioned at bottom-left of the canvas, beside the legend's ? button (the
+ * extension's editor and the viewer). Theme tokens only (styles/theme.css).
+ */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  margin-left: 40px; /* Leave room for the legend ? button */
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--editor-fg);
+  opacity: 0.85;
+}
+
+.status-bar__item {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* "5 tables | 4 relationships": one group that never wraps (in the editor's
+   row it reads exactly as three separate items with the same gap). */
+.status-bar__counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.status-bar__divider {
+  color: var(--panel-border);
+}
+
+/* The key to the tables' layers: a swatch in each layer's colour, its name and how many tables. */
+.status-bar__layers {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-bar__layer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The layer's abbreviation, as the table headers badge it. */
+.status-bar__badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.5;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/*
+ * The viewer: clear of the legend's ? button (15px panel margin + 28px
+ * button + a gap), never under the minimap (200px wide, 15px margin), and
+ * beside the open legend (260px at most) rather than behind it. The counts
+ * and the layer key are two rows that never break inside an item, with no
+ * divider between them, and the box is only as wide as its widest row.
+ */
+.status-bar--viewer {
+  margin-left: 51px;
+  max-width: calc(100% - 51px - 231px);
+  flex-direction: column;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  row-gap: 2px;
+}
+
+.status-bar--viewer .status-bar__divider--layers {
+  display: none;
+}
+
+.status-bar--viewer.status-bar--beside-legend {
+  margin-left: 283px;
+  max-width: calc(100% - 283px - 231px);
+}
+
+.status-bar--viewer .status-bar__layers {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* Beside the open legend there is no room for the counts on a canvas under
+   about 720px wide (283px legend + 231px minimap + the counts): they hide
+   until the legend closes. The canvas root is the size container
+   (`ErdCanvas`), so this follows the canvas, not the window. */
+@container (max-width: 719px) {
+  .status-bar--viewer.status-bar--beside-legend {
+    display: none;
+  }
+}

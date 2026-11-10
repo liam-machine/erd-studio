@@ -340,3 +340,35 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* "Will be stored in …": the file a new relationship goes to (DBML). */
+.new-fk-dialog__stored-in {
+  padding: 0 16px 8px;
+  font-size: 11px;
+  color: var(--dim-fg);
+  overflow-wrap: anywhere;
+}
+
+/* How to give the schema a relationships file of its own (only under its layer's shared file). */
+.new-fk-dialog__stored-in-hint {
+  margin-top: 2px;
+}
+
+/* "Stored in": a choice of the layer's relationships files (DBML, two or more). */
+.new-fk-dialog__stored-in--choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-fk-dialog__stored-in-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__stored-in-select {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+}

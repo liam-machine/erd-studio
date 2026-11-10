@@ -1,0 +1,16 @@
+name: dim_payment_method
+schema: retail
+description: Ways customers pay
+grain: One row per payment method
+modelRole: reference
+columns:
+  - name: payment_method_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: method_name
+    dataType: VARCHAR
+    description: "Card, cash, gift card…"
+  - name: provider
+    dataType: VARCHAR
+    description: Payment provider

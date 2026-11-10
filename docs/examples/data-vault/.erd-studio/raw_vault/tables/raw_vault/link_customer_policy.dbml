@@ -1,0 +1,9 @@
+Table raw_vault.link_customer_policy [vault_type: 'link'] {
+  Note: 'Which customers hold which policies.'
+
+  customer_policy_hk BINARY    [pk, note: 'Hash of customer_bk and policy_bk']
+  customer_hk        BINARY    [foreign_key: 'true']
+  policy_hk          BINARY    [foreign_key: 'true']
+  load_datetime      TIMESTAMP [note: 'When the row was loaded']
+  record_source      STRING    [note: 'The system the row came from']
+}

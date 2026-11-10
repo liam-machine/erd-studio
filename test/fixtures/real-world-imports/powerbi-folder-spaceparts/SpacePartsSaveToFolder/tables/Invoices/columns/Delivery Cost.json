@@ -1,0 +1,20 @@
+{
+  "name": "Delivery Cost",
+  "dataType": "double",
+  "isHidden": true,
+  "sourceColumn": "delivery_cost",
+  "sourceProviderType": "float",
+  "displayFolder": "Columns",
+  "lineageTag": "9ecb1ae0-6e98-45f6-a75d-f14fa567fb57",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

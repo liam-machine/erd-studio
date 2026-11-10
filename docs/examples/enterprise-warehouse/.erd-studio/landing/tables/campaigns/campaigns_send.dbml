@@ -1,0 +1,11 @@
+Table campaigns.campaigns_send [owner: 'data-engineering'] {
+  Note: 'Messages the marketing platform sent, and whether the customer responded.'
+
+  send_id       STRING    [pk, natural_key: 'true']
+  campaign_code STRING
+  customer_no   STRING
+  channel       STRING
+  sent_at       TIMESTAMP
+  responded     BOOLEAN
+  _loaded_at    TIMESTAMP [note: 'When the loader landed the row']
+}

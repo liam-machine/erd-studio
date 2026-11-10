@@ -19,6 +19,17 @@ describe('parseArgs', () => {
     expect(opts).toMatchObject({ command: 'diff', json: true, domains: ['a.json', 'b.json'], project: 'p', strict: true });
   });
 
+  it('takes --diagram, and --domain as its older name, into one list', () => {
+    expect(parseArgs(['export', '--diagram', 'a.dbml', '--format', 'dbml'])).toMatchObject({ command: 'export', domains: ['a.dbml'] });
+    expect(parseArgs(['diff', '--diagram=a.dbml', '--domain', 'b.json']).domains).toEqual(['a.dbml', 'b.json']);
+  });
+
+  it('documents --diagram in the usage text and keeps --domain as its alias', async () => {
+    const { USAGE } = await import('../../src/cli/args');
+    expect(USAGE).toContain('(--diagram <path> | --all)');
+    expect(USAGE).toMatch(/--domain <path> is the same/);
+  });
+
   it('defaults', () => {
     expect(parseArgs(['doctor'])).toMatchObject({ command: 'doctor', semanticDir: '.erd-studio', json: false, noDbt: false });
     expect(parseArgs([]).command).toBe('help');
@@ -39,8 +50,10 @@ describe('parseArgs', () => {
     [['doctor', '--nope'], /Unknown option --nope/],
     [['doctor', '--strict'], /not an option of "doctor"/],
     [['inventory', '--all'], /not an option of "inventory"/],
-    [['diff'], /--domain <path> or --all/],
-    [['diff', '--all', '--domain', 'x'], /either --domain or --all/],
+    [['diff'], /--diagram <path> or --all/],
+    [['diff', '--all', '--diagram', 'x'], /either --diagram or --all/],
+    [['inventory', '--diagram', 'x'], /not an option of "inventory"/],
+    [['diff', '--all', '--domain', 'x'], /either --diagram or --all/],
     [['diff', '--domain'], /needs a value/],
     [['diff', '--all=yes'], /does not take a value/],
     [['doctor', 'diff'], /Unexpected argument/],

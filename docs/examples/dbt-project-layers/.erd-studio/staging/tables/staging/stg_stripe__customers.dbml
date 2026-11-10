@@ -1,0 +1,10 @@
+// models/staging/stripe/stg_stripe__customers.sql: the source system is the folder in dbt and the
+// stg_<source>__ prefix here, since every staging model builds into the staging schema.
+Table staging.stg_stripe__customers [grain: 'One row per Stripe customer'] {
+  Note: 'Stripe customers, renamed and cast.'
+
+  customer_id    STRING [pk, natural_key: 'true', note: 'Stripe customer id']
+  email          STRING
+  app_account_id STRING [note: 'Set by checkout; matches the app\'s account id']
+  created_at     TIMESTAMP
+}

@@ -16,15 +16,15 @@ const fakes = vi.hoisted(() => {
   const state = {
     workers: [] as FakeWorker[],
     elkInstances: 0,
-    layoutImpl: (): Promise<unknown> => new Promise(() => {}), // never settles by default
+    layoutImpl: (_graph?: unknown): Promise<unknown> => new Promise(() => {}), // never settles by default
   };
   class FakeELK {
     constructor(opts: { workerFactory: () => FakeWorker }) {
       state.elkInstances++;
       opts.workerFactory();
     }
-    layout(): Promise<unknown> {
-      return state.layoutImpl();
+    layout(graph: unknown): Promise<unknown> {
+      return state.layoutImpl(graph);
     }
   }
   return { FakeWorker, FakeELK, state };
@@ -32,7 +32,7 @@ const fakes = vi.hoisted(() => {
 
 vi.mock('elkjs/lib/elk-api', () => ({ default: fakes.FakeELK }));
 
-import { runElkLayout, LAYOUT_TIMEOUT_MS } from '../../webview/lib/elkLayout';
+import { runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow } from '../../webview/lib/elkLayout';
 import type { TableFlowNode } from '@erd-studio/renderer/editor';
 
 const node: TableFlowNode = {
@@ -101,6 +101,37 @@ describe('runElkLayout worker guard', () => {
     fakes.state.layoutImpl = () => Promise.resolve({ id: 'root', children: [] });
     await runElkLayout([node], []);
     expect(fakes.state.elkInstances).toBe(instancesBefore + 1);
+  });
+
+  // A 257-table import: NETWORK_SIMPLEX overflowed the worker's stack and the
+  // canvas showed "Auto layout failed: Maximum call stack size exceeded".
+  it('retries once with Brandes–Köpf node placement when the layout overflows the stack', async () => {
+    const graphs: Array<{ layoutOptions: Record<string, string> }> = [];
+    fakes.state.layoutImpl = (graph) => {
+      graphs.push(graph as { layoutOptions: Record<string, string> });
+      return graphs.length === 1
+        ? Promise.reject(new RangeError('Maximum call stack size exceeded'))
+        : Promise.resolve({ id: 'root', children: [{ id: 'a', x: 1, y: 2 }] });
+    };
+    expect(await runElkLayout([node], [])).toEqual({ a: { x: 1, y: 2 } });
+    expect(graphs.map((g) => g.layoutOptions['elk.layered.nodePlacement.strategy'])).toEqual(['NETWORK_SIMPLEX', STACK_SAFE_NODE_PLACEMENT]);
+    // Everything else is the same layout.
+    const { ['elk.layered.nodePlacement.strategy']: _a, ...first } = graphs[0].layoutOptions;
+    const { ['elk.layered.nodePlacement.strategy']: _b, ...second } = graphs[1].layoutOptions;
+    expect(second).toEqual(first);
+  });
+
+  it('a second overflow, or another error, is not retried', async () => {
+    let calls = 0;
+    fakes.state.layoutImpl = () => { calls++; return Promise.reject(new RangeError('Maximum call stack size exceeded')); };
+    await expect(runElkLayout([node], [])).rejects.toThrow('Maximum call stack size exceeded');
+    expect(calls).toBe(2);
+    calls = 0;
+    fakes.state.layoutImpl = () => { calls++; return Promise.reject(new Error('cycle detected')); };
+    await expect(runElkLayout([node], [])).rejects.toThrow('cycle detected');
+    expect(calls).toBe(1);
+    expect(isStackOverflow(new Error('too much recursion'))).toBe(true);
+    expect(isStackOverflow(new Error('ELK layout timed out after 30s'))).toBe(false);
   });
 
   it('propagates ordinary layout rejections without killing the worker', async () => {

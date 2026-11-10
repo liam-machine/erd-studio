@@ -22,6 +22,7 @@
   --syn-key: #78c0f4; --syn-val: #eca86c; --syn-str: #a4d0a8; --syn-kw: #c490e8; --syn-punc: #8b9099;
   --prog-on: #e9ecef; --prog-off: #292a30; --link: #3794ff;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --chip: #1c1e23; --chip-border: #34363d; --chip-green: #13301f; --chip-green-border: #1f6b3a;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -46,6 +47,22 @@ svg { display: block; }
 .chapters__bar i { display: block; height: 100%; background: var(--prog-on); }
 .chapters__lbl { margin-top: 16px; font-size: 22px; font-weight: 700; letter-spacing: .06em; color: var(--text-3); white-space: nowrap; }
 .chapters__lbl--on { color: var(--text); }
+/* A recorded cut (main.js adds body.rec): the headline and chapter bar make room for the real
+   VS Code window at the timeline's recording.inset (y 240-960). */
+/* ...and is light, to match VS Code's Light Modern it is filmed in: off-white, dark text, the
+   accents darkened enough to read on it (main.js ACCENT_LIGHT for the headline's highlight). */
+body.rec {
+  --bg-0: #eceff3; --bg-1: #f6f7f9; --bg-glow: #ffffff;
+  --card: #ffffff; --card-head: #f3f4f6; --card-border: #d0d7de; --card-inner: #f6f8fa; --row-line: #e5e7eb;
+  --text: #1f2328; --text-2: #57606a; --text-3: #8c959f; --line-no: #8c959f;
+  --blue: #2563eb; --green: #16a34a; --amber: #b45309;
+  --prog-on: #1f2328; --prog-off: #d5dae0; --link: #0969da;
+  --chip: #ffffff; --chip-border: #d0d7de; --chip-green: #e8f6ed; --chip-green-border: #9ad5ae;
+  background: radial-gradient(1400px 700px at 50% -10%, var(--bg-glow) 0%, var(--bg-1) 45%, var(--bg-0) 100%);
+}
+body.rec .kicker { top: 44px; }
+body.rec .headline { top: 84px; font-size: 62px; }
+body.rec .chapters { bottom: 40px; }
 .preview-hud { position: absolute; right: 12px; top: 8px; font: 500 16px var(--mono); color: #fff8; }
 
 /* ---------- generic ---------- */
@@ -67,6 +84,7 @@ svg { display: block; }
 .badge--fk { background: var(--fk-bg); color: var(--fk-fg); }
 .badge--gld { background: var(--gld-bg); color: var(--gld-fg); }
 .badge--slv { background: var(--slv-bg); color: var(--slv-fg); }
+.badge--main { background: #2e2f6b; color: #c7c9ff; }   /* Main: layers.json colour #6366f1 */
 .badge--only { background: var(--amber); color: #1a1405; }
 .icon { display: inline-block; flex: none; }
 
@@ -90,6 +108,11 @@ svg { display: block; }
 /* ---------- canvas toolbar (mirrors webview StageTabs + Diff) ---------- */
 .tb { position: absolute; display: flex; align-items: center; gap: 14px; padding: 10px 14px 10px 22px; background: var(--card-head); border: 1px solid var(--card-border); border-radius: 14px; font-size: 22px; white-space: nowrap; }
 .tb__domain { font-weight: 700; }
+/* A dbt project's toolbar: the controls row, then the stage tabs as their own pill centred under it (Toolbar.css .toolbar-container). */
+.tb-stack { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tb-stack > .tb--row { position: static; }
+.tb__tabs--row2 { background: var(--card-head); border-radius: 12px; padding: 5px 8px; gap: 4px; font-size: 20px; white-space: nowrap; }
+.tb__tabs--row2 .tb__tab { border-radius: 8px; padding: 6px 16px; }
 .tb__tabs { display: flex; border: 1px solid var(--card-border); border-radius: 10px; overflow: hidden; }
 .tb__tab { display: flex; align-items: center; gap: 8px; padding: 8px 18px; color: var(--text-2); }
 .tb__tab--logical { background: #2563eb; color: #fff; font-weight: 600; }
@@ -97,6 +120,9 @@ svg { display: block; }
 .tb__diff { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 10px; color: var(--text-2); border: 1px solid var(--card-border); }
 .tb__diff--amber { background: var(--amber); color: #1a1405; font-weight: 700; border-color: var(--amber); }
 .tb__diff--busy { background: #1b2a40; color: #cfe3ff; border-color: #2d4a70; }
+.tb__layer { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 20px; }
+.tb__hint { margin-left: 6px; font-size: 17px; opacity: .75; }
+.tb__glyph { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; color: var(--text-2); }
 .tb__diff--green { background: var(--green); color: #06210f; font-weight: 700; border-color: var(--green); }
 
 /* ---------- chat / terminal rows ---------- */

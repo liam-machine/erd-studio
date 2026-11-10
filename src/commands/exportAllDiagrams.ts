@@ -1,9 +1,8 @@
 /**
  * **Export All Diagrams…** (`erdStudio.exportAllDiagrams`) — every subject
  * area's logical (design) stage, one file each, into a folder the user picks:
- * format → folder → write. With DBML for dbdiagram.io (`dbml-rich`) each
- * `.dbml` gets its `.dbdiagram` layout file beside it, so the folder is
- * ready for `dbdiagram push`.
+ * format → folder → write. With rich DBML (`dbml-rich`) each `.dbml`
+ * carries its table positions in its Project's `erd_layout`.
  *
  * The files come from `exportSubjectAreaFiles` (`src/services/diagramExport.ts`),
  * the same read and the same names `erd-studio export --all` prints: one
@@ -26,6 +25,7 @@ import * as vscode from 'vscode';
 import type { DiagramExportFormat } from '@erd-studio/core';
 
 import {
+  OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
   classifyWriteFailure,
   describeDiagramFileProblem,
@@ -39,7 +39,9 @@ import {
 import type { ExportedFile, SubjectAreaFilesExport } from '../services/diagramExport';
 import { telemetry } from '../services/telemetryService';
 import type { SubjectAreaSummary } from '../types/semantic';
-import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE } from './exportDiagram';
+import { FORMAT_ITEMS, FORMAT_LABELS, NO_DIAGRAMS_MESSAGE, exportInsideSemanticDirMessage, isInsideFolder } from './exportDiagram';
+import { log } from '../services/logger';
+import { openTableFileAt } from './openModelFile';
 
 export const EXPORT_ALL_DIAGRAMS_COMMAND = 'erdStudio.exportAllDiagrams';
 
@@ -71,6 +73,8 @@ export interface ExportAllDiagramsUi {
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill. */
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
+  /** Open a file as text, the cursor at the 1-based line and column when given (#236). */
+  openFileAt(filePath: string, line?: number, column?: number): Promise<void>;
 }
 
 export interface ExportAllDiagramsDeps {
@@ -80,6 +84,8 @@ export interface ExportAllDiagramsDeps {
   exportAll: (domainPaths: readonly string[], format: DiagramExportFormat) => Promise<SubjectAreaFilesExport>;
   /** Where the folder picker starts (the project root). */
   defaultFolder?: string;
+  /** The semantic dir, absolute: a folder inside it is refused (§5.7), since files there are the diagrams' own storage. */
+  semanticRoot?: string;
   /** The dbt project root, which messages name files and folders relative to. */
   projectRoot?: string;
   ui?: ExportAllDiagramsUi;
@@ -128,7 +134,7 @@ function oursFailure(err: unknown, ui: ExportAllDiagramsUi, doing = 'while expor
 
 function showFailure(ui: ExportAllDiagramsUi, failure: ShownFailure): void {
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
-    console.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }
@@ -178,25 +184,43 @@ interface SkippedInWords {
   text: string;
   /** Not the file's fault: ERD Studio's, offered as a report. */
   ours?: unknown;
+  /** The user's file to fix, and opening it helps: Open File goes there (#236). */
+  open?: { line?: number; column?: number };
 }
 
 function describeSkipped(deps: ExportAllDiagramsDeps, exported: SubjectAreaFilesExport): SkippedInWords[] {
   return exported.skipped.map(({ domainPath, error }) => {
     const shown = deps.projectRoot ? projectRelative(deps.projectRoot, domainPath) : path.basename(domainPath);
     const problem = describeDiagramFileProblem(error, domainPath, shown);
-    return problem
-      ? { domainPath, text: `${shown} (${problem.reason})` }
-      : { domainPath, text: `${shown} (ERD Studio hit a problem reading it)`, ours: error };
+    if (!problem) return { domainPath, text: `${shown} (ERD Studio hit a problem reading it)`, ours: error };
+    return {
+      domainPath,
+      text: `${shown} (${problem.reason})`,
+      ...(problem.openable
+        ? { open: { ...(problem.line !== undefined ? { line: problem.line } : {}), ...(problem.column !== undefined ? { column: problem.column } : {}) } }
+        : {}),
+    };
   });
+}
+
+/**
+ * The buttons for skipped diagrams (#236): Open File at the first one the
+ * user can fix, and Send Feedback when a skip was ours.
+ */
+function skippedActions(ui: ExportAllDiagramsUi, skipped: readonly SkippedInWords[], doing: string): ErrorActions {
+  const openable = skipped.find((s) => s.open !== undefined);
+  const ours = skipped.find((s) => s.ours !== undefined);
+  return {
+    ...(openable ? { [OPEN_FILE_BUTTON]: () => ui.openFileAt(openable.domainPath, openable.open?.line, openable.open?.column) } : {}),
+    ...(ours ? { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)) } : {}),
+  };
 }
 
 /** Every domain was skipped: say why each, with a report when any failure was ours. */
 function nothingReadable(ui: ExportAllDiagramsUi, total: number, skipped: readonly SkippedInWords[]): ShownFailure {
-  const ours = skipped.find((s) => s.ours !== undefined);
-  const doing = 'while reading the diagrams';
   return {
     message: `None of the ${count(total, 'diagram')} could be exported, so nothing was written: ${listNames(skipped.map((s) => s.text))}.`,
-    actions: ours ? { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)) } : {},
+    actions: skippedActions(ui, skipped, 'while reading the diagrams'),
   };
 }
 
@@ -228,6 +252,14 @@ async function chooseFolderAndWrite(
   const folderUri = picked?.[0];
   if (!folderUri) { return cancelled(); }
   const folder = folderUri.fsPath;
+  if (deps.semanticRoot !== undefined && isInsideFolder(deps.semanticRoot, folder)) {
+    const outside = path.dirname(deps.semanticRoot);
+    showFailure(ui, {
+      message: exportInsideSemanticDirMessage(deps.semanticRoot),
+      actions: { [CHOOSE_ANOTHER_FOLDER_BUTTON]: () => retryFolder(deps, ui, format, exported, skipped, outside) },
+    });
+    return cancelled();
+  }
   const shownFolder = folderShown(deps, folder);
   const targets = exported.files.map((file) => ({ file, uri: vscode.Uri.file(path.join(folder, file.fileName)) }));
 
@@ -311,9 +343,7 @@ function reportDone(
   skipped: readonly SkippedInWords[],
   shownFolder: string,
 ): void {
-  const diagrams = files.filter((f) => f.kind === 'diagram').length;
-  const withLayout = files.some((f) => f.kind === 'layout') ? ', each with its table positions in a .dbdiagram file' : '';
-  const done = `Exported ${count(diagrams, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}${withLayout}.`;
+  const done = `Exported ${count(files.length, 'diagram')} as ${FORMAT_LABELS[format]} to ${shownFolder}.`;
   if (skipped.length === 0) {
     void ui.showInformationMessage(done);
     return;
@@ -322,14 +352,13 @@ function reportDone(
   // A skip that was ours is a failure of ours, though the rest was exported.
   if (ours) { telemetry.error('exportFailed'); }
   const message = `${done} Skipped ${count(skipped.length, 'diagram')} that couldn't be read: ${listNames(skipped.map((s) => s.text))}.`;
-  if (!ours) {
-    void ui.showWarningMessage(message);
-    return;
-  }
-  const doing = 'while reading a diagram';
-  void Promise.resolve(ui.showWarningMessage(message, SEND_FEEDBACK_BUTTON)).then((choice) => {
-    if (choice === SEND_FEEDBACK_BUTTON) { void ui.sendFeedback(feedbackPrefill(COMMAND_NAME, doing, ours.ours)); }
-  });
+  const actions = skippedActions(ui, skipped, 'while reading a diagram');
+  showErrorWithActions(
+    (m, ...items) => ui.showWarningMessage(m, ...items),
+    message,
+    actions,
+    (choice, err) => log.error(`[ERD Studio] ${EXPORT_ALL_TITLE}: "${choice}" failed:`, err),
+  );
 }
 
 function cancelled(): undefined {
@@ -349,5 +378,6 @@ export function vscodeExportAllUi(): ExportAllDiagramsUi {
     showWarningMessage: async (message, ...items) => vscode.window.showWarningMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
+    openFileAt: (filePath, line, column) => openTableFileAt(filePath, line, column),
   };
 }

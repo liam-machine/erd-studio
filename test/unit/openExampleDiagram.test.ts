@@ -66,7 +66,6 @@ function recorder(answers: { confirm?: boolean; layer?: string } = {}): Recorder
     dialogs: 0, reads: [], picks: [], inputs: [], confirms: [], opened: [], errors: [],
     pickFile: async () => { ui.dialogs++; return undefined; },
     readFile: async (filePath) => { ui.reads.push(filePath); throw new Error('read from disk'); },
-    exists: async () => true,
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[]) => {
       const ids = (items as unknown as Array<{ id: string }>).map((i) => i.id);
       ui.picks.push(ids);
@@ -155,6 +154,12 @@ describe('the example DBML', () => {
     expect(orders.columns.find((c) => c.name === 'customer_order_number')?.additiveType).toBe('non-additive');
     expect(orders.columns.find((c) => c.name === 'order_id')?.isNaturalKey).toBe(true);
     expect(byName.dim_customers.rationale?.scdStrategy).toContain('Type 1');
+    // Context fields: the choices are Decisions, never a retired field.
+    expect(byName.dim_products.rationale).toEqual({ decisions: expect.stringContaining('one hop deep') });
+    expect(byName.fct_order_items.rationale).toEqual({ decisions: expect.stringContaining('finest grain') });
+    for (const name of SAMPLE_TABLES) {
+      for (const retired of ['design', 'grainChoice', 'roleChoice']) expect(byName[name].rationale ?? {}, name).not.toHaveProperty(retired);
+    }
     expect(byName.dim_customers.columns.find((c) => c.name === 'customer_name')?.scdType).toBe(1);
     // Every relationship from a fact's FK column to a dimension's (or the order's) key.
     for (const rel of plan.relationships) {
@@ -168,27 +173,28 @@ describe('the example DBML', () => {
 });
 
 describe('Open Example Diagram', () => {
-  it('is a post-rename command with no legacy alias, registered after project resolution', () => {
+  it('is a post-rename command with no legacy alias, pre-registered: it opens the example draft in an empty window too', () => {
     expect(OPEN_EXAMPLE_DIAGRAM_COMMAND).toBe('erdStudio.openExampleDiagram');
     expect(NO_LEGACY_ALIAS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
-    // An empty window gets the fallback "Open a folder first" with Open Folder….
-    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(false);
+    // Draft-first §9: the same draft as Open an Example…, so it works before a folder is open.
+    expect(PRE_REGISTERED_COMMANDS.has(OPEN_EXAMPLE_DIAGRAM_COMMAND)).toBe(true);
   });
 
-  it('is contributed in the ERD Studio category and offered in the no-dbt sidebar welcome', () => {
+  it('is contributed in the ERD Studio category; the start surfaces offer the example projects instead', () => {
     const pkg = packageJson as unknown as {
       contributes: {
         commands: Array<{ command: string; title: string; category?: string }>;
         viewsWelcome: Array<{ view: string; contents: string; when?: string }>;
+        walkthroughs: Array<{ steps: Array<{ description: string }> }>;
       };
     };
+    // It adds the coffee-shop diagram to the open project; "Open an example" on the start
+    // surfaces opens a whole example project in a folder of its own (erdStudio.openExampleProject).
     expect(pkg.contributes.commands.find((c) => c.command === OPEN_EXAMPLE_DIAGRAM_COMMAND)).toEqual({
       command: OPEN_EXAMPLE_DIAGRAM_COMMAND, title: 'Open Example Diagram', category: 'ERD Studio',
     });
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasProject && !erdStudio.hasDbtProject')!;
-    expect(plain.contents).toContain('New to data modelling? [Open Example Diagram](command:erdStudio.openExampleDiagram)');
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject')!;
-    expect(dbt.contents).not.toContain('openExampleDiagram');
+    const surfaces = [...pkg.contributes.viewsWelcome.map((v) => v.contents), ...pkg.contributes.walkthroughs[0].steps.map((s) => s.description)];
+    expect(surfaces.filter((text) => text.includes(OPEN_EXAMPLE_DIAGRAM_COMMAND))).toEqual([]);
   });
 
   it('in a plain folder: name box, dry run, then .erd-studio/ with layers.json, the tables and the diagram, opened', async () => {
@@ -197,7 +203,8 @@ describe('Open Example Diagram', () => {
 
     const result = await openExampleDiagram(deps(ui));
 
-    const domainPath = erd(EXAMPLE_LAYER, 'coffee-shop.json');
+    // A new project stores the example as DBML (native DBML storage, §3.2).
+    const domainPath = erd(EXAMPLE_LAYER, 'diagrams', 'coffee-shop.dbml');
     expect(result?.domainPath).toBe(domainPath);
     // No Open dialog, no layer pick (the default layers have gold), no read from disk.
     expect(ui.dialogs).toBe(0);
@@ -205,18 +212,27 @@ describe('Open Example Diagram', () => {
     expect(ui.reads).toEqual([]);
     expect(ui.inputs).toEqual(['coffee-shop']);
     expect(ui.confirms).toHaveLength(1);
-    expect(ui.confirms[0].message).toBe('Import 6 tables into a new diagram "coffee-shop" in the Gold layer.');
+    expect(ui.confirms[0].message).toBe('Import 6 tables and 8 relationships into a new diagram "coffee-shop" in the Gold layer.');
     expect(ui.confirms[0].detail).toContain('8 relationships');
     expect(ui.confirms[0].detail).toContain('laid out automatically');
     expect(ui.confirms[0].detail).not.toContain('Left out');
     expect(ui.errors).toEqual([]);
     expect(ui.opened).toEqual([domainPath]);
-    // A project with no library yet writes the table naming (#182), in a layer folder.
+    // A project with no library yet writes DBML (§3.2) in the layer-first tree: the tables in gold/tables/gold/
+    // (layer gold, schema gold), the Refs in gold's relationships file, and the README a new project starts with.
     expect(erdFiles()).toEqual([
-      'gold/coffee-shop.json',
+      'README.md',
+      'gold/diagrams/coffee-shop.dbml',
+      'gold/relationships/gold.dbml',
+      ...SAMPLE_TABLES.map((t) => `gold/tables/gold/${t}.dbml`).sort(),
       'layers.json',
-      ...SAMPLE_TABLES.map((t) => `tables/gold/${t}.yml`).sort(),
     ]);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^Table gold\.fct_orders \[/m);
+    // The table files spell every field bare (context fields): no rationale_ prefix on disk.
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'fct_orders.dbml'), 'utf-8')).toMatch(/^ {2}measures: 'Amounts and counts are additive/m);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'dim_products.dbml'), 'utf-8')).toMatch(/^ {2}decisions: 'Supply details/m);
+    expect(fs.readFileSync(erd('gold', 'tables', 'gold', 'dim_customers.dbml'), 'utf-8')).toMatch(/^ {2}scd_strategy: 'Type 1/m);
+    for (const t of SAMPLE_TABLES) expect(fs.readFileSync(erd('gold', 'tables', 'gold', `${t}.dbml`), 'utf-8'), t).not.toContain('rationale_');
     // Counted as the example only: the Import DBML counts stay the user's own files.
     expect(features()).toEqual(['exampleDiagram']);
   });
@@ -229,7 +245,7 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
     expect(ui.inputs).toEqual(['coffee-shop-2']);
     expect(result?.plan.reusedTables).toEqual(SAMPLE_TABLES);
-    expect(ui.confirms[0].detail).toContain('Already in your Table Library');
+    expect(ui.confirms[0].detail).toContain('6 tables already in your Table Library (from the Gold layer), used as they are');
   });
 
   it('cancelled at the dry run: nothing written, not counted as an example', async () => {
@@ -258,7 +274,8 @@ describe('Open Example Diagram', () => {
     await vi.waitFor(() => expect(ui.opened).toEqual([erd(EXAMPLE_LAYER, 'coffee-shop.json')]));
     expect(ui.errors).toEqual(['A diagram named "taken" already exists in the Gold layer.']);
     expect(ui.reads).toEqual([]);
-    expect(features()).toEqual(['exampleDiagram']);
+    // The name taken is the project's state (importStopNameTaken); the example itself is counted once.
+    expect(features()).toEqual(['importStopNameTaken', 'exampleDiagram']);
   });
 
   it('a project without a gold layer is asked for one, as any import is', async () => {
@@ -273,17 +290,21 @@ describe('Open Example Diagram', () => {
     services();
     const ui = recorder({ layer: 'marts' });
     const result = await openExampleDiagram(deps(ui));
-    expect(ui.picks).toEqual([['staging', 'marts']]);
-    expect(result?.domainPath).toBe(erd('marts', 'coffee-shop.json'));
+    // New Diagram's default for a first diagram (the last creatable layer) first: Enter takes it.
+    expect(ui.picks).toEqual([['marts', 'staging']]);
+    // A project with no tables yet writes DBML (§3.2).
+    expect(result?.domainPath).toBe(erd('marts', 'diagrams', 'coffee-shop.dbml'));
+    expect(fs.existsSync(erd('marts', 'tables', 'marts', 'fct_orders.dbml'))).toBe(true);
   });
 
-  it('exampleDbmlUi reads only the example and finds no layout next to it', async () => {
+  it('exampleDbmlUi reads only the example, which has no erd_layout', async () => {
     const base = recorder();
     const examplePath = path.join(tmp, EXAMPLE_DBML_FILE_NAME);
     const ui = exampleDbmlUi(base, examplePath);
     expect(await ui.pickFile(tmp)).toBe(examplePath);
     expect(await ui.readFile(examplePath)).toBe(EXAMPLE_DBML);
-    expect(await ui.exists(path.join(tmp, 'coffee-shop.dbdiagram'))).toBe(false);
+    expect(ui).not.toHaveProperty('exists');
+    expect(EXAMPLE_DBML).not.toContain('erd_layout');
     await expect(ui.readFile(path.join(tmp, 'other.dbml'))).rejects.toThrow('read from disk');
   });
 });

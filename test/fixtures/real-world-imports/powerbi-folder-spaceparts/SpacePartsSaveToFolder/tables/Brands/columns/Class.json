@@ -1,0 +1,14 @@
+{
+  "name": "Class",
+  "dataType": "string",
+  "sourceColumn": "class",
+  "displayFolder": "1. Brand Hierarchy",
+  "lineageTag": "e3b11f72-6c3d-4151-a219-5df0d87c75ab",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

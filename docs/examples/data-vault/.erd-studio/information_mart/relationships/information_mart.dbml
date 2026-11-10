@@ -1,0 +1,9 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table shared.dim_date }               from '../tables/shared/dim_date.dbml'
+use { table underwriting.dim_customer }     from '../tables/underwriting/dim_customer.dbml'
+use { table underwriting.dim_policy }       from '../tables/underwriting/dim_policy.dbml'
+use { table underwriting.fct_policy_month } from '../tables/underwriting/fct_policy_month.dbml'
+
+Ref: underwriting.fct_policy_month.customer_key >? underwriting.dim_customer.customer_key
+Ref: underwriting.fct_policy_month.month_date_key >? shared.dim_date.date_key
+Ref: underwriting.fct_policy_month.policy_key >? underwriting.dim_policy.policy_key

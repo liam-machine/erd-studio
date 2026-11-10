@@ -80,6 +80,12 @@ export type ColumnAction =
 
 export interface ColumnResolution {
   modelName: string;
+  /**
+   * The column's name. On an `add-column-to-logical` for a column neither the
+   * schema yml nor the manifest declares (only `catalog.json` reports it), the
+   * spelling to write: an ALL-CAPS warehouse name lowercased, as Import from dbt
+   * seeds it (`LOADED_AT` → `loaded_at`). Compare matches names in any case.
+   */
   columnName: string;
   discrepancyStatus: 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
   groundTruth: GroundTruth;
@@ -127,6 +133,14 @@ export interface RelationshipResolution {
   compositeKey?: string;
   /** An `extra` composite the target does not declare as one (see `RelationshipDiscrepancy.composite`). */
   composite?: true;
+  /**
+   * The DBML relationships file that holds this relationship now,
+   * project-relative (`.erd-studio/gold/relationships/gold.dbml`): where a
+   * removal or a cardinality change is made, in place. Absent when no
+   * relationships file holds it (a YAML table, or a relationship only the
+   * physical side has). Optional, additive in `.sync-plan.json`.
+   */
+  storedIn?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +151,21 @@ export interface TableContext {
   modelName: string;
   /** Relative path to the logical model YAML (e.g. .erd-studio/logical-models/dim_customer.yml). */
   logicalModelPath: string;
-  /** Relative path to the dbt SQL file (from manifest originalFilePath). Null if not in manifest. */
+  /**
+   * Where a NEW Ref of this DBML foreign-key table goes, project-relative
+   * (`.erd-studio/gold/relationships/gold.dbml`): the relationships file
+   * holding most of its Refs, else its layer's default file (which may not
+   * exist yet). A Ref already stored is edited where `storedIn` says. Absent
+   * for a YAML table.
+   */
+  relationshipsPath?: string;
+  /**
+   * The model's `.sql` file, project-relative, only when it is on disk (the
+   * manifest's `original_file_path`, else `<name>.sql` found under the model
+   * paths). Null when there is none: a model declared only in a schema yml, a
+   * Python model, or a file deleted, renamed or moved outside the model
+   * paths since the last compile.
+   */
   dbtSqlPath: string | null;
   /** Relative path to the dbt schema YAML. Null if not determinable. */
   dbtSchemaPath: string | null;
@@ -168,6 +196,12 @@ export interface SyncPlan {
   relationships: RelationshipResolution[];
   /** True if any action targets the physical side (dbt files), meaning dbt compile is needed after. */
   requiresCompile: boolean;
+  /**
+   * Tables whose file does not read: their column and relationship entries
+   * are left out, since they only reflect the failed read. Fix each file and
+   * compare again. Absent when every table read.
+   */
+  unreadableTables?: string[];
 }
 
 // ---------------------------------------------------------------------------

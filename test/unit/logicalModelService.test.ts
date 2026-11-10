@@ -1741,6 +1741,70 @@ describe('TableLibraryService — YAML anchors, aliases and text a save did not 
       .toBe('name: fct_order\nmeta:\n  owners:\n    # who\n    - ana\n    - bo\n');
   });
 
+  describe('the rationale: map holds every built-in text field (context fields, A11)', () => {
+    it('writes a new field into an existing rationale: map, camelCase', () => {
+      expect(save('name: fct_order\nrationale:\n  purpose: Track orders\n', (m) => {
+        m.rationale = { ...m.rationale, decisions: 'Kept returns as negative lines.' };
+      })).toBe('name: fct_order\nrationale:\n  purpose: Track orders\n  decisions: Kept returns as negative lines.\n');
+    });
+
+    it('writes and clears every catalogue rationale key, in catalogue order for a new map', () => {
+      const out = save('name: fct_order\n', (m) => {
+        m.rationale = {
+          retention: 'Seven years', openQuestions: 'Do refunds count?', sourceOfTruth: 'SAP',
+          freshness: 'Hourly', knownIssues: 'Duplicates before 2021', purpose: 'Track orders', decisions: 'Lines, not orders',
+        };
+      });
+      expect(out).toBe([
+        'name: fct_order',
+        'rationale:',
+        '  purpose: Track orders',
+        '  decisions: Lines, not orders',
+        '  openQuestions: Do refunds count?',
+        '  sourceOfTruth: SAP',
+        '  freshness: Hourly',
+        '  knownIssues: Duplicates before 2021',
+        '  retention: Seven years',
+        '',
+      ].join('\n'));
+      expect(read(out).rationale).toEqual({
+        purpose: 'Track orders', decisions: 'Lines, not orders', openQuestions: 'Do refunds count?',
+        sourceOfTruth: 'SAP', freshness: 'Hourly', knownIssues: 'Duplicates before 2021', retention: 'Seven years',
+      });
+      const cleared = save(out, (m) => {
+        const { openQuestions: _o, retention: _r, ...rest } = m.rationale!;
+        m.rationale = rest;
+      });
+      expect(cleared).not.toContain('openQuestions');
+      expect(cleared).not.toContain('retention');
+      expect(cleared).toContain('  knownIssues: Duplicates before 2021\n');
+    });
+
+    it('keeps a key it does not manage when the last managed key is cleared', () => {
+      const out = save('name: fct_order\nrationale:\n  purpose: x\n  notes: y # by hand\n', (m) => {
+        delete m.rationale;
+      });
+      expect(out).toBe('name: fct_order\nrationale:\n  notes: y # by hand\n');
+    });
+
+    it('keeps a rationale: map of keys it does not manage through an unrelated edit', () => {
+      const yml = 'name: fct_order\nrationale:\n  notes: y\n  why_not: z\n';
+      expect(save(yml, (m) => { m.description = 'Orders'; })).toBe(`${yml}description: Orders\n`);
+    });
+
+    it('removes the rationale: map only when nothing is left in it', () => {
+      expect(save('name: fct_order\nrationale:\n  purpose: x\n  decisions: y\n', (m) => { delete m.rationale; }))
+        .toBe('name: fct_order\n');
+    });
+
+    it('reads snake_case keys inside rationale: as unknown keys, kept and never written over', () => {
+      const yml = 'name: fct_order\nrationale:\n  open_questions: by hand\n';
+      expect(read(yml).rationale?.openQuestions).toBeUndefined();
+      expect(save(yml, (m) => { m.rationale = { openQuestions: 'canvas' }; }))
+        .toBe('name: fct_order\nrationale:\n  open_questions: by hand\n  openQuestions: canvas\n');
+    });
+  });
+
   it('writes a role the reader did not take as text, though it looks the same', () => {
     // `role: true` is a YAML boolean: core reads no role from it. Setting the
     // role "true" on the canvas must write the text, not leave the boolean.

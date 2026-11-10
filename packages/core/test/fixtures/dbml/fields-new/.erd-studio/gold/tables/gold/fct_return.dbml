@@ -1,0 +1,27 @@
+// Both spellings at once (a pre-release edit beside a 2.0 one), the new
+// built-in fields, a team field kept under a reserved name, and settings
+// that are never fields.
+Table gold.fct_return [
+  role: 'transaction-fact',
+  purpose: 'Returns, bare',
+  rationale_purpose: 'Returns, old',
+  decisions: 'Returns are their own fact, not negative sales',
+  open_questions: '',
+  rationale_open_questions: 'Do exchanges count as returns?',
+  source_of_truth: 'POS',
+  owner: 'returns-team',
+  meta_owner: 'returns-old',
+  rationale_sla: 'Next day',
+  meta_purpose: 'kept as metadata, never the built-in',
+  meta_note: 'a team key named like a DBML setting',
+  color: 'never a field',
+  open questions: 'never a field either'
+] {
+  return_id  BIGINT  [pk]
+  store_key  INT     [foreign_key: 'true', purpose: 'a column field of its own', rationale_owner: 'old team', owner: 'new team']
+  reason     VARCHAR [meta_json: '{"pii":true,"reviewed":"no"}', reviewed: 'yes']
+}
+
+Metadata Table gold.fct_return {
+  known_issues: 'Late returns arrive a week after the sale'
+}

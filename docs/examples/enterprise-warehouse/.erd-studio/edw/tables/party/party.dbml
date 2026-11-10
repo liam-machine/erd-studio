@@ -1,0 +1,15 @@
+// A normalised enterprise warehouse (Inmon), by subject area: party, arrangement, product, event, location.
+// Each fact is stored once, so these tables are narrow and joined by keys; the marts denormalise them for reporting.
+Table party.party [
+  grain: 'One row per party: a person or an organisation the bank deals with',
+  decisions: 'One party table for people and organisations, so a customer, a guarantor and a company director are all parties, with person and organisation holding what only one kind has.',
+  owner: 'customer-data'
+] {
+  Note: 'Anyone the bank deals with: customers, guarantors, companies and their directors.'
+
+  party_id           BIGINT [pk, note: 'The enterprise id, the same in every subject area']
+  party_type         STRING [note: 'person or organisation']
+  source_customer_no STRING [natural_key: 'true', note: 'The core banking CIF']
+  valid_from         TIMESTAMP
+  valid_to           TIMESTAMP
+}

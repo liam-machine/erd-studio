@@ -76,7 +76,9 @@ function makeProvider(models: SemanticTable[]) {
     ensureDir: () => {},
     getTablesDir: () => '/ws/.erd-studio/logical-models',
     groupsByFolder: () => false,
+    yamlTableFolderFor: () => undefined,
     invalidateCache: () => {},
+    invalidatePaths: () => {},
   };
   vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(true);
   const provider = new SemanticEditorProvider(

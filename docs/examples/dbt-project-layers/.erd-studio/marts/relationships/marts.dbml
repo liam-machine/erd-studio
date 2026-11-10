@@ -1,0 +1,11 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table marts.customers }       from '../tables/marts/customers.dbml'
+use { table marts.invoices }        from '../tables/marts/invoices.dbml'
+use { table marts.monthly_revenue } from '../tables/marts/monthly_revenue.dbml'
+use { table marts.users }           from '../tables/marts/users.dbml'
+
+Ref: marts.invoices.customer_id >? marts.customers.customer_id
+
+Ref: marts.monthly_revenue.customer_id >? marts.customers.customer_id
+
+Ref: marts.users.customer_id >? marts.customers.customer_id

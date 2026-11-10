@@ -1,0 +1,16 @@
+{
+  "name": "Customer Key",
+  "dataType": "string",
+  "isHidden": true,
+  "sourceColumn": "customer_key",
+  "sourceProviderType": "nvarchar(max)",
+  "displayFolder": "Columns",
+  "lineageTag": "c4c2e629-13f0-49bd-a155-6b4ab02847e1",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

@@ -33,6 +33,8 @@ export interface Project { root: string; tableLibraryService: TableLibraryServic
 
 export function materialise(w: World): Project {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-statespace-'));
+  // A YAML project (an empty logical-models/ is YAML evidence): a new project would write DBML (§3.2).
+  fs.mkdirSync(path.join(root, SEMANTIC_DIR, 'logical-models'), { recursive: true });
   const layerService = new LayerService(root, SEMANTIC_DIR);
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(root, SEMANTIC_DIR);

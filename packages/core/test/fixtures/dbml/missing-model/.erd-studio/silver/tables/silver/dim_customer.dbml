@@ -1,0 +1,5 @@
+Table silver.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR [note: 'Display name']
+  Note: 'Customers'
+}

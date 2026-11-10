@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "source_aligned",
+      "label": "Source-aligned",
+      "abbreviation": "SRC",
+      "color": "#0ea5e9",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "aggregate",
+      "label": "Aggregate",
+      "abbreviation": "AGG",
+      "color": "#8b5cf6",
+      "creatable": true,
+      "order": 2
+    },
+    {
+      "id": "consumer_aligned",
+      "label": "Consumer-aligned",
+      "abbreviation": "CON",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 3
+    }
+  ]
+}

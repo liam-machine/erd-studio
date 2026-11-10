@@ -3,7 +3,11 @@
  *
  * Renders a `DisplaySubjectArea` the way the VS Code extension's canvas shows a
  * read-only domain: model nodes, FK edges, annotations, the minimap, the
- * detail panel a click on a model opens, and the legend. There are no editing
+ * detail panel a click on a model opens, the legend (only the entries the
+ * stage shown can draw) and, beside its button, the table and relationship
+ * counts. Closing the detail panel keeps the table selected, its
+ * relationships lit; a click on the empty canvas, or Escape, clears the
+ * selection. There are no editing
  * affordances (the canvas runs in viewer mode) and nothing is ever sent
  * anywhere.
  *
@@ -17,6 +21,14 @@
  * edges attached to a moved node re-pick their sides live,
  * `onLayoutModifiedChange` reports whether the layout differs from the
  * domain's, and `resetLayout()` (through a ref) puts everything back.
+ *
+ * Resting the pointer on a table previews what it connects to (the rest of
+ * the diagram fades) and the relationship lines of the hovered or clicked
+ * table carry moving direction arrows (`useHoverFocus`). Both are local,
+ * ephemeral presentation: nothing is posted and no prop is needed.
+ *
+ * Relationship lines are routed around the tables in one of two styles,
+ * `lineStyle` `curved` (the default) or `hops`; the reader cannot change it.
  *
  * Derived from the extension webview's `EditorCanvas` (`webview/App.tsx`),
  * keeping its React Flow configuration.
@@ -39,6 +51,7 @@ import {
   SelectionMode,
   applyNodeChanges,
   useNodesInitialized,
+  useStoreApi,
   type NodeChange,
 } from '@xyflow/react';
 import type { DisplayColumn, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
@@ -51,6 +64,7 @@ import {
 } from './store/editorStore';
 import { CanvasEnvironmentProvider, NOOP_CANVAS_HOST } from './host/canvasEnvironment';
 import { useCanvasGraph } from './canvas/useCanvasGraph';
+import { useHoverFocus } from './canvas/useHoverFocus';
 import { CanvasBackdrop } from './canvas/CanvasBackdrop';
 import { canvasNodeTypes, canvasEdgeTypes } from './canvas/flowTypes';
 import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
@@ -58,6 +72,15 @@ import { repickHandleSides } from './lib/dragHandleSides';
 import type { GraphNode, GraphEdge } from './lib/nodeOverlays';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { Legend } from './components/Legend/Legend';
+import { StatusBar } from './components/StatusBar/StatusBar';
+import { DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
+
+/**
+ * The canvas the reader last clicked, pointed at or focused. An Escape with
+ * nothing focused clears only its selection, so with several canvases on a
+ * page one Escape never clears them all.
+ */
+let lastActiveCanvas: HTMLElement | null = null;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -76,6 +99,21 @@ export interface ErdCanvasProps {
   onLayoutModifiedChange?: (modified: boolean) => void;
   /** Called once, when the first nodes have been measured and fitted into view. */
   onReady?: () => void;
+  /**
+   * Draw the diagram of a project with no dbt project: no stage colours on
+   * tables, lines or the selection ring (the layer badge carries the colour)
+   * and no Physical, ghost or comparison entries in the legend. Default
+   * false: the stage colours, as before.
+   */
+  logicalOnly?: boolean;
+  /**
+   * How relationship lines are drawn. Both route the lines around the tables:
+   * `curved` (the default) with soft curves, a halo where two lines cross and
+   * a faint dashed "x-ray" where a line has to pass under a table; `hops`
+   * with square corners and a small hop where two lines cross. Anything else
+   * reads as `curved`.
+   */
+  lineStyle?: LineStyle;
   className?: string;
   style?: CSSProperties;
 }
@@ -180,11 +218,15 @@ function ErdCanvasInner({
   nodesDraggable = false,
   onLayoutModifiedChange,
   onReady,
+  logicalOnly = false,
+  lineStyle: lineStyleProp,
   className,
   style,
   handleRef,
 }: ErdCanvasInnerProps) {
   const storeApi = useEditorStoreApi();
+  const flowApi = useStoreApi();
+  const containerRef = useRef<HTMLDivElement>(null);
   const domain = useEditorStore((s) => s.domain);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
@@ -198,6 +240,19 @@ function ErdCanvasInner({
       storeApi.getState().setDomain(domainProp);
     }
   }, [domainProp, storeApi]);
+
+  // The logical-only look follows the prop (the legend reads it from the store).
+  useEffect(() => {
+    if (storeApi.getState().logicalOnly !== logicalOnly) {
+      storeApi.setState({ logicalOnly });
+    }
+  }, [logicalOnly, storeApi]);
+
+  // The line style follows the prop.
+  const lineStyle = isLineStyle(lineStyleProp) ? lineStyleProp : DEFAULT_LINE_STYLE;
+  useEffect(() => {
+    storeApi.getState().setLineStyle(lineStyle);
+  }, [lineStyle, storeApi]);
 
   // Latest callbacks, so a parent passing new closures re-runs nothing.
   const onLayoutModifiedChangeRef = useRef(onLayoutModifiedChange);
@@ -255,6 +310,41 @@ function ErdCanvasInner({
   );
 
   const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ onTransformed });
+
+  // Escape clears the selection, as a click on the empty canvas does (the
+  // panel may already be closed, with the table still selected). Only when
+  // the key is pressed in the canvas, or with nothing focused (focus fell
+  // back to the page) and this is the canvas the reader last used, so it
+  // never takes Escape from the rest of the page or from another canvas.
+  useEffect(() => {
+    const container = containerRef.current;
+    const markActive = () => {
+      lastActiveCanvas = container;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const target = e.target as Node | null;
+      const inCanvas = target !== null && container?.contains(target) === true;
+      const nowhere =
+        (target === document.body || target === document.documentElement || target === document) &&
+        lastActiveCanvas === container;
+      if (!inCanvas && !nowhere) return;
+      const s = storeApi.getState();
+      if (s.selectedNode === null && s.selectedEdge === null && s.selectedAnnotation === null) return;
+      onPaneClick();
+      flowApi.getState().resetSelectedElements();
+    };
+    const activity = ['pointerdown', 'click', 'focusin'] as const;
+    for (const type of activity) container?.addEventListener(type, markActive, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      for (const type of activity) container?.removeEventListener(type, markActive, true);
+      window.removeEventListener('keydown', onKeyDown);
+      if (lastActiveCanvas === container) lastActiveCanvas = null;
+    };
+  }, [storeApi, flowApi, onPaneClick]);
+  // Hover preview and relationship flow (ephemeral, no posts).
+  const { hoverHandlers, flowClassName } = useHoverFocus();
 
   // Apply React Flow's node changes (selection, measurement, drags). A drag
   // re-picks the sides of the edges on the moved nodes; nothing is saved.
@@ -325,12 +415,15 @@ function ErdCanvasInner({
 
   return (
     <div
-      className={className ? `editor-canvas ${className}` : 'editor-canvas'}
+      ref={containerRef}
+      className={`editor-canvas${logicalOnly ? ' editor-canvas--neutral' : ''}${className ? ` ${className}` : ''}`}
       // The extension's canvas layout (a column flex box around the flow area),
-      // positioned so the legend and panels anchor to the canvas.
-      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', ...style }}
+      // positioned so the legend and panels anchor to the canvas, and a size
+      // container so the counts can react to the canvas's width (StatusBar.css).
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', containerType: 'inline-size', ...style }}
     >
       <ReactFlow
+        className={flowClassName}
         style={{ flex: '1 1 0', minHeight: 0 }}
         nodes={nodes}
         edges={edges}
@@ -341,6 +434,7 @@ function ErdCanvasInner({
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
+        {...hoverHandlers}
         fitView
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
@@ -358,6 +452,7 @@ function ErdCanvasInner({
         proOptions={{ hideAttribution: true }}
       >
         <CanvasBackdrop />
+        <StatusBar />
         <DetailPanel />
       </ReactFlow>
       <Legend />
@@ -371,7 +466,13 @@ function ErdCanvasInner({
 
 export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function ErdCanvas(props, ref) {
   const renderable = useMemo(() => toRenderableSubjectArea(props.domain), [props.domain]);
-  const [store] = useState(() => createCanvasStore({ domain: renderable }));
+  const [store] = useState(() =>
+    createCanvasStore({
+      domain: renderable,
+      logicalOnly: props.logicalOnly === true,
+      lineStyle: isLineStyle(props.lineStyle) ? props.lineStyle : DEFAULT_LINE_STYLE,
+    }),
+  );
 
   return (
     <CanvasStoreProvider store={store}>

@@ -7,6 +7,7 @@
  */
 
 import type { Meta } from '../types/semantic';
+import type { RelationshipTestCondition, YmlSourceRelationshipTest, YmlSourceTable } from '../types/ymlData';
 import type {
   CompositeForeignKey,
   ManifestColumn,
@@ -14,8 +15,9 @@ import type {
   ManifestRelationshipTest,
   ManifestWorkerResult,
 } from '../types/manifest';
+import { THROWAWAY_MARKER_KEY } from '../types/manifest';
 import { readMeta } from '@erd-studio/core';
-import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameUtils';
+import { parseRefModelName, parseSourceCall, resolveModelNameFromNodeId } from '../services/nameUtils';
 
 const MODEL_KEY_PREFIX = 'model.';
 const TEST_KEY_PREFIX = 'test.';
@@ -36,6 +38,7 @@ export function extractManifestData(
   // evidence in its own right, and losing it to a malformed manifest would
   // let a bare .sql file pass for a working model.
   const disabledModels = extractDisabledModels(manifest.disabled);
+  const placeholder = isPlaceholderManifest(manifest);
 
   const nodes = manifest.nodes as Record<string, unknown> | undefined;
   if (!nodes || typeof nodes !== 'object') {
@@ -47,6 +50,10 @@ export function extractManifestData(
       disabledModels,
       resourceDocs: {},
       compositeForeignKeys: [],
+      notNullColumns: {},
+      sourceRelationshipTests: [],
+      sources: extractSources(manifest.sources),
+      ...(placeholder ? { placeholderProfile: true } : {}),
     };
   }
 
@@ -55,6 +62,20 @@ export function extractManifestData(
   const uniqueColumns: Record<string, string[]> = {};
   const compositeUniqueGroups: Record<string, string[][]> = {};
   const resourceDocs: Record<string, ManifestModelInfo> = {};
+  const sourceRelationshipTests: YmlSourceRelationshipTest[] = [];
+  /**
+   * Not-null columns by the model node they are on (`model.p.dim.v1`): a
+   * versioned model's versions each have their own, and only the version
+   * kept in `models` gives its name's (below, once every node is seen).
+   */
+  const notNullByNode = new Map<string, string[]>();
+  const addNotNull = (nodeId: string, column: string): void => {
+    let cols = notNullByNode.get(nodeId);
+    if (!cols) notNullByNode.set(nodeId, (cols = []));
+    if (!cols.includes(column)) cols.push(column);
+  };
+  /** The node each model name was taken from (the latest version of a versioned model). */
+  const keptNode = new Map<string, string>();
   // Composite foreign keys, resolved once every model is known (a constraint's
   // `to` may be a rendered relation named by its alias).
   const declaredForeignKeys: Array<CompositeForeignKey & { to: string }> = [];
@@ -71,8 +92,10 @@ export function extractManifestData(
         const existing = models[modelInfo.name];
         if (!existing || isPreferredVersion(modelInfo, existing)) {
           models[modelInfo.name] = modelInfo;
+          keptNode.set(modelInfo.name, nodeKey);
         }
         declaredForeignKeys.push(...extractForeignKeyConstraints(modelInfo.name, node.constraints));
+        for (const column of notNullConstraintColumns(node)) addNotNull(nodeKey, column);
       }
       continue;
     }
@@ -92,9 +115,21 @@ export function extractManifestData(
         continue;
       }
 
+      const sourceTest = extractSourceRelationshipTest(node, nodes);
+      if (sourceTest) {
+        sourceRelationshipTests.push(sourceTest);
+        continue;
+      }
+
       const relTest = extractRelationshipTest(node, nodes);
       if (relTest) {
         relationshipTests.push(relTest);
+        continue;
+      }
+
+      const notNull = extractNotNullTest(node);
+      if (notNull) {
+        addNotNull(notNull.nodeId, notNull.column);
         continue;
       }
 
@@ -103,8 +138,176 @@ export function extractManifestData(
     }
   }
 
+  // A model's not-null columns are its kept node's: a not_null only an older version has does not reach the latest.
+  const notNullColumns: Record<string, string[]> = {};
+  for (const [nodeId, columns] of notNullByNode) {
+    const name = resolveModelNameFromNodeId(nodeId, nodes);
+    if (!name) continue;
+    const kept = keptNode.get(name);
+    if (kept !== undefined && kept !== nodeId) continue;
+    const cols = (notNullColumns[name] ??= []);
+    for (const column of columns) if (!cols.includes(column)) cols.push(column);
+  }
   const compositeForeignKeys = resolveForeignKeyTargets(declaredForeignKeys, models);
-  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys };
+  const sources = extractSources(manifest.sources);
+  const extra = { notNullColumns, sourceRelationshipTests, sources };
+  if (placeholder) {
+    // Parse without your credentials: every schema came from placeholder
+    // connection details (`erd_studio_placeholder…`). Blank them after all
+    // extraction (composite FK targets resolve by the relation's last
+    // segment, so they are unaffected), so nothing shows or writes them.
+    // `configSchema` is the user's own `config.schema` and is kept.
+    for (const info of Object.values(models)) { info.schema = ''; }
+    for (const info of Object.values(resourceDocs)) { info.schema = ''; }
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, ...extra, placeholderProfile: true };
+  }
+  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys, ...extra };
+}
+
+/** A non-empty string, trimmed; undefined for anything else (dbt writes `where: null` on every test). */
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
+/** A test node's `config.where`, when it limits the rows tested. */
+function whereOf(node: Record<string, unknown>): string | undefined {
+  const config = node.config;
+  return isPlainObject(config) ? text(config.where) : undefined;
+}
+
+/** dbt's own `not_null` (no namespace) and dbt_expectations' not-null test. */
+const NOT_NULL_TESTS: ReadonlyArray<{ namespace: string | null; name: string }> = [
+  { namespace: null, name: 'not_null' },
+  { namespace: 'dbt_expectations', name: 'expect_column_values_to_not_be_null' },
+];
+
+/**
+ * A not-null test node (`test_metadata`, written under `tests:` or
+ * `data_tests:`, kwargs top-level or under dbt 1.10's `arguments:` — the
+ * manifest records both as `kwargs`): the model it is attached to and the
+ * column, as dbt passes it (quoted when the column has `quote: true`). Null
+ * when a `where:` config or a `row_condition` limits it to some rows: it
+ * does not say the column is never null.
+ */
+function extractNotNullTest(node: Record<string, unknown>): { nodeId: string; column: string } | null {
+  const meta = node.test_metadata;
+  if (!isPlainObject(meta) || typeof meta.name !== 'string') return null;
+  const namespace = typeof meta.namespace === 'string' && meta.namespace !== 'dbt' ? meta.namespace : null;
+  if (!NOT_NULL_TESTS.some((t) => t.name === meta.name && t.namespace === namespace)) return null;
+  const kwargs = isPlainObject(meta.kwargs) ? meta.kwargs : {};
+  if (whereOf(node) || text(kwargs.row_condition)) return null;
+  const column = text(kwargs.column_name) ?? text(node.column_name);
+  if (!column) return null;
+  const nodeId = modelNodeOfTest(node);
+  return nodeId ? { nodeId, column } : null;
+}
+
+/**
+ * The columns a model's contract makes required: a column's own
+ * `constraints: [{ type: not_null }]` (or `primary_key`, never null), and a
+ * model-level `not_null` / `primary_key` constraint's `columns`.
+ */
+function notNullConstraintColumns(node: Record<string, unknown>): string[] {
+  const requiring = (c: unknown): boolean => isPlainObject(c) && (c.type === 'not_null' || c.type === 'primary_key');
+  const out: string[] = [];
+  if (isPlainObject(node.columns)) {
+    for (const [key, col] of Object.entries(node.columns)) {
+      if (!isPlainObject(col) || !Array.isArray(col.constraints) || !col.constraints.some(requiring)) continue;
+      out.push(text(col.name) ?? key);
+    }
+  }
+  if (Array.isArray(node.constraints)) {
+    for (const c of node.constraints) {
+      if (!requiring(c)) continue;
+      for (const column of columnList((c as Record<string, unknown>).columns) ?? []) out.push(column);
+    }
+  }
+  return out;
+}
+
+/**
+ * A relationships test whose `to:` is a dbt `source('raw', 'customers')`: a
+ * source is not a model, so no draft draws it; kept to be said. Null for any
+ * other test.
+ */
+function extractSourceRelationshipTest(node: Record<string, unknown>, nodes: Record<string, unknown>): YmlSourceRelationshipTest | null {
+  const meta = node.test_metadata;
+  if (!isPlainObject(meta) || !isPlainObject(meta.kwargs)) return null;
+  const kwargs = meta.kwargs;
+  const to = text(kwargs.to);
+  const field = text(kwargs.field);
+  const fromColumn = text(kwargs.column_name);
+  const target = to ? parseSourceCall(to) : undefined;
+  if (!target || !field || !fromColumn) return null;
+  const fromModel = resolveModelFromTestNode(node, nodes);
+  if (!fromModel) return null;
+  const file = text(node.original_file_path);
+  return { fromModel, fromColumn, source: `${target.source}.${target.table}`, toColumn: field, ...(file ? { file } : {}) };
+}
+
+/**
+ * The manifest's enabled `sources` (dbt moves a disabled one to `disabled`):
+ * one entry per source table, with its `identifier` when it differs from its
+ * name and whether the identifier is quoted.
+ */
+function extractSources(sources: unknown): YmlSourceTable[] {
+  if (!isPlainObject(sources)) return [];
+  const out: YmlSourceTable[] = [];
+  for (const value of Object.values(sources)) {
+    if (!isPlainObject(value)) continue;
+    const name = text(value.name);
+    const source = text(value.source_name);
+    if (!name || !source) continue;
+    if (isPlainObject(value.config) && value.config.enabled === false) continue;
+    const identifier = text(value.identifier);
+    const quoting = isPlainObject(value.quoting) ? value.quoting : {};
+    const columns = isPlainObject(value.columns)
+      ? Object.values(value.columns).filter(isPlainObject).map((c) => ({
+        name: typeof c.name === 'string' ? c.name : '',
+        description: typeof c.description === 'string' ? c.description : '',
+        dataType: typeof c.data_type === 'string' ? c.data_type : null,
+      })).filter((c) => c.name !== '')
+      : [];
+    const uniqueId = text(value.unique_id);
+    const projectName = text(value.package_name) ?? (uniqueId?.split('.')[1] || undefined);
+    out.push({
+      source,
+      name,
+      ...(identifier && identifier !== name ? { identifier } : {}),
+      ...(quoting.identifier === true ? { quoted: true } : {}),
+      description: typeof value.description === 'string' ? value.description : '',
+      columns,
+      file: text(value.original_file_path) ?? '',
+      ...(projectName ? { projectName } : {}),
+    });
+  }
+  return out;
+}
+
+/** A relationships test's condition: `relationships_where`'s `from_condition` / `to_condition`, and a `where:` config. */
+function conditionOf(kwargs: Record<string, unknown>, node: Record<string, unknown>): RelationshipTestCondition | undefined {
+  const from = text(kwargs.from_condition);
+  const to = text(kwargs.to_condition);
+  const where = whereOf(node) ?? text(kwargs.where) ?? text(kwargs.row_condition);
+  if (!from && !to && !where) return undefined;
+  return { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(where ? { where } : {}) };
+}
+
+/** A plain (non-null, non-array) object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether Parse without your credentials wrote this manifest: its
+ * `metadata.env` holds `THROWAWAY_MARKER_KEY` as the string `"1"`.
+ */
+function isPlaceholderManifest(manifest: Record<string, unknown>): boolean {
+  const metadata = manifest.metadata;
+  if (!isPlainObject(metadata)) return false;
+  const env = metadata.env;
+  if (!isPlainObject(env)) return false;
+  return env[THROWAWAY_MARKER_KEY] === '1';
 }
 
 /** A list of column names, or null when it is not a list of strings. */
@@ -280,11 +483,16 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
   const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
   const hasOwnAlias = alias !== '' && alias !== name && (version === undefined || alias !== `${name}_v${version}`);
 
+  const config = node.config;
+  const configured = config && typeof config === 'object' ? (config as Record<string, unknown>).schema : undefined;
+  const configSchema = typeof configured === 'string' ? configured.trim() : '';
+
   return {
     name,
     uniqueId,
     projectName,
     schema: typeof node.schema === 'string' ? node.schema : '',
+    ...(configSchema !== '' ? { configSchema } : {}),
     ...(hasOwnAlias ? { alias } : {}),
     description: typeof node.description === 'string' ? node.description : '',
     columns,
@@ -405,7 +613,16 @@ function extractRelationshipTest(
     return null;
   }
 
-  return { fromModel, fromColumn, toModel, toColumn };
+  // relationships_where holds for the rows its conditions pick; a where: config likewise (the yml reader's rule).
+  const condition = conditionOf(kwargs, node);
+  const conditional = testMetadata.name === 'relationships_where' || condition !== undefined;
+  const file = text(node.original_file_path);
+  return {
+    fromModel, fromColumn, toModel, toColumn,
+    ...(conditional ? { conditional: true as const } : {}),
+    ...(condition ? { condition } : {}),
+    ...(file ? { file } : {}),
+  };
 }
 
 function extractUniqueTest(
@@ -469,6 +686,15 @@ function extractCompositeUniqueTest(
     compositeUniqueGroups[modelName] = [];
   }
   compositeUniqueGroups[modelName].push(columns);
+}
+
+/** The model node a test is on (`model.p.dim.v2`): its `attached_node`, else the first model it depends on. */
+function modelNodeOfTest(node: Record<string, unknown>): string | undefined {
+  const attached = node.attached_node;
+  if (typeof attached === 'string' && attached.startsWith('model.')) return attached;
+  const dependsOn = node.depends_on as { nodes?: unknown } | undefined;
+  const refs = Array.isArray(dependsOn?.nodes) ? dependsOn.nodes : [];
+  return refs.find((r): r is string => typeof r === 'string' && r.startsWith('model.'));
 }
 
 function resolveModelFromTestNode(

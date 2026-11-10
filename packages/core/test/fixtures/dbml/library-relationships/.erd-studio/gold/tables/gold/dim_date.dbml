@@ -1,0 +1,7 @@
+// Kept from logical-models/gold/dim_date.yml by Convert Project to DBML:
+// # ERD Studio 1.6.7 saved a dimension-to-fact line as a many-to-one from the
+// # dimension's primary key — backwards — next to the fact's own copy.
+Table gold.dim_date [role: 'dimension'] {
+  date_key      INT [pk]
+  calendar_date DATE
+}

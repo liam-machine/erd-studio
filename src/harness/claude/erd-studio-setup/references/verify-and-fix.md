@@ -1,7 +1,7 @@
 # Verify and fix
 
 Stage 5 compares the logical model you wrote with the physical dbt project and fixes the logical
-side until they match. The comparison is the **same code** as the canvas's **⊕ Diff** button
+side until they match. The comparison is the **same code** as the canvas's **Compare with dbt** button
 (on the Logical tab it compares against Physical), so a clean result here means a clean result
 on the canvas.
 
@@ -19,10 +19,10 @@ on the canvas.
 ## 1. Reading `diff --json`
 
 ```
-~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/<domain>.json --json --semantic-dir .erd-studio
+~/.erd-studio-cli/bin/erd-studio diff --domain .erd-studio/<layer>/diagrams/<domain>.dbml --json --semantic-dir .erd-studio
 ```
 
-Exit code 0 means clean, 1 means differences were found (not a failure), 3 means the domain
+In a `yaml` project the diagram is the `.json` file. Exit code 0 means clean, 1 means differences were found (not a failure), 3 means the domain
 file or project could not be read (the JSON `error` says why).
 
 Top level:
@@ -39,7 +39,7 @@ Per domain (`domains[i]`):
 |---|---|
 | `file`, `domain`, `layer` | Which diagram this is |
 | `error` | Set when this one domain could not be checked; explain it and move on. Code `merge-conflict`: the diagram file holds git conflict markers — follow troubleshooting.md → "Merge conflicts" |
-| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate to v5** from the Command Palette, then re-run |
+| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate Subject Areas to the Central Table Library** from the Command Palette, then re-run |
 | `clean` | No blocking differences in this domain |
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
@@ -75,12 +75,27 @@ Each fix:
 | `remove-relationship` | Remove the entry `relationship` names from `file` — a model yml's `relationships:` or `logical.relationships` — and any other copy of the same two columns (either way round) in the other model's yml. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
 | `set-cardinality` | Write `relationship` (its `cardinality` is the one to store) in `file`, replacing the entry for the same two columns there. When `movesFrom` is set, take the entry for those two columns out of that file too — the fix moves it to the model on its many side. A yml change shows in every diagram holding both models |
 | `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships — in the domain JSON and in any model yml's `relationships:` whose `toModel` names it) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
+| `fix-dbml-file` | **Fix these first**, like `fix-model-yaml`: the `.dbml` table file at `file` does not read (`line` says where). Usually an unquoted text value: quote it (`grain: 'One row per order line'`). An unquoted `true` or number (`natural_key: true`) is only an `unquotedValue` warning, but quote it too (`natural_key: 'true'`): other DBML tools reject it. doctor's `dbmlProblems` gives each problem with its line, and the exact line to write where one is missing or wrong. A merge conflict is the user's (troubleshooting.md → "Merge conflicts") |
 
-For `missingModelFiles`: if the model exists in dbt, write its yml from `inventory --models
-<name>` (building-the-model.md). If it does not, treat it like a phantom and ask.
+**In a DBML project** (`file` ends in `.dbml`; the fix ids are the same). Edit in place, quote every custom value, and keep every other line:
 
-Edit the yml and JSON with Edit, keeping everything else in the file untouched — comments, key
-order, other columns, and especially `viewConfig.positions`.
+| kind | Edit (DBML) |
+|---|---|
+| `add-column` | Add a column line to the Table block in `file`, after the last column (before any `indexes` block): `name TYPE [note: '…']`, the type double-quoted when it is not a plain identifier (`"DECIMAL(18,2)"`) |
+| `remove-column` | Delete the column's line from `file`, **and** every Ref in a relationships file (`<layer>/relationships/`) that names it |
+| `set-type` | Change the column's type to `to` |
+| `add-relationship` | Add one Ref line to `file` (the relationships file a new Ref of the foreign-key table goes in), each end spelled as its table declares itself (`gold.fct_order.customer_id`): `Ref: from_table.from_col >? to_table.to_col` for `many-to-one`, `Ref: to_table.to_col ?- from_table.from_col` for `one-to-one` (key end first), `<>?` for `many-to-many`; a composite as `from_table.(a, b) >? to_table.(x, y)`. Add a `use { table s.x } from '…'` line there for each table it names that the file does not import, `foreign_key: 'true'` on the foreign-key column in its table file, and a `use * from '…'` line for `file` in every diagram that shows both tables and lacks it |
+| `import-relationships-file` | The Ref is already in `storedIn`; the diagram `file` just does not import that file. Add the line `useLine` (`use * from '…'`) to `file`, beside its other `use *` lines. **Never** add the Ref again: a second copy is a duplicate that breaks every diagram importing the file |
+| `remove-relationship` | Delete the Ref line `relationship` names from `file`, the relationships file that holds it (either way round). It is shared by every diagram holding both tables, so say so — always a question first (section 3) |
+| `set-cardinality` | Rewrite that Ref's operator for the new cardinality in place in `file`, the file that holds it (a DBML fix has no `movesFrom`; a turn-round is written from the other end in the same file) |
+| `resolve-phantom` | The same question; renaming means rewriting its `use` line in the diagram (and its Refs). **Never** delete its table file |
+
+For `missingModelFiles`: if the model exists in dbt, write its table file (`.dbml`, or `.yml` in a
+YAML project) from `inventory --models <name>` (building-the-model.md). If it does not, treat it
+like a phantom and ask.
+
+Edit the files with Edit, keeping everything else in the file untouched — comments, key
+order, other columns, and especially the positions (a DBML diagram's `erd_layout`, or `viewConfig.positions`).
 
 ## 3. Who decides: the fix rules
 
@@ -123,6 +138,10 @@ versions of the file. Show the file and line, ask which
 side to keep, and never pick one or run a git command yourself (troubleshooting.md → "Merge
 conflicts").
 
+**`fix-fields-file`** is a doctor step, not a diff fix: `.erd-studio/fields.yml` has an error.
+Fix the line doctor's `erd.fields` names before writing tables (troubleshooting.md →
+"`fix-fields-file`"); the diff never compares fields.
+
 **Advisory fixes** are never applied. List them once at the end: "dbt doesn't know these column
 types yet. Generating the catalog (Stage 2) will fill them in."
 
@@ -138,7 +157,7 @@ types yet. Generating the catalog (Stage 2) will fill them in."
 5. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something
    is off that edits will not solve (a stale manifest, a model dbt disables, a case the rules do
    not cover). Stop, list what remains using each fix's `explain`, and suggest opening the domain
-   and clicking **⊕ Diff** in the canvas toolbar to look at it together.
+   and clicking **Compare with dbt** in the canvas toolbar to look at it together.
 
 Success line, from `counts`:
 
@@ -202,7 +221,7 @@ link appears even without dbt), then run the diff again.
 Use this when the helper cannot run. Ask the user to:
 
 > 1. Open the domain from the ERD Studio sidebar.
-> 2. On the **Logical** tab, click **⊕ Diff** in the toolbar.
+> 2. On the **Logical** tab, click **Compare with dbt** in the toolbar.
 > 3. In the comparison panel that opens, click **⊕ Sync**.
 > 4. In the window that opens, click **Keep all** in the **Physical** column for each model, and
 >    pick the Physical side for any row still waiting (relationships have their own rows). Then
@@ -226,7 +245,7 @@ edits above:
 | `add-to-logical` / `remove-from-logical` | ask first — adding or removing a whole model from the domain |
 
 Apply the same rules from section 3 about who decides. Delete `.erd-studio/.sync-plan.json` when
-you are done, then ask the user to click **⊕ Diff** again to confirm. Treat the canvas's result as the
+you are done, then ask the user to click **Compare with dbt** again to confirm. Treat the canvas's result as the
 check, up to the same 3 rounds.
 
 ## 7. Fallback B — manual comparison
@@ -239,4 +258,4 @@ exists), list its columns and `data_type:` values, and compare them with the log
 ignoring case. Compare `relationships` tests between two models in the domain with the
 relationships the domain draws: its own `logical.relationships` plus every model yml
 `relationships:` entry whose two models are both in the domain. Fix the logical side as in section 2, and recommend opening the canvas
-and clicking **⊕ Diff** as soon as they can.
+and clicking **Compare with dbt** as soon as they can.

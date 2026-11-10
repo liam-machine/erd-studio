@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  MigrationFailed,
   MigrationService,
   findLegacySemanticDir,
   migrateLegacySemanticDir,
@@ -468,5 +469,156 @@ describe('MigrationService (domain format → v5)', () => {
     expect(after.viewConfig).toEqual({ positions: { dim_x: { x: 5, y: 6 } } });
     expect(lms.tableExists('dim_x')).toBe(true);
     expect(migration.needsMigration()).toBe(false);
+  });
+});
+
+describe('MigrationService reports what it left (#243)', () => {
+  let workspaceRoot: string;
+  let migration: MigrationService;
+  let lms: TableLibraryService;
+
+  const v4 = (name: string, table: string) => ({
+    schemaVersion: 4, domain: name, layer: 'silver',
+    logical: { models: [{ name: table, columns: [{ name: 'id' }] }], relationships: [] }, viewConfig: {},
+  });
+  function writeSubjectArea(name: string, body: unknown): string {
+    const dir = path.join(workspaceRoot, '.erd-studio', 'silver');
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${name}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(body, null, 2));
+    return filePath;
+  }
+
+  beforeEach(() => {
+    workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-migration-skips-'));
+    fs.mkdirSync(path.join(workspaceRoot, '.erd-studio', 'logical-models'), { recursive: true });
+    lms = new TableLibraryService(workspaceRoot);
+    migration = new MigrationService(workspaceRoot, new LayerService(workspaceRoot), lms);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  });
+
+  it('a clean run skips nothing and counts what it found', () => {
+    writeSubjectArea('a', v4('a', 'dim_a'));
+    expect(migration.migrate()).toMatchObject({ domainsFound: 1, domainsConverted: 1, skipped: [] });
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('a diagram file it may not write is named as writeFailed, and the rest still convert', () => {
+    writeSubjectArea('a', v4('a', 'dim_a'));
+    const locked = writeSubjectArea('b', v4('b', 'dim_b'));
+    fs.chmodSync(locked, 0o444);
+    try {
+      const result = migration.migrate();
+      expect(result.domainsFound).toBe(2);
+      expect(result.domainsConverted).toBe(1);
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0]).toMatchObject({ filePath: locked, reason: 'writeFailed' });
+      expect((result.skipped[0].error as NodeJS.ErrnoException).code).toBe('EACCES');
+    } finally {
+      fs.chmodSync(locked, 0o644);
+    }
+  });
+
+  it('a diagram file that stopped being JSON while it ran is named as unreadable and left as it is', () => {
+    writeSubjectArea('a', v4('a', 'dim_a'));
+    const broken = writeSubjectArea('b', v4('b', 'dim_b'));
+    // Between reading the tables and rewriting the diagrams, another tool breaks the file.
+    const save = lms.saveTable.bind(lms);
+    vi.spyOn(lms, 'saveTable').mockImplementation((...args: Parameters<TableLibraryService['saveTable']>) => {
+      fs.writeFileSync(broken, '{ "schemaVersion": 4,');
+      return save(...args);
+    });
+    const result = migration.migrate();
+    expect(result.domainsConverted).toBe(1);
+    expect(result.skipped).toEqual([{ filePath: broken, reason: 'unreadable' }]);
+    expect(fs.readFileSync(broken, 'utf-8')).toBe('{ "schemaVersion": 4,');
+  });
+
+  it('a throw while writing tables is MigrationFailed, carrying how many table files were already written', () => {
+    writeSubjectArea('a', v4('a', 'dim_a'));
+    writeSubjectArea('b', v4('b', 'dim_b'));
+    const save = lms.saveTable.bind(lms);
+    let calls = 0;
+    vi.spyOn(lms, 'saveTable').mockImplementation((...args: Parameters<TableLibraryService['saveTable']>) => {
+      if (calls++ === 1) throw new Error('boom');
+      return save(...args);
+    });
+    let thrown: unknown;
+    try { migration.migrate(); } catch (err) { thrown = err; }
+    expect(thrown).toBeInstanceOf(MigrationFailed);
+    expect((thrown as MigrationFailed).modelsCreated).toBe(1);
+    expect(((thrown as MigrationFailed).cause as Error).message).toBe('boom');
+    // No diagram file was rewritten.
+    for (const name of ['a', 'b']) {
+      expect(JSON.parse(fs.readFileSync(path.join(workspaceRoot, '.erd-studio', 'silver', `${name}.json`), 'utf-8')).schemaVersion).toBe(4);
+    }
+  });
+});
+
+describe('MigrationService richness: every built-in text field counts (context fields)', () => {
+  it('scores the catalogue\'s rationale keys: the legacy weights kept, a new field counts 2', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-migration-rich-'));
+    try {
+      const migration = new MigrationService(root, new LayerService(root), new TableLibraryService(root));
+      const richness = (m: object): number => (migration as unknown as { richness: (t: object) => number }).richness(m);
+      const base = richness({ name: 't' });
+      expect(richness({ name: 't', rationale: { purpose: 'p', design: 'd' } })).toBe(base + 6);
+      expect(richness({ name: 't', rationale: { grainChoice: 'g', roleChoice: 'r', scdStrategy: 's', measures: 'm' } })).toBe(base + 8);
+      expect(richness({ name: 't', rationale: { decisions: 'd', openQuestions: 'q', retention: 'r' } })).toBe(base + 6);
+      // An empty or non-text value counts nothing.
+      expect(richness({ name: 't', rationale: { decisions: '', purpose: 7 } })).toBe(base);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('MigrationService (domain format → v5) in a project that writes DBML', () => {
+  let workspaceRoot: string;
+  const semantic = (...parts: string[]): string => path.join(workspaceRoot, '.erd-studio', ...parts);
+
+  beforeEach(() => {
+    workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-migration-dbml-'));
+    fs.mkdirSync(semantic('gold', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(semantic('gold', 'tables', 'gold', 'dim_existing.dbml'), 'Table gold.dim_existing {\n  id INT [pk]\n}\n');
+    fs.writeFileSync(semantic('layers.json'), JSON.stringify({ schemaVersion: 1, layers: [
+      { id: 'gold', label: 'Gold', abbreviation: 'G', color: '#888888', creatable: true, order: 1 },
+      { id: 'silver', label: 'Silver', abbreviation: 'S', color: '#888888', creatable: true, order: 2 },
+    ] }));
+    fs.mkdirSync(semantic('silver'), { recursive: true });
+    fs.writeFileSync(semantic('silver', 'v4.json'), JSON.stringify({
+      schemaVersion: 4, domain: 'v4', layer: 'silver',
+      logical: {
+        models: [
+          { name: 'dim_a', columns: [{ name: 'a_id', dataType: 'INT', description: '', isPrimaryKey: true }] },
+          { name: 'dim_b', columns: [{ name: 'b_id', dataType: 'INT', description: '' }] },
+        ],
+        relationships: [],
+      },
+      viewConfig: {},
+    }, null, 2));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  });
+
+  it('extracts every model as DBML in ONE batch (one plan, one settle), into <layer>/tables/<layer>/ of its domain\'s layer', () => {
+    const lms = new TableLibraryService(workspaceRoot);
+    expect(lms.writesDbml()).toBe(true);
+    const batch = vi.spyOn(lms, 'applyDbmlBatch');
+    const listing = vi.spyOn(lms, 'listDbmlDiagrams');
+    const save = vi.spyOn(lms, 'saveTable');
+    const result = new MigrationService(workspaceRoot, new LayerService(workspaceRoot), lms).migrate();
+    expect(result).toMatchObject({ domainsConverted: 1, modelsCreated: 2 });
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(listing).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(semantic('silver', 'tables', 'silver', 'dim_a.dbml'), 'utf-8')).toMatch(/^Table silver\.dim_a \{/);
+    expect(fs.readFileSync(semantic('silver', 'tables', 'silver', 'dim_b.dbml'), 'utf-8')).toMatch(/^Table silver\.dim_b \{/);
+    expect(lms.getTable('dim_a')?.columns?.[0].name).toBe('a_id');
   });
 });

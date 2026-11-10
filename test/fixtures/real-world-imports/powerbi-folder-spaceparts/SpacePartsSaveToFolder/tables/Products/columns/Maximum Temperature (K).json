@@ -1,0 +1,14 @@
+{
+  "name": "Maximum Temperature (K)",
+  "dataType": "int64",
+  "sourceColumn": "maximum_temperature_k",
+  "displayFolder": "4. Product Facts",
+  "lineageTag": "2005d462-c934-4b0d-9746-b46329fb408d",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

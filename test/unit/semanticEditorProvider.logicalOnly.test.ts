@@ -117,6 +117,14 @@ describe('SemanticEditorProvider in logical-only mode', () => {
     expect(featureOnce).not.toHaveBeenCalledWith('manifestMissingCanvas');
   });
 
+  it('a v6 JSON diagram counts canvasJsonV6 once a day, off the onboarding trail (still the v5 format)', async () => {
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
+    const canvasOpened = vi.spyOn(telemetry, 'canvasOpened');
+    await openIn(buildProvider(root, true), file);
+    expect(quiet).toHaveBeenCalledWith('canvasJsonV6', true);
+    expect(canvasOpened).toHaveBeenCalledWith('logical', 'v5', 1);
+  });
+
   it('answers a physical switch with the logical stage, echoing requestId', async () => {
     const panel = await openIn(buildProvider(root, true), file);
     await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 7 } });
@@ -161,6 +169,15 @@ describe('SemanticEditorProvider in logical-only mode', () => {
     expect(info).toHaveBeenCalledWith(ADD_FROM_DBT_NEEDS_DBT_MESSAGE);
     expect(pick).not.toHaveBeenCalled();
     expect(ofType(panel, 'error')).toEqual([]);
+  });
+  it('a batch pick whose table file is gone says it is not in the Table Library, without naming dbt', async () => {
+    const panel = await openIn(buildProvider(root, true), file);
+    // A stale Table Library row, or a drag whose file was renamed meanwhile.
+    await panel._simulateMessage({ type: 'addExistingModels', payload: { modelNames: ['gone_a', 'gone_b'] } });
+    await vi.waitFor(() => expect(ofType(panel, 'error')).toHaveLength(1));
+    const message = (ofType(panel, 'error')[0].payload as { message: string }).message;
+    expect(message).toBe('No tables were added. Left out: gone_a (not in the Table Library), gone_b (not in the Table Library).');
+    expect(message).not.toMatch(/\bdbt\b/i);
   });
 });
 

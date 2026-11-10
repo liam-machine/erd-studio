@@ -1,0 +1,10 @@
+// The shipping domain's relationships, including its Ref into the orders domain (a Ref lives with its foreign-key table). CODEOWNERS: the shipping team.
+use { table orders.customer_order }   from '../tables/orders/customer_order.dbml'
+use { table shipping.carrier }        from '../tables/shipping/carrier.dbml'
+use { table shipping.shipment }       from '../tables/shipping/shipment.dbml'
+use { table shipping.tracking_event } from '../tables/shipping/tracking_event.dbml'
+
+Ref: shipping.shipment.carrier_code >? shipping.carrier.carrier_code
+Ref: shipping.shipment.order_id >? orders.customer_order.order_id
+
+Ref: shipping.tracking_event.shipment_id >? shipping.shipment.shipment_id

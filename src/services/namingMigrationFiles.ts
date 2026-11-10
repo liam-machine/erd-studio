@@ -35,9 +35,13 @@ export function readNamingMigrationInput(
       return null;
     }
   };
+  // Only `.json` diagrams and `.yml` tables: DBML texts are never fed to
+  // `planNamingMigration` (native DBML storage, §5.7).
   const subjectAreas = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)
+    .filter((s) => s.filePath.endsWith('.json'))
     .map((s) => read(s.filePath)).filter((f): f is NamingMigrationFile => f !== null);
   const tables = tableLibraryService.listTableFiles()
+    .filter((e) => e.filePath.endsWith('.yml'))
     .map((e) => read(e.filePath)).filter((f): f is NamingMigrationFile => f !== null);
   return {
     subjectAreas,

@@ -1,0 +1,12 @@
+Table gold.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar day'
+] {
+  Note: 'The calendar every star shares.'
+
+  date_key         INT    [pk, note: 'yyyymmdd']
+  calendar_date    DATE
+  month_start_date DATE
+  fiscal_quarter   STRING [note: 'Australian financial year: Q1 is July to September']
+  is_weekend       BOOLEAN
+}

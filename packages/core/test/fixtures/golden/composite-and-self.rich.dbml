@@ -1,10 +1,14 @@
 // erd-studio dbml-export v2 (DBML 9.1+)
-// Table positions: vault.dbdiagram, next to this file (`dbdiagram push` reads it).
 // A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
-// Not exported: sticky-note positions and sizes, the canvas layout options.
+// Not exported: the canvas layout options.
 
 Project vault {
   Note: 'A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)'
+  erd_layout: '''
+    employee 40 360
+    pit_customer 40 40
+    sat_customer 400 40
+  '''
 }
 
 Table pit_customer {

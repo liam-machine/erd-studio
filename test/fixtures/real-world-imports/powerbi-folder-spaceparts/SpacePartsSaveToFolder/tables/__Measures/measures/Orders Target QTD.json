@@ -1,0 +1,19 @@
+{
+  "name": "Orders Target QTD",
+  "expression": [
+    "",
+    "VAR _DATES_QTD =",
+    "    CALCULATETABLE (",
+    "        DATESQTD ('Date'[Date]),",
+    "        'Date'[IsThisMonth] = FALSE",
+    "    )",
+    "VAR _CURRENT_MONTH_Forecast = [Orders Target MTD]",
+    "VAR _QTD_Forecast_BEFORE_THIS_MONTH = CALCULATE ([Orders Target], _DATES_QTD)",
+    "VAR _RESULT = _CURRENT_MONTH_Forecast + _QTD_Forecast_BEFORE_THIS_MONTH",
+    "RETURN",
+    "    _RESULT"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "3. QTD\\Orders Target",
+  "lineageTag": "8592bd67-7145-4ca4-ba42-fa3e0defba2e"
+}

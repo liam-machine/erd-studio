@@ -1,0 +1,17 @@
+{
+  "name": "Billing Document Line Item Number",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "billing_document_line_item_number",
+  "formatString": "0",
+  "sourceProviderType": "int",
+  "displayFolder": "Columns",
+  "lineageTag": "de732182-dbdd-4d23-a417-553be7c45e2b",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

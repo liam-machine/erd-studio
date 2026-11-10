@@ -1,0 +1,25 @@
+use { table business_vault.pit_customer }    from '../tables/business_vault/pit_customer.dbml'
+use { table business_vault.bridge_customer_policy } from '../tables/business_vault/bridge_customer_policy.dbml'
+use { table business_vault.sat_customer_risk_score } from '../tables/business_vault/sat_customer_risk_score.dbml'
+use { table raw_vault.hub_customer }         from '../../raw_vault/tables/raw_vault/hub_customer.dbml'
+use { table raw_vault.hub_policy }           from '../../raw_vault/tables/raw_vault/hub_policy.dbml'
+use { table raw_vault.link_customer_policy } from '../../raw_vault/tables/raw_vault/link_customer_policy.dbml'
+use { table raw_vault.sat_customer_crm }     from '../../raw_vault/tables/raw_vault/sat_customer_crm.dbml'
+use { table raw_vault.sat_customer_policy_admin } from '../../raw_vault/tables/raw_vault/sat_customer_policy_admin.dbml'
+use * from '../../raw_vault/relationships/raw_vault.dbml'
+use * from '../relationships/business_vault.dbml'
+
+Project "query-helpers" {
+  Note: 'PIT and bridge tables and the computed risk score, drawn with the raw vault tables they point at.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    bridge_customer_policy 248 815
+    hub_customer 1004 295
+    hub_policy 1144 899
+    link_customer_policy 696 810
+    pit_customer 12 243
+    sat_customer_crm 572 527
+    sat_customer_policy_admin 572 12
+    sat_customer_risk_score 572 270
+  '''
+}

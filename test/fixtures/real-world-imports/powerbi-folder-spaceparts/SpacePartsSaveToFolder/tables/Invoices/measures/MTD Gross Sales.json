@@ -1,0 +1,16 @@
+{
+  "name": "MTD Gross Sales",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Gross Sales],",
+    "    CALCULATETABLE (",
+    "        DATESMTD ('Date'[Date]),",
+    "        'Date'[IsDateInScope]",
+    "    )",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\I. Total",
+  "lineageTag": "ea816f78-4faf-4f3f-8d4e-02121230e7db"
+}

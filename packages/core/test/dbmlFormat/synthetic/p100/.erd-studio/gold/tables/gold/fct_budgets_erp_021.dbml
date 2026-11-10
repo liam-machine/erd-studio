@@ -1,0 +1,23 @@
+Table gold.fct_budgets_erp_021 [
+  role: 'fact',
+  grain: 'One row per budgets erp 021'
+] {
+  budgets_erp_021_key BIGINT [pk, note: 'Primary key of fct_budgets_erp_021']
+  valid_from BOOLEAN [note: 'valid from of the budgets erp 021 row']
+  category DATE [note: 'category of the budgets erp 021 row']
+  owner_name BOOLEAN [note: 'owner name of the budgets erp 021 row']
+  is_active BOOLEAN [note: 'is active of the budgets erp 021 row']
+  effective_date INT [note: 'effective date of the budgets erp 021 row']
+  country_code TIMESTAMP_NTZ [note: 'country code of the budgets erp 021 row']
+  duration_minutes DOUBLE [note: 'duration minutes of the budgets erp 021 row', additive_type: 'semi-additive']
+  external_ref DATE [note: 'external ref of the budgets erp 021 row']
+  discount_pct INT [note: 'discount pct of the budgets erp 021 row']
+  type_code STRING [note: 'type code of the budgets erp 021 row']
+  owner_name_10 DATE [note: 'owner name 10 of the budgets erp 021 row']
+  duration_minutes_11 BOOLEAN [note: 'duration minutes 11 of the budgets erp 021 row', additive_type: 'semi-additive']
+  loaded_at INT [note: 'loaded at of the budgets erp 021 row']
+  unit_price "DECIMAL(18,2)" [note: 'unit price of the budgets erp 021 row', additive_type: 'semi-additive']
+  valid_to BOOLEAN [note: 'valid to of the budgets erp 021 row']
+  ecom_assets_015_id STRING [note: 'FK to int_ecom_assets_015', foreign_key: 'true']
+  Note: 'Synthetic gold table fct_budgets_erp_021'
+}

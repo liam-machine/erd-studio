@@ -1,0 +1,22 @@
+name: dim_promotion
+schema: retail
+description: Price promotions
+grain: One row per promotion
+modelRole: domain-dim
+columns:
+  - name: promotion_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: promotion_name
+    dataType: VARCHAR
+    description: Campaign name
+  - name: discount_pct
+    dataType: DECIMAL
+    description: Discount percentage
+  - name: starts_on
+    dataType: DATE
+    description: First day
+  - name: ends_on
+    dataType: DATE
+    description: Last day

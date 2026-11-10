@@ -1,0 +1,21 @@
+Table procurement.fct_purchase_order_pipeline [
+  role: 'accumulating-snapshot',
+  grain: 'One row per purchase order line, updated as it moves',
+  decisions: 'A date column for each milestone, filled in as the line is ordered, received and invoiced, rather than a row per event.'
+] {
+  Note: 'Purchase orders from order to invoice.'
+
+  po_line_id        STRING          [pk, natural_key: 'true']
+  product_key       INT             [foreign_key: 'true']
+  store_key         INT             [
+    foreign_key: 'true',
+    note: 'The receiving store or distribution centre'
+  ]
+  supplier_key      INT             [foreign_key: 'true']
+  ordered_date_key  INT             [foreign_key: 'true']
+  received_date_key INT             [foreign_key: 'true']
+  invoiced_date_key INT             [foreign_key: 'true']
+  ordered_quantity  INT             [additive_type: 'additive']
+  received_quantity INT             [additive_type: 'additive']
+  invoice_amount    "DECIMAL(12,2)" [additive_type: 'additive']
+}

@@ -1,0 +1,10 @@
+Table common.dim_crm_account [
+  role: 'conformed-dim',
+  grain: 'One row per Salesforce account'
+] {
+  Note: 'Customers as sales knows them.'
+
+  dim_crm_account_id STRING [pk, note: 'The Salesforce account id']
+  crm_account_name   STRING [scd_type: '1']
+  crm_account_type   STRING [scd_type: '1']
+}

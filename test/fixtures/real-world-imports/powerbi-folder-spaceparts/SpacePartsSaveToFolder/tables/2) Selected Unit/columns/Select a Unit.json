@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Select a Unit",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Select a Unit]",
+  "sortByColumn": "Order",
+  "lineageTag": "01083816-a18e-4ea5-9fba-28c9b19b5f74",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

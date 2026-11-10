@@ -1,0 +1,15 @@
+Table common_mart.mart_arr [
+  role: 'gold-fact',
+  grain: 'One row per subscription per month',
+  decisions: 'fct_mrr joined to its dimensions, so analysts and dashboards need no joins.'
+] {
+  Note: 'ARR by account and month, pre-joined.'
+
+  primary_key            STRING          [pk]
+  arr_month              DATE
+  crm_account_name       STRING
+  billing_account_number STRING
+  subscription_name      STRING
+  mrr                    "DECIMAL(18,2)" [additive_type: 'semi-additive']
+  arr                    "DECIMAL(18,2)" [additive_type: 'semi-additive']
+}

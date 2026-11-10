@@ -1,0 +1,16 @@
+{
+  "name": "Standard Margin 1YP (Value)",
+  "description": [
+    "The standard margin is the selling margin + the delivery margin",
+    "It takes into account all revenues and costs."
+  ],
+  "expression": [
+    "CALCULATE (",
+    "    [Standard Margin (Value)],",
+    "    DATEADD ('Date'[Date], -1, YEAR)",
+    ")"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\d. Margins\\I. Std. Margin\\$",
+  "lineageTag": "ecefc65d-3c1e-4680-8aee-7b9f7623d8c6"
+}

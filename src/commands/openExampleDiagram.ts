@@ -6,23 +6,29 @@
  * keys and measures filled in.
  *
  * It is Import DBML… with the file supplied: the DBML below is fed through
- * the very same flow (`importDbml`), so the user still names the diagram and
- * sees the dry-run summary with Import / Cancel before anything is written,
- * and the files land exactly as an import writes them (a plain folder gets
- * `.erd-studio/` and its `layers.json` on that confirm, never before).
+ * the very same flow (`importDbml`), so the files land exactly as an import
+ * writes them (a plain folder gets `.erd-studio/` and its `layers.json` on
+ * Keep, never before). With the draft preview (Draft-first, the **Open an
+ * Example…** draft in a folder, `docs/dev/draft-first.md` §9) it runs the
+ * quick path: nothing is asked, the draft is shown and **Keep This Example**
+ * writes it. Without one, the user names it and confirms the dry run.
+ * The command stays registered (the setup skill names it) but is hidden from
+ * the palette: it opens the same draft as Open an Example….
  * No dbt needed, and nothing new ships in the VSIX: the DBML is inline.
  *
  * Only the file-reading half of the import UI is replaced (`exampleDbmlUi`):
- * the "file" is a name that is never opened, and there is no `.dbdiagram`
- * layout, so the canvas lays the diagram out when it opens. The diagram goes
- * in the `gold` layer when the project has it (the default layers do), else
- * the import asks for a layer as usual.
+ * the "file" is a name that is never opened, and its DBML has no
+ * `erd_layout`, so the canvas lays the diagram out when it opens. The diagram goes
+ * in the `gold` layer when the project has it (a dbt project's default layers
+ * do), in the only layer of a project that has one (a new project without dbt
+ * starts with `main`), else the import asks for a layer as usual. Its tables
+ * are unqualified, so in a DBML project they take the layer's name as their
+ * schema (`gold/tables/gold/`).
  */
 
 import * as path from 'path';
 
 import {
-  dbdiagramLayoutPathFor,
   importDbml,
   vscodeImportDbmlUi,
   type ImportDbmlDeps,
@@ -41,7 +47,12 @@ export const EXAMPLE_LAYER = 'gold';
 /**
  * The coffee-shop star schema, in DBML with ERD Studio's custom properties
  * (`role`, `grain`, `rationale_*`, `natural_key`, `scd_type`,
- * `additive_type`; see `src/services/dbmlImport.ts`). Plain DBML apart from
+ * `additive_type`; see `src/services/dbmlImport.ts`). It is Import DBML's
+ * input, so its fields keep the rich export's `rationale_<field>` spelling
+ * (Import DBML reads that, and keeps another tool's bare settings in
+ * `meta.dbml`); the table files the import writes spell them bare
+ * (`decisions: '…'`). No retired field (`design`, `grain_choice`): the
+ * choices are Decisions. Plain DBML apart from
  * those, so it also opens in dbdiagram.io. Kept free of settings ERD Studio
  * has no field for (`not null`, defaults, indexes), so the import keeps
  * nothing in `meta.dbml`. Tested to parse and import whole in
@@ -63,7 +74,7 @@ Table dim_customers [role: 'conformed-dim', grain: 'One row per customer', ratio
   lifetime_spend decimal(38,2) [note: 'Total spent across all orders, including tax, in dollars.']
 }
 
-Table dim_products [role: 'conformed-dim', grain: 'One row per product on the menu', rationale_design: 'Supply details are folded in so the star stays one hop deep.'] {
+Table dim_products [role: 'conformed-dim', grain: 'One row per product on the menu', rationale_decisions: 'Supply details are folded in so the star stays one hop deep.'] {
   Note: 'Product dimension: what is on the menu.'
   product_id varchar [pk, natural_key: 'true', note: 'The product SKU, for example JAF-001.']
   product_name varchar [note: 'Menu name of the product.']
@@ -117,7 +128,7 @@ Table fct_orders [role: 'transaction-fact', grain: 'One row per order', rational
   customer_order_number bigint [additive_type: 'non-additive', note: '1 for the first order of a customer, 2 for the second, and so on.']
 }
 
-Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an order', rationale_grain_choice: 'The finest grain in the star, so product-level questions need no join back to the order.'] {
+Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an order', rationale_decisions: 'Kept at the finest grain in the star, so product-level questions need no join back to the order.'] {
   Note: 'Order item fact. order_id links each line back to its order.'
   order_item_id varchar [pk, natural_key: 'true', note: 'Natural key for the order line from the source system.']
   order_id varchar [ref: > fct_orders.order_id, note: 'The order this line belongs to.']
@@ -132,16 +143,14 @@ Table fct_order_items [role: 'transaction-fact', grain: 'One row per item on an 
 
 /**
  * The import UI with the file supplied: `examplePath` reads as
- * `EXAMPLE_DBML` and has no layout file next to it. Everything else (the
- * pickers, the dry run, opening the diagram) is `base`'s.
+ * `EXAMPLE_DBML`. Everything else (the pickers, the dry run, opening the
+ * diagram) is `base`'s.
  */
 export function exampleDbmlUi(base: ImportDbmlUi, examplePath: string): ImportDbmlUi {
-  const layoutPath = dbdiagramLayoutPathFor(examplePath);
   return {
     ...base,
     pickFile: async () => examplePath,
     readFile: async (filePath) => (filePath === examplePath ? EXAMPLE_DBML : base.readFile(filePath)),
-    exists: async (filePath) => (filePath === examplePath ? true : filePath === layoutPath ? false : base.exists(filePath)),
   };
 }
 
@@ -157,6 +166,7 @@ export async function openExampleDiagram(deps: ImportDbmlDeps): Promise<ImportDb
   const hasExampleLayer = deps.layerService.getCreatableLayers().some((l) => l.id === EXAMPLE_LAYER);
   return importDbml(
     { ...deps, ui, source: 'example' },
-    { filePath: examplePath, ...(hasExampleLayer ? { layer: EXAMPLE_LAYER } : {}) },
+    // The draft asks nothing: the layer and name are the quick path's.
+    { filePath: examplePath, ...(hasExampleLayer ? { layer: EXAMPLE_LAYER } : {}), ...(deps.draft ? { quick: true } : {}) },
   );
 }

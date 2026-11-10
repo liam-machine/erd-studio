@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 5,
+  "domain": "star-crossings",
+  "layer": "gold",
+  "description": "A sales star, and a returns fact sharing four of its dimensions",
+  "logical": {
+    "models": [
+      "fct_sale",
+      "dim_customer",
+      "dim_product",
+      "dim_store",
+      "dim_promotion",
+      "dim_employee",
+      "dim_payment_method",
+      "dim_date",
+      "dim_channel",
+      "fct_return"
+    ],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_sale": {
+        "x": 968,
+        "y": 397
+      },
+      "dim_customer": {
+        "x": 12,
+        "y": 323
+      },
+      "dim_product": {
+        "x": 386,
+        "y": 215
+      },
+      "dim_store": {
+        "x": 547,
+        "y": 449
+      },
+      "dim_promotion": {
+        "x": 751,
+        "y": 739
+      },
+      "dim_employee": {
+        "x": 355,
+        "y": 781
+      },
+      "dim_payment_method": {
+        "x": 820,
+        "y": 952
+      },
+      "dim_date": {
+        "x": 26,
+        "y": 12
+      },
+      "dim_channel": {
+        "x": 891,
+        "y": 1168
+      },
+      "fct_return": {
+        "x": 751,
+        "y": 144
+      }
+    },
+    "annotations": []
+  }
+}

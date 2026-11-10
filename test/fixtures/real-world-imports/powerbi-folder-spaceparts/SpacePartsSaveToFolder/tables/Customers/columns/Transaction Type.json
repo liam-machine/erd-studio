@@ -1,0 +1,14 @@
+{
+  "name": "Transaction Type",
+  "dataType": "string",
+  "sourceColumn": "transaction_type",
+  "displayFolder": "2. Other Customer Attributes",
+  "lineageTag": "d288644d-e68b-417a-b6ad-c229a86c5de4",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

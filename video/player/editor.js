@@ -1,248 +1,187 @@
-// Shared pieces of the VS Code window the scenes play in: the window frame, activity bar, the
-// real "Get started with ERD Studio" walkthrough page, the orders canvas every canvas scene
-// shares (so cuts between them are seamless) and VS Code's QuickPick shell.
+// Shared pieces of the VS Code window the README GIF (hero.js) draws: the activity bar, an Explorer
+// file tree, the draft page an import opens, the DBML syntax colours, and the product copy the
+// end card and the tests use. (The getting-started tours themselves are recordings of the real VS
+// Code: record/.)
 //
-// Product copy here is verbatim: `npm test` checks each constant against its source
-// (package.json, src/commands/drawFromDbt.ts, src/providers/dbtDraftPicker.ts, the webview).
-import { card, COLORS, ICON, esc, node } from './lib.js';
+// Product copy here is verbatim: `npm test` checks each constant against its source (package.json,
+// src/providers/HelpTreeProvider.ts, src/services/draftModel.ts, webview-draft/).
+import { edge, esc, ICON, node } from './lib.js';
 
-// ---------- the window (frame px) ----------
-export const WIN = { x: 96, y: 322, w: 1728, h: 600 };
+// ---------- the window body (frame px; draftPage's default width) ----------
+const WIN = { x: 96, y: 322, w: 1728, h: 600 };
 /** Frame position of the window body's top-left (card border 1 px + 64 px head). */
 export const BODY = { x: WIN.x + 1, y: WIN.y + 65, w: WIN.w - 2, h: WIN.h - 66 };
 export const ACT = 72;          // activity bar width
-export const SIDE = 400;        // side bar width
-
-export const editorWindow = ({ tabs, crumb = 'jaffle-shop', body, style = '', bodyCls = '' }) =>
-  card({ ...WIN, tabs, crumb, body, style, bodyCls });
+const SIDE = 400;               // side bar width
+/** Left edge of the editor area beside the side bar, in body px. */
+export const ED = ACT + SIDE;
 
 // ---------- activity bar ----------
+/** The body of media/icon-sidebar.svg, verbatim (inside its 24x24 viewBox). */
+export const ERD_SIDEBAR_ICON = `<g transform="translate(-2.08 -2.08) scale(.22)">
+    <g transform="translate(4 0) skewX(-8)">
+      <path d="M16 42H42V51H26V59H40V68H26V77H42V86H16Z" fill="currentColor"/>
+      <path fill-rule="evenodd" d="M48 86V42H65C76 42 82 48 82 57C82 64 79 68 73 70L84 86H72L62 71H58V86H48ZM58 51V62H64C69 62 72 60 72 56.5C72 53 69 51 64 51H58Z" fill="currentColor"/>
+      <path fill-rule="evenodd" d="M88 42H101C115 42 122 50 122 64C122 78 115 86 101 86H88V42ZM98 51V77H101C108 77 112 73 112 64C112 55 108 51 101 51H98Z" fill="currentColor"/>
+    </g>
+  </g>`;
 const ai = (d) => `<svg class="icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const ACT_ICONS = {
   files: ai('<path d="M13 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V9z"/><path d="M13 3v6h6"/>'),
   search: ai('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>'),
   ext: ai('<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/><rect x="14.5" y="2.5" width="7" height="7" rx="1" transform="rotate(12 18 6)"/>'),
-  erd: ai('<rect x="3" y="4" width="8" height="6" rx="1.2"/><rect x="13" y="14" width="8" height="6" rx="1.2"/><path d="M7 10v7h6"/>'),
+  // The real activity bar icon: media/icon-sidebar.svg (package.json contributes.viewsContainers),
+  // inlined so it takes currentColor like VS Code's own monochrome icon. test/pipeline.test.mjs
+  // checks these paths still match the file.
+  erd: `<svg class="icon" width="32" height="32" viewBox="0 0 24 24" fill="none">${ERD_SIDEBAR_ICON}</svg>`,
 };
-/** Activity bar in body coordinates; `erd` adds ERD Studio's icon (fading in with erdOp). */
-export function activityBar(active, { erd = true, erdOp = 1 } = {}) {
-  const items = [['files', 20], ['search', 84], ['ext', 148]];
-  if (erd) items.push(['erd', 212]);
+/** Activity bar row tops (body px): Explorer, Search, Extensions, ERD Studio. */
+export const ACT_Y = { files: 20, search: 84, ext: 148, erd: 212 };
+/** Activity bar in body coordinates; `erd` adds ERD Studio's icon (fading in with erdOp), `erdGlow` rings it. */
+export function activityBar(active, { erd = true, erdOp = 1, erdGlow = 0 } = {}) {
+  const items = ['files', 'search', 'ext'];
+  if (erd) items.push('erd');
   let h = `<div class="abs" style="left:0;top:0;width:${ACT}px;bottom:0;background:#131619;border-right:1px solid var(--card-border)"></div>`;
-  for (const [k, y] of items) {
+  for (const k of items) {
+    const y = ACT_Y[k];
     const on = k === active;
     h += `<div class="abs" style="left:0;top:${y}px;width:${ACT}px;height:48px;display:flex;align-items:center;justify-content:center;color:${on ? 'var(--text)' : 'var(--text-3)'};${k === 'erd' ? `opacity:${erdOp.toFixed(3)};` : ''}">${ACT_ICONS[k]}</div>`;
     if (on) h += `<div class="abs" style="left:0;top:${y}px;width:3px;height:48px;background:var(--text)"></div>`;
+    if (k === 'erd' && erdGlow > 0) h += `<div class="abs" style="left:10px;top:${y - 2}px;width:52px;height:52px;border-radius:12px;box-shadow:0 0 0 3px rgba(55,148,255,${erdGlow.toFixed(3)}),0 0 22px rgba(55,148,255,${(0.5 * erdGlow).toFixed(3)})"></div>`;
   }
   return h;
 }
 
-// ---------- the Explorer side bar of the jaffle-shop project (body coordinates) ----------
-export function explorerSide({ hot = 0, op = 1 } = {}) {
-  const row = (y, label, { folder = false, lit = 0 } = {}) =>
-    `<div class="abs" style="left:0;top:${y}px;width:${SIDE}px;height:44px;background:rgba(27,42,64,${lit.toFixed(3)});${lit > 0 ? `box-shadow:inset 4px 0 0 rgba(96,165,250,${lit.toFixed(3)});` : ''}display:flex;align-items:center;gap:10px;padding-left:${folder ? 18 : 50}px;font-size:23px;white-space:nowrap">
-      ${folder ? `<span style="color:var(--text-2)">${ICON.chevRight({ size: 20 })}</span><span style="color:#d9b35a">${ICON.folder({ size: 24 })}</span>` : `<span style="color:#c490e8">${ICON.file({ size: 24 })}</span>`}${label}</div>`;
-  return `<div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;background:#16181b;border-right:1px solid var(--card-border)"></div>
-    <div class="abs" style="left:${ACT}px;top:0;width:${SIDE}px;bottom:0;opacity:${op.toFixed(3)}">
-    <div class="abs" style="left:24px;top:20px;font-size:20px;font-weight:700;letter-spacing:.08em;color:var(--text-2)">EXPLORER</div>
-    <div class="abs" style="left:14px;top:62px;display:flex;align-items:center;gap:6px;font-size:21px;font-weight:800;letter-spacing:.04em">${ICON.chevDown({ size: 20 })}JAFFLE-SHOP</div>
-    ${row(100, 'models', { folder: true })}${row(144, 'seeds', { folder: true })}${row(188, 'target', { folder: true })}
-    ${row(232, 'dbt_project.yml', { lit: hot })}${row(276, 'packages.yml')}</div>`;
+/**
+ * An Explorer file tree (for the README GIF). `rows` are
+ * [depth, kind ('folder' | 'dbml' | 'json' | 'md'), label, closed?] (a closed folder's chevron points
+ * right); `lit(i)` 0..1 highlights row i,
+ * `badge(i)` returns HTML at its right (the Source Control "U"). Rows are `rowH` apart from `top`.
+ */
+export function fileTree(rows, { top = 58, rowH = 40, width = 560, indent = 26, font = 22, lit = () => 0, badge = () => '', style = () => '', colour = () => null } = {}) {
+  const ICOL = { folder: '#d9b35a', json: '#e8c46a', dbml: '#5ca2f8', md: '#8b9099' };
+  let r = '';
+  rows.forEach(([d, kind, label, closed], i) => {
+    const y = top + i * rowH;
+    const h = lit(i);
+    r += `<div class="abs" style="left:0;top:${y}px;width:${width}px;height:${rowH}px;background:rgba(96,165,250,${(0.16 * h).toFixed(3)});${h > 0 ? `box-shadow:inset 4px 0 0 rgba(96,165,250,${h.toFixed(3)});` : ''}${style(i)}"></div>
+      <div class="abs" style="left:${20 + d * indent}px;right:0;top:${y + (rowH - font - 10) / 2}px;display:flex;align-items:center;gap:10px;font-size:${font}px;white-space:nowrap;color:${colour(i) ?? (kind === 'folder' ? 'var(--text)' : '#c9ced6')};${style(i)}">
+        <span style="color:var(--text-3);width:18px;display:flex">${kind === 'folder' ? (closed ? ICON.chevRight({ size: 18, sw: 2.6 }) : ICON.chevDown({ size: 18, sw: 2.6 })) : ''}</span>
+        <span style="color:${ICOL[kind] ?? '#c9ced6'};display:flex">${kind === 'folder' ? ICON.folder({ size: font }) : ICON.file({ size: font })}</span>${label}${badge(i)}</div>`;
+  });
+  return r;
 }
 
 // ---------- the extension listing (package.json) ----------
 export const EXTENSION = {
   name: 'ERD Studio',
   publisher: 'liamwynne',
-  description: 'Logical data modeling in Git: draw ERDs in VS Code, saved as plain YAML your AI assistant can read. DBML import and export, no lock-in. Compare with dbt.',
+  /** The Marketplace id (publisher.name): a search for the name alone also lists an unrelated extension. */
+  id: 'liamwynne.erd-studio',
 };
+/** The Help & Feedback view's rows (HELP_ACTIONS), as the recording's aiSetup scene shows them. */
+export const HELP_ROWS = ['Set Up My AI Helper', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs'];
 
-// ---------- the walkthrough (package.json contributes.walkthroughs, id erdStudio.getStarted) ----------
-// Every step, in order, with its real `when` clause; a window shows only the steps whose clause
-// holds there. VS Code renders a step's command link that sits on its own line as a button;
-// `text` is the rest of the description (set only for the steps a scene opens).
-export const WALKTHROUGH = {
-  title: 'Get started with ERD Studio',
-  description: 'Design your data model in Git — from scratch, from DBML or from dbt — then let your AI assistant fill in the detail.',
-  steps: [
-    { id: 'watch', when: 'erdStudio.hasDbtProject', title: 'Watch the one-minute tour', svg: 'watch' },
-    { id: 'openProject', when: 'workspaceFolderCount == 0', title: 'Open the folder your data model lives in', svg: 'open-project' },
-    { id: 'newDiagram', when: '!erdStudio.hasDbtProject', title: 'Draw your first data model — no dbt needed', svg: 'new-diagram' },
-    {
-      id: 'draw', when: 'erdStudio.hasDbtProject', title: 'Draw your dbt project — no AI needed', svg: 'draw', button: 'Draw from dbt',
-      text: 'Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.',
-    },
-    { id: 'importDbml', title: 'Start from a DBML file', svg: 'import-dbml' },
-    {
-      id: 'enrich', title: 'Enrich it with your AI assistant', svg: 'enrich', button: 'Set Up My AI Helper',
-      text: "Add grain, keys, rationale and your team's modelling style. This installs a guide for Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; then type /erd-studio-setup in your assistant.",
-    },
-    {
-      id: 'sample', when: '!erdStudio.hasDbtProject', title: 'Using dbt? Try the sample project', svg: 'sample', button: 'Try the sample project',
-      text: 'A small dbt project to compare a design with what dbt built.',
-    },
+// ---------- the draft page (webview-draft: DraftBanner, a read-only canvas) ----------
+// What opens when a start reads something in (src/services/draftModel.ts): the banner's
+// headline and detail, its buttons, and the diagram it would keep, drawn read-only. Nothing is
+// written until Keep.
+/** What Import DBML… shows for a sales.dbml before anything is written (draftFromImportPlan). */
+export const SALES_DRAFT = {
+  tab: 'Draft: sales',
+  file: 'sales.dbml',
+  headline: 'Draft from sales.dbml · 5 tables, 4 relationships · not saved',
+  detail: 'Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml).',
+  // Keep is the primary; the other starts (FIND_STARTS) sit in the menu.
+  buttons: [['Keep as Diagram', 'primary'], ['More ways to start', 'menu'], ['Discard', 'secondary']],
+  // An import's draft always carries its review (draftModel detailsFromImportReview): "Show details".
+  details: true,
+  // ...and every import's draft (not an example's) offers its report (draftModel `importReport`, set
+  // from importDbml.ts's reportId: a DBML file is an IMPORT_REPORT_SOURCES source): "Show Import Report".
+  importReport: true,
+  // No name the README GIF's library already has (its .erd-studio tables): a name that is would be
+  // reused, and the detail would say so.
+  tables: [
+    { name: 'dim_store', x: 0, y: 0, cols: [['PK', 'store_id', 'int'], [null, 'store_name', 'varchar'], [null, 'region', 'varchar']] },
+    { name: 'dim_staff', x: 0, y: 330, cols: [['PK', 'staff_id', 'int'], [null, 'staff_name', 'varchar']] },
+    { name: 'fct_sale', x: 540, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'store_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
+    { name: 'dim_calendar', x: 1080, y: 0, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
+    { name: 'fct_refund', x: 1080, y: 300, cols: [['PK', 'refund_id', 'int'], ['FK', 'sale_id', 'int'], [null, 'refunded', 'decimal(12,2)']] },
   ],
+  rels: [[2, 1, 0, 0], [2, 2, 1, 0], [2, 3, 3, 0], [4, 1, 2, 0]],
 };
 
-// The two windows the video shows: the tour runs in the jaffle-shop dbt project; the sample scene
-// is a folder without dbt (the sample step is offered only there).
-export const DBT_PROJECT = { 'erdStudio.hasDbtProject': true, workspaceFolderCount: 1 };
-export const PLAIN_FOLDER = { 'erdStudio.hasDbtProject': false, workspaceFolderCount: 1 };
+/** DraftBanner's link to the draft's details (webview-draft/lib/wording.ts SHOW_DETAILS). */
+export const SHOW_DETAILS = 'Show details';
+/** DraftBanner's link to the import's report (webview-draft/lib/wording.ts SHOW_IMPORT_REPORT). */
+export const SHOW_IMPORT_REPORT = 'Show Import Report';
 
-/** Evaluates the walkthrough's `when` clauses: `key`, `!key` and `key == n`. Anything else throws. */
-export function whenHolds(when, ctx) {
-  if (when === undefined) return true;
-  let m;
-  if ((m = when.match(/^(!?)([\w.]+)$/))) {
-    if (!(m[2] in ctx)) throw new Error(`unknown context key ${m[2]}`);
-    return Boolean(ctx[m[2]]) !== (m[1] === '!');
-  }
-  if ((m = when.match(/^([\w.]+) == (\d+)$/))) {
-    if (!(m[1] in ctx)) throw new Error(`unknown context key ${m[1]}`);
-    return ctx[m[1]] === Number(m[2]);
-  }
-  throw new Error(`unsupported when clause: ${when}`);
-}
-/** The steps a window with this context shows, in order. */
-export const visibleSteps = (ctx = DBT_PROJECT) => WALKTHROUGH.steps.filter((s) => whenHolds(s.when, ctx));
-
-// The step images are the real media/walkthrough/*.svg files, inlined (an <img> could not use the
-// page's fonts, and the video uses OFL fonts only). Fetched once, before the first frame.
-const SVG_NAMES = WALKTHROUGH.steps.map((s) => s.svg);
-export const WALK_SVG = Object.fromEntries(await Promise.all(SVG_NAMES.map(async (n) => {
-  const txt = await (await fetch(`/media/walkthrough/${n}.svg`, { cache: 'no-store' })).text();
-  return [n, txt.replace(/font-family="[^"]*"/, 'font-family="Inter, sans-serif"')];
-})));
-/** A walkthrough image at width w (the sources are 480x300). */
-export const walkSvg = (name, w) =>
-  WALK_SVG[name].replace(/width="480" height="300"/, `width="${w}" height="${Math.round((w * 300) / 480)}"`);
-
+const MINI_W = 360;
+/** The draft diagram's table width (local px): hero.js routes the draft's lines around these cards. */
+export const DRAFT_NODE_W = MINI_W;
+const miniRowY = (top, i) => top + 62 + i * 46 + 23;
 /**
- * Geometry of the walkthrough page, in coordinates relative to its own left edge / the body top.
- * `wide` (no side bar) gives the step column and the image more room.
+ * A draft's diagram at full node scale, in local coordinates (scaled by draftPage). `edges`: its
+ * lines, drawn by the caller (the README GIF routes them Curved, as the product's draft canvas
+ * does); without it, plain square steps between the key rows.
  */
-export function wtGeom({ wide = false, open = 'draw', ctx = DBT_PROJECT } = {}) {
-  const W = wide ? BODY.w - ACT : BODY.w - ACT - SIDE;
-  const g = { W, SX: 48, SW: wide ? 760 : 640, ROW: 48, STEPS_Y: 104, INDENT: 52, TEXT_W: wide ? 680 : 560, TEXT_LH: 28, BTN_H: 46 };
-  g.IMG_X = g.SX + g.SW + 44;
-  g.IMG_W = Math.min(W - g.IMG_X - 48, wide ? 760 : 520);
-  const steps = visibleSteps(ctx);
-  const idx = steps.findIndex((s) => s.id === open);
-  if (idx < 0) throw new Error(`walkthrough step ${open} is not shown in this window`);
-  g.OPEN_Y = g.STEPS_Y + idx * g.ROW;
-  const step = steps[idx];
-  const perLine = g.TEXT_W / 9.6;                      // ~characters per line at 19 px Inter
-  g.TEXT_LINES = step?.text ? Math.ceil(step.text.length / perLine) : 0;
-  g.BTN_Y = 54 + g.TEXT_LINES * g.TEXT_LH + 14;         // relative to the open step's top
-  g.OPEN_H = g.BTN_Y + g.BTN_H + 18;
-  return g;
-}
-
-const doneDot = (size) =>
-  `<span style="width:${size}px;height:${size}px;border-radius:50%;background:#3794ff;color:#0b1422;display:flex;align-items:center;justify-content:center;flex:none">${ICON.check({ size: Math.round(size * 0.68) })}</span>`;
-const openDot = (size) => `<span style="width:${size}px;height:${size}px;border-radius:50%;display:block;border:2.5px solid #6c6f76;flex:none;box-sizing:border-box"></span>`;
-
-/**
- * The Welcome editor's walkthrough page (origin = its top-left inside the body).
- * @param o.open   id of the expanded step   @param o.done  completed step ids
- * @param o.glow   0..1 highlight on the open step   @param o.press 0..1 click on its button
- * @param o.img    0..1 opacity of the step's image
- * @param o.ctx    the window's context keys (DBT_PROJECT or PLAIN_FOLDER): which steps show
- */
-export function walkthrough({ open = 'draw', done = [], glow = 0, press = 0, wide = false, img = 1, ctx = DBT_PROJECT } = {}) {
-  const g = wtGeom({ wide, open, ctx });
-  let h = `<div class="abs" style="left:0;top:0;width:${g.W}px;bottom:0;background:var(--card)"></div>`;
-  h += `<div class="abs" style="left:${g.SX}px;top:18px;font-size:32px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${WALKTHROUGH.title}</div>`;
-  h += `<div class="abs" style="left:${g.SX}px;top:62px;font-size:20px;color:var(--text-2);white-space:nowrap">${WALKTHROUGH.description}</div>`;
-  let y = g.STEPS_Y;
-  for (const s of visibleSteps(ctx)) {
-    const dot = done.includes(s.id) ? doneDot(26) : openDot(26);
-    if (s.id === open) {
-      const bw = `rgba(55,148,255,${(0.3 + 0.7 * glow).toFixed(2)})`;
-      const btnBg = press > 0 && press < 1 ? '#0b4f7d' : '#0e639c';
-      h += `<div class="abs" style="left:${g.SX}px;top:${y}px;width:${g.SW}px;height:${g.OPEN_H}px;border-radius:10px;background:#ffffff0c;border:2px solid ${bw};box-shadow:0 0 ${(26 * glow).toFixed(1)}px rgba(55,148,255,${(0.35 * glow).toFixed(2)})">
-        <div class="abs" style="left:13px;top:14px">${dot}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:10px;font-size:23px;line-height:34px;font-weight:700;white-space:nowrap">${esc(s.title)}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:54px;width:${g.TEXT_W}px;font-size:19px;line-height:${g.TEXT_LH}px;color:var(--text-2)">${esc(s.text)}</div>
-        <div class="abs" style="left:${g.INDENT}px;top:${g.BTN_Y}px;height:${g.BTN_H}px;padding:0 22px;border-radius:5px;background:${btnBg};color:#fff;font-size:21px;font-weight:600;display:flex;align-items:center;white-space:nowrap">${s.button}</div>
-      </div>`;
-      y += g.OPEN_H + 6;
-    } else {
-      h += `<div class="abs" style="left:${g.SX}px;top:${y}px;width:${g.SW}px;height:${g.ROW}px;display:flex;align-items:center;gap:14px;padding-left:13px;font-size:21px;white-space:nowrap;color:${done.includes(s.id) ? 'var(--text-2)' : 'var(--text)'}">${dot}${esc(s.title)}</div>`;
-      y += g.ROW;
-    }
+function draftDiagram(d, { op = 1, edges = null } = {}) {
+  let h = edges ? `<div class="abs" style="left:0;top:0;opacity:${op.toFixed(3)}">${edges}</div>` : '';
+  if (!edges) for (const [a, ar, b, br] of d.rels) {
+    const A = d.tables[a], B = d.tables[b];
+    const rightward = B.x > A.x;
+    const x0 = rightward ? A.x + MINI_W : A.x, x1 = rightward ? B.x : B.x + MINI_W;
+    const y0 = miniRowY(A.y, ar), y1 = miniRowY(B.y, br), mx = (x0 + x1) / 2;
+    h += edge([[x0, y0], [mx, y0], [mx, y1], [x1, y1]], { width: 4, opacity: op });
   }
-  const step = WALKTHROUGH.steps.find((s) => s.id === open);
-  if (step && img > 0) {
-    h += `<div class="abs" style="left:${g.IMG_X}px;top:${g.STEPS_Y}px;opacity:${img.toFixed(3)}">${walkSvg(step.svg, g.IMG_W)}</div>`;
+  for (const t of d.tables) {
+    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'MAIN', cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
   }
   return h;
 }
-/** Frame-space centre of the open step's button. `left` = the walkthrough's left edge in body px. */
-export function walkButton({ wide = false, open = 'draw', left = ACT + SIDE, ctx = DBT_PROJECT } = {}) {
-  const g = wtGeom({ wide, open, ctx });
-  const step = WALKTHROUGH.steps.find((s) => s.id === open);
-  const w = 22 * 2 + step.button.length * 11.2;
-  return { x: BODY.x + left + g.SX + g.INDENT + w / 2, y: BODY.y + g.OPEN_Y + g.BTN_Y + g.BTN_H / 2 };
-}
-
-// ---------- the orders canvas (Draw from dbt on a small jaffle-shop project's marts folder) ----------
-// Four marts models, so the picker's "4 models" and the canvas agree. Keys come from the unique
-// and relationship tests (markDraftKeys), types from each column's data_type in the schema .yml.
-export const CANVAS = { toolbarX: BODY.x + 24, toolbarY: BODY.y + 16 };
-export const MODELS = [
-  { name: 'dim_customers', x: 135, y: 530, w: 350, cols: [{ key: 'PK', name: 'customer_id', type: 'VARCHAR' }, { name: 'customer_name', type: 'VARCHAR' }] },
-  { name: 'fct_orders', x: 560, y: 490, w: 350, cols: [{ key: 'PK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'customer_id', type: 'VARCHAR' }, { name: 'ordered_at', type: 'DATE' }, { name: 'order_total', type: 'DECIMAL' }] },
-  { name: 'fct_order_items', x: 985, y: 530, w: 370, cols: [{ key: 'PK', name: 'order_item_id', type: 'VARCHAR' }, { key: 'FK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'product_id', type: 'VARCHAR' }] },
-  { name: 'dim_products', x: 1430, y: 510, w: 350, cols: [{ key: 'PK', name: 'product_id', type: 'VARCHAR' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'product_price', type: 'DECIMAL' }] },
-];
-/** Frame y of the centre of column row i of a node at `top` (no grain line: a draft has none). */
-export const ry = (top, i) => top + 62 + i * 46 + 23;
-export const nodeH = (m) => 62 + m.cols.length * 46 + 6;
 
 /**
- * The three relationship edges as orthogonal paths: [points, manyMark, oneMark].
- * `pos` overrides model positions (for the layout glide).
+ * The draft editor, in body coordinates from `left` to the body's right edge: the banner (two
+ * rows: the text, then the switcher and buttons) over the draft's read-only diagram. `press` is
+ * [buttonIndex, 0..1] for a click, `glow` rings the primary; `diagramOp` fades the diagram in.
  */
-export function orderEdges(pos = MODELS) {
-  const [dc, fo, fi, dp] = pos.map((p, i) => ({ ...MODELS[i], ...p }));
-  const jog = (a, b) => (a + b) / 2;
-  const e = (from, fr, to, tr, dir) => {
-    // from.side: the many end; dir -1 = to the left, +1 = to the right
-    const x0 = dir < 0 ? from.x : from.x + from.w;
-    const x1 = dir < 0 ? to.x + to.w : to.x;
-    const y0 = ry(from.y, fr), y1 = ry(to.y, tr);
-    const mx = jog(x0, x1);
-    return [[[x0, y0], [mx, y0], [mx, y1], [x1, y1]], [dir < 0 ? x0 - 22 : x0 + 6, y0 - 8], [dir < 0 ? x1 + 8 : x1 - 20, y1 - 10]];
-  };
-  return [e(fo, 1, dc, 0, -1), e(fi, 1, fo, 0, -1), e(fi, 2, dp, 0, +1)];
+export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17, edges = null } = {}) {
+  // DraftBanner: the headline, the detail, then (a draft with details or an import's report) a line
+  // of links: "Show details · Show Import Report".
+  const links = [d.details && SHOW_DETAILS, d.importReport && SHOW_IMPORT_REPORT].filter(Boolean);
+  const BAN = links.length ? 162 : 132;
+  const bx = 28;
+  const btnHtml = d.buttons.map(([label, kind], i) => {
+    const pressed = press && press[0] === i && press[1] > 0 && press[1] < 1;
+    const bg = kind === 'primary' ? (pressed ? '#0b4f7d' : '#0e639c') : kind === 'quiet' ? 'transparent' : '#3a3d41';
+    const ring = kind === 'primary' && glow > 0 ? `box-shadow:0 0 0 3px rgba(55,148,255,${(0.6 * glow).toFixed(3)}),0 0 22px rgba(55,148,255,${(0.5 * glow).toFixed(3)});` : '';
+    return `<span style="height:36px;padding:0 13px;border-radius:4px;background:${bg};${kind === 'quiet' ? 'border:1px solid #4a4d55;' : ''}color:${kind === 'primary' ? '#fff' : 'var(--text)'};font-weight:${kind === 'primary' ? 600 : 500};display:flex;align-items:center;gap:6px;${ring}">${esc(label)}${kind === 'menu' ? ICON.chevDown({ size: 15, sw: 2.6 }) : ''}</span>`;
+  }).join('');
+  const scope = d.scope
+    ? `<span style="display:flex;align-items:center;gap:8px;margin-right:8px"><span style="color:var(--text-2)">${d.scope.label}</span><span style="height:34px;display:flex;align-items:center;gap:8px;padding:0 8px 0 10px;border-radius:4px;background:#2a2b30;border:1px solid #3c3d44">${esc(d.scope.value)}${ICON.chevDown({ size: 15, sw: 2.6 })}</span></span>`
+    : '';
+  const html = `<div class="abs" style="left:${left}px;top:0;width:${width}px;bottom:0;background:var(--card);opacity:${op.toFixed(3)};overflow:hidden">
+      <div class="abs grid-bg" style="left:0;right:0;top:${BAN}px;bottom:0"></div>
+      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp, edges })}</div>
+      <div class="abs" style="left:0;right:0;top:0;height:${BAN}px;background:#1d2633;border-bottom:1px solid #2d4a70"></div>
+      <div class="abs" style="left:${bx}px;top:14px;right:20px;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.headline)}</div>
+      <div class="abs" style="left:${bx}px;top:46px;right:20px;font-size:17px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.detail)}</div>
+      ${links.length ? `<div class="abs" style="left:${bx}px;top:74px;font-size:17px;color:#3794ff;white-space:nowrap">${links.join('<span style="color:var(--text-2)"> · </span>')}</div>` : ''}
+      <div class="abs" style="left:${bx}px;top:${BAN - 52}px;display:flex;align-items:center;gap:8px;font-size:${font}px;white-space:nowrap">${scope}${btnHtml}</div></div>`;
+  return { html };
 }
 
-/** A node with the canvas' layer badge. */
-export const orderNode = (m, opts = {}) => node({ x: m.x, y: m.y, w: m.w, name: m.name, layer: 'GLD', cols: m.cols, ...opts });
-
-export const STAGE_BLUE = COLORS.logical;
-
-// ---------- VS Code QuickPick ----------
-// The first QuickPick, as the command lists this project (dbtDraft.ts listDraftScopes: one row per
-// folder, presentation folders first; detail = the first names, best-connected first).
-export const DRAW_PICK = {
-  title: 'Draw from dbt',
-  placeholder: 'Which dbt models should the diagram start from?',
-  rows: [
-    { label: 'marts', description: '4 models', detail: 'fct_order_items, fct_orders, dim_customers, dim_products' },
-    { label: 'staging', description: '4 models', detail: 'stg_customers, stg_order_items, stg_orders, stg_products' },
-  ],
-  choose: { label: 'Choose models…', description: 'pick up to 15 of 8' },
-  progress: 'Reading your dbt project…',
-  namePrompt: 'Name the diagram. It is saved in the Gold layer.',
-  suggested: 'marts',
-  name: 'orders',
-};
-
-export const QP = { x: WIN.x + (WIN.w - 900) / 2, y: WIN.y + 8, w: 900, title: 46, input: 56 };
-/** QuickPick box with its title bar; `inner` is positioned inside it. */
-export const quickPick = (title, inner, h, style = '') =>
-  `<div class="abs" style="left:${QP.x}px;top:${QP.y}px;width:${QP.w}px;height:${h}px;border-radius:10px;background:#252526;border:1px solid #454545;box-shadow:0 18px 50px #000c;overflow:hidden;${style}">
-    <div class="abs" style="left:0;right:0;top:0;height:${QP.title}px;display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600;color:var(--text-2);background:#1f1f20;border-bottom:1px solid #3a3a3c">${title}</div>
-    ${inner}</div>`;
+// ---------- DBML text, coloured as VS Code's DBML grammar colours it ----------
+/** One line of a .dbml file as HTML: a leading keyword, quoted strings, brackets; everything else plain. */
+export function dbmlLine(s) {
+  if (s.trim().startsWith('//')) return `<span style="color:var(--text-3)">${esc(s)}</span>`;
+  const col = (c, x) => `<span style="color:var(${c})">${esc(x)}</span>`;
+  // tokens: a keyword at the start, quoted strings, brackets; everything else plain
+  return s.split(/('[^']*'|"[^"]*"|[[\]]|^\s*(?:Table|Ref|use)\b)/).filter(Boolean).map((tok) => {
+    if (/^\s*(Table|Ref|use)$/.test(tok)) return col('--syn-kw', tok);
+    if (/^'.*'$/.test(tok)) return col('--syn-str', tok);
+    if (/^".*"$/.test(tok)) return col('--syn-val', tok);
+    if (tok === '[' || tok === ']') return col('--syn-punc', tok);
+    return esc(tok);
+  }).join('');
+}

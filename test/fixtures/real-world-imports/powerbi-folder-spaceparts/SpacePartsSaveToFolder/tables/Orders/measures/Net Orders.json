@@ -1,0 +1,21 @@
+{
+  "name": "Net Orders",
+  "description": "Net orders exclude cancellation document types",
+  "expression": [
+    "",
+    "CALCULATE (",
+    "    [Total Net Order Value],",
+    "    'Order Document Type'[Group]",
+    "        <> \"Cancellation\"",
+    ") "
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "1. Value\\i. Total",
+  "lineageTag": "4b34a3e0-ef13-4b57-8312-568cc0f1083c",
+  "annotations": [
+    {
+      "name": "TabularEditor_InPerspective",
+      "value": "[\"No Measure Selection\"]"
+    }
+  ]
+}

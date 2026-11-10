@@ -1,0 +1,15 @@
+{
+  "name": "SemanticModel",
+  "compatibilityLevel": 1567,
+  "model": {
+    "tables": [
+      {
+        "name": "Orders",
+        "columns": [
+          { "name": "OrderKey", "dataType": "int64" }
+          { "name": "Amount", "dataType": "decimal" }
+        ]
+      }
+    ]
+  }
+}

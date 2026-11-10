@@ -1,0 +1,28 @@
+{
+  "name": "Total Freight Surcharge",
+  "description": "The freight surcharge is what we charge for delivery. It is one of our lines of revenue.",
+  "expression": [
+    "",
+    "VAR _RATE = MAX ('Exchange Rate'[Rate])",
+    "RETURN",
+    "    CALCULATE (",
+    "",
+    "        -- Convert to common currency (WAT)",
+    "        SUMX (",
+    "            'Invoices',",
+    "            'Invoices'[Freight]",
+    "                / RELATED ('Budget Rate'[Rate])",
+    "        )",
+    "",
+    "            -- Convert to selected currency",
+    "            * _RATE,",
+    "",
+    "        -- Limit to dates in scope",
+    "        'Date'[IsDateInScope] = TRUE",
+    "    )"
+  ],
+  "formatString": "#,##0",
+  "isHidden": true,
+  "displayFolder": "1. Value\\b. Cost & Penalties\\III. Freight",
+  "lineageTag": "29974f41-9300-4296-92e6-a5f0f7f5b4a6"
+}

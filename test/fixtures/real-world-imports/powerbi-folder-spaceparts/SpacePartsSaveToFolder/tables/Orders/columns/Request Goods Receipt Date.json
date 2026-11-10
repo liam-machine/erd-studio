@@ -1,0 +1,20 @@
+{
+  "name": "Request Goods Receipt Date",
+  "dataType": "dateTime",
+  "isHidden": true,
+  "sourceColumn": "request_goods_receipt_date",
+  "formatString": "Long Date",
+  "displayFolder": "Columns\\3. Keys\\Dates",
+  "lineageTag": "1d86455e-0786-4044-a863-46c0f76d2528",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    },
+    {
+      "name": "UnderlyingDateTimeDataType",
+      "value": "Date"
+    }
+  ]
+}

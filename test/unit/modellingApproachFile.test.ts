@@ -37,14 +37,14 @@ describe('.erd-studio/modelling-approach.md is ignored by the extension', () => 
     expect(classifySemanticPath(semantic, path.join(semantic, 'modelling-approach.md'))).toBe('other');
   });
 
-  it('the semantic-file watcher glob (**/*.json) and the custom editor selector cannot match it', () => {
+  it('the semantic-file watcher glob (**/*.{json,dbml}) and the custom editor selector cannot match it', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
     const selectors = (pkg.contributes.customEditors[0].selector as Array<{ filenamePattern: string }>).map((s) => s.filenamePattern);
     for (const pattern of selectors) {
-      expect(pattern.endsWith('/*/*.json'), pattern).toBe(true);
+      expect(pattern.endsWith('/*/*.json') || pattern.endsWith('/*/diagrams/*.dbml'), pattern).toBe(true);
     }
     const watcher = fs.readFileSync(path.join(REPO_ROOT, 'src', 'watchers', 'FileWatcherService.ts'), 'utf-8');
-    expect(watcher).toContain('`${this.semanticDir}/**/*.json`');
+    expect(watcher).toContain('`${this.semanticDir}/**/*.{json,dbml}`');
   });
 
   it('adds no layer, domain or model, with or without layers.json', () => {
@@ -77,5 +77,50 @@ describe('.erd-studio/modelling-approach.md is ignored by the extension', () => 
     const names = models.listTableNames();
     expect(names).not.toContain('modelling-approach');
     expect(names.every((n) => /^[a-z][a-z0-9_]*$/.test(n))).toBe(true);
+  });
+});
+
+/**
+ * `.erd-studio/fields.yml` (v46) sits beside `modelling-approach.md` and is
+ * the file the setup guide writes for the team's field list. ERD Studio reads
+ * it as the field list only: it is never a layer, a diagram or a table.
+ */
+describe('.erd-studio/fields.yml is never a layer, diagram or table', () => {
+  const FIELDS = 'version: 1\ntables:\n  - grain\n  - key: owner\n    label: Owner\n    type: value\ncolumns:\n  - natural_key\n';
+
+  it('adds no layer, domain or model, with or without layers.json', () => {
+    const layerService = new LayerService(root, '.erd-studio');
+    const subjectAreaService = new SubjectAreaService(layerService);
+    subjectAreaService.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
+    const layersBefore = layerService.detectLayersFromFilesystem().map((l) => l.id);
+    const domainsBefore = subjectAreaService.listSubjectAreas(root, '.erd-studio');
+
+    fs.writeFileSync(path.join(semantic, 'fields.yml'), FIELDS);
+
+    const layers = new LayerService(root, '.erd-studio');
+    const domains = new SubjectAreaService(layers);
+    domains.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
+    expect(layers.detectLayersFromFilesystem().map((l) => l.id)).toEqual(layersBefore);
+    expect(domains.listSubjectAreas(root, '.erd-studio')).toEqual(domainsBefore);
+    expect(layers.getLoadError()).toBeNull();
+
+    fs.rmSync(path.join(semantic, 'layers.json'), { force: true });
+    const scanned = new LayerService(root, '.erd-studio').detectLayersFromFilesystem().map((l) => l.id);
+    expect(scanned).not.toContain('fields.yml');
+    expect(scanned).not.toContain('fields');
+  });
+
+  it('is not listed as a logical model', () => {
+    fs.writeFileSync(path.join(semantic, 'fields.yml'), FIELDS);
+    const names = new TableLibraryService(root, '.erd-studio').listTableNames();
+    expect(names).not.toContain('fields');
+  });
+
+  it('is never classified as a diagram or the layer config by the watcher', () => {
+    const kind = classifySemanticPath(semantic, path.join(semantic, 'fields.yml'));
+    // The host may give the field list a kind of its own; it is never one of these.
+    for (const other of ['domain', 'table', 'relationships', 'layer-config']) {
+      expect(kind).not.toBe(other);
+    }
   });
 });

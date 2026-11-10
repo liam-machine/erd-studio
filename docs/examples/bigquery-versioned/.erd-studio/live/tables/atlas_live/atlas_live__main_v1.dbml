@@ -1,0 +1,14 @@
+// atlas_live.main_v1 and atlas_stable.main_v1 share a table name. A table's name is unique across the
+// whole project, so each takes its dataset as a prefix (<dataset>__<table>), with the BigQuery name in alias.
+Table atlas_live.atlas_live__main_v1 [
+  alias: 'main_v1',
+  meta_retention: '30 days'
+] {
+  Note: 'Main pings as they arrive, kept for 30 days.'
+
+  document_id          STRING [pk]
+  client_id            STRING
+  submission_timestamp TIMESTAMP
+  normalized_channel   STRING
+  payload              JSON
+}

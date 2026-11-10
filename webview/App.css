@@ -59,6 +59,23 @@
   color: var(--editor-fg);
 }
 
+.editor-message__spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--focus-border);
+  border-radius: 50%;
+  animation: editor-message-spin 0.9s linear infinite;
+}
+
+@keyframes editor-message-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-message__spinner { animation: none; }
+}
+
 .editor-message__button {
   padding: 6px 14px;
   border: 1px solid transparent;

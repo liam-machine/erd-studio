@@ -1,0 +1,11 @@
+Table common.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar day'
+] {
+  Note: 'The calendar, shared by every analysis area.'
+
+  date_id             INT [pk, note: 'yyyymmdd']
+  date_actual         DATE
+  first_day_of_month  DATE
+  fiscal_quarter_name STRING
+}

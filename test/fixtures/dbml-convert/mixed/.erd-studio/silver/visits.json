@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 6,
+  "subjectArea": "visits",
+  "layer": "silver",
+  "description": "Visits by region and customer",
+  "logical": {
+    "tables": ["fct_visit", "dim_region", "dim_customer", "fct_refund", "fct_order"],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_visit": { "x": 400, "y": 200 },
+      "dim_region": { "x": 40, "y": 40 },
+      "dim_customer": { "x": 40, "y": 360 }
+    }
+  }
+}

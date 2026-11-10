@@ -1,6 +1,7 @@
 /**
  * `erd-studio` CLI entry point (dist/cli.js) — the read-only helper the
- * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `export`, `version`.
+ * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `export`, `version` — and
+ * `changes`, the model changes since a git ref, for a pull-request comment.
  *
  * Launched through the ~/.erd-studio-cli shims (cliLauncherService), under
  * plain Node or VS Code's own Electron with ELECTRON_RUN_AS_NODE. It never
@@ -13,6 +14,8 @@
 
 import { redactPaths } from '../types/feedback';
 import { parseArgs, USAGE, type CliOptions } from './args';
+import { runChanges } from './changes';
+import { formatChangesMarkdown, formatChangesText } from './changesFormat';
 import { buildCliContext, CLI_VERSION, CliEnvError } from './context';
 import { runDiff } from './diff';
 import { runDoctor, runtimeInfo } from './doctor';
@@ -96,7 +99,8 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
           cwd: io.cwd,
           env: io.env,
         });
-        out(result, () => formatDoctor(result, paint));
+        // A dbt flag says the user is after a dbt project: a missing one may say so.
+        out(result, () => formatDoctor(result, paint, { mentionDbt: opts.noDbt || opts.dbt !== undefined || opts.trustVenv }));
         return EXIT.ok;
       }
 
@@ -108,7 +112,8 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
       }
 
       case 'diff': {
-        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
+        // diff compares with dbt, so a missing project says where dbt_project.yml was looked for.
+        const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd, mentionDbt: true });
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
         return exitCode;
@@ -132,6 +137,13 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
         const result = await runExport(ctx, { domain: opts.domains[0], format: opts.format!, cwd: io.cwd });
         // Human mode is the export text and nothing else, so `> schema.dbml` works.
         out(result, () => result.content);
+        return EXIT.ok;
+      }
+
+      case 'changes': {
+        // parseArgs guarantees --base, and folds --format json into --json.
+        const result = runChanges({ project: opts.project, semanticDir: opts.semanticDir, base: opts.base!, cwd: io.cwd });
+        out(result, () => (opts.changesFormat === 'markdown' ? formatChangesMarkdown(result) : formatChangesText(result)));
         return EXIT.ok;
       }
 

@@ -1,0 +1,16 @@
+Table conformed.dim_product [
+  role: 'conformed-dim',
+  grain: 'One row per product per version',
+  scd_strategy: 'Type 2 on brand and category so last year\'s sales stay in last year\'s category; type 1 on the description.'
+] {
+  Note: 'Products, at SKU level. Conformed across sales, inventory and procurement.'
+
+  product_key         INT    [pk, note: 'Surrogate key']
+  sku                 STRING [natural_key: 'true']
+  product_description STRING [scd_type: '1']
+  brand               STRING [scd_type: '2']
+  category            STRING [scd_type: '2']
+  department          STRING [scd_type: '2']
+  valid_from          DATE
+  valid_to            DATE
+}

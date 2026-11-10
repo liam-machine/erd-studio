@@ -62,9 +62,9 @@ All tools take a `project_path` argument: the **absolute path** to the dbt proje
 
 | Tool | Returns |
 |---|---|
-| `list_domains` | All ERDs grouped by layer. Filter optional by `layer`. |
-| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. |
-| `list_models` | All logical model definitions from `.erd-studio/logical-models/*.yml`. |
+| `list_domains` | All ERDs grouped by layer, each with its `file_format` (`dbml`, or `json` before 2.0). Filter optional by `layer`. |
+| `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. `domain` is the diagram's file name without `.dbml` or `.json` (a DBML diagram is `<layer>/diagrams/<name>.dbml`). |
+| `list_models` | All logical model definitions: the `.dbml` table files in `.erd-studio/<layer>/tables/<schema>/` (or older `.yml` files), each with its `file_format`. |
 | `read_model` | Single logical model with column-level metadata, grain, SCD types, rationale. |
 | `list_manifest_models` | Models from `target/manifest.json` (what dbt actually built), with unique/relationship test coverage. Filter optional by `name_contains`. |
 | `get_editor_setup` | Returns install instructions for the ERD Studio VS Code extension. Use this when the user wants to edit, design, or build (this MCP server is read-only). |
@@ -73,7 +73,7 @@ All tools are read-only. If the project hasn't been initialized with a `.erd-stu
 
 ## What the AI gets
 
-Unlike most ERD tools where the model is locked behind a vendor UI, ERD Studio stores the semantic model as **plain YAML + JSON in your dbt repo**. This MCP server exposes that model structurally:
+Unlike most ERD tools where the model is locked behind a vendor UI, ERD Studio stores the semantic model in your repo as **DBML**, an open format that other DBML tools read too (one file per table, plus relationships and diagrams), with **YAML + JSON** for projects from before ERD Studio 2.0. This MCP server exposes that model structurally, in either format:
 
 - **Grain** as a first-class field — *"one row per customer (current + history)"*
 - **Model role** — `conformed-dim`, `transaction-fact`, `bridge`, etc.
@@ -94,8 +94,8 @@ So when you ask the AI *"propose a column to add to `dim_customer`"*, it sees no
 If your dbt project doesn't have a `.erd-studio/` directory yet:
 
 1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio)
-2. In VS Code: Command Palette → `dbt: Set Up Semantic Domains Directory`
-3. Optionally: Command Palette → `dbt: Install AI Coding Harness` to get the bundled skill
+2. In VS Code: Command Palette → `ERD Studio: New Diagram…`
+3. Optionally: Command Palette → `ERD Studio: Set Up My AI Helper` to get the bundled skill
 
 The MCP server still works on uninitialized projects — `list_manifest_models` reads `target/manifest.json` directly, and the other tools return graceful "install the extension to start designing" tips. So you can install this MCP first to inspect what dbt has, then move to the extension for the design work.
 

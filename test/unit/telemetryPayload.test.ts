@@ -13,11 +13,15 @@ import * as path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
+import { NO_CREDS_ADAPTER_FEATURES, THROWAWAY_ADAPTERS } from '../../src/services/dbtAdapters';
+import { DBT_PARSE_FAILURE_FEATURES } from '../../src/services/dbtFailure';
+
 import {
   ASSISTANTS,
   ERROR_CODES,
   saveFailureCode,
   saveFailureCodes,
+  subjectAreaLoadErrorCode,
   FEATURES,
   HARNESSES,
   HOSTS,
@@ -449,7 +453,7 @@ describe('allowlists agree with the Worker', () => {
   it('appends the DBML round-trip keys at the very end: exports, imports and a cancel as features, a failed import as an error', () => {
     const at = FEATURES.indexOf('exportDbmlRich');
     expect(FEATURES.slice(at, at + 6)).toEqual(['exportDbmlRich', 'exportAll', 'importDbml', 'importDbmlLayout', 'importDbmlCancelled', 'importDbmlInvalid']);
-    expect(ERROR_CODES.slice(-1)).toEqual(['importDbmlFailed']);
+    expect(ERROR_CODES.indexOf('importDbmlFailed')).toBe(ERROR_CODES.indexOf('saveFailedUndoRedo') + 1);
     let s = emptyCounters('2026-10-26');
     s = recordFeature(s, 'exportDbmlRich');
     s = recordFeature(s, 'importDbml');
@@ -461,7 +465,8 @@ describe('allowlists agree with the Worker', () => {
   });
 
   it('appends the logical-only keys at the very end, after the DBML round trip: presence once a day, starts counted', () => {
-    expect(FEATURES.slice(-3)).toEqual(['logicalOnlyProject', 'exampleDiagram', 'blankDiagram']);
+    const at = FEATURES.indexOf('logicalOnlyProject');
+    expect(FEATURES.slice(at, at + 3)).toEqual(['logicalOnlyProject', 'exampleDiagram', 'blankDiagram']);
     expect(FEATURES.indexOf('logicalOnlyProject')).toBe(FEATURES.indexOf('importDbmlInvalid') + 1);
     let s = emptyCounters('2026-10-27');
     s = recordFeatureOnce(s, 'logicalOnlyProject');
@@ -470,6 +475,36 @@ describe('allowlists agree with the Worker', () => {
     s = recordFeature(s, 'blankDiagram');
     s = recordFeature(s, 'blankDiagram');
     expect(buildHeartbeat(s, ENV).features).toEqual({ logicalOnlyProject: 1, exampleDiagram: 1, blankDiagram: 2 });
+  });
+
+  it('appends the native DBML storage keys after the logical-only ones: features and errors', () => {
+    const at = FEATURES.indexOf('dbmlProject');
+    expect(FEATURES.slice(at, at + 8)).toEqual([
+      'dbmlProject', 'convertToDbml', 'convertToDbmlOffered', 'convertToDbmlDeclined', 'convertToDbmlNotNow',
+      'convertToDbmlCancelled', 'convertToDbmlRefused', 'dbmlForeignFormatWarned',
+    ]);
+    expect(FEATURES.indexOf('dbmlProject')).toBe(FEATURES.indexOf('blankDiagram') + 1);
+    const errAt = ERROR_CODES.indexOf('modelFileDbmlSyntax');
+    expect(ERROR_CODES.slice(errAt, errAt + 5)).toEqual([
+      'modelFileDbmlSyntax', 'modelFileDbmlInvalid', 'modelFileDbmlStructure', 'domainLoadDbml', 'convertToDbmlFailed',
+    ]);
+    expect(ERROR_CODES.indexOf('modelFileDbmlSyntax')).toBe(ERROR_CODES.indexOf('importDbmlFailed') + 1);
+    expect(tableFileErrorCode('dbmlSyntax')).toBe('modelFileDbmlSyntax');
+    expect(tableFileErrorCode('dbmlInvalid')).toBe('modelFileDbmlInvalid');
+    expect(tableFileErrorCode('dbmlStructure')).toBe('modelFileDbmlStructure');
+    expect(subjectAreaLoadErrorCode('dbml')).toBe('domainLoadDbml');
+    let s = emptyCounters('2026-10-28');
+    s = recordFeatureOnce(s, 'dbmlProject');
+    s = recordFeatureOnce(s, 'dbmlProject');
+    s = recordFeature(s, 'convertToDbmlOffered');
+    s = recordFeature(s, 'convertToDbmlRefused');
+    s = recordError(s, 'modelFileParse');
+    s = recordError(s, tableFileErrorCode('dbmlInvalid'));
+    s = recordError(s, 'domainLoad');
+    s = recordError(s, subjectAreaLoadErrorCode('dbml'));
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ dbmlProject: 1, convertToDbmlOffered: 1, convertToDbmlRefused: 1 });
+    expect(body.errors).toEqual({ modelFileParse: 1, modelFileDbmlInvalid: 1, domainLoad: 1, domainLoadDbml: 1 });
   });
 
   it('appends the saveFailed split as one run after domainLoadConflict, as errors beside saveFailed', () => {
@@ -501,6 +536,190 @@ describe('allowlists agree with the Worker', () => {
     expect(saveFailureCodes(new Set(['refused'] as const), { undoRedo: true })).toEqual([
       'saveFailed', 'saveFailedRefused', 'saveFailedUndoRedo',
     ]);
+  });
+
+  it('appends the start-screen keys at the very end, after the native DBML ones: features and errors', () => {
+    const at = FEATURES.indexOf('welcomeBlank');
+    expect(at).toBe(FEATURES.indexOf('dbmlForeignFormatWarned') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('exampleDiagramShown') + 1)).toEqual([
+      'welcomeBlank', 'welcomeImport', 'welcomeExample', 'welcomeConvert',
+      'walkthroughBlank', 'walkthroughImport', 'walkthroughExample', 'walkthroughConvert', 'walkthroughDrawFromDbt',
+      'sidebarBlank', 'sidebarImport', 'sidebarExample', 'sidebarConvert', 'sidebarDrawFromDbt',
+      'sidebarStartShown', 'welcomeLeftNoChoice', 'blankDiagramCancelled',
+      'exampleOpened', 'exampleReopened', 'exampleCancelled',
+      'exampleEnterpriseWarehouse', 'exampleMedallion', 'exampleDbtProjectLayers', 'exampleKimballBusMatrix',
+      'exampleDataVault', 'exampleGitlabStyle', 'exampleBigqueryVersioned', 'exampleDataMesh',
+      'exampleDiagramShown',
+    ]);
+    expect(ERROR_CODES.indexOf('exampleWriteFailed')).toBe(ERROR_CODES.indexOf('convertToDbmlFailed') + 1);
+  });
+
+  it('appends the import-source and first-run keys at the very end, after the start-screen ones: features and errors', () => {
+    const at = FEATURES.indexOf('importPickDbml');
+    expect(at).toBe(FEATURES.indexOf('exampleDiagramShown') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('walkthroughWaited') + 1)).toEqual([
+      'importPickDbml', 'importPickSqlDdl', 'importPickSemanticModel', 'importPickCancelled',
+      'importSqlDdl', 'importSqlDdlCancelled', 'importSqlDdlInvalid',
+      'importSqlDialectPostgres', 'importSqlDialectMysql', 'importSqlDialectSqlserver', 'importSqlDialectSnowflake', 'importSqlDialectDatabricks',
+      'importSemanticModel', 'importSemanticModelCancelled', 'importSemanticModelInvalid',
+      'firstRun', 'firstRunHasDiagrams', 'diagramsNudgeShown', 'diagramsNudgeOpened', 'walkthroughWaited',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('exampleWriteFailed'), ERROR_CODES.indexOf('importSemanticModelFailed') + 1)).toEqual([
+      'exampleWriteFailed', 'importSqlDdlFailed', 'importSemanticModelFailed',
+    ]);
+  });
+
+  it('appends the start-suggestion keys at the very end, after the first-run ones', () => {
+    const at = FEATURES.indexOf('welcomeImportSemanticModel');
+    expect(at).toBe(FEATURES.indexOf('walkthroughWaited') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('importReviewOpened') + 1)).toEqual([
+      'welcomeImportSemanticModel', 'welcomeImportSqlDdl', 'welcomeImportDbmlFile',
+      'walkthroughImportSemanticModel', 'walkthroughImportSqlDdl', 'walkthroughImportDbmlFile',
+      'sidebarImportSemanticModel', 'sidebarImportSqlDdl', 'sidebarImportDbmlFile',
+      'startSuggestedConvert', 'startSuggestedDrawFromDbt', 'startSuggestedImportSemanticModel',
+      'startSuggestedImportSqlDdl', 'startSuggestedImportDbmlFile', 'startSuggestedBlank',
+      'howToClipPlayed',
+      // The start suggestion and the quick import, appended after them.
+      'suggestPromptShown', 'suggestPromptAccepted', 'suggestPromptMore', 'suggestPromptOff', 'suggestPromptDismissed',
+      'startSuggestionsOff', 'quickImport', 'quickImportChangeOptions', 'quickImportFellBack', 'importReviewOpened',
+    ]);
+  });
+
+  it('appends the import guide and nothing-found keys after the start-suggestion ones', () => {
+    const at = FEATURES.indexOf('importGuideOpened');
+    expect(at).toBe(FEATURES.indexOf('importReviewOpened') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('suggestPromptNothingOff') + 1)).toEqual([
+      'importGuideOpened',
+      'importGuideFromWelcome', 'importGuideFromWalkthrough', 'importGuideFromSidebar',
+      'importGuideFromPicker', 'importGuideFromStartPick', 'importGuideFromPrompt',
+      'importGuideActionFound', 'importGuideActionDbt', 'importGuideActionDatabricks', 'importGuideActionSnowflake',
+      'importGuideActionPowerBi', 'importGuideActionFabric', 'importGuideActionFabricWarehouse', 'importGuideActionSqlServer',
+      'importGuideActionPostgres', 'importGuideActionMysql', 'importGuideActionDbml', 'importGuideActionOtherTools',
+      'importGuideActionFeedback',
+      'importGuideCopied',
+      'suggestPromptNothingShown', 'suggestPromptNothingNewDiagram', 'suggestPromptNothingGuide', 'suggestPromptNothingOff',
+    ]);
+  });
+
+  it('appends the Draft-first keys after the nothing-found ones (which stay listed)', () => {
+    const at = FEATURES.indexOf('draftShown');
+    expect(at).toBe(FEATURES.indexOf('suggestPromptNothingOff') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('activatedDbt'))).toEqual([
+      'draftShown', 'draftShownAuto', 'draftExampleShown',
+      'draftSourceSqlDdl', 'draftSourceSemanticModel', 'draftSourceDbml', 'draftSourceDbt',
+      'draftKept', 'draftChangeOptions', 'draftDiscarded', 'draftClosed', 'draftOtherStart',
+      'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',
+      'suggestPromptShowMe', 'importGuideFromDraft',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('importSemanticModelFailed') + 1, ERROR_CODES.indexOf('draftLayoutFailed') + 1)).toEqual(['draftBuildFailed', 'draftLayoutFailed']);
+  });
+
+  it('the Worker README documents the Draft-first keys: a Draft funnel row, and chose_start counts draftKept', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    for (const key of FEATURES.slice(FEATURES.indexOf('draftShown'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['draftBuildFailed', 'draftLayoutFailed']) expect(readme, code).toContain(`\`${code}\``);
+    expect(readme).toMatch(/^\| Draft \|/m);
+    const choseStart = readme.split('\n').find((l) => l.includes('AS chose_start'))!;
+    expect(choseStart).toContain("'draftKept'");
+    expect(choseStart).toContain("'suggestPromptShowMe'");
+  });
+
+  it('appends the per-window activation and unused-dbt keys at the very end, after the Draft-first ones', () => {
+    const at = FEATURES.indexOf('activatedDbt');
+    expect(at).toBe(FEATURES.indexOf('importGuideFromDraft') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtProjectUnused') + 1)).toEqual(['activatedDbt', 'activatedLogical', 'activatedNoFolder', 'dbtProjectUnused']);
+  });
+
+  it('appends the onboarding guide keys at the very end, after the activation ones, in their fixed order', () => {
+    const at = FEATURES.indexOf('guideStarted');
+    expect(at).toBe(FEATURES.indexOf('dbtProjectUnused') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('guideLeftDraft') + 1)).toEqual([
+      'guideStarted', 'guideStartedFromCommand', 'guideDraftDone', 'guideCanvasStarted', 'guideCompleted',
+      'guideSkippedOnDraft', 'guideSkippedOnCanvas', 'guideStarClicked', 'guideAiHelperClicked',
+      'guideStepDraftBanner', 'guideStepDraftMoreWays', 'guideStepDraftKeep',
+      'guideStepCanvasTable', 'guideStepCanvasRelationship', 'guideStepCanvasToolbar', 'guideStepCanvasStages',
+      'guideStepCanvasSidebar', 'guideStepCanvasFiles', 'guideStepCanvasFinish',
+      'guideBack', 'guideLeftDraft',
+    ]);
+    // The no-longer-sent clip key stays listed (append-only).
+    expect(FEATURES).toContain('howToClipPlayed');
+  });
+
+  it('appends the existing-diagrams notice\'s Show Me Around key after the guide ones', () => {
+    expect(FEATURES.indexOf('diagramsNudgeShowMeAround')).toBe(FEATURES.indexOf('guideLeftDraft') + 1);
+    expect(FEATURES.indexOf('draftAfterOpenFolder')).toBe(FEATURES.indexOf('diagramsNudgeShowMeAround') + 1);
+  });
+
+  it('appends the Run dbt parse outcome keys after the guide ones, in order', () => {
+    const at = FEATURES.indexOf('dbtParseLaunched');
+    expect(at).toBe(FEATURES.indexOf('draftAfterOpenFolder') + 1);
+    expect(FEATURES.slice(at, FEATURES.indexOf('dbtCompileNoStart') + 1)).toEqual([
+      'dbtParseLaunched', 'dbtParseRefresh', 'dbtParseNoDbt', 'dbtParseVenvDeclined', 'dbtParseCloudCli',
+      'dbtParseBusy', 'dbtParseNoProfiles', 'dbtParseNoStart', 'dbtParseStopped', 'dbtParseExitOk',
+      'dbtParseExitFail', 'dbtParseOkNoManifest',
+      'dbtParseFailProfile', 'dbtParseFailTarget', 'dbtParseFailEnvVar', 'dbtParseFailAdapter',
+      'dbtParseFailAdapterDeps', 'dbtParseFailDeps', 'dbtParseFailCredentials', 'dbtParseFailNoProject',
+      'dbtParseFailDbtVersion', 'dbtParseFailProject', 'dbtParseFailOther',
+      'dbtParseShowOutput', 'dbtParseAdapterDocs',
+      'dbtParseNoCreds', 'dbtParseNoCredsAsked', 'dbtParseNoCredsUnsupported', 'dbtParseNoCredsOk', 'dbtParseNoCredsFail',
+      'dbtNoCredsDuckdb', 'dbtNoCredsPostgres', 'dbtNoCredsRedshift', 'dbtNoCredsSnowflake', 'dbtNoCredsDatabricks',
+      'dbtNoCredsBigquery', 'dbtNoCredsFabric', 'dbtNoCredsSqlserver', 'dbtNoCredsTrino', 'dbtNoCredsSpark',
+      'dbtParseDeps', 'dbtDepsExitOk', 'dbtDepsExitFail', 'dbtParseOpenPhysical',
+      'dbtCompileLaunched', 'dbtCompileNoDbt', 'dbtCompileVenvDeclined', 'dbtCompileExitOk', 'dbtCompileExitFail',
+      'dbtCompileStopped', 'dbtCompileNoStart',
+    ]);
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('draftLayoutFailed') + 1, ERROR_CODES.indexOf('manifestRetryFailed') + 1)).toEqual(['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']);
+  });
+
+  it('appends the 2.0.0 launch keys after every earlier one, so no index moves', () => {
+    expect(FEATURES.indexOf('heartbeatProvisional')).toBe(FEATURES.indexOf('dbtCompileNoStart') + 1);
+    expect(ERROR_CODES.indexOf('activationFailed')).toBe(ERROR_CODES.indexOf('manifestRetryFailed') + 1);
+    expect(FEATURES.indexOf('crashFallbackReload')).toBe(FEATURES.indexOf('handlerFileProblem') + 1);
+    // The import outcome keys follow the crash screen's, as one run (importOutcomeTelemetry.test.ts holds their order).
+    expect(FEATURES.indexOf('importOutcomeSqlDdlClean')).toBe(FEATURES.indexOf('crashFallbackFeedback') + 1);
+    // The automatic draft's time-limit drop is appended after them.
+    expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
+    expect(FEATURES.at(-1)).toBe('draftDropTimeLimit');
+    // #262's per-step load codes follow the logged-error ones.
+    expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
+      'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
+      'domainLoadInternalPositions', 'domainLoadInternalPhysical', 'domainLoadInternalDisplay', 'domainLoadInternalOther',
+    ]);
+    // Liam's decision for B6: no table-count bucket is ever a key.
+    expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
+  });
+
+  it('the Worker README lists every 2.0.0 key, one line each, under Keys added in 2.0.0', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    const at = readme.indexOf('## Keys added in 2.0.0');
+    expect(at).toBeGreaterThan(0);
+    const next = readme.indexOf('\n## ', at + 1);
+    const section = readme.slice(at, next === -1 ? undefined : next);
+    const added = [
+      ...FEATURES.slice(FEATURES.indexOf('heartbeatProvisional')),
+      ...ERROR_CODES.slice(ERROR_CODES.indexOf('activationFailed')),
+    ];
+    for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
+  });
+
+  it('every dbt parse failure category and placeholder adapter has its feature key', () => {
+    for (const key of Object.values(DBT_PARSE_FAILURE_FEATURES)) expect(FEATURES, key).toContain(key);
+    expect(new Set(Object.values(DBT_PARSE_FAILURE_FEATURES)).size).toBe(Object.keys(DBT_PARSE_FAILURE_FEATURES).length);
+    const adapterKeys = FEATURES.filter((f) => f.startsWith('dbtNoCreds'));
+    expect(adapterKeys).toEqual(THROWAWAY_ADAPTERS.map((a) => NO_CREDS_ADAPTER_FEATURES[a]));
+  });
+
+  it('the Worker README documents the Run dbt parse keys in a Run dbt parse funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Run dbt parse \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('dbtParseLaunched'))) expect(readme, key).toContain(`\`${key}\``);
+    for (const code of ['dbtProfileWriteFailed', 'dbtRunFailed', 'manifestRetryFailed']) expect(readme, code).toContain(`\`${code}\``);
+  });
+
+  it('the Worker README documents the onboarding guide keys in a Guide funnel row', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    expect(readme).toMatch(/^\| Guide \|/m);
+    for (const key of FEATURES.slice(FEATURES.indexOf('guideStarted'))) expect(readme, key).toContain(`\`${key}\``);
   });
 
   it('telemetry.json documents every feature key', () => {

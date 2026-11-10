@@ -16,6 +16,7 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
+      "@erd-studio/core/dbml": ["./packages/core/src/dbml/index.ts"],
       "@erd-studio/core": ["./packages/core/src/index.ts"],
       "@erd-studio/renderer": ["./packages/renderer/src/index.ts"],
       "@erd-studio/renderer/editor": ["./packages/renderer/src/editor.ts"],

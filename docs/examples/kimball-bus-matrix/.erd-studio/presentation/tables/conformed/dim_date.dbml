@@ -1,0 +1,13 @@
+Table conformed.dim_date [
+  role: 'conformed-dim',
+  grain: 'One row per calendar day'
+] {
+  Note: 'The calendar. Conformed: every business process uses this one table.'
+
+  date_key        INT [pk, note: 'yyyymmdd']
+  calendar_date   DATE
+  day_of_week     STRING
+  week_start_date DATE
+  fiscal_period   STRING
+  is_holiday      BOOLEAN
+}

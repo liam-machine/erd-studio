@@ -5,15 +5,21 @@
 #   A/V check        speech onsets measured in the MIXED narration (silencedetect) against the
 #                    line start times every visual beat is keyed to — catches a mix that drifted
 #                    from the timeline the player was rendered with.
+#
+#   bash qa.sh                     the dbt cut (build/, media/onboarding/getting-started.mp4)
+#   VARIANT=logical bash qa.sh     the logical cut (build-logical/qa/, getting-started-logical.mp4)
 set -euo pipefail
 cd "$(dirname "$0")"
-MP4=../media/onboarding/getting-started.mp4
-QA=build/qa
+VARIANT="${VARIANT:-}"
+if [[ -z "$VARIANT" ]]; then B=build; NAME=getting-started; else B="build-$VARIANT"; NAME="getting-started-$VARIANT"; fi
+export B
+MP4=../media/onboarding/$NAME.mp4
+QA=$B/qa
 mkdir -p "$QA"
 rm -f "$QA"/scene-*.png
 
 TIMES=$(node -e "
-const t=require('./build/timeline.json');
+const t=require('./'+process.env.B+'/timeline.json');
 const pts=t.scenes.map(s=>s.start+s.dur*0.72);
 pts.push(t.scenes.at(-1).start+1.5);
 console.log(pts.map(x=>x.toFixed(2)).join(' '))")
@@ -30,10 +36,10 @@ ffmpeg -v error -y "${INPUTS[@]}" -filter_complex "$FILTER" -frames:v 1 "$QA/con
 echo "contact sheet: $QA/contact.png ($N frames)"
 
 # A/V: speech onsets vs line starts
-ffmpeg -hide_banner -i build/narration.wav -af silencedetect=noise=-40dB:d=0.1 -f null - 2>&1 \
+ffmpeg -hide_banner -i $B/narration.wav -af silencedetect=noise=-40dB:d=0.1 -f null - 2>&1 \
   | sed -n 's/.*silence_end: \([0-9.]*\).*/\1/p' > "$QA/onsets.txt"
 node -e "
-const t=require('./build/timeline.json');
+const t=require('./'+process.env.B+'/timeline.json');
 const on=require('fs').readFileSync('$QA/onsets.txt','utf8').trim().split('\n').map(Number);
 on.unshift(0);
 let worst=0; const rows=[];

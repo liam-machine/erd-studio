@@ -1,0 +1,4496 @@
+{
+ "sample": "postgres-pagila",
+ "engine": "PostgreSQL 18.6 (Homebrew)",
+ "loaded": [
+  "postgres-pagila/pagila-schema.sql"
+ ],
+ "errors": [],
+ "tables": [
+  {
+   "schema": "public",
+   "name": "actor",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "actor_id"
+   ],
+   "columns": [
+    {
+     "name": "actor_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "address",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "address_id"
+   ],
+   "columns": [
+    {
+     "name": "address_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "address",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "address2",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "district",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "city_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "postal_code",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "phone",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "category",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "category_id"
+   ],
+   "columns": [
+    {
+     "name": "category_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "city",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "city_id"
+   ],
+   "columns": [
+    {
+     "name": "city_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "city",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "country_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "country",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "country_id"
+   ],
+   "columns": [
+    {
+     "name": "country_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "country",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "customer",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "customer_id"
+   ],
+   "columns": [
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "email",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "address_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "activebool",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "create_date",
+     "type": "date",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": false
+    },
+    {
+     "name": "active",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "film",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "film_id"
+   ],
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "title",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "description",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "release_year",
+     "type": "year",
+     "notNull": false
+    },
+    {
+     "name": "language_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "original_language_id",
+     "type": "integer",
+     "notNull": false
+    },
+    {
+     "name": "rental_duration",
+     "type": "smallint",
+     "notNull": true
+    },
+    {
+     "name": "rental_rate",
+     "type": "numeric(4,2)",
+     "notNull": true
+    },
+    {
+     "name": "length",
+     "type": "smallint",
+     "notNull": false
+    },
+    {
+     "name": "replacement_cost",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "rating",
+     "type": "mpaa_rating",
+     "notNull": false
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "special_features",
+     "type": "text[]",
+     "notNull": false
+    },
+    {
+     "name": "fulltext",
+     "type": "tsvector",
+     "notNull": true
+    },
+    {
+     "name": "length_hours",
+     "type": "numeric(4,2)",
+     "notNull": false,
+     "generated": "virtual"
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "film_actor",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "actor_id",
+    "film_id"
+   ],
+   "columns": [
+    {
+     "name": "actor_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "film_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "film_category",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "film_id",
+    "category_id"
+   ],
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "category_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "film_embedding",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "film_id"
+   ],
+   "columns": [
+    {
+     "name": "film_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "embedding",
+     "type": "vector(20)",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "inventory",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "inventory_id"
+   ],
+   "columns": [
+    {
+     "name": "inventory_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "film_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "language",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "language_id"
+   ],
+   "columns": [
+    {
+     "name": "language_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment",
+   "comment": null,
+   "partitioned": true,
+   "partitionOf": null,
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_01",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_02",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_03",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_04",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_05",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_06",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_07",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_08",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_09",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_10",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_11",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2022_12",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_01",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_02",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_03",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_04",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_05",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_06",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_07",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_08",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_09",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_10",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_11",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2023_12",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_01",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_02",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_03",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_04",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_05",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_06",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_07",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_08",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_09",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_10",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_11",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2024_12",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_01",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_02",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_03",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_04",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_05",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_06",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_07",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_08",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_09",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_10",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_11",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2025_12",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_01",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_02",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_03",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_04",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_05",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_06",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "payment_p2026_07",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": "public.payment",
+   "pk": [
+    "payment_date",
+    "payment_id"
+   ],
+   "columns": [
+    {
+     "name": "payment_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "amount",
+     "type": "numeric(5,2)",
+     "notNull": true
+    },
+    {
+     "name": "payment_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "rental",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "rental_id"
+   ],
+   "columns": [
+    {
+     "name": "rental_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "rental_date",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "inventory_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "customer_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "return_date",
+     "type": "timestamp with time zone",
+     "notNull": false
+    },
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "uuid",
+     "type": "uuid",
+     "notNull": true
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "staff",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "staff_id"
+   ],
+   "columns": [
+    {
+     "name": "staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "first_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "last_name",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "address_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "email",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "active",
+     "type": "boolean",
+     "notNull": true
+    },
+    {
+     "name": "username",
+     "type": "text",
+     "notNull": true
+    },
+    {
+     "name": "password",
+     "type": "text",
+     "notNull": false
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    },
+    {
+     "name": "picture",
+     "type": "bytea",
+     "notNull": false
+    }
+   ]
+  },
+  {
+   "schema": "public",
+   "name": "store",
+   "comment": null,
+   "partitioned": false,
+   "partitionOf": null,
+   "pk": [
+    "store_id"
+   ],
+   "columns": [
+    {
+     "name": "store_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "manager_staff_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "address_id",
+     "type": "integer",
+     "notNull": true
+    },
+    {
+     "name": "last_update",
+     "type": "timestamp with time zone",
+     "notNull": true
+    }
+   ]
+  }
+ ],
+ "uniqueKeys": [
+  {
+   "schema": "public",
+   "table": "customer",
+   "name": "customer_uuid_key",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment",
+   "name": "payment_uuid_key",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_01",
+   "name": "payment_p2022_01_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_02",
+   "name": "payment_p2022_02_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_03",
+   "name": "payment_p2022_03_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_04",
+   "name": "payment_p2022_04_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_05",
+   "name": "payment_p2022_05_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_06",
+   "name": "payment_p2022_06_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_07",
+   "name": "payment_p2022_07_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_08",
+   "name": "payment_p2022_08_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_09",
+   "name": "payment_p2022_09_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_10",
+   "name": "payment_p2022_10_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_11",
+   "name": "payment_p2022_11_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_12",
+   "name": "payment_p2022_12_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_01",
+   "name": "payment_p2023_01_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_02",
+   "name": "payment_p2023_02_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_03",
+   "name": "payment_p2023_03_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_04",
+   "name": "payment_p2023_04_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_05",
+   "name": "payment_p2023_05_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_06",
+   "name": "payment_p2023_06_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_07",
+   "name": "payment_p2023_07_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_08",
+   "name": "payment_p2023_08_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_09",
+   "name": "payment_p2023_09_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_10",
+   "name": "payment_p2023_10_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_11",
+   "name": "payment_p2023_11_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2023_12",
+   "name": "payment_p2023_12_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_01",
+   "name": "payment_p2024_01_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_02",
+   "name": "payment_p2024_02_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_03",
+   "name": "payment_p2024_03_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_04",
+   "name": "payment_p2024_04_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_05",
+   "name": "payment_p2024_05_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_06",
+   "name": "payment_p2024_06_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_07",
+   "name": "payment_p2024_07_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_08",
+   "name": "payment_p2024_08_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_09",
+   "name": "payment_p2024_09_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_10",
+   "name": "payment_p2024_10_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_11",
+   "name": "payment_p2024_11_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2024_12",
+   "name": "payment_p2024_12_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_01",
+   "name": "payment_p2025_01_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_02",
+   "name": "payment_p2025_02_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_03",
+   "name": "payment_p2025_03_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_04",
+   "name": "payment_p2025_04_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_05",
+   "name": "payment_p2025_05_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_06",
+   "name": "payment_p2025_06_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_07",
+   "name": "payment_p2025_07_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_08",
+   "name": "payment_p2025_08_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_09",
+   "name": "payment_p2025_09_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_10",
+   "name": "payment_p2025_10_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_11",
+   "name": "payment_p2025_11_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2025_12",
+   "name": "payment_p2025_12_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_01",
+   "name": "payment_p2026_01_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_02",
+   "name": "payment_p2026_02_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_03",
+   "name": "payment_p2026_03_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_04",
+   "name": "payment_p2026_04_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_05",
+   "name": "payment_p2026_05_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_06",
+   "name": "payment_p2026_06_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2026_07",
+   "name": "payment_p2026_07_uuid_payment_date_idx",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid",
+    "payment_date"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "rental",
+   "name": "idx_unq_rental_rental_date_inventory_id_customer_id",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "rental_date",
+    "inventory_id",
+    "customer_id"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "rental",
+   "name": "rental_uuid_key",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "uuid"
+   ]
+  },
+  {
+   "schema": "public",
+   "table": "store",
+   "name": "idx_unq_manager_staff_id",
+   "kind": "index",
+   "partial": false,
+   "columns": [
+    "manager_staff_id"
+   ]
+  }
+ ],
+ "foreignKeys": [
+  {
+   "schema": "public",
+   "table": "address",
+   "name": "address_city_id_fkey",
+   "columns": [
+    "city_id"
+   ],
+   "refSchema": "public",
+   "refTable": "city",
+   "refColumns": [
+    "city_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "city",
+   "name": "city_country_id_fkey",
+   "columns": [
+    "country_id"
+   ],
+   "refSchema": "public",
+   "refTable": "country",
+   "refColumns": [
+    "country_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "customer",
+   "name": "customer_address_id_fkey",
+   "columns": [
+    "address_id"
+   ],
+   "refSchema": "public",
+   "refTable": "address",
+   "refColumns": [
+    "address_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "customer",
+   "name": "customer_store_id_fkey",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "public",
+   "refTable": "store",
+   "refColumns": [
+    "store_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film",
+   "name": "film_language_id_fkey",
+   "columns": [
+    "language_id"
+   ],
+   "refSchema": "public",
+   "refTable": "language",
+   "refColumns": [
+    "language_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film",
+   "name": "film_original_language_id_fkey",
+   "columns": [
+    "original_language_id"
+   ],
+   "refSchema": "public",
+   "refTable": "language",
+   "refColumns": [
+    "language_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film_actor",
+   "name": "film_actor_actor_id_fkey",
+   "columns": [
+    "actor_id"
+   ],
+   "refSchema": "public",
+   "refTable": "actor",
+   "refColumns": [
+    "actor_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film_actor",
+   "name": "film_actor_film_id_fkey",
+   "columns": [
+    "film_id"
+   ],
+   "refSchema": "public",
+   "refTable": "film",
+   "refColumns": [
+    "film_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film_category",
+   "name": "film_category_category_id_fkey",
+   "columns": [
+    "category_id"
+   ],
+   "refSchema": "public",
+   "refTable": "category",
+   "refColumns": [
+    "category_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film_category",
+   "name": "film_category_film_id_fkey",
+   "columns": [
+    "film_id"
+   ],
+   "refSchema": "public",
+   "refTable": "film",
+   "refColumns": [
+    "film_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "film_embedding",
+   "name": "film_embedding_film_id_fkey",
+   "columns": [
+    "film_id"
+   ],
+   "refSchema": "public",
+   "refTable": "film",
+   "refColumns": [
+    "film_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "inventory",
+   "name": "inventory_film_id_fkey",
+   "columns": [
+    "film_id"
+   ],
+   "refSchema": "public",
+   "refTable": "film",
+   "refColumns": [
+    "film_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "inventory",
+   "name": "inventory_store_id_fkey",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "public",
+   "refTable": "store",
+   "refColumns": [
+    "store_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_01",
+   "name": "payment_p2022_01_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_01",
+   "name": "payment_p2022_01_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_01",
+   "name": "payment_p2022_01_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_02",
+   "name": "payment_p2022_02_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_02",
+   "name": "payment_p2022_02_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_02",
+   "name": "payment_p2022_02_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_03",
+   "name": "payment_p2022_03_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_03",
+   "name": "payment_p2022_03_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_03",
+   "name": "payment_p2022_03_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_04",
+   "name": "payment_p2022_04_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_04",
+   "name": "payment_p2022_04_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_04",
+   "name": "payment_p2022_04_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_05",
+   "name": "payment_p2022_05_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_05",
+   "name": "payment_p2022_05_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_05",
+   "name": "payment_p2022_05_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_06",
+   "name": "payment_p2022_06_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_06",
+   "name": "payment_p2022_06_rental_id_fkey",
+   "columns": [
+    "rental_id"
+   ],
+   "refSchema": "public",
+   "refTable": "rental",
+   "refColumns": [
+    "rental_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "payment_p2022_06",
+   "name": "payment_p2022_06_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "rental",
+   "name": "rental_customer_id_fkey",
+   "columns": [
+    "customer_id"
+   ],
+   "refSchema": "public",
+   "refTable": "customer",
+   "refColumns": [
+    "customer_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "rental",
+   "name": "rental_inventory_id_fkey",
+   "columns": [
+    "inventory_id"
+   ],
+   "refSchema": "public",
+   "refTable": "inventory",
+   "refColumns": [
+    "inventory_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "rental",
+   "name": "rental_staff_id_fkey",
+   "columns": [
+    "staff_id"
+   ],
+   "refSchema": "public",
+   "refTable": "staff",
+   "refColumns": [
+    "staff_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "staff",
+   "name": "staff_address_id_fkey",
+   "columns": [
+    "address_id"
+   ],
+   "refSchema": "public",
+   "refTable": "address",
+   "refColumns": [
+    "address_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "staff",
+   "name": "staff_store_id_fkey",
+   "columns": [
+    "store_id"
+   ],
+   "refSchema": "public",
+   "refTable": "store",
+   "refColumns": [
+    "store_id"
+   ],
+   "inherited": false
+  },
+  {
+   "schema": "public",
+   "table": "store",
+   "name": "store_address_id_fkey",
+   "columns": [
+    "address_id"
+   ],
+   "refSchema": "public",
+   "refTable": "address",
+   "refColumns": [
+    "address_id"
+   ],
+   "inherited": false
+  }
+ ]
+}

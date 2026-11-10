@@ -1,10 +1,17 @@
 // erd-studio dbml-export v2 (DBML 9.1+)
-// Table positions: showcase.dbdiagram, next to this file (`dbdiagram push` reads it).
 // A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
-// Not exported: sticky-note positions and sizes, the canvas layout options.
+// Not exported: the canvas layout options.
 
 Project showcase {
   Note: 'Project task management — tracks projects, tasks, events, and customers'
+  erd_layout: '''
+    dim_customer 40 60
+    dim_date 420 100
+    dim_project 980 60
+    dim_task 1026 586
+    fct_order 100 340
+    fct_task_event 438 544
+  '''
 }
 
 Table silver.fct_task_event [

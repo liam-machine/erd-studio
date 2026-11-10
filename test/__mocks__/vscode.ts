@@ -61,13 +61,53 @@ const _textDocumentChangeListeners: Array<(e: unknown) => unknown> = [];
  * `document` — e.g. `reason: TextDocumentChangeReason.Undo` for the native
  * undo Cmd+Z runs. Resolves once every (async) listener has finished.
  */
-export async function _fireDidChangeTextDocument(document: unknown, reason?: TextDocumentChangeReason): Promise<void> {
-  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges: [], reason })));
+export async function _fireDidChangeTextDocument(
+  document: unknown,
+  reason?: TextDocumentChangeReason,
+  /** The changes; `[]` is a dirty-state event (a save), as VS Code fires it. Defaults to one text change. */
+  contentChanges: unknown[] = [{ rangeOffset: 0, rangeLength: 0, text: '' }],
+): Promise<void> {
+  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges, reason })));
+}
+
+/** Listeners registered through workspace.onDidRenameFiles. */
+const _renameFilesListeners: Array<(e: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidRenameFiles as VS Code does after the Explorer (a drag
+ * and drop, F2) or a WorkspaceEdit moved files. Resolves once every (async)
+ * listener has finished.
+ */
+export async function _fireDidRenameFiles(files: ReadonlyArray<{ oldUri: unknown; newUri: unknown }>): Promise<void> {
+  await Promise.all([..._renameFilesListeners].map((listener) => listener({ files })));
 }
 
 export enum TextDocumentChangeReason {
   Undo = 1,
   Redo = 2,
+}
+
+/** Text document content providers registered through `workspace`, in order. */
+export const _contentProviders: Array<{ scheme: string; provider: { provideTextDocumentContent: (...args: unknown[]) => unknown } }> = [];
+
+/** Listeners registered through `window.tabGroups.onDidChangeTabs` / `onDidChangeTabGroups`. */
+const _tabListeners: Array<(e: unknown) => unknown> = [];
+const _tabGroupListeners: Array<(e: unknown) => unknown> = [];
+
+/** Subscribe `listener` to `list`, VS Code style. */
+function _listen(list: Array<(e: unknown) => unknown>, listener: (e: unknown) => unknown) {
+  list.push(listener);
+  return { dispose: () => { const i = list.indexOf(listener); if (i >= 0) list.splice(i, 1); } };
+}
+
+/** Fire `window.tabGroups.onDidChangeTabs` (set `tabGroups.all` first, as VS Code updates it before the event). */
+export function _fireDidChangeTabs(e: { opened?: unknown[]; closed?: unknown[]; changed?: unknown[] } = {}): void {
+  for (const listener of [..._tabListeners]) listener({ opened: [], closed: [], changed: [], ...e });
+}
+
+/** Fire `window.tabGroups.onDidChangeTabGroups`. */
+export function _fireDidChangeTabGroups(e: { opened?: unknown[]; closed?: unknown[]; changed?: unknown[] } = {}): void {
+  for (const listener of [..._tabGroupListeners]) listener({ opened: [], closed: [], changed: [], ...e });
 }
 
 export const workspace = {
@@ -119,8 +159,24 @@ export const workspace = {
       },
     };
   },
+  /** Registers a listener; `_fireDidRenameFiles` (and a WorkspaceEdit's renameFile) calls it. */
+  onDidRenameFiles: (listener: (e: unknown) => unknown) => {
+    _renameFilesListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = _renameFilesListeners.indexOf(listener);
+        if (idx !== -1) _renameFilesListeners.splice(idx, 1);
+      },
+    };
+  },
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  /** Records the provider in `_contentProviders` (tests ask it for a document's text). */
+  registerTextDocumentContentProvider: (scheme: string, provider: { provideTextDocumentContent: (...args: unknown[]) => unknown }) => {
+    const entry = { scheme, provider };
+    _contentProviders.push(entry);
+    return { dispose: () => { const i = _contentProviders.indexOf(entry); if (i >= 0) _contentProviders.splice(i, 1); } };
+  },
   /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
   getWorkspaceFolder(uri: { fsPath: string }) {
     const inside = (root: string) => uri.fsPath === root || uri.fsPath.startsWith(root.endsWith('/') ? root : `${root}/`);
@@ -139,7 +195,20 @@ export const workspace = {
   },
 };
 
+/** Every output channel created, oldest first (tests read `_lines` and `_shown`). */
+export const _outputChannels: Array<{ name?: string; _lines: string[]; _shown: number }> = [];
+
+const _windowStateListeners: Array<(e: { focused: boolean }) => void> = [];
+/** Fire `window.onDidChangeWindowState` (the window gained or lost the focus). */
+export function _fireDidChangeWindowState(focused: boolean): void {
+  for (const listener of [..._windowStateListeners]) listener({ focused });
+}
+
 export const window = {
+  onDidChangeWindowState: (listener: (e: { focused: boolean }) => void) => {
+    _windowStateListeners.push(listener);
+    return { dispose: () => { const i = _windowStateListeners.indexOf(listener); if (i >= 0) _windowStateListeners.splice(i, 1); } };
+  },
   showInformationMessage: async () => undefined,
   showWarningMessage: async () => undefined,
   showErrorMessage: async () => undefined,
@@ -147,11 +216,32 @@ export const window = {
   showQuickPick: async () => undefined,
   showOpenDialog: async () => _mockOpenDialogResult,
   setStatusBarMessage: (_message: string, _hideAfterTimeout?: number) => ({ dispose: () => {} }),
-  createOutputChannel: () => ({
-    appendLine: () => {},
-    show: () => {},
-    dispose: () => {},
-  }),
+  /** A plain channel, or with `{ log: true }` a LogOutputChannel whose lines are kept in `_lines` (`[level] message args`). */
+  createOutputChannel: (name?: string, _options?: unknown) => {
+    const lines: string[] = [];
+    const at = (level: string) => (message: unknown, ...args: unknown[]) => {
+      lines.push([`[${level}] ${message instanceof Error ? message.message : String(message)}`, ...args.map((a) => (a instanceof Error ? a.message : String(a)))].join(' '));
+    };
+    const channel = {
+      name,
+      _lines: lines,
+      _shown: 0,
+      appendLine: (line: string) => { lines.push(line); },
+      append: (text: string) => { lines.push(text); },
+      show: () => { channel._shown++; },
+      hide: () => {},
+      clear: () => { lines.length = 0; },
+      dispose: () => {},
+      logLevel: 2,
+      trace: at('trace'),
+      debug: at('debug'),
+      info: at('info'),
+      warn: at('warn'),
+      error: at('error'),
+    };
+    _outputChannels.push(channel);
+    return channel;
+  },
   showTextDocument: async () => undefined,
   /** Runs the task immediately with a no-op progress reporter. */
   withProgress: async <R>(
@@ -176,15 +266,31 @@ export const window = {
     all: [] as Array<{ tabs: Array<{ input: unknown }> }>,
     /** Set `activeTab` to `{ input: new TabInputCustom(uri, viewType) }` to simulate a focused canvas. */
     activeTabGroup: { activeTab: undefined as { input: unknown } | undefined },
+    /** `_fireDidChangeTabs` calls these. (`close` is not mocked: a test that needs it sets it.) */
+    onDidChangeTabs: (listener: (e: unknown) => unknown) => _listen(_tabListeners, listener),
+    /** `_fireDidChangeTabGroups` calls these. */
+    onDidChangeTabGroups: (listener: (e: unknown) => unknown) => _listen(_tabGroupListeners, listener),
   },
   /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
   terminals: [] as MockTerminal[],
-  createTerminal: (options?: { name?: string; cwd?: string; env?: Record<string, string> }): MockTerminal => {
+  createTerminal: (options?: MockTerminalOptions): MockTerminal => {
     const terminal = createMockTerminal(options?.name ?? 'terminal');
     terminal._options = options;
+    const pty = options?.pty;
+    if (pty) {
+      terminal._pty = pty;
+      pty.onDidWrite((text: string) => { terminal._written.push(text); });
+      // The pty asked to close: VS Code disposes the terminal (no pty.close()) and fires onDidCloseTerminal.
+      pty.onDidClose?.((code?: number | void) => {
+        terminal._closedWith.push(code);
+        _removeTerminal(terminal, false);
+      });
+    }
     window.terminals.push(terminal);
     return terminal;
   },
+  /** `_closeTerminal` (and a pty terminal's dispose / close) fire these. */
+  onDidCloseTerminal: (listener: (t: unknown) => unknown) => _listen(_terminalCloseListeners, listener),
   /** Every panel createWebviewPanel returned, in order (reset with `_resetMockWebviewPanels`). */
   _webviewPanels: [] as MockWebviewPanel[],
   createWebviewPanel: (viewType: string, title: string, column?: unknown, options?: Record<string, unknown>): MockWebviewPanel => {
@@ -223,9 +329,22 @@ export interface MockStatusBarItem {
   dispose: () => void;
 }
 
+export enum FileType {
+  Unknown = 0,
+  File = 1,
+  Directory = 2,
+  SymbolicLink = 64,
+}
+
 export enum QuickPickItemKind {
   Separator = -1,
   Default = 0,
+}
+
+export enum InputBoxValidationSeverity {
+  Info = 1,
+  Warning = 2,
+  Error = 3,
 }
 
 export enum StatusBarAlignment {
@@ -298,6 +417,47 @@ export const env = {
   }),
 };
 
+/** A pseudoterminal as `createTerminal({ pty })` receives it. */
+export interface MockPty {
+  onDidWrite: (listener: (text: string) => void) => unknown;
+  onDidClose?: (listener: (code?: number | void) => void) => unknown;
+  open: (dimensions: unknown) => void;
+  close: () => void;
+  handleInput?: (data: string) => void;
+}
+
+export interface MockTerminalOptions {
+  name?: string; cwd?: string; env?: Record<string, string>;
+  shellPath?: string; shellArgs?: string[]; pty?: MockPty; isTransient?: boolean;
+}
+
+const _terminalCloseListeners: Array<(t: unknown) => unknown> = [];
+
+/** Remove `terminal` (once), optionally telling its pty, and fire onDidCloseTerminal. */
+function _removeTerminal(terminal: MockTerminal, closePty: boolean): void {
+  const idx = window.terminals.indexOf(terminal);
+  if (idx === -1) return;
+  window.terminals.splice(idx, 1);
+  terminal.exitStatus = terminal.exitStatus ?? { code: undefined };
+  if (closePty) terminal._pty?.close();
+  for (const l of [..._terminalCloseListeners]) l(terminal);
+}
+
+/** Test helper: the user closed `terminal` (its pty's `close()` runs, onDidCloseTerminal fires). */
+export function _closeTerminal(terminal: MockTerminal): void {
+  _removeTerminal(terminal, true);
+}
+
+/** Test helper: VS Code opened a pty terminal (calls `pty.open`). */
+export function _openPty(terminal: MockTerminal): void {
+  terminal._pty?.open(undefined);
+}
+
+/** Test helper: the user typed `data` into a pty terminal. */
+export function _input(terminal: MockTerminal, data: string): void {
+  terminal._pty?.handleInput?.(data);
+}
+
 /** Minimal mock of vscode.Terminal for launch-in-terminal handlers. */
 export interface MockTerminal {
   name: string;
@@ -308,7 +468,13 @@ export interface MockTerminal {
   /** Test helper: every string passed to sendText, in order. */
   _sentText: string[];
   /** Test helper: the options createTerminal received. */
-  _options?: { name?: string; cwd?: string; env?: Record<string, string> };
+  _options?: MockTerminalOptions;
+  /** Test helper: the pseudoterminal, for `createTerminal({ pty })`. */
+  _pty?: MockPty;
+  /** Test helper: everything the pty wrote. */
+  _written: string[];
+  /** Test helper: each value the pty's onDidClose fired with. */
+  _closedWith: Array<number | void | undefined>;
 }
 
 export function createMockTerminal(name: string): MockTerminal {
@@ -323,11 +489,14 @@ export function createMockTerminal(name: string): MockTerminal {
       terminal._sentText.push(text);
     },
     dispose: () => {
+      if (terminal._pty) { _removeTerminal(terminal, true); }
       terminal.exitStatus = { code: undefined };
       const idx = window.terminals.indexOf(terminal);
       if (idx !== -1) window.terminals.splice(idx, 1);
     },
     _sentText: [],
+    _written: [],
+    _closedWith: [],
   };
   return terminal;
 }
@@ -335,6 +504,11 @@ export function createMockTerminal(name: string): MockTerminal {
 /** Minimal mock of vscode.TabInputCustom for the recovery service. */
 export class TabInputCustom {
   constructor(public readonly uri: unknown, public readonly viewType: string) {}
+}
+
+/** Minimal mock of vscode.TabInputText: a text editor's tab. */
+export class TabInputText {
+  constructor(public readonly uri: unknown) {}
 }
 
 /** Every command registered via commands.registerCommand, in registration order. */
@@ -608,6 +782,40 @@ export class Range {
   constructor(public readonly start: Position, public readonly end: Position) {}
 }
 
+/** A text edit, as a formatting provider returns them. */
+export class TextEdit {
+  constructor(public readonly range: Range, public readonly newText: string) {}
+  static replace(range: Range, newText: string): TextEdit { return new TextEdit(range, newText); }
+  static insert(position: Position, newText: string): TextEdit { return new TextEdit(new Range(position, position), newText); }
+  static delete(range: Range): TextEdit { return new TextEdit(range, ''); }
+}
+
+/** Document formatting providers registered through `languages`, in order (tests read and clear it). */
+export const _formattingProviders: Array<{ selector: unknown; provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown } }> = [];
+
+/** Document drop edit providers registered through `languages`, in order (tests read and clear it). */
+export const _dropEditProviders: Array<{ selector: unknown; provider: { provideDocumentDropEdits: (...args: unknown[]) => unknown } }> = [];
+
+/** A drop-into-editor edit, as a drop edit provider returns it. */
+export class DocumentDropEdit {
+  additionalEdit?: unknown;
+  constructor(public insertText: string) {}
+}
+
+export const languages = {
+  getLanguages: async (): Promise<string[]> => ['plaintext', 'json', 'yaml', 'dbml'],
+  registerDocumentDropEditProvider: (selector: unknown, provider: { provideDocumentDropEdits: (...args: unknown[]) => unknown }) => {
+    const entry = { selector, provider };
+    _dropEditProviders.push(entry);
+    return { dispose: () => { const i = _dropEditProviders.indexOf(entry); if (i >= 0) _dropEditProviders.splice(i, 1); } };
+  },
+  registerDocumentFormattingEditProvider: (selector: unknown, provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }) => {
+    const entry = { selector, provider };
+    _formattingProviders.push(entry);
+    return { dispose: () => { const i = _formattingProviders.indexOf(entry); if (i >= 0) _formattingProviders.splice(i, 1); } };
+  },
+};
+
 export interface MockTextDocument {
   uri: ReturnType<typeof createUri>;
   fileName: string;
@@ -668,8 +876,14 @@ export class WorkspaceEdit {
 /** Every WorkspaceEdit passed to workspace.applyEdit, in order. */
 export const _appliedEdits: WorkspaceEdit[] = [];
 
-/** Set to false to make workspace.applyEdit reject (nothing is applied). */
-export const _mockWorkspaceState = { applyEditResult: true };
+/**
+ * Set `applyEditResult` to false to make workspace.applyEdit reject (nothing
+ * is applied). `applyEditPrefixes` scripts the next calls, one entry each: a
+ * number n applies the edit's first n operations and then returns false, as
+ * VS Code does when a file operation fails part way (it keeps the steps that
+ * ran); `'ok'` applies the call normally.
+ */
+export const _mockWorkspaceState: { applyEditResult: boolean; applyEditPrefixes: Array<number | 'ok'> } = { applyEditResult: true, applyEditPrefixes: [] };
 
 /** fsPaths whose document save() resolves false (see `_failMockSave`). */
 const _failingSaves = new Set<string>();
@@ -704,14 +918,42 @@ export function _closeMockDocument(fsPath: string): void {
   doc.save = async () => { throw new Error('Document has been closed'); };
 }
 
+/**
+ * `editor.formatOnSave` for `.dbml` documents. When on, every save() runs the
+ * registered document formatting providers first and applies their edits, as
+ * VS Code's format-on-save participant does for an extension's save() too.
+ */
+export const _mockFormatOnSave: { enabled: boolean } = { enabled: false };
+
+/** Run the formatting providers over `doc` and return its text with their edits applied (format on save). */
+function formatOnSaveText(doc: MockTextDocument, text: string): string {
+  if (!_mockFormatOnSave.enabled || !doc.uri.fsPath.endsWith('.dbml')) return text;
+  let current = text;
+  for (const { provider } of _formattingProviders) {
+    const edits = (provider.provideDocumentFormattingEdits(doc, { tabSize: 2, insertSpaces: true }) ?? []) as TextEdit[];
+    const spans = edits
+      .map((e) => ({ start: doc.offsetAt(e.range.start), end: doc.offsetAt(e.range.end), text: e.newText }))
+      .sort((a, b) => b.start - a.start);
+    for (const e of spans) current = current.slice(0, e.start) + e.text + current.slice(e.end);
+  }
+  return current;
+}
+
 /** Reset documents, applied edits and applyEdit behaviour (call in beforeEach). */
 export function _resetMockWorkspace(): void {
+  _mockFormatOnSave.enabled = false;
   _failingSaves.clear();
   _mockDocuments.clear();
   _appliedEdits.length = 0;
   _mockWorkspaceState.applyEditResult = true;
+  _mockWorkspaceState.applyEditPrefixes.length = 0;
   workspace.textDocuments = [];
   _textDocumentChangeListeners.length = 0;
+  _renameFilesListeners.length = 0;
+  _tabListeners.length = 0;
+  _tabGroupListeners.length = 0;
+  _contentProviders.length = 0;
+  _dropEditProviders.length = 0;
 }
 
 /**
@@ -747,6 +989,8 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
     },
     save: async () => {
       if (_failingSaves.has(path.resolve(fsPath))) return false;
+      const formatted = formatOnSaveText(doc, current);
+      if (formatted !== current) doc._setText(formatted);
       if (doc._persist) {
         fs.writeFileSync(fsPath, current, 'utf-8');
       }
@@ -771,10 +1015,14 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
  */
 async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
   _appliedEdits.push(edit);
-  if (!_mockWorkspaceState.applyEditResult) {
+  const scripted = _mockWorkspaceState.applyEditPrefixes.shift();
+  if (scripted === undefined && !_mockWorkspaceState.applyEditResult) {
     return false;
   }
-  for (const op of edit._ops) {
+  const prefix = typeof scripted === 'number' ? scripted : edit._ops.length;
+  // The files the edit moved: VS Code fires onDidRenameFiles for them, as for the Explorer's moves.
+  const renamed: Array<{ oldUri: MockUri; newUri: MockUri }> = [];
+  for (const op of edit._ops.slice(0, prefix)) {
     switch (op.kind) {
       case 'replace':
       case 'insert': {
@@ -807,11 +1055,13 @@ async function applyMockEdit(edit: WorkspaceEdit): Promise<boolean> {
       case 'renameFile': {
         fs.mkdirSync(path.dirname(op.newUri.fsPath), { recursive: true });
         fs.renameSync(op.oldUri.fsPath, op.newUri.fsPath);
+        renamed.push({ oldUri: op.oldUri, newUri: op.newUri });
         break;
       }
     }
   }
-  return true;
+  if (renamed.length > 0) void _fireDidRenameFiles(renamed);
+  return prefix >= edit._ops.length;
 }
 
 /** Open (or return the already-open) persisted document backed by a real file. */
@@ -909,8 +1159,9 @@ workspace.createFileSystemWatcher = ((pattern?: unknown) => {
 export class RelativePattern {
   base: string;
   pattern: string;
-  constructor(base: string | { uri: { fsPath: string } }, pattern: string) {
-    this.base = typeof base === 'string' ? base : base.uri.fsPath;
+  constructor(base: string | { uri: { fsPath: string } } | { fsPath: string }, pattern: string) {
+    // A folder path, a WorkspaceFolder or a Uri, as VS Code takes them.
+    this.base = typeof base === 'string' ? base : 'uri' in base ? base.uri.fsPath : base.fsPath;
     this.pattern = pattern;
   }
 }

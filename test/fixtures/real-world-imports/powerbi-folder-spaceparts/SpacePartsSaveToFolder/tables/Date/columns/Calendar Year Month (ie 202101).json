@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Calendar Year Month (ie 202101)",
+  "dataType": "int64",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Calendar Year Month (ie 202101)]",
+  "displayFolder": "3. Month",
+  "lineageTag": "2063cb48-7333-440e-acc1-5d12b4ef4641",
+  "summarizeBy": "sum",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

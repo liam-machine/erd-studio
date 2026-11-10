@@ -1,0 +1,20 @@
+use { table bronze.shopify_customers }        from '../tables/bronze/shopify_customers.dbml'
+use { table bronze.shopify_orders }           from '../tables/bronze/shopify_orders.dbml'
+use { table bronze.shopify_order_line_items } from '../tables/bronze/shopify_order_line_items.dbml'
+use { table bronze.shopify_products }         from '../tables/bronze/shopify_products.dbml'
+use { table bronze.stripe_customers }         from '../tables/bronze/stripe_customers.dbml'
+use { table bronze.stripe_charges }           from '../tables/bronze/stripe_charges.dbml'
+use * from '../relationships/bronze.dbml'
+
+Project sources {
+  Note: 'What each source system lands, as it lands it.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    shopify_customers 1507 244
+    shopify_order_line_items 682 14
+    shopify_orders 1102 244
+    shopify_products 1102 12
+    stripe_charges 12 12
+    stripe_customers 417 62
+  '''
+}

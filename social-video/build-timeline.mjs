@@ -52,7 +52,8 @@ export function buildTimeline(script, durations) {
     clock += dur;
     return scene;
   });
-  return { fps: 30, width: 1080, height: 1350, fade, total: round(clock), chapters: script.chapters, scenes };
+  // `music: false` in a script makes a voice-only cut: music.py writes no bed and encode.sh mixes none.
+  return { fps: 30, width: 1080, height: 1350, fade, total: round(clock), chapters: script.chapters, music: script.music !== false, scenes };
 }
 
 /** Splits text into caption-sized pieces at sentence, then clause, boundaries. */

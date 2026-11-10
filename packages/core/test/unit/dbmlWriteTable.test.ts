@@ -1,0 +1,217 @@
+/**
+ * The table-file writer (§2.2, §4.5, §4.5.x of the native DBML storage
+ * spec): every table operation, splicing only what changes, and the files
+ * it refuses. The cases live in `../dbmlWriterCases/tableCases.ts`, so
+ * `dbmlMultiParser.test.ts` can compile each output again in every parser.
+ */
+import { describe, it, expect } from 'vitest';
+
+import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
+import { DbmlEditRefused } from '../../src/dbml/errors';
+import { applyTextEdits, refuseOverlaps } from '../../src/dbml/splice';
+import * as DbmlParse from '@dbml/parse';
+import { FIELD_CASES, METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
+import { clone, projectDiagnostics, readTable } from '../dbmlWriterSupport';
+import { parseTableDbml } from '../../src/dbml/readTable';
+import { STORAGE_PARSERS } from '../dbmlParsers';
+
+describe('editTableDbml', () => {
+  for (const c of TABLE_CASES) it(c.name, () => c.check(c.run()));
+});
+
+describe('editTableDbml: context fields in every spelling', () => {
+  for (const c of FIELD_CASES) it(c.name, () => c.check(c.run()));
+});
+
+const BARE_TABLE = 'Table fct_order {\n  id int [pk]\n}\n';
+
+describe('editTableDbml refusals', () => {
+  const refusal = (fn: () => unknown): DbmlEditRefused => {
+    try {
+      fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(DbmlEditRefused);
+      return err as DbmlEditRefused;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('a file that does not parse is refused with the reader\'s message, never rewritten', () => {
+    const err = refusal(() => editTableDbml('Table fct_order {\n  id int [pk\n}\n', { name: 'fct_order', columns: [] }, { file: 'tables/fct_order.dbml' }));
+    expect(err.message).toMatch(/^Fix the DBML in tables\/fct_order\.dbml first \(Line \d+, column \d+: /);
+    expect(err.line).toBeGreaterThan(0);
+    expect(err.message).toMatch(/ERD Studio never rewrites a file it cannot read\.$/);
+    expect(err.file).toBe('tables/fct_order.dbml');
+  });
+
+  it('a file holding an inline ref (writable: false) is refused with the line to move', () => {
+    const text = 'Table fct_order {\n  id int [pk]\n  customer_key int [ref: > dim_customer.customer_key]\n}\n';
+    const table = readTable(text, 'fct_order').table;
+    const err = refusal(() => editTableDbml(text, table));
+    expect(err.message).toContain('Ref: fct_order.customer_key >? dim_customer.customer_key');
+  });
+
+  it('a file with git conflict markers is refused', () => {
+    const text = 'Table fct_order {\n<<<<<<< HEAD\n  id int\n=======\n  id bigint\n>>>>>>> branch\n}\n';
+    expect(() => editTableDbml(text, { name: 'fct_order', columns: [] })).toThrow(DbmlEditRefused);
+  });
+
+  it('a schema change without requalify is refused: a DBML table\'s schema is its folder (§1.2)', () => {
+    const text = 'Table gold.fct_order {\n  id int\n}\n';
+    const table = readTable(text, 'fct_order').table;
+    expect(table.schema).toBe('gold');
+    const err = refusal(() => editTableDbml(text, { ...table, schema: 'silver' }, { file: 'gold/tables/gold/fct_order.dbml' }));
+    expect(err.message).toBe('The schema of a DBML table is its folder: move the table to change it.');
+    expect(err.line).toBe(1);
+    // An unqualified Table reads its schema from its folder: another one is refused too.
+    const bare = refusal(() => editTableDbml(BARE_TABLE, { name: 'fct_order', schema: 'silver', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true }] }, { schemaFolder: 'gold' }));
+    expect(bare.message).toBe('The schema of a DBML table is its folder: move the table to change it.');
+    // An unset schema keeps the qualifier.
+    expect(editTableDbml(text, { ...table, schema: undefined })).toBe(text);
+  });
+
+  it('a name that differs from the declared one is refused unless the edit is a rename', () => {
+    const table = readTable(BARE_TABLE, 'fct_order').table;
+    const err = refusal(() => editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { file: 'tables/fct_order.dbml' }));
+    expect(err.message).toBe('tables/fct_order.dbml declares Table fct_order, not fct_line; a rename must say so.');
+    expect(editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { rename: true })).toBe(BARE_TABLE.replace('fct_order', 'fct_line'));
+  });
+
+  it('a parser that throws is refused like a file that does not read', () => {
+    const throwing = { ...DbmlParse, Compiler: class { constructor() { throw new Error('boom'); } } };
+    const err = refusal(() => editTableDbml(BARE_TABLE, { name: 'fct_order', columns: [] }, { file: 'tables/fct_order.dbml', parser: throwing }));
+    expect(err.message).toBe('Fix the DBML in tables/fct_order.dbml first (the DBML parser stopped: boom). ERD Studio never rewrites a file it cannot read.');
+  });
+
+  it('an overlap of a writer\'s own edits is refused, never thrown as an unexpected error', () => {
+    const err = refusal(() => refuseOverlaps('tables/x.dbml', () => applyTextEdits('abc', [{ start: 0, end: 2, text: '' }, { start: 1, end: 3, text: '' }])));
+    expect(err.message).toBe('ERD Studio could not apply this change to tables/x.dbml safely, so nothing was written. Make the change in the file by hand.');
+    expect(err.file).toBe('tables/x.dbml');
+    // Hosts tell a writer bug from a file problem by the reason (the message is the same).
+    expect(err.reason).toBe('overlap');
+  });
+
+  it('a refusal for the file itself carries no overlap reason', () => {
+    const table = readTable(BARE_TABLE, 'fct_order').table;
+    const err = refusal(() => editTableDbml(BARE_TABLE, { ...table, name: 'fct_line' }, { file: 'tables/fct_order.dbml' }));
+    expect(err.reason).toBeUndefined();
+  });
+
+  it('a property a Metadata block in another file sets is refused (D25)', () => {
+    const table = readTable(METADATA_TABLE(), 'fct_order').table;
+    const err = refusal(() => editTableDbml(METADATA_TABLE(), { ...table, modelRole: 'x' as never }, {
+      foreignMetadata: [{ file: 'gold/sales.dbml', line: 12, property: 'role' }],
+    }));
+    expect(err.message).toBe('role is set by a Metadata block in gold/sales.dbml:12; edit it there.');
+    // A property no block elsewhere sets edits as usual.
+    expect(() => editTableDbml(METADATA_TABLE(), { ...table, grain: 'ok' }, {
+      foreignMetadata: [{ file: 'gold/sales.dbml', line: 12, property: 'role' }],
+    })).not.toThrow();
+  });
+});
+
+describe('editTableDbml: a field another file\'s Metadata block sets is refused in every spelling (D25, A9)', () => {
+  const TEXT = "Table fct_order [rationale_purpose: 'p', owner: 'o'] {\n  id int [meta_unit: 'u']\n}\n";
+  const table = (): ReturnType<typeof readTable>['table'] => clone(readTable(TEXT, 'fct_order').table);
+  const refused = (fn: () => unknown): string => {
+    try {
+      fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(DbmlEditRefused);
+      return (err as Error).message;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it.each(['purpose', 'erd_purpose', 'rationale_purpose', 'erd_rationale_purpose'])('a rationale field set as %s elsewhere', (property) => {
+    const desired = { ...table(), rationale: { purpose: 'changed' } };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property }] })))
+      .toBe('purpose is set by a Metadata block in gold/x.dbml:3; edit it there.');
+  });
+
+  it.each(['owner', 'meta_owner', 'erd_owner', 'rationale_owner'])('a meta key set as %s elsewhere', (property) => {
+    const desired = { ...table(), meta: { owner: 'changed' } };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property }] })))
+      .toBe('meta owner is set by a Metadata block in gold/x.dbml:3; edit it there.');
+  });
+
+  it('a column\'s meta key, and only that column\'s', () => {
+    const desired = table();
+    desired.columns![0].meta = { unit: 'AUD' };
+    expect(refused(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, column: 'id', property: 'unit' }] })))
+      .toBe('meta unit is set by a Metadata block in gold/x.dbml:3; edit it there.');
+    // The table's own meta, or a block of another home (meta_purpose is not Purpose), edits as usual.
+    expect(() => editTableDbml(TEXT, desired, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property: 'unit' }] })).not.toThrow();
+    expect(() => editTableDbml(TEXT, { ...table(), rationale: { purpose: 'x' } }, { foreignMetadata: [{ file: 'gold/x.dbml', line: 3, property: 'meta_purpose' }] })).not.toThrow();
+  });
+});
+
+describe('Metadata blocks (D25) read back the same in every parser', () => {
+  it.each(STORAGE_PARSERS)('an edit of block-set values re-reads as the edit (%s)', (_label, parser) => {
+    const desired = clone(readTable(METADATA_TABLE(), 'fct_order').table);
+    desired.grain = 'from the edit';
+    desired.columns![0].description = 'new note';
+    desired.columns![0].meta = { owner: 'z' };
+    const out = editTableDbml(METADATA_TABLE(), desired, { parser });
+    const reading = parseTableDbml(out, 'fct_order', {}, parser);
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.table.grain).toBe('from the edit');
+    expect(reading.table.columns![0].description).toBe('new note');
+    expect(reading.table.columns![0].meta).toEqual({ owner: 'z' });
+    // Clearing removes the block entry and the shadowed inline value: nothing resurfaces.
+    delete desired.grain;
+    const clearedText = editTableDbml(out, desired, { parser });
+    const cleared = parseTableDbml(clearedText, 'fct_order', {}, parser);
+    expect(cleared.ok && cleared.table.grain).toBeUndefined();
+    // Law 5: both outputs compile with no error or warning in every parser.
+    for (const text of [out, clearedText]) expect(projectDiagnostics({ 'tables/fct_order.dbml': text })).toEqual([]);
+  });
+});
+
+describe('renderNewTableDbml', () => {
+  for (const c of NEW_TABLE_CASES) it(c.name, () => c.check(c.run()));
+
+  it('needs a schema: a DBML table\'s schema is its folder and its qualifier', () => {
+    expect(() => renderNewTableDbml({ name: 'x', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+    expect(() => renderNewTableDbml({ name: 'x', schema: '', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+    expect(() => renderNewTableDbml({ name: 'x', schema: 'a/b', columns: [] })).toThrow('renderNewTableDbml: a DBML table needs a schema');
+  });
+});
+
+describe('Metadata blocks that name the table by its alias (Law 3)', () => {
+  const TEXT = "Table gold.x as DC {\n  id int\n}\n\nMetadata Table DC {\n  purpose: 'b'\n}\n\nMetadata Column DC.id {\n  note: 'n'\n}\n";
+
+  it.each(STORAGE_PARSERS)('an edit lands in the alias block and reads back as the edit (%s)', (_label, parser) => {
+    const read = (text: string): ReturnType<typeof readTable>['table'] => {
+      const reading = parseTableDbml(text, 'x', { schemaFolder: 'gold' }, parser);
+      if (!reading.ok) throw new Error(reading.error.message);
+      return reading.table;
+    };
+    const desired = clone(read(TEXT));
+    expect(desired.rationale).toEqual({ purpose: 'b' });
+    expect(desired.columns![0].description).toBe('n');
+    desired.rationale = { purpose: 'new' };
+    desired.columns![0].description = 'edited';
+    const out = editTableDbml(TEXT, desired, { parser, fileStem: 'x' });
+    expect(out).toBe(TEXT.replace("purpose: 'b'", "purpose: 'new'").replace("note: 'n'", "note: 'edited'"));
+    expect(read(out).rationale).toEqual({ purpose: 'new' });
+    expect(read(out).columns![0].description).toBe('edited');
+    // Clearing removes the block entry: the value does not come back.
+    delete desired.rationale;
+    desired.columns![0].description = '';
+    const cleared = editTableDbml(out, desired, { parser, fileStem: 'x' });
+    expect(cleared).not.toContain('purpose');
+    expect(read(cleared).rationale).toBeUndefined();
+    expect(read(cleared).columns![0].description).toBe('');
+  });
+
+  it('a rename keeps an alias block as it is (the alias still names the table)', () => {
+    const desired = clone(parseTableDbml(TEXT, 'x', { schemaFolder: 'gold' }));
+    if (!desired.ok) throw new Error('read');
+    const out = editTableDbml(TEXT, { ...desired.table, name: 'y' }, { fileStem: 'x', rename: true });
+    expect(out).toContain('Table gold.y as DC {');
+    expect(out).toContain('Metadata Table DC {');
+    expect(out).toContain('Metadata Column DC.id {');
+  });
+});

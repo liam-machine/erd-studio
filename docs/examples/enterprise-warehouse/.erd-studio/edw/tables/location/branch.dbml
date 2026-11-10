@@ -1,0 +1,12 @@
+Table location.branch [
+  grain: 'One row per branch',
+  owner: 'data-architecture'
+] {
+  Note: 'The bank\'s branches.'
+
+  branch_id   BIGINT [pk]
+  branch_code STRING [natural_key: 'true']
+  branch_name STRING
+  state       STRING
+  opened_on   DATE
+}

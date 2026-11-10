@@ -1,0 +1,23 @@
+Table sales.fct_retail_sales [
+  role: 'transaction-fact',
+  grain: 'One row per product on a checkout transaction',
+  decisions: 'The finest grain the tills record, so every question about baskets, products and promotions can be answered.'
+] {
+  Note: 'Point-of-sale sales.'
+
+  date_key               INT             [foreign_key: 'true']
+  product_key            INT             [foreign_key: 'true']
+  store_key              INT             [foreign_key: 'true']
+  promotion_key          INT             [foreign_key: 'true']
+  pos_transaction_number STRING          [
+    natural_key: 'true',
+    note: 'Degenerate dimension: the receipt number'
+  ]
+  sales_quantity         INT             [additive_type: 'additive']
+  sales_amount           "DECIMAL(12,2)" [additive_type: 'additive']
+  cost_amount            "DECIMAL(12,2)" [additive_type: 'additive']
+  gross_profit_amount    "DECIMAL(12,2)" [additive_type: 'additive']
+  indexes {
+    (pos_transaction_number, product_key) [pk]
+  }
+}

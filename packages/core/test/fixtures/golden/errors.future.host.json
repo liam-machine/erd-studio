@@ -1,6 +1,8 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/future.json has schemaVersion 7 but this extension only supports up to version 6. Please update the extension."
+    "message": "Subject area file .erd-studio/silver/future.json has schemaVersion 7 but this extension only supports up to version 6. Please update the extension.",
+    "kind": "invalid",
+    "newerSchema": true
   }
 }

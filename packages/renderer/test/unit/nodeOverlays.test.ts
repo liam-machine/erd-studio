@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyNodeOverlays, type OverlayState } from '../../src/lib/nodeOverlays';
+import { computeCanvasFocus } from '../../src/lib/canvasFocus';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode } from '../../src/types/graph';
 
 function makeNode(id: string, extra: Partial<TableFlowNode['data']> = {}): TableFlowNode {
@@ -127,5 +128,18 @@ describe('applyNodeOverlays', () => {
     expect((selected.nodes[1] as TableFlowNode).data.dimmed).toBe(true);
     const cleared = applyNodeOverlays(selected.nodes, [], baseState);
     expect((cleared.nodes[1] as TableFlowNode).data.dimmed).toBe(false);
+  });
+});
+
+describe('applyNodeOverlays — the shared connectivity rule', () => {
+  it('keeps exactly computeCanvasFocus(edges, { node }).nodes bright for a selected node', () => {
+    const nodes = ['a', 'b', 'c', 'd', 'e'].map((id) => makeNode(id));
+    const edges = [makeEdge('a', 'b'), makeEdge('c', 'a'), makeEdge('b', 'c'), makeEdge('d', 'e')];
+    const result = applyNodeOverlays(nodes, edges, { ...baseState, selectedNode: 'a' });
+    const bright = result.nodes
+      .filter((n) => !(n.data as TableFlowNode['data']).dimmed)
+      .map((n) => n.id)
+      .sort();
+    expect(bright).toEqual([...computeCanvasFocus(edges, { node: 'a' })!.nodes].sort());
   });
 });

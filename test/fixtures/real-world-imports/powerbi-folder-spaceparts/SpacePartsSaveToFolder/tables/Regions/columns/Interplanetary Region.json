@@ -1,0 +1,14 @@
+{
+  "name": "Interplanetary Region",
+  "dataType": "string",
+  "sourceColumn": "interplanetary_region",
+  "displayFolder": "1. Region Hierarchy",
+  "lineageTag": "e5e4b390-0dcc-4018-b87c-b484a852f032",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

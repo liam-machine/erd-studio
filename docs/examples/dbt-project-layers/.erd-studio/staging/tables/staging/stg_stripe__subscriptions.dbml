@@ -1,0 +1,10 @@
+Table staging.stg_stripe__subscriptions [grain: 'One row per Stripe subscription'] {
+  Note: 'Stripe subscriptions, renamed and cast.'
+
+  subscription_id STRING [pk, natural_key: 'true']
+  customer_id     STRING [foreign_key: 'true']
+  plan_code       STRING
+  status          STRING
+  started_at      TIMESTAMP
+  cancelled_at    TIMESTAMP
+}

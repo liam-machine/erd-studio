@@ -1,0 +1,15 @@
+{
+  "name": "Product Key",
+  "dataType": "int64",
+  "isHidden": true,
+  "sourceColumn": "product_key",
+  "displayFolder": "5. Keys",
+  "lineageTag": "0af3eedf-9023-45c6-9b52-df7c4c69ee12",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

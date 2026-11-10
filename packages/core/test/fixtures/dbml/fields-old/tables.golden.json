@@ -1,0 +1,102 @@
+{
+  "fct_sale": {
+    "name": "fct_sale",
+    "schema": "gold",
+    "description": "Sale lines",
+    "grain": "One row per sale line",
+    "modelRole": "transaction-fact",
+    "rationale": {
+      "purpose": "Revenue by store and day",
+      "design": "A star around the sale line",
+      "measures": "amount is additive; unit_price is not",
+      "grainChoice": "Line level, so returns can be matched",
+      "roleChoice": "A transaction fact: one row per event"
+    },
+    "meta": {
+      "owner": "sales-data",
+      "steward": "finance",
+      "pii": false,
+      "tags": [
+        "finance",
+        "daily"
+      ],
+      "tier": "gold",
+      "reviewed": "yes"
+    },
+    "columns": [
+      {
+        "name": "sale_line_id",
+        "dataType": "BIGINT",
+        "description": "Line id",
+        "isPrimaryKey": true
+      },
+      {
+        "name": "store_key",
+        "dataType": "INT",
+        "description": "",
+        "isForeignKey": true,
+        "meta": {
+          "source": "pos-v2"
+        }
+      },
+      {
+        "name": "amount",
+        "dataType": "DECIMAL(18,2)",
+        "description": "Line total",
+        "additiveType": "additive",
+        "meta": {
+          "unit": "AUD",
+          "sensitive": true
+        }
+      },
+      {
+        "name": "unit_price",
+        "dataType": "DECIMAL(18,2)",
+        "description": "",
+        "additiveType": "non-additive"
+      }
+    ]
+  },
+  "dim_store": {
+    "name": "dim_store",
+    "schema": "gold",
+    "grain": "One row per store version",
+    "modelRole": "conformed-dim",
+    "rationale": {
+      "purpose": "Stores, for every sales report",
+      "scdStrategy": "Type 2 on region; the name overwrites"
+    },
+    "meta": {
+      "owner": "retail-ops"
+    },
+    "columns": [
+      {
+        "name": "store_key",
+        "dataType": "INT",
+        "description": "",
+        "isPrimaryKey": true
+      },
+      {
+        "name": "store_code",
+        "dataType": "VARCHAR",
+        "description": "",
+        "isNaturalKey": true,
+        "meta": {
+          "business_rule": "The till prefix of the store"
+        }
+      },
+      {
+        "name": "region",
+        "dataType": "VARCHAR",
+        "description": "",
+        "scdType": 2
+      },
+      {
+        "name": "name",
+        "dataType": "VARCHAR",
+        "description": "",
+        "scdType": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+use { table sfdc.sfdc_account_source }        from '../tables/sfdc/sfdc_account_source.dbml'
+use { table zuora.zuora_account_source }      from '../tables/zuora/zuora_account_source.dbml'
+use { table zuora.zuora_subscription_source } from '../tables/zuora/zuora_subscription_source.dbml'
+use * from '../relationships/prep.dbml'
+
+Project "source-models" {
+  Note: 'The source models: renamed and typed, still one schema per source.'
+  erd_schema_version: '7'
+  erd_layout: '''
+    sfdc_account_source 12 12
+    zuora_account_source 726 49
+    zuora_subscription_source 280 12
+  '''
+}

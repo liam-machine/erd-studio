@@ -1,0 +1,4 @@
+# The import corpus source counter (count_source.py). Pinned; install into a venv:
+#   python3 -m venv .cache/corpus-venv && .cache/corpus-venv/bin/pip install -r scripts/corpus/requirements.txt
+sqlglot==27.29.0
+pyyaml==6.0.2

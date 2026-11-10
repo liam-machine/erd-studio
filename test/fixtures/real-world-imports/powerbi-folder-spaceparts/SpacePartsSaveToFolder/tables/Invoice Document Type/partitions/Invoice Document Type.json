@@ -1,0 +1,15 @@
+{
+  "name": "Invoice Document Type",
+  "mode": "import",
+  "queryGroup": "Tables",
+  "source": {
+    "type": "m",
+    "expression": [
+      "let",
+      "    Source = Sql.Database(#\"SqlEndpoint\",#\"Database\"),",
+      "    Data = Source{[Schema=\"dbo\",Item=\"invoice_doc_type\"]}[Data]",
+      "in",
+      "    Data"
+    ]
+  }
+}

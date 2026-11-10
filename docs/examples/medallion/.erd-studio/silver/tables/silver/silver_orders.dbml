@@ -1,0 +1,14 @@
+// The warehouse calls this table orders, and so does gold's gold_orders. A table's name is unique across
+// the whole project, so each takes its layer as a prefix, with the warehouse name in alias.
+Table silver.silver_orders [
+  grain: 'One row per order',
+  alias: 'orders'
+] {
+  Note: 'Orders, typed and in one currency.'
+
+  order_id        BIGINT          [pk, natural_key: 'true']
+  customer_id     BIGINT          [foreign_key: 'true']
+  ordered_at      TIMESTAMP
+  order_total     "DECIMAL(12,2)" [note: 'In AUD']
+  source_currency STRING
+}

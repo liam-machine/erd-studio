@@ -1,6 +1,7 @@
 {
   "type": "error",
   "payload": {
-    "message": "Subject area file <root>/.erd-studio/silver/legacy.json uses a pre-v4 layout (schemaVersion < 4 or a top-level \"models\" array) that is no longer supported. Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to convert it, or move \"models\"/\"relationships\" under a \"logical\" section and set \"schemaVersion\" to 5."
+    "message": "Subject area file .erd-studio/silver/legacy.json uses a pre-v4 layout (schemaVersion < 4 or a top-level \"models\" array) that is no longer supported. Run \"ERD Studio: Migrate Subject Areas to the Central Table Library\" to convert it, or move \"models\"/\"relationships\" under a \"logical\" section and set \"schemaVersion\" to 5.",
+    "kind": "invalid"
   }
 }

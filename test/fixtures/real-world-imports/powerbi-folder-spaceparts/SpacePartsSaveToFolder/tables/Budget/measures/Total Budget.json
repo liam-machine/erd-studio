@@ -1,0 +1,12 @@
+{
+  "name": "Total Budget",
+  "expression": [
+    "",
+    "    VAR _SelectedRate = MAX ( 'Exchange Rate'[Rate] )",
+    "RETURN",
+    "    SUM ( 'Budget'[Budget (EUR)] ) * _SelectedRate"
+  ],
+  "formatString": "#,##0",
+  "displayFolder": "Measures\\i. Total",
+  "lineageTag": "1cfbbd0e-ec57-4948-8e7c-e8a520d634c7"
+}

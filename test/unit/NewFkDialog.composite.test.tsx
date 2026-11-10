@@ -33,7 +33,8 @@ const openNew = () => {
 };
 const submit = () => screen.getByRole('button', { name: /Create|Save/ }) as HTMLButtonElement;
 const pick = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const sent = () => postMessage.mock.calls.map(([m]) => m);
+// The edits the dialog sent (opening it also asks where a new relationship goes: `requestNewRelationshipFiles`).
+const sent = () => postMessage.mock.calls.map(([m]) => m).filter((m) => m.type !== 'requestNewRelationshipFiles');
 
 beforeEach(() => postMessage.mockClear());
 afterEach(cleanup);
@@ -67,7 +68,7 @@ describe('NewFkDialog — composite foreign keys (#133 L2)', () => {
       fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-many',
     } as never);
     render(<NewFkDialog />);
-    const cardinality = () => (screen.getByLabelText('Cardinality') as HTMLSelectElement).value;
+    const cardinality = () => (screen.getByLabelText('How many?') as HTMLSelectElement).value;
     expect(cardinality()).toBe('many-to-many');
     fireEvent.click(screen.getByText('+ Add another column pair'));
     pick('Source column 2', 'as_of_date');
@@ -83,19 +84,19 @@ describe('NewFkDialog — composite foreign keys (#133 L2)', () => {
   it('a cardinality the user picked in the dialog is kept when pairs change', () => {
     setSubjectArea();
     openNew();
-    fireEvent.change(screen.getByLabelText('Cardinality'), { target: { value: 'one-to-one' } });
+    fireEvent.change(screen.getByLabelText('How many?'), { target: { value: 'one-to-one' } });
     fireEvent.click(screen.getByText('+ Add another column pair'));
     pick('Source column 2', 'as_of_date');
     pick('Target column 2', 'load_date');
-    expect((screen.getByLabelText('Cardinality') as HTMLSelectElement).value).toBe('one-to-one');
+    expect((screen.getByLabelText('How many?') as HTMLSelectElement).value).toBe('one-to-one');
   });
 
   it('with two or more pairs, many-to-many is disabled and refused', () => {
     setSubjectArea();
     openNew();
-    fireEvent.change(screen.getByLabelText('Cardinality'), { target: { value: 'many-to-many' } });
+    fireEvent.change(screen.getByLabelText('How many?'), { target: { value: 'many-to-many' } });
     fireEvent.click(screen.getByText('+ Add another column pair'));
-    const option = screen.getByRole('option', { name: 'Many-to-Many (*↔*)' }) as HTMLOptionElement;
+    const option = screen.getByRole('option', { name: 'Many → many' }) as HTMLOptionElement;
     expect(option.disabled).toBe(true);
     expect(option.title).toBe("A composite key can't be many-to-many");
     pick('Source column 2', 'as_of_date');

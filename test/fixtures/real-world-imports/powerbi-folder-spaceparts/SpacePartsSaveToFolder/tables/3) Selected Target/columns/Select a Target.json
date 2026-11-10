@@ -1,0 +1,17 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "Select a Target",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "sourceColumn": "[Select a Target]",
+  "sortByColumn": "Order",
+  "lineageTag": "d66a7492-deb6-4fc5-8bf4-9ea15c424cfc",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

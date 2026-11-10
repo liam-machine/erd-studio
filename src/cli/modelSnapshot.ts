@@ -1,0 +1,386 @@
+/**
+ * One version of an ERD Studio model, read from a list of files: every
+ * table in the library, every relationship, every diagram's members and
+ * every DBML relationships file's Refs. `erd-studio changes` reads two of
+ * these — the files at a git ref and the files in the working tree — and
+ * compares them with `diffModelSnapshots` (`modelChanges.ts`).
+ *
+ * Pure apart from `read`: the caller lists the files (posix paths relative
+ * to the semantic dir) and hands over a function that returns a file's text,
+ * so a git tree and a folder on disk are read by exactly the same code.
+ * Files are parsed with the readers the extension uses (`@erd-studio/core`
+ * and `@erd-studio/core/dbml`), classified with `classifySemanticFile`, and
+ * a DBML Ref is attached to its table with `attachRelationships`, so a Ref
+ * reads here exactly as the canvas reads it.
+ *
+ * No `vscode`: `dist/cli.js` bundles it.
+ */
+
+import {
+  LAYERS_CONFIG_FILE,
+  TABLES_DIR,
+  attachRelationships,
+  canonicalRelationship,
+  classifySemanticFile,
+  dbmlTableLookup,
+  getRawSubjectAreaTableNames,
+  linkKey,
+  parseSubjectAreaJson,
+  parseTableText,
+  validateSubjectAreaDocument,
+  type Cardinality,
+  type ColumnDef,
+  type DbmlAttachTable,
+  type DbmlRelationshipsReading,
+  type Relationship,
+  type SemanticTable,
+} from '@erd-studio/core';
+import { parseTableDbml, readRelationshipsDbml, subjectAreaMembersDbml } from '@erd-studio/core/dbml';
+
+import { isLayerFolder, type ListedName } from '../services/tableLibraryIndex';
+
+/** A column as `changes` compares it. */
+export interface SnapshotColumn {
+  name: string;
+  dataType: string;
+  pk: boolean;
+  fk: boolean;
+  nk: boolean;
+}
+
+/** A table of the library. */
+export interface SnapshotTable {
+  /** As spelled in its file. */
+  name: string;
+  /** Its file, relative to the semantic dir. */
+  file: string;
+  /** `dbml` table file, `yaml` model file, or a model written inline in a v4 `json` diagram. */
+  storage: 'dbml' | 'yaml' | 'json';
+  /** A DBML table's layer folder; a YAML model's library folder (by convention a layer); absent at the top of a YAML library. */
+  layer?: string;
+  /** The table's schema: a DBML table's qualifier or schema folder, a YAML model's `schema`. */
+  schema?: string;
+  alias?: string;
+  role?: string;
+  grain?: string;
+  columns: SnapshotColumn[];
+  /** The file could not be read; the other fields are empty. */
+  unreadable?: true;
+}
+
+/** A relationship, stored the way the canvas reads it (the foreign-key end is `from` for a many-to-one). */
+export interface SnapshotRelationship {
+  /** Core's `linkKey`: the identity of the link, either way round, without case. */
+  key: string;
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+  cardinality: Cardinality;
+  /** The file that holds it, relative to the semantic dir. */
+  file: string;
+}
+
+/** A diagram (a `.dbml` diagram or a `.json` domain file). */
+export interface SnapshotDiagram {
+  /** `<layer>/<name>`, the identity a diagram keeps when it moves from JSON to DBML. */
+  id: string;
+  name: string;
+  layer: string;
+  file: string;
+  /** Its tables, as listed, without repeats. */
+  tables: string[];
+  /** The file could not be read: `tables` is empty. */
+  unreadable?: true;
+}
+
+/** A DBML relationships file and its Refs. */
+export interface SnapshotRelationshipsFile {
+  file: string;
+  /**
+   * One entry per Ref: its identity (the `linkKey`s of its column pairs, so
+   * a composite Ref is one entry) → what it says (each pair's direction and
+   * cardinality), so a Ref whose cardinality changed is a changed Ref.
+   */
+  refs: Map<string, string>;
+  unreadable?: true;
+}
+
+/** A file that could not be read, and why. */
+export interface SnapshotProblem {
+  file: string;
+  message: string;
+}
+
+export interface ModelSnapshot {
+  /** By lower-case name; the first file in path order wins a name written twice. */
+  tables: Map<string, SnapshotTable>;
+  /** By `linkKey`. */
+  relationships: Map<string, SnapshotRelationship>;
+  /** By lower-case `id`. */
+  diagrams: Map<string, SnapshotDiagram>;
+  /** By file. */
+  relationshipsFiles: Map<string, SnapshotRelationshipsFile>;
+  problems: SnapshotProblem[];
+}
+
+/** Reads one file of the snapshot (a path relative to the semantic dir); null when it cannot be read. */
+export type SnapshotReader = (rel: string) => string | null;
+
+const lower = (s: string): string => s.toLowerCase();
+
+/** Code-unit order, so the result never depends on the order the files were listed in. */
+function byteOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function columnOf(c: ColumnDef): SnapshotColumn {
+  return {
+    name: String(c.name ?? ''),
+    dataType: typeof c.dataType === 'string' ? c.dataType : '',
+    pk: c.isPrimaryKey === true,
+    fk: c.isForeignKey === true,
+    nk: c.isNaturalKey === true,
+  };
+}
+
+function tableOf(t: SemanticTable, file: string, storage: SnapshotTable['storage'], layer: string | undefined, schema: string | undefined): SnapshotTable {
+  return {
+    name: t.name,
+    file,
+    storage,
+    ...(layer ? { layer } : {}),
+    ...(schema ? { schema } : {}),
+    ...(t.alias ? { alias: t.alias } : {}),
+    ...(t.modelRole ? { role: String(t.modelRole) } : {}),
+    ...(t.grain ? { grain: t.grain } : {}),
+    columns: (t.columns ?? []).filter((c) => c && typeof c.name === 'string' && c.name !== '').map(columnOf),
+  };
+}
+
+function fileStem(rel: string): string {
+  const base = rel.slice(rel.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
+}
+
+/**
+ * Whether `tables/` is a layer folder rather than the v6 library, from a
+ * file list: the rule of `tablesDirIsLayer` (`isLayerFolder`), fed from the
+ * list and `layers.json` instead of a directory listing.
+ */
+export function tablesDirIsLayerOf(files: readonly string[], layersText: string | null): boolean {
+  const prefix = `${TABLES_DIR}/`;
+  const top: ListedName[] = files
+    .filter((f) => f.startsWith(prefix) && !f.slice(prefix.length).includes('/'))
+    .map((f) => ({ name: f.slice(prefix.length), file: true, dir: false, link: false }));
+  let listsTables = false;
+  if (layersText !== null) {
+    try {
+      const config = JSON.parse(layersText.replace(/^﻿/, '')) as { layers?: unknown };
+      listsTables = Array.isArray(config.layers)
+        && config.layers.some((l) => !!l && typeof l === 'object' && (l as { id?: unknown }).id === TABLES_DIR);
+    } catch {
+      listsTables = false;
+    }
+  }
+  return isLayerFolder(top.length > 0 || files.some((f) => f.startsWith(prefix)) ? top : null, listsTables);
+}
+
+/** Add a relationship under its link key; the first copy read (in path order) wins, as the canvas keeps one. */
+function addRelationship(out: Map<string, SnapshotRelationship>, rel: Relationship, file: string): void {
+  if (!rel || typeof rel.fromModel !== 'string' || typeof rel.toModel !== 'string') return;
+  const canonical = canonicalRelationship(rel);
+  const key = linkKey(canonical);
+  if (out.has(key)) return;
+  out.set(key, {
+    key,
+    fromTable: canonical.fromModel,
+    fromColumn: String(canonical.fromColumn ?? ''),
+    toTable: canonical.toModel,
+    toColumn: String(canonical.toColumn ?? ''),
+    cardinality: canonical.cardinality,
+    file,
+  });
+}
+
+/**
+ * Read a snapshot. `files` are posix paths relative to the semantic dir, as
+ * `listSemanticFiles` lists them or `git ls-tree` prints them under it.
+ */
+export function readModelSnapshot(files: readonly string[], read: SnapshotReader): ModelSnapshot {
+  const sorted = [...new Set(files)].sort(byteOrder);
+  const snapshot: ModelSnapshot = {
+    tables: new Map(),
+    relationships: new Map(),
+    diagrams: new Map(),
+    relationshipsFiles: new Map(),
+    problems: [],
+  };
+  const tablesDirIsLayer = tablesDirIsLayerOf(sorted, sorted.includes(LAYERS_CONFIG_FILE) ? read(LAYERS_CONFIG_FILE) : null);
+  const classified = sorted.map((rel) => ({ rel, cls: classifySemanticFile(rel, { tablesDirIsLayer }) }));
+
+  const addTable = (t: SnapshotTable): void => {
+    const key = lower(t.name);
+    if (!snapshot.tables.has(key)) snapshot.tables.set(key, t);
+  };
+  const libraryRelationships: Array<{ rel: Relationship; file: string }> = [];
+  const attachTables: DbmlAttachTable[] = [];
+
+  // Tables first: relationships and diagrams resolve against them.
+  for (const { rel, cls } of classified) {
+    if (cls.kind !== 'table') continue;
+    const text = read(rel);
+    const stem = cls.name ?? fileStem(rel);
+    if (text === null) {
+      snapshot.problems.push({ file: rel, message: 'The file could not be read.' });
+      addTable({ name: stem, file: rel, storage: cls.storage === 'dbml' ? 'dbml' : 'yaml', columns: [], unreadable: true });
+      continue;
+    }
+    if (cls.storage === 'dbml') {
+      const reading = parseTableDbml(text, stem, cls.schema !== undefined ? { schemaFolder: cls.schema } : {});
+      if (!reading.ok) {
+        snapshot.problems.push({ file: rel, message: reading.error.message });
+        addTable({ name: stem, file: rel, storage: 'dbml', ...(cls.layer ? { layer: cls.layer } : {}), columns: [], unreadable: true });
+        continue;
+      }
+      addTable(tableOf(reading.table, rel, 'dbml', cls.layer, reading.table.schema ?? cls.schema));
+      attachTables.push({ table: reading.table, storage: 'dbml', ...(reading.alias ? { dbmlAlias: reading.alias } : {}) });
+      continue;
+    }
+    try {
+      const table = parseTableText(text, stem, { duplicateKeys: 'last' });
+      if (!table) {
+        snapshot.problems.push({ file: rel, message: 'The file holds no table (no name).' });
+        addTable({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true });
+        continue;
+      }
+      addTable(tableOf(table, rel, 'yaml', cls.folder, table.schema));
+      attachTables.push({ table, storage: 'yaml' });
+      for (const r of table.relationships ?? []) {
+        libraryRelationships.push({ rel: { ...r, fromModel: table.name } as Relationship, file: rel });
+      }
+    } catch (err) {
+      snapshot.problems.push({ file: rel, message: messageOf(err) });
+      addTable({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true });
+    }
+  }
+
+  // DBML relationships files: each Ref attached to its table the canvas's way.
+  const readings: Array<{ path: string; reading: DbmlRelationshipsReading }> = [];
+  for (const { rel, cls } of classified) {
+    if (cls.kind !== 'relationships') continue;
+    const text = read(rel);
+    const reading = text === null ? null : readRelationshipsDbml(text);
+    if (reading === null || !reading.readable) {
+      const first = reading?.problems.find((p) => p.severity === 'error');
+      snapshot.problems.push({ file: rel, message: first?.message ?? 'The file could not be read.' });
+      snapshot.relationshipsFiles.set(rel, { file: rel, refs: new Map(), unreadable: true });
+      continue;
+    }
+    readings.push({ path: rel, reading });
+  }
+  const lookup = dbmlTableLookup(attachTables);
+  const realName = (spelled: string): string => lookup(spelled)?.table.name ?? spelled;
+  for (const { path, reading } of readings) {
+    const refs = new Map<string, string>();
+    for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
+      const pairs = ref.relationships.map((r) => ({ ...r, fromModel: realName(r.fromModel), toModel: realName(r.toModel) }));
+      const identity = pairs.map((r) => linkKey(r)).sort(byteOrder).join('\u0001');
+      const says = pairs
+        .map((r) => lower(`${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}:${r.cardinality}`))
+        .sort(byteOrder)
+        .join('\u0001');
+      if (!refs.has(identity)) refs.set(identity, says);
+    }
+    snapshot.relationshipsFiles.set(path, { file: path, refs });
+  }
+  const attached = attachRelationships(readings, lookup);
+  const locations = attached.locations ?? new Map();
+  for (const [owner, list] of [...attached.byOwner.entries()].sort(([a], [b]) => byteOrder(a, b))) {
+    const fromModel = lookup(owner)?.table.name ?? owner;
+    for (const r of list) {
+      const full = { ...r, fromModel } as Relationship;
+      addRelationship(snapshot.relationships, full, locations.get(linkKey(full))?.path ?? '');
+    }
+  }
+  for (const { rel, file } of libraryRelationships) addRelationship(snapshot.relationships, rel, file);
+
+  // Diagrams: their members, and (JSON) relationships kept in the domain file and v4's inline models.
+  for (const { rel, cls } of classified) {
+    if (cls.kind !== 'diagram' || !cls.layer || !cls.name) continue;
+    const id = `${cls.layer}/${cls.name}`;
+    if (snapshot.diagrams.has(lower(id))) continue;
+    const diagram: SnapshotDiagram = { id, name: cls.name, layer: cls.layer, file: rel, tables: [] };
+    snapshot.diagrams.set(lower(id), diagram);
+    const text = read(rel);
+    if (text === null) {
+      snapshot.problems.push({ file: rel, message: 'The file could not be read.' });
+      diagram.unreadable = true;
+      continue;
+    }
+    let members: string[] | null;
+    if (cls.storage === 'dbml') {
+      members = subjectAreaMembersDbml(text, rel);
+      if (members === null) {
+        snapshot.problems.push({ file: rel, message: 'The diagram does not parse as DBML.' });
+      }
+    } else {
+      members = readJsonDiagram(text, rel, snapshot, addTable);
+    }
+    if (members === null) {
+      diagram.unreadable = true;
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const m of members) {
+      if (typeof m !== 'string' || m === '' || seen.has(lower(m))) continue;
+      seen.add(lower(m));
+      diagram.tables.push(snapshot.tables.get(lower(m))?.name ?? m);
+    }
+  }
+  return snapshot;
+}
+
+/** A JSON diagram's members; its domain-file relationships and v4 inline models go into `snapshot`. Null when unreadable. */
+function readJsonDiagram(
+  text: string,
+  rel: string,
+  snapshot: ModelSnapshot,
+  addTable: (t: SnapshotTable) => void,
+): string[] | null {
+  let raw: unknown;
+  try {
+    raw = parseSubjectAreaJson(text, rel);
+  } catch (err) {
+    snapshot.problems.push({ file: rel, message: messageOf(err) });
+    return null;
+  }
+  let obj: Record<string, unknown>;
+  try {
+    obj = validateSubjectAreaDocument(raw, rel).obj;
+  } catch (err) {
+    // A newer or mixed-up file still lists its tables; nothing else of it is read.
+    snapshot.problems.push({ file: rel, message: messageOf(err) });
+    return getRawSubjectAreaTableNames(raw);
+  }
+  const logical = (obj.logical && typeof obj.logical === 'object' ? obj.logical : {}) as Record<string, unknown>;
+  const models = Array.isArray(logical.models) ? logical.models as unknown[] : [];
+  for (const entry of models) {
+    if (entry && typeof entry === 'object' && typeof (entry as SemanticTable).name === 'string') {
+      const t = entry as SemanticTable;
+      addTable(tableOf(t, rel, 'json', undefined, typeof t.schema === 'string' ? t.schema : undefined));
+    }
+  }
+  const relationships = Array.isArray(logical.relationships) ? logical.relationships as Relationship[] : [];
+  for (const r of relationships) {
+    if (r && typeof r === 'object' && typeof r.fromColumn === 'string' && typeof r.toColumn === 'string') {
+      addRelationship(snapshot.relationships, r, rel);
+    }
+  }
+  return getRawSubjectAreaTableNames(obj);
+}

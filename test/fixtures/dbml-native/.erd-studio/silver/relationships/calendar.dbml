@@ -1,0 +1,4 @@
+// The calendar's own Refs, split out by hand: new dim_date Refs land here too.
+use { table calendar.dim_date } from '../tables/calendar/dim_date.dbml'
+
+Ref "previous day": calendar.dim_date.previous_date_key > calendar.dim_date.date_key

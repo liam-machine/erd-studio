@@ -1,0 +1,26 @@
+{
+  "name": "4) Selected Period",
+  "mode": "import",
+  "source": {
+    "type": "calculated",
+    "expression": [
+      "",
+      "UNION (",
+      "    ROW (",
+      "        \"Period\", {\"Full Period\"},",
+      "        \"Order\", {0},",
+      "        \"MTD\", {\"Full Month\"},",
+      "        \"QTD\", {\"Full Quarter\"},",
+      "        \"YTD\", {\"Full Year\"}",
+      "    ),",
+      "    ROW (",
+      "        \"Period\", {\"Period-to-Date\"},",
+      "        \"Order\", {1},",
+      "        \"MTD\", {\"MTD\"},",
+      "        \"QTD\", {\"QTD\"},",
+      "        \"YTD\", {\"YTD\"}",
+      "    )",
+      ")"
+    ]
+  }
+}

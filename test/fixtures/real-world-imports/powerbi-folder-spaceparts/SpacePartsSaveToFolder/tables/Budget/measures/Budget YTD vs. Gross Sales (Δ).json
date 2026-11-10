@@ -1,0 +1,10 @@
+{
+  "name": "Budget YTD vs. Gross Sales (Δ)",
+  "expression": [
+    "",
+    "[Gross Sales] - [Budget YTD]"
+  ],
+  "formatString": "#,##0 ↑;#,##0 ↓;#,##0",
+  "displayFolder": "Measures\\iv. YTD",
+  "lineageTag": "ee4a5a38-3679-4596-afa7-5f613a87ed87"
+}

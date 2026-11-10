@@ -1,0 +1,248 @@
+// @vitest-environment jsdom
+/**
+ * Dropping tables on the canvas, webview side (`useLibraryDrop`,
+ * `LibraryDropOverlay`, wired in App.tsx): the host's `libraryDragStarted`
+ * shows "Hold Shift and drop to add … to this diagram" until the drop, a
+ * pointer move or {@link LIBRARY_DRAG_HINT_MS}; an acceptable drag over an
+ * editable logical diagram is highlighted and its drop posts `dropTables`
+ * with the flow position and the DataTransfer's URIs. Nothing of it on the
+ * physical stage or in the viewer. The host side is `test/unit/dropTables.test.ts`.
+ */
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import React from 'react';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { ReactFlowProvider } from '@xyflow/react';
+import { CanvasEnvironmentProvider } from '@erd-studio/renderer/editor';
+
+const mockVsCode = vi.hoisted(() => ({
+  postMessage: vi.fn(),
+  getState: vi.fn(),
+  setState: vi.fn(),
+}));
+
+vi.mock('../../webview/hooks/useVsCodeApi', () => ({
+  useVsCodeApi: () => mockVsCode,
+  getVsCodeApi: () => mockVsCode,
+}));
+
+import { App } from '../../webview/App';
+import { useEditorStore } from '../../webview/store/editorStore';
+import {
+  LIBRARY_DRAG_HINT_MS,
+  dropEffectFor,
+  acceptsDrop,
+  droppedUris,
+  libraryDragHintText,
+  useLibraryDrop,
+} from '../../webview/hooks/useLibraryDrop';
+import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
+import type { DisplaySubjectArea } from '../../src/types/display';
+
+const initialStoreState = useEditorStore.getState();
+
+const subjectArea = (stage: 'logical' | 'physical'): DisplaySubjectArea => ({
+  schemaVersion: 7, domain: 'sales', layer: 'gold', stage, description: '',
+  models: [], relationships: [], viewConfig: {}, readOnly: stage === 'physical', positionDraggable: stage === 'logical',
+} as unknown as DisplaySubjectArea);
+
+function postFromHost(data: unknown) {
+  act(() => {
+    window.dispatchEvent(new MessageEvent('message', { data }));
+  });
+}
+
+/** A DataTransfer as a drop over the canvas sees it. */
+function transfer(data: Record<string, string>) {
+  return {
+    types: Object.keys(data),
+    getData: (type: string) => data[type] ?? data[type.toLowerCase()] ?? '',
+    dropEffect: 'none',
+  };
+}
+
+const sent = () => mockVsCode.postMessage.mock.calls.map((c) => c[0] as { type: string; payload?: unknown });
+const drops = () => sent().filter((m) => m.type === 'dropTables');
+const canvas = (container: HTMLElement) => container.querySelector('.editor-canvas') as HTMLElement;
+const HINT = 'Hold Shift and drop to add dim_customer to this diagram';
+
+beforeAll(() => {
+  // React Flow measures its container; jsdom has no ResizeObserver.
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+  // jsdom has no DragEvent: one with a pointer position, as a browser's.
+  if (typeof (window as { DragEvent?: unknown }).DragEvent === 'undefined') {
+    (window as unknown as { DragEvent: typeof MouseEvent }).DragEvent = class DragEvent extends MouseEvent {};
+  }
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  useEditorStore.setState(initialStoreState, true);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe('droppedUris', () => {
+  it('reads text/uri-list and the VS Code URI list (lines, comments out), then ResourceURLs, each once', () => {
+    expect(droppedUris(transfer({
+      'text/uri-list': '# a comment\r\nfile:///p/a.dbml\r\nfile:///p/b.yml\n',
+      'application/vnd.code.uri-list': 'file:///p/b.yml\nfile:///p/c.dbml',
+      ResourceURLs: JSON.stringify(['file:///p/c.dbml', 'file:///p/d.dbml', 42]),
+    }))).toEqual(['file:///p/a.dbml', 'file:///p/b.yml', 'file:///p/c.dbml', 'file:///p/d.dbml']);
+  });
+
+  it('reads a JSON URI list too, skips what cannot be read, and keeps to the limits', () => {
+    expect(droppedUris(transfer({ 'application/vnd.code.uri-list': '["file:///p/a.dbml"]', ResourceURLs: '{not json' })))
+      .toEqual(['file:///p/a.dbml']);
+    const throwing = { types: ['text/uri-list'], getData: () => { throw new Error('protected'); } };
+    expect(droppedUris(throwing)).toEqual([]);
+    expect(droppedUris(null)).toEqual([]);
+    const many = Array.from({ length: DROP_TABLES_URI_LIMIT + 3 }, (_, i) => `file:///p/t${i}.dbml`).join('\n');
+    expect(droppedUris(transfer({ 'text/uri-list': many }))).toHaveLength(DROP_TABLES_URI_LIMIT);
+    expect(droppedUris(transfer({ 'text/uri-list': `file:///${'x'.repeat(DROP_TABLES_URI_MAX_LENGTH)}` }))).toEqual([]);
+  });
+});
+
+describe('acceptsDrop', () => {
+  it('accepts URIs, a VS Code tree drag, or any drag while the Table Library drag is on', () => {
+    expect(acceptsDrop(transfer({ 'text/uri-list': 'x' }), false)).toBe(true);
+    expect(acceptsDrop({ types: ['resourceurls'], getData: () => '' }, false)).toBe(true);
+    expect(acceptsDrop({ types: ['application/vnd.code.tree.erdstudio.modellibrary'], getData: () => '' }, false)).toBe(true);
+    expect(acceptsDrop(transfer({ 'text/plain': 'hello' }), false)).toBe(false);
+    expect(acceptsDrop(transfer({ 'text/plain': 'hello' }), true)).toBe(true);
+    expect(acceptsDrop(null, true)).toBe(false);
+  });
+
+  it('words the hint for one table or several', () => {
+    expect(libraryDragHintText(['dim_customer'])).toBe(HINT);
+    expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Hold Shift and drop to add 3 tables to this diagram');
+  });
+});
+
+describe('the canvas as a drop target', () => {
+  it('shows the hint when a Table Library drag starts, as a polite live region, and hides it on a pointer move', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const hint = screen.getByText(HINT);
+    expect(hint.closest('[role="status"]')?.getAttribute('aria-live')).toBe('polite');
+    act(() => { window.dispatchEvent(new Event('pointermove')); });
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('hides the hint after a while', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['a', 'b'] } });
+    expect(screen.getByText('Hold Shift and drop to add 2 tables to this diagram')).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
+    expect(screen.queryByText(/Hold Shift and drop/)).toBeNull();
+  });
+
+  it('highlights an acceptable drag, and its drop posts the flow position and the URIs, and ends the hint', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const target = canvas(container);
+    const dataTransfer = transfer({ 'text/uri-list': 'file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml' });
+
+    fireEvent.dragEnter(target, { dataTransfer });
+    const accepted = fireEvent.dragOver(target, { dataTransfer, clientX: 120, clientY: 80 });
+    expect(accepted).toBe(false); // preventDefault: the drop is allowed
+    expect(dataTransfer.dropEffect).toBe('copy');
+    expect(screen.getByTestId('library-drop-highlight')).toBeTruthy();
+
+    fireEvent.drop(target, { dataTransfer, clientX: 120, clientY: 80 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 120, y: 80 }, uris: ['file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml'] },
+    }]);
+    expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('posts a drop with no URIs while the Table Library drag is on (the host knows its tables)', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const dataTransfer = transfer({});
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(false);
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 10, clientY: 20 });
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 10, y: 20 }, uris: [] } }]);
+  });
+
+  it('leaves a plain text drag alone, and drops the highlight when the drag leaves', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    const target = canvas(container);
+    expect(fireEvent.dragOver(target, { dataTransfer: transfer({ 'text/plain': 'x' }) })).toBe(true);
+    fireEvent.drop(target, { dataTransfer: transfer({ 'text/plain': 'x' }) });
+    expect(drops()).toEqual([]);
+
+    const uris = transfer({ 'text/uri-list': 'file:///p/a.dbml' });
+    fireEvent.dragEnter(target, { dataTransfer: uris });
+    fireEvent.dragOver(target, { dataTransfer: uris });
+    expect(screen.getByTestId('library-drop-highlight')).toBeTruthy();
+    fireEvent.dragLeave(target, { dataTransfer: uris });
+    expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
+  });
+
+  it('takes no drop and shows no hint on the physical stage', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('physical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.queryByText(HINT)).toBeNull();
+    const dataTransfer = transfer({ 'text/uri-list': 'file:///p/a.dbml' });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(true);
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 1, clientY: 1 });
+    expect(drops()).toEqual([]);
+    expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
+  });
+});
+
+describe('useLibraryDrop in the viewer', () => {
+  it('offers no drop handlers and no hint', () => {
+    useEditorStore.setState({ domain: subjectArea('logical') });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <CanvasEnvironmentProvider viewer>
+        <ReactFlowProvider>{children}</ReactFlowProvider>
+      </CanvasEnvironmentProvider>
+    );
+    const { result } = renderHook(() => useLibraryDrop(), { wrapper });
+    act(() => result.current.libraryDragStarted(['dim_customer']));
+    expect(result.current.dropHandlers).toBeUndefined();
+    expect(result.current.hintTables).toBeNull();
+    expect(result.current.dropActive).toBe(false);
+    expect(mockVsCode.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('the same hook outside the viewer offers them on an editable logical diagram', () => {
+    useEditorStore.setState({ domain: subjectArea('logical') });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <ReactFlowProvider>{children}</ReactFlowProvider>;
+    const { result } = renderHook(() => useLibraryDrop(), { wrapper });
+    act(() => result.current.libraryDragStarted(['dim_customer']));
+    expect(result.current.dropHandlers).toBeDefined();
+    expect(result.current.hintTables).toEqual(['dim_customer']);
+  });
+});
+
+describe('dropEffectFor', () => {
+  it('asks for copy unless the drag allows only move or link', () => {
+    expect(dropEffectFor(undefined)).toBe('copy');
+    expect(dropEffectFor('uninitialized')).toBe('copy');
+    expect(dropEffectFor('all')).toBe('copy');
+    expect(dropEffectFor('copyMove')).toBe('copy');
+    expect(dropEffectFor('move')).toBe('move');
+    expect(dropEffectFor('linkMove')).toBe('move');
+    expect(dropEffectFor('link')).toBe('link');
+  });
+});

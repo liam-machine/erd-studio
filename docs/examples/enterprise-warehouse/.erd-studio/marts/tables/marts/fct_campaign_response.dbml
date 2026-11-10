@@ -1,0 +1,15 @@
+Table marts.fct_campaign_response [
+  role: 'transaction-fact',
+  grain: 'One row per campaign message sent',
+  owner: 'marketing-analytics'
+] {
+  Note: 'Every campaign message and whether the customer responded, for marketing.'
+
+  send_id        BIGINT          [pk, natural_key: 'true']
+  campaign_key   BIGINT          [foreign_key: 'true']
+  customer_key   BIGINT          [foreign_key: 'true']
+  date_key       INT             [foreign_key: 'true']
+  channel        STRING
+  responded      BOOLEAN
+  response_value "DECIMAL(18,2)" [additive_type: 'additive']
+}

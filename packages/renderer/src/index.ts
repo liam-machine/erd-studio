@@ -5,6 +5,7 @@
 //   import '@erd-studio/renderer/styles.css';
 
 export { ErdCanvas, type ErdCanvasProps, type ErdCanvasHandle } from './ErdCanvas';
+export { LINE_STYLES, DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
 
 export {
   transformSubjectArea,
@@ -35,8 +36,8 @@ export type {
   LayerConfig,
 } from '@erd-studio/core';
 
-// Text exports of a diagram (Mermaid erDiagram, portable DBML, rich DBML and
-// its dbdiagram layout file), re-exported from @erd-studio/core so a page
+// Text exports of a diagram (Mermaid erDiagram, portable DBML and rich DBML,
+// whose Project carries the positions in erd_layout), re-exported from @erd-studio/core so a page
 // that renders with this package can offer them without depending on core
 // directly.
 export {
@@ -50,11 +51,6 @@ export {
   DIAGRAM_EXPORT_FORMATS,
   DIAGRAM_EXPORT_FILE_EXTENSIONS,
   type DiagramExportFormat,
-  toDbdiagramLayout,
-  serializeDbdiagramLayout,
-  dbdiagramLayoutFileName,
-  type DbdiagramLayout,
-  type DbdiagramTablePosition,
 } from '@erd-studio/core';
 
 export type {

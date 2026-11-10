@@ -14,6 +14,7 @@ import ELK from 'elkjs/lib/elk-api';
 import type { ELK as IELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 import type { NodePosition, LayoutOptions, TableRole } from '../../src/types/semantic';
+import type { LayoutFailure } from '../../src/types/webviewError';
 import { resolveNodeDimensions } from '@erd-studio/renderer/sizing';
 
 // ---------------------------------------------------------------------------
@@ -249,6 +250,25 @@ const pendingRejecters = new Set<(err: Error) => void>();
 /** Give up on a layout after this long and recycle the worker. */
 export const LAYOUT_TIMEOUT_MS = 30_000;
 
+/** The class each guard error carries, for usage telemetry (2.0 B17): read by {@link classifyLayoutFailure}. */
+const LAYOUT_FAILURE = Symbol('layoutFailure');
+
+function guardError(message: string, failure: LayoutFailure): Error {
+  return Object.assign(new Error(message), { [LAYOUT_FAILURE]: failure });
+}
+
+/**
+ * Why a layout failed, from the known shapes of this module's errors (never
+ * sent as text): the timeout guard, the worker dying, the worker's stack
+ * overflowing (with the stack-safe placement too), or anything else.
+ */
+export function classifyLayoutFailure(err: unknown): LayoutFailure {
+  const tagged = typeof err === 'object' && err !== null ? (err as { [LAYOUT_FAILURE]?: LayoutFailure })[LAYOUT_FAILURE] : undefined;
+  if (tagged) return tagged;
+  if (isStackOverflow(err)) return 'stack';
+  return 'other';
+}
+
 /**
  * Discard the current ELK instance/worker and fail every in-flight layout.
  * The next `runElkLayout()` call spins up a fresh worker.
@@ -281,7 +301,7 @@ function getElk(): IELK {
         URL.revokeObjectURL(url);
         worker.onerror = (event: ErrorEvent) => {
           const detail = event?.message ? `: ${event.message}` : '';
-          resetElk(new Error(`ELK layout worker crashed${detail}`));
+          resetElk(guardError(`ELK layout worker crashed${detail}`, 'worker'));
         };
         elkWorker = worker;
         return worker;
@@ -289,6 +309,15 @@ function getElk(): IELK {
     });
   }
   return elkInstance;
+}
+
+/** The node placement a layout falls back to when the default one overflows the worker's stack. */
+export const STACK_SAFE_NODE_PLACEMENT = 'BRANDES_KOEPF';
+
+/** A layout that failed because the worker ran out of stack (V8: RangeError, Firefox: InternalError). */
+export function isStackOverflow(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Maximum call stack size exceeded|too much recursion/i.test(message);
 }
 
 /**
@@ -313,7 +342,7 @@ function layoutWithGuard(elk: IELK, graph: ElkNode): Promise<ElkNode> {
 
     pendingRejecters.add(rejectOnce);
     timer = setTimeout(() => {
-      resetElk(new Error(`ELK layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s`));
+      resetElk(guardError(`ELK layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s`, 'timeout'));
     }, LAYOUT_TIMEOUT_MS);
 
     elk.layout(graph).then(resolveOnce, (err: unknown) => {
@@ -419,6 +448,12 @@ export function detectStrategy(
   return 'none';
 }
 
+/** What a caller may hear about a layout as it runs (usage telemetry). */
+export interface LayoutHooks {
+  /** The layout overflowed the worker's stack and is being laid out again with {@link STACK_SAFE_NODE_PLACEMENT}. */
+  onStackFallback?: () => void;
+}
+
 /**
  * Run ELK layout on a set of React Flow nodes and edges.
  *
@@ -428,6 +463,7 @@ export function detectStrategy(
  *   `viewConfig.layoutOptions`. Merged on top of defaults.
  * @param partitionStrategy — how to assign nodes to spatial bands.
  *   Defaults to 'auto' (auto-detect from graph structure).
+ * @param hooks — told when the layout falls back to the stack-safe placement.
  * @returns a positions map keyed by model name, ready for
  *   `viewConfig.positions`.
  */
@@ -436,6 +472,7 @@ export async function runElkLayout(
   edges: FkFlowEdge[],
   layoutOptions?: LayoutOptions,
   partitionStrategy: PartitionStrategy = 'auto',
+  hooks: LayoutHooks = {},
 ): Promise<Record<string, NodePosition>> {
   const elk = getElk();
 
@@ -476,7 +513,24 @@ export async function runElkLayout(
     edges: toElkEdges(edges),
   };
 
-  const layouted = await layoutWithGuard(elk, graph);
+  let layouted: ElkNode;
+  try {
+    layouted = await layoutWithGuard(elk, graph);
+  } catch (err) {
+    // NETWORK_SIMPLEX node placement recurses deeply on a large connected
+    // component (a 257-table SQL import) and overflows the worker's stack.
+    // Brandes–Köpf needs little stack: retry once with it rather than fail.
+    if (!isStackOverflow(err) || mergedOptions['elk.layered.nodePlacement.strategy'] === STACK_SAFE_NODE_PLACEMENT) throw err;
+    try {
+      hooks.onStackFallback?.();
+    } catch {
+      // Telemetry never stops a layout.
+    }
+    layouted = await layoutWithGuard(getElk(), {
+      ...graph,
+      layoutOptions: { ...mergedOptions, 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT },
+    });
+  }
 
   // Extract positions from the layouted graph
   const positions: Record<string, NodePosition> = {};

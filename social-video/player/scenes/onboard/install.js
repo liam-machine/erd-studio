@@ -29,7 +29,7 @@ export const WT = {
     { id: 'sample', title: 'No dbt project? Try the sample' },
     { id: 'openProject', title: 'Open your dbt project' },
     {
-      id: 'draw', title: 'Draw your dbt project — no AI needed', button: 'Draw from dbt',
+      id: 'draw', title: 'Draw your dbt project — no AI needed', button: 'Import from dbt',
       text: 'Pick a folder of dbt models. ERD Studio copies their columns and relationship tests into a diagram you can edit, and lays it out for you.',
     },
     { id: 'enrich', title: 'Enrich it with your AI assistant' },
@@ -62,7 +62,7 @@ const openDot = (size) => `<span style="width:${size}px;height:${size}px;border-
  * The Welcome editor's walkthrough page in body coordinates (origin = the editor body's top-left).
  * @param o.done       step ids shown as completed
  * @param o.glow       0..1 highlight on the open "draw" step
- * @param o.press      0..1 click press on its Draw from dbt button
+ * @param o.press      0..1 click press on its Import from dbt button
  * @param o.hero       true: the full-width hero size (this scene); false: the compact page
  */
 export function walkthrough({ done = ['openProject'], glow = 0, press = 0, hero = false } = {}) {

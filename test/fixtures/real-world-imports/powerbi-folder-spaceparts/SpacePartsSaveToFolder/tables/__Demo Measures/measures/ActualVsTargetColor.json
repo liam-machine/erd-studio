@@ -1,0 +1,19 @@
+{
+  "name": "ActualVsTargetColor",
+  "expression": [
+    "",
+    "IF (",
+    "    [Gross Sales (Quantity)]",
+    "        > [Sales Target],",
+    "    \"good\", -- Good color (blue)",
+    "    \"bad\"  -- Bad color (yellow)",
+    ")"
+  ],
+  "lineageTag": "c7dae960-d6ad-4ebc-881d-32b70eebfecf",
+  "annotations": [
+    {
+      "name": "PBI_FormatHint",
+      "value": "{\"isGeneralNumber\":true}"
+    }
+  ]
+}

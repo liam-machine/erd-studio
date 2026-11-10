@@ -18,7 +18,7 @@
  * | (header)                          | `erDiagram`, then `%% erd-studio mermaid-export v1` and `%%` lines naming what is left out |
  * | domain name, layer, description   | `%% Diagram: …` and `%% Description: …` lines                            |
  * | model                             | entity `"name" { … }` — always quoted (so `end`, `style` and other keywords work; Mermaid 10.0.0 already reads quoted names), the model name, never the alias; `"`, `%` and `\` become `'`, `_` and `/` (a `%%` line gives the original) |
- * | schema, alias, role, grain, description, rationale, meta | `%%` lines above the entity: `%%   grain: …`, `%%   Purpose: …`, `%%   meta owner: …` |
+ * | schema, alias, role, grain, description, rationale, meta | `%%` lines above the entity: `%%   grain: …`, `%%   Purpose: …`, `%%   meta owner: …` (rationale in `RATIONALE_LABELS` order, with its labels) |
  * | column                            | `type name KEYS "comment"`                                               |
  * | type                              | letters, digits and `_` only (`decimal(10,2)` → `decimal_10_2`); `t_` before a leading digit; empty → `unknown`; the original in the comment when it differs |
  * | column name                       | letters, digits and `_` only; `_` before a leading digit or a bare `PK`/`FK`/`UK`; the original in the comment when it differs |

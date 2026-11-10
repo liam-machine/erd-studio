@@ -74,6 +74,8 @@ describe('writing meta', () => {
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-meta-'));
+    // A YAML project (an empty logical-models/ is YAML evidence): a new project would write DBML (§3.2).
+    fs.mkdirSync(path.join(root, '.erd-studio', 'logical-models'), { recursive: true });
     service = new TableLibraryService(root, '.erd-studio');
     service.ensureDir();
     filePath = service.tablePath('dim_customer');

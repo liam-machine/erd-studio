@@ -35,7 +35,13 @@ export function mix(a, b, p) {
   return '#' + A.map((v, i) => Math.round(lerp(v, B[i], clamp(p))).toString(16).padStart(2, '0')).join('');
 }
 export const ACCENT = { blue: '#5ca2f8', amber: '#f4b42c', green: '#22c55e' };
-export const COLORS = { logical: '#60a5fa', physical: '#20c05a', amber: '#f4b42c', green: '#22c55e', text: '#e9ecef', text2: '#8b9099' };
+/** The accents on the light frame a recorded cut uses (style.css body.rec): darker, so they read on off-white. */
+export const ACCENT_LIGHT = { blue: '#2563eb', amber: '#b45309', green: '#15803d' };
+export const COLORS = { logical: '#60a5fa', physical: '#20c05a', amber: '#f4b42c', green: '#22c55e', text: '#e9ecef', text2: '#8b9099',
+  // A folder without dbt draws no stage colours (packages/renderer theme.css, `editor-canvas--neutral`):
+  // relationship lines and their end labels in --canvas-neutral-line (#8a94a3), table borders in
+  // --canvas-neutral-border (that colour at 55% over the node, flattened here so mix() can blend it).
+  neutralLine: '#8a94a3', neutralBorder: '#565c66' };
 
 export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -63,6 +69,10 @@ export const ICON = {
   claude: (o) => svg([0, 45, 90, 135].map((a) => `<path d="M12 3.2v17.6" transform="rotate(${a} 12 12)"/>`).join(''), { sw: 2.6, ...o }),
   globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>', { sw: 1.8, ...o }),
   neq: (o) => svg('<path d="M5 9h14M5 15h14M16 4L8 20"/>', { sw: 2.4, ...o }),
+  dot: (o) => svg('<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>', o),
+  /** A small diagram glyph for the Diagrams view's rows (not the activity bar icon: that is editor.js ERD_SIDEBAR_ICON). */
+  erdMark: (o) => svg('<rect x="3" y="4" width="8" height="6" rx="1.2"/><rect x="13" y="14" width="8" height="6" rx="1.2"/><path d="M7 10v7h6"/>', { sw: 2, ...o }),
+  exportGlyph: (o) => svg('<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/>', { sw: 2.2, ...o }),
 };
 /** Deterministic spinner: a 270° arc rotated by t. */
 export const spinner = (t, size = 26, color = 'var(--text-2)') =>
@@ -99,31 +109,36 @@ export const nodeHeight = (cols, grain = true) => NODE.head + (grain ? NODE.grai
 export const rowY = (i, grain = true) => NODE.head + (grain ? NODE.grain : 0) + i * NODE.row + NODE.row / 2;
 
 /**
- * An ERD node. `stage` is logical|physical, or a 0..1 number to blend the border between them.
+ * An ERD node. `stage` is neutral (a folder without dbt: the default), logical or physical, or a
+ * 0..1 number to blend the border from logical to physical; `border` overrides it with a colour.
+ * `layer` is the header's layer badge ('MAIN', 'GLD', 'SLV'): none on a single-layer project's
+ * canvas (a new folder without dbt), but a draft page's nodes show it (MAIN).
  * cols: [{ name, type, key?: 'PK'|'FK', row?: 'amber'|'green', types?: [[label, value, colour]...], pill?: html, strike? }]
  */
-export function node({ x, y, w, name, stage = 'logical', layer = 'GLD', grain, cols, style = '', lock = false }) {
-  const border = typeof stage === 'number' ? mix(COLORS.logical, COLORS.physical, stage) : stage === 'physical' ? COLORS.physical : COLORS.logical;
+export function node({ x, y, w, name, stage = 'neutral', border: borderOverride = null, layer = null, grain, cols, style = '', lock = false }) {
+  const border = borderOverride
+    ?? (typeof stage === 'number' ? mix(COLORS.logical, COLORS.physical, stage) : ({ physical: COLORS.physical, logical: COLORS.logical }[stage] ?? COLORS.neutralBorder));
   const rows = cols
     .map((c) => {
       const key = c.key ? `<span class="badge badge--${c.key.toLowerCase()}">${c.key}</span>` : '';
       const type = c.types
-        ? `<span class="node__types">${c.types.map(([l, v, col]) => `<span style="color:${col}">${l}: ${esc(v)}</span>`).join('')}</span>`
+        ? `<span class="node__types">${c.types.map(([l, v, col]) => `<span style="color:${col}">${l} ${esc(v)}</span>`).join('')}</span>`
         : `<span class="node__type">${esc(c.type)}</span>`;
       return `<div class="node__row${c.row ? ` node__row--${c.row}` : ''}"${c.rowStyle ? ` style="${c.rowStyle}"` : ''}><span class="node__key">${key}</span><span class="node__col"${c.strike ? ' style="text-decoration:line-through;color:var(--text-3)"' : ''}>${c.name}</span>${type}${c.pill ?? ''}</div>`;
     })
     .join('');
   const lockTab = lock ? `<div class="node__lock" style="left:${x + 18}px;top:${y - 36}px;${style}">${ICON.lock({ size: 17 })}read-only</div>` : '';
   return `${lockTab}<div class="node" style="left:${x}px;top:${y}px;width:${w}px;border-color:${border};${style}">
-    <div class="node__head"><span class="node__name">${name}</span><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span></div>
+    <div class="node__head"><span class="node__name">${name}</span>${layer ? `<span class="badge badge--${{ SLV: 'slv', MAIN: 'main' }[layer] ?? 'gld'}">${layer}</span>` : ''}</div>
     ${grain ? `<div class="node__grain">${grain}</div>` : ''}${rows}</div>`;
 }
 
 /**
  * Orthogonal relationship edge through `pts` ([[x,y],...]), drawn up to `progress` (0..1)
- * of its length, with "1" / "*" cardinality marks at the ends once fully drawn.
+ * of its length, with "1" / "*" cardinality marks at the ends once fully drawn. Neutral (a folder
+ * without dbt) unless a `color` is given.
  */
-export function edge(pts, { color = COLORS.logical, progress = 1, width = 3, one, many, dash = false, opacity = 1 } = {}) {
+export function edge(pts, { color = COLORS.neutralLine, progress = 1, width = 3, one, many, dash = false, opacity = 1 } = {}) {
   let len = 0;
   for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join(' ');
@@ -136,19 +151,61 @@ export function edge(pts, { color = COLORS.logical, progress = 1, width = 3, one
   return `<svg class="abs" style="left:0;top:0;overflow:visible;opacity:${opacity}" width="1" height="1"><path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" ${dashAttr}/>${marks}</svg>`;
 }
 
-/** Canvas toolbar: domain name + layer badge, Logical/Physical tabs, ⊕/⊘ Diff button. */
-export function toolbar({ x, y, domain = 'orders', layer = 'GLD', stage = 'logical', diff = 'off', layout = null, t = 0, style = '' }) {
-  const tab = (s, label, icon = '') => `<span class="tb__tab${stage === s ? ` tb__tab--${s}` : ''}">${icon}${label}</span>`;
-  // The real button reads "⊕ Diff" while off and "⊘ Diff" while the comparison is showing
-  // (webview/components/Toolbar/Toolbar.tsx); drawn as SVG so the glyphs never fall back to a system font.
-  const diffIcon = `<svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="8"/>${diff === 'off' ? '<path d="M12 8v8M8 12h8"/>' : '<path d="M6.5 17.5l11-11"/>'}</svg>`;
+/** The Compare button's words (webview/components/Toolbar/Toolbar.tsx compareButtonWording). */
+export const COMPARE_WORDS = { logical: 'Compare with dbt', physical: 'Compare with design', stop: 'Stop comparing' };
+/** The stage tabs (webview/components/Toolbar/StageTabs.tsx STAGE_LABELS): label and hint. */
+export const STAGE_TABS = [['logical', 'Logical', 'your design'], ['physical', 'Physical', 'read from dbt']];
+
+/**
+ * Canvas toolbar: the diagram's name, its layer badge only when given (`layer`: "GLD Gold layer" in a
+ * project with more than one layer; a new folder without dbt has one, Main, and no badge), then the Layout button, "+ Add ▾" and the Export glyph. A
+ * folder without dbt (`logicalOnly`) has no stage tabs and nothing to compare (Toolbar.tsx renders
+ * neither). A dbt project adds the Compare button (`compare`: 'off' or 'on') before "+ Add", and
+ * the Logical · Physical tabs as their own pill in a second row, centred under the toolbar
+ * (Toolbar.tsx "Row 2: Stage tabs (attached below toolbar)", `.toolbar-container`). The Physical
+ * stage is read-only, so its toolbar has no "+ Add" (`{!isReadOnly && (`).
+ */
+export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = '', stage = 'logical', compare = 'off', layout = null, t = 0, style = '', logicalOnly = true, add = null, exportGlyph = true, lineStyle = null, lineStyleHover = null }) {
+  // a single-layer project (a new folder without dbt: Main) shows no layer badge (isSingleLayerProject)
+  const badge = layer ? `<span class="tb__layer"><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>${layerLabel}</span>` : '';
   // The Layout button ("⊞ Layout", a spinner while ELK runs) — only when a scene asks for it.
   const layoutBtn = layout
     ? `<span class="tb__diff${layout === 'busy' ? ' tb__diff--busy' : ''}">${layout === 'busy' ? spinner(t, 20, '#cfe3ff') : '<svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg>'}Layout</span>`
     : '';
-  return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span><span class="badge badge--${layer === 'SLV' ? 'slv' : 'gld'}">${layer}</span>
-    <span class="tb__tabs">${tab('logical', 'Logical')}${tab('physical', 'Physical', stage === 'physical' ? ICON.lock({ size: 18 }) : '')}</span>
-    <span class="tb__diff${diff !== 'off' ? ` tb__diff--${diff}` : ''}">${diffIcon}Diff</span>${layoutBtn}</div>`;
+  const readOnly = !logicalOnly && stage === 'physical';
+  const addBtn = add && !readOnly
+    ? `<span class="tb__diff${add === 'open' ? ' tb__diff--busy' : ''}">+ Add<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>`
+    : '';
+  const exp = exportGlyph ? `<span class="tb__glyph">${ICON.exportGlyph({ size: 22 })}</span>` : '';
+  const lines = lineStyle ? lineStyleSwitch(lineStyle, lineStyleHover) : '';
+  if (logicalOnly) {
+    return `<div class="tb" style="left:${x}px;top:${y}px;${style}"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}${lines}${addBtn}${exp}</div>`;
+  }
+  const tab = ([s, label, hint]) => `<span class="tb__tab${stage === s ? ` tb__tab--${s}` : ''}">${stage === s && s === 'physical' ? ICON.lock({ size: 18 }) : ''}${label}<span class="tb__hint">· ${hint}</span></span>`;
+  const cmp = compare === 'on' ? COMPARE_WORDS.stop : COMPARE_WORDS[stage];
+  return `<div class="tb-stack" style="left:${x}px;top:${y}px;${style}"><div class="tb tb--row"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}
+    <span class="tb__diff${compare === 'on' ? ' tb__diff--amber' : ''}">${cmp}</span>${addBtn}${exp}</div>
+    <div class="tb__tabs tb__tabs--row2">${STAGE_TABS.map(tab).join('')}</div></div>`;
+}
+
+/**
+ * The toolbar's line style switch (webview/components/Toolbar/LineStyleSwitch.tsx and .css): a
+ * segmented control of two glyph buttons, Curved then Hops (LINE_STYLES). The chosen one takes the
+ * button colours; the other sits at 0.7 opacity, full with the selection colour while hovered.
+ * Its glyphs are LINE_STYLE_ICONS' paths (16 × 16), drawn at the toolbar's scale.
+ */
+export const LINE_STYLE_GLYPHS = {
+  curved: ['M2 13 V9 C2 5 4.5 3 8.5 3 H14'],
+  hops: ['M8 2 V14', 'M2 9 H5.5 A2.5 2.5 0 0 1 10.5 9 H14'],
+};
+export function lineStyleSwitch(on, hover = null) {
+  const opt = (s) => {
+    const sel = s === on;
+    const bg = sel ? '#0e639c' : hover === s ? '#37373d' : 'transparent';
+    const glyph = `<svg width="27" height="27" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${LINE_STYLE_GLYPHS[s].map((d) => `<path d="${d}"/>`).join('')}</svg>`;
+    return `<span data-line-style="${s}" style="display:flex;align-items:center;justify-content:center;width:40px;height:34px;border-radius:5px;background:${bg};color:${sel ? '#fff' : 'var(--text)'};opacity:${sel || hover === s ? 1 : 0.7}">${glyph}</span>`;
+  };
+  return `<span style="display:flex;align-items:center;gap:2px;height:44px;padding:4px;box-sizing:border-box;border:1px solid var(--card-border);border-radius:8px">${opt('curved')}${opt('hops')}</span>`;
 }
 
 /** Mouse pointer at (x, y); `press` 0..1 draws the click ripple. */

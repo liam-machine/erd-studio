@@ -1,0 +1,18 @@
+{
+  "type": "calculatedTableColumn",
+  "name": "MTD Slicer",
+  "dataType": "string",
+  "isNameInferred": true,
+  "isDataTypeInferred": true,
+  "isHidden": true,
+  "sourceColumn": "[MTD Slicer]",
+  "sortByColumn": "Order",
+  "lineageTag": "02184b60-9463-42cc-9353-3076dcfd57d1",
+  "summarizeBy": "none",
+  "annotations": [
+    {
+      "name": "SummarizationSetBy",
+      "value": "Automatic"
+    }
+  ]
+}

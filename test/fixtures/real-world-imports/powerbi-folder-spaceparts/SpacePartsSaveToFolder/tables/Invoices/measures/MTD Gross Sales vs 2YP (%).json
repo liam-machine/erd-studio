@@ -1,0 +1,14 @@
+{
+  "name": "MTD Gross Sales vs 2YP (%)",
+  "expression": [
+    "",
+    "VAR _TARGET = [MTD Gross Sales 1YP]",
+    "VAR _DELTA  = [MTD Gross Sales] - _TARGET",
+    "VAR _PERC   = DIVIDE ( _DELTA, _TARGET )",
+    "RETURN",
+    "_PERC"
+  ],
+  "formatString": "#,##0.0% ↑;#,##0.0% ↓;#,##0.0%",
+  "displayFolder": "1. Value\\a. Gross Sales Actuals\\III. 2YP\\MTD",
+  "lineageTag": "c694eb93-5caf-484f-b50d-c2601f9cd9bd"
+}
