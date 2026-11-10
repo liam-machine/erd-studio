@@ -59,7 +59,11 @@
  * `alias` when it can be one, else in `meta.dbml.name`. Two tables whose
  * names differ only by schema or case become `{schema}_{name}` with
  * `alias: {name}`. A name the Table Library already has, in any case, is used
- * as it is in the library — never overwritten — in the library's spelling.
+ * as it is in the library (never overwritten, in the library's spelling)
+ * only when the library's table has the same columns, by name; otherwise the
+ * file's table is imported as its own, `{diagram}_{name}` with
+ * `alias: {name}`, so the diagram shows what the file says (#269). The
+ * `sameName: 'reuse'` input keeps the library's table whatever its columns.
  *
  * Pure: no `vscode`, no file access. The library comes in as two lookups.
  */
@@ -136,7 +140,31 @@ export interface DbmlImportLibrary {
   findTableName(name: string): string | null;
   /** The library table (`getTable`), or null when its file cannot be read. The planner copies it before changing it. */
   getTable(name: string): SemanticTable | null;
+  /**
+   * The layer a library table's file is in (a DBML table's `<layer>/tables/`
+   * folder), for the report's words; undefined for a table with no layer of
+   * its own (a YAML library). Absent: no layer is named.
+   */
+  layerOf?(name: string): { id: string; label: string } | undefined;
+  /**
+   * The library tables an earlier import kept as their own copy of a table
+   * called `name` (#269): those whose `alias` is `name`, or whose original
+   * name (`meta.dbml.name`, kept when the table had an alias of its own) is,
+   * ignoring case. Reused when the columns match, instead of another copy.
+   * Absent: none is looked for.
+   */
+  earlierCopiesOf?(name: string): string[];
 }
+
+/**
+ * What an import does with a table whose name the Table Library already has
+ * (#269). `auto` (the default): reuse the library's table when it has the
+ * same columns, by name, as the file's (or an earlier import's copy that
+ * does), else import the file's table as its own, `{diagram}_{name}`.
+ * `reuse`: the library's table, whatever its columns (the file's other
+ * columns are not added, and references that need them are left out).
+ */
+export type DbmlImportSameName = 'auto' | 'reuse';
 
 export interface PlanDbmlImportInput {
   model: DbmlModel;
@@ -166,6 +194,8 @@ export interface PlanDbmlImportInput {
    * the document or counted. Needs `libraryRelationships`.
    */
   diagramHoldsNoRelationships?: boolean;
+  /** A table whose name the Table Library already has (default `auto`, see {@link DbmlImportSameName}). */
+  sameName?: DbmlImportSameName;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,9 +223,12 @@ export interface DbmlImportRename {
   /**
    * `invalid-name`: not a name ERD Studio can use; `same-name`: another table
    * in the file has the same name in another schema or case; `duplicate`: two
-   * columns became one name.
+   * columns became one name; `in-library`: the Table Library has a table of
+   * that name with other columns (#269), named in {@link inLibrary}.
    */
-  reason: 'invalid-name' | 'same-name' | 'duplicate';
+  reason: 'invalid-name' | 'same-name' | 'duplicate' | 'in-library';
+  /** With `in-library`: the library's table of that name, and its layer when it has one. */
+  inLibrary?: { name: string; layer?: { id: string; label: string } };
 }
 
 /** A table the library already has: used as it is, never overwritten. */
@@ -206,6 +239,10 @@ export interface DbmlImportReused {
   dbmlName: string;
   /** DBML columns the library's table does not have (they are not added). */
   missingColumns: string[];
+  /** The library table's columns the DBML table does not have (the diagram shows them too); absent when none or unreadable. */
+  extraColumns?: string[];
+  /** The layer its file is in, when it has one (a DBML table). */
+  layer?: { id: string; label: string };
 }
 
 /** What kind of thing an import leaves out: the summary gives each kind one line. */
@@ -533,7 +570,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     declaredUnique: new WeakSet(), declaredUniqueIndexes: new WeakMap(),
   };
 
-  const names = planTableNames(model.tables, input.library, ctx);
+  const names = planTableNames(model.tables, input, ctx);
   const planned: PlannedTable[] = model.tables.map((dbml, i) => planTable(dbml, names[i], input.library, ctx));
   applyEnums(model, planned, ctx);
 
@@ -645,11 +682,18 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
 
   reportFileExtras(model, input.layer, ctx);
   report.newTables = newTables.map((t) => t.name);
-  report.reusedTables = planned.filter((p) => p.reused).map((p) => ({
-    name: p.name,
-    dbmlName: dbmlTableLabel(p.dbml),
-    missingColumns: p.dbml.fields.filter((f) => !isPlaceholder(f) && !p.columns.has(f.name)).map((f) => f.name),
-  }));
+  report.reusedTables = planned.filter((p) => p.reused).map((p) => {
+    const layer = input.library.layerOf?.(p.name);
+    const mapped = new Set([...p.columns.values()].map(normaliseName));
+    const extraColumns = (p.library?.columns ?? []).map((c) => c.name).filter((c) => !mapped.has(normaliseName(c)));
+    return {
+      name: p.name,
+      dbmlName: dbmlTableLabel(p.dbml),
+      missingColumns: p.dbml.fields.filter((f) => !isPlaceholder(f) && !p.columns.has(f.name)).map((f) => f.name),
+      ...(extraColumns.length > 0 ? { extraColumns } : {}),
+      ...(layer ? { layer } : {}),
+    };
+  });
 
   return {
     subjectAreaName: input.subjectAreaName,
@@ -769,6 +813,40 @@ function hasDbmlMeta(meta: Meta | undefined): boolean {
   return !!meta && DBML_META_KEY in meta;
 }
 
+/** A table's imported name, and the library table it is when it reuses one. */
+interface PlannedName {
+  name: string;
+  /** The library's table (its spelling) this file table is: referenced, never created. Null: a new table. */
+  reuse: string | null;
+}
+
+/**
+ * Each column's imported name: names as the file writes them first, then
+ * the changed ones, as for tables (planTableNames), so a cleaned-up
+ * `order-id` never takes `order_id`'s own name; `_2`, `_3`… for the rest.
+ */
+function plannedColumnNames(fields: readonly DbmlField[], used: Set<string> = new Set()): Map<DbmlField, string> {
+  const columnNames = new Map<DbmlField, string>();
+  for (const keptAsWritten of [true, false]) {
+    for (const field of fields) {
+      const candidate = sanitiseDbmlColumnName(field.name);
+      if ((candidate === field.name) === keptAsWritten) columnNames.set(field, freeName(candidate, used));
+    }
+  }
+  return columnNames;
+}
+
+/** A table's columns as the import would name them (planTable's own rule), lower-cased: what "the same columns" compares (#269). */
+function fileColumnKeys(table: DbmlTable): Set<string> {
+  return new Set([...plannedColumnNames(table.fields.filter((f) => !isPlaceholder(f))).values()].map(normaliseName));
+}
+
+/** Whether a library table has exactly `columns`, by name (types, keys and notes are not compared). */
+function hasSameColumns(table: SemanticTable, columns: ReadonlySet<string>): boolean {
+  const own = new Set((table.columns ?? []).map((c) => normaliseName(c.name)));
+  return own.size === columns.size && [...columns].every((c) => own.has(c));
+}
+
 /**
  * Each table's imported name: its own when valid and unique; the nearest
  * valid name otherwise; `{schema}_{name}` when another table in the file has
@@ -776,37 +854,91 @@ function hasDbmlMeta(meta: Meta | undefined): boolean {
  * A name kept as the file writes it is handed out first, so a renamed table
  * (`"dim-customer"` → `dim_customer`) never takes the name of a table the
  * file really calls that.
+ *
+ * A name the file writes that the Table Library already has (#269) is that
+ * library table only when it has the same columns (or its file cannot be
+ * read, when it is taken on trust). Otherwise an earlier import's own copy
+ * with the same columns ({@link DbmlImportLibrary.earlierCopiesOf}) is
+ * reused; failing that, under `sameName: 'reuse'` the library's table is,
+ * and by default the table is its own: `{diagram}_{name}`, steered clear of
+ * the library like any made-up name.
  */
-function planTableNames(tables: readonly DbmlTable[], library: DbmlImportLibrary, ctx: Context): string[] {
+function planTableNames(
+  tables: readonly DbmlTable[],
+  input: Pick<PlanDbmlImportInput, 'library' | 'subjectAreaName' | 'sameName'>,
+  ctx: Context,
+): PlannedName[] {
+  const { library } = input;
+  const policy = input.sameName ?? 'auto';
   const groups = new Map<string, number>();
   for (const t of tables) groups.set(normaliseName(t.name), (groups.get(normaliseName(t.name)) ?? 0) + 1);
   const sameName = (t: DbmlTable): boolean => groups.get(normaliseName(t.name))! > 1;
-  const candidates = tables.map((t) => {
+  /** Per table: the library table it is (a name the file wrote), an earlier copy it reuses, or the library table it steers clear of. */
+  const libraryHit: Array<string | null> = tables.map(() => null);
+  const earlierCopy: Array<string | null> = tables.map(() => null);
+  const clashesWith: Array<string | null> = tables.map(() => null);
+  const separateName = (t: DbmlTable): string => sanitiseDbmlTableName(`${input.subjectAreaName}_${sanitiseDbmlTableName(t.name)}`);
+  const candidates = tables.map((t, i) => {
     const base = sanitiseDbmlTableName(t.name);
-    return sameName(t) && t.schema ? sanitiseDbmlTableName(`${t.schema}_${base}`) : base;
+    if (sameName(t) && t.schema) return sanitiseDbmlTableName(`${t.schema}_${base}`);
+    const hit = base === t.name ? library.findTableName(t.name) : null;
+    if (hit === null) return base;
+    const own = library.getTable(hit);
+    if (!own) {
+      // Nothing to compare: the library's table is taken on trust, as before (a file mid-merge is not a reason to copy it).
+      libraryHit[i] = hit;
+      ctx.report.notes.push(`${dbmlTableLabel(t)}: your Table Library's ${hit} could not be read to compare its columns, so it is used as it is.`);
+      return base;
+    }
+    const columns = fileColumnKeys(t);
+    if (hasSameColumns(own, columns)) { libraryHit[i] = hit; return base; }
+    // An earlier import's copy with these columns loses nothing, whichever the answer.
+    const copy = (library.earlierCopiesOf?.(t.name) ?? [])
+      .filter((n) => normaliseName(n) !== normaliseName(hit))
+      .sort((a, b) => a.localeCompare(b, 'en'))
+      .find((n) => { const c = library.getTable(n); return !!c && hasSameColumns(c, columns); });
+    if (copy !== undefined) { earlierCopy[i] = copy; clashesWith[i] = hit; return copy; }
+    if (policy === 'reuse') { libraryHit[i] = hit; return base; }
+    clashesWith[i] = hit;
+    return separateName(t);
   });
   const used = new Set<string>();
   const names: string[] = new Array(tables.length);
-  // Names as the file writes them first, then the changed ones, each in file order.
+  // Names as the file writes them (and earlier copies reused) first, then the changed ones, each in file order.
   for (const keptAsWritten of [true, false]) {
-    candidates.forEach((candidate, i) => {
+    candidates.forEach((_candidate, i) => {
+      const copy = earlierCopy[i];
+      if (copy !== null && keptAsWritten) {
+        if (!used.has(normaliseName(copy))) { names[i] = copy; used.add(normaliseName(copy)); return; }
+        // Another table of the file already is that copy: this one is its own.
+        earlierCopy[i] = null;
+        candidates[i] = separateName(tables[i]);
+        return;
+      }
+      if (copy !== null) return;
       // Only a name the file wrote may be a library table (planTable reuses it);
       // a name made up here steers clear of the library instead.
       const madeUp = (n: string): boolean => n !== tables[i].name && library.findTableName(n) !== null;
-      if ((candidate === tables[i].name) === keptAsWritten) names[i] = freeName(candidate, used, madeUp);
+      if ((candidates[i] === tables[i].name) === keptAsWritten) names[i] = freeName(candidates[i], used, madeUp);
     });
   }
-  names.forEach((name, i) => {
-    if (name === tables[i].name) return;
+  return names.map((name, i) => {
+    const copy = earlierCopy[i];
+    if (copy !== null) return { name: copy, reuse: copy };
+    const hit = libraryHit[i];
+    if (name === tables[i].name) return { name, reuse: hit };
+    const clash = clashesWith[i] !== null && candidates[i] !== tables[i].name ? clashesWith[i] : null;
+    const layer = clash !== null ? library.layerOf?.(clash) : undefined;
     ctx.report.renamed.push({
       kind: 'table',
       table: name,
       from: dbmlTableLabel(tables[i]),
       to: name,
-      reason: sameName(tables[i]) ? 'same-name' : 'invalid-name',
+      reason: clash !== null ? 'in-library' : sameName(tables[i]) ? 'same-name' : 'invalid-name',
+      ...(clash !== null ? { inLibrary: { name: clash, ...(layer ? { layer } : {}) } } : {}),
     });
+    return { name, reuse: null };
   });
-  return names;
 }
 
 function isPlaceholder(field: DbmlField): boolean {
@@ -873,9 +1005,10 @@ function shadowedNote(label: string, key: string): string {
   return `${label}: both ${key} and ${DBML_RICH_PROPERTY_PREFIX}${key} are set. ERD Studio read ${DBML_RICH_PROPERTY_PREFIX}${key}; ${key} was kept in meta.${DBML_META_KEY}.`;
 }
 
-function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ctx: Context): PlannedTable {
-  // A name the file wrote is the library's table; one the import made up never is (planTableNames).
-  const libraryName = name === dbml.name ? library.findTableName(name) : null;
+function planTable(dbml: DbmlTable, planned: PlannedName, library: DbmlImportLibrary, ctx: Context): PlannedTable {
+  // planTableNames decided whether it is a library table (#269): a made-up name never is.
+  const { name } = planned;
+  const libraryName = planned.reuse;
   const columns = new Map<string, string>();
   const primaryKey = new Set<string>();
   const label = dbmlTableLabel(dbml);
@@ -960,15 +1093,7 @@ function planTable(dbml: DbmlTable, name: string, library: DbmlImportLibrary, ct
   if (dbml.headerColor) tableExtras.header_color = dbml.headerColor;
 
   if (dbml.note) table.description = dbml.note;
-  // Names as the file writes them first, then the changed ones, as for tables
-  // (planTableNames): a cleaned-up `order-id` never takes `order_id`'s own name.
-  const columnNames = new Map<DbmlField, string>();
-  for (const keptAsWritten of [true, false]) {
-    for (const field of kept) {
-      const candidate = sanitiseDbmlColumnName(field.name);
-      if ((candidate === field.name) === keptAsWritten) columnNames.set(field, freeName(candidate, used));
-    }
-  }
+  const columnNames = plannedColumnNames(kept, used);
   table.columns = kept.map((field) => {
     const columnName = columnNames.get(field)!;
     columns.set(field.name, columnName);
@@ -1598,8 +1723,13 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
   if (report.newTables.length > 0) lines.push(`• New: ${someOf(report.newTables)}.`);
   if (report.reusedTables.length > 0) {
     const differ = report.reusedTables.filter((r) => r.missingColumns.length > 0).length;
-    lines.push(`• Already in your Table Library, used as they are: ${someOf(report.reusedTables.map((r) => r.name))}.`
+    lines.push(`• Already in your Table Library, used as they are: ${someOf(report.reusedTables.map((r) => withLayer(r.name, r.layer)))}.`
       + (differ > 0 ? ` ${plural(differ, 'of them has', 'of them have')} columns the file has and the library does not; those are not added.` : ''));
+  }
+  const keptOwn = inLibraryRenameLines(report.renamed);
+  if (keptOwn.length > 0) {
+    const more = keptOwn.length > 4 ? ` And ${keptOwn.length - 4} more.` : '';
+    lines.push(`• Kept as ${keptOwn.length === 1 ? 'its own table' : 'their own tables'}, beside a same-named table in your project: ${keptOwn.slice(0, 4).join('; ')}.${more}`);
   }
   if (report.relationships > 0) {
     // A DBML project writes them to the library's relationships files, a YAML one to the tables' own files.
@@ -1659,8 +1789,8 @@ export function describeDbmlImportPlan(plan: DbmlImportPlan, options: DescribeDb
     // business, and no count (it mixes tables and columns, and read like a wrong table count).
     lines.push(`• ${keptInMetaNote(plan, options)}`);
   }
-  if (report.renamed.length > 0) {
-    const renames = renameEntries(report.renamed);
+  const renames = renameEntries(report.renamed);
+  if (renames.length > 0) {
     const more = renames.length > 4 ? ` and ${renames.length - 4} more` : '';
     lines.push(`• Renamed to names ERD Studio can use: ${renames.slice(0, 4).join(', ')}${more}.`);
   }
@@ -1896,8 +2026,14 @@ export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeD
   const library: string[] = [];
   if (report.reusedTables.length > 0) {
     const differ = report.reusedTables.filter((r) => r.missingColumns.length > 0).length;
-    library.push(`${plural(report.reusedTables.length, 'table')} already in your Table Library, used as ${report.reusedTables.length === 1 ? 'it is' : 'they are'}`
+    const layers = [...new Set(report.reusedTables.map((r) => r.layer?.label).filter((l): l is string => !!l))];
+    const from = layers.length > 0 ? ` (from the ${layers.join(', ')} ${layers.length === 1 ? 'layer' : 'layers'})` : '';
+    library.push(`${plural(report.reusedTables.length, 'table')} already in your Table Library${from}, used as ${report.reusedTables.length === 1 ? 'it is' : 'they are'}`
       + (differ > 0 ? ` (${plural(differ, 'has', 'have')} columns the import does not add)` : ''));
+  }
+  const keptOwn = inLibraryRenames(report.renamed);
+  if (keptOwn.length > 0) {
+    library.push(`${plural(keptOwn.length, 'table')} kept as ${keptOwn.length === 1 ? 'its own' : 'their own'} beside a same-named table with other columns: ${someOf(keptOwn.map((r) => `${r.from} → ${r.to}`), 2)}`);
   }
   const changed = plan.changedLibraryTables.length;
   if (changed > 0) library.push(`${plural(changed, 'library table gains', 'library tables gain')} relationships`);
@@ -1910,8 +2046,8 @@ export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeD
     detail.push(`• ${plural(report.relationships, 'relationship')}${relationshipsHome(plan, options)}.${already}`);
   }
 
-  if (report.renamed.length > 0) {
-    const renames = renameEntries(report.renamed);
+  const renames = renameEntries(report.renamed);
+  if (renames.length > 0) {
     detail.push(`• Renamed to names ERD Studio can use: ${renames[0]}${renames.length > 1 ? ` and ${renames.length - 1} more` : ''}.`);
   }
 
@@ -1928,6 +2064,70 @@ export function summariseDbmlImportPlan(plan: DbmlImportPlan, options: DescribeD
   return { headline, detail: detail.slice(0, IMPORT_MODAL_MAX_DETAIL_LINES) };
 }
 
+/** The renames a same-named library table caused (#269): the file's table kept as its own. */
+export function inLibraryRenames(renamed: readonly DbmlImportRename[]): DbmlImportRename[] {
+  return renamed.filter((r) => r.kind === 'table' && r.reason === 'in-library');
+}
+
+/** `customer (Reports layer)`, or the bare name for a table with no layer of its own. */
+function withLayer(name: string, layer: { label: string } | undefined): string {
+  return layer ? `${name} (${layer.label} layer)` : name;
+}
+
+/** One line per table kept as its own: `customer → warehouse_customer: the project's customer (Reports layer) has other columns`. */
+export function inLibraryRenameLines(renamed: readonly DbmlImportRename[]): string[] {
+  return inLibraryRenames(renamed).map((r) =>
+    `${r.from} → ${r.to}: the project's ${withLayer(r.inLibrary?.name ?? r.from, r.inLibrary?.layer)} has other columns`);
+}
+
+/** The step-by-step flow's question when a same-named table was kept as its own (#269): `null` when there is none. */
+export interface SameNameQuestion {
+  placeHolder: string;
+  separate: { label: string; detail: string };
+  reuse: { label: string; detail: string };
+}
+
+/**
+ * The question, from the plan made with `sameName: 'auto'` and the one made
+ * with `'reuse'` (what the second choice would leave out, counted).
+ */
+export function sameNameQuestion(auto: DbmlImportPlan, reuse: DbmlImportPlan): SameNameQuestion | null {
+  const kept = inLibraryRenames(auto.report.renamed);
+  if (kept.length === 0) return null;
+  const one = kept.length === 1;
+  const names = (list: readonly string[]): string => someOf(list, 3);
+  const keptFrom = new Set(kept.map((r) => normaliseName(r.inLibrary?.name ?? r.from)));
+  const switched = reuse.report.reusedTables.filter((r) => keptFrom.has(normaliseName(r.name)));
+  const lostColumns = switched.reduce((n, r) => n + r.missingColumns.length, 0);
+  const shownColumns = switched.reduce((n, r) => n + (r.extraColumns?.length ?? 0), 0);
+  const lostRelationships = Math.max(0, auto.report.relationships - reuse.report.relationships);
+  const lost = [
+    ...(lostColumns > 0 ? [plural(lostColumns, 'column')] : []),
+    ...(lostRelationships > 0 ? [plural(lostRelationships, 'relationship')] : []),
+  ];
+  const lostSentence = lost.length > 0
+    ? `${lost.join(' and ')} from the file ${lostColumns + lostRelationships === 1 ? 'is' : 'are'} not imported.`
+    : '';
+  const shownSentence = shownColumns > 0
+    ? `The diagram shows ${plural(shownColumns, 'column')} the file does not have.`
+    : '';
+  const layers = [...new Set(kept.map((r) => r.inLibrary?.layer?.label).filter((l): l is string => !!l))];
+  const where = layers.length === 1 ? ` (${layers[0]} layer)` : layers.length > 1 ? ` (${layers.join(', ')} layers)` : '';
+  return {
+    placeHolder: one
+      ? `${kept[0].from} is already in your project${where} with other columns. Import the file's table as its own, or use the project's?`
+      : `${kept.length} tables are already in your project${where} with other columns: ${names(kept.map((r) => r.from))}. Import the file's tables as their own, or use the project's?`,
+    separate: {
+      label: one ? 'Keep it as its own table' : 'Keep them as their own tables',
+      detail: `Imported as ${names(kept.map((r) => r.to))}, so the diagram shows what the file says. The project's ${one ? 'table is' : 'tables are'} not changed.`,
+    },
+    reuse: {
+      label: one ? "Use the project's table as it is" : "Use the project's tables as they are",
+      detail: [lostSentence, shownSentence].filter(Boolean).join(' ') || 'The project\'s table is used for this diagram.',
+    },
+  };
+}
+
 /** Renames as the summary names them: a column renamed the same way in several tables once. */
 export function renameEntries(renamed: readonly DbmlImportRename[]): string[] {
   const columns = new Map<string, DbmlImportRename[]>();
@@ -1939,6 +2139,8 @@ export function renameEntries(renamed: readonly DbmlImportRename[]): string[] {
   const out: string[] = [];
   const shown = new Set<string>();
   for (const r of renamed) {
+    // A table kept as its own beside a same-named library table is said apart ({@link inLibraryRenameLines}).
+    if (r.reason === 'in-library') continue;
     if (r.kind === 'table') {
       out.push(`${r.from} → ${r.to}`);
       continue;

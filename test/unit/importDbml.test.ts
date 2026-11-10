@@ -85,13 +85,15 @@ const shopWithLayout = (...lines: string[]): string =>
 /** SHOP_DBML with both tables placed. */
 const SHOP_PLACED = shopWithLayout('customers 10 20', 'orders 300.5 40');
 
-type Pickable = vscode.QuickPickItem & { id?: string };
+type Pickable = vscode.QuickPickItem & { id?: string; policy?: 'auto' | 'reuse' };
 
 interface Answers {
   /** The file the Open dialog returns (undefined = cancelled). */
   file?: string;
   /** The layer id picked (undefined = Escape). */
   layer?: string;
+  /** The answer to "already in your project with other columns" (#269), when asked (undefined = Escape). */
+  sameName?: 'auto' | 'reuse';
   /** What the name box returns, in turn; absent = accept the suggestion; null = Escape. */
   names?: Array<string | null>;
   /** The dry run's answer (default: Import). */
@@ -132,7 +134,9 @@ function fakeUi(answers: Answers): FakeUi {
     },
     showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions) => {
       ui.picks.push({ items: [...items] as Pickable[], options });
-      return (items as readonly Pickable[]).find((i) => i.id === answers.layer) as T | undefined;
+      const pickable = items as readonly Pickable[];
+      if (pickable.some((i) => i.policy !== undefined)) return pickable.find((i) => i.policy === answers.sameName) as T | undefined;
+      return pickable.find((i) => i.id === answers.layer) as T | undefined;
     },
     showInputBox: async (options) => {
       ui.inputs.push(options);
@@ -365,7 +369,7 @@ describe('Import DBML — a file from another tool', () => {
       viewConfig: {},
     }));
     const file = dbmlFile('shop.dbml', SHOP_DBML);
-    const ui = fakeUi({ file, layer: 'silver' });
+    const ui = fakeUi({ file, layer: 'silver', sameName: 'reuse' });
 
     const result = await importDbml(deps(ui));
 
@@ -878,7 +882,7 @@ describe('Import DBML — where relationships go', () => {
     fs.writeFileSync(erd('logical-models', 'orders.yml'), 'name: orders\ncolumns:\n  - name: id\n    dataType: int\n    description: ""\n  - name: customer_id\n    dataType: int\n    description: ""\n');
     const file = dbmlFile('shop.dbml', SHOP_DBML);
 
-    const result = await importDbml(deps(fakeUi({ file, layer: 'silver' })));
+    const result = await importDbml(deps(fakeUi({ file, layer: 'silver', sameName: 'reuse' })));
 
     expect(result!.plan.newTables).toEqual([]);
     expect(lms.getTable('orders')?.relationships).toEqual([
@@ -896,7 +900,7 @@ describe('Import DBML — where relationships go', () => {
     tab._setText(`${ordersYml}# unsaved\n`);
     (vscode.workspace.textDocuments as unknown[]).push(tab);
     const file = dbmlFile('shop.dbml', SHOP_DBML);
-    const ui = fakeUi({ file, layer: 'silver', errorChoices: [SHOW_FILE_BUTTON] });
+    const ui = fakeUi({ file, layer: 'silver', sameName: 'reuse', errorChoices: [SHOW_FILE_BUTTON] });
 
     await expect(importDbml(deps(ui))).resolves.toBeUndefined();
 
@@ -919,7 +923,7 @@ describe('Import DBML — where relationships go', () => {
       throw new DuplicateKeyWriteRefused('orders.yml, line 2: "columns" is written twice in one block.', { filePath: ordersPath, line: 2 });
     });
     const file = dbmlFile('shop.dbml', SHOP_DBML);
-    const ui = fakeUi({ file, layer: 'silver', errorChoices: [OPEN_FILE_BUTTON] });
+    const ui = fakeUi({ file, layer: 'silver', sameName: 'reuse', errorChoices: [OPEN_FILE_BUTTON] });
 
     await expect(importDbml(deps(ui))).resolves.toBeUndefined();
 
@@ -1020,7 +1024,7 @@ describe('Import DBML — a write that fails', () => {
       if (table.name === 'orders') throw fsError('EACCES', ordersPath);
     });
     const file = dbmlFile('shop.dbml', SHOP_DBML);
-    const ui = fakeUi({ file, layer: 'silver' });
+    const ui = fakeUi({ file, layer: 'silver', sameName: 'reuse' });
 
     await importDbml(deps(ui));
 

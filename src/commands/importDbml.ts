@@ -37,15 +37,20 @@ import { classifySemanticFile, diagramFilePath } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE } from '@erd-studio/core/dbml';
 
 import {
+  DBML_META_KEY,
   analyseDbml,
   importLedgerOf,
   planDbmlImport,
+  sameNameQuestion,
   serializeDbmlImportDocument,
   suggestDbmlSubjectAreaName,
   summariseDbmlImportPlan,
+  type DbmlImportLibrary,
   type DbmlImportPlan,
+  type DbmlImportSameName,
   type DescribeDbmlImportOptions,
 } from '../services/dbmlImport';
+import { tableHomesOf, type TableHome } from '../services/tableHomes';
 import { afterScope, draftFromImportPlan, importPlanFingerprint, DRAFT_REDRAWN_NOTICE } from '../services/draftModel';
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftScopes, DraftTarget, DraftTrigger } from '../types/draft';
 import type { DbmlDiagnostic } from '../services/dbmlImportParse';
@@ -245,7 +250,7 @@ export interface ImportDbmlDeps {
     TableLibraryService,
     'findTableNameIgnoringCase' | 'getTable' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable'
       | 'listTables' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder'>>;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder' | 'listTableFiles'>>;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /**
@@ -355,6 +360,12 @@ export interface ImportDbmlResume {
    * answered, asked again when the write does not land.
    */
   redraw?: { fingerprint: string; settle(outcome: DraftKeepOutcome): void; draft?: Draft };
+  /**
+   * The answer to "a table of that name is already in your project with
+   * other columns" (#269), once given: a re-plan (a redraw, Try Again) keeps
+   * it and does not ask again. Absent: `auto`, and the step-by-step flow asks.
+   */
+  sameName?: DbmlImportSameName;
 }
 
 export interface ImportDbmlResult {
@@ -694,7 +705,9 @@ async function runImportDbml(
   // A DBML diagram is `<layer>/diagrams/<slug>.dbml` (§1.1); a JSON one `<layer>/<slug>.json`.
   const dbmlDiagramPath = path.join(workspaceRoot, semanticDir, ...diagramFilePath(chosenLayer, slug).split('/'));
   const domainPath = dbml ? dbmlDiagramPath : path.join(layerDir, `${slug}.json`);
-  const tryAgain = again({ layer: chosenLayer, name: slug });
+  /** The same-name answer (#269): the resume's, else `auto` until the step-by-step flow asks. */
+  let sameName: DbmlImportSameName | undefined = resume?.sameName;
+  const tryAgain = (): unknown => again({ layer: chosenLayer, name: slug, ...(sameName !== undefined ? { sameName } : {}) })();
   progress.retry = tryAgain;
   // The name box already refuses a name in use; this is a diagram that
   // appeared since (another window, git), so the choices are kept.
@@ -732,25 +745,43 @@ async function runImportDbml(
       // A DBML table's relationships can only live in the library (D5, §5.1).
       tableLibraryService.hasDbmlLibrary?.() ?? false,
     );
-    plan = planDbmlImport({
+    const diagramCopies = libraryRelationships && !dbml
+      ? drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir))
+      : [];
+    const library = importLibrary(deps);
+    const planWith = (policy: DbmlImportSameName): DbmlImportPlan => planDbmlImport({
       model,
       layout,
       layer: chosenLayer,
       subjectAreaName: slug,
       fileName,
       ...(deps.origin?.description !== undefined ? { description: deps.origin.description } : {}),
-      library: {
-        findTableName: (n) => tableLibraryService.findTableNameIgnoringCase(n),
-        getTable: (n) => tableLibraryService.getTable(n),
-      },
+      library,
       libraryRelationships,
       // A DBML diagram keeps no copy: every relationship goes to the library.
-      diagramCopies: libraryRelationships && !dbml
-        ? drawnDiagramCopies(readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir))
-        : [],
+      diagramCopies,
       // A DBML diagram holds no relationships (D5): one the library cannot take is named, not dropped silently.
       ...(dbml ? { diagramHoldsNoRelationships: true } : {}),
+      sameName: policy,
     });
+    plan = planWith(sameName ?? 'auto');
+    // A table of the same name already in the project, with other columns, was kept as its own (#269):
+    // the step-by-step flow asks once whether to use the project's instead. The quick path and the
+    // automatic draft keep the default; the draft says so, and its Change options… asks.
+    if (sameName === undefined && !quick && !quiet) {
+      const reusePlan = planWith('reuse');
+      // Not offered when the project's table could not be used anyway (a YAML table in a DBML project).
+      const reusable = !dbml || dbmlImportRefusal(reusePlan, (n) => tableLibraryService.tableStorage?.(n)) === undefined;
+      const question = reusable ? sameNameQuestion(plan, reusePlan) : null;
+      if (question) {
+        const separate = { label: question.separate.label, description: 'recommended', detail: question.separate.detail, policy: 'auto' as const };
+        const reuse = { label: question.reuse.label, detail: question.reuse.detail, policy: 'reuse' as const };
+        const choice = await ui.showQuickPick([separate, reuse], { title, placeHolder: question.placeHolder, ignoreFocusOut: true });
+        if (!choice) return cancelled();
+        sameName = choice.policy;
+        if (sameName === 'reuse') plan = planWith('reuse');
+      }
+    }
     if (dbml) {
       const refusal = dbmlImportRefusal(plan, (n) => tableLibraryService.tableStorage?.(n));
       if (refusal) {
@@ -937,6 +968,7 @@ async function runImportDbml(
                 ...(quick ? { quick } : {}),
                 layer: chosenLayer,
                 name: slug,
+                ...(sameName !== undefined ? { sameName } : {}),
                 redraw: { fingerprint, settle, draft: asked },
               });
             } finally {
@@ -1237,5 +1269,41 @@ export function vscodeImportDbmlUi(): ImportDbmlUi {
     addLayer: async () => { await vscode.commands.executeCommand('erdStudio.addLayer'); },
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
     showImportReport: async (reportId) => { await vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId); },
+  };
+}
+
+/**
+ * The Table Library as the planner reads it: names, tables, each DBML
+ * table's layer (as layers.json labels it) and the tables an earlier import
+ * kept as its own copy of a same-named table (#269: by `alias`, or by the
+ * original name `meta.dbml.name` keeps). Each listing is read once, when the
+ * planner first asks.
+ */
+function importLibrary(deps: Pick<ImportDbmlDeps, 'tableLibraryService' | 'layerService'>): DbmlImportLibrary {
+  const { tableLibraryService, layerService } = deps;
+  let homes: Map<string, TableHome> | undefined;
+  let byOriginal: Map<string, string[]> | undefined;
+  return {
+    findTableName: (n) => tableLibraryService.findTableNameIgnoringCase(n),
+    getTable: (n) => tableLibraryService.getTable(n),
+    layerOf: (n) => {
+      homes ??= tableHomesOf(tableLibraryService.listTableFiles?.() ?? []);
+      const home = homes.get(n.toLowerCase());
+      if (!home) return undefined;
+      return { id: home.layer, label: layerService.getAllLayers().find((l) => l.id === home.layer)?.label ?? home.layer };
+    },
+    earlierCopiesOf: (name) => {
+      if (!byOriginal) {
+        byOriginal = new Map();
+        for (const table of tableLibraryService.listTables()) {
+          const dbmlMeta = table.meta?.[DBML_META_KEY];
+          const original = dbmlMeta && typeof dbmlMeta === 'object' && !Array.isArray(dbmlMeta) ? dbmlMeta.name : undefined;
+          for (const key of new Set([table.alias, typeof original === 'string' ? original : undefined].filter((k): k is string => !!k).map((k) => k.toLowerCase()))) {
+            byOriginal.set(key, [...(byOriginal.get(key) ?? []), table.name]);
+          }
+        }
+      }
+      return byOriginal.get(name.toLowerCase()) ?? [];
+    },
   };
 }

@@ -884,6 +884,8 @@ describe('foreign DBML (dbdiagram syntax)', () => {
 // ---------------------------------------------------------------------------
 
 describe('collisions with an existing Table Library', () => {
+  // These library tables have other columns than the file's: `sameName: 'reuse'` uses them as they are
+  // (the default keeps the file's own, #269: see 'a table whose name the Table Library already has').
   const libraryCustomer = (): SemanticTable => ({
     name: 'DIM_CUSTOMER',
     description: 'From the library',
@@ -896,7 +898,7 @@ describe('collisions with an existing Table Library', () => {
   it('a name the library has in another case is reused in the library\'s spelling, never overwritten', () => {
     const lib = libraryCustomer();
     const before = structuredClone(lib);
-    const p = salesPlan({ library: library([lib]) });
+    const p = salesPlan({ library: library([lib]), sameName: 'reuse' });
     expect(p.reusedTables).toEqual(['DIM_CUSTOMER']);
     expect(p.newTables.map((t) => t.name)).not.toContain('dim_customer');
     expect(p.modelNames).toContain('DIM_CUSTOMER');
@@ -906,7 +908,7 @@ describe('collisions with an existing Table Library', () => {
   });
 
   it('relationships use the library\'s spelling; one to a column the library lacks is dropped', () => {
-    const p = salesPlan({ library: library([libraryCustomer()]) });
+    const p = salesPlan({ library: library([libraryCustomer()]), sameName: 'reuse' });
     expect(p.relationships.map(ends)).toContain('fct_order.customer_key -> DIM_CUSTOMER.Customer_Key many-to-one');
     expect(p.relationships.map(ends)).toContain('bridge_tag.tag_id -> DIM_CUSTOMER.Customer_Key many-to-many');
     expect(p.relationships.some((r) => r.fromColumn === 'passport_key')).toBe(false);
@@ -927,13 +929,13 @@ describe('collisions with an existing Table Library', () => {
 
   it('a library grouped into layer folders is matched by name alone', () => {
     // TableLibraryService finds `gold/dim_date.yml` by its name; no folder ever reaches a name.
-    const p = salesPlan({ library: library([{ name: 'dim_date', columns: [{ name: 'date_key', dataType: 'int', description: '' }] }]) });
+    const p = salesPlan({ library: library([{ name: 'dim_date', columns: [{ name: 'date_key', dataType: 'int', description: '' }] }]), sameName: 'reuse' });
     expect(p.reusedTables).toEqual(['dim_date']);
     expect([...p.modelNames, ...p.relationships.flatMap((r) => [r.fromModel, r.toModel])].every((n) => !n.includes('/'))).toBe(true);
   });
 
   it('two DBML tables matching one library table: the one renamed to stay unique is new', () => {
-    const p = plan('Table Users {\n  id int\n}\nTable users {\n  id int\n}\n', { library: library([{ name: 'users', columns: [] }]) });
+    const p = plan('Table Users {\n  id int\n}\nTable users {\n  id int\n}\n', { library: library([{ name: 'users', columns: [{ name: 'id', dataType: 'int', description: '' }] }]) });
     expect(p.modelNames).toEqual(['users', 'users_2']);
     expect(p.reusedTables).toEqual(['users']);
     expect(p.newTables.map((t) => t.name)).toEqual(['users_2']);
@@ -981,7 +983,7 @@ describe('where relationships are stored', () => {
       ],
     };
     const before = structuredClone(shipment);
-    const p = salesPlan({ libraryRelationships: true, library: library([shipment]) });
+    const p = salesPlan({ libraryRelationships: true, library: library([shipment]), sameName: 'reuse' });
     expect(p.changedLibraryTables).toHaveLength(1);
     const changed = p.changedLibraryTables[0];
     expect(changed).not.toBe(shipment);
@@ -998,7 +1000,7 @@ describe('where relationships are stored', () => {
       columns: [{ name: 'customer_key', dataType: 'int', description: '', isPrimaryKey: true }, { name: 'passport_key', dataType: 'int', description: '' }],
       relationships: [{ fromColumn: 'passport_key', toModel: 'dim_passport', toColumn: 'passport_key', cardinality: 'many-to-one' }],
     };
-    const p = salesPlan({ libraryRelationships: true, library: library([customer]) });
+    const p = salesPlan({ libraryRelationships: true, library: library([customer]), sameName: 'reuse' });
     expect(p.changedLibraryTables).toEqual([]);
     expect(p.report).toMatchObject({ relationships: 6, relationshipsAlreadyInLibrary: 1, relationshipsInLibrary: 5 });
     // bridge_tag <> dim_customer is stored on the new bridge_tag; dim_customer is untouched.
@@ -1131,7 +1133,7 @@ describe('describeDbmlImportPlan', () => {
   });
 
   it('says where relationships go and what is reused', () => {
-    const text = describeDbmlImportPlan(salesPlan({ libraryRelationships: true, library: library([{ name: 'dim_date', columns: [] }]) }));
+    const text = describeDbmlImportPlan(salesPlan({ libraryRelationships: true, library: library([{ name: 'dim_date', columns: [] }]), sameName: 'reuse' }));
     expect(text).toContain('• Already in your Table Library, used as they are: dim_date. 1 of them has columns the file has and the library does not; those are not added.');
     expect(text).toContain('saved in the tables\' files');
   });

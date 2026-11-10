@@ -53,7 +53,7 @@ Counts: `1 table`, `no relationships`; thousands separated (`1,204 tables`).
 
 Detail line:
 
-- Keep possible: `Keep saves it as <name> in the <Layer> layer (<diagramFile>).` Plus, when tables are reused or changed: ` 3 tables are already in your Table Library and are used as they are.` / ` 2 tables in your Table Library gain a relationship.`
+- Keep possible: `Keep saves it as <name> in the <Layer> layer (<diagramFile>).` Plus, when tables are reused, kept as their own or changed: ` 3 tables are already in your Table Library (Reports layer) and are used as they are.` / ` 1 table has the name of one in your project but other columns, so it is kept as its own.` (#269) / ` 2 tables in your Table Library gain a relationship.`
 - dbt over the cap: ` Drew the 15 best-connected of 40 models; add the rest from the canvas.`
 - Example with no folder open: `Open a folder to keep a copy of it.`
 - Example project: `Save This Example… copies it to a folder of its own and opens it there.`

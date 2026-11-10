@@ -3985,7 +3985,9 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     answerDraft({ type: 'keep' });
     const redrawn = await nextDraft(first);
     expect(redrawn.banner.notice).toBe('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
-    expect(redrawn.summary.reusedTables).toBe(1);
+    // The library's customers now has a column the file's has not (segment): the file's is kept as its own (#269).
+    expect(redrawn.summary.reusedTables).toBe(0);
+    expect(redrawn.banner.detail).toContain('1 table has the name of one in your project but other columns, so it is kept as its own.');
     expect(fs.readFileSync(table, 'utf-8')).toBe(tableText);
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);
   });

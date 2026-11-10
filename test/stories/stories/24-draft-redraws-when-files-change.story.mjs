@@ -6,13 +6,14 @@
 // scripts do not have. The draft does not change under me, but Keep checks
 // first: the project changed since the draft was planned (Draft-first §5.1,
 // staleness, `generation()`), so it plans again, and the plan is another
-// one now (dim_customer is already in the project, so it is reused, not
-// created). Keep does not save; the draft is redrawn with the notice "Your
-// files changed, so the draft was redrawn. Check it and keep it again." and
-// dim_customer drawn as the project has it (loyalty_tier shows). Keep again
-// saves: the diagram uses the project's dim_customer, whose file still has
-// loyalty_tier (the scripts did not overwrite it), and the other three
-// tables are new files.
+// one now: the project has a dim_customer, with other columns than the
+// scripts', so the scripts' is kept as its own, sales_dim_customer (#269),
+// rather than created as dim_customer. Keep does not save; the draft is
+// redrawn with the notice "Your files changed, so the draft was redrawn.
+// Check it and keep it again." and says the table was kept as its own. Keep
+// again saves: the diagram has sales_dim_customer with the scripts' four
+// columns, the project's dim_customer file still has loyalty_tier (the
+// scripts did not overwrite it), and the other three tables are new files.
 //
 // What it watches is the project's ERD Studio folder, not the scripts: an
 // edit to a .sql file while the draft is open is not picked up (the draft
@@ -86,18 +87,18 @@ export default story({
       await s.wb.unhighlight();
     }, { say: 'When I press Keep as Diagram, it does not save. The draft is redrawn, and says my files changed.' });
 
-    await s.step('The redrawn draft shows dim_customer as my project has it now', async () => {
-      const customer = await draft.page.waitFor(`(() => { const t=${NODE_TEXT('dim_customer')}; return t.includes('loyalty_tier') && t; })()`, { what: 'loyalty_tier in dim_customer' });
-      s.expect(customer.includes('5 columns'), `dim_customer should have its five columns: ${customer}`);
+    await s.step('The redrawn draft keeps the scripts\' customer as its own, beside the one my project has now', async () => {
+      const customer = await draft.page.waitFor(`(() => { const t=${NODE_TEXT('sales_dim_customer')}; return t.includes('4 columns') && t; })()`, { what: 'sales_dim_customer with the scripts\' four columns' });
+      s.expect(!customer.includes('loyalty_tier'), `the scripts have no loyalty_tier: ${customer}`);
       const state = await draftState(draft.page);
-      s.assert.equal(state.detail, 'Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml). 1 table is already in your Table Library and is used as it is.');
+      s.assert.equal(state.detail, 'Keep saves it as sales in the Main layer (.erd-studio/main/diagrams/sales.dbml). 1 table has the name of one in your project but other columns, so it is kept as its own.');
       s.assert.equal(state.tables.length, 4, 'still four tables');
-      await draft.page.highlight(NODE('dim_customer'));
+      await draft.page.highlight(NODE('sales_dim_customer'));
       await s.pause(2500);
       await s.wb.unhighlight();
-    }, { say: 'The redrawn draft uses the customer table my project has now, loyalty tier and all.' });
+    }, { say: 'The redrawn draft keeps the scripts\' customer table as its own, because my project\'s has other columns.' });
 
-    await s.step('I keep it again: saved, and the new column is kept', async () => {
+    await s.step('I keep it again: saved, and my assistant\'s table is untouched', async () => {
       await draft.page.click(DRAFT.button('Keep as Diagram'));
       draft.page.close();
       await s.ui.waitForActiveTab('sales.dbml', { timeout: 45000 });
@@ -106,12 +107,12 @@ export default story({
       await s.expectFile('.erd-studio/main/diagrams/sales.dbml');
       await s.expectFile(tableFile, { contains: "loyalty_tier varchar(20) [note: 'Bronze, silver or gold']" });
       for (const t of ['dim_product', 'dim_date', 'fct_order_line']) await s.expectFile(`.erd-studio/main/tables/sales/${t}.dbml`, { contains: new RegExp(`^Table sales\\.${t}\\b`, 'm') });
-      const customer = await canvas.waitFor(`(() => { const n=${NODE('dim_customer')}; return n && n.innerText.includes('loyalty_tier') && n.innerText; })()`, { what: 'loyalty_tier on the canvas' });
-      s.expect(customer.includes('loyalty_tier'), 'the canvas shows loyalty_tier');
-      await canvas.highlight(NODE('dim_customer'));
+      await s.expectFile('.erd-studio/main/tables/sales/sales_dim_customer.dbml', { contains: "alias: 'dim_customer'" });
+      await canvas.waitFor(`!!${NODE('sales_dim_customer')}`, { what: 'sales_dim_customer on the canvas' });
+      await canvas.highlight(NODE('sales_dim_customer'));
       await s.pause(2500);
       await s.wb.unhighlight();
       canvas.close();
-    }, { say: 'I keep it again. It is saved, and the new column is kept.' });
+    }, { say: 'I keep it again. It is saved, and my assistant\'s customer table is untouched.' });
   },
 });

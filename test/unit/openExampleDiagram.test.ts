@@ -245,7 +245,7 @@ describe('Open Example Diagram', () => {
     const result = await openExampleDiagram(deps(ui));
     expect(ui.inputs).toEqual(['coffee-shop-2']);
     expect(result?.plan.reusedTables).toEqual(SAMPLE_TABLES);
-    expect(ui.confirms[0].detail).toContain('6 tables already in your Table Library, used as they are');
+    expect(ui.confirms[0].detail).toContain('6 tables already in your Table Library (from the Gold layer), used as they are');
   });
 
   it('cancelled at the dry run: nothing written, not counted as an example', async () => {
