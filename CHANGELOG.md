@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased — 2.0.0
+## 2.0.0 — 2026-11-10
 
 **ERD Studio 2.0 is a major release: new projects are stored as DBML.** Nothing changes in your project until you run **ERD Studio: Convert Project to DBML**. Before converting, commit your work: Undo works while VS Code stays open, and git is the safety net. Existing YAML and JSON projects keep loading and stay fully editable. What breaks is for tools that read `.erd-studio` directly: a new project writes `.dbml` files under a folder per layer (`<layer>/tables/<schema>/<name>.dbml`, `<layer>/relationships/<file>.dbml` and `<layer>/diagrams/<name>.dbml`, each diagram keeping its table positions inside it) instead of `.yml` and `.json`, and `erd-studio doctor --json` gains `erd.storage` (`dbml`, `yaml` or `mixed`), which says which kind a project writes.
 
