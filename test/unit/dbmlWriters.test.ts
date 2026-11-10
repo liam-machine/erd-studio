@@ -1,9 +1,10 @@
 /**
- * `src/services/dbmlWriters.ts`: core's DBML splicers followed by the
- * formatter, the only way the host writes a `.dbml`. Holds the boundary (no
- * other host module imports a writer from core), the no-op rule, the 1.9.x
- * layout reading and converging, and the logged fallback when the formatter
- * declines.
+ * `src/services/dbmlWriters.ts`: core's DBML splicers with the formatter
+ * where it keeps a file's layout, the only way the host writes a `.dbml`.
+ * Holds the boundary (no other host module imports a writer from core), the
+ * no-op rule, canonical in / canonical out with a hand-laid file spliced
+ * only (#275), the 1.9.x layout reading, and the logged fallback when the
+ * formatter declines.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -45,7 +46,7 @@ const V193_TABLE = `Table fct_order [schema: 'gold', role: 'transaction-fact'] {
 beforeEach(() => clearLogBuffer());
 
 describe('the boundary', () => {
-  it('no host module but dbmlWriters.ts imports a DBML writer from core, so every write is formatted', () => {
+  it('no host module but dbmlWriters.ts imports a DBML writer from core, so every write follows its layout rule', () => {
     const offenders: string[] = [];
     for (const file of sources(SRC)) {
       if (path.basename(file) === 'dbmlWriters.ts') continue;
@@ -120,27 +121,42 @@ describe('the writers', () => {
     expect(editTableDbml(V193_TABLE, reading.table)).toBe(V193_TABLE);
   });
 
-  it('the first real edit of a 1.9.3 file converges it on the canonical layout in one write, keeping its order', () => {
+  it('the first real edit of a 1.9.3 file changes only the line it edits: a hand-laid layout survives (#275)', () => {
     const reading = parseTableDbml(V193_TABLE, 'fct_order');
     if (!reading.ok) throw new Error('no read');
     const desired = structuredClone(reading.table);
     desired.columns![1].description = 'Who ordered';
     const out = editTableDbml(V193_TABLE, desired);
-    expect(out).toBe(`Table fct_order [
-  schema: 'gold',
-  role: 'transaction-fact'
-] {
-  order_line_id BIGINT          [pk, note: 'Line id from the shop', natural_key: 'true']
-  customer_key  INT             [note: 'Who ordered', foreign_key: 'true']
-  amount        "DECIMAL(18,2)" [note: 'Line total', additive_type: 'additive']
-  Note: 'Order lines'
-}
-`);
-    expect(formatDbml(out).changed).toBe(false);
+    expect(out).toBe(V193_TABLE.replace("note: 'FK to dim_customer'", "note: 'Who ordered'"));
     const back = parseTableDbml(out, 'fct_order');
     expect(back.ok && back.table).toEqual(desired);
     // A second identical edit is a no-op.
     expect(editTableDbml(out, desired)).toBe(out);
+  });
+
+  it('an edit of a file in the canonical layout keeps it there: a name that becomes its group\'s longest re-pads the group', () => {
+    const table: SemanticTable = {
+      name: 'fct_order', schema: 'gold', description: '',
+      columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }, { name: 'amount', dataType: 'DECIMAL', description: '' }],
+    };
+    const text = renderNewTableDbml(table);
+    expect(formatDbml(text).changed).toBe(false);
+    const desired = structuredClone(table);
+    desired.columns!.push({ name: 'customer_key', dataType: 'INT', description: '' });
+    const out = editTableDbml(text, desired);
+    expect(out).toBe('Table gold.fct_order {\n  id           INT [pk]\n  amount       DECIMAL\n  customer_key INT\n}\n');
+    expect(formatDbml(out).changed).toBe(false);
+  });
+
+  it('an edit of a hand-laid file re-aligns nothing it did not write (#275)', () => {
+    const hand = 'Table gold.fct_order {\n  id INT [pk] // the key\n\n\n  amount    DECIMAL\n}\n';
+    const reading = parseTableDbml(hand, 'fct_order');
+    if (!reading.ok) throw new Error('no read');
+    const desired = structuredClone(reading.table);
+    desired.columns!.push({ name: 'customer_key', dataType: 'INT', description: '' });
+    const out = editTableDbml(hand, desired);
+    expect(out.startsWith('Table gold.fct_order {\n  id INT [pk] // the key\n\n\n  amount    DECIMAL\n')).toBe(true);
+    expect(out).toContain('customer_key INT');
   });
 
   it('a new diagram aligns its table use lines', () => {

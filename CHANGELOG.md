@@ -8,6 +8,14 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **New Relationship:** on a short window the **Stored in** picker no longer runs into the Role field's hint. It sits in a band of its own above the buttons, with a divider where the fields above scroll away (#275).
+- **Convert Project to DBML, then Undo:** the undo now also removes the empty folders the conversion made for its new files (`gold/diagrams`, `silver/tables/public`, …), so the project is exactly as it was. A folder that existed before, or that you have put a file in since, stays (#275).
+- **Edits keep a DBML file's own layout:** renaming a table, Move Table and new relationships now change only the lines they must in a file you laid out by hand. They no longer re-align its columns or `use` lines, add blank lines between Refs you kept together, or put a new `use` line above the file's opening comment. Files already in ERD Studio's layout stay in it, and **Format Document** still tidies a file when you ask (#275).
+
 ## 2.0.1 — 2026-11-10
 
 - Release: renderer 0.4.1 (routing worker file) — develop → main (#279)

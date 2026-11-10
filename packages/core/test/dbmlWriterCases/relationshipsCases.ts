@@ -66,6 +66,22 @@ Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
 Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 `;
 
+/** A hand-split file: Refs of two foreign-key tables with no blank line between them (#275, customers.dbml's shape). */
+const HAND_SPLIT = `use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
+Ref parent: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
+`;
+
+/** A hand-written header comment directly above the first use line, no blank line between (#275). */
+const HAND_HEADER = `// Orders and their customers, split out by hand.
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+`;
+
 /** A composite Ref with settings and a trailing comment. */
 const COMPOSITE_REF = `use { table gold.dim_region } from '../tables/gold/dim_region.dbml'
 use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
@@ -172,6 +188,14 @@ const DIM_DAY_LIBRARY: Readonly<Record<string, string>> = (() => {
   const out: Record<string, string> = { ...LIBRARY };
   delete out['silver/tables/shared/dim_date.dbml'];
   out['silver/tables/shared/dim_day.dbml'] = LIBRARY['silver/tables/shared/dim_date.dbml'].replace('Table shared.dim_date', 'Table shared.dim_day');
+  return out;
+})();
+
+/** The library with \`dim_customer\` renamed to \`dim_client\`. */
+const DIM_CLIENT_LIBRARY: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = { ...LIBRARY };
+  delete out['gold/tables/gold/dim_customer.dbml'];
+  out['gold/tables/gold/dim_client.dbml'] = LIBRARY['gold/tables/gold/dim_customer.dbml'].replace('Table gold.dim_customer', 'Table gold.dim_client');
   return out;
 })();
 
@@ -352,13 +376,13 @@ Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
     owners: new Map([['customer_profile', { name: 'customer_profile', relationships: [M21('customer_key', 'dim_customer', 'customer_key', { role: 'profile of' })] }]]),
   }), (out) => {
     // dim_date's use line stays missing and bridge's extra one stays; the edited Ref's tables get theirs.
+    // The Ref is re-spelled in place, so no blank line appears above it (#275: W3 only next to an added Ref).
     expect(out).toBe(`use { table gold.bridge } from '../tables/gold/bridge.dbml'
 use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
 use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
 
 Ref: gold.fct_order.ship_date_key >? shared.dim_date.date_key
-
 Ref "profile of": gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 `);
   }),
@@ -720,22 +744,34 @@ Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
 Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
   }),
-  relCase('an edit of a pre-2.0 file with no blank lines between tables adds them; Refs of one table stay together', OLD_LAYOUT, () => changed(OLD_LAYOUT, 'fct_order', (list) => [
+  relCase('an edit of a pre-2.0 file with no blank lines between tables keeps its spacing (#275); the added Ref joins its table', OLD_LAYOUT, () => changed(OLD_LAYOUT, 'fct_order', (list) => [
     ...list, M21('order_date_key', 'dim_date', 'date_key'),
   ]), (out) => {
-    expect(out).toBe(`use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
-use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
-use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
-use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
-
-Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
-
-// the parent
-Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
-
-Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
-Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
+    expect(out).toBe(`${OLD_LAYOUT}Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
 `);
+  }),
+  relCase('a Ref added for a new foreign-key table between two others still gets its blank lines (W3 next to an added Ref)', OLD_LAYOUT, () => ({
+    owners: new Map([['dim_date', { name: 'dim_date', relationships: [M21('date_key', 'dim_customer', 'customer_key')] }]]),
+  }), (out) => {
+    // The Refs the file had keep their spacing; only the added Ref is set off from its neighbours.
+    expect(out).toBe(OLD_LAYOUT.replace(
+      'Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key\n',
+      'Ref: gold.dim_customer.parent_key >? gold.dim_customer.customer_key\n\nRef: shared.dim_date.date_key >? gold.dim_customer.customer_key\n\n',
+    ));
+  }),
+  relCase('a rename that re-spells the Refs of a hand-split file adds no blank line between them (#275)', HAND_SPLIT, () => ({
+    owners: new Map(),
+    renamedOwners: new Map([['dim_customer', 'dim_client']]),
+    pathChanged: new Set(['dim_customer', 'dim_client']),
+  }), (out) => {
+    expect(out).toBe(HAND_SPLIT.replaceAll('dim_customer', 'dim_client'));
+  }, DIM_CLIENT_LIBRARY, true),
+  relCase('a use line added above the first one goes below a hand-written header comment with no blank line after it (#275)', HAND_HEADER, () => changed(HAND_HEADER, 'fct_order', (list) => [
+    ...list, M21('order_date_key', 'dim_date', 'date_key'),
+  ]), (out) => {
+    expect(out).toBe(HAND_HEADER
+      .replace('by hand.\n', "by hand.\nuse { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'\n")
+      .replace('customer_key\n', 'customer_key\nRef: gold.fct_order.order_date_key >? shared.dim_date.date_key\n'));
   }),
   relCase('a Ref added to the first of two tables joins its group: the file reads as a fresh render does', W3_TWO_GROUPS, () => changed(W3_TWO_GROUPS, 'customer_profile', (list) => [
     ...list, W3_TO_DATE,

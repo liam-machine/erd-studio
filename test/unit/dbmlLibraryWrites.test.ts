@@ -27,7 +27,7 @@ import type { SemanticTable, TableRelationship } from '../../src/types/semantic'
 import { projectDiagnostics } from '../../packages/core/test/dbmlWriterSupport';
 import { formatWrittenDbml } from '../../src/services/dbmlWriters';
 
-/** The expected text in the canonical layout ERD Studio writes every .dbml in (every write is formatted). */
+/** The expected text in the canonical layout ERD Studio writes a new .dbml in (and keeps a canonical one in). */
 function canonical(text: string): string {
   return formatWrittenDbml(text, 'expected.dbml');
 }
@@ -167,7 +167,8 @@ describe('each op kind: one write per file', () => {
     model.relationships = model.relationships!.filter((r) => r.toModel !== 'dim_customer');
     const { plan, after } = run(files, { save: [{ model }] });
     expect(pathsOf(plan.writes)).toEqual([`replace ${GOLD}`]);
-    expect(after[GOLD]).toBe(canonical(`${HEADER}use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.date_key >? calendar.dim_date.date_key [delete: cascade] // keep me\n`));
+    // base()'s file is laid out by hand (its use lines unaligned): the cut is the only change (#275).
+    expect(after[GOLD]).toBe(`${HEADER}use { table calendar.dim_date } from '../../silver/tables/calendar/dim_date.dbml'\nuse { table gold.fct_order } from '../tables/gold/fct_order.dbml'\n\nRef: gold.fct_order.date_key >? calendar.dim_date.date_key [delete: cascade] // keep me\n`);
     expect(plan.changedPairs).toEqual(new Set([pairKey('fct_order', 'dim_customer')]));
     expectClean(after);
   });
@@ -189,7 +190,8 @@ describe('each op kind: one write per file', () => {
     const { plan, after } = run(files, { delete: ['fct_order'] });
     expect(pathsOf(plan.writes)).toEqual(['delete gold/tables/gold/fct_order.dbml', `replace ${GOLD}`]);
     expect(plan.pathChanged).toEqual(new Map([['fct_order', null]]));
-    expect(after[GOLD]).toBe(canonical(HEADER));
+    // Spliced, not re-laid (#275): the blank line that stood between the use lines and the Refs stays.
+    expect(after[GOLD]).toBe(`${HEADER}\n`);
     expect(plan.resolveTable('fct_order')).toBeUndefined();
     expect(plan.fileExists('gold/tables/gold/fct_order.dbml')).toBe(false);
   });
@@ -696,7 +698,7 @@ describe('determinism', () => {
   });
 });
 
-describe('the canonical layout (every write is formatted; a no-op stays a no-op)', () => {
+describe('the canonical layout (a new file is formatted; a no-op stays a no-op)', () => {
   it('a save that changes nothing writes nothing', () => {
     const files = base();
     const plan = planDbmlLibraryWrites(snapshotOf(files), { save: [{ model: modelOf(files, 'fct_order') }, { model: modelOf(files, 'dim_customer') }] });

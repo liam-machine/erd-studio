@@ -13,6 +13,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const mockPostMessage = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useVsCodeApi', () => ({
@@ -308,5 +310,28 @@ describe('New Relationship: choosing where it is stored', () => {
   it('the physical stage offers no choice', () => {
     openAndPick(CHOICES, { stage: 'physical' });
     expect(select()).toBeNull();
+  });
+
+  it('the "Stored in" band sits outside the scrolling fields, just above the buttons, so the file stays in view', () => {
+    openAndPick(CHOICES);
+    const band = document.querySelector('.new-fk-dialog__stored-in')!;
+    expect(band.closest('.new-fk-dialog__content')).toBeNull();
+    expect(band.nextElementSibling?.classList.contains('new-fk-dialog__footer')).toBe(true);
+  });
+});
+
+describe('New Relationship: the "Stored in" band', () => {
+  // jsdom has no layout, so this pins the CSS rule. On a short canvas the fields above
+  // scroll and are cut off; without a band of its own the cut Role hint ran straight into
+  // "Stored in" and the two read as overlapping (#275).
+  const css = fs.readFileSync(path.join(__dirname, '../../webview/components/NewFkDialog/NewFkDialog.css'), 'utf8');
+  const rule = css.slice(css.indexOf('.new-fk-dialog__stored-in {'), css.indexOf('}', css.indexOf('.new-fk-dialog__stored-in {')) + 1);
+
+  it('never shrinks, and a divider and top padding set it apart from the scrolling fields, in theme colours only', () => {
+    expect(rule).toContain('flex-shrink: 0;');
+    expect(rule).toMatch(/border-top: 1px solid var\(--panel-border\);/);
+    const padding = /\n  padding: (\d+)px/.exec(rule);
+    expect(Number(padding?.[1])).toBeGreaterThan(0);
+    expect(rule).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
   });
 });

@@ -27,23 +27,35 @@ export interface TextEdit {
  * is a writer bug, never something a file can cause.
  */
 export function applyTextEdits(text: string, edits: readonly TextEdit[]): string {
-  if (edits.length === 0) return text;
+  return applyTextEditsTracked(text, edits).text;
+}
+
+/**
+ * {@link applyTextEdits}, also saying where each edit's text landed:
+ * `spans[i]` is the `[start, end)` of `edits[i].text` in the result. A
+ * writer that must treat the lines it added differently from the lines it
+ * found (W3 adds a blank line only next to an added Ref) reads them here.
+ */
+export function applyTextEditsTracked(text: string, edits: readonly TextEdit[]): { text: string; spans: Array<{ start: number; end: number }> } {
+  const spans: Array<{ start: number; end: number }> = edits.map(() => ({ start: 0, end: 0 }));
+  if (edits.length === 0) return { text, spans };
   const sorted = edits
     .map((edit, index) => ({ edit, index }))
     .sort((a, b) => a.edit.start - b.edit.start
       || (a.edit.end - a.edit.start) - (b.edit.end - b.edit.start)
-      || a.index - b.index)
-    .map(({ edit }) => edit);
+      || a.index - b.index);
   let out = '';
   let at = 0;
-  for (const edit of sorted) {
+  for (const { edit, index } of sorted) {
     if (edit.start < at || edit.end < edit.start || edit.end > text.length) {
       throw new Error(`DBML writer: overlapping or out-of-range edit [${edit.start}, ${edit.end}) after ${at}`);
     }
-    out += text.slice(at, edit.start) + edit.text;
+    out += text.slice(at, edit.start);
+    spans[index] = { start: out.length, end: out.length + edit.text.length };
+    out += edit.text;
     at = edit.end;
   }
-  return out + text.slice(at);
+  return { text: out + text.slice(at), spans };
 }
 
 /**
@@ -143,6 +155,24 @@ export function attachedStart(text: string, node: AstNode, floor = 0): number {
     start = previous;
   }
   return start;
+}
+
+/**
+ * The end of the `//` comment lines a file starts with, whether or not a
+ * blank line follows them: the start of the first line after them, or 0 when
+ * the file does not start with a comment line. A comment at the very top of a
+ * file describes the file, so a line inserted above the file's first element
+ * goes below it, never above it (#275), even when no blank line separates
+ * the two.
+ */
+export function leadingCommentEnd(text: string): number {
+  let at = 0;
+  while (at < text.length && isCommentLine(text, at)) {
+    const next = nextLineStart(text, at);
+    if (next === at) return text.length;
+    at = next;
+  }
+  return at;
 }
 
 /**

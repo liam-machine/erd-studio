@@ -479,8 +479,8 @@ describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites
     expect(() => lib.serializeTable(table)).toThrow(DbmlTableWriteRefused);
     table.columns[1].description = 'Shown name';
     lib.saveTable(table);
-    // Spliced, then aligned (every DBML write is in the canonical layout).
-    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable gold.dim_date {\n  id    INT     [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
+    // Spliced only: the file was not in the canonical layout, so no other line is re-aligned (#275).
+    expect(fs.readFileSync(file, 'utf-8')).toBe("// keep me\nTable gold.dim_date {\n  id INT [pk]\n  label VARCHAR [note: 'Shown name']\n}\n");
     expect(fs.readdirSync(path.dirname(file))).toEqual(['dim_date.dbml']);
   });
 
@@ -498,7 +498,7 @@ describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites
     expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
     expect(fs.readFileSync(path.join(semantic, 'gold/tables/gold/dim_day.dbml'), 'utf-8')).toBe(dbmlTable('gold.dim_day'));
     expect(fs.readFileSync(relFile, 'utf-8'))
-      .toBe(`${HEADER}use { table gold.dim_day } from '../tables/gold/dim_day.dbml'\nuse { table gold.fct_x }   from '../tables/gold/fct_x.dbml'\n\nRef: gold.fct_x.date_id >? gold.dim_day.id\n`);
+      .toBe(`${HEADER}use { table gold.dim_day } from '../tables/gold/dim_day.dbml'\nuse { table gold.fct_x } from '../tables/gold/fct_x.dbml'\n\nRef: gold.fct_x.date_id >? gold.dim_day.id\n`);
     expect(lib.getTable('fct_x')?.relationships?.[0]).toMatchObject({ toModel: 'dim_day', toColumn: 'id' });
   });
 
@@ -518,8 +518,9 @@ describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites
     lib.deleteTable('dim_date');
     expect(listing).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
-    // The relationships file keeps its header and is never deleted (D15).
-    expect(fs.readFileSync(relFile, 'utf-8')).toBe(HEADER);
+    // The relationships file keeps its header and is never deleted (D15); spliced, so the blank line
+    // that stood between its use lines and its Refs stays (#275: a hand-laid file is never re-laid).
+    expect(fs.readFileSync(relFile, 'utf-8')).toBe(`${HEADER}\n`);
     expect(lib.getTable('fct_x')?.relationships).toBeUndefined();
   });
 
@@ -531,7 +532,7 @@ describe('DBML table writes outside the editor (one batch: planDbmlLibraryWrites
     lib.deleteTable('dim_date');
     expect(fs.existsSync(path.join(semantic, 'gold/tables/gold/dim_date.dbml'))).toBe(false);
     expect(fs.readFileSync(yml, 'utf-8')).toBe(ymlText);
-    expect(fs.readFileSync(relFile, 'utf-8')).toBe(HEADER);
+    expect(fs.readFileSync(relFile, 'utf-8')).toBe(`${HEADER}\n`);
   });
 
   it('relationshipsFileForNewRef follows decision 5; relationshipsFileHolding names where a Ref is; YAML tables have neither', () => {

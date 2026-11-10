@@ -41,7 +41,7 @@ import {
   type AstNode,
 } from './parser.js';
 import { readRelationshipsDbml } from './readRelationships.js';
-import { applyTextEdits, attachedStart, cutEdit, eolOf, headerEnd, lineEndOf, nextLineStart, refuseOverlaps, type TextEdit } from './splice.js';
+import { applyTextEdits, applyTextEditsTracked, attachedStart, cutEdit, eolOf, headerEnd, leadingCommentEnd, lineEndOf, nextLineStart, refuseOverlaps, type TextEdit } from './splice.js';
 
 /** One relationship unit: a Ref line (a composite is one unit), canonical (`from` is the foreign-key table). */
 export interface RefUnit {
@@ -180,8 +180,18 @@ function refuse(file: string, message: string, line?: number): never {
  * nothing but comment lines between them) belongs to another table and has
  * no blank line above it; blank lines already there stay. A text that does
  * not read comes back as it is.
+ *
+ * `added`, when given, is where the Refs this edit added sit in `text`: only
+ * a boundary next to one of them gets its blank line. Refs the file already
+ * had keep the spacing the user gave them, however they are grouped (#275):
+ * a hand-split file need not be sorted by foreign-key table.
  */
-export function separateRefGroups(text: string, eol: string, parser: DbmlParserModule = PINNED_PARSER): string {
+export function separateRefGroups(
+  text: string,
+  eol: string,
+  parser: DbmlParserModule = PINNED_PARSER,
+  added?: ReadonlyArray<{ start: number; end: number }>,
+): string {
   // A syntax parse (no binding): the Ref lines and their operators are all this needs.
   let parsed: ReturnType<typeof parseSyntax>;
   try {
@@ -196,11 +206,14 @@ export function separateRefGroups(text: string, eol: string, parser: DbmlParserM
     const owner = refOwnerTable(node);
     if (owner !== undefined) refs.push({ node, owner });
   }
+  const isAdded = (node: AstNode): boolean =>
+    added === undefined || added.some((span) => span.start < (node.end as number) && (node.start as number) < span.end);
   const inserts: TextEdit[] = [];
   for (let i = 1; i < refs.length; i++) {
     const before = refs[i - 1];
     const after = refs[i];
     if (lower(before.owner) === lower(after.owner)) continue;
+    if (!isAdded(before.node) && !isAdded(after.node)) continue;
     const end = typeof before.node.fullEnd === 'number' ? before.node.fullEnd as number : before.node.end as number;
     const at = nextLineStart(text, Math.max(before.node.start as number, end - 1));
     const gap = text.slice(at, lineStartOf(text, after.node.start));
@@ -377,9 +390,6 @@ function inLibrary(resolved: string): boolean {
 function isRelationshipsPath(resolved: string): boolean {
   return classifySemanticFile(resolved, { tablesDirIsLayer: false }).kind === 'relationships';
 }
-
-/** What every ERD Studio relationships-file header starts with (2.0's and the 1.9 pre-release's). */
-const RELATIONSHIPS_HEADER_PREFIX = '// ERD Studio relationships';
 
 /** A Ref's parts in the file: its node, its application (the line with the ends) and its ends. */
 interface RefNode {
@@ -903,8 +913,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   }
   newUses.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const keptUses = uses.filter((u) => !useEdits.some((e) => e.text === '' && e.start <= u.node.start && e.end >= u.node.end));
-  // ERD Studio's own header comment sits right above the first use line; it describes the file, not that line.
-  const headerFloor = text.startsWith(RELATIONSHIPS_HEADER_PREFIX) && text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 0;
+  // The comment lines the file starts with (ERD Studio's own header, or one written by hand) describe
+  // the file, not the use line under them: a new use line never goes above them (#275).
+  const headerFloor = leadingCommentEnd(text);
   for (const added of newUses) {
     const before = keptUses.find((u) => u.importPath > added.path);
     if (before) {
@@ -977,9 +988,13 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const lead = text === '' ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
     refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? eol : lead}${pendingBlock.join(eol)}${eol}` });
   }
-  const spliced = applyTextEdits(text, [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...refInserts]);
-  // A file the edit changes gets the canonical blank line between foreign-key tables (W3); a no-op stays byte-identical.
-  const out = spliced === text ? spliced : separateRefGroups(spliced, eol, parser);
+  const fileEdits = [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts)];
+  const { text: spliced, spans } = applyTextEditsTracked(text, [...fileEdits, ...refInserts]);
+  // The blank line between foreign-key tables (W3) goes only next to a Ref this edit added: the
+  // Refs the file had keep their spacing (a rename or a move re-spells them, never regroups them),
+  // and a no-op stays byte-identical.
+  const added = spans.slice(fileEdits.length);
+  const out = added.length === 0 ? spliced : separateRefGroups(spliced, eol, parser, added);
   return hadBom ? `﻿${out}` : out;
 
   /**
