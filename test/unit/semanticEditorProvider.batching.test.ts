@@ -163,7 +163,12 @@ beforeEach(() => {
     for (const op of edit._ops ?? []) {
       const own = op.kind === 'replace' ? docs.get(op.uri.fsPath) : undefined;
       if (own) {
-        own._setText(op.newText);
+        // The range's offsets (this harness's positionAt): a full-range
+        // replace, or the one-character undo anchor (#274).
+        const text = own.getText();
+        const start = op.range?.start?.offset ?? 0;
+        const end = op.range?.end?.offset ?? text.length;
+        own._setText(text.slice(0, start) + op.newText + text.slice(end));
       } else {
         rest._ops.push(op);
       }
@@ -542,7 +547,7 @@ describe('Delete Table File after a remove (#205)', () => {
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
       (String(m).includes('Delete their table files too') ? 'Delete Table Files' : undefined)) as never);
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
-    // The delete removes its first file and fails; the reconcile applies. (The diagram edit is the spy's.)
+    // The delete removes its first file and fails; the reconcile applies. (The diagram edits, the remove and the delete's undo anchor, are the spy's.)
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task', 'dim_project'] } });
@@ -564,6 +569,26 @@ describe('Delete Table File after a remove (#205)', () => {
     await vi.waitFor(() => expect(error).toHaveBeenCalled());
     expect(error).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*dim_task\.yml.*Restore these from source control\.$/), { modal: true });
+  });
+
+  it('the delete is one edit with the canvas\'s diagram (its undo anchor), so Cmd+Z there undoes it before the remove (#274)', async () => {
+    const { doc, panel, file } = await openShowcase();
+    const ymlPath = path.join(root, '.erd-studio', 'logical-models', 'dim_task.yml');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (m: string) =>
+      (String(m).includes('Delete its table file too') ? 'Delete Table File' : undefined)) as never);
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+
+    await vi.waitFor(() => expect(fs.existsSync(ymlPath)).toBe(false));
+    const ops = (applyEditSpy.mock.calls.at(-1)![0] as unknown as { _ops: Array<{ kind: string; uri: { fsPath: string } }> })._ops;
+    expect(ops.map((op) => [op.kind, path.resolve(op.uri.fsPath)])).toEqual([
+      ['replace', path.resolve(file)],
+      ['deleteFile', path.resolve(ymlPath)],
+    ]);
+    // The anchor is a character replaced by itself: the diagram is as it was, and saved.
+    await vi.waitFor(() => expect(doc.isDirty).toBe(false));
+    expect(fs.readFileSync(file, 'utf-8')).toBe(doc.getText());
+    expect(readSubjectArea(file).logical.models).not.toContain('dim_task');
   });
 
   it('names the count, not a file, when several could not be deleted', () => {
