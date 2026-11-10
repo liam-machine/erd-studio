@@ -92,7 +92,8 @@ afterEach(() => {
 describe('#274 item 1: Delete Table File after Remove from Diagram, then Undo on the canvas', () => {
   async function removeThenDelete(
     table = 'dim_region',
-    answer: (choose: () => void, panel: ReturnType<typeof createMockWebviewPanel>) => void = (choose) => choose(),
+    answer: (choose: () => void, panel: ReturnType<typeof createMockWebviewPanel>, provider: SemanticEditorProvider) => void = (choose) => choose(),
+    before: (provider: SemanticEditorProvider, sales: ReturnType<typeof createMockTextDocument>) => Promise<void> = async () => {},
   ) {
     const salesPath = at('gold/diagrams/sales.dbml');
     const regionPath = at(`gold/tables/gold/${table}.dbml`);
@@ -105,6 +106,7 @@ describe('#274 item 1: Delete Table File after Remove from Diagram, then Undo on
       {} as vscode.CancellationToken,
     );
     await panel._simulateMessage({ type: 'ready' });
+    await before(provider, sales);
 
     // Record every applied edit with the canvas document's text just before it.
     const recorded: Recorded[] = [];
@@ -115,7 +117,7 @@ describe('#274 item 1: Delete Table File after Remove from Diagram, then Undo on
     });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(((m: string, ...items: string[]) =>
       String(m).includes('Delete its table file too')
-        ? new Promise((resolve) => answer(() => resolve(items[0]), panel))
+        ? new Promise((resolve) => answer(() => resolve(items[0]), panel, provider))
         : Promise.resolve(undefined)) as never);
 
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: [table] } });
@@ -124,6 +126,21 @@ describe('#274 item 1: Delete Table File after Remove from Diagram, then Undo on
     await vi.waitFor(() => expect(info.mock.calls.some((c) => String(c[0]).startsWith('Deleted'))).toBe(true));
     return { salesPath, regionPath, recorded, info, sales, panel };
   }
+
+  /** Open one more canvas on `document` and let it load. */
+  async function openCanvas(provider: SemanticEditorProvider, document: ReturnType<typeof createMockTextDocument>) {
+    const panel = createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      document as unknown as vscode.TextDocument,
+      panel as unknown as vscode.WebviewPanel,
+      {} as vscode.CancellationToken,
+    );
+    await panel._simulateMessage({ type: 'ready' });
+    return panel;
+  }
+
+  const anchoredOn = (ops: Op[], p: string): boolean =>
+    ops.some((op) => op.kind === 'replace' && path.resolve(op.uri!.fsPath) === path.resolve(p));
 
   const drawn = (panel: ReturnType<typeof createMockWebviewPanel>): number =>
     (panel._postedMessages as Array<{ type: string }>).filter((m) => m.type === 'domainLoaded').length;
@@ -205,5 +222,31 @@ describe('#274 item 1: Delete Table File after Remove from Diagram, then Undo on
     expect(last.some((op) => op.kind === 'deleteFile')).toBe(true);
     expect(last.some((op) => op.kind === 'replace' && path.resolve(op.uri!.fsPath) === path.resolve(salesPath))).toBe(false);
     expect(sales.isDirty).toBe(false);
+  });
+
+  it('a second canvas on the same diagram: answering in the first still anchors the delete on the diagram', async () => {
+    const { salesPath, recorded, sales } = await removeThenDelete('dim_region', (choose) => choose(), async (provider, document) => {
+      await openCanvas(provider, document);
+    });
+    const last = recorded[recorded.length - 1].ops;
+    expect(last.some((op) => op.kind === 'deleteFile')).toBe(true);
+    expect(anchoredOn(last, salesPath), 'delete anchored on sales.dbml').toBe(true);
+    expect(sales.isDirty).toBe(false);
+  });
+
+  it('a canvas closed and reopened before the answer: the delete anchors on the reopened canvas\'s diagram', async () => {
+    const salesPathFor = () => at('gold/diagrams/sales.dbml');
+    let reopened: ReturnType<typeof createMockTextDocument> | undefined;
+    const { salesPath, recorded } = await removeThenDelete('dim_region', (choose, panel, provider) => {
+      panel.dispose();
+      // Reopened as a new document (VS Code closed the old one with its last editor).
+      reopened = createMockTextDocument(salesPathFor(), fs.readFileSync(salesPathFor(), 'utf-8'), { persist: true });
+      void openCanvas(provider, reopened).then(choose);
+    });
+    const last = recorded[recorded.length - 1].ops;
+    expect(last.some((op) => op.kind === 'deleteFile')).toBe(true);
+    expect(anchoredOn(last, salesPath), 'delete anchored on the reopened sales.dbml').toBe(true);
+    expect(reopened!.isDirty).toBe(false);
+    expect(fs.readFileSync(salesPath, 'utf-8')).toBe(reopened!.getText());
   });
 });

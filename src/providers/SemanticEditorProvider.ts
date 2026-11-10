@@ -6493,7 +6493,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                     // In this canvas's queue, anchored on its diagram while it is open:
                     // Cmd+Z here then rewinds the delete before the remove (#274).
                     result = await this.runQueued(panelKey, () =>
-                      this.deleteTablesWithCascade(filesToOffer, this.deleteOriginOf(document, webview)));
+                      this.deleteTablesWithCascade(filesToOffer, this.deleteOriginOf(document)));
                   } catch (err) {
                     void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
                     return;
@@ -6513,7 +6513,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 // bare unlink; a partial apply is put back before anything is said.
                 // Anchored on this canvas's diagram like the DBML cascade (#274).
                 const deleted = await this.runQueued(panelKey, () =>
-                  this.deleteTableFilesFromCanvas(filePaths, this.deleteOriginOf(document, webview)));
+                  this.deleteTableFilesFromCanvas(filePaths, this.deleteOriginOf(document)));
                 if (deleted.ok) {
                   vscode.window.showInformationMessage(fileIsSingle ? `Deleted ${shownPaths[0]}` : `Deleted ${filesToOffer.length} table files`);
                   return;
@@ -6703,17 +6703,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * The canvas a Delete Table File prompt came from, while it is still open
-   * on a file that exists: the delete then anchors on its diagram
-   * ({@link deleteTablesWithCascade}). Undefined once the panel closed (the
-   * prompt is not modal): a closed document is never reopened, dirtied and
-   * saved for an anchor, nor a deleted diagram recreated (#161).
+   * The diagram a Delete Table File prompt came from, while a canvas is open
+   * on it and its file exists: the delete then anchors on it
+   * ({@link deleteTablesWithCascade}). Decided by the document, not by the
+   * webview that showed the prompt: a second canvas on the same diagram, or
+   * the canvas closed and reopened before the (non-modal) prompt is answered,
+   * shares its undo stack, so it anchors on the live canvas's document.
+   * Undefined when no canvas is open on it: a closed document is never
+   * reopened, dirtied and saved for an anchor, nor a deleted diagram
+   * recreated (#161).
    */
-  private deleteOriginOf(document: vscode.TextDocument, webview: vscode.Webview): DeleteOrigin | undefined {
+  private deleteOriginOf(document: vscode.TextDocument): DeleteOrigin | undefined {
     const panelKey = document.uri.toString();
-    if (this.openPanels.get(panelKey)?.webview !== webview || this.disposedWebviews.has(webview)) return undefined;
-    if ((document as { isClosed?: boolean }).isClosed || !fs.existsSync(document.uri.fsPath)) return undefined;
-    return { document, panelKey };
+    const open = this.openPanels.get(panelKey);
+    if (!open || this.disposedWebviews.has(open.webview) || this.forgetIfGone(panelKey)) return undefined;
+    const live = open.document;
+    if ((live as { isClosed?: boolean }).isClosed || !fs.existsSync(live.uri.fsPath)) return undefined;
+    return { document: live, panelKey };
   }
 
   /**
