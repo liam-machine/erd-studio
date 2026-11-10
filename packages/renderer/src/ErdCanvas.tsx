@@ -114,6 +114,15 @@ export interface ErdCanvasProps {
    * reads as `curved`.
    */
   lineStyle?: LineStyle;
+  /**
+   * The URL of the host's copy of `@erd-studio/renderer/edge-routing-worker.js`,
+   * served from the page's own origin. Diagrams over 100 lines route in that
+   * worker. Without it the worker starts from a blob URL, which a CSP with no
+   * `blob:` for workers (only `script-src 'self'`) refuses, so larger diagrams route
+   * on the main thread and those over 150 lines keep simple lines. Read once,
+   * when the canvas mounts.
+   */
+  routingWorkerUrl?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -471,6 +480,7 @@ export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function Er
       domain: renderable,
       logicalOnly: props.logicalOnly === true,
       lineStyle: isLineStyle(props.lineStyle) ? props.lineStyle : DEFAULT_LINE_STYLE,
+      routingWorkerUrl: typeof props.routingWorkerUrl === 'string' && props.routingWorkerUrl !== '' ? props.routingWorkerUrl : null,
     }),
   );
 

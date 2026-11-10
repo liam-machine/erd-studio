@@ -19,7 +19,7 @@ import { useEditorStore, useEditorStoreApi } from '../store/editorStore';
 import {
   buildRoutingInput,
   createEdgeRoutingEngine,
-  createRoutingWorker,
+  routingWorkerFactory,
   draggingNodesKey,
   lineStyleOptions,
   routingInputKey,
@@ -101,7 +101,8 @@ export function EdgeRouter() {
         const root = storeApi.getState().domNode;
         if (root) root.dataset.edgeRouting = `${update.pass} ${Math.round(update.millis)}ms ${update.routes?.size ?? 0}`;
       };
-      engine.current ??= createEdgeRoutingEngine({ worker: createRoutingWorker, onUpdate: apply });
+      // The worker starts from the host's worker file when it gave one (ErdCanvas `routingWorkerUrl`), else from the inlined code.
+      engine.current ??= createEdgeRoutingEngine({ worker: routingWorkerFactory(canvas.getState().routingWorkerUrl), onUpdate: apply });
       const { nodeLookup, edges } = storeApi.getState();
       const dragging = new Set<string>();
       for (const node of nodeLookup.values()) if (node.dragging && !node.hidden) dragging.add(node.id);

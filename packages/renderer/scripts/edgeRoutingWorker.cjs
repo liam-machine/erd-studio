@@ -4,6 +4,9 @@
 // client.ts), the way the extension starts the ELK layout worker: a VS Code
 // webview cannot load a worker from a file URL, and the published package
 // must not depend on the consumer's bundler handling `new Worker(new URL())`.
+// build.mjs also writes the same code as dist/edge-routing-worker.js, which a
+// host whose CSP refuses blob workers serves itself (ErdCanvas
+// `routingWorkerUrl`).
 // Both builds that ship the canvas define `__ERD_EDGE_ROUTING_WORKER__` with
 // this: the extension's esbuild.js (webview + draft page) and this package's
 // build.mjs (the published npm dist). Where it is not defined

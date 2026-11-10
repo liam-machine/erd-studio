@@ -154,6 +154,14 @@ export interface CanvasState {
    * a line missing from it) means `FkEdge` draws its smooth-step fallback.
    */
   edgeRoutes: Map<string, RoutedEdge> | null;
+  /**
+   * Where the host serves the line-routing worker file
+   * (`@erd-studio/renderer/edge-routing-worker.js`), for a page whose CSP
+   * refuses a blob worker. Read once, when the canvas starts its router.
+   * Absent or null: the worker starts from the inlined code, as before.
+   * Optional, so a host that hand-builds `CanvasState` need not add it.
+   */
+  routingWorkerUrl?: string | null;
 }
 
 export interface CanvasActions {
