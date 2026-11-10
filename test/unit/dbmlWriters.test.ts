@@ -134,18 +134,28 @@ describe('the writers', () => {
     expect(editTableDbml(out, desired)).toBe(out);
   });
 
-  it('an edit of a file in the canonical layout keeps it there: a name that becomes its group\'s longest re-pads the group', () => {
+  describe('an edit of a file in the canonical layout changes only the lines it writes (#275)', () => {
     const table: SemanticTable = {
       name: 'fct_order', schema: 'gold', description: '',
       columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }, { name: 'amount', dataType: 'DECIMAL', description: '' }],
     };
     const text = renderNewTableDbml(table);
-    expect(formatDbml(text).changed).toBe(false);
-    const desired = structuredClone(table);
-    desired.columns!.push({ name: 'customer_key', dataType: 'INT', description: '' });
-    const out = editTableDbml(text, desired);
-    expect(out).toBe('Table gold.fct_order {\n  id           INT [pk]\n  amount       DECIMAL\n  customer_key INT\n}\n');
-    expect(formatDbml(out).changed).toBe(false);
+
+    it('a new line that fits the group\'s widths lines up with it', () => {
+      expect(text).toBe('Table gold.fct_order {\n  id     INT [pk]\n  amount DECIMAL\n}\n');
+      const desired = structuredClone(table);
+      desired.columns!.push({ name: 'qty', dataType: 'INT', description: '' });
+      const out = editTableDbml(text, desired);
+      expect(out).toBe('Table gold.fct_order {\n  id     INT [pk]\n  amount DECIMAL\n  qty    INT\n}\n');
+      expect(formatDbml(out).changed).toBe(false);
+    });
+
+    it('a new line longer than the group goes in with single spaces: the lines it did not write keep their padding', () => {
+      const desired = structuredClone(table);
+      desired.columns!.push({ name: 'customer_key', dataType: 'INT', description: '' });
+      const out = editTableDbml(text, desired);
+      expect(out).toBe('Table gold.fct_order {\n  id     INT [pk]\n  amount DECIMAL\n  customer_key INT\n}\n');
+    });
   });
 
   it('an edit of a hand-laid file re-aligns nothing it did not write (#275)', () => {

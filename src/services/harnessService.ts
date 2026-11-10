@@ -665,7 +665,7 @@ The table and sticky-note positions are the Project's \`erd_layout\`, one triple
 
 ## Layout
 
-ERD Studio writes every new \`.dbml\` in one layout and keeps a file that is in it in it; a file laid out any other way (by hand) keeps its layout, and an edit changes only the lines it touches. **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac, or right-click → Format Document) puts a file into the layout, except the blank lines between foreign-key tables' Refs (below). Write in this layout, so the next save by ERD Studio changes only what was meant to change:
+ERD Studio writes every new \`.dbml\` in one layout. An edit of an existing file changes only the lines it touches: in a file in the layout those lines are in it too, and a file laid out any other way (by hand) keeps its layout. **Format Document** (Shift+Alt+F, ⇧⌥F on a Mac, or right-click → Format Document) puts a file into the layout, except the blank lines between foreign-key tables' Refs (below). Write in this layout, so the next save by ERD Studio changes only what was meant to change:
 
 - **Two-space indents.** At most one blank line in a row, and none straight after \`{\` or before \`}\`.
 - **A table's \`Note\` comes first** in its body, then one blank line, then the columns, then \`indexes\`.

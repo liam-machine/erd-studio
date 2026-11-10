@@ -74,6 +74,18 @@ Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
 Ref parent: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
 `;
 
+/** Three foreign-key tables' Refs, one blank line between each (#275: a cut between two blank lines). */
+const THREE_GROUPS = `use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order } from '../tables/gold/fct_order.dbml'
+
+Ref: gold.customer_profile.customer_key >? gold.dim_customer.customer_key
+
+Ref parent: gold.dim_customer.parent_key >? gold.dim_customer.customer_key
+
+Ref: gold.fct_order.Customer_Key >? gold.dim_customer.customer_key
+`;
+
 /** A hand-written header comment directly above the first use line, no blank line between (#275). */
 const HAND_HEADER = `// Orders and their customers, split out by hand.
 use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
@@ -553,6 +565,27 @@ Ref "ship date": gold.fct_order.ship_date_key >? shared.dim_date.date_key
       return { path: REL_PATH, output, context: { ...BRIDGE_RENAMED }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
     },
     check: (o) => {
+      // The file kept its two tables' Refs together, so the moved Ref gets no blank line (#275).
+      expect(o.output).toBe(`use { table gold.zz_bridge } from '../tables/gold/zz_bridge.dbml'
+use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
+use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
+
+Ref: gold.customer_profile.customer_key >? shared.dim_date.date_key
+Ref r: gold.zz_bridge.a_key >? shared.dim_date.date_key // a tail
+`);
+    },
+  },
+  {
+    name: '…and in a file that sets its foreign-key tables apart, the moved Ref keeps that: one blank line, never two (#275)',
+    run: (): WriterOutcome => {
+      const output = relEdit(SORTED_FOR_RENAME.replace('// a tail\n', '// a tail\n\n'), {
+        owners: new Map([['zz_bridge', { name: 'zz_bridge', relationships: [M21('a_key', 'dim_date', 'date_key', { role: 'r' })] }]]),
+        renamedOwners: new Map([['bridge', 'zz_bridge']]),
+        pathChanged: new Set(['bridge']),
+      }, BRIDGE_RENAMED);
+      return { path: REL_PATH, output, context: { ...BRIDGE_RENAMED }, parsers: ['9.1.1', '10.3.1', '11.0.0'] };
+    },
+    check: (o) => {
       expect(o.output).toBe(`use { table gold.zz_bridge } from '../tables/gold/zz_bridge.dbml'
 use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'
 use { table shared.dim_date } from '../../silver/tables/shared/dim_date.dbml'
@@ -766,6 +799,9 @@ Ref: gold.fct_order.order_date_key >? shared.dim_date.date_key
   }), (out) => {
     expect(out).toBe(HAND_SPLIT.replaceAll('dim_customer', 'dim_client'));
   }, DIM_CLIENT_LIBRARY, true),
+  relCase('a Ref cut from between two blank lines takes one of them: no run of blank lines is left (#275)', THREE_GROUPS, () => changed(THREE_GROUPS, 'dim_customer', () => []), (out) => {
+    expect(out).toBe(THREE_GROUPS.replace('Ref parent: gold.dim_customer.parent_key >? gold.dim_customer.customer_key\n\n', ''));
+  }),
   relCase('a use line added above the first one goes below a hand-written header comment with no blank line after it (#275)', HAND_HEADER, () => changed(HAND_HEADER, 'fct_order', (list) => [
     ...list, M21('order_date_key', 'dim_date', 'date_key'),
   ]), (out) => {

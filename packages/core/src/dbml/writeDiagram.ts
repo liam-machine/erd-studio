@@ -49,6 +49,7 @@ import { erdLayoutTextEdit } from './erdLayoutDbml.js';
 import {
   applyTextEdits,
   attachedStart,
+  closeCutGaps,
   cutEdit,
   cutSpan,
   eolOf,
@@ -765,7 +766,7 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     if (change) lateEdits.push(change);
   }
 
-  const out = applyTextEdits(text, [...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
+  const out = applyTextEdits(text, [...closeCutGaps(text, edits, [...pendingEdits, ...lateEdits]), ...pendingEdits, ...pendingLineCuts(text, pendingCuts), ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
 
   /** Whether an edit so far appends text at the very end of the file (a note, a first `use` line). */

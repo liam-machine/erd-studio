@@ -142,6 +142,44 @@ export function cutEdit(text: string, node: AstNode): TextEdit {
 }
 
 /**
+ * The edits with each run of whole-line cuts that would leave two blank
+ * lines in a row (a blank line above the run and one below it) also taking
+ * the blank line above it, so a cut never opens a gap
+ * the file did not have (#275: deleting the middle Ref of a blank-separated
+ * file leaves one blank line, not two). A run whose blank line another edit
+ * writes into or next to is left as it is (`alongside` are the other edits
+ * applied with these, checked but never changed). Every other edit comes
+ * back as it was.
+ */
+export function closeCutGaps(text: string, edits: readonly TextEdit[], alongside: readonly TextEdit[] = []): TextEdit[] {
+  const isLineCut = (e: TextEdit): boolean =>
+    e.text === '' && e.end > e.start && lineStartOf(text, e.start) === e.start && (e.end === text.length || text[e.end - 1] === '\n');
+  const cuts = edits.filter(isLineCut).sort((a, b) => a.start - b.start);
+  if (cuts.length === 0) return [...edits];
+  const runs: Array<{ start: number; end: number; members: TextEdit[] }> = [];
+  for (const cut of cuts) {
+    const last = runs[runs.length - 1];
+    if (last && last.end === cut.start) {
+      last.end = cut.end;
+      last.members.push(cut);
+    } else runs.push({ start: cut.start, end: cut.end, members: [cut] });
+  }
+  const out = [...edits];
+  for (const run of runs) {
+    if (run.start === 0) continue;
+    const above = lineStartOf(text, run.start - 1);
+    if (!isBlankLine(text, above)) continue;
+    if (run.end >= text.length || !isBlankLine(text, run.end)) continue;
+    // Another edit writing into the blank line or the run (an insertion inside it too) keeps the line.
+    const others = [...edits, ...alongside].filter((e) => !run.members.includes(e));
+    if (others.some((e) => (e.start < run.end && e.end > above) || (e.start === e.end && e.start >= run.start && e.start < run.end))) continue;
+    for (const m of run.members) out.splice(out.indexOf(m), 1);
+    out.push({ start: above, end: run.end, text: '' });
+  }
+  return out;
+}
+
+/**
  * Where to insert a line before `node` without separating it from the
  * comment lines directly above it (no blank line between): the start of the
  * first of those lines, never earlier than `floor`.

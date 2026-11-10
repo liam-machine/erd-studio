@@ -41,7 +41,7 @@ import {
   type AstNode,
 } from './parser.js';
 import { readRelationshipsDbml } from './readRelationships.js';
-import { applyTextEdits, applyTextEditsTracked, attachedStart, cutEdit, eolOf, headerEnd, leadingCommentEnd, lineEndOf, nextLineStart, refuseOverlaps, type TextEdit } from './splice.js';
+import { applyTextEdits, applyTextEditsTracked, attachedStart, closeCutGaps, cutEdit, eolOf, headerEnd, leadingCommentEnd, lineEndOf, nextLineStart, refuseOverlaps, type TextEdit } from './splice.js';
 
 /** One relationship unit: a Ref line (a composite is one unit), canonical (`from` is the foreign-key table). */
 export interface RefUnit {
@@ -841,9 +841,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   for (const c of cut) edits.push(cutEdit(text, c.ref.node));
 
   // New Refs (and moved ones) at their sorted places among the Refs that stay.
-  const additions = [
+  const additions: Array<{ unit: RefUnit; text: string; moved?: boolean }> = [
     ...inserted.map((unit) => ({ unit, text: refText(unit) })),
-    ...moving,
+    ...moving.map((m) => ({ ...m, moved: true })),
   ].sort((a, b) => (refUnitSortKey(a.unit) < refUnitSortKey(b.unit) ? -1 : refUnitSortKey(a.unit) > refUnitSortKey(b.unit) ? 1 : 0));
   // --- use lines (§4.5 step 5): only for the tables this edit touched -------------------
   const pathChanged = new Set([...(edit.pathChanged ?? []), ...requalified].map(lower));
@@ -988,12 +988,16 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const lead = text === '' ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? eol : `${eol}${eol}`;
     refInserts.push({ start: at, end: at, text: `${refInserts.some((e) => e.start === at) ? eol : lead}${pendingBlock.join(eol)}${eol}` });
   }
-  const fileEdits = [...useEdits, ...edits, ...pendingEdits, ...pendingLineCuts(text, pendingCuts)];
+  const fileEdits = [...closeCutGaps(text, [...useEdits, ...edits], [...pendingEdits, ...refInserts]), ...pendingEdits, ...pendingLineCuts(text, pendingCuts)];
   const { text: spliced, spans } = applyTextEditsTracked(text, [...fileEdits, ...refInserts]);
   // The blank line between foreign-key tables (W3) goes only next to a Ref this edit added: the
   // Refs the file had keep their spacing (a rename or a move re-spells them, never regroups them),
   // and a no-op stays byte-identical.
-  const added = spans.slice(fileEdits.length);
+  // A Ref a rename moved (to keep the file sorted) is the file's own Ref in a new place: it gets the
+  // blank line only in a file that already sets its foreign-key tables apart (as ERD Studio writes
+  // them), never in one whose Refs the user kept together.
+  const movedGetBlank = moving.length > 0 && separateRefGroups(text, eol, parser) === text;
+  const added = spans.slice(fileEdits.length).filter((_, i) => !(additions[i]?.moved && !movedGetBlank));
   const out = added.length === 0 ? spliced : separateRefGroups(spliced, eol, parser, added);
   return hadBom ? `﻿${out}` : out;
 
