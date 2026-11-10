@@ -84,7 +84,8 @@ describe('parseTableDbml: the §2.2 field mapping', () => {
         { name: 'country_code', dataType: 'VARCHAR', description: '' },
         { name: 'amount', dataType: 'DECIMAL(18,2)', description: 'Line total', additiveType: 'additive' },
         { name: 'order_number', dataType: 'VARCHAR', description: '', isNaturalKey: true },
-        { name: 'loaded_at', dataType: 'timestamp', description: '' },
+        // DBML's own `not null` and `default` read into meta.dbml, as Import DBML keeps them.
+        { name: 'loaded_at', dataType: 'timestamp', description: '', meta: { dbml: { not_null: true, default: '`now()`' } } },
       ],
     });
     expect(table.relationships).toBeUndefined();

@@ -393,6 +393,35 @@ describe('Import from dbt and Import DBML in a DBML project (§5.7)', () => {
     expect(data.models.get('dim')).not.toHaveProperty('configSchema');
   });
 
+  it('Import into a DBML project writes not null, unique, increment and default as DBML settings, and reads them back into meta.dbml', async () => {
+    const read = readDbml("Table customers {\n  id int [pk, increment]\n  email varchar [not null, unique]\n  status varchar [not null, default: 'new']\n  score int [default: 0]\n}\nTable orders {\n  id int [pk]\n  customer_id int [not null, ref: > customers.id]\n}\n");
+    if (!read.ok) throw new Error('unreadable');
+    const plan = planDbmlImport({
+      model: read.model, layer: 'gold', subjectAreaName: 'shop',
+      library: { findTableName: () => null, getTable: () => null }, libraryRelationships: true, diagramHoldsNoRelationships: true,
+    });
+    const s = services();
+    const result = await writeNewSubjectArea({
+      workspaceRoot: tmp, semanticDir: '.erd-studio', domainPath: erd('gold', 'diagrams', 'shop.dbml'), newTables: plan.newTables, folder: 'gold', changedTables: [],
+      documentText: () => '', document: () => ({ domain: 'shop', logical: { models: ['customers', 'orders'] }, viewConfig: {} }),
+    }, s);
+    expect(result.ok).toBe(true);
+    const customers = snapshot().get('gold/tables/gold/customers.dbml')!;
+    expect(customers).toContain('id     int     [pk, increment]');
+    expect(customers).toContain('email  varchar [not null, unique]');
+    expect(customers).toContain("status varchar [not null, default: 'new']");
+    // A default that reads as a number keeps its text in meta_json: a setting could not say whether it was quoted.
+    expect(customers).toContain(`score  int     [meta_json: '{"dbml":{"default":"0"}}']`);
+    expect(snapshot().get('gold/tables/gold/orders.dbml')).toContain('customer_id int [not null]');
+    expect([...snapshot().values()].join('\n')).not.toContain('not_null');
+    expectCompilesInEveryParser(dbmlFiles(), ['gold/diagrams/shop.dbml']);
+    // The model is unchanged: the canvas reads meta.dbml as the import planned it.
+    s.tableLibraryService.invalidateCache();
+    for (const planned of plan.newTables) {
+      expect(s.tableLibraryService.getTable(planned.name)?.columns?.map((c) => c.meta)).toEqual(planned.columns?.map((c) => c.meta));
+    }
+  });
+
   it('Import refuses a file with use lines (a multi-file project), naming the export route', () => {
     const text = "// a comment: use * from 'x'\nuse { table a } from './a.dbml'\nTable b {\n  id int\n}\n";
     expect(firstUseDeclarationLine(text)).toBe(2);

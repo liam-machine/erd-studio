@@ -1,0 +1,89 @@
+{
+  "name": "customers",
+  "schema": "gold",
+  "columns": [
+    {
+      "name": "id",
+      "dataType": "int",
+      "description": "",
+      "isPrimaryKey": true,
+      "meta": {
+        "dbml": {
+          "increment": true
+        }
+      }
+    },
+    {
+      "name": "email",
+      "dataType": "varchar",
+      "description": "",
+      "meta": {
+        "dbml": {
+          "not_null": true,
+          "unique": true
+        }
+      }
+    },
+    {
+      "name": "status",
+      "dataType": "varchar",
+      "description": "",
+      "meta": {
+        "dbml": {
+          "not_null": true,
+          "default": "new"
+        }
+      }
+    },
+    {
+      "name": "created_at",
+      "dataType": "timestamp",
+      "description": "",
+      "meta": {
+        "dbml": {
+          "not_null": true,
+          "default": "`now()`"
+        }
+      }
+    },
+    {
+      "name": "score",
+      "dataType": "int",
+      "description": "",
+      "meta": {
+        "dbml": {
+          "default": "0",
+          "checks": [
+            "score >= 0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "region",
+      "dataType": "varchar",
+      "description": "",
+      "meta": {
+        "dbml": {
+          "name": "Region",
+          "not_null": true,
+          "enum": [
+            "north",
+            "south"
+          ]
+        }
+      }
+    },
+    {
+      "name": "tier",
+      "dataType": "int",
+      "description": "Loyalty tier",
+      "meta": {
+        "owner": "crm",
+        "dbml": {
+          "not_null": true
+        }
+      }
+    }
+  ]
+}

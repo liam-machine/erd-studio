@@ -12,8 +12,10 @@
  * the older `rationale_purpose`, `meta_owner`, a `meta_json` entry, an
  * `erd_` form), by the precedence `settings.ts` decides for the writer too.
  * A reserved setting (DBML's own, ERD Studio's typed ones, `json`, …) or a
- * multi-word one is never a field; its bytes stay. `fieldSpellings` lists
- * every spelling found, for `doctor`.
+ * multi-word one is never a field; its bytes stay. A column's `not null`,
+ * `unique`, `increment` and `default` read into `meta.dbml`, as Import DBML
+ * keeps them (`nativeColumnSettings.ts`). `fieldSpellings` lists every
+ * spelling found, for `doctor`.
  */
 
 import type { ColumnDef, SemanticTable } from '../types/semantic.js';
@@ -27,6 +29,7 @@ import {
   bareDbmlProperty,
 } from '../dbmlRichProperties.js';
 import { dbmlName, dbmlString } from '../dbmlText.js';
+import { nativeColumnEntries, withNativeColumnEntries } from './nativeColumnSettings.js';
 import type { FieldScope } from '../fields.js';
 import {
   columnNodesOf,
@@ -508,7 +511,9 @@ function mapTable(
       : columnNodes.find((c) => c.name.toLowerCase() === fieldName.toLowerCase());
     const names = node ? settingNames(settersOf(node.settings, sources.blocks, node.name)) : [];
     const fields = readFields(fieldProps, names, 'column', fieldName, where, problems, sources.spellings);
-    if (fields.meta) column.meta = fields.meta;
+    // DBML's own `not null`, `unique`, `increment` and `default` are `meta.dbml` (nativeColumnSettings.ts).
+    const meta = withNativeColumnEntries(fields.meta, nativeColumnEntries(field));
+    if (meta) column.meta = meta;
     columns.push(column);
     columnFields.push(fields);
   });

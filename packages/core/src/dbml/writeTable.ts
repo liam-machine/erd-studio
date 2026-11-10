@@ -35,7 +35,7 @@ import {
   bareDbmlProperty,
 } from '../dbmlRichProperties.js';
 import { dbmlColumnType, dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
-import { RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, type FieldScope } from '../fields.js';
+import { DBML_IMPORT_META_KEY, RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, type FieldScope } from '../fields.js';
 import { readMeta } from '../meta.js';
 import { isLibraryFolderName } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
@@ -52,6 +52,14 @@ import {
   topLevel,
   type AstNode,
 } from './parser.js';
+import {
+  NATIVE_COLUMN_SETTINGS,
+  dbmlMetaOf,
+  nativeColumnSettingText,
+  nativeDefaultValueText,
+  splitNativeColumnSettings,
+  withoutDbmlKeys,
+} from './nativeColumnSettings.js';
 import { readTableFile, type TableFieldSettings } from './readTable.js';
 import {
   columnNodesOf,
@@ -164,19 +172,22 @@ function tableSettings(table: SemanticTable): string[] {
 
 /**
  * A column's settings, in the order a new file writes them (the canonical
- * order, {@link COLUMN_KEY_ORDER}): `pk`, then ERD Studio's properties
- * (`natural_key`, `scd_type`, `additive_type`, `foreign_key`), then the
- * column's fields (meta), then the `note` last, so a long note never hides
- * the short flags.
+ * order, {@link COLUMN_KEY_ORDER}): `pk`, DBML's own (`not null`, `unique`,
+ * `increment`, `default`: what `meta.dbml` holds of them), then ERD
+ * Studio's properties (`natural_key`, `scd_type`, `additive_type`,
+ * `foreign_key`), then the column's fields (the rest of meta), then the
+ * `note` last, so a long note never hides the short flags.
  */
 function columnSettings(column: ColumnDef, isPk: boolean): string[] {
   const settings: string[] = [];
   if (isPk) settings.push('pk');
+  const native = splitNativeColumnSettings(column.meta);
+  settings.push(...native.settings);
   if (column.isNaturalKey) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.naturalKey}: 'true'`);
   if (column.scdType !== undefined && column.scdType !== null) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.scdType}: ${dbmlString(String(column.scdType))}`);
   if (column.additiveType) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.additiveType}: ${dbmlString(column.additiveType)}`);
   if (column.isForeignKey) settings.push(`${DBML_RICH_COLUMN_PROPERTIES.foreignKey}: 'true'`);
-  settings.push(...metaSettings(column.meta, 'column'));
+  settings.push(...metaSettings(native.meta, 'column'));
   const note = noteValue(column.description);
   if (note !== undefined) settings.push(`note: ${dbmlString(note)}`);
   return settings;
@@ -788,7 +799,8 @@ function editTableOnce(
     if (wantAdditive !== present(have.additiveType)) {
       setProperty(setters, DBML_RICH_COLUMN_PROPERTIES.additiveType, wantAdditive === undefined ? undefined : dbmlString(wantAdditive), owner);
     }
-    planMeta(setters, fields.columns[ci], have.meta, want.meta, owner, have.name, metaOwnerId(want.name), 'column');
+    const metas = planNativeSettings(setters, have.meta, want.meta, owner);
+    planMeta(setters, fields.columns[ci], metas.have, metas.want, owner, have.name, metaOwnerId(want.name), 'column');
   });
 
   // Metadata Column blocks of removed columns go with them.
@@ -977,6 +989,54 @@ function editTableOnce(
 
   const out = applyTextEdits(text, [...edits, ...lateEdits]);
   return hadBom ? `﻿${out}` : out;
+
+  /**
+   * A column's `meta.dbml` keys that DBML's own settings store (`not null`,
+   * `unique`, `increment`, `default`; nativeColumnSettings.ts): a changed one
+   * is set, spliced or removed as that setting, and the meta `planMeta` sees
+   * leaves out every key a setting holds. A key `meta_json` holds (as 2.0
+   * pre-releases wrote it) stays there while its value is the same; a value
+   * no setting can hold (a `default` of `0`) goes into `meta_json`.
+   */
+  function planNativeSettings(
+    setters: readonly Setter[],
+    haveMeta: Meta | undefined,
+    wantMeta: Meta | undefined,
+    owner: { column?: string; list: AstNode | undefined; ownerKey: AstNode | string; anchor: number; multiLine: boolean; order: readonly string[] },
+  ): { have: Meta | undefined; want: Meta | undefined } {
+    const haveDbml = dbmlMetaOf(haveMeta);
+    const wantDbml = dbmlMetaOf(wantMeta);
+    // The reader merges the settings into a map only (a `meta.dbml` that is text leaves them unread).
+    const merged = haveMeta?.[DBML_IMPORT_META_KEY] === undefined || haveDbml !== undefined;
+    const stripHave = new Set<string>();
+    const stripWant = new Set<string>();
+    for (const { key, setting } of NATIVE_COLUMN_SETTINGS) {
+      const mine = setters.filter((s) => s.name === setting);
+      const held = merged && mine.length > 0;
+      const haveValue = haveDbml?.[key];
+      const wantValue = wantDbml?.[key];
+      if (deepEqual(haveValue, wantValue)) {
+        if (held) { stripHave.add(key); stripWant.add(key); }
+        continue;
+      }
+      if (held) stripHave.add(key);
+      const settingText = nativeColumnSettingText(key, wantValue);
+      if (settingText === undefined) {
+        for (const s of mine) removeSetter(s);
+        continue;
+      }
+      stripWant.add(key);
+      const target = effectiveSetter(mine);
+      if (key === 'default' && target?.value) {
+        setValue(target, nativeDefaultValueText(wantValue as string));
+      } else if (mine.length === 0) {
+        // `not null` replaces an explicit `null`.
+        if (key === 'not_null') for (const s of setters.filter((x) => x.name === 'null')) removeSetter(s);
+        planFor(owner.list, owner.ownerKey, owner.anchor, owner.multiLine).added.push({ order: keyOrder(COLUMN_KEY_ORDER, setting), text: settingText });
+      }
+    }
+    return { have: withoutDbmlKeys(haveMeta, stripHave), want: withoutDbmlKeys(wantMeta, stripWant) };
+  }
 
   /**
    * Meta for the table or one column: only the entries whose value changed

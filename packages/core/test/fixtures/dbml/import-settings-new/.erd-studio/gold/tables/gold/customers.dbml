@@ -1,0 +1,9 @@
+Table gold.customers {
+  id         int       [pk, increment]
+  email      varchar   [not null, unique]
+  status     varchar   [not null, default: 'new']
+  created_at timestamp [not null, default: `now()`]
+  score      int       [meta_json: '{"dbml":{"default":"0","checks":["score >= 0"]}}']
+  region     varchar   [not null, meta_json: '{"dbml":{"name":"Region","enum":["north","south"]}}']
+  tier       int       [not null, owner: 'crm', note: 'Loyalty tier']
+}
