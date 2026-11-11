@@ -971,7 +971,9 @@ export function dbtTestsOnTables(
   const claim = (model: DbtModel | undefined, table: DbtMatchTable): void => {
     if (!model) return;
     const key = normaliseName(model.name);
-    claims.set(key, [...(claims.get(key) ?? []), table.ref]);
+    const refs = claims.get(key) ?? [];
+    // One table listed twice (a diagram may list a member twice) is one claim, not two tables.
+    if (!refs.some((ref) => ref.toLowerCase() === table.ref.toLowerCase())) claims.set(key, [...refs, table.ref]);
   };
   for (const table of tables) {
     const byName = models.get(normaliseName(table.name));

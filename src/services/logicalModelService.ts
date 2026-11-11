@@ -326,16 +326,16 @@ export function placementKey(table: TableId | string): string {
   return typeof table === 'string' ? table.toLowerCase() : tableIdKey(table);
 }
 
-/** Whether `filePath` is a `.dbml` file. */
 /**
  * A stored relationship's whole text, for telling an unchanged one from an
- * added or changed one: every field, keys in order, names without case.
+ * added or changed one: every field, keys sorted, text without case.
  */
 function relationshipText(rel: TableRelationship): string {
   const record = rel as unknown as Record<string, unknown>;
   return JSON.stringify(Object.keys(record).sort().map((key) => [key, typeof record[key] === 'string' ? (record[key] as string).toLowerCase() : record[key]]));
 }
 
+/** Whether `filePath` is a `.dbml` file. */
 function isDbmlFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.dbml');
 }
