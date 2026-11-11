@@ -1,10 +1,6 @@
 Project staging {
   Note: 'Orders by day, laid out automatically (no positions stored)'
   erd_schema_version: '7'
-  erd_layout: '''
-    dim_date 12 129
-    fct_order 431 12
-  '''
 }
 
 use { table gold.fct_order } from '../../gold/tables/gold/fct_order.dbml'
