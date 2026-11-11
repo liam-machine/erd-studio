@@ -443,9 +443,16 @@ function planMembers(
       let slots = removedUnlinked;
       const unlinkedNow = new Set(newUnlinked.map(lower));
       const renamedUnlinked = new Set<string>();
+      // A use member whose reference changed (a twin joined or left) is that member, never a renamed unlinked
+      // one, even where `resolveTable` cannot name it alone (a bare name two library tables share): the caller
+      // says so in `renamedMembers`, or names it by its own name or `<schema>.<name>`.
+      const useNames = new Set([
+        ...[...(edit.renamedMembers ?? [])].filter(([from]) => oldMembers.some((m) => lower(m) === lower(from))).map(([, to]) => lower(to)),
+        ...readUses.flatMap((u) => [lower(u.name), ...(u.schema ? [lower(qualifiedRef(u.schema, u.name))] : [])]),
+      ]);
       for (const name of named) {
         if (slots === 0) break;
-        if (oldMembers.some((m) => lower(m) === lower(name)) || edit.resolveTable(name)?.storage === 'dbml') continue;
+        if (oldMembers.some((m) => lower(m) === lower(name)) || useNames.has(lower(name)) || edit.resolveTable(name)?.storage === 'dbml') continue;
         renamedUnlinked.add(lower(name));
         slots--;
       }
@@ -936,9 +943,10 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   // Written only when the canvas's positions or boxes changed, so an edit that moved nothing
   // leaves the value's bytes as they are (even where the reader placed a note the file does not).
   // A diagram where an older version kept one bare line for two members of one name
-  // (`layoutSharedBare`) gets each member's own line on the next edit that changes something.
+  // (`layoutSharedBare`) gets each member's own line on the next edit that changes something, unless
+  // erd_layout holds a merge conflict: then it waits until the user keeps one side, as a drag does.
   const layoutAfter = layoutOfObject(after);
-  const sharedBareLines = changing && (reading.layoutSharedBare?.length ?? 0) > 0;
+  const sharedBareLines = changing && (reading.layoutSharedBare?.length ?? 0) > 0 && reading.layoutConflictLine === undefined;
   const layoutChanged = sharedBareLines || !sameErdLayout(layoutOfObject(before), layoutAfter);
   const keepLayout = edit.keepLayoutIfConflicted === true && reading.layoutConflictLine !== undefined;
   if (!project) {

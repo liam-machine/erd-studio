@@ -172,6 +172,45 @@ use * from '../relationships/bronze.dbml'
     expect(edit(both, D1, () => undefined)).toBe(both);
     for (const file of [KUNDEN, KUNDEN_BARE, 'bronze/diagrams/ccc.dbml']) expect(edit(FILES[file], file, () => undefined)).toBe(FILES[file]);
   });
+
+  it('a caller that names a member by its new reference without renamedMembers still keeps its line (the line that imports its file)', () => {
+    // A hand-spaced line with its own comment: a line written anew would lose both.
+    const own = "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'";
+    const spaced = "use { table bqs.addresse }  from '../tables/bqs/addresse.dbml' // home addresses";
+    const start = BQS_ONLY.replace(own, spaced);
+    // The twin joins, and the caller already calls the first table bqs.addresse.
+    const joined = edit(start, D1, (a) => {
+      a.logical.models = ['bqs.addresse', 'kunde', 'ccc.addresse'];
+      a.viewConfig.positions = { 'bqs.addresse': { x: 10, y: 20 }, kunde: { x: 400, y: 20 }, 'ccc.addresse': { x: 40, y: 360 } };
+    }, { names: BQS_NAMES });
+    expect(joined).toBe(both.replace(own, spaced));
+    // The twin leaves, and the caller already calls the one left by its bare name.
+    const left = edit(joined, D1, (a) => {
+      a.logical.models = ['addresse', 'kunde'];
+      a.viewConfig.positions = { addresse: { x: 10, y: 20 }, kunde: { x: 400, y: 20 } };
+    }, { names: { addresse: BQS_ADDRESSE } });
+    expect(left).toBe(start);
+  });
+
+  it('the twin and an unlinked member leave in one edit: the member left keeps its line, never taken for a renamed unlinked one', () => {
+    const withOrphan = both.replace("  erd_schema_version: '8'\n", "  erd_schema_version: '8'\n  erd_unlinked_tables: 'orphan'\n");
+    // A library-wide lookup: `addresse` names two tables there, so it resolves nothing; renamedMembers says who it is.
+    const out = edit(withOrphan, D1, (a) => {
+      a.logical.models = ['addresse', 'kunde'];
+      a.viewConfig.positions = { addresse: { x: 10, y: 20 }, kunde: { x: 400, y: 20 } };
+    }, { extra: { renamedMembers: new Map([['bqs.addresse', 'addresse']]) } });
+    expect(out).toBe(BQS_ONLY);
+    // Without renamedMembers nothing tells which addresse is meant: refused, never written as an unlinked member.
+    expect(() => edit(withOrphan, D1, (a) => {
+      a.logical.models = ['addresse', 'kunde'];
+      a.viewConfig.positions = { addresse: { x: 10, y: 20 }, kunde: { x: 400, y: 20 } };
+    })).toThrow(/addresse cannot be added to a DBML diagram/);
+  });
+
+  it("pathChanged names references: a bare name the pair's tables share touches neither table's line", () => {
+    // Neither kunde is called `kunde` on this diagram, so neither line is re-derived (each keeps its spacing).
+    expect(edit(FILES[KUNDEN], KUNDEN, () => undefined, { extra: { pathChanged: new Set(['kunde']) } })).toBe(FILES[KUNDEN]);
+  });
 });
 
 describe('editSubjectAreaDbml on the fixture diagrams', () => {
@@ -193,6 +232,18 @@ describe('editSubjectAreaDbml on the fixture diagrams', () => {
     expect(after.viewConfig.positions).toEqual(before.viewConfig.positions);
     expect(after.viewConfig.annotations).toEqual(before.viewConfig.annotations);
     expect(after.logical.models).toEqual(before.logical.models);
+  });
+
+  it('the 2.0.2 diagram with a merge conflict in erd_layout: an edit that moves nothing is written, the layout left for the user to resolve', () => {
+    const text = FILES[KUNDEN_BARE].replace(
+      '    addresse 40 40\n',
+      '<<<<<<< HEAD\n    addresse 40 40\n=======\n    addresse 50 50\n>>>>>>> other\n',
+    );
+    expect(parseSubjectAreaDbml(text, KUNDEN_BARE).layoutSharedBare).toBeDefined();
+    const out = edit(text, KUNDEN_BARE, (a) => { a.description = 'Changed'; });
+    expect(out).toContain("Note: 'Changed'");
+    expect(out).toContain("erd_schema_version: '8'");
+    expect(out).toContain('<<<<<<< HEAD\n    addresse 40 40\n=======\n    addresse 50 50\n>>>>>>> other\n');
   });
 
   it('a drag on the version-8 diagram rewrites only the moved line and keeps the version', () => {
