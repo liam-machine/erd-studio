@@ -205,6 +205,6 @@ describe('the Databricks probe, end to end: catalog CSV → Import SQL DDL… �
     }
     expect(found.strong + extra.strong).toBe(0);
     expect(run.review.sections.flatMap((s) => s.rows).some((r) => r.picked)).toBe(false);
-    expect(run.review.placeholder).toBe('Nothing is ticked: no table on this diagram marks a primary key, so every suggestion needs a look.');
+    expect(run.review.placeholder).toBe('Nothing is ticked: no table here has a primary key, so check each one.');
   });
 });

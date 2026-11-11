@@ -66,13 +66,13 @@ export const REVIEW_PAGE = 500;
 
 export const reviewGroupOf = (s: RelationshipSuggestion): ReviewGroup => (s.direction === 'undecided' ? 'direction' : s.band);
 
-/** Each section's heading: what it means, in plain words. */
+/** Each section's heading: what it means, in plain words, short (VS Code draws it beside the section's first row). */
 export function reviewGroupLabel(group: ReviewGroup, dbt: boolean): string {
   switch (group) {
-    case 'strong': return dbt ? 'Strong: a declared key or a dbt test backs these' : 'Strong: a declared key backs these';
-    case 'likely': return 'Likely: the names match; check each one';
-    case 'possible': return 'Possible: a weak match; most need a second look';
-    case 'direction': return 'Direction unknown: you will be asked which way each one points';
+    case 'strong': return dbt ? 'Strong: a key or a dbt test backs these' : 'Strong: a declared key backs these';
+    case 'likely': return 'Likely: the names match';
+    case 'possible': return 'Possible: a weak match';
+    case 'direction': return "Direction unknown: you'll be asked";
   }
 }
 
@@ -137,12 +137,12 @@ export function reviewRow(s: RelationshipSuggestion): ReviewRow {
   };
 }
 
-/** The placeholder: what is ticked and why, in one line. */
+/** The placeholder: what is ticked and why, in one short line (VS Code cuts a long placeholder off). */
 function reviewPlaceholder(strong: number, options: ReviewOptions): string {
-  if (strong > 0) return 'Only the strong ones are ticked. Untick any that are wrong, tick any others you want, then press OK.';
+  if (strong > 0) return 'Only strong ones are ticked: untick any that are wrong, then press OK.';
   return options.anyKeys
-    ? `Nothing is ticked: none of these is backed by a declared key${options.dbt ? ' or a dbt test' : ''}, so each needs a look.`
-    : 'Nothing is ticked: no table on this diagram marks a primary key, so every suggestion needs a look.';
+    ? 'Nothing is ticked: none is certain enough, so check each one.'
+    : 'Nothing is ticked: no table here has a primary key, so check each one.';
 }
 
 /**

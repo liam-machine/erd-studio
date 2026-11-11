@@ -80,13 +80,13 @@ describe('buildSuggestionReview: sections, ticks and words', () => {
     expect(review.title).toBe('Suggested relationships for sales');
     expect(review.sections.map((x) => x.label)).toEqual([
       'Strong: a declared key backs these',
-      'Likely: the names match; check each one',
-      'Possible: a weak match; most need a second look',
-      'Direction unknown: you will be asked which way each one points',
+      'Likely: the names match',
+      'Possible: a weak match',
+      "Direction unknown: you'll be asked",
     ]);
     const rows = review.sections.flatMap((x) => x.rows);
     expect(rows.filter((r) => r.picked).map((r) => r.label)).toEqual(['fct_sale.customer_id → dim_customer.customer_id']);
-    expect(review.placeholder).toBe('Only the strong ones are ticked. Untick any that are wrong, tick any others you want, then press OK.');
+    expect(review.placeholder).toBe('Only strong ones are ticked: untick any that are wrong, then press OK.');
     expect(review).toMatchObject({ shown: 4, total: 4, hidden: 0 });
     expect(review.moreLabel).toBeUndefined();
   });
@@ -106,17 +106,16 @@ describe('buildSuggestionReview: sections, ticks and words', () => {
     const keyless = [t('customers', [['customer_id', 'int'], ['name', 'varchar']]), t('orders', [['order_id', 'int'], ['customer_id', 'int']])];
     const review = buildSuggestionReview(computeSuggestions({ tables: keyless, relationships: [] }), { ...options, anyKeys: anyDeclaredKeys(keyless) });
     expect(review.sections.flatMap((x) => x.rows).some((r) => r.picked)).toBe(false);
-    expect(review.placeholder).toBe('Nothing is ticked: no table on this diagram marks a primary key, so every suggestion needs a look.');
+    expect(review.placeholder).toBe('Nothing is ticked: no table here has a primary key, so check each one.');
     const keyedButWeak = buildSuggestionReview([s({ id: 'a', band: 'likely' })], { ...options, anyKeys: true });
-    expect(keyedButWeak.placeholder).toBe('Nothing is ticked: none of these is backed by a declared key, so each needs a look.');
-    expect(buildSuggestionReview([s({ id: 'a', band: 'likely' })], { ...options, anyKeys: true, dbt: true }).placeholder)
-      .toBe('Nothing is ticked: none of these is backed by a declared key or a dbt test, so each needs a look.');
+    expect(keyedButWeak.placeholder).toBe('Nothing is ticked: none is certain enough, so check each one.');
+    expect(buildSuggestionReview([s({ id: 'a', band: 'likely' })], { ...options, anyKeys: true, dbt: true }).placeholder).toBe(keyedButWeak.placeholder);
   });
 
   it('dbt is named only in a dbt project', () => {
     const strongOne = [s({ id: 'a', band: 'strong' })];
     expect(buildSuggestionReview(strongOne, options).sections[0].label).not.toMatch(/dbt/);
-    expect(buildSuggestionReview(strongOne, { ...options, dbt: true }).sections[0].label).toBe('Strong: a declared key or a dbt test backs these');
+    expect(buildSuggestionReview(strongOne, { ...options, dbt: true }).sections[0].label).toBe('Strong: a key or a dbt test backs these');
     for (const text of [
       ...buildSuggestionReview(computeSuggestions({ tables: keyedStar(), relationships: [] }), options).sections.map((x) => x.label),
       buildSuggestionReview([s({ id: 'a', band: 'likely' })], options).placeholder,

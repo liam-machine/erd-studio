@@ -298,7 +298,7 @@ describe('Suggest Relationships on a YAML project (relationships kept in the YAM
     expect(rows(ui.reviews[0]).filter((r) => r.picked)).toHaveLength(6);
     expect(ui.reviews[0].sections.map((s) => s.group)).toEqual(['strong', 'likely', 'direction']);
     // A dbt project: the strong heading may name dbt's tests.
-    expect(ui.reviews[0].sections[0].label).toBe('Strong: a declared key or a dbt test backs these');
+    expect(ui.reviews[0].sections[0].label).toBe('Strong: a key or a dbt test backs these');
     expect(outcome).toEqual({ written: 6, dropped: 0 });
     expect(_appliedEdits).toHaveLength(1);
     // The FK tables' files, and the diagram (the undo anchor), as one WorkspaceEdit.
