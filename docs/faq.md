@@ -14,7 +14,7 @@ ERD Studio 2.0 starts every new project as DBML, an open format.
 
 ## Everyday
 
-**How do I add a table or a schema folder?** In a DBML project, right-click a layer or schema row in the Table Library and choose **New Table…** (the **+** on the row does the same), or right-click a layer row and choose **New Schema…**; both are in the Table Library's **…** menu and the Command Palette too. A new table goes into the layer and schema you picked, and a new schema folder is empty until you give it a table.
+**How do I add a table or a schema folder?** In a DBML project, right-click a layer or schema row in the Table Library and choose **New Table…** (the **+** on the row does the same), or right-click a layer row and choose **New Schema…**; both are in the Table Library's **…** menu and the Command Palette too. A new table goes into the layer and schema you picked. **New Schema…** asks for the schema's name and then its first table, and makes the folder with that table: a folder with no table in it is not a schema, so cancelling makes nothing.
 
 **Can two tables have the same name?** Yes, when they are in different schemas: `bqs.addresse` and `ccc.addresse` are two tables, each with its own columns and relationships, and **Import…** keeps both names. A diagram that shows both names each with its schema (`bqs.addresse`); an older ERD Studio asks you to update before it opens that diagram. Within one schema a name is used once, across every layer: a second file of the same schema and name shows as "(duplicate — ignored)" in the Table Library. A YAML/JSON project from before 2.0 keeps every name unique.
 
