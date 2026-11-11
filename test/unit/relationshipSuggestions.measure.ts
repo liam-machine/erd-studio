@@ -21,11 +21,13 @@ import {
   SUGGESTION_RULES,
   suggestRelationships,
   type RelationshipSuggestion,
+  type SuggestInput,
   type SuggestOptions,
   type SuggestionBand,
   type SuggestionRule,
 } from '../../src/services/relationshipSuggestions';
 import { importDbmlFlow, canon, loadTruth, qualifySameNames, runSample, type ImportRun, type TruthSample } from './realWorldScorecard';
+import { tableEntity } from '../../src/services/relationshipNaming';
 import { messyLakehouse, messyLakehouseHoldout, type SyntheticLink } from './relationshipSuggestions.samples';
 
 export type Condition = 'A' | 'B' | 'C';
@@ -157,13 +159,14 @@ export function messySample(holdout = false): Sample {
     from: l.from, to: l.to, pairs: [pairKey(l.from, l.fromColumn, l.to, l.toColumn)], label: `${l.from}.${l.fromColumn} → ${l.to}.${l.toColumn}`,
   }));
   const schemaOf = new Map(tables.map((t) => [t.name, t.schema ?? '']));
-  // Defensible: a bronze or silver copy's link that mirrors a truth link (same columns, the copy's own layer).
-  const truthByColumns = new Set(truth.map((l) => `${canon(l.fromColumn)}>${canon(l.toColumn)}`));
+  // Defensible: a copy's link, in the copy's own layer, that mirrors a truth link (same columns, a table of the same entity pointed at).
+  const entity = (name: string): string => tableEntity(name, schemaOf.get(name)).words.join('');
+  const truthByColumns = new Set(truth.map((l) => `${canon(l.fromColumn)}>${canon(l.toColumn)}>${entity(l.to)}`));
   const plausible = (s: ScoredSuggestion): boolean => {
     if (schemaOf.get(s.s.fromModel) !== schemaOf.get(s.s.toModel)) return false;
     // The holdout's silver `region` lookup: a silver table's region text pointing at it is defensible (decided before the first run).
     if (holdout && s.s.toModel === 'region' && s.s.pairs.length === 1 && s.s.pairs[0].fromColumn === 'region' && s.s.pairs[0].toColumn === 'region') return true;
-    return s.s.pairs.every((p) => truthByColumns.has(`${canon(p.fromColumn)}>${canon(p.toColumn)}`) || truthByColumns.has(`${canon(p.toColumn)}>${canon(p.fromColumn)}`));
+    return s.s.pairs.every((p) => truthByColumns.has(`${canon(p.fromColumn)}>${canon(p.toColumn)}>${entity(s.s.toModel)}`));
   };
   return {
     slug: holdout ? MESSY_HOLDOUT_SLUG : MESSY_SLUG, half: holdout ? 'holdout' : 'synthetic', tables, relationships: [], truth: links, outOfReach: 0,
@@ -241,10 +244,15 @@ export interface SampleResult {
   ms: number;
 }
 
-export function scoreSample(sample: Sample, condition: Condition, options: SuggestOptions = {}): SampleResult {
+export function scoreSample(
+  sample: Sample,
+  condition: Condition,
+  options: SuggestOptions = {},
+  suggester: (input: SuggestInput) => RelationshipSuggestion[] = (input) => suggestRelationships(input, options),
+): SampleResult {
   const input = applyCondition(sample, condition);
   const t0 = performance.now();
-  const suggestions = suggestRelationships(input, options);
+  const suggestions = suggester(input);
   const ms = performance.now() - t0;
 
   // Condition C: the existing links are not to be found again; recall is over what is not drawn.

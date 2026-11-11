@@ -476,9 +476,11 @@ export function suggestRelationships(input: SuggestInput, options: SuggestOption
   }
   const byColumn = new Map<string, Candidate[]>();
   for (const list of byTarget.values()) {
-    const best = Math.max(...list.map(evidenceScore));
+    // A role-playing column is a second foreign key to the same parent by design (ship_date_key beside date_key): never folded.
+    const plain = list.filter((c) => !c.role);
+    const best = Math.max(...plain.map(evidenceScore));
     for (const c of list) {
-      if (list.length > 1 && evidenceScore(c) < best) continue;
+      if (!c.role && plain.length > 1 && evidenceScore(c) < best) continue;
       const k = `${c.from.name}\u0000${c.fromCol.name}`;
       const l = byColumn.get(k);
       if (l) l.push(c); else byColumn.set(k, [c]);
@@ -496,7 +498,9 @@ export function suggestRelationships(input: SuggestInput, options: SuggestOption
     const s = toSuggestion(c, keyIndex.get(c.fromCol.canon)?.length ?? 0);
     if (!s || existing.has(s.id)) continue;
     const prior = out.get(s.id);
-    if (!prior || bandRank(s.band) < bandRank(prior.band)) out.set(s.id, s);
+    // Found from both ends: the stronger band, then the end that sorts first (whatever the table order).
+    const endKey = (x: RelationshipSuggestion): string => `${x.fromModel.toLowerCase()}\u0000${x.pairs[0].fromColumn.toLowerCase()}`;
+    if (!prior || bandRank(s.band) < bandRank(prior.band) || (s.band === prior.band && endKey(s) < endKey(prior))) out.set(s.id, s);
   }
   if (rulesOn.has('composite')) {
     for (const s of compositeSuggestions(tables, existing, typeCheck, suppress)) if (!out.has(s.id)) out.set(s.id, s);
