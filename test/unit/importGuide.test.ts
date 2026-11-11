@@ -8,7 +8,7 @@
  * Copy copies, the fixed command each button runs, and the evidence behind
  * the cards: the Databricks notebook snippet's output and a Fabric Warehouse
  * script convert, and so does realistic BigQuery DDL, read as BigQuery (no
- * longer "Not yet"); each catalog query (Databricks, PostgreSQL, MySQL) is
+ * longer "Not yet"); each catalog query (Databricks, SQL Server, PostgreSQL, MySQL) is
  * the query that was run on that engine (`test/fixtures/catalog-csv/`), and
  * its real export imports.
  */
@@ -157,9 +157,9 @@ describe('the cards', () => {
     expect(
       [...p.doc.querySelectorAll('[data-card="databricks"] [data-action="run"], [data-card="snowflake"] [data-action="run"], [data-card="sqlServer"] [data-action="run"], [data-card="postgres"] [data-action="run"], [data-card="mysql"] [data-action="run"]')]
         .map((b) => b.textContent),
-    ).toEqual(['Import the CSV…', 'Import Databricks DDL…', 'Import Snowflake DDL…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import the CSV…', 'Import MySQL DDL…', 'Import the TSV…']);
+    ).toEqual(['Import the CSV…', 'Import Databricks DDL…', 'Import Snowflake DDL…', 'Import the CSV…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import the CSV…', 'Import MySQL DDL…', 'Import the TSV…']);
     // A catalog query's button runs its card's own action (the same import, the same telemetry key): no new key.
-    for (const id of ['databricks', 'postgres', 'mysql']) {
+    for (const id of ['databricks', 'sqlServer', 'postgres', 'mysql']) {
       expect([...p.doc.querySelectorAll(`[data-card="${id}"] [data-action="run"]`)].map((b) => b.getAttribute('data-guide-action'))).toEqual([id, id]);
     }
     expect([...p.doc.querySelectorAll('[data-card="fabric"] [data-action="run"]')].map((b) => b.textContent))
@@ -237,6 +237,7 @@ describe('the Copy buttons', () => {
       databricksCatalog: catalogQuery('databricks.sql'),
       postgresCatalog: catalogQuery('postgres.sql'),
       mysqlCatalog: catalogQuery('mysql.sql'),
+      sqlServerCatalog: catalogQuery('sqlserver.sql'),
       postgresCatalogRun: 'psql -d <database> --csv -f catalog.sql -o catalog.csv',
       mysqlCatalogRun: 'mysql --batch --execute="source catalog.sql" > catalog.tsv',
     });
@@ -470,7 +471,7 @@ describe('the evidence behind the cards (the SQL importer on what each source ex
   });
 });
 
-describe('the catalog queries (one query, a download): Databricks, PostgreSQL and MySQL only, each as it was run', () => {
+describe('the catalog queries (one query, a download): Databricks, SQL Server, PostgreSQL and MySQL only, each as it was run', () => {
   const docs = fs.readFileSync(path.join(__dirname, '../../docs/import-existing-models.md'), 'utf-8');
   /** The docs' code blocks under a heading (the text between `## heading` and the next `## `). */
   const blocks = (heading: string): string[] => {
@@ -483,13 +484,15 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     expect(IMPORT_GUIDE_SNIPPETS.databricksCatalog).toBe(catalogQuery('databricks.sql'));
     expect(IMPORT_GUIDE_SNIPPETS.postgresCatalog).toBe(catalogQuery('postgres.sql'));
     expect(IMPORT_GUIDE_SNIPPETS.mysqlCatalog).toBe(catalogQuery('mysql.sql'));
+    expect(IMPORT_GUIDE_SNIPPETS.sqlServerCatalog).toBe(catalogQuery('sqlserver.sql'));
     expect(blocks('Databricks (Unity Catalog)')).toContain(catalogQuery('databricks.sql'));
+    expect(blocks('SQL Server and Azure SQL')).toEqual([catalogQuery('sqlserver.sql')]);
     expect(blocks('PostgreSQL')).toEqual(expect.arrayContaining([catalogQuery('postgres.sql'), IMPORT_GUIDE_SNIPPETS.postgresCatalogRun]));
     expect(blocks('MySQL and MariaDB')).toEqual(expect.arrayContaining([catalogQuery('mysql.sql'), IMPORT_GUIDE_SNIPPETS.mysqlCatalogRun]));
     // DuckDB is in the docs only (no card): the query wrapped in the COPY that writes the file.
     expect(blocks('DuckDB')).toEqual([`COPY (\n${catalogQuery('duckdb.sql').replace(/;$/, '')}\n) TO 'catalog.csv' (HEADER);`]);
     // Every query counts its rows, so a cut-short download is refused.
-    for (const file of ['databricks.sql', 'postgres.sql', 'mysql.sql', 'duckdb.sql']) expect(catalogQuery(file)).toMatch(/count\(\*\) OVER \(\) AS total_rows/i);
+    for (const file of ['databricks.sql', 'sqlserver.sql', 'postgres.sql', 'mysql.sql', 'duckdb.sql']) expect(catalogQuery(file)).toMatch(/count\(\*\) OVER \(\) AS total_rows/i);
   });
 
   it('sits beside each card\'s own export, in a section of its own; the other cards are as they were', () => {
@@ -498,7 +501,8 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     expect(sections('databricks')).toEqual(['One query, downloaded as CSV Recommended', 'CREATE TABLE statements, from a notebook']);
     expect(sections('postgres')).toEqual(['pg_dump Recommended', 'One query, saved as CSV']);
     expect(sections('mysql')).toEqual(['mysqldump Recommended', 'One query, saved as TSV']);
-    for (const id of ['snowflake', 'sqlServer', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
+    expect(sections('sqlServer')).toEqual(['One query, saved as CSV Recommended', 'Generate Scripts, in SQL Server Management Studio']);
+    for (const id of ['snowflake', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
     expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
     expect(p.text).not.toMatch(/DuckDB/);
   });
@@ -545,6 +549,14 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     ]);
   });
 
+  it('says honestly what each SQL Server route lacks (catalogCsvImport.sqlserver.test.ts scores both on one database)', () => {
+    const notes = [...page(BLANK).doc.querySelectorAll('[data-card="sqlServer"] .ig-note')].map((n) => n.textContent);
+    expect(notes).toEqual([
+      'CHECK constraints do not come in; Generate Scripts keeps them. A filtered unique index (one with a WHERE) is not a unique key, so it does not come in. Save the whole result: a part of it is refused, as is sqlcmd\'s output, which does not quote a comment with a comma or a line break in it.',
+      'Leave out dbo.sysdiagrams (SQL Server Management Studio\'s own diagrams) when you choose the tables, or it comes in as a table. A computed column comes in without its type.',
+    ]);
+  });
+
   it('a card with two ways to one import says which to use and why, lists it first and gives it the main button; the other says when to use it instead', () => {
     const p = page(BLANK);
     const why = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => ({
@@ -562,6 +574,12 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     expect(why('mysql')).toEqual([
       { badge: 'Recommended', why: 'Keeps the most: CHECK constraints come in too.' },
       { badge: '', why: 'Use this instead if you can run a query on the database but cannot run mysqldump.' },
+    ]);
+    // SQL Server: the query, because it runs in VS Code anywhere and keeps a computed column's type (sqlserver/probe.csv
+    // against the SMO script of the same database, catalogCsvImport.sqlserver.test.ts); the script keeps CHECK constraints.
+    expect(why('sqlServer')).toEqual([
+      { badge: 'Recommended', why: 'One query in VS Code on Windows, macOS or Linux (Generate Scripts needs SQL Server Management Studio, on Windows), and computed columns come in with their type.' },
+      { badge: '', why: 'Use this instead if you need CHECK constraints: only a script carries them.' },
     ]);
     // One recommendation at most, always first; a card whose sections are different sources (Fabric) recommends neither.
     for (const card of p.doc.querySelectorAll('.ig-card')) {
@@ -623,5 +641,8 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     const sakila = convert('mysql/sakila.tsv');
     expect([sakila.tableCount, sakila.refCount]).toEqual([16, 22]);
     expect(convert('duckdb/probe.csv').tableCount).toBe(12);
+    const sqlServer = convert('sqlserver/probe.csv');
+    expect([sqlServer.tableCount, sqlServer.refCount]).toEqual([12, 14]);
+    expect(sqlServer.dbml).toContain('Ref: "sales"."shipment_line".("ord_id", "ln_no") > "sales"."order_line".("order_id", "line_no")');
   });
 });

@@ -1,0 +1,76 @@
+table_schema,table_name,table_type,table_comment,column_name,ordinal_position,data_type,is_nullable,column_default,column_comment,is_identity,is_primary_key,pk_ordinal,unique_constraint_name,fk_constraint_name,fk_ordinal,fk_table_schema,fk_table,fk_column,total_rows
+ref,country,BASE TABLE,NULL,country_code,1,char(2),NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+ref,country,BASE TABLE,NULL,name,2,nvarchar(50),NO,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+ref,currency,BASE TABLE,NULL,currency_code,1,char(3),NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+ref,currency,BASE TABLE,NULL,name,2,varchar(50),NO,NULL,NULL,NO,NO,NULL,currency_name_ux,NULL,NULL,NULL,NULL,NULL,63
+ref,currency,BASE TABLE,NULL,minor_units,3,smallint,NO,2,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+ref,exchange_rate,BASE TABLE,NULL,from_currency,1,char(3),NO,NULL,NULL,NO,YES,1,NULL,exchange_rate_from_fk,1,ref,currency,currency_code,63
+ref,exchange_rate,BASE TABLE,NULL,to_currency,2,char(3),NO,NULL,NULL,NO,YES,2,NULL,exchange_rate_to_fk,1,ref,currency,currency_code,63
+ref,exchange_rate,BASE TABLE,NULL,rate_date,3,date,NO,NULL,NULL,NO,YES,3,NULL,NULL,NULL,NULL,NULL,NULL,63
+ref,exchange_rate,BASE TABLE,NULL,rate,4,"decimal(18,4)",NO,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",logged_at,1,datetime2(3),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",actor,2,varchar(50),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",payload,3,nvarchar(max),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",is_system,4,bit,YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",at_time,5,time(7),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,audit_log,BASE TABLE,"No keys, append-only",context,6,xml,YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",customer_id,1,int,NO,NULL,NULL,YES,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",email,2,nvarchar(255),YES,NULL,"Login email, lower-cased",NO,NO,NULL,customer_email_uq,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",full_name,3,nvarchar(50),NO,NULL,"Name, as entered; ""quoted"", and
+a second line",NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",country_code,4,char(2),NO,'AU',NULL,NO,NO,NULL,NULL,customer_country_fk,1,ref,country,country_code,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",segment,5,varchar(20),YES,"'retail, small'",NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",credit_limit,6,"decimal(18,4)",YES,0,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",created_at,7,datetime2(6),NO,sysutcdatetime(),NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",phone,8,dbo.Phone,YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",external_id,9,uniqueidentifier,NO,newid(),NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",notes,10,nvarchar(max),YES,NULL,"Free text \ a back\slash, C:\temp
+and a CRLF line",NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,employee,BASE TABLE,NULL,employee_id,1,int,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,employee,BASE TABLE,NULL,full_name,2,nvarchar(50),NO,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,employee,BASE TABLE,NULL,manager_id,3,int,YES,NULL,NULL,NO,NO,NULL,NULL,employee_manager_fk,1,sales,employee,employee_id,63
+sales,loyalty_card,BASE TABLE,NULL,card_id,1,bigint,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,loyalty_card,BASE TABLE,NULL,customer_id,2,int,NO,NULL,NULL,NO,NO,NULL,loyalty_card_customer_uq,loyalty_card_customer_fk,1,sales,customer,customer_id,63
+sales,loyalty_card,BASE TABLE,NULL,issued_on,3,date,YES,"CONVERT([date],getdate())",NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_header,BASE TABLE,NULL,order_id,1,bigint,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_header,BASE TABLE,NULL,customer_id,2,int,NO,NULL,NULL,NO,NO,NULL,order_header_customer_ts_uq,order_header_customer_fk,1,sales,customer,customer_id,63
+sales,order_header,BASE TABLE,NULL,currency_code,3,char(3),NO,NULL,NULL,NO,NO,NULL,NULL,order_header_currency_fk,1,ref,currency,currency_code,63
+sales,order_header,BASE TABLE,NULL,sold_by,4,int,YES,NULL,NULL,NO,NO,NULL,NULL,order_header_sold_by_fk,1,sales,employee,employee_id,63
+sales,order_header,BASE TABLE,NULL,approved_by,5,int,YES,NULL,NULL,NO,NO,NULL,NULL,order_header_approved_by_fk,1,sales,employee,employee_id,63
+sales,order_header,BASE TABLE,NULL,order_ts,6,datetime2(6),NO,NULL,NULL,NO,NO,NULL,order_header_customer_ts_uq,NULL,NULL,NULL,NULL,NULL,63
+sales,order_header,BASE TABLE,NULL,pickup_time,7,time(0),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_line,BASE TABLE,NULL,order_id,1,bigint,NO,NULL,NULL,NO,YES,1,NULL,order_line_order_fk,1,sales,order_header,order_id,63
+sales,order_line,BASE TABLE,NULL,line_no,2,smallint,NO,NULL,NULL,NO,YES,2,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_line,BASE TABLE,NULL,product_id,3,int,NO,NULL,NULL,NO,NO,NULL,NULL,order_line_product_fk,1,sales,product,product_id,63
+sales,order_line,BASE TABLE,NULL,quantity,4,int,NO,1,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_line,BASE TABLE,NULL,amount,5,"decimal(18,4)",YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,order_line,BASE TABLE,NULL,line_total,6,"decimal(29,4)",YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,OrderNote,BASE TABLE,NULL,NoteId,1,int,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,OrderNote,BASE TABLE,NULL,order_id,2,bigint,NO,NULL,NULL,NO,NO,NULL,NULL,OrderNote_order_fk,1,sales,order_header,order_id,63
+sales,OrderNote,BASE TABLE,NULL,Note Text,3,nvarchar(max),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,OrderNote,BASE TABLE,NULL,attachment,4,varbinary(max),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,OrderNote,BASE TABLE,NULL,checksum,5,varbinary(32),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,product_id,1,int,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,sku,2,varchar(32),NO,NULL,NULL,NO,NO,NULL,product_sku_uq,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,order,3,int,YES,NULL,Sort order (reserved word),NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,Display Name,4,nvarchar(50),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,unit_price,5,"decimal(18,4)",NO,0.0000,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,legacy_code,6,varchar(10),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,product,BASE TABLE,NULL,barcode,7,varchar(20),YES,NULL,NULL,NO,NO,NULL,product_barcode_ux,NULL,NULL,NULL,NULL,NULL,63
+sales,shipment_line,BASE TABLE,NULL,shipment_id,1,bigint,NO,NULL,NULL,NO,YES,1,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,shipment_line,BASE TABLE,NULL,ln_no,2,smallint,NO,NULL,NULL,NO,NO,NULL,NULL,shipment_line_order_line_fk,2,sales,order_line,line_no,63
+sales,shipment_line,BASE TABLE,NULL,ord_id,3,bigint,NO,NULL,NULL,NO,NO,NULL,NULL,shipment_line_order_fk,1,sales,order_header,order_id,63
+sales,shipment_line,BASE TABLE,NULL,ord_id,3,bigint,NO,NULL,NULL,NO,NO,NULL,NULL,shipment_line_order_line_fk,1,sales,order_line,order_id,63
+sales,shipment_line,BASE TABLE,NULL,shipped_at,4,datetime2(6),YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,v_order_totals,VIEW,NULL,order_id,1,bigint,NO,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
+sales,v_order_totals,VIEW,NULL,total,2,"decimal(38,4)",YES,NULL,NULL,NO,NO,NULL,NULL,NULL,NULL,NULL,NULL,NULL,63
