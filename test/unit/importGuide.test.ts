@@ -29,6 +29,7 @@ import {
   IMPORT_GUIDE_INTRO,
   IMPORT_GUIDE_ORDER,
   IMPORT_GUIDE_SNIPPETS,
+  IMPORT_GUIDE_STYLE,
   IMPORT_GUIDE_SURFACES,
   IMPORT_GUIDE_SURFACE_FEATURES,
   IMPORT_GUIDE_VIEW_TYPE,
@@ -498,6 +499,15 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     for (const id of ['snowflake', 'sqlServer', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
     expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
     expect(p.text).not.toMatch(/DuckDB/);
+  });
+
+  it('a long query line scrolls inside its box: the card (a grid item) and the snippet (a flex item) may shrink, so the page never widens past the view and Copy stays on screen', () => {
+    const rule = (selector: string): string => new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`).exec(IMPORT_GUIDE_STYLE)?.[1] ?? '';
+    expect(rule('.ig-card')).toMatch(/min-width: 0;/);
+    expect(rule('.ig-snippet__code')).toMatch(/min-width: 0;/);
+    expect(rule('.ig-snippet__code')).toMatch(/overflow-x: auto;/);
+    // The catalog queries are the widest snippets the guide shows.
+    expect(Math.max(...IMPORT_GUIDE_SNIPPETS.postgresCatalog.split('\n').map((l) => l.length))).toBeGreaterThan(120);
   });
 
   it('says honestly what each Databricks route lacks', () => {

@@ -683,6 +683,8 @@ body {
 .ig__nofolder-text { margin: 0; }
 .ig__cards { display: grid; gap: 14px; margin: 20px 0 0; padding: 0; list-style: none; }
 .ig-card {
+  /* A grid item: without min-width 0 a long snippet line widens the card (and the page) past the view. */
+  min-width: 0;
   padding: 14px 16px; border-radius: 4px;
   border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
@@ -703,7 +705,8 @@ body {
 }
 .ig-snippet { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 0; }
 .ig-snippet__code {
-  flex: 1 1 auto; margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre;
+  /* A flex item: min-width 0 lets it shrink, so a long line scrolls inside it and Copy stays in view. */
+  flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre;
   font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
   border-radius: 3px; background: var(--vscode-textCodeBlock-background);
 }
