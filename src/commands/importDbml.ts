@@ -89,6 +89,7 @@ import type { SubjectAreaService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { TableLibraryService } from '../services/logicalModelService';
 import type { SemanticTable } from '../types/semantic';
+import type { TableId } from '@erd-studio/core';
 import { dirtyFiles, openOrDiskText } from '../providers/dirtyDocuments';
 import { readSubjectAreaRelationships } from './moveRelationshipsToLibrary';
 import { openTableFileAt } from './openModelFile';
@@ -250,7 +251,8 @@ export interface ImportDbmlDeps {
     TableLibraryService,
     'findTableNameIgnoringCase' | 'getTable' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable'
       | 'listTables' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder' | 'listTableFiles'>>;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache' | 'listsSchemaFolder' | 'listTableFiles'
+    | 'resolveLibraryRef' | 'tablesNamed' | 'libraryRef' | 'findTableById' | 'hasSharedNames'>>;
   /** `createDomain`'s rule for a new subject area name in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /**
@@ -515,6 +517,23 @@ async function runImportDbml(
   progress: ImportRunProgress,
 ): Promise<ImportDbmlResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, subjectAreaService, tableLibraryService } = deps;
+  /**
+   * The library table each changed table of `plan` is, where the plan read it by a reference that is not
+   * its name (another schema folder has a table of its name): saved as that table, never its namesake.
+   */
+  const changedIds = (plan: DbmlImportPlan): Map<SemanticTable, TableId> => {
+    const out = new Map<SemanticTable, TableId>();
+    for (const [model, ref] of plan.changedLibraryRefs ?? []) {
+      const found = tableLibraryService.resolveLibraryRef?.(ref);
+      if (found?.kind === 'found' && found.entry.id !== undefined) out.set(model, found.entry.id);
+    }
+    return out;
+  };
+  let changedIdsOfPlan: Map<SemanticTable, TableId> | undefined;
+  const changedSave = (model: SemanticTable): { model: SemanticTable; from?: TableId } => {
+    const from = changedIdsOfPlan?.get(model);
+    return from !== undefined ? { model, from } : { model };
+  };
   const source = deps.source ?? 'file';
   const counts = IMPORT_SOURCE_TELEMETRY[source];
   const title = IMPORT_TITLES[source];
@@ -768,7 +787,8 @@ async function runImportDbml(
       // A DBML diagram keeps no copy: every relationship goes to the library.
       diagramCopies,
       // A DBML diagram holds no relationships (D5): one the library cannot take is named, not dropped silently.
-      ...(dbml ? { diagramHoldsNoRelationships: true } : {}),
+      // Its tables are their schema folders and names: same-named tables of two schemas keep their names.
+      ...(dbml ? { diagramHoldsNoRelationships: true, schemaScopedNames: true } : {}),
       sameName: policy,
     });
     plan = planWith(sameName ?? 'auto');
@@ -797,14 +817,18 @@ async function runImportDbml(
         return undefined;
       }
     }
+    changedIdsOfPlan = changedIds(plan);
     // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
     // Each new table keeps the schema the file gives it (its qualifier), as the layer's folder spells it (§2.4).
     const planWrites = dbml && tableLibraryService.planTableWrites
-      ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true, schemaFromSource: true })
+      // New tables and changed library tables are told apart (D-4): a new one is never an edit of a namesake.
+      ? tableLibraryService.planTableWrites({ save: [...plan.newTables.map((model) => ({ model, create: true })), ...plan.changedLibraryTables.map((model) => changedSave(model))] }, folder, { dbml: true, schemaFromSource: true })
       : undefined;
     planned = (planWrites?.writes ?? []).map((w) => w.path);
     if (planWrites?.plan) {
-      respelled = respelledSchemas(plan.newTables, (name) => planWrites.plan!.resolveTable(name)?.reference)
+      // A name two of the new tables share is found by its `<schema>.<name>`.
+      respelled = respelledSchemas(plan.newTables, (name, schema) => (planWrites.plan!.resolveTable(name)
+        ?? (schema ? planWrites.plan!.resolveTable(`${schema}.${name}`) : undefined))?.reference)
         // A folder the layer does not list yet is made by this import, for the file's first spelling.
         .map((r) => (tableLibraryService.listsSchemaFolder?.(chosenLayer, r.to) ?? true ? r : { ...r, newFolder: true }));
     }
@@ -1035,6 +1059,7 @@ async function runImportDbml(
       folder,
       ...(dbml ? { schemaFromSource: true } : {}),
       changedTables: plan.changedLibraryTables,
+      ...(changedIds(plan).size > 0 ? { changedTableIds: changedIds(plan) } : {}),
       documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
       // The source's positions and sticky-note boxes go where the project keeps a new diagram's layout.
       document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
@@ -1212,11 +1237,11 @@ export function dbmlImportRefusal(plan: DbmlImportPlan, tableStorage: (name: str
  */
 export function respelledSchemas(
   tables: readonly SemanticTable[],
-  referenceOf: (name: string) => string | undefined,
+  referenceOf: (name: string, schema?: string) => string | undefined,
 ): Array<{ table: string; from: string; to: string }> {
   const out: Array<{ table: string; from: string; to: string }> = [];
   for (const table of tables) {
-    const reference = referenceOf(table.name);
+    const reference = referenceOf(table.name, table.schema);
     if (!table.schema || reference === undefined) continue;
     const dot = reference.lastIndexOf('.');
     const written = dot > 0 ? reference.slice(0, dot).replace(/^"(.*)"$/, '$1') : undefined;
@@ -1290,27 +1315,51 @@ function importLibrary(deps: Pick<ImportDbmlDeps, 'tableLibraryService' | 'layer
   const { tableLibraryService, layerService } = deps;
   let homes: Map<string, TableHome> | undefined;
   let byOriginal: Map<string, string[]> | undefined;
+  /**
+   * The table `n` names: by its library reference where two schema folders share its name
+   * (`<schema>.<name>`, as {@link DbmlImportLibrary.tablesNamed} gives it), else by its name.
+   */
+  const tableOf = (n: string): TableId | string => {
+    const found = tableLibraryService.resolveLibraryRef?.(n);
+    return found?.kind === 'found' && found.entry.id !== undefined && found.entry.name.toLowerCase() !== n.toLowerCase() ? found.entry.id : n;
+  };
+  const listed = tableLibraryService.listTableFiles?.bind(tableLibraryService);
   return {
     findTableName: (n) => tableLibraryService.findTableNameIgnoringCase(n),
-    getTable: (n) => tableLibraryService.getTable(n),
+    getTable: (n) => tableLibraryService.getTable(tableOf(n)),
     layerOf: (n) => {
-      homes ??= tableHomesOf(tableLibraryService.listTableFiles?.() ?? []);
-      const home = homes.get(n.toLowerCase());
-      if (!home) return undefined;
-      return { id: home.layer, label: layerService.getAllLayers().find((l) => l.id === home.layer)?.label ?? home.layer };
+      const table = tableOf(n);
+      const layer = typeof table === 'string'
+        ? (homes ??= tableHomesOf(listed?.() ?? [])).get(n.toLowerCase())?.layer
+        : tableLibraryService.findTableById?.(table)?.layer;
+      if (layer === undefined) return undefined;
+      return { id: layer, label: layerService.getAllLayers().find((l) => l.id === layer)?.label ?? layer };
     },
     earlierCopiesOf: (name) => {
       if (!byOriginal) {
         byOriginal = new Map();
-        for (const table of tableLibraryService.listTables()) {
+        // Each library table by its reference (its name, or `<schema>.<name>` where another schema folder has it).
+        const tables: Array<{ table: SemanticTable; ref: string }> = listed && tableLibraryService.libraryRef && tableLibraryService.hasSharedNames?.()
+          ? listed().filter((e) => !e.shadowedBy).flatMap((e) => {
+            const table = tableLibraryService.getTable(e.id ?? e.name);
+            return table ? [{ table, ref: (e.id ? tableLibraryService.libraryRef!(e.id) : undefined) ?? table.name }] : [];
+          })
+          : tableLibraryService.listTables().map((table) => ({ table, ref: table.name }));
+        for (const { table, ref } of tables) {
           const dbmlMeta = table.meta?.[DBML_META_KEY];
           const original = dbmlMeta && typeof dbmlMeta === 'object' && !Array.isArray(dbmlMeta) ? dbmlMeta.name : undefined;
           for (const key of new Set([table.alias, typeof original === 'string' ? original : undefined].filter((k): k is string => !!k).map((k) => k.toLowerCase()))) {
-            byOriginal.set(key, [...(byOriginal.get(key) ?? []), table.name]);
+            byOriginal.set(key, [...(byOriginal.get(key) ?? []), ref]);
           }
         }
       }
       return byOriginal.get(name.toLowerCase()) ?? [];
     },
+    ...(tableLibraryService.tablesNamed && tableLibraryService.libraryRef ? {
+      tablesNamed: (name: string) => tableLibraryService.tablesNamed!(name).map((e) => {
+        const id = e.id ?? { schema: e.storage === 'dbml' ? e.folder : '', name: e.name };
+        return { schema: id.schema, name: e.name, ref: tableLibraryService.libraryRef!(id) ?? e.name };
+      }),
+    } : {}),
   };
 }

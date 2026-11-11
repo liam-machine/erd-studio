@@ -319,7 +319,8 @@ export async function moveDbmlTables(
   try {
     planned = planDbmlTableMoves({
       tableLibraryService: deps.tableLibraryService,
-      moves: moving.map((t) => ({ name: t.name, toLayer: to.layer, toSchema: to.schema })),
+      // Each table by its file: never a namesake in another schema folder.
+      moves: moving.map((t) => ({ name: t.name, filePath: t.filePath, toLayer: to.layer, toSchema: to.schema })),
       // Every DBML diagram, in a layer folder layers.json lists or not.
       diagrams: deps.tableLibraryService.listDbmlDiagrams(),
       readText: deps.readText,

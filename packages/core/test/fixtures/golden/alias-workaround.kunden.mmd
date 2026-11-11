@@ -1,0 +1,54 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: kunden (layer bronze, logical stage)
+%% Description: Customers and addresses from both source systems
+
+  %% Table addresse
+  %%   schema: bqs
+  %%   description: Addresses from the BQS system
+  "addresse" {
+    INT id PK
+    VARCHAR strasse
+    VARCHAR ort
+  }
+
+  %% Table kunde
+  %%   schema: bqs
+  %%   description: Customers from the BQS system
+  "kunde" {
+    INT id PK
+    VARCHAR name
+    INT addresse_id FK
+  }
+
+  %% Table ccc_addresse
+  %%   schema: ccc
+  %%   alias: addresse
+  %%   description: Addresses from the CCC system
+  "ccc_addresse" {
+    INT id PK, FK
+    VARCHAR street
+    VARCHAR city
+    VARCHAR postcode
+  }
+
+  %% Table ccc_kunde
+  %%   schema: ccc
+  %%   alias: kunde
+  %%   description: Customers from the CCC system
+  "ccc_kunde" {
+    INT id PK
+    VARCHAR full_name
+    INT addresse_id FK
+  }
+
+  %% kunde.addresse_id -> addresse.id, many-to-one
+  "kunde" }o--|| "addresse" : "addresse_id"
+  %% ccc_addresse.id -> addresse.id, many-to-one
+  "ccc_addresse" }o--|| "addresse" : "id"
+  %% ccc_kunde.addresse_id -> ccc_addresse.id, many-to-one
+  "ccc_kunde" }o--|| "ccc_addresse" : "addresse_id"
+
+  %% Sticky note 1 (linked to ccc_addresse): ccc_addresse is the warehouse table ccc.addresse

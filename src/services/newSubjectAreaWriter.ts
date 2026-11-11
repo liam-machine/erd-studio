@@ -31,8 +31,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { diagramPathOf, subjectAreaStorageOf } from '@erd-studio/core';
-import type { Annotation, NodePosition } from '@erd-studio/core';
+import { assignTableRefs, dbmlTreePathOf, diagramPathOf, rekeySubjectArea, subjectAreaStorageOf, tableIdOfPath } from '@erd-studio/core';
+import type { Annotation, NodePosition, TableId } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import { renderNewSubjectAreaDbml } from './dbmlWriters';
 
@@ -72,6 +72,11 @@ export interface NewSubjectAreaWrite {
    * (it was saved with them).
    */
   changedTables: readonly SemanticTable[];
+  /**
+   * The table each of {@link changedTables} is, where its name alone cannot
+   * say (another schema folder has a table of its name): saved as that table.
+   */
+  changedTableIds?: ReadonlyMap<SemanticTable, TableId>;
   /**
    * The subject area: a JSON file's text, or (for a `.dbml` `domainPath`)
    * the v5 object a DBML diagram is rendered from (`domain`, `description`,
@@ -173,7 +178,8 @@ export async function writeNewSubjectArea(
     if (dbmlNew.length > 0 || dbmlChanged.length > 0) {
       const batch = tableLibraryService.applyDbmlBatch!({
         ops: {
-          save: [...dbmlNew, ...dbmlChanged].map((model) => ({ model })),
+          // New tables and changed ones are told apart (D-4): a new one is never an edit of a namesake.
+          save: [...dbmlNew.map((model) => ({ model, create: true })), ...dbmlChanged.map((model) => ({ model }))],
           ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(write.folder) } : {}),
         },
         ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
@@ -272,30 +278,55 @@ async function writeNewDbmlSubjectArea(
     // New tables go in the diagram's layer, its name as the schema (§2.4), unless they bring their own.
     const layer = diagramPathOf(rel)?.layer ?? write.folder;
     const saves = [
-      ...write.newTables.map((model) => ({ model })),
-      ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => ({ model })),
+      ...write.newTables.map((model) => ({ model, create: true })),
+      ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => {
+        const from = write.changedTableIds?.get(model);
+        return from !== undefined ? { model, from } : { model };
+      }),
     ];
     const diagramWrites = (plan: DbmlLibraryWritePlan): FileWrite[] => {
       planned = true;
       const doc = write.document?.() ?? {};
       const logical = (doc.logical ?? {}) as { models?: unknown };
       const names = Array.isArray(logical.models) ? (logical.models as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+      // A table this plan created is the member of its name (or `<schema>.<name>`), not a namesake the
+      // library already had in another schema folder: found by the file the plan made.
+      const createdAt = new Map<string, string>();
+      plan.createdTables.forEach((created, i) => {
+        const at = plan.createdTablePaths?.[i];
+        if (at !== undefined) createdAt.set(created.toLowerCase(), createdAt.has(created.toLowerCase()) ? '' : at);
+      });
+      const tableOf = (name: string): ReturnType<DbmlLibraryWritePlan['resolveTable']> => {
+        const table = plan.resolveTable(name);
+        const made = createdAt.get(name.toLowerCase());
+        if (!made || table?.path === made) return table;
+        const schema = dbmlTreePathOf(made)?.schema;
+        const own = schema !== undefined ? plan.resolveTable(`${schema}.${name}`) : undefined;
+        return own?.path === made ? own : table;
+      };
       // A DBML diagram's members are DBML tables (D20): a `use` line cannot point at a `.yml`.
       const members = names.map((name) => {
-        const table = plan.resolveTable(name);
+        const table = tableOf(name);
         if (!table || table.storage !== 'dbml') {
           throw new DbmlEditRefused(rel, `"${name}" is a YAML table, and a DBML diagram can only hold DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`);
         }
         return { name: table.name, reference: table.reference, path: table.path };
       });
-      const view = (doc.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
+      // The document names a table by the plan's name for it (`<schema>.<name>` where the library has its
+      // name in another schema folder); the diagram, by what it calls its own members: its name, unless
+      // another member shares it. Positions and sticky links follow.
+      const diagramRefs = assignTableRefs(members.map((m): TableId => tableIdOfPath(m.path) ?? { schema: '', name: m.name }));
+      const respelled = new Map(names.flatMap((name, i) => (name !== diagramRefs[i] ? [[name, diagramRefs[i]] as const] : [])));
+      const shown = respelled.size > 0 ? rekeySubjectArea(doc, respelled) : doc;
+      const view = (shown.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
       const text = renderNewSubjectAreaDbml({
         filePath: rel,
         domain: typeof doc.domain === 'string' ? doc.domain : path.basename(domainPath, '.dbml'),
         ...(typeof doc.description === 'string' ? { description: doc.description } : {}),
         ...(typeof doc.modelFolder === 'string' ? { modelFolder: doc.modelFolder } : {}),
         members,
-        relationshipsFiles: plan.relationshipsImportsFor(members.map((m) => m.name), []),
+        // By each member's identity (its file), so a namesake's Refs in another schema folder never come along.
+        relationshipsFiles: plan.relationshipsImportsFor(members.map((m) => (plan.identities ? tableIdOfPath(m.path) : undefined) ?? m.name), []),
         annotations: Array.isArray(view.annotations) ? view.annotations : [],
         ...(view.positions ? { positions: view.positions } : {}),
       });

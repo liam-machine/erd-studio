@@ -25,6 +25,16 @@ describe('semanticReadmeText', () => {
     expect(text.endsWith('Check the files with `erd-studio doctor`.\n')).toBe(true);
   });
 
+  it('says a table is its schema and name, so two schemas may each hold a table of one name', () => {
+    const text = semanticReadmeText();
+    expect(text).toContain([
+      '- A table is its schema and name: two schema folders may each hold a table of one name',
+      '  (tables/crm/customer.dbml, tables/erp/customer.dbml), but a schema holds a name once, across',
+      '  all layers.',
+    ].join('\n'));
+    expect(text).not.toContain('unique across the whole project');
+  });
+
   it('says what fields.yml is, in one item, and that it is optional (context fields)', () => {
     const text = semanticReadmeText();
     expect(text).toContain([

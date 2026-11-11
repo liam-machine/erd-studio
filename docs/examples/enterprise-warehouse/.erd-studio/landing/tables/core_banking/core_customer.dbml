@@ -1,5 +1,5 @@
-// Landing has one schema per source system, so names carry the source too: every table name
-// is unique across the whole project (core_customer, cards_account, …).
+// Landing has one schema per source system. This example also puts the source in each name
+// (core_customer, cards_account, …), so every name is unique.
 Table core_banking.core_customer [owner: 'data-engineering'] {
   Note: 'Customers as the core banking system sends them.'
 

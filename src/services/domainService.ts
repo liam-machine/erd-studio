@@ -29,21 +29,25 @@ import {
   linkKey,
   parseSubjectAreaJson,
   subjectAreaStorageOf,
+  tableNameOf,
   toLogicalStage,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
 import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
 import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
-import type { DbmlSubjectAreaReading, DbtKeyIndex, LoaderWarningCode, SubjectAreaFormat } from '@erd-studio/core';
+import { DiagramMemberTable } from './diagramMemberTable';
+import type { DbmlSubjectAreaReading, DbtKeyIndex, DiagramNamedTable, LoaderWarningCode, SubjectAreaFormat } from '@erd-studio/core';
 import type { SubjectAreaSummary, SemanticSubjectArea, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
-import type { CompositeForeignKey, ManifestData } from '../types/manifest';
+import type { CompositeForeignKey, ManifestData, ManifestModelInfo } from '../types/manifest';
 import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { TableFileEntry, TableLibraryService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
+import type { TableId } from '../types/tableId';
+import { sameName } from '../types/naming';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
 import { log } from './logger';
 
@@ -161,7 +165,10 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
  * relationships files it imports. The canvas draws only these, as core does.
  */
 interface DbmlDiagramView {
+  /** Each member's `use` path, by lower-case reference (core's `uses[].ref`: its name, or `<schema>.<name>` for a shared name). */
   memberPaths: ReadonlyMap<string, string>;
+  /** The members whose reference is not their name (two members share it): lower-case reference -> name. */
+  tableNames: ReadonlyMap<string, string>;
   /** The table folders its `use` lines name, relative to the semantic dir, byte-sorted (core's `useTableDirs`). */
   useTableDirs: readonly string[];
   imports: ReadonlySet<string>;
@@ -172,10 +179,33 @@ interface DbmlDiagramView {
   unlinked: ReadonlySet<string>;
   /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
   drift: Set<string>;
-  /** Filled while reading: each DBML member's layer, from the file it was read from (by lower-case name). */
+  /** Filled while reading: each DBML member's layer, from the file it was read from (by lower-case reference). */
   memberLayers?: Map<string, string>;
-  /** The library's table files by resolved path (and lower-cased), listed once per diagram read on first use. */
-  listing?: { byPath: Map<string, TableFileEntry>; byLowerPath: Map<string, TableFileEntry> };
+  /** The library's table files by resolved path (and lower-cased), and by lower-case name in index order, listed once per diagram read on first use. */
+  listing?: { byPath: Map<string, TableFileEntry>; byLowerPath: Map<string, TableFileEntry>; byName: Map<string, TableFileEntry[]> };
+  /** The diagram's members (the diagram boundary): each reference with the table file its `use` line reads. */
+  members: DiagramMemberTable;
+  /**
+   * Filled while reading: the table file each DBML member was read from (by
+   * lower-case reference), null for one drawn missing. A member's error is
+   * that file's, never the library's first file of its name.
+   */
+  memberFiles: Map<string, string | null>;
+  /** Each member's `use` path, resolved and lower-cased, → the lower-case references that name it; built on first use. */
+  membersByPath?: Map<string, string[]>;
+}
+
+/**
+ * A DBML member's relationships, told apart by identity: `ref` is what the
+ * diagram calls it, `owner` the table file it was read from (its identity:
+ * the library's holders are asked by it), and `diagramRefOf` turns a library
+ * reference (a relationship's other end) into the diagram's.
+ */
+interface MemberRelationshipScope {
+  ref: string;
+  owner?: TableId;
+  /** The diagram reference a relationship end is drawn under; undefined for an end that names no one table (a bare name two schema folders share). */
+  diagramRefOf: (libraryRef: string) => string | undefined;
 }
 
 /** `view`'s listing of the library's table files, made on first use: one listing per diagram read. */
@@ -183,12 +213,17 @@ function listingOf(library: TableLibraryService, view: DbmlDiagramView): NonNull
   if (!view.listing) {
     const byPath = new Map<string, TableFileEntry>();
     const byLowerPath = new Map<string, TableFileEntry>();
+    const byName = new Map<string, TableFileEntry[]>();
     for (const entry of library.listTableFiles()) {
       const resolved = path.resolve(entry.filePath);
       byPath.set(resolved, entry);
       byLowerPath.set(resolved.toLowerCase(), entry);
+      const key = entry.name.trim().toLowerCase();
+      const named = byName.get(key);
+      if (named) named.push(entry);
+      else byName.set(key, [entry]);
     }
-    view.listing = { byPath, byLowerPath };
+    view.listing = { byPath, byLowerPath, byName };
   }
   return view.listing;
 }
@@ -213,6 +248,10 @@ export class SubjectAreaService {
   private readonly memberLayers = new Map<string, ReadonlyMap<string, string>>();
   /** The last successful read of each diagram: the fixed codes of the warnings it gave (path → codes; telemetry only). */
   private readonly warningCodes = new Map<string, ReadonlySet<LoaderWarningCode>>();
+  /** Each DBML diagram read's members' table files, by the UnifiedSubjectArea the read returned (lower-case reference -> file, null for one drawn missing). */
+  private readonly memberFilesByRead = new WeakMap<UnifiedSubjectArea, ReadonlyMap<string, string | null>>();
+  /** The last read of each DBML diagram: the table file each member was read from (path → lower-case reference → file, null for one drawn missing). */
+  private readonly lastMemberFiles = new Map<string, ReadonlyMap<string, string | null>>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -377,7 +416,8 @@ export class SubjectAreaService {
       reading.warnings.forEach((_w, i) => codes.add(reading.warningCodes?.[i] ?? 'other'));
       const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
       const view: DbmlDiagramView = {
-        memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
+        memberPaths: new Map((reading.uses ?? []).map((u) => [(u.ref ?? u.name).toLowerCase(), u.resolved])),
+        tableNames: new Map((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref !== u.name).map((u) => [u.ref!.toLowerCase(), u.name])),
         useTableDirs: reading.useTableDirs ?? [],
         imports: new Set(reading.relationshipsUses),
         unlinked: new Set((reading.unlinked ?? [])
@@ -385,9 +425,22 @@ export class SubjectAreaService {
           .map((n) => n.toLowerCase())),
         drift: new Set(),
         memberLayers: new Map(),
+        members: DiagramMemberTable.fromUses(reading.uses ?? [], reading.unlinked ?? []),
+        memberFiles: new Map(),
       };
       const unified = this.buildUnified(obj, format, filePath, path.basename(filePath, '.dbml'), { ...options, dbml: view, codes });
+      // A member named `<schema>.<name>` keeps its own name beside it, a placeholder for a missing one too (as core's loader names it).
+      if (view.tableNames.size > 0) {
+        unified.logical.models = unified.logical.models.map((m) => {
+          const tableName = view.tableNames.get(m.name.toLowerCase());
+          if (tableName === undefined || tableNameOf(m) !== undefined) return m;
+          const { name, ...rest } = m;
+          return { name, tableName, ...rest } as DiagramNamedTable;
+        });
+      }
       this.memberLayers.set(path.resolve(filePath), view.memberLayers!);
+      this.memberFilesByRead.set(unified, view.memberFiles);
+      this.lastMemberFiles.set(path.resolve(filePath), view.memberFiles);
       const drift = [...view.drift].sort();
       this.importDrift.set(path.resolve(filePath), drift);
       for (const file of drift) log.warn(`[DomainService] ${filePath}: ${unimportedRelationshipsMessage(file)}`);
@@ -451,9 +504,10 @@ export class SubjectAreaService {
     const raw = text ?? fs.readFileSync(filePath, 'utf-8');
     const reading = readDbmlDiagram(raw, filePath);
     for (const warning of reading.warnings) log.warn(`[DomainService] ${filePath}: ${warning}`);
-    // Only a library that holds a YAML table can resolve a member to one.
+    // Only a library that holds a YAML table can resolve a member to one (by its name, never `<schema>.<name>`).
     if (this.tableLibraryService?.hasYamlTableFiles()) {
-      for (const name of new Set(reading.members)) {
+      const names = reading.uses ? [...reading.uses.map((u) => u.name), ...(reading.unlinked ?? [])] : reading.members;
+      for (const name of new Set(names)) {
         if (this.tableLibraryService.tableStorage(name) === 'yaml') {
           log.warn(
             `[DomainService] Table "${name}" is a YAML table (${this.tableLibraryService.tableLibraryFile(name)}); the DBML diagram shows it, ` +
@@ -485,6 +539,17 @@ export class SubjectAreaService {
     return this.memberLayers.get(path.resolve(filePath));
   }
 
+  /**
+   * Each member of the DBML diagram `filePath`, as its last read found it: the
+   * table file it was read from (its `use` path, the stale-path fallback of
+   * owner decision B, or, for a member with no `use` line, the library's file
+   * of its name), by lower-case reference; null for one drawn missing.
+   * Undefined when it was never read or is not a DBML diagram.
+   */
+  dbmlMemberFiles(filePath: string): ReadonlyMap<string, string | null> | undefined {
+    return this.lastMemberFiles.get(path.resolve(filePath));
+  }
+
   /** `buildUnifiedSubjectArea` with this host's library and layers. */
   private buildUnified(
     obj: Record<string, unknown>,
@@ -496,8 +561,9 @@ export class SubjectAreaService {
     // The diagram's own tables are read with only the relationships they own
     // worked out (`readingTables`), not an attach over the whole library.
     const library = this.tableLibraryService;
+    const names = tableNamesOf(obj).map((ref) => bareNameOf(ref, options.dbml));
     return library
-      ? library.readingTables(tableNamesOf(obj), () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
+      ? library.readingTables(names, () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
       : this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options);
   }
 
@@ -511,6 +577,10 @@ export class SubjectAreaService {
     const view = options.dbml;
     const library = this.tableLibraryService;
     const members = new Set(tableNamesOf(obj).map((n) => n.toLowerCase()));
+    // Where two schema folders share a name, a member's relationships come from
+    // the library under its library reference and are drawn under the diagram's;
+    // while none do, every reference is the table's name.
+    const scope = library && view && library.hasSharedNames?.() === true ? this.diagramScope(library, view) : undefined;
     return buildUnifiedSubjectArea(obj, format, {
       filePath,
       domainNameFallback,
@@ -519,14 +589,24 @@ export class SubjectAreaService {
       layers: this.layerService,
       getModel: library
         ? (name) => {
-          if (!view) return library.getTable(name);
-          const model = this.dbmlMember(library, name, view);
-          return model ? this.importedRelationshipsOnly(library, model, view, members) : null;
+          if (!view) return this.legacyNamed(library, library.getTable(name));
+          const model = scope ? scope.read(name) : this.dbmlMember(library, name, view);
+          const tableName = model ? tableNameOf(model) : undefined;
+          if (!model || tableName === undefined) return model ? this.importedRelationshipsOnly(library, model, view, members, scope?.of(name)) : null;
+          // The library knows the table by its name: its relationships are worked out under that name.
+          const { tableName: _ref, ...own } = model as DiagramNamedTable;
+          const named: DiagramNamedTable = { ...this.importedRelationshipsOnly(library, { ...own, name: tableName }, view, members, scope?.of(name)), name: model.name, tableName };
+          return named;
         }
         : undefined,
       getModelError: this.tableLibraryService
         ? (name) => {
-          const error = this.tableLibraryService!.getTableFileError(name);
+          // A member's error is the error of the file it was read from: for one of two members
+          // of one name (or any member, told apart by identity), never the library's first file of its name.
+          const read = view && (scope || bareNameOf(name, view) !== name) ? view.memberFiles.get(name.toLowerCase()) : undefined;
+          const error = read === undefined
+            ? this.tableLibraryService!.getTableFileError(bareNameOf(name, view))
+            : read === null ? null : this.tableLibraryService!.getTableFileErrorAt(read, bareNameOf(name, view));
           return error
             ? {
               kind: error.kind,
@@ -556,19 +636,27 @@ export class SubjectAreaService {
    * cannot list folders: `<dir>/<name>.dbml` in each table folder the
    * diagram's `use` lines name, then a YAML table by name. A `.dbml` table
    * anywhere else is drawn missing, as core draws it, until the next edit
-   * gives it a `use` line.
+   * gives it a `use` line. A member whose `use` line names no listed file
+   * is looked for as core's finder looks ({@link staleMemberFile}). The file
+   * it was read from is remembered in `view.memberFiles`.
    */
-  private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
+  private dbmlMember(library: TableLibraryService, ref: string, view: DbmlDiagramView): SemanticTable | null {
+    // Two members of one name are named `<schema>.<name>` (core's reference): each is read by its
+    // name from its own `use` path, and handed on under its reference with its name beside it.
+    const name = bareNameOf(ref, view);
     // The layer of the file the member is read from, for the canvas's badge (core reads it the
     // same way): a file that cannot be read is still in its layer, and drawn there with its error.
     const readFrom = (file: string | null, table: SemanticTable | null): SemanticTable | null => {
+      view.memberFiles.set(ref.toLowerCase(), file);
       if (file !== null && view.memberLayers) {
         const entry = listingOf(library, view).byPath.get(path.resolve(file));
-        if (entry?.layer !== undefined) view.memberLayers.set(name.toLowerCase(), entry.layer);
+        if (entry?.layer !== undefined) view.memberLayers.set(ref.toLowerCase(), entry.layer);
       }
-      return table;
+      if (!table || name === ref) return table;
+      const named: DiagramNamedTable = { ...table, name: ref, tableName: table.name };
+      return named;
     };
-    const usePath = view.memberPaths.get(name.toLowerCase());
+    const usePath = view.memberPaths.get(ref.toLowerCase());
     if (usePath === undefined) {
       const listed = listingOf(library, view).byLowerPath;
       for (const dir of view.useTableDirs) {
@@ -578,7 +666,14 @@ export class SubjectAreaService {
         const byName = library.findTableFile(name);
         return readFrom(file, byName !== null && path.resolve(byName) === path.resolve(file) ? library.getTable(name) : library.getTableAt(file, name));
       }
-      return library.tableStorage(name) === 'dbml' ? null : library.getTable(name);
+      if (library.tableStorage(name) === 'dbml') return readFrom(null, null);
+      let file: string | null;
+      try {
+        file = library.findTableFile(name);
+      } catch {
+        file = null;
+      }
+      return readFrom(file, library.getTable(name));
     }
     if (!usePath.startsWith('../')) {
       const file = library.semanticAbsolute(usePath);
@@ -588,7 +683,132 @@ export class SubjectAreaService {
         return readFrom(file, library.getTableAt(file, name));
       }
     }
-    return readFrom(library.findTableFile(name), library.getTable(name));
+    const byName = library.findTableFile(name);
+    const found = this.staleMemberFile(library, ref, name, usePath, view, byName);
+    if (found === null) return readFrom(null, null);
+    return readFrom(found, byName !== null && path.resolve(found) === path.resolve(byName) ? library.getTable(name) : library.getTableAt(found, name));
+  }
+
+  /**
+   * The file a member is read from when its `use` line names no listed table
+   * file (or the file the library picks by name: the usual case), by owner
+   * decision B (D-6), as core's `dbmlTableFinder` answers with the line's
+   * schema as its hint: a file of the name in the line's schema folder (its
+   * layer's first), else, in another schema folder, only the one table of
+   * that name in the listing (a table moved to another schema), never one
+   * of several (it would be another table that happens to share the name).
+   * A file another member's `use` line points at is that member's: a member
+   * whose own file is gone is drawn missing (null), as core draws it, never
+   * as its namesake in another schema folder. A YAML table keeps the
+   * library's answer by name.
+   */
+  private staleMemberFile(library: TableLibraryService, ref: string, name: string, usePath: string, view: DbmlDiagramView, byName: string | null): string | null {
+    if (byName === null) return null;
+    let found: string | null = byName;
+    // The usual case, the library's file of the name is the member's own: nothing to look for.
+    const own = path.resolve(byName).toLowerCase() === path.resolve(library.semanticAbsolute(usePath)).toLowerCase();
+    if (!own && path.extname(byName).toLowerCase() === '.dbml') {
+      const named = (listingOf(library, view).byName.get(name.trim().toLowerCase()) ?? []).filter((e) => e.storage === 'dbml');
+      const use = view.members.resolve(ref);
+      const hint = use?.id;
+      const schema = (hint?.schema ?? use?.qualifier ?? '').toLowerCase();
+      const sameSchema = schema === '' ? [] : named.filter((e) => e.folder.toLowerCase() === schema);
+      if (sameSchema.length > 0) {
+        const sameLayer = sameSchema.filter((e) => e.layer === hint?.layer);
+        found = (sameLayer[0] ?? sameSchema[0]).filePath;
+      } else if (schema !== '' && new Set(named.map((e) => e.folder.toLowerCase())).size > 1) {
+        found = null;
+      }
+      if (found !== null && path.resolve(found) !== path.resolve(library.semanticAbsolute(usePath))) {
+        log.warn(`[DomainService] Table "${name}" is not at its use line's path (${usePath}); it was read from ${library.libraryRelativePath(found)}`);
+      } else if (found === null) {
+        log.warn(`[DomainService] Table "${name}" is not at its use line's path (${usePath}), and more than one other schema folder has a table of that name: it is drawn missing until the line is fixed`);
+      }
+    }
+    // The member's own file (the usual case) is no other member's: only another file is looked up.
+    if (found === null || own) return found;
+    if (!view.membersByPath) {
+      view.membersByPath = new Map();
+      for (const [other, use] of view.memberPaths) {
+        if (use.startsWith('../')) continue;
+        const key = path.resolve(library.semanticAbsolute(use)).toLowerCase();
+        view.membersByPath.set(key, [...(view.membersByPath.get(key) ?? []), other]);
+      }
+    }
+    if ((view.membersByPath.get(path.resolve(found).toLowerCase()) ?? []).some((other) => other !== ref.toLowerCase())) return null;
+    return found;
+  }
+
+  /**
+   * How a DBML diagram's members are read when the library tells tables
+   * apart by identity (two schema folders share a name): each member read once, before
+   * any relationship is drawn (`read`), so every member's file is known; and
+   * for each, the library reference its relationships are owned under and
+   * the diagram reference each relationship's other end is drawn under
+   * (`of`). An end whose table is not on the diagram keeps its library
+   * reference, which names no member.
+   */
+  private diagramScope(library: TableLibraryService, view: DbmlDiagramView): {
+    read: (ref: string) => SemanticTable | null;
+    of: (ref: string) => MemberRelationshipScope;
+  } {
+    const read = new Map<string, SemanticTable | null>();
+    let byFile: Map<string, string> | undefined;
+    const readAll = (): Map<string, string> => {
+      if (byFile) return byFile;
+      byFile = new Map();
+      for (const ref of view.members.refs()) {
+        if (!read.has(ref.toLowerCase())) read.set(ref.toLowerCase(), this.dbmlMember(library, ref, view));
+      }
+      for (const [ref, file] of view.memberFiles) {
+        const key = file === null ? undefined : path.resolve(file).toLowerCase();
+        if (key !== undefined && !byFile.has(key)) byFile.set(key, view.members.resolve(ref)?.ref ?? ref);
+      }
+      return byFile;
+    };
+    const diagramRefOf = (libraryRef: string): string | undefined => {
+      const found = library.resolveLibraryRef(libraryRef);
+      // An end the attach could not resolve (an unqualified Ref end two schema folders share, rule 2(e))
+      // is reported, never drawn: it would land on whichever member happens to bear the bare name.
+      if (found.kind === 'ambiguous') return undefined;
+      if (found.kind !== 'found') return libraryRef;
+      return readAll().get(path.resolve(found.entry.filePath).toLowerCase()) ?? libraryRef;
+    };
+    return {
+      read: (ref) => {
+        readAll();
+        const key = ref.toLowerCase();
+        if (!read.has(key)) read.set(key, this.dbmlMember(library, ref, view));
+        return read.get(key) ?? null;
+      },
+      of: (ref) => {
+        const file = view.memberFiles.get(ref.toLowerCase());
+        const entry = file === null || file === undefined ? undefined : library.tableEntryAt(file);
+        return { ref, owner: entry?.id, diagramRefOf };
+      },
+    };
+  }
+
+  /**
+   * A table a JSON diagram lists (by name alone, D-9's read half): told
+   * apart by identity, the library names a relationship's other end by its
+   * library reference (`<schema>.<name>` where two schema folders share its
+   * name); the end is drawn under its bare name only when that name is what
+   * the diagram reads (the library's first file of it), so a relationship
+   * of the other table of that name never lands on this one.
+   */
+  private legacyNamed(library: TableLibraryService, model: SemanticTable | null): SemanticTable | null {
+    if (!model || library.hasSharedNames?.() !== true || !(model.relationships ?? []).length) return model;
+    let changed = false;
+    const relationships = model.relationships!.map((rel) => {
+      const found = library.resolveLibraryRef(rel.toModel);
+      if (found.kind !== 'found' || sameName(found.entry.name, rel.toModel)) return rel;
+      const byName = library.findTableFile(found.entry.name);
+      if (byName === null || path.resolve(byName) !== path.resolve(found.entry.filePath)) return rel;
+      changed = true;
+      return { ...rel, toModel: found.entry.name };
+    });
+    return changed ? { ...model, relationships } : model;
   }
 
   /**
@@ -602,29 +822,42 @@ export class SubjectAreaService {
    * a pending line (D27) between two tables the diagram draws (unlinked ones
    * too). A
    * YAML table's own relationships (held in no relationships file) are kept.
+   *
+   * With `scope` (the library tells tables apart by identity), the holders
+   * are asked by the member's identity, and each kept relationship's other
+   * end is drawn under its diagram reference.
    */
   private importedRelationshipsOnly(
     library: TableLibraryService,
     model: SemanticTable,
     view: DbmlDiagramView,
     members: ReadonlySet<string>,
+    scope?: MemberRelationshipScope,
   ): SemanticTable {
     const relationships = model.relationships ?? [];
     if (relationships.length === 0) return model;
+    const ownerRef = scope?.ref ?? model.name;
     const kept = relationships.filter((rel) => {
-      const holders = library.relationshipHolders(model.name, rel);
+      const holders = library.relationshipHolders(scope?.owner ?? model.name, rel);
       if (holders.length === 0 || holders.some((h) => view.imports.has(h.path))) return true;
-      const owner = model.name.toLowerCase();
-      const target = rel.toModel.toLowerCase();
-      if (members.has(owner) && members.has(target)) {
+      const owner = ownerRef.toLowerCase();
+      const target = (scope ? scope.diagramRefOf(rel.toModel) : rel.toModel)?.toLowerCase();
+      if (target !== undefined && members.has(owner) && members.has(target)) {
         const linked = !view.unlinked.has(owner) && !view.unlinked.has(target);
         for (const h of holders) if (h.pending || linked) view.drift.add(h.path);
       }
       return false;
     });
-    if (kept.length === relationships.length) return model;
+    const drawn = scope
+      ? kept.flatMap((rel) => {
+        const toModel = scope.diagramRefOf(rel.toModel);
+        if (toModel === undefined) return [];
+        return [toModel === rel.toModel ? rel : { ...rel, toModel }];
+      })
+      : kept;
+    if (drawn.length === relationships.length && drawn.every((rel, i) => rel === relationships[i])) return model;
     const { relationships: _all, ...rest } = model;
-    return kept.length > 0 ? { ...rest, relationships: kept } : rest;
+    return drawn.length > 0 ? { ...rest, relationships: drawn } : rest;
   }
 
   /**
@@ -712,6 +945,103 @@ export class SubjectAreaService {
    *
    * Uses the global viewConfig for positions so layout is consistent across all stages.
    */
+  /**
+   * How the physical stage finds each of `unified`'s tables in dbt: by its
+   * own name, then by its warehouse relation (schema + alias), as always.
+   * A table whose name two schema folders share (two members of one diagram,
+   * or two tables of the library told apart by identity) is found by its
+   * relation first, then by its name only when that dbt model's schema
+   * agrees with the table's (its schema folder or the schema its file
+   * declares): one dbt model called `addresse` is never both tables. Such a
+   * table carries its `schemas`; `dbtName` is undefined when it found none.
+   * The rule {@link dbtTestsOnTables} applies to an added table's dbt tests.
+   */
+  private dbtMatcher(
+    unified: UnifiedSubjectArea,
+    ymlData: YmlData,
+    manifest: ManifestData | undefined,
+  ): (model: SemanticTable) => { byName?: ManifestModelInfo; byRelation?: ManifestModelInfo; dbtName?: string; tableName?: string; schemas?: string[] } {
+    const ymlIndex = indexByNormalisedName(ymlData.models);
+    const manifestIndex = manifest ? indexByNormalisedName(manifest.models) : undefined;
+    // Second-chance index by warehouse relation: (schema, alias ?? name). Only
+    // consulted when the model NAME found nothing, and only as a pair — an
+    // alias alone would join silver.date to gold.date. See relationKey().
+    const manifestByRelation = manifest
+      ? indexByRelation([...manifest.models.values()], m => relationKey(m.schema, m.alias ?? m.name))
+      : undefined;
+    const library = this.tableLibraryService;
+    const files = this.memberFilesByRead.get(unified);
+    const isShared = this.sharedNameRule();
+    return (model) => {
+      const tableName = tableNameOf(model);
+      const bare = tableName ?? model.name;
+      if (!isShared(model)) {
+        const byName = manifest?.models.get(model.name) ?? manifestIndex?.get(normaliseName(model.name));
+        const knownByName = !!byName || !!ymlData.models.get(model.name)
+          || !!ymlIndex.get(normaliseName(model.name)) || !!ymlData.sourceFiles?.get(normaliseName(model.name));
+        const byRelation = !knownByName
+          ? manifestByRelation?.get(relationKey(model.schema, model.alias ?? model.name))
+          : undefined;
+        return { byName, byRelation, dbtName: byRelation?.name ?? model.name };
+      }
+      // The table's schemas: the one its file declares and its schema folder (the file it was read from).
+      const file = files?.get(model.name.toLowerCase());
+      const folder = file ? library?.tableEntryAt(file)?.id?.schema : undefined;
+      const schemas = [...new Set([model.schema, folder].filter((s): s is string => !!s))];
+      const agrees = (dbtSchemas: Array<string | undefined>): boolean =>
+        dbtSchemas.some((s) => !!s && schemas.some((t) => normaliseName(t) === normaliseName(s)));
+      const byRelation = onlyOne(schemas.map((s) => manifestByRelation?.get(relationKey(s, model.alias ?? bare))));
+      if (byRelation) return { byRelation, dbtName: byRelation.name, tableName, schemas };
+      const named = manifest?.models.get(bare) ?? manifestIndex?.get(normaliseName(bare));
+      if (named) return agrees([named.configSchema, named.schema]) ? { byName: named, dbtName: bare, tableName, schemas } : { tableName, schemas };
+      // No compiled node: a schema yml that configures the model's schema may still say which table it is.
+      const yml = ymlData.models.get(bare) ?? ymlIndex.get(normaliseName(bare));
+      return yml && agrees([yml.configSchema]) ? { dbtName: bare, tableName, schemas } : { tableName, schemas };
+    };
+  }
+
+  /**
+   * The dbt model each table of `unified` that the physical stage finds by
+   * schema (a name two schema folders share) was found as, by lower-case
+   * reference: null for one it found none for. Tables found by their own
+   * name are not listed: their dbt model is their name. For the selectors and
+   * the sync plan, so they name the model the comparison matched.
+   */
+  dbtModelNamesOf(unified: UnifiedSubjectArea, ymlData: YmlData, manifest?: ManifestData): Map<string, string | null> {
+    const out = new Map<string, string | null>();
+    // Nothing is indexed for a diagram with no such table (every diagram of a project with no shared name).
+    const isShared = this.sharedNameRule();
+    if (!unified.logical.models.some(isShared)) return out;
+    const match = this.dbtMatcher(unified, ymlData, manifest);
+    for (const model of unified.logical.models) {
+      const found = match(model);
+      if (found.schemas) out.set(model.name.toLowerCase(), found.dbtName ?? null);
+    }
+    return out;
+  }
+
+  /** Whether a table's name is shared by two schema folders: two members of its diagram, or two tables of the library. */
+  private sharedNameRule(): (model: SemanticTable) => boolean {
+    const library = this.tableLibraryService;
+    return (model) => tableNameOf(model) !== undefined || library?.isAmbiguousName?.(model.name) === true;
+  }
+
+  /**
+   * Each table of a DBML diagram's read `unified` by its identity (the file it
+   * was read from), by lower-case reference; empty for a JSON diagram and a
+   * table drawn missing. For the sync plan's library lookups, which must name
+   * a table's own file where a name is shared.
+   */
+  tableIdsOf(unified: UnifiedSubjectArea): Map<string, TableId> {
+    const out = new Map<string, TableId>();
+    const library = this.tableLibraryService;
+    for (const [ref, file] of this.memberFilesByRead.get(unified) ?? []) {
+      const id = file ? library?.tableEntryAt(file)?.id : undefined;
+      if (id) out.set(ref, id);
+    }
+    return out;
+  }
+
   buildPhysicalSubjectArea(
     unifiedDomain: UnifiedSubjectArea,
     ymlData: YmlData,
@@ -722,53 +1052,56 @@ export class SubjectAreaService {
     const physicalModelNames = new Set<string>();
 
     const ymlIndex = indexByNormalisedName(ymlData.models);
-    const manifestIndex = manifest ? indexByNormalisedName(manifest.models) : undefined;
-    // Second-chance index by warehouse relation: (schema, alias ?? name). Only
-    // consulted when the model NAME found nothing, and only as a pair — an
-    // alias alone would join silver.date to gold.date. See relationKey().
-    const manifestByRelation = manifest
-      ? indexByRelation([...manifest.models.values()], m => relationKey(m.schema, m.alias ?? m.name))
-      : undefined;
-    // dbt model name (normalised) → logical name, for models resolved through
-    // the relation index, so their relationship tests land on the right node.
-    const resolvedViaRelation = new Map<string, string>();
     const catalogByRelation = catalog
       ? indexByRelation([...catalog.byUniqueId.values()].filter(n => n.resourceType === 'model'), n => relationKey(n.schema, n.relationName))
       : undefined;
+    const match = this.dbtMatcher(unifiedDomain, ymlData, manifest);
+    // dbt model name (normalised) → logical name, for models resolved through
+    // the relation index (or, for a name two schema folders share, any model
+    // found under another name), so their relationship tests land on the
+    // right node.
+    const resolvedViaRelation = new Map<string, string>();
+    // The names of tables two schema folders share that are NOT the dbt model
+    // of that name (another schema's): that model's tests must not land on them.
+    const notTheirDbtModel = new Set<string>();
 
     const models: DisplayTable[] = logicalStage.models.map(model => {
-        const byName = manifest?.models.get(model.name) ?? manifestIndex?.get(normaliseName(model.name));
-        const knownByName = !!byName || !!ymlData.models.get(model.name)
-          || !!ymlIndex.get(normaliseName(model.name)) || !!ymlData.sourceFiles?.get(normaliseName(model.name));
-        const byRelation = !knownByName
-          ? manifestByRelation?.get(relationKey(model.schema, model.alias ?? model.name))
-          : undefined;
+        const { byName, byRelation, dbtName, tableName, schemas } = match(model);
         if (byRelation) {
           resolvedViaRelation.set(normaliseName(byRelation.name), model.name);
+        } else if (dbtName !== undefined && normaliseName(dbtName) !== normaliseName(model.name)) {
+          resolvedViaRelation.set(normaliseName(dbtName), model.name);
+        }
+        if (schemas && (dbtName === undefined || normaliseName(dbtName) !== normaliseName(model.name))) {
+          notTheirDbtModel.add(normaliseName(model.name));
         }
         // Everything below is looked up by the dbt model's own name, which is
-        // the logical name unless the relation index resolved it.
-        const key = normaliseName(byRelation?.name ?? model.name);
-        const ymlModel = ymlData.models.get(byRelation?.name ?? model.name) ?? ymlIndex.get(key);
+        // the logical name unless the relation index resolved it. A table two
+        // schema folders share that matched no dbt model looks up nothing.
+        const key = dbtName === undefined ? undefined : normaliseName(dbtName);
+        const ymlModel = dbtName === undefined ? undefined : ymlData.models.get(dbtName) ?? ymlIndex.get(key!);
         const manifestModel = byName ?? byRelation;
         // `sourceFiles` is keyed by an already-normalised stem — look it up with
         // normaliseName(), never through indexByNormalisedName().
-        const sourceFile = ymlData.sourceFiles?.get(key);
+        const sourceFile = key === undefined ? undefined : ymlData.sourceFiles?.get(key);
         // A disabled model's .sql is on disk but `ref()` to it fails, so the bare
         // file must not upgrade it to "exists". The veto applies to THAT branch
         // only: a disabled model still declared in a yml keeps what the yml says,
         // because that is a different question.
-        const disabled = manifest?.disabledModels.has(key) ?? false;
+        const disabled = key === undefined ? false : manifest?.disabledModels.has(key) ?? false;
         // unique_id first, then the short-name index (catalogNodeFor — the
         // same lookup Import from dbt seeds types through); the relation index
-        // only when no manifest resolved the model.
-        const catalogNode = catalogNodeFor(catalog, manifestModel, key)
-          ?? (manifestModel ? undefined : catalogByRelation?.get(relationKey(model.schema, model.alias ?? model.name)));
+        // only when no manifest resolved the model. A table two schema folders share
+        // never takes the short-name index's node (owner decision H): with no
+        // manifest node to say which, only its own relation finds its columns.
+        const relation = model.alias ?? tableName ?? model.name;
+        const catalogNode = (key === undefined || (schemas !== undefined && !manifestModel) ? undefined : catalogNodeFor(catalog, manifestModel, key))
+          ?? (manifestModel ? undefined : onlyOne((schemas ?? [model.schema]).map((s) => catalogByRelation?.get(relationKey(s, relation)))));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of
         // the model sources above, exactly as before seeds were documented.
-        const ymlDoc = ymlData.resourceDocs?.get(key);
-        const manifestDoc = manifest?.resourceDocs?.get(key);
+        const ymlDoc = key === undefined ? undefined : ymlData.resourceDocs?.get(key);
+        const manifestDoc = key === undefined ? undefined : manifest?.resourceDocs?.get(key);
         const docColumnDescriptions = new Map<string, string>();
         for (const dc of [...(manifestDoc?.columns ?? []), ...(ymlDoc?.columns ?? [])]) {
           // yml second so it overwrites the manifest's compiled copy.
@@ -781,6 +1114,7 @@ export class SubjectAreaService {
           // physicalModelNames so it pulls in no edges.
           return {
             name: model.name,
+            ...(tableName !== undefined ? { tableName } : {}),
             schema: '',
             ...(model.alias ? { alias: model.alias } : {}),
             description: model.description || '',
@@ -904,6 +1238,8 @@ export class SubjectAreaService {
 
         return {
           name: model.name,
+          // Two members of one name: the diagram's reference is the name, the table's own name beside it.
+          ...(tableName !== undefined ? { tableName } : {}),
           // MANIFEST FIRST, not catalog first. The two agree on the value and
           // disagree only on case — no adapter lowercases `metadata.schema`, so
           // Snowflake's catalog says ANALYTICS where the manifest carries the
@@ -946,6 +1282,10 @@ export class SubjectAreaService {
     // Composite foreign keys dbt declares (#133 L2): constraints and
     // dbt_constraints tests, yml ∪ manifest.
     const mergedForeignKeys = mergeCompositeForeignKeys(ymlData.compositeForeignKeys, manifest?.compositeForeignKeys);
+    // A test naming another schema's dbt model of a shared name names no table here ('' matches none).
+    for (const name of notTheirDbtModel) {
+      if (!resolvedViaRelation.has(name)) resolvedViaRelation.set(name, '');
+    }
 
     const relationships = derivePhysicalRelationships(
       renameTestTables(mergedRelationshipTests, resolvedViaRelation),
@@ -1238,6 +1578,12 @@ function indexByRelation<T>(entries: T[], keyOf: (entry: T) => string): Map<stri
   return index;
 }
 
+/** The one distinct entry `found` holds (undefined entries ignored), or undefined when it holds none or several. */
+function onlyOne<T>(found: Array<T | undefined>): T | undefined {
+  const distinct = [...new Set(found.filter((f): f is T => f !== undefined))];
+  return distinct.length === 1 ? distinct[0] : undefined;
+}
+
 /** The physical model's alias: dbt's, then a catalog relation named otherwise, then the design's. */
 function physicalAlias(
   logicalAlias: string | undefined,
@@ -1357,6 +1703,11 @@ export function mergeCompositeGroups(
     merged.set(model, existing);
   }
   return merged;
+}
+
+/** A DBML member's name from its reference (`<schema>.<name>` for a name two members share); any other name is its own. */
+function bareNameOf(ref: string, view: DbmlDiagramView | undefined): string {
+  return view?.tableNames.get(ref.toLowerCase()) ?? ref;
 }
 
 /** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */

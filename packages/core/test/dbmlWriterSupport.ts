@@ -14,7 +14,8 @@ import { parseTableDbml } from '../src/dbml/readTable';
 import { readRelationshipsDbml } from '../src/dbml/readRelationships';
 import { attachRelationships, dbmlTableLookup } from '../src/dbmlAttach';
 import { classifySemanticFile } from '../src/storage';
-import type { DbmlResolvedTable } from '../src/dbml/writeRelationships';
+import type { DbmlResolvedTable, DbmlTableText } from '../src/dbml/writeRelationships';
+import { assignTableRefs, resolveTableRef, tableIdOfPath, type TableRefCandidate } from '../src/tableIdentity';
 import type { DbmlDiagramTable } from '../src/dbml/writeDiagram';
 import type { DbmlAttachTable } from '../src/types/dbmlStorage';
 import type { SemanticTable, TableRelationship } from '../src/types/semantic';
@@ -255,4 +256,67 @@ export function lawFiveParsers(outcome: WriterOutcome): string[] {
 /** The project a {@link WriterOutcome} compiles as: its context plus the written file. */
 export function projectOf(outcome: WriterOutcome): Record<string, string> {
   return { ...(outcome.context ?? {}), [outcome.path]: outcome.output };
+}
+
+/**
+ * The writers' lookups over a library where two tables may share a name in
+ * different schema folders: each table is named by its library reference
+ * (its name, or `<schema>.<name>` while another table has the name,
+ * `assignTableRefs`), as a host keyed by table identity names it.
+ * `resolveTable` and `resolve` take a reference, `<schema>.<name>`, a name
+ * only one table has, or a name `names` maps to a table file (what one
+ * diagram calls its members); `identify` is the relationships writer's:
+ * a Ref end by its own `use` line's file, else its qualifier and name.
+ */
+export function identityLookups(files: Readonly<Record<string, string>>, names: Readonly<Record<string, string>> = {}): {
+  library: LibraryTable[];
+  refOf(path: string): string | undefined;
+  resolve(text: string): DbmlResolvedTable | undefined;
+  resolveTable(text: string): DbmlDiagramTable | undefined;
+  identify(table: DbmlTableText): string | undefined;
+} {
+  const library = libraryOf(files);
+  const ids = library.map((t) => {
+    const id = tableIdOfPath(t.path);
+    return { schema: id?.schema ?? '', name: id?.name ?? t.table.name };
+  });
+  const refs = assignTableRefs(ids);
+  const candidates: TableRefCandidate[] = ids.map((id, i) => ({ ...id, ref: refs[i], qualifiers: library[i].table.schema ? [library[i].table.schema!] : [] }));
+  const byPath = (path: string): number => library.findIndex((t) => t.path.toLowerCase() === path.toLowerCase());
+  const indexOf = (text: string): number => {
+    const mapped = Object.entries(names).find(([n]) => n.toLowerCase() === text.toLowerCase());
+    if (mapped) return byPath(mapped[1]);
+    return resolveTableRef(text, candidates) ?? -1;
+  };
+  const resolved = (i: number): DbmlResolvedTable | undefined => {
+    if (i < 0) return undefined;
+    const entry = library[i];
+    const columns = (entry.table.columns ?? []).map((c) => c.name);
+    return {
+      name: entry.table.name,
+      reference: entry.reference,
+      columns: (column) => columns.find((c) => c === column) ?? columns.find((c) => c.toLowerCase() === column.toLowerCase()),
+      path: entry.path,
+      storage: entry.storage,
+      primaryKey: (entry.table.columns ?? []).filter((c) => c.isPrimaryKey).map((c) => c.name),
+    };
+  };
+  return {
+    library,
+    refOf: (path) => {
+      const i = byPath(path);
+      return i < 0 ? undefined : refs[i];
+    },
+    resolve: (text) => resolved(indexOf(text)),
+    resolveTable: (text) => {
+      const r = resolved(indexOf(text));
+      return r ? { name: r.name, reference: r.reference, path: r.path, storage: r.storage } : undefined;
+    },
+    identify: (table) => {
+      const atPath = table.path !== undefined ? byPath(table.path) : -1;
+      if (atPath >= 0) return refs[atPath];
+      const i = resolveTableRef(table.qualifier !== undefined ? `${table.qualifier}.${table.name}` : table.name, candidates);
+      return i === undefined ? undefined : refs[i];
+    },
+  };
 }

@@ -9,7 +9,7 @@ export const list_models = {
     description:
       'List all logical model definitions in the table library — one .dbml table file per table, in .erd-studio/<layer>/tables/<schema>/ ' +
       '(or older .yml files in .erd-studio/logical-models/ or tables/, from before ERD Studio 2.0, at the top level and one folder down). ' +
-      'Names are unique across folders. ' +
+      'A .dbml table is its schema folder and name: two schema folders may each hold a table of one name, listed with schema_folder (pass it to read_model as schema). A .yml table\'s name is unique across folders. ' +
       'Each model is one table (dimension, fact, bridge, etc.) reusable across domains. ' +
       'Returns model names + light metadata. Call read_model for full column-level detail.',
     inputSchema: {
@@ -40,23 +40,25 @@ export const list_models = {
       };
     }
 
-    const models = tableLibraryService.listTables();
-    const formatOf = (name: string): 'dbml' | 'yaml' => tableLibraryService.tableStorage(name) ?? 'yaml';
+    const tables = tableLibraryService.listTablesWithFiles();
+    const formatOf = (entry: (typeof tables)[number]['entry']): 'dbml' | 'yaml' => entry.storage ?? 'yaml';
     return {
       content: [
         {
           type: 'text' as const,
           text: JSON.stringify(
             {
-              count: models.length,
-              models: models.map((m) => ({
+              count: tables.length,
+              models: tables.map(({ model: m, entry }) => ({
                 name: m.name,
                 schema: m.schema ?? null,
+                // The schema folder read_model's `schema` takes, where another schema folder has a table of this name.
+                ...(entry.storage === 'dbml' && entry.layer !== undefined && tableLibraryService.isAmbiguousName(m.name) ? { schema_folder: entry.folder } : {}),
                 description: m.description ?? null,
                 grain: m.grain ?? null,
                 model_role: m.modelRole ?? null,
                 column_count: m.columns?.length ?? 0,
-                file_format: formatOf(m.name),
+                file_format: formatOf(entry),
               })),
             },
             null,

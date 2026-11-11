@@ -99,7 +99,7 @@ const NOT_NULL_TEST_KEYS = ['not_null', 'dbt_expectations.expect_column_values_t
 const REQUIRING_CONSTRAINTS = new Set(['not_null', 'primary_key']);
 
 /** What a disabled service answers: no models, tests, source files or docs. */
-function emptyYmlData(): YmlData {
+export function emptyYmlData(): YmlData {
   return {
     models: new Map(),
     relationshipTests: [],
@@ -195,6 +195,11 @@ export class YmlParserService {
         this.loadPromise = null;
       }
     }
+  }
+
+  /** The schema yml data as last loaded, without loading; undefined when it was not loaded since the last invalidate. */
+  peekYmlData(): YmlData | undefined {
+    return this.cache ?? undefined;
   }
 
   /** Clear the cache so the next loadYmlData call re-parses from disk. */

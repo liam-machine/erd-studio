@@ -270,6 +270,14 @@ export interface AddExistingModelMessage {
   type: 'addExistingModel';
   payload: {
     modelName: string;
+    /**
+     * The file the row was listed from (`ExistingTablePreview.sourcePath`,
+     * project-relative): a Table Library row names its table by its file,
+     * so two tables of one name in different schema folders are told apart.
+     * Optional: an older canvas sends the name alone, which means the table
+     * the library finds by that name.
+     */
+    sourcePath?: string;
   };
 }
 
@@ -285,6 +293,12 @@ export interface AddExistingModelsMessage {
   type: 'addExistingModels';
   payload: {
     modelNames: string[];
+    /**
+     * Each picked row's file, index for index with `modelNames`
+     * (`ExistingTablePreview.sourcePath`, project-relative; `''` for a row
+     * with none). Optional, as on `addExistingModel`.
+     */
+    sourcePaths?: string[];
   };
 }
 
@@ -314,6 +328,12 @@ export interface OffDiagramRelationship {
   /** As stored, read from the foreign-key end (as the panel's other rows show it). */
   cardinality: Cardinality;
   direction: 'out' | 'in';
+  /**
+   * The other table's file, project-relative with `/` separators: what "+ Add"
+   * posts as `sourcePath`, so the table added is this one even when another
+   * schema folder has a table of its name. Absent from an older host.
+   */
+  otherTablePath?: string;
 }
 
 /**

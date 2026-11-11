@@ -572,7 +572,7 @@ describe('composite foreign keys are drawn when they form one (#133 L2)', () => 
 
 describe('native DBML storage: versions, the invalid-dbml reason and DBML table-file errors', () => {
   it('a JSON file declaring schemaVersion 7 (a DBML version) is still refused, word for word as before', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
     expect(CURRENT_JSON_SCHEMA_VERSION).toBe(6);
     expect(DBML_SCHEMA_VERSION).toBe(7);
     for (const version of [7, 8]) {

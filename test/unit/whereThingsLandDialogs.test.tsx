@@ -122,6 +122,32 @@ describe('New Table: the Schema field', () => {
     expect(sent()).toEqual([expect.objectContaining({ type: 'addModel', payload: expect.objectContaining({ name: 'dim_store', schemaFolder: 'finance' }) })]);
   });
 
+  it('a name a DBML table on the diagram has is refused only in that table\'s schema folder: in another it forms a pair', () => {
+    setDiagram({
+      newTableSchemas: CHOICE,
+      models: [{ name: 'fct_order', schema: 'sales', layer: 'gold', columns: [col('order_id', true)] }],
+    });
+    openDialog();
+    fireEvent.change(input('modelName')!, { target: { value: 'fct_order' } });
+    fireEvent.blur(input('modelName')!);
+    expect(screen.getByText(/Table "fct_order" already exists in this diagram/)).toBeTruthy();
+    expect(createButton().disabled).toBe(true);
+    fireEvent.change(input('tableSchema')!, { target: { value: 'finance' } });
+    expect(screen.queryByText(/already exists in this diagram/)).toBeNull();
+    expect(createButton().disabled).toBe(false);
+    fireEvent.click(createButton());
+    expect(sent()).toEqual([expect.objectContaining({ type: 'addModel', payload: expect.objectContaining({ name: 'fct_order', schemaFolder: 'finance' }) })]);
+  });
+
+  it('a YAML table on a DBML diagram (no layer) still refuses its name in any schema folder', () => {
+    setDiagram({ newTableSchemas: CHOICE, models: [{ name: 'fct_refund', schema: '', columns: [col('id', true)] }] });
+    openDialog();
+    fireEvent.change(input('modelName')!, { target: { value: 'fct_refund' } });
+    fireEvent.blur(input('modelName')!);
+    fireEvent.change(input('tableSchema')!, { target: { value: 'finance' } });
+    expect(screen.getByText(/Table "fct_refund" already exists in this diagram/)).toBeTruthy();
+  });
+
   it('a YAML project: no Schema field, and no schema sent', () => {
     setDiagram();
     openDialog();

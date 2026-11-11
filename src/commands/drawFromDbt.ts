@@ -32,6 +32,8 @@ import { afterScope, dbtDraftFingerprint, dbtDraftLogLines, dbtDraftScopes, draf
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftTarget, DraftTrigger } from '../types/draft';
 import {
   buildDbtDraft,
+  dbtModelSchemaFolder,
+  dbtModelTableOfSharedName,
   buildDraftSubjectAreaDocument,
   listDraftModels,
   listDraftScopes,
@@ -77,7 +79,8 @@ import {
   UnsavedFilesRefused,
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
-import { diagramFilePath } from '@erd-studio/core';
+import { diagramFilePath, qualifiedRef, type TableId } from '@erd-studio/core';
+import type { SemanticTable } from '../types/semantic';
 import { DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
@@ -116,7 +119,8 @@ export interface DrawFromDbtDeps {
   tableLibraryService: Pick<
     TableLibraryService,
     'tableExists' | 'saveTable' | 'serializeTable' | 'groupsByFolder' | 'deleteTable' | 'listTables' | 'getTable' | 'hasUnreadableRelationships' | 'tablePath' | 'getTablesDir' | 'writesTableNaming'
-  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache'>>;
+  > & Partial<Pick<TableLibraryService, 'hasDbmlLibrary' | 'planTableWrites' | 'writesDbml' | 'tableStorage' | 'invalidateCache'
+    | 'tableTakingName' | 'tablesNamed' | 'dbmlHomeOf'>>;
   /** Schema yml, manifest and catalog; each may be undefined (no yml, never compiled, no `dbt docs generate`). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -330,12 +334,26 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
 
   // A project that writes DBML (§3.2) gets a `.dbml` diagram, whose members are DBML tables (D20).
   const dbml = tableLibraryService.writesDbml?.() ?? false;
+  // A dbt model is the library's table of its name, as always, while one table has the name. Where
+  // tables in two or more schema folders have it (owner decision H), it is the one in the schema folder
+  // its table goes to (its dbt custom schema, else the layer's own), or a YAML table of its name; when
+  // none of them is there, nothing says which, and it is a new table beside them.
+  const homeSchema = tableLibraryService.dbmlHomeOf?.(chosenLayer).schema ?? chosenLayer;
+  const schemaFor = (n: string): string => dbtModelSchemaFolder(n, homeSchema, ymlData, manifest);
+  const libraryTableOf = (n: string): TableId | string | undefined => {
+    if (!dbml || !tableLibraryService.tableTakingName || (tableLibraryService.tablesNamed?.(n).length ?? 0) < 2) {
+      return tableLibraryService.tableExists(n) ? n : undefined;
+    }
+    const taken = dbtModelTableOfSharedName(n, homeSchema, { tableTakingName: (name, schema) => tableLibraryService.tableTakingName!(name, schema) }, ymlData, manifest);
+    if (taken === undefined) return undefined;
+    return taken.storage === 'dbml' && taken.id !== undefined ? taken.id : taken.name;
+  };
   const draft = buildDbtDraft({
     modelNames: pick.modelNames,
     ymlData,
     manifest,
     catalog,
-    libraryHas: (n) => tableLibraryService.tableExists(n),
+    libraryHas: (n) => libraryTableOf(n) !== undefined,
     ...(dbml ? { dbml: { tableStorage: (n: string) => tableLibraryService.tableStorage?.(n) } } : {}),
   });
   if (draft.modelNames.length === 0) {
@@ -386,6 +404,12 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
   // draw before anything is written, as a canvas edit does.
   let folder: string | undefined;
   let routed: { kept: DbtDraft['relationships']; changed: DbtDraft['newModels'] };
+  /** A changed library table whose name another schema folder's table has: saved as its own file. */
+  const changedIds = new Map<SemanticTable, TableId>();
+  const changedSave = (model: SemanticTable): { model: SemanticTable; from?: TableId } => {
+    const from = changedIds.get(model);
+    return from !== undefined ? { model, from } : { model };
+  };
   let dirty: string[];
   // Relationships a DBML diagram cannot store (their many-side table's file could not be read): named in the notice.
   let unstored: DbtDraft['relationships'] = [];
@@ -397,7 +421,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
     // A DBML diagram holds no relationships (D5): every one goes to the library,
     // none stays behind as a diagram copy.
     routed = dbml
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => tableLibraryService.getTable(n))
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => {
+        const table = libraryTableOf(n);
+        if (table === undefined) return null;
+        const model = tableLibraryService.getTable(table);
+        if (model && typeof table !== 'string') changedIds.set(model, table);
+        return model;
+      })
       : usesLibraryRelationships(
         tableLibraryService.listTables(),
         subjectAreaService.countSubjectAreaFileRelationships(workspaceRoot, semanticDir),
@@ -412,9 +442,13 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
       unstored = routed.kept;
       routed = { kept: [], changed: routed.changed };
     }
+    // A new table whose name another schema folder's table has is named `<schema>.<name>` where a
+    // relationship points at it, so the library planner never takes it for that other table.
+    if (dbml) qualifyNewNamesakes([...draft.newModels, ...routed.changed], draft.newModels, (n) => tableLibraryService.tablesNamed?.(n).length ?? 0, schemaFor);
     const planned = dbml && tableLibraryService.planTableWrites
       // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
-      ? tableLibraryService.planTableWrites({ save: [...draft.newModels, ...routed.changed].map((model) => ({ model })) }, folder, { dbml: true })
+      // New tables and changed library tables are told apart (D-4): a new one is never an edit of a namesake.
+      ? tableLibraryService.planTableWrites({ save: [...draft.newModels.map((model) => ({ model, create: true })), ...routed.changed.map((model) => changedSave(model))] }, folder, { dbml: true })
         .writes.map((w) => w.path)
       : [];
     dirty = dirtyFiles([
@@ -582,6 +616,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
       newTables: draft.newModels,
       folder,
       changedTables: routed.changed,
+      ...(changedIds.size > 0 ? { changedTableIds: changedIds } : {}),
       documentText: (tableNaming) => serializeDraftSubjectAreaDocument(buildDraftSubjectAreaDocument({
         domain: slug,
         layer: chosenLayer,
@@ -729,4 +764,29 @@ function describeSkipped(skipped: readonly DraftSkipped[]): string {
     if (names.length > 0) parts.push(`Skipped ${names.join(', ')}: ${why}.`);
   }
   return parts.join(' ');
+}
+
+/**
+ * Name each of `newModels` whose name other library tables have (`othersNamed`:
+ * how many; they are in other schema folders, or it would not be new) by its
+ * `<schema>.<name>` (`schemaOf`: the folder it goes to) wherever a
+ * relationship of `models` points at it, in place: a new table of a name the
+ * library already has is told from that table only so. The table itself is
+ * saved under its own name.
+ */
+export function qualifyNewNamesakes(
+  models: readonly SemanticTable[],
+  newModels: readonly SemanticTable[],
+  othersNamed: (name: string) => number,
+  schemaOf: (name: string) => string,
+): void {
+  const qualified = new Map<string, string>();
+  for (const model of newModels) {
+    if (othersNamed(model.name) > 0) qualified.set(model.name.toLowerCase(), qualifiedRef(schemaOf(model.name), model.name));
+  }
+  if (qualified.size === 0) return;
+  for (const model of models) {
+    if (!model.relationships?.some((r) => qualified.has(r.toModel.toLowerCase()))) continue;
+    model.relationships = model.relationships.map((r) => (qualified.has(r.toModel.toLowerCase()) ? { ...r, toModel: qualified.get(r.toModel.toLowerCase())! } : r));
+  }
 }

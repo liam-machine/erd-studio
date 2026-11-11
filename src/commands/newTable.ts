@@ -13,8 +13,10 @@
  * Planned by the library's own planner (`planDbmlBatch`: the save the canvas's
  * New Table makes, plus the settle of any diagram that was waiting for the
  * name), never a second one, and applied as ONE WorkspaceEdit through the
- * host's `applyWrites`. A name the library already has, in any case, is
- * refused as the canvas refuses it (`findTableNameIgnoringCase`).
+ * host's `applyWrites`. A name the same schema folder already has (in any
+ * layer, any case), or a YAML table's name, is refused as the canvas refuses
+ * it (`tableTakingName`); another schema folder's table of that name is
+ * another table.
  */
 
 import * as path from 'path';
@@ -41,7 +43,7 @@ export interface NewTableDeps {
   workspaceRoot: string;
   /** The semantic dir, absolute. */
   semanticRoot: string;
-  tableLibraryService: Pick<TableLibraryService, 'listTableFiles' | 'listDbmlLayerFolders' | 'findTableNameIgnoringCase' | 'planDbmlBatch'>;
+  tableLibraryService: Pick<TableLibraryService, 'listTableFiles' | 'listDbmlLayerFolders' | 'tableTakingName' | 'planDbmlBatch'>;
   /** How the project stores its tables: a YAML project is refused. */
   storage(): ProjectStorage;
   /** The layers `layers.json` lists, in its order. */
@@ -100,10 +102,12 @@ function labelOf(deps: Pick<NewTableDeps, 'layers'>, layer: string): string {
 }
 
 /**
- * Why `value` cannot be a new table's name, or null: the table-name rule the
- * canvas's New Table holds a name to, and a name the library already has in
- * any case (names are unique across the whole project), naming that table's
- * file and the way to keep two warehouse tables of one name.
+ * Why `value` cannot be a new table's name in the schema folder `schema`, or
+ * null: the table-name rule the canvas's New Table holds a name to, and a
+ * name that schema folder already has in any layer and any case, or a YAML
+ * table has (a table is its schema folder and name; YAML names are unique
+ * across the project), naming that table's file. A table of that name in
+ * another schema folder does not stop it.
  */
 export function validateNewTableName(
   deps: Pick<NewTableDeps, 'tableLibraryService' | 'workspaceRoot'>,
@@ -114,13 +118,12 @@ export function validateNewTableName(
   if (!name) return 'Enter a table name.';
   const rule = validateNewDbmlTableName(name) ?? validateTableName(name);
   if (rule) return rule;
-  const taken = deps.tableLibraryService.findTableNameIgnoringCase(name);
-  if (taken === null) return null;
-  const file = deps.tableLibraryService.listTableFiles().find((e) => !e.shadowedBy && e.name.toLowerCase() === taken.toLowerCase());
-  const where = file ? ` (${projectRelative(deps.workspaceRoot, file.filePath)})` : '';
-  const prefix = schema.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-  return `Table "${taken}" already exists in the Table Library${where}. Table names are unique across the project. ` +
-    `For a separate table also called ${name}, name it ${prefix ? `${prefix}_${name}` : `${name}_2`} and set its warehouse name (alias) to ${name}.`;
+  const taken = deps.tableLibraryService.tableTakingName(name, schema);
+  if (taken === undefined) return null;
+  const where = projectRelative(deps.workspaceRoot, taken.filePath);
+  return taken.storage === 'dbml'
+    ? `The schema ${taken.folder} already has a table called "${taken.name}" (${where}). Choose another name, or add the table in another schema.`
+    : `Table "${taken.name}" already exists in the Table Library as a YAML table (${where}), and a YAML table's name is unique across the project. Choose another name.`;
 }
 
 /** Whether the project takes a DBML table; says why not, once, when it does not. */
@@ -203,13 +206,14 @@ export async function createDbmlTable(deps: NewTableDeps, home: NewTableHome, ra
   let filePath: string | undefined;
   try {
     const planned = deps.tableLibraryService.planDbmlBatch({
-      ops: { save: [{ model: { name, schema: home.schema, description: '', columns: [] }, home }] },
+      // A new table (D-4): never an edit of a table of that name in another schema folder.
+      ops: { save: [{ model: { name, schema: home.schema, description: '', columns: [] }, home, create: true }] },
       dirtyFiles: deps.dirtyFiles,
       readText: deps.readText,
     });
     writes = planned.writes;
     // The file as the plan spells it (an existing schema folder's spelling wins).
-    const rel = planned.plan.resolveTable(name)?.path;
+    const rel = planned.plan.createdTablePaths?.[0] ?? planned.plan.resolveTable(name)?.path;
     filePath = rel !== undefined ? path.join(deps.semanticRoot, ...rel.split('/')) : undefined;
   } catch (err) {
     if (isRefusedWrite(err)) {
@@ -250,7 +254,7 @@ async function askNameAndCreate(deps: NewTableDeps, home: NewTableHome): Promise
   const label = labelOf(deps, home.layer);
   const name = (await vscode.window.showInputBox({
     title: `New table in ${label} › ${home.schema}`,
-    prompt: `Its file is ${home.layer}/tables/${home.schema}/<name>.dbml, declaring Table ${home.schema}.<name>. Table names are unique across the project.`,
+    prompt: `Its file is ${home.layer}/tables/${home.schema}/<name>.dbml, declaring Table ${home.schema}.<name>. A schema holds one table of a name.`,
     placeHolder: 'dim_customer',
     ignoreFocusOut: true,
     validateInput: (value) => validateNewTableName(deps, value, home.schema),

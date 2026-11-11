@@ -294,6 +294,11 @@ export class ManifestService {
     }
   }
 
+  /** The manifest as last loaded (the last good one when a later parse failed), without loading; undefined when none was. */
+  peekManifest(): ManifestData | undefined {
+    return this.cache ?? this.lastKnownGood ?? undefined;
+  }
+
   /** Get columns for a specific model by short name (e.g. "dim_customer"). */
   getModelColumns(modelName: string): ManifestColumn[] {
     const model = this.cache?.models.get(modelName);

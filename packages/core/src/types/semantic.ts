@@ -16,14 +16,19 @@ export type Layer = string;
 export type Stage = 'logical' | 'physical';
 
 /**
- * The newest schema version this version of core reads, in any format: 7, a
- * DBML diagram (native DBML storage, ERD Studio 2.0). A JSON subject area may
- * declare at most {@link CURRENT_JSON_SCHEMA_VERSION}; a DBML diagram whose
- * `erd_schema_version` is higher than this one is refused with "Please update
- * the extension" rather than read as an empty diagram. Writers use
- * {@link WRITTEN_SCHEMA_VERSION} (JSON) or {@link DBML_SCHEMA_VERSION} (DBML).
+ * The newest schema version this version of core reads, in any format: 8, a
+ * DBML diagram that holds two tables with one name in different schema
+ * folders. A DBML diagram is read the same at 7 and 8; 8 only tells an older
+ * reader, which would draw the two tables as one, to refuse the diagram. The
+ * diagram writer writes it ({@link DBML_TWIN_SCHEMA_VERSION}) only while a
+ * diagram holds such a pair.
+ * A JSON subject area may declare at most {@link CURRENT_JSON_SCHEMA_VERSION};
+ * a DBML diagram whose `erd_schema_version` is higher than this one is
+ * refused with "Please update the extension" rather than read as an empty
+ * diagram. Writers use {@link WRITTEN_SCHEMA_VERSION} (JSON) or
+ * {@link DBML_SCHEMA_VERSION} (DBML).
  */
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 /**
  * The newest schema version a JSON subject area file may declare. A JSON file
@@ -40,6 +45,17 @@ export const CURRENT_JSON_SCHEMA_VERSION = 6;
  * and reaches only the Unified and Display `schemaVersion`.
  */
 export const DBML_SCHEMA_VERSION = 7;
+
+/**
+ * The version a DBML diagram declares while it holds two tables with one
+ * name in different schema folders (`bronze/tables/bqs/addresse.dbml` and
+ * `bronze/tables/ccc/addresse.dbml`), so a reader that cannot tell them apart
+ * refuses that one diagram instead of drawing the two as one. The diagram
+ * writer sets it on the edit that gives a diagram such a pair and sets
+ * {@link DBML_SCHEMA_VERSION} again on the edit that leaves it none; a
+ * diagram with no pair keeps whatever version line (or none) it has.
+ */
+export const DBML_TWIN_SCHEMA_VERSION = 8;
 
 /**
  * Schema v6 (#162): the table naming. `tables/` for the library,
@@ -221,6 +237,23 @@ export interface SemanticTable {
  */
 export interface UnreadableTablePlaceholder extends SemanticTable {
   loadError: TableLoadError;
+}
+
+/**
+ * A table as a DBML diagram that shows two tables of one name from different
+ * schema folders names it: `<schema>.<name>` (core's `assignTableRefs`),
+ * with its own name kept as `tableName`, for its label and for dbt.
+ * Runtime-only, like `loadError`: never written to a file (the on-disk shape
+ * is {@link SemanticTable}), and a table handed to a writer has none.
+ */
+export interface DiagramNamedTable extends SemanticTable {
+  tableName: string;
+}
+
+/** The own name of a {@link DiagramNamedTable}, if `model` is one: undefined when `name` is the table's own. */
+export function tableNameOf(model: SemanticTable): string | undefined {
+  const candidate = (model as Partial<DiagramNamedTable>).tableName;
+  return typeof candidate === 'string' ? candidate : undefined;
 }
 
 /** The load error carried by an {@link UnreadableTablePlaceholder}, if `model` is one. */

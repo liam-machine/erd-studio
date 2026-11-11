@@ -21,7 +21,7 @@
  * | (header)                           | `// erd-studio dbml-export v1`, then `//` lines naming what is left out  |
  * | domain name                        | `Project <name> { … }` (`Project { … }` when it has none)               |
  * | layer, stage, description          | the Project `Note`: `Layer: …`, `Stage: …`, a blank line, the description |
- * | model (+ schema)                   | `Table [schema.]name` — the model name, never the alias                 |
+ * | model (+ schema)                   | `Table [schema.]name` — the model name, never the alias; two tables of one name from different schema folders are `Table bqs.addresse` and `Table ccc.addresse` (their own name, `tableName`, after the schema) |
  * | modelRole, grain, alias            | table `Note` lines `Role: …`, `Grain: …`, `Warehouse table (alias): …` — never `Table x as y` (DBML aliases are unique; ours are not) |
  * | description                        | the table `Note`, after a blank line                                    |
  * | rationale                          | table `Note` lines `Purpose: …`, `Decisions: …`, …, after a blank line, in `RATIONALE_LABELS` order (a fields.yml label never changes them) |
@@ -56,7 +56,7 @@
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
-import { backwardsNoteOf, describeEnds, foreignKeyColumns, oneLine, prepareSubjectArea } from './exportShared.js';
+import { backwardsNoteOf, declaredName, describeEnds, foreignKeyColumns, oneLine, prepareSubjectArea } from './exportShared.js';
 import type { ExportColumn, ExportLink, ExportMeta, ExportTable } from './exportShared.js';
 
 export const DBML_EXPORT_HEADER = '// erd-studio dbml-export v1';
@@ -108,7 +108,7 @@ function nameChanged(value: string): boolean {
 }
 
 function tableName(model: ExportTable): string {
-  return model.schema ? `${ident(model.schema)}.${ident(model.name)}` : ident(model.name);
+  return model.schema ? `${ident(model.schema)}.${ident(declaredName(model))}` : ident(declaredName(model));
 }
 
 function columnType(dataType: string): string {
@@ -173,8 +173,8 @@ const columnKey = (model: ExportTable, column: string): string => `${model.name}
  */
 function tableBlock(model: ExportTable, fkColumns: Set<string>, written: Set<string>): string[] {
   const lines: string[] = [];
-  if (nameChanged(model.name) || nameChanged(model.schema)) {
-    const original = model.schema ? `${oneLine(model.schema)}.${oneLine(model.name)}` : oneLine(model.name);
+  if (nameChanged(declaredName(model)) || nameChanged(model.schema)) {
+    const original = model.schema ? `${oneLine(model.schema)}.${oneLine(declaredName(model))}` : oneLine(declaredName(model));
     lines.push(`// ${original} is written as ${tableName(model)}: DBML names cannot hold " or \\ in every parser`);
   }
   const modelMeta = metaNotExported(model.meta);

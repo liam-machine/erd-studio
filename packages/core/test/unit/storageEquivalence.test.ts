@@ -496,3 +496,33 @@ describe('normaliseForStorageEquivalence on the goldens', () => {
     expect(out.schemaVersion).toBe(7);
   });
 });
+
+describe('normaliseForStorageEquivalence on two tables of one name from different schema folders', () => {
+  // What core draws for a diagram that shows both: `bqs.addresse` and `ccc.addresse`, `tableName` beside.
+  const twins = (): Area => ({
+    schemaVersion: 8,
+    domain: 'kunden',
+    layer: 'bronze',
+    stage: 'logical',
+    description: '',
+    models: [
+      { name: 'bqs.addresse', tableName: 'addresse', schema: 'bqs', description: '', layer: 'bronze', columns: [{ name: 'id', dataType: 'int', description: '', isPrimaryKey: true, isForeignKey: false, isNaturalKey: false }] },
+      { name: 'ccc.addresse', tableName: 'addresse', schema: 'ccc', description: '', layer: 'bronze', columns: [{ name: 'ID', dataType: 'int', description: '', isPrimaryKey: true, isForeignKey: true, isNaturalKey: false }] },
+    ],
+    relationships: [{ fromModel: 'CCC.addresse', fromColumn: 'id', toModel: 'bqs.addresse', toColumn: 'ID', cardinality: 'many-to-one' }],
+    viewConfig: { positions: { 'bqs.addresse': { x: 1.234, y: 2 }, 'ccc.addresse': { x: 3, y: 4 } } },
+  });
+
+  it('keeps them two tables: each end respelled to its own table, positions under their own names', () => {
+    const out = norm(twins()) as Area;
+    expect(out.models.map((m: Area) => [m.name, m.tableName])).toEqual([['bqs.addresse', 'addresse'], ['ccc.addresse', 'addresse']]);
+    expect(out.relationships).toEqual([{ fromModel: 'ccc.addresse', fromColumn: 'ID', toModel: 'bqs.addresse', toColumn: 'id', cardinality: 'many-to-one' }]);
+    expect(out.viewConfig.positions).toEqual({ 'bqs.addresse': { x: 1.23, y: 2 }, 'ccc.addresse': { x: 3, y: 4 } });
+  });
+
+  it('still tells a change in one of them apart', () => {
+    const changed = twins();
+    changed.models[1].columns[0].dataType = 'bigint';
+    differ(twins(), changed);
+  });
+});

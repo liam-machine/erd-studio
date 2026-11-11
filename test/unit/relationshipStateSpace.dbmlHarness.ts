@@ -22,6 +22,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { canonicalRelationship } from '@erd-studio/core';
+import type { TableId } from '@erd-studio/core';
+import { planRelationshipWrite } from '../../src/services/libraryRelationships';
+import type { RelationshipWriteOp } from '../../src/services/libraryRelationships';
 import { readRelationshipsDbml, renderNewSubjectAreaDbml, renderNewTableDbml } from '@erd-studio/core/dbml';
 import { relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
 import { diagramSummaryOf } from '../../src/services/dbmlDiagramSummaries';
@@ -376,4 +379,88 @@ export function normaliseLibraryG(w: GWorld): string {
     rel.fromModel.toLowerCase(), rel.toModel.toLowerCase(), rel.fromColumn.toLowerCase(), rel.toColumn.toLowerCase(),
     rel.cardinality, rel.role ?? null, group,
   ])).sort().join('\n');
+}
+
+// ---------------------------------------------------------------------------------------------
+// TWINS: two schema folders holding tables of the same names (schema-scoped table identity).
+// ---------------------------------------------------------------------------------------------
+
+/** The four tables of the TWINS state: `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml`. */
+export const TWIN_TABLES: Record<string, { schema: string; name: string; columns: string[] }> = {
+  'bqs.addresse': { schema: 'bqs', name: 'addresse', columns: ['id', 'ref_id', 'strasse'] },
+  'bqs.kunde': { schema: 'bqs', name: 'kunde', columns: ['id', 'addresse_id'] },
+  'ccc.addresse': { schema: 'ccc', name: 'addresse', columns: ['id', 'ref_id', 'street'] },
+  'ccc.kunde': { schema: 'ccc', name: 'kunde', columns: ['id', 'addresse_id'] },
+};
+
+/** A link of the TWINS state, by the tables' library references (`<schema>.<name>`: every name is shared). */
+export interface TwinLink { from: string; fromColumn: string; to: string; toColumn: string; cardinality: Relationship['cardinality'] }
+
+/**
+ * The project of the TWINS state, with `links` stored in
+ * `bronze/relationships/bronze.dbml` (each end qualified and imported by its
+ * own `use` line, as ERD Studio writes them), read through a
+ * TableLibraryService that tells tables apart by identity.
+ */
+export function materialiseTwins(links: readonly TwinLink[]): { root: string; semantic: string; library: () => TableLibraryService } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-statespace-twins-'));
+  const semantic = path.join(root, SEMANTIC_DIR);
+  const write = (rel: string, text: string): void => {
+    fs.mkdirSync(path.dirname(path.join(semantic, rel)), { recursive: true });
+    fs.writeFileSync(path.join(semantic, rel), text);
+  };
+  write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', creatable: true, order: 1 }] }, null, 2));
+  for (const t of Object.values(TWIN_TABLES)) {
+    write(`bronze/tables/${t.schema}/${t.name}.dbml`, renderNewTableDbml({
+      name: t.name, schema: t.schema, description: '',
+      columns: t.columns.map((c) => ({ name: c, dataType: 'INT', description: '', ...(c === 'id' ? { isPrimaryKey: true } : {}) })),
+    }));
+  }
+  if (links.length > 0) {
+    const named = [...new Set(links.flatMap((l) => [l.from, l.to]))].sort();
+    write('bronze/relationships/bronze.dbml', [
+      ...named.map((ref) => `use { table ${ref} } from '../tables/${TWIN_TABLES[ref].schema}/${TWIN_TABLES[ref].name}.dbml'`),
+      '',
+      ...links.map((l) => `Ref: ${l.from}.${l.fromColumn} ${l.cardinality === 'one-to-one' ? '-' : '>'} ${l.to}.${l.toColumn}`),
+      '',
+    ].join('\n'));
+  }
+  return { root, semantic, library: () => new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker()) };
+}
+
+/**
+ * One canvas relationship edit on the TWINS state, as the editor will make it
+ * once it names tables by identity: the one planner (`planRelationshipWrite`)
+ * sees every model named by its library reference, and each model it changes
+ * is saved under its own name by its identity (`from`), through the library's
+ * batch (plan, settle, write). Returns the planner's refusal, if any.
+ */
+export function twinRelationshipEdit(library: TableLibraryService, op: RelationshipWriteOp): string | undefined {
+  const ids = new Map<string, TableId>();
+  const models = library.listTableFiles().filter((e) => !e.shadowedBy && e.id !== undefined).map((e) => {
+    const ref = library.libraryRef(e.id!)!;
+    ids.set(ref.toLowerCase(), e.id!);
+    return { ...library.getTable(e.id!)!, name: ref };
+  });
+  const plan = planRelationshipWrite(op, { home: 'library', models, domainRelationships: [] });
+  if (!plan.ok) return plan.error;
+  const save = plan.changed.map((m) => {
+    const id = ids.get(m.name.toLowerCase())!;
+    return { model: { ...m, name: id.name }, from: id };
+  });
+  library.applyDbmlBatch({ ops: { save } });
+  return undefined;
+}
+
+/** The TWINS state's links as the library reads them back, by library reference, sorted. */
+export function readBackTwins(library: TableLibraryService): string[] {
+  const out: string[] = [];
+  for (const e of library.listTableFiles()) {
+    if (e.shadowedBy || e.id === undefined) continue;
+    const ref = library.libraryRef(e.id)!;
+    for (const r of library.getTable(e.id)?.relationships ?? []) {
+      out.push(`${ref}.${r.fromColumn} > ${r.toModel}.${r.toColumn} ${r.cardinality}`);
+    }
+  }
+  return out.sort();
 }

@@ -20,12 +20,23 @@
  * the plan reports them instead.
  */
 
+import { tableIdKey } from '@erd-studio/core';
+
 import type { TableFileEntry } from './logicalModelService';
 
 /** One domain's layer and the model names it references. */
 export interface SubjectAreaTableUsage {
   readonly layer: string;
   readonly modelNames: readonly string[];
+  /**
+   * The identity keys (`tableIdKey`) of the table files a DBML diagram's
+   * `use` lines read, given only where the library tells tables apart by
+   * identity. A DBML table is then counted for this diagram by its identity,
+   * never by its name, so of two tables of one name in different schema
+   * folders only the one the diagram shows is used here (`modelNames` then
+   * still counts the YAML and unlinked members).
+   */
+  readonly modelIds?: readonly string[];
 }
 
 export interface TableMove {
@@ -62,16 +73,40 @@ export function planOrganizeByLayer(
   targetPath: (name: string, layer: string, from: string) => string | null,
   layerIds: ReadonlySet<string> = new Set(usage.map(u => u.layer)),
 ): OrganizePlan {
+  const note = (map: Map<string, Set<string>>, key: string, layer: string): void => {
+    const layers = map.get(key) ?? new Set<string>();
+    layers.add(layer);
+    map.set(key, layers);
+  };
+  // By name: every domain for a YAML table; for a DBML one, only the domains that give no identities.
   const layersByModel = new Map<string, Set<string>>();
+  const layersByNameAlone = new Map<string, Set<string>>();
+  const layersById = new Map<string, Set<string>>();
   for (const domain of usage) {
     for (const name of domain.modelNames) {
-      const layers = layersByModel.get(name) ?? new Set<string>();
-      layers.add(domain.layer);
-      layersByModel.set(name, layers);
+      note(layersByModel, name, domain.layer);
+      if (!domain.modelIds) note(layersByNameAlone, name, domain.layer);
     }
+    for (const key of domain.modelIds ?? []) note(layersById, key, domain.layer);
   }
+  /** Told apart by identity (some domain gives identities), a DBML table counts by its own file. */
+  const byIdentity = usage.some(u => u.modelIds !== undefined);
+  const layersOf = (entry: TableFileEntry): Set<string> | undefined => {
+    if (!byIdentity || entry.storage !== 'dbml' || !entry.id) return layersByModel.get(entry.name);
+    return new Set([...(layersById.get(tableIdKey(entry.id)) ?? []), ...(layersByNameAlone.get(entry.name) ?? [])]);
+  };
 
   const taken = new Set(entries.filter(e => e.folder !== '').map(e => `${e.folder}/${e.name}`));
+  /**
+   * Told apart by identity, a DBML table's move (which keeps its schema
+   * folder) is in the way only of another file of its identity, in any layer
+   * (D-7); a table of its name in another schema folder is not.
+   */
+  const takenFor = (entry: TableFileEntry, layer: string): boolean => {
+    if (!byIdentity || entry.storage !== 'dbml' || !entry.id) return taken.has(`${layer}/${entry.name}`);
+    const key = tableIdKey(entry.id);
+    return entries.some(e => e !== entry && e.storage === 'dbml' && e.id !== undefined && tableIdKey(e.id) === key);
+  };
   const moves: TableMove[] = [];
   const shared: { name: string; layers: string[] }[] = [];
   const unused: string[] = [];
@@ -87,7 +122,7 @@ export function planOrganizeByLayer(
       otherFolderCounts.set(entry.folder, (otherFolderCounts.get(entry.folder) ?? 0) + 1);
       continue;
     }
-    const layers = [...(layersByModel.get(entry.name) ?? [])].sort();
+    const layers = [...(layersOf(entry) ?? [])].sort();
     if (layers.length !== 1) {
       // Only a top-level file is reported: one in a layer folder stays put quietly.
       if (!inLayerFolder) {
@@ -103,7 +138,7 @@ export function planOrganizeByLayer(
       if (!inLayerFolder) shared.push({ name: entry.name, layers });
       continue;
     }
-    if (taken.has(`${layer}/${entry.name}`)) {
+    if (takenFor(entry, layer)) {
       conflicts.push({ name: entry.name, layer });
       continue;
     }

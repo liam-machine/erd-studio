@@ -82,6 +82,30 @@ export function tablesOfDroppedUris(
 }
 
 /**
+ * The table files the dropped `uris` are, in drop order, each file once, at
+ * most {@link ADD_EXISTING_TABLES_LIMIT}: {@link tablesOfDroppedUris} by file
+ * rather than by name, so two tables of one name in different schema folders
+ * are two tables. Only `file:` URIs of listed, unshadowed table files count.
+ */
+export function tableFilesOfDroppedUris<T extends DroppableTableFile>(
+  uris: readonly string[],
+  files: readonly T[],
+  platform: NodeJS.Platform = process.platform,
+): T[] {
+  const candidates = files.filter((f) => !f.shadowedBy);
+  const out: T[] = [];
+  for (const uri of uris) {
+    const filePath = filePathOf(uri, platform);
+    if (filePath === undefined) continue;
+    const file = candidates.find((f) => samePath(f.filePath, filePath, platform));
+    if (!file || out.includes(file)) continue;
+    out.push(file);
+    if (out.length >= ADD_EXISTING_TABLES_LIMIT) break;
+  }
+  return out;
+}
+
+/**
  * Where dropped tables go: the first centred under the drop point with its
  * header under the pointer, the others in a grid to its right and below,
  * {@link DROP_GRID_COLUMNS} to a row, one table width and height (plus the

@@ -535,9 +535,9 @@ describe('TableLibraryTreeProvider', () => {
         const silver = folders(p.getChildren()).find(f => f.folder === 'silver')!;
         return String(p.getTreeItem((p.getChildren(silver) as TableLibraryTableNode[])[0]).tooltip);
       };
-      expect(tip(true)).toContain('Table names are unique across all folders, as dbt model names are. Use "Give Duplicate Table Its Own Name"');
+      expect(tip(true)).toContain('A schema holds one table of a name, and a YAML table\'s name is one in the project, as dbt builds one model of a name. Use "Give Duplicate Table Its Own Name"');
       const plain = tip(false);
-      expect(plain).toContain('Table names are unique across all folders. Use "Give Duplicate Table Its Own Name" to make this copy "silver_dim_customer"');
+      expect(plain).toContain('A schema holds one table of a name, and a YAML table\'s name is one in the project. Use "Give Duplicate Table Its Own Name" to make this copy "silver_dim_customer"');
       expect(plain).not.toMatch(/dbt/i);
     });
   });

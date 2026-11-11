@@ -270,27 +270,34 @@ describe('New Table…', () => {
     expect(read('silver', 'tables', 'calendar', 'dim_week.dbml')).toMatch(/^Table calendar\.dim_week \{$/m);
   });
 
-  it('refuses a name the library already has, in any case and in any layer: nothing is written', async () => {
+  // A table is its schema folder and name: only the same schema folder's table refuses the name (this
+  // pinned the project-wide rule, which refused gold's names in silver › calendar too).
+  it('refuses a name its schema folder already has, in any case: nothing is written; another schema folder\'s is no clash', async () => {
     await activate(context);
     const before = tree();
     const beforeBytes = bytes();
     for (const name of ['dim_customer', 'DIM_Customer', 'Fct_Order']) {
       errors.mockClear();
       const inputs = answerInputs(name);
-      // gold.dim_customer and gold.fct_order exist; the new one is asked for in silver › calendar.
-      await vscode.commands.executeCommand('erdStudio.newTable', schemaRow('silver', 'calendar'));
+      // gold.dim_customer and gold.fct_order exist; the new one is asked for in gold › gold.
+      await vscode.commands.executeCommand('erdStudio.newTable', schemaRow('gold', 'gold'));
       const taken = name.toLowerCase();
       expect(errors).toHaveBeenCalledTimes(1);
       expect(errors.mock.calls[0][0]).toBe(
-        `New Table: Table "${taken}" already exists in the Table Library (.erd-studio/gold/tables/gold/${taken}.dbml). Table names are unique across the project. ` +
-        `For a separate table also called ${name}, name it calendar_${name} and set its warehouse name (alias) to ${name}. Nothing was created.`,
+        `New Table: The schema gold already has a table called "${taken}" (.erd-studio/gold/tables/gold/${taken}.dbml). Choose another name, or add the table in another schema. Nothing was created.`,
       );
       // The box itself says so while typing.
       const validate = (inputs.mock.calls[0][0] as { validateInput(v: string): string | null }).validateInput;
-      expect(validate(name)).toMatch(/already exists in the Table Library/);
+      expect(validate(name)).toMatch(/already has a table called/);
       expect(validate('dim_brand_new')).toBeNull();
       inputs.mockRestore();
     }
+    // In silver › calendar the same names are free: another schema folder's table is another table.
+    const cancelled = answerInputs(undefined);
+    await vscode.commands.executeCommand('erdStudio.newTable', schemaRow('silver', 'calendar'));
+    const validate = (cancelled.mock.calls[0][0] as { validateInput(v: string): string | null }).validateInput;
+    expect(validate('dim_customer')).toBeNull();
+    cancelled.mockRestore();
     expect(tree()).toEqual(before);
     expect(bytes()).toEqual(beforeBytes);
   });

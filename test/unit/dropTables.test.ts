@@ -24,7 +24,7 @@ import {
 } from '../../src/providers/SemanticEditorProvider';
 import { TABLE_LIBRARY_DRAG_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
 import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
-import { DROP_GRID_COLUMNS, dropGridPositions, tablesOfDroppedUris } from '../../src/services/tableDrop';
+import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../../src/services/tableDrop';
 import { validateDropTablesPayload } from '../../src/providers/payloadValidation';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
 import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../../src/services/positionService';
@@ -160,6 +160,27 @@ describe('tablesOfDroppedUris', () => {
   it('decodes a percent-encoded path', () => {
     const spaced = [{ name: 'fct_order', filePath: '/my proj/.erd-studio/gold/tables/gold/fct_order.dbml' }];
     expect(tablesOfDroppedUris(['file:///my%20proj/.erd-studio/gold/tables/gold/fct_order.dbml'], spaced, 'linux')).toEqual(['fct_order']);
+  });
+});
+
+describe('tableFilesOfDroppedUris', () => {
+  const uri = (p: string): string => pathToFileURL(p).href;
+  const twins = [
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/bqs/addresse.dbml' },
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/ccc/addresse.dbml' },
+    { name: 'kunde', filePath: '/proj/.erd-studio/bronze/tables/ccc/kunde.dbml', shadowedBy: '/proj/x.dbml' },
+  ];
+
+  it('gives each dropped table file once, by its file: two tables of one name are two tables', () => {
+    expect(tableFilesOfDroppedUris([
+      uri('/proj/.erd-studio/bronze/tables/ccc/addresse.dbml'),
+      uri('/proj/.erd-studio/bronze/tables/bqs/addresse.dbml'),
+      uri('/proj/.erd-studio/bronze/tables/ccc/addresse.dbml'),
+      uri('/proj/.erd-studio/bronze/tables/ccc/kunde.dbml'),
+      uri('/proj/README.md'),
+    ], twins, 'linux')).toEqual([twins[1], twins[0]]);
+    // By name, as before, the second addresse is the first one again.
+    expect(tablesOfDroppedUris(twins.slice(0, 2).map((f) => uri(f.filePath)), twins, 'linux')).toEqual(['addresse']);
   });
 });
 

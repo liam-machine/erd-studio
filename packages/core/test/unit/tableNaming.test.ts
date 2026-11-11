@@ -46,8 +46,8 @@ function fsReadFile(root: string) {
 }
 
 describe('schema versions', () => {
-  it('reads JSON up to v6 (DBML diagrams up to v7) and still writes v5', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+  it('reads JSON up to v6 (DBML diagrams up to v8) and still writes v5', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
     expect(CURRENT_JSON_SCHEMA_VERSION).toBe(6);
     expect(TABLE_NAMING_SCHEMA_VERSION).toBe(6);
     expect(LIBRARY_SCHEMA_VERSION).toBe(5);

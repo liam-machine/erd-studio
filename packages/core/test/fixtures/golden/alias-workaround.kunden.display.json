@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 7,
+  "domain": "kunden",
+  "layer": "bronze",
+  "stage": "logical",
+  "description": "Customers and addresses from both source systems",
+  "models": [
+    {
+      "name": "addresse",
+      "schema": "bqs",
+      "description": "Addresses from the BQS system",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "strasse",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "ort",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "kunde",
+      "schema": "bqs",
+      "description": "Customers from the BQS system",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "name",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "addresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false,
+          "isForeignKeyDeclared": true
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "ccc_addresse",
+      "schema": "ccc",
+      "alias": "addresse",
+      "description": "Addresses from the CCC system",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        },
+        {
+          "name": "street",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "city",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "postcode",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "ccc_kunde",
+      "schema": "ccc",
+      "alias": "kunde",
+      "description": "Customers from the CCC system",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "full_name",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "addresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false,
+          "isForeignKeyDeclared": true
+        }
+      ],
+      "layer": "bronze"
+    }
+  ],
+  "relationships": [
+    {
+      "fromModel": "kunde",
+      "fromColumn": "addresse_id",
+      "toModel": "addresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "fromModel": "ccc_addresse",
+      "fromColumn": "id",
+      "toModel": "addresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "fromModel": "ccc_kunde",
+      "fromColumn": "addresse_id",
+      "toModel": "ccc_addresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "viewConfig": {
+    "positions": {
+      "addresse": {
+        "x": 40,
+        "y": 40
+      },
+      "ccc_addresse": {
+        "x": 40,
+        "y": 360
+      },
+      "ccc_kunde": {
+        "x": 400,
+        "y": 360
+      },
+      "kunde": {
+        "x": 400,
+        "y": 40
+      }
+    },
+    "annotations": [
+      {
+        "id": "5d1c7e2a-3b4f-4a6e-9d8c-1f2e3a4b5c6d",
+        "text": "ccc_addresse is the warehouse table ccc.addresse",
+        "x": 760,
+        "y": 360,
+        "color": "yellow",
+        "width": 220,
+        "height": 120,
+        "linkedModel": "ccc_addresse"
+      }
+    ]
+  },
+  "layerConfig": {
+    "id": "bronze",
+    "label": "Bronze",
+    "abbreviation": "BRZ",
+    "color": "#cd7f32",
+    "creatable": true,
+    "order": 1
+  },
+  "readOnly": false,
+  "positionDraggable": true,
+  "layerConfigs": [
+    {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 1
+    }
+  ]
+}

@@ -15,7 +15,9 @@ import { DBML_CONVERSION_DECLINED_KEY, DBML_OFFER_CONVERT_SETTING, SemanticEdito
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { DiagramMembers } from './services/diagramMembers';
 import { CodeOwnersReader } from './services/codeOwners';
-import { tableHomesOf, type TableHome } from './services/tableHomes';
+import { tableHomesById, tableHomesOf, type TableHome } from './services/tableHomes';
+import { tableUsageOf, type TableUsageKeys } from './services/sidebarTables';
+import { tableFilesOfDroppedUris } from './services/tableDrop';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
@@ -24,7 +26,7 @@ import { TABLES_DIR, TableLibraryService } from './services/logicalModelService'
 import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from './services/legacyDbmlTree';
 import { LibraryWarmUp } from './services/libraryWarmUp';
 import { projectStorageOf } from './services/projectStorage';
-import type { ProjectStorage } from '@erd-studio/core';
+import type { ProjectStorage, TableId } from '@erd-studio/core';
 import { ownWrites } from './services/ownWriteTracker';
 import { ownFileOperations } from './services/ownFileOperations';
 import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './services/migrationService';
@@ -35,7 +37,7 @@ import {
   samePath,
   type DbtProjectResolution,
 } from './services/projectDiscovery';
-import { YmlParserService } from './services/ymlParserService';
+import { YmlParserService, emptyYmlData } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
@@ -58,7 +60,7 @@ import { TableLibraryDragController, TABLE_LIBRARY_DRAG_MIME } from './providers
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, subjectAreaStorageOf, tableIdKey, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -154,7 +156,7 @@ import {
   REVEAL_IN_TABLE_LIBRARY_COMMAND,
   addToDiagramCommand,
   goToTableCommand,
-  tablesFromTreeArgs,
+  tableRowsFromTreeArgs,
   type AddToDiagramDeps,
   type GoToTableDeps,
   type TableDetails,
@@ -1797,6 +1799,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     {
       // Paths compared as the file system does (a `c:` drive letter, a folder in another case).
       isFileDirtyInEditor: (filePath) => dirtyFiles([filePath]).length > 0,
+      // A table whose name two schema folders share is written as the dbt model it was found as (D-12).
+      dbtModelsOf: (unified) => subjectAreaService.dbtModelNamesOf(unified, ymlParserService.peekYmlData() ?? emptyYmlData(), manifestService.peekManifest()),
       onSkipped: (info) => {
         const message = info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
@@ -1919,6 +1923,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // empty-state text meanwhile.
   // Each diagram's member names by file version, shared by the Table Library and the Explorer's tooltips.
   const diagramMembers = new DiagramMembers();
+  // Which table a sidebar row or command means, and which diagrams show it: by name, or, where the
+  // library tells tables apart by their schema folders, by the file each diagram's `use` line reads.
+  const tableUsage = (): TableUsageKeys => tableUsageOf(tableLibraryService, diagramMembers);
+  // The Diagrams view's other-layer counts and `schema:` facet count each table by the same rule.
+  treeProvider.setTableIdentity(tableUsage, () => tableHomesById(tableLibraryService.listTableFiles()));
   // The repository's CODEOWNERS (read only): "Reviewed by …" on a table's tooltip.
   const codeOwners = new CodeOwnersReader(() => {
     const folder = vscode.workspace.getWorkspaceFolder?.(vscode.Uri.file(workspaceRoot))?.uri.fsPath;
@@ -2040,6 +2049,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     peekAlias: (name) => tableLibraryService.peekTableSummary(name)?.alias,
     listDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),
     diagramMembers: (filePath) => diagramMembers.of(filePath),
+    usage: tableUsage,
     listRelationshipsFiles: () => tableLibraryService.listRelationshipsFiles(),
     relationshipsCount: (filePath) => {
       const reading = tableLibraryService.readRelationshipsFile(filePath);
@@ -2494,7 +2504,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     show: async (name, filePath) => {
       try {
         // Its row, when the view's filter shows it (the filter is the user's: never cleared here); then its file.
-        const node = tableLibraryProvider.findTableNode(name);
+        // By its file: another schema folder may have a table of its name.
+        const node = tableLibraryProvider.findTableNode(name, filePath);
         if (node && tableLibraryView?.visible) await tableLibraryView.reveal(node, { select: true, focus: false });
         await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } catch (err) {
@@ -2618,7 +2629,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(guardRefresh('Table', ({ tables: changed }) => {
     draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
-    tableLibraryService.invalidateTables(names);
+    // By name, and by each changed file's own path: a name two schema folders share is two files.
+    tableLibraryService.invalidateTables(names, changed.map((t) => t.uri.fsPath));
     // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
     for (const name of names) editorProvider.queueTableRefresh(name);
     treeProvider.refresh();
@@ -3282,7 +3294,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       tableLibraryView = vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
         // Rows drag onto a diagram: a Shift-drop adds them where they land.
-        dragAndDropController: new TableLibraryDragController((tables) => editorProvider.noteLibraryDrag(tables)),
+        // Each dragged table's file goes with its name: a drop adds that file where two schema folders share the name.
+        dragAndDropController: new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true }),
         // Move Table moves every selected table to one folder.
         canSelectMany: true,
         showCollapseAll: true,
@@ -3308,6 +3321,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         findTableFile: (name) => tableLibraryService.findTableFile(name),
         listSubjectAreas: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),
         memberNames: (filePath) => diagramMembers.of(filePath),
+        usage: tableUsage,
         layerLabel: (layer) => layerService.getLabel(layer),
         revealRelationship: (filePath, target) => editorProvider.revealRelationship(vscode.Uri.file(filePath), target),
         revealTable: (filePath, modelName) => editorProvider.revealTable(vscode.Uri.file(filePath), modelName),
@@ -3316,20 +3330,27 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       const addToDiagramDeps: AddToDiagramDeps = {
         listSubjectAreas: deps.listSubjectAreas,
         memberNames: deps.memberNames,
+        usage: tableUsage,
         layerLabel: deps.layerLabel,
-        addTables: async (filePath, tables) => {
+        addTables: async (filePath, tables, files) => {
           await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
-          await editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables);
+          await editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
         // The diagram in front of the user is offered first.
         activeDiagramPath: activeSubjectAreaCanvasPath,
       };
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
-      treeProvider.setTablesDropHandler((filePath, tables) => addToDiagramDeps.addTables(filePath, tables));
+      // Where two schema folders share a name, the dragged rows' files say which tables.
+      treeProvider.setTablesDropHandler((filePath, tables, uris) => {
+        const dropped = tableLibraryService.hasSharedNames() ? tableFilesOfDroppedUris(uris, tableLibraryService.listTableFiles()) : [];
+        return dropped.length > 0
+          ? addToDiagramDeps.addTables(filePath, dropped.map((f) => f.name), dropped.map((f) => f.filePath))
+          : addToDiagramDeps.addTables(filePath, tables);
+      });
       // A table's warehouse name and owner, from the cached reading of a file
       // already read (`read` reads it first, with no copy or relationships
       // attach): undefined while unread.
-      const tableDetails = (name: string, read: boolean): TableDetails | undefined => {
+      const tableDetails = (name: TableId | string, read: boolean): TableDetails | undefined => {
         const error = read ? tableLibraryService.getTableFileError(name) : tableLibraryService.peekTableFileError(name);
         if (error === undefined) return undefined;
         if (error) return {};
@@ -3356,17 +3377,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       context.subscriptions.push(...sidebarFilters.disposables);
       // Show / Hide Row Details (each view's … menu): `erdStudio.sidebar.rowDetails`, applied to the three trees now and on change.
       context.subscriptions.push(...registerRowDetails([treeProvider, tableLibraryProvider, relationshipsProvider]));
+      // A Go to Table row's table: by its file where one is given (told apart by identity), else by its name.
+      const rowTable = (name: string, filePath?: string): TableId | string =>
+        (filePath !== undefined ? tableLibraryService.tableEntryAt(filePath)?.id : undefined) ?? name;
       const goToTableDeps: GoToTableDeps = {
         listTableFiles: () => tableLibraryService.listTableFiles(),
-        tableHomes,
+        // Keyed as the usage keys a table: where two schema folders share a name, by identity, each table's own home.
+        tableHomes: () => (tableLibraryService.hasSharedNames() ? tableHomesById(tableLibraryService.listTableFiles()) : tableHomes()),
         listSubjectAreas: deps.listSubjectAreas,
         memberNames: deps.memberNames,
+        usage: tableUsage,
         layerLabel: deps.layerLabel,
-        peekDetails: (name) => tableDetails(name, false),
-        readDetails: (name) => tableDetails(name, true),
-        openInDiagram: (name) => openInDiagram({ type: 'model', name }, deps),
+        peekDetails: (name, filePath) => tableDetails(rowTable(name, filePath), false),
+        readDetails: (name, filePath) => tableDetails(rowTable(name, filePath), true),
+        openInDiagram: (name, filePath) => openInDiagram({ type: 'model', name, ...(filePath !== undefined ? { filePath } : {}) }, deps),
         openFile: async (filePath) => { await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath)); },
-        showRelationships: async (name) => {
+        showRelationships: async (given, filePath) => {
+          // The Relationships view names a table by its library reference (`<schema>.<name>` where two schema folders share its name).
+          const id = filePath !== undefined ? tableLibraryService.tableEntryAt(filePath)?.id : undefined;
+          const name = (id !== undefined ? tableLibraryService.libraryRef(id) : undefined) ?? given;
           // Table rows exist only when grouped by table.
           if (relationshipsProvider.getGrouping() !== 'table') setRelationshipsGrouping('table');
           let node = await relationshipsProvider.findTableNode(name);
@@ -3386,13 +3415,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
         vscode.commands.registerCommand(ADD_TO_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
-          addToDiagramCommand(addToDiagramDeps, tablesFromTreeArgs(arg, selection))),
-        vscode.commands.registerCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, async (name?: unknown) => {
-          let node = typeof name === 'string' ? tableLibraryProvider.findTableNode(name) : undefined;
+          addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection))),
+        // `filePath` (optional): the table's file, whose row is revealed (two schema folders may share the name).
+        vscode.commands.registerCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, async (name?: unknown, filePath?: unknown) => {
+          const file = typeof filePath === 'string' ? filePath : undefined;
+          let node = typeof name === 'string' ? tableLibraryProvider.findTableNode(name, file) : undefined;
           // Hidden by the view's filter: clear it, then reveal the table.
           if (!node && typeof name === 'string' && sidebarFilters.filters.tableLibrary.isFiltered()) {
             sidebarFilters.filters.tableLibrary.clear();
-            node = tableLibraryProvider.findTableNode(name);
+            node = tableLibraryProvider.findTableNode(name, file);
           }
           if (!node) {
             void vscode.window.showErrorMessage(`Reveal in Table Library: ${typeof name === 'string' ? `"${name}" is not in the Table Library.` : 'No table named.'}`);
@@ -3438,26 +3469,48 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // would remove the file that IS in use.
       const nodes = (selection?.includes(node) ? selection : [node])
         .filter((n): n is TableLibraryTableNode => n.type === 'model' && !n.shadowedBy);
-      const names = [...new Set(nodes.map((n) => n.name))];
+      // Each table to delete: by name, or, where two schema folders share a name,
+      // by the row's own file (a DBML table by its identity, never its namesake in
+      // another schema folder), named `<schema>.<name>` in the question where
+      // another schema folder shares its name.
+      const rows: Array<{ label: string; table: TableId | string; dbml: boolean }> = [];
+      if (tableLibraryService.hasSharedNames()) {
+        const seen = new Set<string>();
+        for (const n of nodes) {
+          const key = path.resolve(n.filePath);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const entry = tableLibraryService.tableEntryAt(n.filePath);
+          const id = entry?.storage === 'dbml' && !entry.shadowedBy ? entry.id : undefined;
+          rows.push(id !== undefined
+            ? { label: tableLibraryService.isAmbiguousName(n.name) ? `${entry!.folder}.${n.name}` : n.name, table: id, dbml: true }
+            : { label: n.name, table: n.name, dbml: tableLibraryService.tableStorage(n.name) === 'dbml' });
+        }
+      } else {
+        for (const name of new Set(nodes.map((n) => n.name))) rows.push({ label: name, table: name, dbml: tableLibraryService.tableStorage(name) === 'dbml' });
+      }
+      const names = rows.map((r) => r.label);
       // A DBML table goes with its relationships and every DBML diagram's use
       // line and positions for it (D16), as one WorkspaceEdit: the canvas's
       // Delete Table File cascade, so a diagram never imports a deleted file.
-      const dbmlNames = names.filter((n) => tableLibraryService.tableStorage(n) === 'dbml');
-      const yamlNames = names.filter((n) => !dbmlNames.includes(n));
+      const dbmlTables = rows.filter((r) => r.dbml).map((r) => r.table);
+      const dbmlNames = rows.filter((r) => r.dbml).map((r) => r.label);
+      const yamlRows = rows.filter((r) => !r.dbml);
+      const yamlNames = yamlRows.map((r) => r.label);
       const subject = names.length === 1 ? `table "${names[0]}"` : `${names.length} tables (${names.join(', ')})`;
       const confirm = await vscode.window.showWarningMessage(
         yamlNames.length === 0
-          ? `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)}`
+          ? `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlTables, false)}`
           : dbmlNames.length === 0
             ? `Delete ${subject}? This removes the ${names.length === 1 ? "table's file" : "tables' files"} — diagrams that show ${names.length === 1 ? 'it' : 'them'} are not updated.`
-            : `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlNames, false)} The YAML ${yamlNames.length === 1 ? 'table' : 'tables'} (${yamlNames.join(', ')}) ${yamlNames.length === 1 ? 'loses its file' : 'lose their files'}; diagrams that show ${yamlNames.length === 1 ? 'it' : 'them'} are not updated.`,
+            : `Delete ${subject}?${editorProvider.describeDbmlDeleteCascade(dbmlTables, false)} The YAML ${yamlNames.length === 1 ? 'table' : 'tables'} (${yamlNames.join(', ')}) ${yamlNames.length === 1 ? 'loses its file' : 'lose their files'}; diagrams that show ${yamlNames.length === 1 ? 'it' : 'them'} are not updated.`,
         { modal: true },
         'Delete',
       );
       if (confirm === 'Delete') {
         try {
-          if (dbmlNames.length > 0) {
-            const result = await editorProvider.deleteTablesWithCascade(dbmlNames);
+          if (dbmlTables.length > 0) {
+            const result = await editorProvider.deleteTablesWithCascade(dbmlTables);
             if (!result.ok) {
               // Files the reconcile could not put back are already named in its modal; saying nothing was deleted would contradict it.
               if (result.unrestored.length === 0) {
@@ -3466,7 +3519,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
               return;
             }
           }
-          for (const name of yamlNames) tableLibraryService.deleteTable(name);
+          for (const row of yamlRows) tableLibraryService.deleteTable(row.table);
         } catch (err) {
           void vscode.window.showErrorMessage(`Delete Table: ${err instanceof Error ? err.message : String(err)}`);
           tableLibraryProvider.refresh();
@@ -3488,7 +3541,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
         try {
           const names = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
-          if (names) usage.push({ layer: summary.layer, modelNames: names });
+          // A DBML diagram counts the table files its use lines read, not names.
+          const ids = subjectAreaStorageOf(summary.filePath) === 'dbml'
+            ? diagramMembers.idsOf(summary.filePath)?.flatMap((m) => (m.id ? [tableIdKey(m.id)] : []))
+            : undefined;
+          if (names) usage.push({ layer: summary.layer, modelNames: names, ...(ids ? { modelIds: ids } : {}) });
         } catch {
           // An unreadable domain contributes no usage; its models stay put.
         }
@@ -3534,7 +3591,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           const diagrams = tableLibraryService.listDbmlDiagrams();
           dbmlPlan = planDbmlTableMoves({
             tableLibraryService,
-            moves: dbmlMoves.map((m) => ({ name: m.name, toLayer: m.layer })),
+            moves: dbmlMoves.map((m) => ({ name: m.name, filePath: m.from, toLayer: m.layer })),
             diagrams,
             readText: openOrDiskText,
           });

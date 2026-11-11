@@ -33,6 +33,7 @@ import { importsOver } from '../dbmlWriterCases/diagramCases';
 import { editRelationshipsDbml } from '../../src/dbml/writeRelationships';
 import { editSubjectAreaDbml, renderNewSubjectAreaDbml } from '../../src/dbml/writeDiagram';
 import { normaliseForStorageEquivalence } from '../../src/storageEquivalence';
+import { rekeySubjectArea } from '../../src/rekeySubjectArea';
 import { dbmlName, dbmlNoteText } from '../../src/dbmlText';
 import { readMeta } from '../../src/meta';
 import { classifySemanticFile } from '../../src/storage';
@@ -51,6 +52,7 @@ import {
   clone,
   comparableRelationships,
   diagramResolver,
+  identityLookups,
   libraryOf,
   mulberry32,
   ownersOf,
@@ -279,6 +281,13 @@ const FIXTURE_ROOTS = [
   path.resolve(__dirname, '../../../../test/fixtures/dbml-native'),
 ];
 
+/**
+ * Projects the loop below leaves out: its lookups name each table by its
+ * bare name, which two tables of one name in different schema folders
+ * share. Its laws run with identity lookups further down (TWIN_FILES).
+ */
+const IDENTITY_PROJECTS = new Set([path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas')]);
+
 /** Whether a path relative to the semantic dir is a DBML diagram (`<layer>/diagrams/<name>.dbml`). */
 const isDiagramFile = (file: string): boolean => classifySemanticFile(file, { tablesDirIsLayer: false }).kind === 'diagram';
 
@@ -294,6 +303,7 @@ function fixtureProjects(): Array<{ name: string; files: Record<string, string> 
     const semanticDirs = walk(root).filter((f) => f.includes(`${path.sep}.erd-studio${path.sep}`))
       .map((f) => f.slice(0, f.indexOf(`${path.sep}.erd-studio${path.sep}`) + `${path.sep}.erd-studio`.length));
     for (const dir of [...new Set(semanticDirs)]) {
+      if (IDENTITY_PROJECTS.has(path.dirname(dir))) continue;
       const files: Record<string, string> = {};
       for (const f of walk(dir)) if (f.endsWith('.dbml')) files[path.relative(dir, f).split(path.sep).join('/')] = fs.readFileSync(f, 'utf8');
       projects.push({ name: path.relative(path.resolve(__dirname, '../../../..'), dir), files });
@@ -553,6 +563,116 @@ describe('Law 5 across a requalifying move (a table moved to another schema fold
       fileExists: (p) => p in moved,
     });
     expect(moved[DIAGRAM]).toMatch(/^use \{ table sales\.fct_order \} +from '\.\.\/tables\/sales\/fct_order\.dbml'$/m);
+    expect(projectDiagnostics(moved, [TO, REL, DIAGRAM], [version])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two tables of one name in different schema folders
+// ---------------------------------------------------------------------------
+
+/**
+ * packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc each
+ * hold addresse and kunde. Left out of the FIXTURE_ROOTS loop, whose lookups
+ * name tables by their bare name: here each table is named by its library
+ * reference (`identityLookups`), as a host keyed by table identity names it.
+ */
+const TWIN_FILES: Record<string, string> = (() => {
+  const dir = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas/.erd-studio');
+  const files: Record<string, string> = {};
+  for (const f of walk(dir)) if (f.endsWith('.dbml')) files[path.relative(dir, f).split(path.sep).join('/')] = fs.readFileSync(f, 'utf8');
+  return files;
+})();
+
+/** The diagram writer's lookups over a twin library (`names`: what one diagram calls its members). */
+function twinLookups(files: Record<string, string>, names: Record<string, string> = {}): {
+  resolveTable: (name: string) => ReturnType<ReturnType<typeof identityLookups>['resolveTable']>;
+  relationshipsImportsFor: (names: readonly string[], current: readonly string[]) => string[];
+  fileExists: (p: string) => boolean;
+} {
+  return {
+    resolveTable: identityLookups(files, names).resolveTable,
+    relationshipsImportsFor: (_names, current) => [...current],
+    fileExists: (p) => p in files,
+  };
+}
+
+describe('the laws over the twin fixture (two tables of one name in two schema folders)', () => {
+  const diagrams = Object.keys(TWIN_FILES).filter(isDiagramFile);
+
+  it('finds its diagrams', () => {
+    expect(diagrams.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const file of diagrams) {
+    it(`${file}: Laws 1–5 for its diagram`, () => {
+      const text = TWIN_FILES[file];
+      const lookups = twinLookups(TWIN_FILES);
+      const before = parseSubjectAreaDbml(text, file).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+      expect(editSubjectAreaDbml(text, { filePath: file, before, after: before, ...lookups })).toBe(text); // Law 1
+      const baseline = cleanIn(TWIN_FILES, file);
+      const after = clone(before);
+      after.description = 'Law description';
+      after.logical.models = after.logical.models.slice(1);
+      delete after.viewConfig.positions[before.logical.models[0]];
+      after.viewConfig.annotations = [...(after.viewConfig.annotations ?? []), { id: 'law-note-1', text: "it's a note", x: 0, y: 0, color: 'green', linkedModel: after.logical.models[0] }];
+      const out = editSubjectAreaDbml(text, { filePath: file, before, after, ...lookups });
+      // Law 3, through the references the members have after the edit: a twin whose namesake left is bare again,
+      // and its position and sticky link follow it.
+      const read = parseSubjectAreaDbml(out, file).obj as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+      expect(read.logical.models.length).toBe(after.logical.models.length);
+      const renames = new Map<string, string>(after.logical.models.map((m: string, i: number) => [m, read.logical.models[i]]));
+      expect(normDiagram(read)).toEqual(normDiagram(rekeySubjectArea(after, renames)));
+      expect(editSubjectAreaDbml(out, { filePath: file, before: read, after: read, ...lookups })).toBe(out); // Law 2
+      expectPreserved(text, out, diagramRemovedSpans(text, out, read)); // Law 4
+      expect(projectDiagnostics({ ...TWIN_FILES, [file]: out }, [file], baseline)).toEqual([]); // Law 5
+    });
+  }
+
+  it('bronze/relationships/bronze.dbml: Law 1 with identify, every owner listed by its reference', () => {
+    const file = 'bronze/relationships/bronze.dbml';
+    const look = identityLookups(TWIN_FILES);
+    const owners = new Map([
+      ['bqs.kunde', { name: 'bqs.kunde', relationships: [{ fromColumn: 'addresse_id', toModel: 'bqs.addresse', toColumn: 'id', cardinality: 'many-to-one' as const }] }],
+      ['ccc.kunde', { name: 'ccc.kunde', relationships: [{ fromColumn: 'addresse_id', toModel: 'ccc.addresse', toColumn: 'id', cardinality: 'many-to-one' as const }] }],
+      ['ccc.addresse', { name: 'ccc.addresse', relationships: [{ fromColumn: 'id', toModel: 'bqs.addresse', toColumn: 'id', cardinality: 'many-to-one' as const }] }],
+    ]);
+    expect(editRelationshipsDbml(TWIN_FILES[file], { filePath: file, owners, resolve: look.resolve, identify: look.identify })).toBe(TWIN_FILES[file]);
+  });
+});
+
+describe('Law 5 across a requalifying move of one twin (bqs.addresse to ddd, beside ccc.addresse)', () => {
+  const FROM = 'bronze/tables/bqs/addresse.dbml';
+  const TO = 'bronze/tables/ddd/addresse.dbml';
+  const REL = 'bronze/relationships/bronze.dbml';
+  const DIAGRAM = 'bronze/diagrams/kunden.dbml';
+
+  it.each(ALL)('compiles clean in %s before and after, and nothing of ccc changes', (version) => {
+    expect(projectDiagnostics(TWIN_FILES, [REL, DIAGRAM], [version])).toEqual([]);
+    const table = readOk(TWIN_FILES[FROM], 'addresse', 'bqs');
+    const moved: Record<string, string> = { ...TWIN_FILES, [TO]: editTableDbml(TWIN_FILES[FROM], { ...table, schema: 'ddd' }, { requalify: true, schemaFolder: 'bqs' }) };
+    delete moved[FROM];
+    expect(moved[TO]).toContain('Table ddd.addresse');
+    // The file's ends are identified as the library was before the move; renamedOwners says what they are after it.
+    moved[REL] = editRelationshipsDbml(TWIN_FILES[REL], {
+      filePath: REL, owners: new Map(), resolve: identityLookups(moved).resolve, identify: identityLookups(TWIN_FILES).identify,
+      renamedOwners: new Map([['bqs.addresse', 'ddd.addresse']]), requalified: new Set(['ddd.addresse']), pathChanged: new Set(['bqs.addresse']),
+    });
+    expect(moved[REL]).toMatch(/^use \{ table ddd\.addresse \} +from '\.\.\/tables\/ddd\/addresse\.dbml'$/m);
+    expect(moved[REL]).toContain("use { table ccc.addresse } from '../tables/ccc/addresse.dbml'");
+    expect(moved[REL]).toContain('Ref: bqs.kunde.addresse_id >? ddd.addresse.id');
+    expect(moved[REL]).toContain('Ref: ccc.kunde.addresse_id >? ccc.addresse.id');
+    expect(moved[REL]).toContain('Ref: ccc.addresse.id >? ddd.addresse.id');
+    const before = parseSubjectAreaDbml(TWIN_FILES[DIAGRAM], DIAGRAM).obj;
+    const renames = new Map([['bqs.addresse', 'ddd.addresse']]);
+    moved[DIAGRAM] = editSubjectAreaDbml(TWIN_FILES[DIAGRAM], {
+      filePath: DIAGRAM, before, after: rekeySubjectArea(before, renames), renamedMembers: renames,
+      pathChanged: new Set(['bqs.addresse']), ...twinLookups(moved),
+    });
+    expect(moved[DIAGRAM]).toMatch(/^use \{ table ddd\.addresse \} +from '\.\.\/tables\/ddd\/addresse\.dbml'$/m);
+    expect(moved[DIAGRAM]).toContain('    ddd.addresse 40 40\n');
+    expect(moved[DIAGRAM]).toContain("linked_table: 'ccc.addresse'");
+    expect(moved[DIAGRAM]).toContain("erd_schema_version: '8'");
     expect(projectDiagnostics(moved, [TO, REL, DIAGRAM], [version])).toEqual([]);
   });
 });

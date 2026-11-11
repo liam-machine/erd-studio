@@ -368,7 +368,8 @@ export function normaliseStorageRows<T>(
     if (rows.has('tableLayers') && Array.isArray(copy.models)) delete model.layer;
     if (rows.has('convertSchemaFallback') && options.schemaFallback && typeof model.name === 'string'
       && (model.schema === undefined || model.schema === '')) {
-      const schema = options.schemaFallback(model.name);
+      // The table's own name: a diagram names one of two same-named tables `<schema>.<name>`.
+      const schema = options.schemaFallback(typeof model.tableName === 'string' ? model.tableName : model.name);
       if (schema !== undefined) model.schema = schema;
     }
     if (rows.has('emptyRationale') && isObject(model.rationale) && Object.keys(model.rationale).length === 0) delete model.rationale;

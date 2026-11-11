@@ -71,8 +71,9 @@ export interface DuplicateHome {
  *
  * - two DBML tables in the same layer but different schemas
  *   (`bronze/tables/bqs/` and `bronze/tables/ccc/`): the copy's **schema**
- *   (`ccc_addresse`), the shape Import gives two same-named tables of
- *   different schemas. Its layer would name both copies alike.
+ *   (`ccc_addresse`). Its layer would name both copies alike. Since a DBML
+ *   table is its schema folder and name, such files are two tables, not a
+ *   duplicate, so the library no longer offers this for them.
  * - otherwise the copy's layer (DBML), else its folder (YAML), as before.
  *
  * `winner` is the file diagrams use; unknown, the layer (or folder) stands.
@@ -107,8 +108,8 @@ export function planDuplicateFix(
  */
 export function duplicateNamePrompt(warehouseName: string, hasDbt: boolean): string {
   return hasDbt
-    ? `Table names are unique, as dbt model names are. The warehouse table name stays "${warehouseName}" (set as the table's alias).`
-    : `Table names are unique across the library. The warehouse name stays "${warehouseName}" (set as the table's alias).`;
+    ? `ERD Studio reads one table of a name in a schema, as dbt builds one model of a name. The warehouse table name stays "${warehouseName}" (set as the table's alias).`
+    : `ERD Studio reads one table of a name in a schema. The warehouse name stays "${warehouseName}" (set as the table's alias).`;
 }
 
 /** Modal text for a plan. `hasDbt` false (a plain folder) leaves dbt out of it. */

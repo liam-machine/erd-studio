@@ -15,16 +15,54 @@
  * relative to the semantic dir, spelled as the listing spells them; "byte
  * order" is code-unit order (`<`), never a locale's.
  *
+ * Tables are named two ways. Each Ref end has a label, the lower-case name
+ * the lookup knows the table by (its library reference: its name, or
+ * `<schema>.<name>` where another table of the library has its name), and,
+ * when the lookup knows the table's file (the library told apart by
+ * identity), its identity key (`tableIdKey`): the table's schema folder and
+ * name, which a twin appearing elsewhere never changes. A query names a
+ * table by a string (a label) or by a `TableId` (its identity; by its name
+ * in an index whose tables carry no identity). In a library where no two
+ * tables share a name, labels are the names and every answer is what it
+ * always was.
+ *
  * Pure: no `vscode`, no file access. The CLI bundles it.
  */
 
-import { linkKey, normalisePosix, relationshipsFilePath, reverseBareOneToOne } from '@erd-studio/core';
-import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStoredRef } from '@erd-studio/core';
+import { dbmlRefEndHints, linkKey, normalisePosix, relationshipsFilePath, reverseBareOneToOne, tableIdKey, tableIdOfPath } from '@erd-studio/core';
+import type { DbmlAttachTable, DbmlRefEndHint, DbmlRelationshipsReading, DbmlStoredRef, TableId } from '@erd-studio/core';
 import type { RefUnit } from '@erd-studio/core/dbml';
 
 import type { Relationship } from '../types/semantic';
 
 const lower = (s: string): string => s.toLowerCase();
+
+/** A table as a query names it: a label (a string) or an identity. */
+export type IndexedTable = string | TableId;
+
+/** A lookup the index resolves Ref ends with: a table part and, where tables of one name are told apart, what the end says beside it. */
+export type IndexLookup = (name: string, hint?: DbmlRefEndHint) => DbmlAttachTable | undefined;
+
+/**
+ * The identity key of the table `entry` (a lookup's answer), when the lookup
+ * knows its file: a DBML table file's schema folder and name, a YAML table's
+ * name (`tableIdKey`). Undefined for an entry with no `path`, as in a library
+ * whose tables are told apart by name alone.
+ */
+function identityKeyOf(entry: DbmlAttachTable | undefined): string | undefined {
+  if (entry?.path === undefined) return undefined;
+  // Asked for both ends of every Ref: worked out once per table entry.
+  let key = identityKeys.get(entry);
+  if (key === undefined) {
+    const id = tableIdOfPath(normalisePosix(entry.path));
+    key = tableIdKey(id ?? { schema: entry.schema ?? '', name: entry.table.name });
+    identityKeys.set(entry, key);
+  }
+  return key;
+}
+
+/** {@link identityKeyOf}'s answers, by table entry. */
+const identityKeys = new WeakMap<DbmlAttachTable, string>();
 
 /** Code-unit order (`<`): the same on every machine and locale. */
 function byteOrder(a: string, b: string): number {
@@ -49,6 +87,12 @@ export interface IndexedRef {
   line: number;
   /** The owner end's schema qualifier as written (`sap` in `sap.afih.x`); absent for an unqualified end. */
   ownerQualifier?: string;
+  /** The other end's schema qualifier as written; absent for an unqualified end. */
+  targetQualifier?: string;
+  /** The owner's identity key (`tableIdKey`), when the lookup knew its file; absent otherwise. */
+  ownerId?: string;
+  /** The other end's identity key, when the lookup knew its file; absent otherwise. */
+  targetId?: string;
 }
 
 /** The per-pair link keys of a unit (core's `linkKey`, order-free). */
@@ -56,23 +100,40 @@ export function unitLinks(unit: RefUnit): string[] {
   return unit.fromColumns.map((c, i) => linkKey({ fromModel: unit.from, fromColumn: c, toModel: unit.to, toColumn: unit.toColumns[i] ?? '' }));
 }
 
-/** A stored Ref's unit, oriented as `attachRelationships` reads it; null for a Ref with no column pair. */
-export function storedUnit(ref: DbmlStoredRef, lookup: (name: string) => DbmlAttachTable | undefined): { unit: RefUnit; rels: Relationship[] } | null {
+/**
+ * A stored Ref's unit, oriented as `attachRelationships` reads it; null for a
+ * Ref with no column pair. `hints` (what each end says beside its table part,
+ * `dbmlRefEndHints`) go to the lookup, turned round with the ends; the unit's
+ * ends are the tables' references (`ref`, else their real spelling), and
+ * `owner` / `target` are the lookup's answers.
+ */
+export function storedUnit(
+  ref: DbmlStoredRef,
+  lookup: IndexLookup,
+  hints?: { owner: DbmlRefEndHint; target: DbmlRefEndHint },
+): { unit: RefUnit; rels: Relationship[]; owner?: DbmlAttachTable; target?: DbmlAttachTable } | null {
   let rels = ref.relationships;
   if (rels.length === 0) return null;
+  let ownerHint = hints?.owner;
+  let targetHint = hints?.target;
   if (ref.oneToOneDirection === 'keys') {
-    const pk = (name: string): string[] | undefined => {
-      const entry = lookup(name);
+    const pk = (name: string, hint: DbmlRefEndHint | undefined): string[] | undefined => {
+      const entry = lookup(name, hint);
       return entry ? (entry.table.columns ?? []).filter((c) => c?.isPrimaryKey).map((c) => c.name) : undefined;
     };
-    if (reverseBareOneToOne(pk(rels[0].fromModel), rels.map((r) => r.fromColumn), pk(rels[0].toModel), rels.map((r) => r.toColumn))) {
+    if (reverseBareOneToOne(pk(rels[0].fromModel, ownerHint), rels.map((r) => r.fromColumn), pk(rels[0].toModel, targetHint), rels.map((r) => r.toColumn))) {
       rels = rels.map((r) => ({ ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn }));
+      [ownerHint, targetHint] = [targetHint, ownerHint];
     }
   }
-  const from = lookup(rels[0].fromModel)?.table.name ?? rels[0].fromModel;
-  const to = lookup(rels[0].toModel)?.table.name ?? rels[0].toModel;
+  const owner = lookup(rels[0].fromModel, ownerHint);
+  const target = lookup(rels[0].toModel, targetHint);
+  const from = owner ? owner.ref ?? owner.table.name : rels[0].fromModel;
+  const to = target ? target.ref ?? target.table.name : rels[0].toModel;
   return {
     rels,
+    ...(owner ? { owner } : {}),
+    ...(target ? { target } : {}),
     unit: {
       from, to,
       fromColumns: rels.map((r) => r.fromColumn),
@@ -86,19 +147,39 @@ export function storedUnit(ref: DbmlStoredRef, lookup: (name: string) => DbmlAtt
 /**
  * A relationships file's Refs and pending lines as index entries
  * ({@link storedUnit} applied to each). None for a file that does not read:
- * an unreadable file holds no counted Ref.
+ * an unreadable file holds no counted Ref. `file` is the file's path relative
+ * to the semantic dir: each end is resolved with what it says beside its
+ * table part (its qualifier, and the table file the file's own `use` line
+ * for it names), as the attach resolves it.
  */
-export function refEntriesOf(file: string, reading: DbmlRelationshipsReading, lookup: (name: string) => DbmlAttachTable | undefined): IndexedRef[] {
+export function refEntriesOf(file: string, reading: DbmlRelationshipsReading, lookup: IndexLookup): IndexedRef[] {
   if (!reading.readable) return [];
   const out: IndexedRef[] = [];
   const add = (ref: DbmlStoredRef, pending: boolean): void => {
-    const read = storedUnit(ref, lookup);
+    const read = storedUnit(ref, lookup, dbmlRefEndHints({ path: file, reading, semanticPath: file }, ref));
     if (!read) return;
     // A bare `-` the keys turned round: its owner is the end the file wrote second.
-    const ownerQualifier = read.rels === ref.relationships ? ref.ownerQualifier : ref.targetQualifier;
+    const turned = read.rels !== ref.relationships;
+    const ownerQualifier = turned ? ref.targetQualifier : ref.ownerQualifier;
+    const targetQualifier = turned ? ref.ownerQualifier : ref.targetQualifier;
+    const ownerId = identityKeyOf(read.owner);
+    const targetId = identityKeyOf(read.target);
+    // Both ends on one table with the same columns (a stale qualifier on one end, `crm.x.id > finance.x.id`):
+    // it joins a column set to itself, which the attach never draws, so it is no Ref of that table here
+    // either. Where neither end's identity is known, "one table" is one table name, the rule the reader
+    // kept before it let differing qualifiers through: so a library told apart by name indexes exactly
+    // what it always did.
+    const sameColumns = read.rels.every((r) => lower(r.fromColumn) === lower(r.toColumn));
+    const oneTable = ownerId !== undefined || targetId !== undefined
+      ? ownerId === targetId
+      : lower(read.rels[0].fromModel) === lower(read.rels[0].toModel);
+    if (oneTable && sameColumns) return;
     out.push({
       file, owner: lower(read.unit.from), target: lower(read.unit.to), unit: read.unit, links: unitLinks(read.unit), pending, line: ref.line,
       ...(ownerQualifier !== undefined ? { ownerQualifier } : {}),
+      ...(targetQualifier !== undefined ? { targetQualifier } : {}),
+      ...(ownerId !== undefined ? { ownerId } : {}),
+      ...(targetId !== undefined ? { targetId } : {}),
     });
   };
   for (const ref of reading.refs) add(ref, false);
@@ -121,14 +202,31 @@ export interface RelationshipsIndex {
   readonly unreadable: ReadonlySet<string>;
   /** Every Ref and pending line, by file (byte order), then line. */
   readonly refs: readonly IndexedRef[];
-  /** How many Refs and pending lines of `owner` (any case) each file holds, in file byte order. */
-  ownerCounts(owner: string): ReadonlyMap<string, number>;
+  /** Whether its Ref ends carry identities (the lookup knew the tables' files): a `TableId` query is then matched by identity. */
+  readonly identities: boolean;
+  /** How many Refs and pending lines of `owner` (a label in any case, or an identity) each file holds, in file byte order. */
+  ownerCounts(owner: IndexedTable): ReadonlyMap<string, number>;
   /** Every Ref and pending line holding `link` (core `linkKey`). */
   holders(link: string): readonly IndexedRef[];
   /** The files holding a live Ref between `a` and `b` (either way round, a self-Ref when equal), byte-sorted. */
-  filesHoldingPair(a: string, b: string): readonly string[];
+  filesHoldingPair(a: IndexedTable, b: IndexedTable): readonly string[];
   /** The files with a `use` line resolving to `tablePath` (compared case-insensitively), byte-sorted. */
   filesUsing(tablePath: string): readonly string[];
+}
+
+/**
+ * The keys an end is found by: its label, and its identity key when known. A
+ * label is a table name or reference, which never holds a `/`; an identity
+ * key always does (`<schema>/<name>`), so the two never meet in one map.
+ */
+function endKeys(label: string, id: string | undefined): string[] {
+  return id === undefined ? [label] : [label, id];
+}
+
+/** The key a query is matched by: a string by its label; a `TableId` by its identity, or by its name where ends carry none. */
+function queryKey(table: IndexedTable, identities: boolean): string {
+  if (typeof table === 'string') return lower(table);
+  return identities ? tableIdKey(table) : lower(table.name);
 }
 
 /** The order of {@link RelationshipsIndex.refs}: by file, line, then content, so any input order gives one index. */
@@ -156,29 +254,45 @@ export function buildRelationshipsIndex(input: {
   refs: Iterable<IndexedRef>;
   unreadable?: Iterable<string>;
   useTargets?: ReadonlyMap<string, readonly string[]>;
+  /** Whether a `TableId` query is matched by identity (default: when any Ref end carries one). */
+  identities?: boolean;
 }): RelationshipsIndex {
   const unreadable = new Set(input.unreadable ?? []);
   const refs = [...input.refs].filter((r) => !unreadable.has(r.file)).sort(compareRefs);
   const files = [...new Set([...input.files, ...unreadable, ...refs.map((r) => r.file)])].sort(byteOrder);
+  const identities = input.identities ?? refs.some((r) => r.ownerId !== undefined || r.targetId !== undefined);
 
+  // By each end key (a label, and an identity where known): a table's counts and pairs answer either query.
   const counts = new Map<string, Map<string, number>>();
   const byLink = new Map<string, IndexedRef[]>();
   const pairFiles = new Map<string, string[]>();
+  const count = (key: string, file: string): void => {
+    const owned = counts.get(key) ?? new Map<string, number>();
+    counts.set(key, owned);
+    owned.set(file, (owned.get(file) ?? 0) + 1);
+  };
+  const hold = (key: string, file: string): void => {
+    const holding = pairFiles.get(key) ?? [];
+    pairFiles.set(key, holding);
+    if (holding[holding.length - 1] !== file) holding.push(file);
+  };
   for (const ref of refs) {
     // Refs are in file order, so each owner's map is in file byte order too.
-    const owned = counts.get(ref.owner) ?? new Map<string, number>();
-    counts.set(ref.owner, owned);
-    owned.set(ref.file, (owned.get(ref.file) ?? 0) + 1);
+    count(ref.owner, ref.file);
+    if (ref.ownerId !== undefined) count(ref.ownerId, ref.file);
     for (const link of new Set(ref.links)) {
       const list = byLink.get(link) ?? [];
       byLink.set(link, list);
       list.push(ref);
     }
     if (ref.pending) continue;
-    const key = pairKey(ref.owner, ref.target);
-    const holding = pairFiles.get(key) ?? [];
-    pairFiles.set(key, holding);
-    if (holding[holding.length - 1] !== ref.file) holding.push(ref.file);
+    hold(pairKey(ref.owner, ref.target), ref.file);
+    if (ref.ownerId === undefined && ref.targetId === undefined) continue;
+    for (const ownerKey of endKeys(ref.owner, ref.ownerId)) {
+      for (const targetKey of endKeys(ref.target, ref.targetId)) {
+        if (ownerKey !== ref.owner || targetKey !== ref.target) hold(pairKey(ownerKey, targetKey), ref.file);
+      }
+    }
   }
 
   const users = new Map<string, string[]>();
@@ -195,9 +309,10 @@ export function buildRelationshipsIndex(input: {
     files,
     unreadable,
     refs,
-    ownerCounts: (owner) => counts.get(lower(owner)) ?? EMPTY_COUNTS,
+    identities,
+    ownerCounts: (owner) => counts.get(queryKey(owner, identities)) ?? EMPTY_COUNTS,
     holders: (link) => byLink.get(link) ?? NONE,
-    filesHoldingPair: (a, b) => pairFiles.get(pairKey(a, b)) ?? NONE,
+    filesHoldingPair: (a, b) => pairFiles.get(pairKey(queryKey(a, identities), queryKey(b, identities))) ?? NONE,
     filesUsing: (tablePath) => users.get(lower(normalisePosix(tablePath))) ?? NONE,
   };
 }
@@ -215,8 +330,8 @@ export interface RefPlacement {
  * Where a new Ref of the foreign-key table `fk.table` goes (decision 5):
  *
  * 1. the file, in any layer, holding the most Refs and pending lines of
- *    `fk.table` (its name BEFORE the edit: the index is the pre-edit
- *    snapshot), ties going to path byte order;
+ *    `fk.table` (its name, or its identity, BEFORE the edit: the index is
+ *    the pre-edit snapshot), ties going to path byte order;
  * 2. otherwise its schema's own file, `<L>/relationships/<schema>.dbml`,
  *    **only when that file already exists** (and reads), its schema being
  *    other than its layer: creating the file is how a team opts a schema
@@ -232,7 +347,7 @@ export interface RefPlacement {
  * `layerDefaultOnly` (Convert) skips rule 1.
  */
 export function placeNewRef(
-  fk: { table: string; layer: string; schema?: string },
+  fk: { table: IndexedTable; layer: string; schema?: string },
   index: RelationshipsIndex,
   listedLayer?: (layerLower: string) => string | undefined,
   options: { layerDefaultOnly?: boolean } = {},
@@ -266,7 +381,8 @@ export function placeNewRef(
  * (D26: no `.dbml` table file to use; a missing table among them).
  */
 export interface DiagramTables {
-  members: Iterable<string>;
+  /** Each `use` member by its label (a string) or its identity (a `TableId`, the file its `use` line reads). */
+  members: Iterable<IndexedTable>;
   unlinked?: Iterable<string>;
 }
 
@@ -282,18 +398,20 @@ export interface DiagramTables {
  * result when given. Byte-sorted. A bare list is the `use` members alone.
  */
 export function relationshipsImportsFor(
-  tables: Iterable<string> | DiagramTables,
+  tables: Iterable<IndexedTable> | DiagramTables,
   index: RelationshipsIndex,
   options: { current?: readonly string[]; exists?: (file: string) => boolean } = {},
 ): string[] {
   const { members, unlinked = [] } = isDiagramTables(tables) ? tables : { members: tables };
-  const names = new Set([...members].map(lower));
-  const drawn = new Set([...names, ...[...unlinked].map(lower)]);
+  // A member named by its identity is found only by it: a ccc-only diagram never takes bqs's Refs of one name.
+  const names = new Set([...members].map((m) => queryKey(m, index.identities)));
+  const drawn = new Set([...names, ...[...unlinked].map((u) => queryKey(u, index.identities))]);
   const out = new Set<string>();
+  const among = (keys: ReadonlySet<string>, label: string, id: string | undefined): boolean => keys.has(label) || (id !== undefined && keys.has(id));
   for (const ref of index.refs) {
     if (index.unreadable.has(ref.file)) continue;
-    const among = ref.pending ? drawn : names;
-    if (among.has(ref.owner) && among.has(ref.target)) out.add(ref.file);
+    const keys = ref.pending ? drawn : names;
+    if (among(keys, ref.owner, ref.ownerId) && among(keys, ref.target, ref.targetId)) out.add(ref.file);
   }
   if (options.current && options.current.length > 0 && index.unreadable.size > 0) {
     const unreadable = new Set([...index.unreadable].map(lower));
@@ -303,15 +421,20 @@ export function relationshipsImportsFor(
   return result.sort(byteOrder);
 }
 
-function isDiagramTables(tables: Iterable<string> | DiagramTables): tables is DiagramTables {
-  return typeof (tables as Iterable<string>)[Symbol.iterator] !== 'function';
+function isDiagramTables(tables: Iterable<IndexedTable> | DiagramTables): tables is DiagramTables {
+  return typeof (tables as Iterable<IndexedTable>)[Symbol.iterator] !== 'function';
 }
 
-/** Every table pair held by a Ref or a pending line, with its holding files (a pending holder marked). */
-function pairHolders(index: RelationshipsIndex): Map<string, string> {
+/**
+ * Every table pair held by a Ref or a pending line, with its holding files (a
+ * pending holder marked). With `ids`, an end is named by its identity key
+ * where it has one (a twin appearing elsewhere changes a label, never an
+ * identity), else by its label.
+ */
+function pairHolders(index: RelationshipsIndex, ids: boolean): Map<string, string> {
   const out = new Map<string, Set<string>>();
   for (const ref of index.refs) {
-    const key = pairKey(ref.owner, ref.target);
+    const key = ids ? pairKey(ref.ownerId ?? ref.owner, ref.targetId ?? ref.target) : pairKey(ref.owner, ref.target);
     const files = out.get(key) ?? new Set<string>();
     out.set(key, files);
     files.add(ref.pending ? `${ref.file}\u0000pending` : ref.file);
@@ -324,11 +447,15 @@ function pairHolders(index: RelationshipsIndex): Map<string, string> {
  * pending line differs between `before` and `after`: one added or removed,
  * moved to another file, renamed (the old pair and the new one both
  * change), or a pending line become a Ref. Pending lines count because
- * they bring an import too ({@link relationshipsImportsFor}).
+ * they bring an import too ({@link relationshipsImportsFor}). Where either
+ * index's ends carry identities, a pair is named by its ends' identity keys
+ * (`<schema>/<name>`, each where known, else its label); otherwise by labels,
+ * the lower-case names.
  */
 export function changedPairs(before: RelationshipsIndex, after: RelationshipsIndex): Set<string> {
-  const a = pairHolders(before);
-  const b = pairHolders(after);
+  const ids = before.identities || after.identities;
+  const a = pairHolders(before, ids);
+  const b = pairHolders(after, ids);
   const changed = new Set<string>();
   for (const [key, files] of a) if (b.get(key) !== files) changed.add(key);
   for (const key of b.keys()) if (!a.has(key)) changed.add(key);

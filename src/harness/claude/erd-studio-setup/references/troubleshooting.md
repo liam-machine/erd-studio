@@ -198,9 +198,10 @@ Other warnings are information.
   message says "Quote the value"). Others: a `use`, `Ref` or inline
   `[ref: …]` inside a table file (move it to a `<layer>/relationships/` file, as the message
   says), a table file holding two Tables or a name other than its file's, a Ref that is stored
-  twice (`duplicateRef`: delete one), or a table name in two table files (`duplicateTableName`:
-  ask the user which to rename, keeping the warehouse name in `alias`). Fix the line, then re-run
-  doctor. Never "fix" a file by reformatting it. Warnings about where a file sits
+  twice (`duplicateRef`: delete one), or one schema and table name in two layers' table files
+  (`duplicateTableName`: ask the user which to rename, keeping the warehouse name in `alias`, or
+  which to move to its own schema folder; two schema folders may each hold a table of one name).
+  Fix the line, then re-run doctor. Never "fix" a file by reformatting it. Warnings about where a file sits
   (`dbmlOutsideKnownFolders`, `dbmlLayerNotConfigured`, `schemaFolderMismatch`) name where it
   belongs: tell the user, and move a file only when they agree.
 - **`fix-fields-file`** — `.erd-studio/fields.yml` has an error, and doctor's `erd.fields` names

@@ -1,0 +1,58 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: the canvas layout options.
+
+Project kunden {
+  Note: 'Customers and addresses from both source systems'
+  erd_layout: '''
+    bqs.addresse 40 40
+    bqs.kunde 400 40
+    ccc.addresse 40 360
+    ccc.kunde 400 360
+    note/sticky_1 760 360 220 120
+  '''
+}
+
+Table bqs.addresse {
+  id INT [pk]
+  strasse VARCHAR
+  ort VARCHAR
+  Note: 'Addresses from the BQS system'
+}
+
+Table bqs.kunde {
+  id INT [pk]
+  name VARCHAR
+  addresse_id INT [foreign_key: 'true']
+  Note: 'Customers from the BQS system'
+}
+
+Table ccc.addresse {
+  id INT [pk]
+  street VARCHAR
+  city VARCHAR
+  postcode VARCHAR
+  Note: 'Addresses from the CCC system'
+}
+
+Table ccc.kunde {
+  id INT [pk]
+  full_name VARCHAR
+  addresse_id INT [foreign_key: 'true']
+  Note: 'Customers from the CCC system'
+}
+
+TableGroup bronze [color: #cd7f32, note: 'Layer: Bronze'] {
+  bqs.addresse
+  bqs.kunde
+  ccc.addresse
+  ccc.kunde
+}
+
+Ref: bqs.kunde.addresse_id >? bqs.addresse.id
+Ref: ccc.addresse.id > bqs.addresse.id
+Ref: ccc.kunde.addresse_id >? ccc.addresse.id
+
+Note sticky_1 [color: #f59e0b, linked_table: 'ccc.addresse'] {
+  'The CCC addresses are matched to BQS by id'
+}

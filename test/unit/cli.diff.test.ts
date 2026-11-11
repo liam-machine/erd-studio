@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml, stringify as toYaml } from 'yaml';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
@@ -175,6 +175,15 @@ describe.each(DBT_FIXTURES)('diff on the dbt fixture (%s storage)', (storage, fi
   const SHOWCASE = `.erd-studio/${diagramRel(storage, 'silver', 'showcase')}`;
   const tableFile = (name: string): string => path.relative(PROJECT, tableFilePath(PROJECT, storage, name)!).split(path.sep).join('/');
   const run = (argv: string[], cwd: string = PROJECT) => runIn(argv, cwd);
+
+  it('the plan of a diagram builds the relationships index once, not once per table it places a Ref for', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const builds = vi.spyOn(ctx.tableLibraryService, 'relationshipsIndex');
+    const d = runDiff(ctx, { domains: [SHOWCASE] }).result.domains[0];
+    expect(d.plan!.relationships.length + d.plan!.columns.length).toBeGreaterThan(0);
+    expect(builds.mock.calls.length).toBeLessThanOrEqual(1);
+    builds.mockRestore();
+  });
 
   it('the showcase report is exactly computeSubjectAreaDiff from logical, and the plan is buildSyncPlan(all physical)', async () => {
     const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });

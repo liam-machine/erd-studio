@@ -15,6 +15,11 @@
  *   line in the relationships file, a YAML table's `relationships:` entry in
  *   the FK table's file, or the diagram that keeps it (YAML/JSON projects).
  *
+ * Where the library tells tables apart by their schema folders, a table is
+ * the file it lives in (`sidebarTables.ts`): the diagrams that show it are
+ * those whose `use` lines read that file, and each is told the table (and
+ * the line's ends) by what that diagram calls it.
+ *
  * Both only open files; nothing here writes.
  */
 import * as vscode from 'vscode';
@@ -27,6 +32,7 @@ import type { SubjectAreaSummary } from '../types/semantic';
 import type { RelationshipsNode } from '../providers/RelationshipsTreeProvider';
 import type { TableLibraryTableNode } from '../providers/ModelLibraryTreeProvider';
 import { normaliseName } from '../services/nameUtils';
+import { tableUsageByName, type SidebarTable, type TableUsageKeys } from '../services/sidebarTables';
 
 export interface RelationshipsViewDeps {
   /** The DBML Ref's file and line, when a relationships file holds it. */
@@ -36,13 +42,15 @@ export interface RelationshipsViewDeps {
   listSubjectAreas(): SubjectAreaSummary[];
   /** A diagram's member table names (null when it cannot be read). */
   memberNames(filePath: string): string[] | null;
+  /** How tables and diagram members are matched (`tableUsageOf`). Optional: without it, by name through `memberNames`. */
+  usage?(): TableUsageKeys;
   layerLabel(layer: string): string;
   /** Select and centre the line on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealRelationship`). */
   revealRelationship(filePath: string, target: RevealRelationshipMessage['payload']): Promise<void>;
   /** Select and centre a table on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealTable`). Optional. */
   revealTable?(filePath: string, modelName: string): Promise<void>;
   /** Add to Diagram… for `tables` (`erdStudio.addToDiagram`), offered when no diagram shows them. Optional: without it the message only says so. */
-  addToDiagram?(tables: readonly string[]): Promise<void>;
+  addToDiagram?(tables: ReadonlyArray<string | SidebarTable>): Promise<void>;
 }
 
 /** The button a "No diagram shows …" message offers. */
@@ -113,18 +121,22 @@ export async function openRelationshipSource(node: RelationshipsNode | undefined
   await openAt(file, line);
 }
 
-/** The diagrams whose members include every one of `tables`. */
-export function diagramsShowing(tables: readonly string[], deps: Pick<RelationshipsViewDeps, 'listSubjectAreas' | 'memberNames'>): SubjectAreaSummary[] {
-  const wanted = [...new Set(tables.map(normaliseName))];
+/** The diagrams whose members include every one of `tables` (matched as `deps.usage` says; by default by name). */
+export function diagramsShowing(
+  tables: ReadonlyArray<string | SidebarTable>,
+  deps: Pick<RelationshipsViewDeps, 'listSubjectAreas' | 'memberNames' | 'usage'>,
+): SubjectAreaSummary[] {
+  const usage = deps.usage?.() ?? tableUsageByName(deps.memberNames);
+  const wanted = [...new Set(tables.map((t) => usage.keyOf(t)))];
   return deps.listSubjectAreas().filter((summary) => {
     let members: string[] | null = null;
     try {
-      members = deps.memberNames(summary.filePath);
+      members = usage.membersOf(summary.filePath);
     } catch {
       return false;
     }
     if (!members) return false;
-    const have = new Set(members.map(normaliseName));
+    const have = new Set(members);
     return wanted.every((t) => have.has(t));
   });
 }
@@ -140,29 +152,43 @@ export function diagramsShowing(tables: readonly string[], deps: Pick<Relationsh
  * Diagrams…, from the diagram already open).
  */
 export async function openInDiagram(
-  node: RelationshipsNode | TableLibraryTableNode | Pick<TableLibraryTableNode, 'type' | 'name'> | undefined,
+  node: RelationshipsNode | TableLibraryTableNode | (Pick<TableLibraryTableNode, 'type' | 'name'> & { readonly filePath?: string }) | undefined,
   deps: RelationshipsViewDeps,
   options: { fallBackToFile?: boolean; excludeDiagram?: string } = {},
 ): Promise<void> {
   if (!node || node.type === 'attention') return;
+  const usage = deps.usage?.() ?? tableUsageByName(deps.memberNames);
   const relationship = node.type === 'relationship' ? node : undefined;
   const entry = relationship?.entry;
-  const tableName = node.type === 'model' ? node.name : node.type === 'table' ? node.group.table : undefined;
+  // A table row's table, with its file when the row knows it (a Table Library row, or the canvas's table).
+  const table: SidebarTable | undefined = node.type === 'model'
+    ? { name: node.name, ...(node.filePath !== undefined ? { filePath: node.filePath } : {}) }
+    : node.type === 'table' ? { name: node.group.table } : undefined;
+  // What the diagram opened calls each table: told apart by identity, its member's reference there.
+  const onDiagram = (filePath: string, t: SidebarTable | string): string => usage.refOn(filePath, t) ?? (typeof t === 'string' ? t : t.name);
   const open = async (filePath: string): Promise<void> => {
     await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
-    if (entry) await deps.revealRelationship(filePath, revealTarget(entry));
-    else if (tableName) await deps.revealTable?.(filePath, tableName);
+    if (entry) {
+      const target = revealTarget(entry);
+      // A diagram's own relationship already names its members as that diagram does.
+      await deps.revealRelationship(filePath, usage.byIdentity && entry.source.kind !== 'diagram'
+        ? { ...target, fromModel: onDiagram(filePath, entry.fromModel), toModel: onDiagram(filePath, entry.toModel) }
+        : target);
+    } else if (table) {
+      await deps.revealTable?.(filePath, onDiagram(filePath, table));
+    }
   };
   if (entry?.source.kind === 'diagram') {
     await open(entry.source.filePath);
     return;
   }
-  const tables = entry ? [entry.fromModel, entry.toModel] : [node.type === 'model' ? node.name : node.type === 'table' ? node.group.table : ''];
+  const tables = entry ? [entry.fromModel, entry.toModel] : [table?.name ?? ''];
+  const shown: Array<string | SidebarTable> = entry ? tables : [table ?? ''];
   const subject = tables.length === 1 || normaliseName(tables[0]) === normaliseName(tables[1])
     ? `"${tables[0]}"`
     : `both "${tables[0]}" and "${tables[1]}"`;
   const excluded = options.excludeDiagram;
-  const found = diagramsShowing(tables, deps)
+  const found = diagramsShowing(shown, { ...deps, usage: () => usage })
     .filter((s) => excluded === undefined || path.resolve(s.filePath) !== path.resolve(excluded));
   const other = excluded !== undefined ? ' other' : '';
   if (found.length === 0) {
@@ -178,7 +204,7 @@ export async function openInDiagram(
       return;
     }
     const choice = await vscode.window.showInformationMessage(`${message} Add ${them} to one?`, ADD_TO_DIAGRAM);
-    if (choice === ADD_TO_DIAGRAM) await deps.addToDiagram(tables);
+    if (choice === ADD_TO_DIAGRAM) await deps.addToDiagram(usage.byIdentity ? shown : tables);
     return;
   }
   let pick = found[0];
