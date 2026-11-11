@@ -530,10 +530,15 @@ function planMembers(
     const id = table && table.storage === 'dbml' ? tableIdOfPath(normalisePosix(table.path)) : undefined;
     return id ? { schema: id.schema, name: id.name } : { schema: '', name: table?.name ?? name };
   });
-  const refs = assignTableRefs(identities);
-  const qualified = refs.map((ref, k) => lower(ref) !== lower(identities[k].name));
+  // A member whose line this edit cuts (its table deleted) is no longer on the diagram: it never keeps
+  // its namesake qualified, so the table left of a pair goes back to its bare name (and the version to 7).
+  const cut = named.map((_, k) => oldIndexOf[k] !== undefined && lineOf.get(oldIndexOf[k]!) === null);
+  const liveRefs = assignTableRefs(identities.filter((_, k) => !cut[k]));
+  let live = 0;
+  const refs = named.map((name, k) => (cut[k] ? name : liveRefs[live++]));
+  const qualified = refs.map((ref, k) => !cut[k] && lower(ref) !== lower(identities[k].name));
   const newMembers = named.map((name, k) => {
-    if (!changing) return name;
+    if (!changing || cut[k]) return name;
     if (qualified[k]) return refs[k];
     return lower(name) === lower(identities[k].name) ? name : refs[k];
   });

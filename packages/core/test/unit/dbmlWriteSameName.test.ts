@@ -301,6 +301,31 @@ use * from '../relationships/bronze.dbml'
 `);
   });
 
+  it('deleting one table of a pair from the library cuts its line, and the one left goes back to its bare line and version 7', () => {
+    const pair = BQS_ONLY
+      .replace("    kunde 400 20\n", "    ccc.addresse 40 360\n")
+      .replace("  erd_schema_version: '7'", "  erd_schema_version: '8'")
+      .replace("    addresse 10 20\n", "    bqs.addresse 10 20\n")
+      .replace("use { table bqs.kunde }    from '../tables/bqs/kunde.dbml'", "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'");
+    const files: Record<string, string> = { ...FILES };
+    delete files[CCC_ADDRESSE];
+    // The settle's edit: nothing changed in the object; the deleted table is in pathChanged and resolves to nothing.
+    const out = edit(pair, D1, () => undefined, { files, names: { 'bqs.addresse': BQS_ADDRESSE }, extra: { pathChanged: new Set(['ccc.addresse']) } });
+    expect(out).toBe(`Project d1 {
+  erd_schema_version: '7'
+  erd_layout: '''
+    addresse 10 20
+    ccc.addresse 40 360
+  '''
+}
+
+use { table bqs.addresse } from '../tables/bqs/addresse.dbml'
+use * from '../relationships/bronze.dbml'
+`);
+    expect(read(out, D1).logical.models).toEqual(['addresse']);
+    expect(read(out, D1).viewConfig.positions.addresse).toEqual({ x: 10, y: 20 });
+  });
+
   it('moving one twin to a free schema re-points its line in place and writes its layout line under its new reference', () => {
     const files: Record<string, string> = { ...FILES, 'bronze/tables/ddd/addresse.dbml': FILES[BQS_ADDRESSE].replace('Table bqs.addresse', 'Table ddd.addresse') };
     delete files[BQS_ADDRESSE];
