@@ -1,0 +1,648 @@
+{
+  "about": "What probe-schema.sql declares, written by hand from it: the truth an export of ../queries/sqlserver.sql on that schema is checked against. Two types are derived, not yet observed: order_line.line_total (a computed int * decimal(18,4), read as decimal(29,4)) and the view's total (sum of decimal(18,4), decimal(38,4)).",
+  "tables": [
+    {
+      "schema": "ref",
+      "name": "country",
+      "pk": [
+        "country_code"
+      ],
+      "columns": [
+        [
+          "country_code",
+          "char(2)",
+          false
+        ],
+        [
+          "name",
+          "nvarchar(50)",
+          false
+        ]
+      ]
+    },
+    {
+      "schema": "ref",
+      "name": "currency",
+      "pk": [
+        "currency_code"
+      ],
+      "columns": [
+        [
+          "currency_code",
+          "char(3)",
+          false
+        ],
+        [
+          "name",
+          "varchar(50)",
+          false
+        ],
+        [
+          "minor_units",
+          "smallint",
+          false,
+          "2"
+        ]
+      ]
+    },
+    {
+      "schema": "ref",
+      "name": "exchange_rate",
+      "pk": [
+        "from_currency",
+        "to_currency",
+        "rate_date"
+      ],
+      "columns": [
+        [
+          "from_currency",
+          "char(3)",
+          false
+        ],
+        [
+          "to_currency",
+          "char(3)",
+          false
+        ],
+        [
+          "rate_date",
+          "date",
+          false
+        ],
+        [
+          "rate",
+          "decimal(18,4)",
+          false
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "customer",
+      "pk": [
+        "customer_id"
+      ],
+      "identity": [
+        "customer_id"
+      ],
+      "comment": "Customers, the \"golden\" record.\nOne row per person; it's deduplicated",
+      "columns": [
+        [
+          "customer_id",
+          "int",
+          false
+        ],
+        [
+          "email",
+          "nvarchar(255)",
+          true,
+          null,
+          "Login email, lower-cased"
+        ],
+        [
+          "full_name",
+          "nvarchar(50)",
+          false,
+          null,
+          "Name, as entered; \"quoted\", and\na second line"
+        ],
+        [
+          "country_code",
+          "char(2)",
+          false,
+          "'AU'"
+        ],
+        [
+          "segment",
+          "varchar(20)",
+          true,
+          "'retail, small'"
+        ],
+        [
+          "credit_limit",
+          "decimal(18,4)",
+          true,
+          "0"
+        ],
+        [
+          "created_at",
+          "datetime2(6)",
+          false,
+          "sysutcdatetime()"
+        ],
+        [
+          "phone",
+          "dbo.Phone",
+          true
+        ],
+        [
+          "external_id",
+          "uniqueidentifier",
+          false,
+          "newid()"
+        ],
+        [
+          "notes",
+          "nvarchar(max)",
+          true,
+          null,
+          "Free text \\ a back\\slash, C:\\temp\r\nand a CRLF line"
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "loyalty_card",
+      "pk": [
+        "card_id"
+      ],
+      "columns": [
+        [
+          "card_id",
+          "bigint",
+          false
+        ],
+        [
+          "customer_id",
+          "int",
+          false
+        ],
+        [
+          "issued_on",
+          "date",
+          true,
+          "CONVERT([date],getdate())"
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "employee",
+      "pk": [
+        "employee_id"
+      ],
+      "columns": [
+        [
+          "employee_id",
+          "int",
+          false
+        ],
+        [
+          "full_name",
+          "nvarchar(50)",
+          false
+        ],
+        [
+          "manager_id",
+          "int",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "product",
+      "pk": [
+        "product_id"
+      ],
+      "columns": [
+        [
+          "product_id",
+          "int",
+          false
+        ],
+        [
+          "sku",
+          "varchar(32)",
+          false
+        ],
+        [
+          "order",
+          "int",
+          true,
+          null,
+          "Sort order (reserved word)"
+        ],
+        [
+          "Display Name",
+          "nvarchar(50)",
+          true
+        ],
+        [
+          "unit_price",
+          "decimal(18,4)",
+          false,
+          "0.0000"
+        ],
+        [
+          "legacy_code",
+          "varchar(10)",
+          true
+        ],
+        [
+          "barcode",
+          "varchar(20)",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "order_header",
+      "pk": [
+        "order_id"
+      ],
+      "columns": [
+        [
+          "order_id",
+          "bigint",
+          false
+        ],
+        [
+          "customer_id",
+          "int",
+          false
+        ],
+        [
+          "currency_code",
+          "char(3)",
+          false
+        ],
+        [
+          "sold_by",
+          "int",
+          true
+        ],
+        [
+          "approved_by",
+          "int",
+          true
+        ],
+        [
+          "order_ts",
+          "datetime2(6)",
+          false
+        ],
+        [
+          "pickup_time",
+          "time(0)",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "order_line",
+      "pk": [
+        "order_id",
+        "line_no"
+      ],
+      "columns": [
+        [
+          "order_id",
+          "bigint",
+          false
+        ],
+        [
+          "line_no",
+          "smallint",
+          false
+        ],
+        [
+          "product_id",
+          "int",
+          false
+        ],
+        [
+          "quantity",
+          "int",
+          false,
+          "1"
+        ],
+        [
+          "amount",
+          "decimal(18,4)",
+          true
+        ],
+        [
+          "line_total",
+          "decimal(29,4)",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "shipment_line",
+      "pk": [
+        "shipment_id"
+      ],
+      "columns": [
+        [
+          "shipment_id",
+          "bigint",
+          false
+        ],
+        [
+          "ord_id",
+          "bigint",
+          false
+        ],
+        [
+          "ln_no",
+          "smallint",
+          false
+        ],
+        [
+          "shipped_at",
+          "datetime2(6)",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "OrderNote",
+      "pk": [
+        "NoteId"
+      ],
+      "columns": [
+        [
+          "NoteId",
+          "int",
+          false
+        ],
+        [
+          "order_id",
+          "bigint",
+          false
+        ],
+        [
+          "Note Text",
+          "nvarchar(max)",
+          true
+        ],
+        [
+          "attachment",
+          "varbinary(max)",
+          true
+        ],
+        [
+          "checksum",
+          "varbinary(32)",
+          true
+        ]
+      ]
+    },
+    {
+      "schema": "sales",
+      "name": "audit_log",
+      "pk": [],
+      "comment": "No keys, append-only",
+      "columns": [
+        [
+          "logged_at",
+          "datetime2(3)",
+          true
+        ],
+        [
+          "actor",
+          "varchar(50)",
+          true
+        ],
+        [
+          "payload",
+          "nvarchar(max)",
+          true
+        ],
+        [
+          "is_system",
+          "bit",
+          true
+        ],
+        [
+          "at_time",
+          "time(7)",
+          true
+        ]
+      ]
+    }
+  ],
+  "views": [
+    {
+      "schema": "sales",
+      "name": "v_order_totals",
+      "columns": [
+        [
+          "order_id",
+          "bigint",
+          false
+        ],
+        [
+          "total",
+          "decimal(38,4)",
+          true
+        ]
+      ]
+    }
+  ],
+  "uniques": [
+    {
+      "schema": "sales",
+      "table": "customer",
+      "name": "customer_email_uq",
+      "columns": [
+        "email"
+      ]
+    },
+    {
+      "schema": "sales",
+      "table": "loyalty_card",
+      "name": "loyalty_card_customer_uq",
+      "columns": [
+        "customer_id"
+      ]
+    },
+    {
+      "schema": "sales",
+      "table": "product",
+      "name": "product_sku_uq",
+      "columns": [
+        "sku"
+      ]
+    },
+    {
+      "schema": "sales",
+      "table": "product",
+      "name": "product_barcode_ux",
+      "columns": [
+        "barcode"
+      ],
+      "note": "unique index with INCLUDE (unit_price): a key over barcode only"
+    },
+    {
+      "schema": "sales",
+      "table": "order_header",
+      "name": "order_header_customer_ts_uq",
+      "columns": [
+        "customer_id",
+        "order_ts"
+      ]
+    }
+  ],
+  "notUnique": [
+    {
+      "schema": "sales",
+      "table": "product",
+      "name": "product_legacy_code_ux",
+      "why": "filtered (WHERE legacy_code IS NOT NULL)"
+    }
+  ],
+  "foreignKeys": [
+    {
+      "name": "exchange_rate_from_fk",
+      "from": "ref.exchange_rate",
+      "columns": [
+        "from_currency"
+      ],
+      "to": "ref.currency",
+      "refColumns": [
+        "currency_code"
+      ]
+    },
+    {
+      "name": "exchange_rate_to_fk",
+      "from": "ref.exchange_rate",
+      "columns": [
+        "to_currency"
+      ],
+      "to": "ref.currency",
+      "refColumns": [
+        "currency_code"
+      ]
+    },
+    {
+      "name": "customer_country_fk",
+      "from": "sales.customer",
+      "columns": [
+        "country_code"
+      ],
+      "to": "ref.country",
+      "refColumns": [
+        "country_code"
+      ]
+    },
+    {
+      "name": "loyalty_card_customer_fk",
+      "from": "sales.loyalty_card",
+      "columns": [
+        "customer_id"
+      ],
+      "to": "sales.customer",
+      "refColumns": [
+        "customer_id"
+      ]
+    },
+    {
+      "name": "employee_manager_fk",
+      "from": "sales.employee",
+      "columns": [
+        "manager_id"
+      ],
+      "to": "sales.employee",
+      "refColumns": [
+        "employee_id"
+      ]
+    },
+    {
+      "name": "order_header_customer_fk",
+      "from": "sales.order_header",
+      "columns": [
+        "customer_id"
+      ],
+      "to": "sales.customer",
+      "refColumns": [
+        "customer_id"
+      ]
+    },
+    {
+      "name": "order_header_currency_fk",
+      "from": "sales.order_header",
+      "columns": [
+        "currency_code"
+      ],
+      "to": "ref.currency",
+      "refColumns": [
+        "currency_code"
+      ]
+    },
+    {
+      "name": "order_header_sold_by_fk",
+      "from": "sales.order_header",
+      "columns": [
+        "sold_by"
+      ],
+      "to": "sales.employee",
+      "refColumns": [
+        "employee_id"
+      ]
+    },
+    {
+      "name": "order_header_approved_by_fk",
+      "from": "sales.order_header",
+      "columns": [
+        "approved_by"
+      ],
+      "to": "sales.employee",
+      "refColumns": [
+        "employee_id"
+      ]
+    },
+    {
+      "name": "order_line_order_fk",
+      "from": "sales.order_line",
+      "columns": [
+        "order_id"
+      ],
+      "to": "sales.order_header",
+      "refColumns": [
+        "order_id"
+      ]
+    },
+    {
+      "name": "order_line_product_fk",
+      "from": "sales.order_line",
+      "columns": [
+        "product_id"
+      ],
+      "to": "sales.product",
+      "refColumns": [
+        "product_id"
+      ]
+    },
+    {
+      "name": "shipment_line_order_line_fk",
+      "from": "sales.shipment_line",
+      "columns": [
+        "ln_no",
+        "ord_id"
+      ],
+      "to": "sales.order_line",
+      "refColumns": [
+        "line_no",
+        "order_id"
+      ]
+    },
+    {
+      "name": "OrderNote_order_fk",
+      "from": "sales.OrderNote",
+      "columns": [
+        "order_id"
+      ],
+      "to": "sales.order_header",
+      "refColumns": [
+        "order_id"
+      ]
+    }
+  ]
+}
