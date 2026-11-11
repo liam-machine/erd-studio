@@ -7777,14 +7777,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // V5: rename central model file + update domain references
       if (this.isSubjectAreaV5(parsed)) {
+        // The member's own name: a table of a pair is named `<schema>.<name>` by the canvas.
+        const resolved = this.canvasTable(document, payload.oldName);
+        if (trimmedNew === resolved.name) return;
         // A case-only rename (`dimdate` → `DimDate`) is refused: on macOS and
         // Windows the new file IS the old one, and the rename's write-new +
         // delete-old edit would delete the model.
-        if (sameName(trimmedNew, payload.oldName)) {
+        if (sameName(trimmedNew, resolved.name)) {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `"${trimmedNew}" differs from "${payload.oldName}" only in upper/lower case, which cannot be renamed in place. ` +
+              message: `"${trimmedNew}" differs from "${resolved.name}" only in upper/lower case, which cannot be renamed in place. ` +
                 'Rename it to a different name first, then to the one you want.',
             },
           });
@@ -7793,12 +7796,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // A DBML table in a schema folder is refused only by its own schema folder's table of the new
         // name (any layer) or a YAML table of it: another schema folder's is another table, and the
         // diagram then names the two `<schema>.<name>`. Anywhere else a name is unique across the project.
-        const resolved = this.canvasTable(document, payload.oldName);
         const ownSchema = resolved.id !== undefined && resolved.id.schema !== '' && this.isDbmlDocument(document) ? resolved.id.schema : undefined;
         const currentNames = (section.models ?? []) as string[];
         const rows = ownSchema !== undefined ? this.parseSubjectAreaFile(document).members?.rows : undefined;
         const inDomain = rows
-          ? rows.find((r) => sameName(r.name, trimmedNew) && (r.id === undefined || sameName(r.id.schema, ownSchema!)))?.ref
+          ? rows.find((r) => r.ref !== resolved.ref && sameName(r.name, trimmedNew) && (r.id === undefined || sameName(r.id.schema, ownSchema!)))?.ref
           : currentNames.find((n) => sameName(n, trimmedNew));
         if (inDomain !== undefined) {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });

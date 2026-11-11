@@ -623,6 +623,18 @@ describe('New Table on a DBML diagram, in a schema folder another table of its n
   });
 });
 
+describe('renaming a table of a pair to its own name', () => {
+  it('in another case is refused as a case-only rename; unchanged is a no-op', async () => {
+    const canvas = await open('bronze/diagrams/kunden.dbml');
+    const before = snapshot();
+    const cased = await canvas.send({ type: 'renameModel', payload: { oldName: 'ccc.addresse', newName: 'Addresse' } });
+    expect(cased.errors).toEqual(['"Addresse" differs from "addresse" only in upper/lower case, which cannot be renamed in place. Rename it to a different name first, then to the one you want.']);
+    const same = await canvas.send({ type: 'renameModel', payload: { oldName: 'ccc.addresse', newName: 'addresse' } });
+    expect(same.errors).toEqual([]);
+    expect(changed(before, snapshot())).toEqual([]);
+  });
+});
+
 describe('opening a diagram is never a write', () => {
   it('a version-7 diagram listing both tables of a pair (bare layout lines) is drawn with every table placed, and its file is left as it is', async () => {
     const before = snapshot();
