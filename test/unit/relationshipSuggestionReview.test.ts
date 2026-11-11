@@ -17,6 +17,7 @@ import {
   directionQuestion,
   importOfferMessage,
   offerAfterImport,
+  offerCount,
   reviewRow,
   stillValid,
   suggestionWriteOps,
@@ -243,6 +244,21 @@ describe('messages and the after-import offer', () => {
     expect(offerAfterImport(0, [s({ id: 'a', band: 'possible' })])).toBe(false);
     expect(offerAfterImport(0, [])).toBe(false);
     expect(importOfferMessage(14)).toBe('This diagram has no relationships yet. ERD Studio found 14 it can suggest.');
+  });
+
+  it('counts only the likely and stronger ones: a heap of possible or undirected ones neither makes the offer nor swells its number', () => {
+    const mixed = [
+      s({ id: 'a', band: 'strong' }),
+      s({ id: 'b', band: 'likely' }),
+      s({ id: 'c', band: 'likely', direction: 'undecided', directionBasis: 'none' }),
+      ...Array.from({ length: 50 }, (_, i) => s({ id: `p${i}`, band: 'possible' })),
+    ];
+    expect(offerCount(mixed)).toBe(2);
+    expect(offerAfterImport(0, mixed)).toBe(true);
+    expect(importOfferMessage(offerCount(mixed))).toBe('This diagram has no relationships yet. ERD Studio found 2 it can suggest.');
+    const weak = mixed.filter((x) => x.band === 'possible' || x.direction === 'undecided');
+    expect(offerCount(weak)).toBe(0);
+    expect(offerAfterImport(0, weak)).toBe(false);
   });
 
   it('a row\'s detail is the engine\'s reasons as written (a column name keeps its case)', () => {

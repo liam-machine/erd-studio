@@ -230,7 +230,7 @@ import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRe
 import { runSuggestRelationships, vscodeSuggestRelationshipsUi, type SuggestOutcome, type SuggestRelationshipsUi, type SuggestionRead } from './suggestRelationshipsFlow';
 import {
   DONT_ASK_AGAIN_BUTTON, NOT_NOW_BUTTON, NO_CANVAS_MESSAGE, REVIEW_SUGGESTIONS_BUTTON, computeSuggestions, importOfferMessage, notAddedMessage,
-  offerAfterImport, unreadableDiagramMessage,
+  offerAfterImport, offerCount, unreadableDiagramMessage,
 } from '../services/relationshipSuggestionReview';
 import { tableHomesOf } from '../services/tableHomes';
 import { buildCanvasContext } from '../services/canvasContext';
@@ -3402,6 +3402,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.pendingSuggestionOffers.delete(fsPath);
     if (Date.now() - at > PENDING_REVEAL_MS) return false;
     if (this.guideCanvas === panelKey) {
+      // Held back only when there could be an offer: a diagram that already has relationships
+      // never gets one, so this open's other prompt (Turn Round) goes ahead as it would without the import.
+      const read = await this.readForSuggestions(document);
+      if (!read.ok || read.relationships.length > 0) return false;
       this.offerAfterGuide = panelKey;
       return true;
     }
@@ -3430,7 +3434,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.suggestionsOffered.add(fsPath);
       // Not awaited: the canvas's `ready` must not wait on the toast.
       void Promise.resolve(vscode.window.showInformationMessage(
-        importOfferMessage(suggestions.length), REVIEW_SUGGESTIONS_BUTTON, NOT_NOW_BUTTON, DONT_ASK_AGAIN_BUTTON,
+        importOfferMessage(offerCount(suggestions)), REVIEW_SUGGESTIONS_BUTTON, NOT_NOW_BUTTON, DONT_ASK_AGAIN_BUTTON,
       )).then(async (choice) => {
         if (choice === REVIEW_SUGGESTIONS_BUTTON) await this.suggestRelationships(document.uri);
         else if (choice === DONT_ASK_AGAIN_BUTTON) await this.context.workspaceState?.update(RELATIONSHIP_SUGGESTIONS_DECLINED_KEY, true);

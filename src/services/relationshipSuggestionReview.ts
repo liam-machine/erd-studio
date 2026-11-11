@@ -296,11 +296,22 @@ export const DONT_ASK_AGAIN_BUTTON = "Don't Ask Again";
 /** The offer needs at least this many suggestions at likely or above (the diagram has no relationship at all). */
 export const OFFER_MIN_SUGGESTIONS = 1;
 
+/**
+ * The suggestions the after-import offer counts: likely or stronger (the
+ * review's Strong and Likely sections). Possible ones and those whose
+ * direction is unknown are listed by the review but never counted, so a huge
+ * keyless diagram's thousands of weak matches never make the offer, nor its number.
+ */
+export function offerCount(suggestions: readonly RelationshipSuggestion[]): number {
+  return suggestions.filter((s) => s.direction === 'decided' && bandRank(s.band) <= bandRank('likely')).length;
+}
+
 /** After an import: offer the review only on a diagram with no relationship, when something likely or stronger was found. */
 export function offerAfterImport(relationships: number, suggestions: readonly RelationshipSuggestion[]): boolean {
   if (relationships > 0) return false;
-  return suggestions.filter((s) => s.direction === 'decided' && bandRank(s.band) <= bandRank('likely')).length >= OFFER_MIN_SUGGESTIONS;
+  return offerCount(suggestions) >= OFFER_MIN_SUGGESTIONS;
 }
 
+/** The offer, with {@link offerCount}'s number (never every suggestion). */
 export const importOfferMessage = (suggested: number): string =>
   `This diagram has no relationships yet. ERD Studio found ${count(suggested)} it can suggest.`;

@@ -68,7 +68,7 @@ function fakeUi(choose?: (review: SuggestionReview) => string[] | undefined, ans
 const rows = (r: SuggestionReview) => r.sections.flatMap((s) => s.rows);
 const idsWhere = (pred: (label: string) => boolean) => (r: SuggestionReview) => rows(r).filter((row) => pred(row.label)).map((row) => row.id);
 
-function buildProvider(options: { offers?: boolean } = {}): SemanticEditorProvider {
+function buildProvider(options: { offers?: boolean; turnRound?: boolean } = {}): SemanticEditorProvider {
   const layerService = new LayerService(root, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
   const tables = new TableLibraryService(root, '.erd-studio');
@@ -81,7 +81,11 @@ function buildProvider(options: { offers?: boolean } = {}): SemanticEditorProvid
     globalState: { get: () => true, update: async () => {} },
     // Every other offer stays quiet; the suggestion offer is on when a test asks for offers.
     workspaceState: {
-      get: (key: string) => (declined.has(key) ? declined.get(key) : key === RELATIONSHIP_SUGGESTIONS_DECLINED_KEY ? !options.offers : true),
+      get: (key: string) => (declined.has(key) ? declined.get(key)
+        : key === RELATIONSHIP_SUGGESTIONS_DECLINED_KEY ? !options.offers
+          // turnRound: every other canvas offer is on too, as semanticEditorProvider.dbml.test.ts runs them.
+          : options.turnRound ? false
+            : true),
       update: async (key: string, value: unknown) => { declined.set(key, value); },
     },
     subscriptions: [],
@@ -444,7 +448,10 @@ describe('the offer after an import', () => {
     provider.offerSuggestionsWhenOpened(at('gold/diagrams/sales.dbml'));
     const panel = await open(provider, 'gold/diagrams/sales.dbml');
     await vi.waitFor(() => expect(ui.reviews).toHaveLength(1));
-    expect(shown.filter((m) => m.includes('ERD Studio found'))).toEqual(['This diagram has no relationships yet. ERD Studio found 5 it can suggest.']);
+    // The offer counts the likely and stronger ones only; the review lists all five (the composite is possible).
+    expect(shown.filter((m) => m.includes('ERD Studio found'))).toEqual(['This diagram has no relationships yet. ERD Studio found 4 it can suggest.']);
+    expect(rows(ui.reviews[0])).toHaveLength(5);
+    expect(rows(ui.reviews[0]).filter((r) => r.group === 'strong' || r.group === 'likely')).toHaveLength(4);
     // Never twice for one diagram in a session, nor on a plain open.
     provider.offerSuggestionsWhenOpened(at('gold/diagrams/sales.dbml'));
     await panel._simulateMessage({ type: 'ready' });
@@ -495,5 +502,26 @@ describe('the offer after an import', () => {
     expect(shown.filter((m) => m.includes('ERD Studio found'))).toEqual([]);
     await panel._simulateMessage({ type: 'guide', payload: { action: 'complete' } });
     await vi.waitFor(() => expect(shown.filter((m) => m.includes('ERD Studio found'))).toHaveLength(1));
+  });
+
+  it('with the guide on the canvas, an imported diagram that has relationships keeps its Turn Round offer, as before', async () => {
+    useDbmlProject();
+    // An import that kept a relationship drawn from dim_date's key (as semanticEditorProvider.dbml.test.ts draws one): the canvas offers to turn it round.
+    fs.writeFileSync(at('gold/relationships/gold.dbml'), read('gold/relationships/gold.dbml').replace('Ref "ship date": gold.fct_order.ship_date_key >? calendar.dim_date.date_key\n', ''));
+    fs.writeFileSync(at('silver/relationships/calendar.dbml'), read('silver/relationships/calendar.dbml')
+      .replace("use { table calendar.dim_date } from '../tables/calendar/dim_date.dbml'\n", "use { table calendar.dim_date } from '../tables/calendar/dim_date.dbml'\nuse { table gold.fct_order } from '../../gold/tables/gold/fct_order.dbml'\n")
+      .concat('Ref "ship date": calendar.dim_date.date_key > gold.fct_order.ship_date_key\n'));
+    const shown = stubInfo();
+    const provider = buildProvider({ offers: true, turnRound: true });
+    let guideTaken = false;
+    provider.setOnboardingGuide({
+      takeCanvas: () => (guideTaken ? undefined : (guideTaken = true, { dbml: true, semanticDir: '.erd-studio' } as never)),
+      startOnCanvas: () => ({ dbml: true, semanticDir: '.erd-studio' } as never),
+      onCanvasAction: () => {},
+    });
+    provider.offerSuggestionsWhenOpened(at('gold/diagrams/sales.dbml'));
+    await open(provider, 'gold/diagrams/sales.dbml');
+    await vi.waitFor(() => expect(shown.filter((m) => /drawn backwards/.test(m))).toHaveLength(1));
+    expect(shown.filter((m) => m.includes('ERD Studio found'))).toEqual([]);
   });
 });
