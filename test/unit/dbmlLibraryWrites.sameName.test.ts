@@ -231,6 +231,32 @@ describe('an edit of one twin never touches the other: rename, move, delete (wit
     expect(after['bronze/diagrams/ccc.dbml']).not.toContain('ccc/addresse.dbml');
     expect(after['bronze/diagrams/kunden.dbml']).not.toContain('ccc/addresse.dbml');
     expect(after['bronze/diagrams/kunden.dbml']).toContain("use { table bqs.addresse } from '../tables/bqs/addresse.dbml'");
+    // bqs's addresse is the only addresse left there, so its line is bare again; the kunde pair keeps the diagram at 8.
+    expect(after['bronze/diagrams/kunden.dbml']).toMatch(/\n {4}addresse 40 40\n {4}bqs\.kunde 400 40\n/);
+    expect(after['bronze/diagrams/kunden.dbml']).toContain("erd_schema_version: '8'");
+  });
+
+  it('delete one of the only pair on a diagram: the other\'s line goes back to bare and the diagram back to version 7', () => {
+    write('bronze/diagrams/pair.dbml', [
+      'Project pair {',
+      "  erd_schema_version: '8'",
+      "  erd_layout: '''",
+      '    bqs.addresse 10 20',
+      '    ccc.addresse 300 20',
+      "  '''",
+      '}',
+      '',
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use * from '../relationships/bronze.dbml'",
+      '',
+    ].join('\n'));
+    scoped().deleteTable(CCC_ADDRESSE);
+    const pair = read('bronze/diagrams/pair.dbml');
+    expect(pair).toContain("erd_schema_version: '7'");
+    expect(pair).toMatch(/\n {4}addresse 10 20\n/);
+    expect(pair).not.toContain('bqs.addresse 10 20');
+    expect(pair).not.toContain('ccc/addresse.dbml');
   });
 
   it('deleting a table a twin points at saves that twin by its identity: the cascade succeeds and cuts only its Ref', () => {
@@ -381,6 +407,26 @@ describe('Explorer moves of a twin move that twin\'s own file (the suspected ove
     for (const f of ['bronze/tables/ccc/addresse.dbml', 'bronze/tables/ccc/kunde.dbml', 'bronze/diagrams/ccc.dbml']) expect(after[f], f).toBe(before[f]);
   });
 
+  it('renaming the schema folder bqs to src1 while another layer holds src1/addresse.dbml is refused as a batch, naming that file (D-7)', () => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', creatable: true, order: 1 }, { id: 'silver', label: 'Silver', creatable: true, order: 2 }] }));
+    write('silver/tables/src1/addresse.dbml', 'Table src1.addresse {\n  id INT [pk]\n}\n');
+    fs.renameSync(path.join(semantic, 'bronze/tables/bqs'), path.join(semantic, 'bronze/tables/src1'));
+    const before = snapshotFiles();
+    const moves = ['addresse', 'kunde'].map((n) => ({ from: path.join(semantic, `bronze/tables/bqs/${n}.dbml`), to: path.join(semantic, `bronze/tables/src1/${n}.dbml`) }));
+    expect(() => planDbmlExplorerMoves({ semanticRoot: semantic, tableLibraryService: scoped(), moves, readText }))
+      .toThrow('src1.addresse already exists in layer silver (silver/tables/src1/addresse.dbml); nothing was moved.');
+    // The planner is pure: nothing but the user's own move happened.
+    expect(snapshotFiles()).toEqual(before);
+  });
+
+  it('the same refusal when the moved file is the one listed later (its new place is behind the other layer\'s file)', () => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', creatable: true, order: 1 }, { id: 'silver', label: 'Silver', creatable: true, order: 2 }] }));
+    write('silver/tables/sss/addresse.dbml', 'Table sss.addresse {\n  id INT [pk]\n}\n');
+    const move = moveOnDisk('silver/tables/sss/addresse.dbml', 'silver/tables/ccc/addresse.dbml');
+    expect(() => planDbmlExplorerMoves({ semanticRoot: semantic, tableLibraryService: scoped(), moves: [move], readText }))
+      .toThrow('ccc.addresse already exists in layer bronze (bronze/tables/ccc/addresse.dbml); nothing was moved.');
+  });
+
   it('renaming ccc/addresse.dbml to adr.dbml renames ccc\'s table only; a name only another schema folder has is not taken', () => {
     const move = moveOnDisk('bronze/tables/ccc/addresse.dbml', 'bronze/tables/ccc/adr.dbml');
     const plan = planDbmlExplorerMoves({ semanticRoot: semantic, tableLibraryService: scoped(), moves: [move], readText });
@@ -421,6 +467,17 @@ describe('D-5: Convert, Import and Move Relationships to Library refuse a shared
     const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
     expect(plan.refusals.join('\n')).toContain('More than one table is named addresse (bqs.addresse, ccc.addresse)');
     expect(plan.creates).toEqual([]);
+  });
+
+  it('Convert: a YAML table that names no shared name converts, and leaves both tables of one name, their Refs and diagrams as they are', async () => {
+    write('logical-models/bestellung.yml', 'name: bestellung\ncolumns:\n  - name: id\n    dataType: INT\n');
+    const plan = await planDbmlConversion(readDbmlConversionInput(root, '.erd-studio'));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.creates.map((c) => c.path)).toContain('bronze/tables/public/bestellung.dbml');
+    // Nothing of the twins' files, their relationships file or the diagrams that show them is written.
+    const touched = [...plan.creates, ...plan.replaces].map((w) => w.path);
+    expect(touched.filter((p) => !/^(bronze\/tables\/public\/bestellung\.dbml|README\.md)$/.test(p))).toEqual([]);
+    expect(plan.deletes).toEqual(['logical-models/bestellung.yml']);
   });
 
   it('Import: a changed library table named by a shared name is refused; a new one marked as new is planned', () => {

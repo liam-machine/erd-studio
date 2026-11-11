@@ -1764,11 +1764,14 @@ export class TableLibraryService {
     // Told apart by identity, each table's library reference as the snapshot sees the library: a moved
     // file counts at its old place (the index lists it at its new one), so a name it shared or stops
     // sharing there is qualified as the plan reads it.
-    const movedRefs = moved.length > 0 && this.index.schemaScopedNames ? this.libraryRefsAsBefore(wasAt) : undefined;
+    // Which files win is decided as before the move too: a file moved onto an identity another layer's
+    // file has must not hide that file from the plan (whose refusal names it), nor be hidden by it.
+    const asBefore = moved.length > 0 && this.index.schemaScopedNames ? this.winnersAsBefore(wasAt) : undefined;
+    const movedRefs = asBefore ? this.libraryRefsAsBefore(asBefore) : undefined;
     for (const entry of this.listTableFiles()) {
       const was = wasAt.get(path.resolve(entry.filePath));
       files.add(this.semanticRelative(was ?? entry.filePath));
-      if (entry.shadowedBy) continue;
+      if (asBefore ? !asBefore.has(path.resolve(entry.filePath)) : entry.shadowedBy) continue;
       // A moved table file is read from its new place, as its old file name and folder.
       const tree = was !== undefined ? dbmlTreePathOf(this.semanticRelative(was)) : undefined;
       const folder = tree?.kind === 'table' && tree.schema !== undefined ? tree.schema : entry.folder;
@@ -1837,21 +1840,46 @@ export class TableLibraryService {
   }
 
   /**
-   * Each unshadowed table's library reference where it differs from its name
-   * (`<schema folder>.<name>`, where another table shares the name), by
-   * absolute path, with the files in `wasAt` (now → before) counted at their
-   * old place: {@link dbmlSnapshot}'s view of an Explorer move.
+   * The library's winners as they were before an Explorer move, by absolute
+   * path (where each is now), with the files in `wasAt` (now → before)
+   * counted at their old place: its name and schema folder there. A DBML
+   * file wins unless one listed before it had the same identity there, or a
+   * YAML table its name (the index's rule told apart by identity), so a move onto
+   * an identity another layer's file has hides neither file from the plan.
    */
-  private libraryRefsAsBefore(wasAt: ReadonlyMap<string, string>): Map<string, string> {
-    const rows = this.listTableFiles().filter((e) => !e.shadowedBy).map((e) => {
-      const was = wasAt.get(path.resolve(e.filePath));
+  private winnersAsBefore(wasAt: ReadonlyMap<string, string>): Map<string, { name: string; schema: string }> {
+    const out = new Map<string, { name: string; schema: string }>();
+    const keys = new Set<string>();
+    const yamlNames = new Set<string>();
+    for (const e of this.listTableFiles()) {
+      const filePath = path.resolve(e.filePath);
+      const was = wasAt.get(filePath);
       const tree = was !== undefined ? dbmlTreePathOf(this.semanticRelative(was)) : undefined;
-      return {
-        filePath: path.resolve(e.filePath),
-        name: tree?.kind === 'table' ? tree.name : e.name,
-        schema: e.storage === 'dbml' ? (tree?.kind === 'table' && tree.schema !== undefined ? tree.schema : e.folder) : '',
-      };
-    });
+      const name = tree?.kind === 'table' ? tree.name : e.name;
+      const schema = e.storage === 'dbml' ? (tree?.kind === 'table' && tree.schema !== undefined ? tree.schema : e.folder) : '';
+      // A YAML table never moves with the Explorer's DBML moves: the index's own answer stands.
+      if (e.storage === 'yaml') {
+        if (e.shadowedBy) continue;
+        yamlNames.add(name.toLowerCase());
+        out.set(filePath, { name, schema });
+        continue;
+      }
+      const key = tableIdKey({ schema, name });
+      if (keys.has(key) || yamlNames.has(name.toLowerCase())) continue;
+      keys.add(key);
+      out.set(filePath, { name, schema });
+    }
+    return out;
+  }
+
+  /**
+   * Each table's library reference where it differs from its name
+   * (`<schema folder>.<name>`, where another table shares the name), by
+   * absolute path, over the winners as they were before an Explorer move
+   * ({@link winnersAsBefore}): {@link dbmlSnapshot}'s view of the move.
+   */
+  private libraryRefsAsBefore(winners: ReadonlyMap<string, { name: string; schema: string }>): Map<string, string> {
+    const rows = [...winners].map(([filePath, { name, schema }]) => ({ filePath, name, schema }));
     const schemasOf = new Map<string, Set<string>>();
     for (const r of rows) {
       const schemas = schemasOf.get(r.name.toLowerCase()) ?? new Set<string>();

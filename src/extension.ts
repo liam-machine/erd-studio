@@ -58,7 +58,7 @@ import { TableLibraryDragController, TABLE_LIBRARY_DRAG_MIME } from './providers
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
-import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
+import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, subjectAreaStorageOf, tableIdKey, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
 import { rewriteJsonScalars } from './services/minimalEdits';
 import { migrateToTableNaming, planProjectNamingMigration } from './commands/migrateNaming';
@@ -3441,7 +3441,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
         try {
           const names = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
-          if (names) usage.push({ layer: summary.layer, modelNames: names });
+          // Told apart by identity, a DBML diagram counts the table files its use lines read, not names.
+          const ids = tableLibraryService.schemaScopedNames && subjectAreaStorageOf(summary.filePath) === 'dbml'
+            ? diagramMembers.idsOf(summary.filePath)?.flatMap((m) => (m.id ? [tableIdKey(m.id)] : []))
+            : undefined;
+          if (names) usage.push({ layer: summary.layer, modelNames: names, ...(ids ? { modelIds: ids } : {}) });
         } catch {
           // An unreadable domain contributes no usage; its models stay put.
         }

@@ -372,6 +372,8 @@ interface TableFileSave {
    * the new path instead of being regenerated from scratch.
    */
   fromName?: string;
+  /** A new DBML table (D-4): never an edit of a table of its name in another schema folder. A YAML write ignores it. */
+  create?: boolean;
 }
 
 /** Why a chosen dbt model was left out of a batch add, in words. */
@@ -6386,7 +6388,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               p.viewConfig = vc;
             }
           },
-          { refreshWebview: true, webview, stage, modelFiles: { save: [{ model: semanticModel }] } },
+          // A new table (D-4): never an edit of a table of its name in another schema folder.
+          { refreshWebview: true, webview, stage, modelFiles: { save: [{ model: semanticModel, create: true }] } },
         );
 
         if (success) {
