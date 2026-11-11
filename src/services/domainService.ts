@@ -202,7 +202,8 @@ interface DbmlDiagramView {
 interface MemberRelationshipScope {
   ref: string;
   owner?: TableId;
-  diagramRefOf: (libraryRef: string) => string;
+  /** The diagram reference a relationship end is drawn under; undefined for an end that names no one table (a bare name two schema folders share). */
+  diagramRefOf: (libraryRef: string) => string | undefined;
 }
 
 /** `view`'s listing of the library's table files, made on first use: one listing per diagram read. */
@@ -738,8 +739,11 @@ export class SubjectAreaService {
       }
       return byFile;
     };
-    const diagramRefOf = (libraryRef: string): string => {
+    const diagramRefOf = (libraryRef: string): string | undefined => {
       const found = library.resolveLibraryRef(libraryRef);
+      // An end the attach could not resolve (an unqualified Ref end two schema folders share, rule 2(e))
+      // is reported, never drawn: it would land on whichever member happens to bear the bare name.
+      if (found.kind === 'ambiguous') return undefined;
       if (found.kind !== 'found') return libraryRef;
       return readAll().get(path.resolve(found.entry.filePath).toLowerCase()) ?? libraryRef;
     };
@@ -810,20 +814,21 @@ export class SubjectAreaService {
       const holders = library.relationshipHolders(scope?.owner ?? model.name, rel);
       if (holders.length === 0 || holders.some((h) => view.imports.has(h.path))) return true;
       const owner = ownerRef.toLowerCase();
-      const target = (scope ? scope.diagramRefOf(rel.toModel) : rel.toModel).toLowerCase();
-      if (members.has(owner) && members.has(target)) {
+      const target = (scope ? scope.diagramRefOf(rel.toModel) : rel.toModel)?.toLowerCase();
+      if (target !== undefined && members.has(owner) && members.has(target)) {
         const linked = !view.unlinked.has(owner) && !view.unlinked.has(target);
         for (const h of holders) if (h.pending || linked) view.drift.add(h.path);
       }
       return false;
     });
     const drawn = scope
-      ? kept.map((rel) => {
+      ? kept.flatMap((rel) => {
         const toModel = scope.diagramRefOf(rel.toModel);
-        return toModel === rel.toModel ? rel : { ...rel, toModel };
+        if (toModel === undefined) return [];
+        return [toModel === rel.toModel ? rel : { ...rel, toModel }];
       })
       : kept;
-    if (kept.length === relationships.length && drawn.every((rel, i) => rel === relationships[i])) return model;
+    if (drawn.length === relationships.length && drawn.every((rel, i) => rel === relationships[i])) return model;
     const { relationships: _all, ...rest } = model;
     return drawn.length > 0 ? { ...rest, relationships: drawn } : rest;
   }

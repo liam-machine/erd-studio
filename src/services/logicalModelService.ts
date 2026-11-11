@@ -327,6 +327,15 @@ export function placementKey(table: TableId | string): string {
 }
 
 /** Whether `filePath` is a `.dbml` file. */
+/**
+ * A stored relationship's whole text, for telling an unchanged one from an
+ * added or changed one: every field, keys in order, names without case.
+ */
+function relationshipText(rel: TableRelationship): string {
+  const record = rel as unknown as Record<string, unknown>;
+  return JSON.stringify(Object.keys(record).sort().map((key) => [key, typeof record[key] === 'string' ? (record[key] as string).toLowerCase() : record[key]]));
+}
+
 function isDbmlFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.dbml');
 }
@@ -753,9 +762,14 @@ export class TableLibraryService {
    * them by its `<schema>.<name>` reference) cannot be written into its
    * `.yml`: refused, never written qualified or left to resolve to either.
    */
-  private refuseYamlRelationshipsToSharedNames(model: SemanticTable): void {
+  private refuseYamlRelationshipsToSharedNames(model: SemanticTable, storedAs: string = model.name): void {
     if (!this.index.schemaScopedNames) return;
+    // A relationship the file already stores, unchanged, is left as it is (owner decision E): the
+    // edit writes nothing new about it, and it stays unresolved until it is fixed. Only one the edit
+    // adds or changes is refused.
+    const stored = new Set((this.tableExists(storedAs) ? this.getTable(storedAs)?.relationships ?? [] : []).map(relationshipText));
     for (const rel of model.relationships ?? []) {
+      if (stored.has(relationshipText(rel))) continue;
       const found = this.index.resolveLibraryRef(rel.toModel);
       const shared = this.index.isAmbiguousName(rel.toModel)
         || (found.kind === 'found' && found.entry.name.toLowerCase() !== rel.toModel.toLowerCase());
@@ -1936,7 +1950,7 @@ export class TableLibraryService {
         dbmlOps.save!.push(save);
         continue;
       }
-      this.refuseYamlRelationshipsToSharedNames(model);
+      this.refuseYamlRelationshipsToSharedNames(model, fromName);
       // A renamed file stays in its own library and folder (#182).
       const renamed = fromName !== undefined && fromName !== model.name;
       const modelPath = renamed ? this.renamedTablePath(fromName, model.name) : this.tablePath(model.name, layerFolder);

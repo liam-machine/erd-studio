@@ -910,6 +910,98 @@ export function relationshipsForAddedTables(
   return out;
 }
 
+/**
+ * A library table that dbt's tests may name, for {@link dbtTestsOnTables}:
+ * where two schema folders share a name, a dbt model is matched to one of
+ * them by its schema, never by its name alone.
+ */
+export interface DbtMatchTable {
+  /** What the relationships derived for it name it by (its library reference: `<schema>.<name>` where the name is shared). */
+  ref: string;
+  /** Its own name (its file's stem). */
+  name: string;
+  /** Its schema folder and the schema its file declares (either may be what dbt builds it in). */
+  schemas: readonly string[];
+  /** The warehouse table name it carries (dbt's `alias`), when it differs from its name. */
+  alias?: string;
+  /** Another schema folder has a table of its name. */
+  shared: boolean;
+}
+
+/**
+ * dbt's relationship and uniqueness tests restated over library tables
+ * (`tables`) instead of dbt model names, for adding a table by its file
+ * (two schema folders may each hold a table of its name). A dbt model is
+ * the table:
+ * - whose name it has, when no other schema folder has a table of that
+ *   name (then its warehouse relation, schema + alias, as a second chance),
+ *   as the physical stage matches it;
+ * - for a name two schema folders share, whose schema and alias (or name)
+ *   it is built as (the relation first), else whose name it has when its
+ *   schema agrees with that table's.
+ * A dbt model two tables would claim, and a test naming a model no table
+ * is, are left out: never a guess. `alsoNamed` are tables matched by name
+ * alone (new tables being seeded from dbt in the same edit).
+ */
+export function dbtTestsOnTables(
+  tables: readonly DbtMatchTable[],
+  tests: DbtTestIndex,
+  ymlData?: YmlData,
+  manifest?: ManifestData,
+  alsoNamed: readonly string[] = [],
+): DbtTestIndex {
+  interface DbtModel { name: string; schemas: string[]; relation: string }
+  const models = new Map<string, DbtModel>();
+  for (const m of manifest?.models.values() ?? []) {
+    models.set(normaliseName(m.name), { name: m.name, schemas: [m.configSchema, m.schema].filter((s): s is string => !!s).map(normaliseName), relation: normaliseName(m.alias ?? m.name) });
+  }
+  // The yml only where the manifest has no node for the model (dbt's own resolution wins).
+  for (const m of ymlData?.models.values() ?? []) {
+    if (models.has(normaliseName(m.name))) continue;
+    models.set(normaliseName(m.name), { name: m.name, schemas: m.configSchema ? [normaliseName(m.configSchema)] : [], relation: normaliseName(m.name) });
+  }
+  const agrees = (model: DbtModel, table: DbtMatchTable): boolean => table.schemas.some((s) => model.schemas.includes(normaliseName(s)));
+  const byRelation = (table: DbtMatchTable): DbtModel | undefined => {
+    const relation = normaliseName(table.alias ?? table.name);
+    const found = [...models.values()].filter((m) => m.relation === relation && agrees(m, table));
+    return found.length === 1 ? found[0] : undefined;
+  };
+  // Normalised dbt model name → the refs of the tables that claim it.
+  const claims = new Map<string, string[]>();
+  const claim = (model: DbtModel | undefined, table: DbtMatchTable): void => {
+    if (!model) return;
+    const key = normaliseName(model.name);
+    claims.set(key, [...(claims.get(key) ?? []), table.ref]);
+  };
+  for (const table of tables) {
+    const byName = models.get(normaliseName(table.name));
+    if (!table.shared) {
+      // Today's order: the name, then the relation.
+      claim(byName ?? byRelation(table), table);
+    } else {
+      claim(byRelation(table) ?? (byName && agrees(byName, table) ? byName : undefined), table);
+    }
+  }
+  const tableOf = new Map<string, string>();
+  for (const [key, refs] of claims) if (refs.length === 1) tableOf.set(key, refs[0]);
+  for (const name of alsoNamed) if (!tableOf.has(normaliseName(name))) tableOf.set(normaliseName(name), name);
+  const on = (name: string): string | undefined => tableOf.get(normaliseName(name));
+  const relationshipTests = tests.relationshipTests.flatMap((t) => {
+    const fromModel = on(t.fromModel);
+    const toModel = on(t.toModel);
+    return fromModel !== undefined && toModel !== undefined ? [{ ...t, fromModel, toModel }] : [];
+  });
+  const rekey = <T>(map: Map<string, T>): Map<string, T> => {
+    const out = new Map<string, T>();
+    for (const [name, value] of map) {
+      const ref = on(name);
+      if (ref !== undefined) out.set(ref, value);
+    }
+    return out;
+  };
+  return { relationshipTests, unique: { uniqueColumns: rekey(tests.unique.uniqueColumns), compositeUniqueGroups: rekey(tests.unique.compositeUniqueGroups) } };
+}
+
 // ---------------------------------------------------------------------------
 // The draft
 // ---------------------------------------------------------------------------

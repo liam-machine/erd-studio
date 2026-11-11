@@ -21,7 +21,7 @@ import * as path from 'path';
 
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { AmbiguousTableName } from '../../src/services/ambiguousTableName';
-import { planDbmlLibraryWrites } from '../../src/services/dbmlLibraryWrites';
+import { ownedRelationshipsOf, planDbmlLibraryWrites, relationshipsIndexOf } from '../../src/services/dbmlLibraryWrites';
 import { clearDiagramSummaries } from '../../src/services/dbmlDiagramSummaries';
 import { planDbmlDuplicateRename, planDbmlExplorerMoves, planDbmlTableMoves } from '../../src/commands/dbmlLifecycle';
 import { writeFilesWithRollback } from '../../src/services/fsFileWrites';
@@ -361,6 +361,51 @@ describe('D-9: a YAML table never stores a relationship to a name DBML tables in
     expect(() => lib.saveTable(model)).toThrow(/Convert the project to DBML first/);
     expect(snapshotFiles()).toEqual(before);
     expect(() => byName().planTableWrites({ save: [{ model }] })).not.toThrow();
+  });
+
+  it('a relationship the yml already stores is left as it is (owner decision E): an edit that does not add or change it is planned, in place', () => {
+    write('logical-models/bestellung.yml', [
+      'name: bestellung', 'description: ""', 'columns:', '  - name: id', '    dataType: INT', '  - name: addresse_id', '    dataType: INT',
+      '  - name: kunde_id', '    dataType: INT',
+      'relationships:', '  - fromColumn: addresse_id', '    toModel: addresse', '    toColumn: id', '    cardinality: many-to-one', '',
+    ].join('\n'));
+    const lib = scoped();
+    const stored = lib.getTable('bestellung')!;
+    expect(stored.relationships).toHaveLength(1);
+    // A description edit keeps the stored relationship, unresolved, and writes the yml in place.
+    const planned = lib.planTableWrites({ save: [{ model: { ...stored, description: 'Orders' } }] });
+    const text = (planned.writes.find((w) => w.path.endsWith('bestellung.yml')) as { text: string }).text;
+    expect(text).toMatch(/description: "?Orders"?/);
+    expect(text).toContain('toModel: addresse');
+    // Adding a relationship to a shared name, or changing the stored one, is still refused.
+    const toKunde = { fromColumn: 'kunde_id', toModel: 'kunde', toColumn: 'id', cardinality: 'many-to-one' as const };
+    expect(() => lib.planTableWrites({ save: [{ model: { ...stored, relationships: [...stored.relationships!, toKunde] } }] })).toThrow(/more than one table is named kunde.*Convert the project to DBML first/);
+    expect(() => lib.planTableWrites({ save: [{ model: { ...stored, relationships: [{ ...stored.relationships![0], toColumn: 'strasse' }] } }] })).toThrow(/Convert the project to DBML first/);
+  });
+});
+
+describe('rule 2(d) in the planner: its attach knows which files exist, as the library\'s does', () => {
+  it('a Ref end whose qualifier names no table, and whose own use line names another file that exists, belongs to no table in either', () => {
+    // orte is in bqs only; the relationships file's use line for crm.orte names another table's file, which exists.
+    write('bronze/tables/bqs/orte.dbml', 'Table bqs.orte {\n  id INT [pk]\n}\n');
+    write('bronze/tables/crm/other.dbml', 'Table crm.other {\n  id INT [pk]\n}\n');
+    write('bronze/relationships/orte.dbml', [
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table crm.orte } from '../tables/crm/other.dbml'",
+      '',
+      'Ref: bqs.kunde.addresse_id > crm.orte.id',
+      '',
+    ].join('\n'));
+    const lib = scoped();
+    const toOrte = (rels: ReadonlyArray<{ toModel: string }>): string[] => rels.map((r) => r.toModel).filter((m) => m.toLowerCase().endsWith('orte'));
+    const library = toOrte(lib.getTable(BQS_KUNDE)!.relationships ?? []);
+    const planner = toOrte(ownedRelationshipsOf(lib.dbmlSnapshot(), lib.libraryRef(BQS_KUNDE) ?? 'kunde'));
+    // Never attached to bqs's orte (its end stays the text it was written as), the same in both.
+    expect(library).toEqual(['crm.orte']);
+    expect(planner).toEqual(library);
+    // The planner's index does not count it as a Ref to bqs's orte either.
+    const indexed = relationshipsIndexOf(lib.dbmlSnapshot()).refs.filter((r) => r.file.endsWith('relationships/orte.dbml'));
+    expect(indexed.map((r) => r.targetId)).toEqual([undefined]);
   });
 });
 
