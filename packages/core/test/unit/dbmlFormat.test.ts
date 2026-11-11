@@ -560,9 +560,11 @@ describe('time', () => {
     const d500 = median(diagram(500));
     const d1000 = median(diagram(1000));
     const wide = median(wideTable(200));
-    // Measured about 10 ms and 8 ms on a laptop; the bounds leave room for a slow CI machine.
-    expect(d500).toBeLessThan(100);
-    expect(wide).toBeLessThan(100);
+    // Measured about 10 ms and 8 ms on a laptop. A shared CI runner under load has taken 118 ms (2026-11-11, on a
+    // change that touched none of this), so the absolute bounds only catch an order-of-magnitude regression; the
+    // ratio below is the check that the formatter stays linear, and it does not depend on the machine's speed.
+    expect(d500).toBeLessThan(400);
+    expect(wide).toBeLessThan(400);
     expect(d1000 / d500).toBeLessThan(3.5);
   });
 });
