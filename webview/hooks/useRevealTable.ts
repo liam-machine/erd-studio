@@ -10,7 +10,7 @@
  * asks for the reveal right after its add, and the refreshed diagram may
  * arrive just after — and then a toast says so.
  *
- * The name is matched ignoring case, as table names are unique that way
+ * The name is matched ignoring case, as a diagram's table names are unique that way
  * (`findRevealNode`: a diagram's name for the table first).
  */
 import { useEffect } from 'react';

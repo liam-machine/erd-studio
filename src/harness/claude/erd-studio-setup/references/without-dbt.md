@@ -143,7 +143,7 @@ per table: its name, role, grain ("One row per …"), primary key, a handful of 
 with types, and what it connects to. Then ask "Shall I write these?" (default yes). Take changes
 one round at a time. This is the one place you invent columns rather than copying them, so:
 
-- **Names** match `^[A-Za-z][A-Za-z0-9_]*$`: lowercase snake_case, unique across the library.
+- **Names** match `^[A-Za-z][A-Za-z0-9_]*$`: lowercase snake_case, each used once (in DBML, once per schema folder).
   Use the style's prefixes (`dim_`, `fct_`) only when the agreed style uses them.
 - **Every table has a primary key** (`pk` in DBML, `isPrimaryKey: true` in YAML) — a surrogate key
   when the style wants one, plus a natural key (`natural_key: 'true'`, `isNaturalKey: true` in YAML)

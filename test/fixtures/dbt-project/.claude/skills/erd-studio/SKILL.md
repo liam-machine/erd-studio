@@ -64,15 +64,15 @@ A new project also needs `.erd-studio/layers.json`, which lists the layer folder
 ```
 
 - **Schema folders.** Each table file is `<layer>/tables/<schema>/<name>.dbml` and declares `Table <schema>.<name>`, the qualifier spelled exactly as its folder (case included). The schema is free: a source system, a domain or the warehouse schema.
-- A table's **name is its identity everywhere** and is unique across the whole project, every layer and schema, ignoring case: never create a second file with a name that exists in another folder. Tables that share a warehouse name get unique names (`silver_customer`, `gold_customer`), with the warehouse name in `alias`.
-- **To find a table**, look for `*/tables/*/{name}.dbml`.
+- **A table is its schema folder and name**, ignoring case. Two schema folders may each hold a table of one name (`bqs.addresse`, `ccc.addresse`); one schema and name in two layers may not (`duplicateTableName`: give one another name, the warehouse name in `alias`). A bare name is enough wherever one table has it; two of one name: "Two tables of one name" in `DBML.md`.
+- **To find a table**, look for `*/tables/{schema}/{name}.dbml`; when several schema folders hold the name, the `use` line or the Ref's qualifier says which.
 - **Where a new table goes.** In the layer of the diagram you are adding it to. Its schema folder, the rule the canvas's **New Table** follows: the schema the user names; else, for a dbt model with a custom schema, dbt's configured schema (`+schema` / `config.schema`; for a source, its `schema:`), never the built schema in `manifest.json`; else the schema folder most of the diagram's tables in that layer already use; else the layer's name. So adding `fct_sale` to `gold/diagrams/reporting.dbml`, whose gold tables are mostly in `gold/tables/sales/`, creates `gold/tables/sales/fct_sale.dbml` holding `Table sales.fct_sale`; with no gold table in the diagram yet, `gold/tables/gold/fct_sale.dbml` holding `Table gold.fct_sale`. When the layer already has a schema folder spelled differently in case, use its spelling. Keep an existing table's file where it is.
 - `tables`, `templates` and `logical-models` are never layer names; `layers.json` ids are lower-case, and the display name is the layer's `label`.
 
 ## Edit rules
 
 - **Edit in place and never reformat.** Change only the lines you mean to change; keep comments, order, spacing and every setting you do not understand exactly as they are. ERD Studio does the same.
-- **Add a table to a diagram** = a new table file (when no file has that name) + a `use { table <schema>.<name> } from '…'` line in the diagram + a `use * from '…'` line for every relationships file holding a Ref between that table and another table of the diagram, when the diagram does not import it yet.
+- **Add a table to a diagram** = a new table file (when its schema folder has no file of that name) + a `use { table <schema>.<name> } from '…'` line in the diagram + a `use * from '…'` line for every relationships file holding a Ref between that table and another table of the diagram, when the diagram does not import it yet.
 - **Add a relationship.** First make sure no relationships file already holds a Ref between the same columns of the same two tables: if one does, change it there. Otherwise write one `Ref` line in the relationships file that already holds the most Refs of the foreign-key table (any layer; ties go to the first path); if none does, in `<layer>/relationships/<schema>.dbml` when that file already exists (the table's own schema; never create it), otherwise in the layer's default file `<layer>/relationships/<layer>.dbml` (create it when missing), + a `use` line there for every table the Ref names that the file does not import yet. Then add `use * from '…'` for that file to every diagram that shows both tables and does not import it yet.
 - **Change a relationship** (columns, cardinality, role) in the file that holds it. Never move a Ref to another file.
 - **Remove a table from a diagram** = delete its `use` line there and its line in the diagram's `erd_layout`. The table file and its Refs stay: the diagram just stops showing them.
@@ -236,4 +236,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 4. Write each logical-side change in the project's format: SYNC.md gives the DBML lines (a column line in the Table block, a new Ref line in `relationshipsPath`, a change to an existing Ref in `storedIn`) and the YAML ones (legacy)
 
-<!-- erd-studio-harness: 48 -->
+<!-- erd-studio-harness: 49 -->

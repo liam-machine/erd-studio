@@ -239,6 +239,22 @@ describe('HarnessService', () => {
       }
     });
 
+    it('all formats say a DBML table is its schema folder and name, and how a diagram showing two of one name is written', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = guideOf(service, target.id);
+        // The schema guide's own rule; the YAML rule above stays as it was.
+        expect(content, target.id).toContain('**A table is its schema folder and name**, ignoring case.');
+        expect(content, target.id).not.toContain('unique across the whole project, every layer and schema');
+        expect(content, target.id).toContain('look for `*/tables/{schema}/{name}.dbml`');
+        // The DBML part (inline, or DBML.md beside the skill): the qualified lines and version 8.
+        expect(content, target.id).toContain('## Two tables of one name');
+        expect(content, target.id).toContain('`bqs.addresse 40 60` and `ccc.addresse 400 60`');
+        expect(content, target.id).toContain('Its Project says `erd_schema_version: \'8\'`');
+        expect(content, target.id).toContain('goes back to bare lines and `\'7\'` on the edit that leaves one');
+        expect(content, target.id).toContain('Never split such a name at its dot');
+      }
+    });
+
     it('all formats include sync reconciliation pointer', () => {
       for (const target of HARNESS_TARGETS) {
         const content = guideOf(service, target.id);
@@ -898,8 +914,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 48 (DBML.md Layout: ERD Studio keeps a file in the layout only when it is already in it, edits a hand-laid file in place, and adds the blank line between foreign-key tables only next to a Ref it adds; 47 DBML.md: an imported column\'s not null, unique, increment and default are DBML\'s own settings in a .dbml table; 46 context fields: one "Fields" section in place of the metadata list and the design rationale, fields.yml and bare `<key>: \'<value>\'` settings, the setting-name table, YAML rationale keys; 45 the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('48');
+    it('is 49 (a DBML table is its schema folder and name: two schema folders may each hold a table of one name, "Two tables of one name" in DBML.md, qualified `<schema>.<name>` lines and erd_schema_version \'8\' on a diagram that shows both; 48 DBML.md Layout: ERD Studio keeps a file in the layout only when it is already in it, edits a hand-laid file in place, and adds the blank line between foreign-key tables only next to a Ref it adds; 47 DBML.md: an imported column\'s not null, unique, increment and default are DBML\'s own settings in a .dbml table; 46 context fields: one "Fields" section in place of the metadata list and the design rationale, fields.yml and bare `<key>: \'<value>\'` settings, the setting-name table, YAML rationale keys; 45 the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('49');
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {

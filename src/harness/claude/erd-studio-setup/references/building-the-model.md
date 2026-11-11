@@ -37,8 +37,8 @@ The schema folder is the one the user names;<!-- dbt-only --> else the model's d
 never the inventory's `schema` (the built schema, which differs per dbt target);<!-- /dbt-only --> else the schema
 folder most of the diagram's tables in that layer already use; else the layer's name. This is the
 rule the canvas's New Table follows. When the layer already has a schema folder spelled differently
-in case, use that spelling. Table names are unique
-across the whole project, and the diagram lists tables by their `use` lines.
+in case, use that spelling. A table is its schema folder and name (another schema folder may hold
+a table of the same name), and the diagram lists tables by their `use` lines.
 
 <!-- dbt-only -->Models in `alreadyModelled` are referenced by name in the diagram and their file is left
 alone, wherever it is. Someone may have designed them by hand, and other domains may share them. If their content

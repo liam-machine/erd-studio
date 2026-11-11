@@ -9,7 +9,7 @@ export const list_models = {
     description:
       'List all logical model definitions in the table library — one .dbml table file per table, in .erd-studio/<layer>/tables/<schema>/ ' +
       '(or older .yml files in .erd-studio/logical-models/ or tables/, from before ERD Studio 2.0, at the top level and one folder down). ' +
-      'Names are unique across folders. ' +
+      'A .dbml table is its schema folder and name: two schema folders may each hold a table of one name, listed with schema_folder (pass it to read_model as schema). A .yml table\'s name is unique across folders. ' +
       'Each model is one table (dimension, fact, bridge, etc.) reusable across domains. ' +
       'Returns model names + light metadata. Call read_model for full column-level detail.',
     inputSchema: {

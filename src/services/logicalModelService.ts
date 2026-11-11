@@ -9,6 +9,10 @@
  * created in — and never part of the model's identity: domain JSON files
  * reference models by name (string[]), so names stay unique across the whole
  * library, exactly as dbt requires of model names across a project.
+ *
+ * A DBML table (`<layer>/tables/<schema>/<name>.dbml`) is its schema folder
+ * and name instead (`TableId`): two schema folders may each hold a table of
+ * one name, and a name two of them hold is read and written by identity.
  */
 
 import * as fs from 'fs';
