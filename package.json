@@ -331,6 +331,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.suggestRelationships",
+        "title": "Suggest Relationships…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.addToDiagram",
         "title": "Add to Diagram…",
         "category": "ERD Studio"
@@ -1036,6 +1041,13 @@
           "group": "7_modification@9"
         }
       ],
+      "editor/title": [
+        {
+          "command": "erdStudio.suggestRelationships",
+          "when": "activeCustomEditorId == erdStudio.domainEditor",
+          "group": "erdStudio@1"
+        }
+      ],
       "view/title": [
         {
           "submenu": "erdStudio.newMenu",
@@ -1263,6 +1275,10 @@
           "when": "erdStudio.hasProject"
         },
         {
+          "command": "erdStudio.suggestRelationships",
+          "when": "erdStudio.hasProject"
+        },
+        {
           "command": "erdStudio.addToDiagram",
           "when": "false"
         },
@@ -1340,6 +1356,11 @@
           "command": "erdStudio.importSemanticModel",
           "when": "erdStudio.hasProject",
           "group": "1_diagram@5"
+        },
+        {
+          "command": "erdStudio.showImportGuide",
+          "when": "erdStudio.hasProject",
+          "group": "1_import_guide@1"
         },
         {
           "command": "erdStudio.addLayer",

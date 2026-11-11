@@ -209,6 +209,7 @@ import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { CUSTOMISE_FIELDS_COMMAND, customiseFields } from './commands/customiseFields';
+import { SUGGEST_RELATIONSHIPS_COMMAND } from './providers/suggestRelationshipsFlow';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
@@ -840,6 +841,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showMeAround',
   'erdStudio.customiseFields',
   'erdStudio.showImportReport',
+  'erdStudio.suggestRelationships',
 ]);
 
 /**
@@ -2960,6 +2962,12 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
   });
+  // Every import through Import DBML's flow (a DBML file, SQL scripts or a catalog export, a semantic model):
+  // once Keep has written the diagram, its canvas offers the relationships it can suggest (it writes none).
+  const refreshAfterImport = (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }): void => {
+    refreshAfterNewSubjectArea(written);
+    editorProvider.offerSuggestionsWhenOpened(written.domainPath);
+  };
   const importDbmlDeps = (draft?: ImportDraftOptions): ImportDbmlDeps => ({
     workspaceRoot,
     semanticDir,
@@ -2967,7 +2975,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     subjectAreaService,
     tableLibraryService,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     // "This folder has a DBML file": the one the look counted (never ERD Studio's own export);
     // the quick path drafts it and the Open dialog starts on it, chosen.
     findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir),
@@ -2981,7 +2989,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     tableLibraryService,
     extensionPath: context.extensionPath,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     timeLimitMs: sqlImportTimeLimitMs(),
     ...(draft ? { draft } : {}),
   });
@@ -2992,7 +3000,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     subjectAreaService,
     tableLibraryService,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     ...(draft ? { draft } : {}),
   });
   const dbtDeps = (draft?: DbtDraftOptions): DrawFromDbtDeps => ({
@@ -3813,6 +3821,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
     // holding the starting set. Writes nothing (the user saves it).
     vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, () => customiseFields(fullSemanticDirPath)),
+    // Suggest Relationships…: on the active canvas (the editor title menu passes its Uri). Writes only what the user accepts.
+    vscode.commands.registerCommand(SUGGEST_RELATIONSHIPS_COMMAND, (arg?: unknown) =>
+      editorProvider.suggestRelationships(arg instanceof vscode.Uri ? arg : undefined)),
     // Export a domain's logical design as Mermaid or DBML. The argument is
     // the canvas's document Uri, the domain tree's node, or nothing (the
     // focused canvas, else the domain picker). Writes no ERD Studio file.

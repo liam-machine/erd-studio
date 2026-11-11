@@ -1,0 +1,62 @@
+table_schema,table_name,table_type,table_comment,column_name,ordinal_position,data_type,is_nullable,column_default,column_comment,is_primary_key,pk_ordinal,unique_constraint_name,fk_constraint_name,fk_ordinal,fk_table_schema,fk_table,fk_column,total_rows
+ref,country,BASE TABLE,,country_code,1,character(2),NO,,,YES,1,,,,,,,51
+ref,country,BASE TABLE,,name,2,character varying(50),NO,,,NO,,,,,,,,51
+ref,currency,BASE TABLE,,currency_code,1,character(3),NO,,,YES,1,,,,,,,51
+ref,currency,BASE TABLE,,name,2,character varying(50),NO,,,NO,,,,,,,,51
+ref,currency,BASE TABLE,,minor_units,3,smallint,NO,2,,NO,,,,,,,,51
+ref,exchange_rate,BASE TABLE,,from_currency,1,character(3),NO,,,YES,1,,exchange_rate_from_fk,1,ref,currency,currency_code,51
+ref,exchange_rate,BASE TABLE,,to_currency,2,character(3),NO,,,YES,2,,exchange_rate_to_fk,1,ref,currency,currency_code,51
+ref,exchange_rate,BASE TABLE,,rate_date,3,date,NO,,,YES,3,,,,,,,51
+ref,exchange_rate,BASE TABLE,,rate,4,"numeric(18,4)",NO,,,NO,,,,,,,,51
+sales,OrderNote,BASE TABLE,,NoteId,1,integer,NO,,,YES,1,,,,,,,51
+sales,OrderNote,BASE TABLE,,order_id,2,bigint,NO,,,NO,,,OrderNote_order_fk,1,sales,order_header,order_id,51
+sales,OrderNote,BASE TABLE,,Note Text,3,text,YES,,,NO,,,,,,,,51
+sales,audit_log,BASE TABLE,"No keys, append-only",logged_at,1,timestamp with time zone,YES,,,NO,,,,,,,,51
+sales,audit_log,BASE TABLE,"No keys, append-only",actor,2,character varying(50),YES,,,NO,,,,,,,,51
+sales,audit_log,BASE TABLE,"No keys, append-only",payload,3,jsonb,YES,,,NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",customer_id,1,integer,NO,,,YES,1,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",email,2,character varying(255),YES,,"Login email, lower-cased",NO,,customer_email_key,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",full_name,3,character varying(50),NO,,"Name, as entered; ""quoted"", and
+a second line",NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",country_code,4,character(2),NO,'AU'::bpchar,,NO,,,customer_country_fk,1,ref,country,country_code,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",segment,5,character varying(20),YES,"'retail, small'::character varying",,NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",credit_limit,6,"numeric(18,4)",YES,0,,NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",created_at,7,timestamp with time zone,NO,now(),,NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",tags,8,text[],YES,,,NO,,,,,,,,51
+sales,customer,BASE TABLE,"Customers, the ""golden"" record.
+One row per person; it's deduplicated",profile,9,jsonb,YES,,,NO,,,,,,,,51
+sales,employee,BASE TABLE,,employee_id,1,integer,NO,,,YES,1,,,,,,,51
+sales,employee,BASE TABLE,,full_name,2,character varying(50),NO,,,NO,,,,,,,,51
+sales,employee,BASE TABLE,,manager_id,3,integer,YES,,,NO,,,employee_manager_fk,1,sales,employee,employee_id,51
+sales,loyalty_card,BASE TABLE,,card_id,1,bigint,NO,,,YES,1,,,,,,,51
+sales,loyalty_card,BASE TABLE,,customer_id,2,integer,NO,,,NO,,loyalty_card_customer_uq,loyalty_card_customer_fk,1,sales,customer,customer_id,51
+sales,loyalty_card,BASE TABLE,,issued_on,3,date,YES,CURRENT_DATE,,NO,,,,,,,,51
+sales,order_header,BASE TABLE,,order_id,1,bigint,NO,,,YES,1,,,,,,,51
+sales,order_header,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,order_header_customer_fk,1,sales,customer,customer_id,51
+sales,order_header,BASE TABLE,,currency_code,3,character(3),NO,,,NO,,,order_header_currency_fk,1,ref,currency,currency_code,51
+sales,order_header,BASE TABLE,,sold_by,4,integer,YES,,,NO,,,order_header_employee_fk,1,sales,employee,employee_id,51
+sales,order_header,BASE TABLE,,order_ts,5,timestamp with time zone,NO,,,NO,,,,,,,,51
+sales,order_line,BASE TABLE,,order_id,1,bigint,NO,,,YES,1,,order_line_order_fk,1,sales,order_header,order_id,51
+sales,order_line,BASE TABLE,,line_no,2,smallint,NO,,,YES,2,,,,,,,51
+sales,order_line,BASE TABLE,,product_id,3,integer,NO,,,NO,,,order_line_product_fk,1,sales,product,product_id,51
+sales,order_line,BASE TABLE,,quantity,4,integer,NO,1,,NO,,,,,,,,51
+sales,order_line,BASE TABLE,,amount,5,"numeric(18,4)",YES,,,NO,,,,,,,,51
+sales,product,BASE TABLE,,product_id,1,integer,NO,,,YES,1,,,,,,,51
+sales,product,BASE TABLE,,sku,2,character varying(32),NO,,,NO,,product_sku_key,,,,,,51
+sales,product,BASE TABLE,,order,3,integer,YES,,Sort order (reserved word),NO,,,,,,,,51
+sales,product,BASE TABLE,,Display Name,4,character varying(50),YES,,,NO,,,,,,,,51
+sales,product,BASE TABLE,,unit_price,5,"numeric(18,4)",NO,0.0000,,NO,,,,,,,,51
+sales,shipment_line,BASE TABLE,,shipment_id,1,bigint,NO,,,YES,1,,,,,,,51
+sales,shipment_line,BASE TABLE,,ln_no,2,smallint,NO,,,NO,,,shipment_line_order_line_fk,2,sales,order_line,line_no,51
+sales,shipment_line,BASE TABLE,,ord_id,3,bigint,NO,,,NO,,,shipment_line_order_line_fk,1,sales,order_line,order_id,51
+sales,shipment_line,BASE TABLE,,shipped_at,4,timestamp with time zone,YES,,,NO,,,,,,,,51
+sales,v_order_totals,VIEW,,order_id,1,bigint,YES,,,NO,,,,,,,,51
+sales,v_order_totals,VIEW,,total,2,numeric,YES,,,NO,,,,,,,,51
