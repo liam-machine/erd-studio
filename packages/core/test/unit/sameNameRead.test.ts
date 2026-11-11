@@ -270,6 +270,38 @@ describe('attachRelationships: resolving an end among tables of one name (rule 2
     expect(result.warnings[0]).toContain('(bqs, ccc)');
   });
 
+  it('(e) an unqualified end whose file imports its name from two schema folders is reported with both, also where only one is in scope', () => {
+    const text = [
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      'Ref: ccc.kunde.addresse_id > addresse.id', '',
+    ].join('\n');
+    const result = attachRelationships([reading(text)], dbmlTableLookup([kundeCcc, ccc]), { partial: true });
+    expect(result.warnings.filter((w) => w.includes('more than one schema folder'))).toEqual([expect.stringContaining('(bqs, ccc)')]);
+    expect(result.unresolved).toEqual([expect.objectContaining({ kind: 'ambiguous', table: 'addresse', schemas: ['bqs', 'ccc'] })]);
+  });
+
+  it('(d) an unqualified end the file says is another schema folder\'s table (its own use line, or its use lines only from there) is contested, never drawn on a namesake whose file exists elsewhere', () => {
+    const own = [
+      "use { table addresse } from '../tables/bqs/addresse.dbml'",
+      'Ref: ccc.kunde.addresse_id > addresse.id', '',
+    ].join('\n');
+    const onlyFrom = [
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      'Ref: ccc.kunde.addresse_id > addresse.id', '',
+    ].join('\n');
+    const only = [kundeCcc, ccc];
+    const exists = (p: string): boolean => p === 'bronze/tables/bqs/addresse.dbml';
+    for (const text of [own, onlyFrom]) {
+      expect(contestedUsePaths([reading(text)], only)).toEqual(['bronze/tables/bqs/addresse.dbml']);
+      expect(linksOf(attachRelationships([reading(text)], dbmlTableLookup(only, { exists })))).toEqual(['ccc.kunde.addresse_id>addresse.id']);
+      // The file is gone (the table moved): the end still lands on the one addresse, as it always did.
+      expect(linksOf(attachRelationships([reading(text)], dbmlTableLookup(only, { exists: () => false })))).toEqual(['ccc.kunde.addresse_id>ccc.addresse.id']);
+    }
+    // A use line naming the same table in another layer (one identity) contests nothing.
+    expect(contestedUsePaths([reading("use { table addresse } from '../../silver/tables/ccc/addresse.dbml'\nRef: ccc.kunde.addresse_id > addresse.id\n")], only)).toEqual([]);
+  });
+
   it('(e) an unqualified end with several tables goes to the one in tables/public/, where unqualified tables live', () => {
     const pub = tableAt('bronze/tables/public/addresse.dbml', undefined);
     const text = 'Ref: kunde.addresse_id > addresse.id\n';

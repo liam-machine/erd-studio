@@ -425,3 +425,72 @@ describe('an unqualified Ref end two schema folders share (core rule 3 counts th
     expect(lines).not.toContain('full_name>street');
   });
 });
+
+describe('a Ref end whose relationships file says it means another schema folder\'s table of its name (core sees only the diagram\'s)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  /** The ccc tables on a diagram importing only `relationships/r.dbml` (`lines`); the twins' own relationships file gone. */
+  function seed(lines: string[], options: { unqualifiedTables?: boolean } = {}): void {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/relationships/bronze.dbml'));
+    if (options.unqualifiedTables) {
+      for (const file of ['bqs/addresse', 'bqs/kunde', 'ccc/addresse', 'ccc/kunde']) {
+        const p = at(`bronze/tables/${file}.dbml`);
+        fs.writeFileSync(p, fs.readFileSync(p, 'utf-8').replace(/^Table \w+\./m, 'Table '));
+      }
+    }
+    const q = options.unqualifiedTables ? '' : 'ccc.';
+    fs.writeFileSync(at('bronze/diagrams/cc.dbml'), [
+      "Project cc {\n  erd_schema_version: '7'\n}",
+      `use { table ${q}addresse } from '../tables/ccc/addresse.dbml'`,
+      `use { table ${q}kunde } from '../tables/ccc/kunde.dbml'`,
+      "use * from '../relationships/r.dbml'",
+      '',
+    ].join('\n'));
+    fs.writeFileSync(at('bronze/relationships/r.dbml'), [...lines, ''].join('\n'));
+  }
+
+  async function bothDraw(): Promise<string[]> {
+    const core = drawn(await coreOf('bronze/diagrams/cc.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/cc.dbml'));
+    // The lines each side draws (a table declaring no schema shows its folder in core, not on the canvas: another matter).
+    expect(canvas.relationships).toEqual(core.relationships);
+    return (canvas.relationships as Array<{ fromModel: string; toModel: string }>).map((r) => `${r.fromModel}>${r.toModel}`);
+  }
+
+  it('the file imports both names from bqs only, by qualified specifiers, and its Ref is unqualified: neither side draws it on ccc\'s tables', async () => {
+    seed([
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('the same with unqualified specifiers from bqs: neither side draws it', async () => {
+    seed([
+      "use { table addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('tables that declare no schema, the file\'s own use lines naming bqs\'s files: neither side draws it', async () => {
+    seed([
+      "use { table addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ], { unqualifiedTables: true });
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('control: the file imports ccc\'s tables, and both sides draw its Ref', async () => {
+    seed([
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      'Ref: ccc.kunde.addresse_id > ccc.addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual(['kunde>addresse']);
+  });
+});

@@ -39,8 +39,10 @@ export type DbmlTableLookup = (name: string, hint?: DbmlRefEndHint) => DbmlAttac
 interface EndResolution {
   entry?: DbmlAttachTable;
   ambiguous?: DbmlAttachTable[];
-  /** A use path whose existence would turn a lenient match into none (rule 4); set only when it decides. */
-  contested?: string;
+  /** Use paths any one of whose existence turns a lenient match into none (rule 4); set only when they decide. */
+  contested?: string[];
+  /** For `ambiguous`: every schema folder the end could mean (the tables' and the file's own use lines'), when the file names more than the tables in scope. */
+  schemas?: string[];
 }
 
 /** The text a table is named by in its scope: its reference, else its name. */
@@ -114,17 +116,33 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: En
     // table of the name a narrower scope sees (a diagram showing only one of them) would be a guess.
     if (qualifier === undefined && (hint?.useSchemas ?? 0) > 1) {
       const inPublic = identities.filter((e) => e.schema !== undefined && lower(e.schema) === DEFAULT_SCHEMA_FOLDER);
-      return inPublic.length === 1 ? { entry: inPublic[0] } : { ambiguous: identities };
+      if (inPublic.length === 1) return { entry: inPublic[0] };
+      // Reported with every schema folder the file imports the name from, not only the ones in scope.
+      const inScope = identities.map((e) => e.schema ?? '');
+      const extra = (hint?.useSchemaNames ?? []).filter((n) => !inScope.some((t) => lower(t) === lower(n)));
+      return { ambiguous: identities, ...(extra.length > 0 ? { schemas: [...inScope, ...extra].sort((a, b) => (lower(a) < lower(b) ? -1 : lower(a) > lower(b) ? 1 : 0)) } : {}) };
     }
     if (identities.length === 1) {
       // 3. The one table of that name. 4. A qualifier that names none of it still lands on it (2.0 drew
       // that line), unless the end's own use line names another file that exists: that table is elsewhere.
+      // An unqualified end is contested the same way when its own use line names a table of another
+      // identity, or, with no line of its own, when its file imports the name only from other schema
+      // folders: an existing file there is the table it means, and the one in scope is a namesake.
       const only = identities[0];
-      const contested = qualifier !== undefined && hint?.usePath !== undefined
-        && (only.path === undefined || lower(normalisePosix(only.path)) !== lower(normalisePosix(hint.usePath)))
-        ? hint.usePath
-        : undefined;
-      if (contested !== undefined && only.path !== undefined && exists?.(contested)) return { contested };
+      const differs = (usePath: string): boolean => only.path === undefined || lower(normalisePosix(only.path)) !== lower(normalisePosix(usePath));
+      const otherIdentity = (usePath: string): boolean => {
+        const id = tableIdOfPath(normalisePosix(usePath));
+        return id === undefined || tableIdKey(id) !== identityOf(only);
+      };
+      let contested: string[] | undefined;
+      if (hint?.usePath !== undefined && differs(hint.usePath) && (qualifier !== undefined || otherIdentity(hint.usePath))) {
+        contested = [hint.usePath];
+      } else if (qualifier === undefined && hint?.usePath === undefined && only.schema !== undefined && hint?.useSchemaPaths !== undefined
+        && !(hint.useSchemaNames ?? []).some((n) => lower(n) === lower(only.schema!))) {
+        const others = hint.useSchemaPaths.filter((p) => differs(p) && otherIdentity(p));
+        if (others.length > 0) contested = others;
+      }
+      if (contested !== undefined && only.path !== undefined && contested.some((p) => exists?.(p) === true)) return { contested };
       return { entry: only, ...(contested !== undefined && only.path !== undefined ? { contested } : {}) };
     }
     // 5. Several tables of the name and nothing decides: an unqualified name means the default schema's table.
@@ -229,25 +247,39 @@ const useTablesBySpelling = new WeakMap<readonly DbmlUseTable[], Map<string, Dbm
  * `use` lines import a table of its name from (`useSchemas`). Internal: the
  * lookup's rule 3 asks it.
  */
-type EndHint = DbmlRefEndHint & { readonly useSchemas?: number };
+type EndHint = DbmlRefEndHint & {
+  readonly useSchemas?: number;
+  /** The schema folders (as the paths spell them, one per folder) the file's own `use` lines import the end's name from. */
+  readonly useSchemaNames?: readonly string[];
+  /** Those `use` lines' table files, resolved against the semantic dir. */
+  readonly useSchemaPaths?: readonly string[];
+};
 
-/** Each file's selective `use` lines by the table name they import (lower case): their schema folders. */
-const useSchemasByName = new WeakMap<object, Map<string, Set<string>>>();
+/** What a file's selective `use` lines import a table name from: its schema folders (lower case → as spelled) and table files. */
+interface UsedFrom { schemas: Map<string, string>; names: string[]; paths: string[] }
 
-/** The schema folders (lower case) `item`'s `use` lines import a table called `table` from. */
-function useSchemasOf(item: DbmlAttachReading, table: string): ReadonlySet<string> | undefined {
+/** Each file's selective `use` lines by the table name they import (lower case). */
+const useSchemasByName = new WeakMap<object, Map<string, UsedFrom>>();
+
+/** The schema folders and table files `item`'s `use` lines import a table called `table` from. */
+function useSchemasOf(item: DbmlAttachReading, table: string): UsedFrom | undefined {
   const useTables = item.reading.useTables;
   if (item.semanticPath === undefined || useTables === undefined || useTables.length === 0) return undefined;
   let byName = useSchemasByName.get(useTables);
   if (byName === undefined) {
     byName = new Map();
     for (const use of useTables) {
-      const id = tableIdOfPath(normalisePosix(resolvePosix(dirnamePosix(item.semanticPath), withDbmlExtension(use.path))));
+      const path = normalisePosix(resolvePosix(dirnamePosix(item.semanticPath), withDbmlExtension(use.path)));
+      const id = tableIdOfPath(path);
       if (id === undefined) continue;
       const key = lower(id.name);
-      const schemas = byName.get(key) ?? new Set<string>();
-      schemas.add(lower(id.schema));
-      byName.set(key, schemas);
+      const used = byName.get(key) ?? { schemas: new Map<string, string>(), names: [], paths: [] };
+      if (!used.schemas.has(lower(id.schema))) {
+        used.schemas.set(lower(id.schema), id.schema);
+        used.names.push(id.schema);
+      }
+      if (!used.paths.includes(path)) used.paths.push(path);
+      byName.set(key, used);
     }
     useSchemasByName.set(useTables, byName);
   }
@@ -273,11 +305,12 @@ function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint
     const use = item.semanticPath !== undefined ? useTableFor(item.reading.useTables, table, qualifier) : undefined;
     const usePath = use ? normalisePosix(resolvePosix(dirnamePosix(item.semanticPath!), withDbmlExtension(use.path))) : undefined;
     // An unqualified end with no use line of its own: which schema folders the file imports its name from.
-    const schemas = qualifier === undefined && usePath === undefined ? useSchemasOf(item, table) : undefined;
+    const used = qualifier === undefined && usePath === undefined ? useSchemasOf(item, table) : undefined;
     return {
       ...(qualifier !== undefined ? { qualifier } : {}),
       ...(usePath !== undefined ? { usePath } : {}),
-      ...(schemas !== undefined && schemas.size > 1 ? { useSchemas: schemas.size } : {}),
+      ...(used !== undefined && used.schemas.size > 1 ? { useSchemas: used.schemas.size } : {}),
+      ...(used !== undefined ? { useSchemaNames: used.names, useSchemaPaths: used.paths } : {}),
     };
   };
   return { owner: hintOf(ref.owner, ref.ownerQualifier), target: hintOf(ref.target, ref.targetQualifier) };
@@ -298,8 +331,7 @@ export function contestedUsePaths(readings: readonly DbmlAttachReading[], tables
     for (const ref of [...item.reading.refs, ...(item.reading.pending ?? [])]) {
       const hints = endHints(item, ref);
       for (const [name, hint] of [[ref.owner, hints.owner], [ref.target, hints.target]] as const) {
-        const contested = resolve(name, hint).contested;
-        if (contested !== undefined) out.add(contested);
+        for (const path of resolve(name, hint).contested ?? []) out.add(path);
       }
     }
   }
@@ -445,7 +477,7 @@ export function attachRelationships(
       };
       for (const [name, end] of [[rels[0].fromModel, owner], [rels[0].toModel, target]] as const) {
         if (!end.ambiguous) continue;
-        const schemas = end.ambiguous.map((e) => e.schema ?? '');
+        const schemas = end.schemas ?? end.ambiguous.map((e) => e.schema ?? '');
         result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
         (result.unresolved ??= []).push({ path, line: ref.line, kind: 'ambiguous', table: name, schemas });
       }
