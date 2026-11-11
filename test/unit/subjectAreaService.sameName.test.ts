@@ -1,12 +1,10 @@
 /**
  * The extension host on two tables of one name in different schema folders
- * (packages/core/test/fixtures/dbml/same-name-two-schemas), before its library is keyed by a
- * table's identity: SubjectAreaService reads each DBML diagram member from
- * its own `use` path, so a diagram that shows both draws each with its own
- * columns under core's names for them (`bqs.addresse`, `ccc.addresse`, with
- * `tableName` beside), never one table twice. Which relationships the host
- * attaches to the second table is the library's business (it still holds
- * the old rule: the later file is a duplicate), pinned in a later stage.
+ * (packages/core/test/fixtures/dbml/same-name-two-schemas): SubjectAreaService reads each
+ * DBML diagram member from its own `use` path, so a diagram that shows both
+ * draws each with its own columns under core's names for them
+ * (`bqs.addresse`, `ccc.addresse`, with `tableName` beside), never one
+ * table twice, and each with the relationships that resolve to it.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -77,10 +75,10 @@ describe('SubjectAreaService: members that share a name', () => {
   });
 });
 
-/** The host with its library telling tables apart by identity (`schemaScopedNames`). */
+/** The host with its library telling tables apart by identity. */
 function scopedService(): SubjectAreaService {
   const subjectAreas = new SubjectAreaService(new LayerService(root, '.erd-studio'));
-  subjectAreas.setTableLibraryService(new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: true }));
+  subjectAreas.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
   return subjectAreas;
 }
 

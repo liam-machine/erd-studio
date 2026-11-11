@@ -2,9 +2,8 @@
  * The sidebar and its commands on two tables of one name in different schema
  * folders (packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and
  * ccc, each with addresse and kunde; the diagrams ccc.dbml, kunden.dbml and
- * kunden-bare.dbml, plus a diagram of bqs's tables here), with the library
- * telling tables apart by identity (`schemaScopedNames`, off by default
- * until the rule flips): the Table Library's rows, their reads and "on N
+ * kunden-bare.dbml, plus a diagram of bqs's tables here), the library
+ * telling tables apart by identity: the Table Library's rows, their reads and "on N
  * diagrams", a drag, Go to Table, Add to Diagram…, Open in Diagram, the
  * Relationships view, the Explorer's tooltips, the Diagrams view's drop and
  * New Table each name a table by its own file, never by a name another
@@ -69,10 +68,10 @@ const BQS_DIAGRAM = [
 
 const LAYERS = [{ id: 'bronze', label: 'Bronze', color: '#cd7f32', creatable: true, order: 1 }];
 
-function services(scoped = true) {
+function services() {
   const layerService = new LayerService(root, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tables = new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: scoped });
+  const tables = new TableLibraryService(root, '.erd-studio');
   subjectAreaService.setTableLibraryService(tables);
   const members = new DiagramMembers();
   return { layerService, subjectAreaService, tables, members, usage: () => tableUsageOf(tables, members) };
@@ -108,8 +107,8 @@ afterEach(() => {
 });
 
 describe('the Table Library: two ordinary rows', () => {
-  function listing(scoped = true) {
-    const s = services(scoped);
+  function listing() {
+    const s = services();
     const provider = new TableLibraryTreeProvider(s.tables, s.subjectAreaService, root, '.erd-studio', () => LAYERS as never, undefined, undefined, undefined, s.members);
     // Read every file first, so each row shows what its own file says.
     for (const entry of s.tables.listTableFiles()) s.tables.getTable(entry.id ?? entry.name);
@@ -148,14 +147,9 @@ describe('the Table Library: two ordinary rows', () => {
     expect(listing().provider.findTableNode('kunde', at('bronze/tables/zzz/kunde.dbml'))?.filePath).toBe(at('bronze/tables/bqs/kunde.dbml'));
   });
 
-  it('with the option off, a file given that no row is still finds the row by its name, as before', () => {
-    const { provider } = listing(false);
-    expect(provider.findTableNode('addresse', at('bronze/tables/ccc/addresse.dbml'))?.filePath).toBe(at('bronze/tables/bqs/addresse.dbml'));
-  });
-
-  it('with the option off, the second file is still the duplicate that is ignored (the rule until it flips)', () => {
-    const { rows } = listing(false);
-    expect(rows.find((r) => r.filePath === at('bronze/tables/ccc/addresse.dbml'))?.shadowedBy).toBe(at('bronze/tables/bqs/addresse.dbml'));
+  it('the second schema folder\'s file is a table of its own, not a duplicate that is ignored', () => {
+    const { rows } = listing();
+    expect(rows.find((r) => r.filePath === at('bronze/tables/ccc/addresse.dbml'))?.shadowedBy).toBeUndefined();
   });
 
   it('dragging the layer row carries every table, both of each name, each with its own file', () => {
@@ -476,8 +470,8 @@ describe('New Table on a schema row', () => {
       tableLibraryService: {
         listTableFiles: () => s.tables.listTableFiles(),
         listDbmlLayerFolders: () => s.tables.listDbmlLayerFolders(),
-        // The name refusal stays project-wide until the rule flips (stage 10): here it is the planner's create flag under test.
-        findTableNameIgnoringCase: () => null,
+        // The real refusal: only ccc's own addresse (none) or a YAML table of the name would stop it.
+        tableTakingName: (name, schema) => s.tables.tableTakingName(name, schema),
         planDbmlBatch: (args) => s.tables.planDbmlBatch(args),
       },
       storage: () => 'dbml',

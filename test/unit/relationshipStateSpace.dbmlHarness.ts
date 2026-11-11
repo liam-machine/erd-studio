@@ -425,7 +425,7 @@ export function materialiseTwins(links: readonly TwinLink[]): { root: string; se
       '',
     ].join('\n'));
   }
-  return { root, semantic, library: () => new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker(), { schemaScopedNames: true }) };
+  return { root, semantic, library: () => new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker()) };
 }
 
 /**

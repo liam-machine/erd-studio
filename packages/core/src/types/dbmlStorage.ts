@@ -313,9 +313,10 @@ export interface DbmlFileOutline {
   /**
    * Each `Metadata Table t` / `Metadata Column t.c` block (D25, DBML 9.1+):
    * the table it targets (its last name part, as written), the column for a
-   * column block, and its 1-based line. Optional: an older core leaves it unset.
+   * column block, the schema written before the table (`qualifier`, when there
+   * is one), and its 1-based line. Optional: an older core leaves it unset.
    */
-  metadata?: Array<{ table: string; column?: string; line: number }>;
+  metadata?: Array<{ table: string; column?: string; qualifier?: string; line: number }>;
   /**
    * The last name part of each `Table` the file itself declares (as written),
    * so a `Metadata` block on one of them is not read as a block outside its

@@ -124,16 +124,14 @@ function referenceFind(name: string): string | null {
 /**
  * The library's table files as `rel[ (shadowed by rel)]`: YAML names match
  * exactly within a library, `tables/` is shadowed by `logical-models/` in
- * any case, and a DBML table by any file before it in any case. Under the
- * schema-scoped rule (`schemaScopedNames`) a DBML table is shadowed only by a
- * YAML file of its name (any case) or an earlier DBML file in a schema
- * folder of the same name (any case, any layer).
+ * any case, and a DBML table only by a YAML file of its name (any case) or
+ * an earlier DBML file in a schema folder of the same name (any case, any
+ * layer): a table is its schema folder and name.
  */
-function referenceListing(options: { schemaScopedNames?: boolean } = {}): string[] {
+function referenceListing(): string[] {
   const out: string[] = [];
   const winners = new Map<string, string>();
   const v5Winners = new Map<string, string>();
-  const anyWinners = new Map<string, string>();
   const yamlWinners = new Map<string, string>();
   const dbmlWinners = new Map<string, string>();
   const add = (dir: string, phase: 'v5' | 'v6' | 'dbml'): void => {
@@ -150,13 +148,12 @@ function referenceListing(options: { schemaScopedNames?: boolean } = {}): string
       const filePath = path.join(dir, file);
       const lower = name.toLowerCase();
       const identity = `${path.basename(dir).toLowerCase()}/${lower.trim()}`;
-      const winner = phase === 'dbml' && options.schemaScopedNames
+      const winner = phase === 'dbml'
         ? yamlWinners.get(lower) ?? dbmlWinners.get(identity)
-        : winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
+        : winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : undefined);
       if (winner === undefined) {
         winners.set(name, filePath);
         if (phase === 'v5') v5Winners.set(lower, filePath);
-        if (!anyWinners.has(lower)) anyWinners.set(lower, filePath);
         if (phase !== 'dbml' && !yamlWinners.has(lower)) yamlWinners.set(lower, filePath);
         if (phase === 'dbml' && !dbmlWinners.has(identity)) dbmlWinners.set(identity, filePath);
         out.push(relOf(filePath));
@@ -183,13 +180,13 @@ function listing(lib: TableLibraryService): string[] {
   return lib.listTableFiles().map((e) => (e.shadowedBy ? `${relOf(e.filePath)} (shadowed by ${relOf(e.shadowedBy)})` : relOf(e.filePath)));
 }
 
-/** Every answer of `lib` against the reference, for `names` (under the rule `lib` was built with). */
+/** Every answer of `lib` against the reference, for `names`. */
 function expectSameAsReference(lib: TableLibraryService, names: readonly string[]): void {
   for (const name of names) {
     expect(lib.findTableFile(name), name).toBe(referenceFind(name));
     expect(lib.findTableNameIgnoringCase(name), name).toBe(lib.listTableFiles().find((e) => sameName(e.name, name))?.name ?? null);
   }
-  expect(listing(lib)).toEqual(referenceListing({ schemaScopedNames: lib.schemaScopedNames }));
+  expect(listing(lib)).toEqual(referenceListing());
   expect(lib.tablesDirIsLayer()).toBe(tablesDirIsLayer(semantic));
   expect(lib.hasTablesLibrary()).toBe(hasTablesLibrary(semantic));
 }
@@ -293,13 +290,15 @@ describe('the index answers exactly as the per-lookup reads did', () => {
     expect(lib.tablesDirIsLayer()).toBe(true);
   });
 
+  // The DBML duplicate within one library is one schema folder and name in two layers: a name in two
+  // schema folders is two tables, not a duplicate (it pinned the rule before schema-scoped identity).
   it('isCrossLibraryDuplicate: a DBML copy of a YAML table and a tables/ copy of a logical-models/ one are; a duplicate within one library is not', () => {
     write('logical-models/dim_a.yml', yamlTable('dim_a'));
     write('tables/dim_c.yml', yamlTable('dim_c'));
     write('logical-models/dim_c.yml', yamlTable('dim_c'));
     write('gold/tables/gold/dim_a.dbml', dbmlTable('dim_a'));
-    write('gold/tables/gold/dim_b.dbml', dbmlTable('dim_b'));
     write('gold/tables/sales/dim_b.dbml', dbmlTable('dim_b', undefined, 'sales'));
+    write('silver/tables/sales/dim_b.dbml', dbmlTable('dim_b', undefined, 'sales'));
     write('logical-models/gold/dim_d.yml', yamlTable('dim_d'));
     write('logical-models/dim_d.yml', yamlTable('dim_d'));
     const lib = service();
@@ -308,7 +307,7 @@ describe('the index answers exactly as the per-lookup reads did', () => {
       'logical-models/gold/dim_d.yml': false,
       'tables/dim_c.yml': true,
       'gold/tables/gold/dim_a.dbml': true,
-      'gold/tables/sales/dim_b.dbml': false,
+      'silver/tables/sales/dim_b.dbml': false,
     });
   });
 
@@ -332,8 +331,8 @@ describe('the index answers exactly as the per-lookup reads did', () => {
   });
 });
 
-describe('the schema-scoped rule (schemaScopedNames): a DBML table is shadowed only by its own identity, or a YAML table of its name', () => {
-  const scoped = (): TableLibraryService => new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: true });
+describe('the schema-scoped rule: a DBML table is shadowed only by its own identity, or a YAML table of its name', () => {
+  const scoped = (): TableLibraryService => service();
   const NAMES = ['addresse', 'Addresse', 'kunde', 'x', 'X', 'orders', 'dim_date', 'fct_order', 'missing'];
 
   /** Two layers, three schema folders, names shared across folders, a case-twin folder, a layer twin and a YAML table. */
@@ -355,16 +354,10 @@ describe('the schema-scoped rule (schemaScopedNames): a DBML table is shadowed o
     write('gold/tables/gold/orders.dbml', dbmlTable('orders'));
   }
 
-  it('both rules match their reference over the same files; only the scoped rule makes the second schema folder\'s tables tables', () => {
+  it('the rule matches its reference; the second schema folder\'s tables of a name are tables, a layer twin or case twin is not', () => {
     twins();
-    expectSameAsReference(service(), NAMES);
     expectSameAsReference(scoped(), NAMES);
     const shadowed = (lib: TableLibraryService): string[] => lib.listTableFiles().filter((e) => e.shadowedBy).map((e) => relOf(e.filePath));
-    expect(shadowed(service()).sort()).toEqual([
-      'bronze/tables/ccc/Addresse.dbml', 'bronze/tables/ccc/kunde.dbml',
-      'gold/tables/finance/fct_order.dbml', 'gold/tables/sales/fct_order.dbml',
-      'silver/tables/CCC/kunde.dbml', 'silver/tables/bqs/addresse.dbml', 'silver/tables/silver/orders.dbml',
-    ]);
     expect(shadowed(scoped()).sort()).toEqual([
       'gold/tables/finance/fct_order.dbml', 'gold/tables/sales/fct_order.dbml',
       'silver/tables/CCC/kunde.dbml', 'silver/tables/bqs/addresse.dbml',
@@ -399,11 +392,17 @@ describe('the schema-scoped rule (schemaScopedNames): a DBML table is shadowed o
     expect(lib.libraryRef({ schema: 'silver', name: 'orders' })).toBe('silver.orders');
     // A bare read still answers the first file in index order (today's answer).
     expect(relOf(lib.findTableFile('addresse')!)).toBe('bronze/tables/bqs/addresse.dbml');
-    // Under the old rule nothing is ambiguous and every reference is bare.
-    const old = service();
-    expect(old.isAmbiguousName('addresse')).toBe(false);
-    expect(old.libraryRef({ schema: 'bqs', name: 'addresse' })).toBe('addresse');
-    expect(old.findTableById({ schema: 'ccc', name: 'addresse' })).toBeUndefined();
+    expect(lib.hasSharedNames()).toBe(true);
+  });
+
+  it('a library where no two schema folders share a name has no shared names, and every reference is bare', () => {
+    write('bronze/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    write('silver/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    write('bronze/tables/ccc/kunde.dbml', dbmlTable('kunde', undefined, 'ccc'));
+    const lib = scoped();
+    expect(lib.hasSharedNames()).toBe(false);
+    expect(lib.isAmbiguousName('addresse')).toBe(false);
+    expect(lib.libraryRef({ schema: 'bqs', name: 'addresse' })).toBe('addresse');
   });
 
   it('resolveLibraryRef answers as core\'s matchTableRef over the library\'s tables', () => {

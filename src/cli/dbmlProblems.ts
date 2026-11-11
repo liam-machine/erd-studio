@@ -35,6 +35,7 @@ import { FIELDS_FILE_NAME, tableIdKey, tableIdOfPath } from '@erd-studio/core';
 import type { DbmlFileOutline, DbmlTableReading, ProjectStorage, Relationship, SemanticFileClass } from '@erd-studio/core';
 import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, usePathBetween } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
+import { sameName } from '../types/naming';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { relationshipsIndexOf } from '../services/dbmlLibraryWrites';
 import { relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
@@ -401,8 +402,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
 
   // Two table files of different identities that declare one schema.name (a copied schema folder, or
   // unqualified Tables in two folders): other DBML tools cannot import both. One identity in two layers
-  // is duplicateTableName's. Only where tables are told apart by identity, which makes both tables.
-  if (lib.schemaScopedNames) {
+  // is duplicateTableName's.
+  {
     const declarers = new Map<string, string[]>();
     for (const [rel, at] of declaredAt) {
       const key = at.reference.toLowerCase();
@@ -455,7 +456,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     }
     return undefined;
   };
-  // Told apart by identity (schemaScopedNames), two schema folders may each hold a table of one name:
+  // Two schema folders may each hold a table of one name:
   // the snapshot keys those by `<schema>.<name>`, so a Ref end is found as the attach finds it.
   const scoped = snapshot?.schemaScopedNames === true;
   const named = new Map<string, NonNullable<ReturnType<typeof tableOf>>[]>();
@@ -488,6 +489,21 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     if (q === undefined) return only(candidates.filter((t) => folderOf(t) === 'public'));
     return only(candidates.filter((t) => folderOf(t) === q))
       ?? only(candidates.filter((t) => t.reference.toLowerCase() === `${q}.${name.toLowerCase()}`));
+  };
+  /**
+   * The table a diagram's `use` line of a name two schema folders share means: the one in the schema
+   * folder its path names, else the one its specifier's qualifier names; undefined when neither does.
+   */
+  const sharedUseTable = (f: ProjectFile, use: { name: string; line: number; resolved: string }): ReturnType<typeof tableOf> => {
+    const candidates = named.get(use.name.toLowerCase()) ?? [];
+    const only = (ts: typeof candidates): ReturnType<typeof tableOf> => (ts.length === 1 ? ts[0] : undefined);
+    const pathSchema = tableIdOfPath(use.resolved)?.schema.toLowerCase();
+    const byPathSchema = pathSchema !== undefined ? only(candidates.filter((t) => folderOf(t) === pathSchema)) : undefined;
+    if (byPathSchema) return byPathSchema;
+    const spec = (outline(f).uses.find((u) => u.line === use.line)?.specifiers ?? [])
+      .find((sp) => sp.toLowerCase().endsWith(`.${use.name.toLowerCase()}`));
+    const q = spec?.slice(0, spec.length - use.name.length - 1).replace(/^"(.*)"$/, '$1').toLowerCase();
+    return q !== undefined ? only(candidates.filter((t) => folderOf(t) === q)) ?? only(candidates.filter((t) => t.reference.toLowerCase() === spec!.toLowerCase())) : undefined;
   };
   /**
    * A name two schema folders share that the Ref quoted in a reader problem (`Line n: \`Ref: …\` …`)
@@ -546,14 +562,37 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
    * A pending relationship (D27): drawn by ERD Studio, a comment to every other DBML tool. Says what it
    * waits for, or that both ends are ready and the next write (or Convert) makes it a live Ref.
    */
-  const pushPending = (rel: string, ref: { line: number; relationships: Relationship[] }): void => {
+  /**
+   * A pending line's end's table: by `own` (the file's own `use` line or qualifier, a diagram member's
+   * file) where it says, else by name. A name tables in several schema folders share, with nothing to
+   * say which, names none of them.
+   */
+  const pendingTableOf = (name: string, own: (name: string) => ReturnType<typeof tableOf> | undefined): ReturnType<typeof tableOf> | 'shared' => {
+    const found = own(name);
+    if (found) return found;
+    return sharedName(name) ? 'shared' : memberTableOf(name);
+  };
+  const pushPending = (
+    rel: string,
+    ref: { line: number; relationships: Relationship[] },
+    own: (end: 'from' | 'to', name: string) => ReturnType<typeof tableOf> | undefined = () => undefined,
+  ): void => {
     const head = ref.relationships[0];
     if (!head) return;
     const cols = (cs: string[]): string => (cs.length === 1 ? cs[0] : `(${cs.join(', ')})`);
     const link = `${head.fromModel}.${cols(ref.relationships.map((r) => r.fromColumn))} → ${head.toModel}.${cols(ref.relationships.map((r) => r.toColumn))}`;
+    // Each end resolved on its own: its two tables may share a name (two schema folders' twins).
+    const ends = { from: pendingTableOf(head.fromModel, (n) => own('from', n)), to: pendingTableOf(head.toModel, (n) => own('to', n)) };
+    const tableAt = (end: 'from' | 'to'): ReturnType<typeof tableOf> => {
+      const t = ends[end];
+      return t === 'shared' ? undefined : t;
+    };
+    const sameEnd = head.fromModel.toLowerCase() === head.toModel.toLowerCase() && ends.from === ends.to;
     const waits = [
-      ...[head.fromModel, head.toModel].filter((n, i, all) => all.indexOf(n) === i).flatMap((name) => {
-        const t = memberTableOf(name);
+      ...([['from', head.fromModel], ['to', head.toModel]] as const).filter(([end]) => end === 'from' || !sameEnd).flatMap(([end, name]) => {
+        const resolved = ends[end];
+        if (resolved === 'shared') return [`${name} is a name tables in more than one schema folder have; write the table's schema in the line`];
+        const t = resolved;
         const wrongName = t ? undefined : misnamedOf(name);
         if (wrongName) return [`${name}'s file ${wrongName.path} is not named .yml, so ERD Studio does not read it as a table yet`];
         if (!t) return [`${name} has no table file`];
@@ -562,12 +601,12 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
         if (t.storage === 'yaml') return [yamlTableLabel(name, t)];
         return [];
       }),
-      ...ref.relationships.flatMap((r) => [[head.fromModel, r.fromColumn], [head.toModel, r.toColumn]] as const)
-        .filter(([table, column]) => {
-          const t = tableOf(table);
+      ...ref.relationships.flatMap((r) => [['from', r.fromColumn], ['to', r.toColumn]] as const)
+        .filter(([end, column]) => {
+          const t = tableAt(end);
           return t !== undefined && t.storage === 'dbml' && !t.columns.some((c) => c.toLowerCase() === column.toLowerCase());
         })
-        .map(([table, column]) => `${tableOf(table)!.name} has no column ${column}`),
+        .map(([end, column]) => `${tableAt(end)!.name} has no column ${column}`),
     ];
     // "Add from dbt" only helps a table with no file; a YAML one is finished by Convert.
     // Without dbt_project.yml there is no Add from dbt: the table file is written by hand or New Table.
@@ -662,7 +701,14 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
         });
       }
     }
-    for (const ref of reading.pending ?? []) pushPending(f.rel, ref);
+    // Each end by the file's own `use` line, then its qualifier (as a live Ref's).
+    for (const ref of reading.pending ?? []) {
+      // The relationship's from end is the Ref's owner, unless the reader turned it round.
+      const forward = sameName(ref.relationships[0]?.fromModel ?? ref.owner, ref.owner);
+      pushPending(f.rel, ref, (end) => ((end === 'from') === forward
+        ? endTableOf(f, ref.owner, ref.ownerQualifier)
+        : endTableOf(f, ref.target, ref.targetQualifier)));
+    }
     if (missing.size > 0) missingUseTables.set(projectRel(f.rel), { tables: new Set([...missing.values()].map((m) => m.name)), schemas: missingSchemas });
     for (const m of missing.values()) {
       push({
@@ -751,7 +797,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       // A block on a Table this file declares is inside that table's file (a
       // single-file DBML, reported as declaresOwnTables / declaredInDiagram).
       if (ownTables.has(m.table.toLowerCase())) continue;
-      const t = tableOf(m.table);
+      // By the file's own use line, then the block's schema: two schema folders may each hold a table of its name.
+      const t = endTableOf(f, m.table, m.qualifier);
       const target = `${t?.name ?? m.table}${m.column !== undefined ? `.${m.column}` : ''}`;
       const ignored = 'ERD Studio reads and edits a table\'s properties only in its table file, so the canvas does not show these values, while other DBML tools apply them. ';
       const message = !t
@@ -804,11 +851,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       continue;
     }
     // D-2: a diagram showing two tables of one name from different schema folders reads only in versions that
-    // know it ('8'); older ones open a '7' file and draw one table twice. Only where tables are told apart by
-    // identity: under the old rule the second table is a duplicate, and doctor says so.
-    const twins = lib.schemaScopedNames
-      ? [...new Set((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref.toLowerCase() !== u.name.toLowerCase()).map((u) => u.name))]
-      : [];
+    // know it ('8'); older ones open a '7' file and draw one table twice.
+    const twins = [...new Set((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref.toLowerCase() !== u.name.toLowerCase()).map((u) => u.name))];
     if (twins.length > 0 && reading.schemaVersion < 8) {
       push({
         file: projectRel(f.rel), code: 'twinDiagramVersion',
@@ -862,7 +906,19 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
         });
         continue;
       }
-      const t = tableOf(use.name);
+      // A name two schema folders share is the table of the line's own schema: its path's folder, then the
+      // qualifier its specifier writes (owner decision B: never the other folder's table of that name).
+      const t = sharedName(use.name) ? sharedUseTable(f, use) : tableOf(use.name);
+      if (!t && sharedName(use.name)) {
+        // D-10: neither its path nor its specifier says which of the tables of its name it means.
+        const ts = named.get(use.name.toLowerCase()) ?? [];
+        push({
+          file: projectRel(f.rel), line: use.line, code: 'ambiguousTableReference',
+          message: `This use line names ${use.name}, which tables in the schema folders ${ts.map((x) => tableIdOfPath(x.path)?.schema ?? '').join(', ')} have, and its path is no table file, so nothing says which one it means; `
+            + `the member is drawn missing. Point it at one of them, as: use { table ${ts[0]?.reference ?? use.name} } from '${ts[0] ? usePathBetween(f.rel, ts[0].path) : use.resolved}'`,
+        });
+        continue;
+      }
       if (!t) continue;
       if (t.storage === 'yaml') {
         push({
@@ -903,17 +959,24 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
             : `${t.name} has a table file now (${t.path}), but the diagram still names it in erd_unlinked_tables. ERD Studio moves it to a use line on its next edit of this diagram, or run ERD Studio: Convert Project to DBML.`,
       });
     }
-    for (const pending of reading.pending ?? []) pushPending(f.rel, pending);
+    // Each end by the member it names: the file its use line reads (a pair is named `<schema>.<name>`).
+    const memberFileOf = (_end: 'from' | 'to', name: string): ReturnType<typeof tableOf> | undefined => {
+      const use = (reading!.uses ?? []).find((u) => sameName(u.ref ?? u.name, name));
+      return use ? byPath.get(use.resolved.toLowerCase()) : undefined;
+    };
+    for (const pending of reading.pending ?? []) pushPending(f.rel, pending, memberFileOf);
     // Its relationships imports, pair-based (§2.4): a file holding a live Ref between two of its `use` members,
     // or a pending line (D27) between two of the tables it draws (unlinked ones too), and no other. An unlinked
     // member whose table has a .dbml file now counts as a `use` member: the next edit gives it a line (D26).
     if (index) {
       const unlinked = (reading.unlinked ?? []).filter((n) => tableOf(n)?.storage !== 'dbml');
       const linked = reading.members.filter((m) => !unlinked.some((u) => u.toLowerCase() === m.toLowerCase()));
-      // Told apart by identity, a member is asked for by its file, so a diagram of one schema's tables needs no other's Refs.
+      // A member is asked for by the file its use line reads, so a diagram of one schema's tables needs no
+      // other's Refs. A use line naming no table file (a stale path) is the member by its name, as it is read.
       const useOf = (m: string) => (reading!.uses ?? []).find((u) => (u.ref ?? u.name).toLowerCase() === m.toLowerCase());
       const members = scoped ? linked.map((m) => {
-        const id = useOf(m) ? tableIdOfPath(useOf(m)!.resolved) : undefined;
+        const use = useOf(m);
+        const id = use && byPath.has(use.resolved.toLowerCase()) ? tableIdOfPath(use.resolved) : undefined;
         return id ? { schema: id.schema, name: id.name } : m;
       }) : linked;
       const want = relationshipsImportsFor({ members, unlinked }, index, { current: reading.relationshipsUses });
@@ -1019,8 +1082,9 @@ function byteOrder(a: string, b: string): number {
  * of no kind ERD Studio knows (`unexpectedFileInDbmlFolder`); a layer folder
  * holding tables or relationships that layers.json does not list, or DBML
  * diagrams in a layer that does not open (`dbmlLayerNotConfigured`) and one
- * table name in two table files
- * (`duplicateTableName`). The files of a 1.9 tree (`skip`) are left to its
+ * table, a schema folder and name, in two table files (two layers, or two
+ * folders spelled in another case: `duplicateTableName`); one name in two
+ * schema folders is two tables. The files of a 1.9 tree (`skip`) are left to its
  * one error.
  */
 function treeShapeProblems(
@@ -1069,17 +1133,19 @@ function treeShapeProblems(
     }
     out.push({ file: projectRel(layer), code: 'dbmlLayerNotConfigured', message });
   }
-  const byName = new Map<string, Array<{ rel: string; name: string }>>();
+  // A table is its schema folder and name (without case): the same pair in two files is one table twice.
+  const byIdentity = new Map<string, Array<{ rel: string; name: string; schema: string }>>();
   for (const { rel, cls } of shown) {
     if (cls.kind !== 'table' || cls.storage !== 'dbml' || cls.name === undefined) continue;
-    const key = cls.name.toLowerCase();
-    byName.set(key, [...(byName.get(key) ?? []), { rel, name: cls.name }]);
+    const key = `${(cls.schema ?? '').toLowerCase()}/${cls.name.toLowerCase()}`;
+    byIdentity.set(key, [...(byIdentity.get(key) ?? []), { rel, name: cls.name, schema: cls.schema ?? '' }]);
   }
-  for (const copies of byName.values()) {
+  for (const copies of byIdentity.values()) {
     for (const copy of copies.slice(1)) {
       out.push({
         file: projectRel(copy.rel), code: 'duplicateTableName',
-        message: `${copies[0].name} is declared in ${copies[0].rel} and ${copy.rel}; give the tables unique names and keep the warehouse name in alias.`,
+        message: `${copies[0].schema}.${copies[0].name} is declared in ${copies[0].rel} and ${copy.rel}: other DBML tools cannot tell two tables of one schema and name apart, `
+          + 'and ERD Studio uses the first. Give this one its own name and keep the warehouse name in alias, or move it to its own schema folder.',
       });
     }
   }

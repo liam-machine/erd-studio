@@ -28,9 +28,9 @@ import { readDbmlConversionInput } from '../services/dbmlConversionFiles';
 import { tablesDirIsLayer, TABLES_DIR } from '../services/logicalModelService';
 import { normaliseName } from '../services/nameUtils';
 import { SubjectAreaFileError } from '../services/domainService';
-import { keysContradictedRelationships, linkKey, parseSubjectAreaJson, subjectAreaStorageOf } from '@erd-studio/core';
+import { keysContradictedRelationships, linkKey, parseSubjectAreaJson, subjectAreaStorageOf, tableIdKey, tableIdOfPath } from '@erd-studio/core';
 import type { ProjectStorage, Relationship } from '@erd-studio/core';
-import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
+import { diagramSummaryDbml, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { projectStorageOf } from '../services/projectStorage';
 import { dbtKeyIndexOf } from '../services/stageDisplay';
 import {
@@ -509,7 +509,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   for (const entry of lib.listTableFiles()) {
     if (entry.shadowedBy) { continue; }
     // A name another schema folder's table shares: read by the table's own file, listed with its schema folder.
-    const id = lib.schemaScopedNames && lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
+    const id = lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
     const err = lib.getTableFileError(id ?? entry.name);
     if (err) { unreadable.push(toUnreadableTableFile(ctx.root, err)); continue; }
     const { columns, ignored, anchored } = lib.dataTypeAliasColumns(id ?? entry.name);
@@ -552,6 +552,34 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
  * read with dbt's key evidence as the canvas reads it. A diagram that does
  * not load is skipped (`diff --all` names it).
  */
+/**
+ * A diagram's member names → the identity key of its table: the file a DBML
+ * diagram's `use` line reads, else (a JSON diagram, an unlinked member) the
+ * table the library reads for the name; a name with neither, as it is.
+ */
+function memberIdentitiesOf(ctx: CliContext, file: string): (name: string) => string {
+  let summary: ReturnType<typeof diagramSummaryDbml> = null;
+  if (subjectAreaStorageOf(file) === 'dbml') {
+    try {
+      summary = diagramSummaryDbml(fs.readFileSync(file, 'utf-8'), file);
+    } catch {
+      summary = null;
+    }
+  }
+  const ids = new Map<string, string>();
+  summary?.members.forEach((ref, i) => {
+    const use = summary!.memberUses[i];
+    const id = use ? tableIdOfPath(use.resolved) : undefined;
+    if (id) ids.set(ref.toLowerCase(), tableIdKey(id));
+  });
+  return (name) => {
+    const own = ids.get(name.toLowerCase());
+    if (own !== undefined) return own;
+    const id = ctx.tableLibraryService.tableIdOf(name);
+    return id ? tableIdKey(id) : name;
+  };
+}
+
 function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): BackwardsRelationship[] {
   const dbtKeyIndex = dbtKeyIndexOf(ctx.ymlData, ctx.manifest);
   const byLink = new Map<string, BackwardsRelationship>();
@@ -573,8 +601,12 @@ function backwardsRelationshipsOf(ctx: CliContext, domainFiles: string[]): Backw
       const id = rel.compositeKey ? [rel.fromModel, rel.toModel, rel.compositeKey].join('\u0000').toLowerCase() : `\u0001${groups.size}`;
       groups.set(id, [...(groups.get(id) ?? []), rel]);
     }
+    // One relationship on several diagrams is one entry: its tables compared by the files the diagram's
+    // use lines read, so two schema folders' same-named tables never merge into one.
+    const identityOf = memberIdentitiesOf(ctx, file);
+    const byIdentity = (rel: Relationship): Relationship => ({ ...rel, fromModel: identityOf(rel.fromModel), toModel: identityOf(rel.toModel) });
     for (const members of groups.values()) {
-      const key = members.map(linkKey).sort().join('\u0001');
+      const key = members.map((m) => linkKey(byIdentity(m))).sort().join('\u0001');
       const held = byLink.get(key) ?? {
         fromModel: members[0].fromModel,
         fromColumns: members.map((m) => m.fromColumn),

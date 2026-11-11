@@ -373,8 +373,12 @@ export function diagramPickItems(
   usage: TableUsageKeys = tableUsageByName(memberNames),
 ): DiagramPickItem[] {
   const wanted = [...new Map(tables.map((t) => [usage.keyOf(t), typeof t === 'string' ? t : t.name])).entries()];
+  // A JSON diagram names tables by name alone, and a name two schema folders share reads the library's
+  // first table of it: it cannot show any other table of that name (owner decision F), so it is not offered.
+  const notByName = usage.byIdentity && tables.some((t) => typeof t !== 'string' && usage.keyOf(t.name) !== usage.keyOf(t));
   const items: DiagramPickItem[] = [];
   for (const summary of summaries) {
+    if (notByName && summary.storage !== 'dbml' && !summary.filePath.toLowerCase().endsWith('.dbml')) continue;
     // By name, the diagram's member names as listed (a count of them); by identity, the tables they read.
     let members: string[] | null = null;
     try {

@@ -2,7 +2,7 @@
  * The editor on two tables of one name in different schema folders
  * (packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc, each
  * with addresse and kunde), with the library telling tables apart by
- * identity (`schemaScopedNames`, off by default until the rule flips): every
+ * identity: every
  * canvas message names a table as the diagram does (its name, or
  * `<schema>.<name>` where two members share it), and each handler acts on
  * the table file that member's own `use` line reads (the diagram boundary,
@@ -71,7 +71,7 @@ function ymlData(): Record<string, unknown> {
 function buildProvider(): { provider: SemanticEditorProvider; tables: TableLibraryService } {
   const layerService = new LayerService(root, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tables = new TableLibraryService(root, '.erd-studio', new OwnWriteTracker(), { schemaScopedNames: true });
+  const tables = new TableLibraryService(root, '.erd-studio', new OwnWriteTracker());
   subjectAreaService.setTableLibraryService(tables);
   const context = {
     extensionUri: vscode.Uri.file(path.join(root, 'no-extension')),

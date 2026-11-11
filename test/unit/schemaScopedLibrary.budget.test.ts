@@ -1,5 +1,5 @@
 /**
- * The library keyed by table identity (`schemaScopedNames`) on the shape of
+ * The library keyed by table identity on the shape of
  * the project that asked for it: 869 tables in one layer across 15 schema
  * folders, most names repeated in several folders, every Ref written with
  * its schema qualifier and a `use` line per table (as ERD Studio writes
@@ -72,7 +72,7 @@ afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-const library = (): TableLibraryService => new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: true });
+const library = (): TableLibraryService => new TableLibraryService(root, '.erd-studio');
 
 // Table file reads, counted through the module object the services read with.
 const cjsFs = createRequire(__filename)('fs') as typeof fs;
@@ -226,12 +226,10 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
     try {
       for (const f of files) fs.rmSync(f);
       fs.writeFileSync(path.join(dir, 'bronze.dbml'), [...lines.filter((l) => l.startsWith('use ')), '', ...lines.filter((l) => l.startsWith('Ref:')), ''].join('\n'));
-      for (const scopedNames of [false, true]) {
-        const lib = new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: scopedNames });
-        lib.listTables();
-        const { result } = measure(`the index over one layer file (schemaScopedNames ${scopedNames})`, 150, () => lib.relationshipsIndex());
-        expect(result.refs).toHaveLength(TABLES * 2);
-      }
+      const lib = new TableLibraryService(root, '.erd-studio');
+      lib.listTables();
+      const { result } = measure('the index over one layer file', 150, () => lib.relationshipsIndex());
+      expect(result.refs).toHaveLength(TABLES * 2);
     } finally {
       fs.rmSync(path.join(dir, 'bronze.dbml'));
       files.forEach((f, i) => fs.writeFileSync(f, texts[i]));

@@ -1,10 +1,9 @@
 /**
  * The CLI on two tables of one name in different schema folders (the twin
- * fixture, packages/core/test/fixtures/dbml/same-name-two-schemas), with the
- * library telling tables apart by identity (`schemaScopedNames`, turned on
- * here for every TableLibraryService the CLI builds). Existing JSON fields
- * keep a table's own name; an additive `schema` field says which one (D-11).
- * The old rule's duplicateTableName stays until the rule flips.
+ * fixture, packages/core/test/fixtures/dbml/same-name-two-schemas), the
+ * library telling tables apart by identity. Existing JSON fields keep a
+ * table's own name; an additive `schema` field says which one (D-11). Two
+ * schema folders' tables of one name are no duplicate.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -19,21 +18,6 @@ import { diffModelSnapshots } from '../../src/cli/modelChanges';
 import { readModelSnapshot } from '../../src/cli/modelSnapshot';
 import { listSemanticFiles } from '../../src/services/semanticFiles';
 
-/** Whether the CLI's Table Library tells tables apart by identity: on, but for the tests of the old rule. */
-const rule = vi.hoisted(() => ({ scoped: true }));
-
-vi.mock('../../src/services/logicalModelService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/logicalModelService')>();
-  /** The CLI's Table Library with the identity rule on, whoever builds it. */
-  class ScopedTableLibraryService extends actual.TableLibraryService {
-    constructor(...args: ConstructorParameters<typeof actual.TableLibraryService>) {
-      const [workspaceRoot, semanticDir, ownWriteTracker, options] = args;
-      super(workspaceRoot, semanticDir, ownWriteTracker, { ...options, schemaScopedNames: rule.scoped });
-    }
-  }
-  return { ...actual, TableLibraryService: ScopedTableLibraryService };
-});
-
 const TWINS = path.resolve(__dirname, '../../packages/core/test/fixtures/dbml/same-name-two-schemas');
 let tmp: string;
 let root: string;
@@ -47,7 +31,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rule.scoped = true;
   vi.restoreAllMocks();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -61,20 +44,19 @@ async function problems(): Promise<Array<{ file: string; line?: number; code: st
 }
 
 /** A snapshot of the project's files as they are now (what `changes` reads for the working tree), told apart by identity. */
-function snapshotNow(schemaScopedNames = true) {
+function snapshotNow() {
   const semanticRoot = path.join(root, '.erd-studio');
   const files = listSemanticFiles(semanticRoot, { tablesDirIsLayer: false }).map((e) => e.rel);
   return readModelSnapshot(files, (rel) => {
     try { return fs.readFileSync(path.join(semanticRoot, rel), 'utf-8'); } catch { return null; }
-  }, { schemaScopedNames });
+  });
 }
 
 describe('doctor: two tables of one name in different schema folders', () => {
-  it('reports no Ref twice, no extra import and nothing but the old rule\'s duplicate, plus the 2.0.2-style diagram\'s version', async () => {
+  // Two schema folders' tables of one name are two tables: no duplicateTableName (it pinned the old rule).
+  it('reports no Ref twice, no extra import and no duplicate, only the 2.0.2-style diagram\'s version', async () => {
     const codes = (await problems()).map((p) => [p.file.replace('.erd-studio/', ''), p.code]);
     expect(codes).toEqual([
-      ['bronze/tables/ccc/addresse.dbml', 'duplicateTableName'],
-      ['bronze/tables/ccc/kunde.dbml', 'duplicateTableName'],
       ['bronze/diagrams/kunden-bare.dbml', 'twinDiagramVersion'],
     ]);
     const version = (await problems()).find((p) => p.code === 'twinDiagramVersion')!;
@@ -83,11 +65,12 @@ describe('doctor: two tables of one name in different schema folders', () => {
     expect(version.message).toMatch(/ERD Studio 2\.0\.4 and later/);
   });
 
-  it('under the old rule, the 2.0.2-style diagram is not reported for its version: the second table is a duplicate', async () => {
-    rule.scoped = false;
-    const codes = (await problems()).map((p) => p.code);
-    expect(codes).toContain('duplicateTableName');
-    expect(codes).not.toContain('twinDiagramVersion');
+  it('the same schema folder and name in two layers is still a duplicate, reworded; one name in two schema folders never is', async () => {
+    fs.cpSync(semantic('bronze/tables/ccc'), semantic('silver/tables/ccc'), { recursive: true });
+    const dup = (await problems()).filter((p) => p.code === 'duplicateTableName');
+    expect(dup.map((p) => p.file.replace('.erd-studio/', ''))).toEqual(['silver/tables/ccc/addresse.dbml', 'silver/tables/ccc/kunde.dbml']);
+    expect(dup[0].message).toBe('ccc.addresse is declared in bronze/tables/ccc/addresse.dbml and silver/tables/ccc/addresse.dbml: other DBML tools cannot tell two tables '
+      + 'of one schema and name apart, and ERD Studio uses the first. Give this one its own name and keep the warehouse name in alias, or move it to its own schema folder.');
   });
 
   it('a Ref whose table the file does not import names the right table\'s use line', async () => {
@@ -144,6 +127,45 @@ describe('doctor: two tables of one name in different schema folders', () => {
   });
 });
 
+describe('doctor reads each end, block and use line of a shared name by its own schema', () => {
+  it('a pending line between the twins names no missing table file; a column only ccc\'s table lacks is named against ccc\'s', async () => {
+    fs.appendFileSync(semantic(REL), '// erd-studio pending: Ref: ccc.addresse.postcode > bqs.addresse.ort\n');
+    const pending = (await problems()).filter((p) => p.code === 'pendingRelationship');
+    expect(pending).toHaveLength(1);
+    expect(pending[0].message).not.toContain('has no table file');
+    expect(pending[0].message).toMatch(/can be a live Ref now/);
+    fs.appendFileSync(semantic(REL), '// erd-studio pending: Ref: ccc.addresse.ort > bqs.addresse.ort\n');
+    const second = (await problems()).filter((p) => p.code === 'pendingRelationship').find((p) => p.line === 11)!;
+    expect(second.message).toContain('addresse has no column ort');
+  });
+
+  it('a Metadata block on ccc.addresse outside its file names ccc\'s file, never "has no table file"', async () => {
+    fs.appendFileSync(semantic(REL), "\nMetadata Table ccc.addresse {\n  owner: 'data team'\n}\n");
+    const foreign = (await problems()).filter((p) => p.code === 'foreignMetadata');
+    expect(foreign).toHaveLength(1);
+    expect(foreign[0].message).toContain('(bronze/tables/ccc/addresse.dbml)');
+    expect(foreign[0].message).not.toContain('has no table file');
+  });
+
+  it('a diagram use line of a twin that misses its file is reported with its own schema\'s line; one nothing decides is ambiguous (D-10)', async () => {
+    const ccc = path.join(root, '.erd-studio', 'bronze', 'diagrams', 'ccc.dbml');
+    fs.writeFileSync(ccc, fs.readFileSync(ccc, 'utf-8').replace("use { table ccc.addresse } from '../tables/ccc/addresse.dbml'", "use { table ccc.addresse } from '../tables/ccc_old/addresse.dbml'"));
+    const mismatch = (await problems()).filter((p) => p.code === 'usePathMismatch');
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0].message).toContain("use { table ccc.addresse } from '../tables/ccc/addresse.dbml'");
+    fs.writeFileSync(ccc, fs.readFileSync(ccc, 'utf-8').replace("use { table ccc.addresse } from '../tables/ccc_old/addresse.dbml'", "use { table addresse } from '../tables/old/addresse.dbml'"));
+    const ambiguous = (await problems()).filter((p) => p.code === 'ambiguousTableReference' && p.file.endsWith('ccc.dbml'));
+    expect(ambiguous).toHaveLength(1);
+    expect(ambiguous[0].message).toMatch(/names addresse, which tables in the schema folders bqs, ccc have/);
+  });
+
+  it('a backwards relationship on two diagrams of two schemas\' twins is two entries, never one', async () => {
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    const backwards = (r.erd as { backwardsRelationships?: Array<{ fromModel: string; domains: string[] }> }).backwardsRelationships ?? [];
+    for (const b of backwards) expect(new Set(b.domains.map((d) => d.replace(/^.*\//, ''))).size).toBe(b.domains.length);
+  });
+});
+
 describe('inventory: two tables of one name in different schema folders', () => {
   it('lists each table by its own name, its own columns and diagrams, with its schema folder beside it', async () => {
     const r = runInventory(await buildCliContext({ project: root, semanticDir: '.erd-studio' }));
@@ -162,7 +184,6 @@ describe('inventory: two tables of one name in different schema folders', () => 
   });
 
   it('a dot in a hand-written file stem is not a pair: the diagram is listed as before', async () => {
-    rule.scoped = false;
     fs.mkdirSync(semantic('bronze/tables/sales'), { recursive: true });
     fs.writeFileSync(semantic('bronze/tables/sales/ord.v2.dbml'), 'Table sales."ord.v2" {\n  id int [pk]\n}\n');
     fs.writeFileSync(semantic('bronze/diagrams/orders.dbml'), "Project orders {\n  erd_schema_version: '7'\n}\n\nuse { table sales.\"ord.v2\" } from '../tables/sales/ord.v2.dbml'\n");
@@ -239,20 +260,14 @@ describe('changes: two tables of one name in different schema folders', () => {
     expect(changes.tables.renamed).toEqual([]);
   });
 
-  it('under the old rule a name is one table, the first file in path order, exactly as before', () => {
-    const snapshot = snapshotNow(false);
-    expect([...snapshot.tables.keys()].sort()).toEqual(['addresse', 'kunde']);
-    expect(snapshot.tables.get('addresse')!.file).toBe('bronze/tables/bqs/addresse.dbml');
-    expect([...snapshot.tables.values()].some((t) => t.id !== undefined)).toBe(false);
-    expect([...snapshot.relationships.values()].some((r) => r.idKey !== undefined)).toBe(false);
-  });
-
-  it('a YAML table and DBML tables of its name stay one table (a format conflict), never a pair', () => {
+  // The first of a name written twice is the one the Table Library keeps: YAML first, as its index lists it
+  // (this pinned the path byte order, in which 'bronze/' sorted before 'logical-models/').
+  it('a YAML table and DBML tables of its name stay one table (a format conflict), never a pair: the YAML file, as the library reads it', () => {
     fs.mkdirSync(semantic('logical-models'), { recursive: true });
     fs.writeFileSync(semantic('logical-models/addresse.yml'), 'name: addresse\ncolumns:\n  - name: id\n');
     const snapshot = snapshotNow();
     expect([...snapshot.tables.keys()].filter((k) => k.endsWith('addresse'))).toEqual(['addresse']);
-    expect(snapshot.tables.get('addresse')!.file).toBe('bronze/tables/bqs/addresse.dbml');
+    expect(snapshot.tables.get('addresse')!.file).toBe('logical-models/addresse.yml');
   });
 
   it('an unreadable table file never hides the readable table of its name in another schema folder', () => {

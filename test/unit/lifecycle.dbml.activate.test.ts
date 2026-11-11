@@ -618,24 +618,17 @@ describe('in a native DBML project', () => {
   });
 
   /**
-   * A second dim_customer in silver/tables/silver/ (`silver.dim_customer`): gold's comes first in
-   * the listing and wins, so the silver one is the copy. silver's relationships file and the
-   * staging diagram use the copy.
+   * A second gold.dim_customer, in silver/tables/gold/ (one schema folder and name in two layers: one
+   * table to DBML): gold's comes first in the listing and wins, so the silver one is the copy. The
+   * staging diagram uses the copy. (A dim_customer in silver/tables/silver/ was the copy until a table
+   * became its schema folder and name: it is a table of its own now.)
    */
   function seedDuplicate(): void {
-    fs.mkdirSync(erd('silver', 'tables', 'silver'), { recursive: true });
-    fs.writeFileSync(erd('silver', 'tables', 'silver', 'dim_customer.dbml'), 'Table silver.dim_customer {\n  customer_key INT [pk]\n}\n');
-    fs.writeFileSync(erd('silver', 'tables', 'silver', 'fct_visit.dbml'), 'Table silver.fct_visit {\n  visit_key INT [pk]\n  customer_key INT\n}\n');
-    fs.writeFileSync(erd('silver', 'relationships', 'silver.dbml'), [
-      "use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'",
-      "use { table silver.fct_visit } from '../tables/silver/fct_visit.dbml'",
-      '',
-      'Ref: silver.fct_visit.customer_key >? silver.dim_customer.customer_key',
-      '',
-    ].join('\n'));
-    fs.writeFileSync(stagingPath(), fs.readFileSync(stagingPath(), 'utf-8').replace("use * from '../../gold/relationships/gold.dbml'", "use { table silver.dim_customer } from '../tables/silver/dim_customer.dbml'\nuse * from '../../gold/relationships/gold.dbml'"));
+    fs.mkdirSync(erd('silver', 'tables', 'gold'), { recursive: true });
+    fs.writeFileSync(erd('silver', 'tables', 'gold', 'dim_customer.dbml'), 'Table gold.dim_customer {\n  customer_key INT [pk]\n}\n');
+    fs.writeFileSync(stagingPath(), fs.readFileSync(stagingPath(), 'utf-8').replace("use * from '../../gold/relationships/gold.dbml'", "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'\nuse * from '../../gold/relationships/gold.dbml'"));
   }
-  const COPY = (): string => erd('silver', 'tables', 'silver', 'dim_customer.dbml');
+  const COPY = (): string => erd('silver', 'tables', 'gold', 'dim_customer.dbml');
 
   it('Give Duplicate Its Own Name: when VS Code rejects the edit, every file is put back and it says nothing was changed', async () => {
     seedDuplicate();
@@ -646,12 +639,12 @@ describe('in a native DBML project', () => {
       (args.includes('Rename') ? 'Rename' : undefined)) as never);
     vscode._mockWorkspaceState.applyEditPrefixes.push(1);
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', COPY());
-    expect(errors).toHaveBeenCalledWith('Could not rename silver/tables/silver/dim_customer.dbml; nothing was changed.');
+    expect(errors).toHaveBeenCalledWith('Could not rename silver/tables/gold/dim_customer.dbml; nothing was changed.');
     for (const doc of vscode.workspace.textDocuments) if (doc.isDirty) await doc.save();
     expect(bytes()).toEqual(before);
   });
 
-  it('Give Duplicate Its Own Name renames a .dbml copy (named after its layer), re-spells its own Ref ends and repoints only the diagram that uses it', async () => {
+  it('Give Duplicate Its Own Name renames a .dbml copy (named after its layer) and repoints only the diagram that uses it', async () => {
     seedDuplicate();
     const salesBefore = fs.readFileSync(salesPath(), 'utf-8');
     const goldRelsBefore = fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8');
@@ -663,31 +656,28 @@ describe('in a native DBML project', () => {
     expect(errors).not.toHaveBeenCalled();
     expect((input.mock.calls[0][0] as { value?: string }).value).toBe('silver_dim_customer');
     expect(fs.existsSync(COPY())).toBe(false);
-    expect(fs.readFileSync(erd('silver', 'tables', 'silver', 'silver_dim_customer.dbml'), 'utf-8')).toMatch(/^Table silver\.silver_dim_customer \[alias: 'dim_customer'\]/m);
-    expect(fs.readFileSync(erd('silver', 'relationships', 'silver.dbml'), 'utf-8')).toContain('Ref: silver.fct_visit.customer_key >? silver.silver_dim_customer.customer_key');
-    expect(fs.readFileSync(stagingPath(), 'utf-8')).toMatch(/^use \{ table silver\.silver_dim_customer \} +from '\.\.\/tables\/silver\/silver_dim_customer\.dbml'$/m);
+    expect(fs.readFileSync(erd('silver', 'tables', 'gold', 'silver_dim_customer.dbml'), 'utf-8')).toMatch(/^Table gold\.silver_dim_customer \[alias: 'dim_customer'\]/m);
+    expect(fs.readFileSync(stagingPath(), 'utf-8')).toMatch(/^use \{ table gold\.silver_dim_customer \} +from '\.\.\/tables\/gold\/silver_dim_customer\.dbml'$/m);
     expect(fs.readFileSync(salesPath(), 'utf-8')).toBe(salesBefore);
     expect(fs.readFileSync(erd('gold', 'relationships', 'gold.dbml'), 'utf-8')).toBe(goldRelsBefore);
     expect(info).toHaveBeenCalledWith(expect.stringContaining('is now its own table, "silver_dim_customer"'));
     compilesClean();
   });
 
-  it('Give Duplicate Its Own Name offers {schema}_{name} for a copy in another schema of the SAME layer, and renames it so', async () => {
-    // gold/tables/gold/dim_customer.dbml wins; a second one in gold/tables/sales/ is the copy.
+  // A table is its schema folder and name: a dim_customer in another schema of the same layer is a table of its
+  // own (this pinned the old rule, which offered it {schema}_{name}); only what is still shadowed is listed.
+  it('Give Duplicate Its Own Name has nothing to rename for a dim_customer in another schema of the same layer: it is a table of its own', async () => {
     const copy = erd('gold', 'tables', 'sales', 'dim_customer.dbml');
     fs.mkdirSync(path.dirname(copy), { recursive: true });
     fs.writeFileSync(copy, 'Table sales.dim_customer {\n  customer_key INT [pk]\n}\n');
+    const before = bytes();
     await activate(context);
-    const input = vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
-    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
-      (args.includes('Rename') ? 'Rename' : undefined)) as never);
+    const input = vi.spyOn(vscode.window, 'showInputBox');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', copy);
-    expect(errors).not.toHaveBeenCalled();
-    // Not `gold_dim_customer`: the layer names both copies alike.
-    expect((input.mock.calls[0][0] as { value?: string }).value).toBe('sales_dim_customer');
-    expect(fs.existsSync(copy)).toBe(false);
-    expect(fs.readFileSync(erd('gold', 'tables', 'sales', 'sales_dim_customer.dbml'), 'utf-8')).toMatch(/^Table sales\.sales_dim_customer \[alias: 'dim_customer'\]/m);
-    compilesClean();
+    expect(input).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Every table file in the library has its own name.');
+    expect(bytes()).toEqual(before);
   });
 
   describe('a refused write shows a modal naming the file, with Open File at the line (§4.7)', () => {
@@ -720,7 +710,7 @@ describe('in a native DBML project', () => {
 
     it('Give Duplicate Its Own Name', async () => {
       seedDuplicate();
-      fs.writeFileSync(COPY(), "use { table gold.dim_region } from '../../../gold/tables/gold/dim_region.dbml'\nTable silver.dim_customer {\n  customer_key INT [pk]\n}\n");
+      fs.writeFileSync(COPY(), "use { table gold.dim_region } from '../../../gold/tables/gold/dim_region.dbml'\nTable gold.dim_customer {\n  customer_key INT [pk]\n}\n");
       const before = bytes();
       await activate(context);
       vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
@@ -728,8 +718,8 @@ describe('in a native DBML project', () => {
         (args.includes('Rename') ? 'Rename' : undefined)) as never);
       await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', COPY());
       const modal = refusalModal();
-      expect(modal.message).toMatch(/^Give Duplicate Its Own Name: silver\/tables\/silver\/dim_customer\.dbml: .* Nothing was changed\.$/);
-      expect(modal.detail).toBe('File: .erd-studio/silver/tables/silver/dim_customer.dbml, line 1');
+      expect(modal.message).toMatch(/^Give Duplicate Its Own Name: silver\/tables\/gold\/dim_customer\.dbml: .* Nothing was changed\.$/);
+      expect(modal.detail).toBe('File: .erd-studio/silver/tables/gold/dim_customer.dbml, line 1');
       expect(modal.buttons).toEqual(['Open File']);
       expect(bytes()).toEqual(before);
     });

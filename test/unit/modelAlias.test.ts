@@ -361,8 +361,8 @@ describe('duplicate model files', () => {
     expect(plain).toContain('The table becomes "gold_date" with alias: date, so the warehouse name stays date.');
     expect(plain).not.toMatch(/dbt/i);
 
-    expect(duplicateNamePrompt('date', true)).toBe('Table names are unique, as dbt model names are. The warehouse table name stays "date" (set as the table\'s alias).');
-    expect(duplicateNamePrompt('date', false)).toBe('Table names are unique across the library. The warehouse name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', true)).toBe('ERD Studio reads one table of a name in a schema, as dbt builds one model of a name. The warehouse table name stays "date" (set as the table\'s alias).');
+    expect(duplicateNamePrompt('date', false)).toBe('ERD Studio reads one table of a name in a schema. The warehouse name stays "date" (set as the table\'s alias).');
     expect(duplicateNamePrompt('date', false)).not.toMatch(/dbt/i);
   });
 

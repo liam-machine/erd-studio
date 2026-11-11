@@ -71,6 +71,7 @@ import type { FieldList } from './fields.js';
 import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
 import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, normalisePosix, tableFileCandidates, type DbmlTableHint } from './storage.js';
 import { attachRelationships, contestedUsePaths, dbmlTableLookup, type DbmlAttachReading } from './dbmlAttach.js';
+import { linkKey } from './relationships.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
 
@@ -702,10 +703,20 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         const lookup = dbmlTableLookup(entries, { exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true });
         const attached = attachRelationships(readings, lookup, { partial: true });
         for (const message of attached.warnings) warn(message);
+        // A Ref whose other end names a table that more than one schema folder has, with nothing to say which,
+        // is reported and not drawn: its bare name would land on whichever member bears it here.
+        const ambiguousAt = new Set((attached.unresolved ?? []).filter((u) => u.kind === 'ambiguous').map((u) => `${u.path}\u0000${u.line}`));
         for (const [ref, entry] of parsed) {
           if (!entry.model || !dbmlFound.has(ref)) continue;
           // A member's relationships are keyed by what ends call it: its reference, or (as before identities) its name.
-          const relationships = attached.byOwner.get((tableNameOf(entry.model) !== undefined ? ref : entry.model.name).toLowerCase());
+          const owner = tableNameOf(entry.model) !== undefined ? ref : entry.model.name;
+          let relationships = attached.byOwner.get(owner.toLowerCase());
+          if (relationships && ambiguousAt.size > 0) {
+            relationships = relationships.filter((rel) => {
+              const at = attached.locations?.get(linkKey({ ...rel, fromModel: owner }));
+              return at === undefined || !ambiguousAt.has(`${at.path}\u0000${at.line}`);
+            });
+          }
           if (relationships && relationships.length > 0) entry.model.relationships = relationships;
         }
       }

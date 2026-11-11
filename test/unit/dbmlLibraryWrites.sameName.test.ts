@@ -6,13 +6,13 @@
  * `addresse` tables, and the diagrams ccc.dbml (ccc only), kunden.dbml (all
  * four) and kunden-bare.dbml (the same, as 2.0.2 left it)).
  *
- * Under the internal option `schemaScopedNames`: a new `addresse` in ccc is
+ * A table is its schema folder and name: a new `addresse` in ccc is
  * created beside bqs's and edits nothing (D-4); a rename, move or delete of
  * one twin leaves the other's file, Refs, `use` lines and diagrams as they
  * were; an op naming a shared name alone is refused (D-5); a create, rename
  * or move onto an identity another layer or a YAML table already has is
  * refused, naming the other file (D-7); a YAML table's relationship to a
- * shared name is refused (D-9). Without the option nothing changes.
+ * shared name is refused (D-9).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -50,8 +50,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-const scoped = (): TableLibraryService => new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: true });
-const byName = (): TableLibraryService => new TableLibraryService(root, '.erd-studio');
+const scoped = (): TableLibraryService => new TableLibraryService(root, '.erd-studio');
 const rel = (filePath: string): string => path.relative(semantic, filePath).split(path.sep).join('/');
 const write = (relPath: string, text: string): void => {
   const file = path.join(semantic, relPath);
@@ -118,6 +117,33 @@ function bqsSide(files: Record<string, string>): Record<string, string | undefin
   };
 }
 
+describe('two creates of one name into two schema folders in one batch (an Import of bqs.ort and ccc.ort)', () => {
+  it('both are named <schema>.<name> from the start, so a Ref naming each lands on its own, never the first', () => {
+    const lib = scoped();
+    const ort = (schema: string) => ({ name: 'ort', schema, description: '', columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }] });
+    const kunde = (schema: string) => ({
+      name: `kunde_${schema}`, schema, description: '',
+      columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }, { name: 'ort_id', dataType: 'INT', description: '' }],
+      relationships: [{ fromColumn: 'ort_id', toModel: `${schema}.ort`, toColumn: 'id', cardinality: 'many-to-one' as const }],
+    });
+    const { plan } = lib.planDbmlBatch({
+      ops: {
+        save: [ort('bqs'), ort('ccc'), kunde('bqs'), kunde('ccc')].map((model) => ({ model, create: true })),
+        newTableHome: { layer: 'bronze', schema: 'bronze' },
+        schemaFromSource: true,
+      },
+    });
+    expect(plan.createdTablePaths).toEqual(['bronze/tables/bqs/ort.dbml', 'bronze/tables/ccc/ort.dbml', 'bronze/tables/bqs/kunde_bqs.dbml', 'bronze/tables/ccc/kunde_ccc.dbml']);
+    expect(plan.resolveTable('bqs.ort')?.path).toBe('bronze/tables/bqs/ort.dbml');
+    expect(plan.resolveTable('ccc.ort')?.path).toBe('bronze/tables/ccc/ort.dbml');
+    // The bare name names neither (it would be the first created, by its key, before both were qualified).
+    expect(plan.resolveTable('ort')).toBeUndefined();
+    const refs = plan.writes.filter((w) => w.kind !== 'delete' && w.path.startsWith('bronze/relationships/')).map((w) => (w.kind === 'delete' ? '' : w.text)).join('\n');
+    expect(refs).toContain('Ref: bqs.kunde_bqs.ort_id >? bqs.ort.id');
+    expect(refs).toContain('Ref: ccc.kunde_ccc.ort_id >? ccc.ort.id');
+  });
+});
+
 describe('D-4: a new table is told from an edit by a flag, never by a name another schema folder has', () => {
   beforeEach(() => {
     // Only bqs has addresse: ccc's addresse, its Refs and the diagrams naming it are gone.
@@ -134,7 +160,7 @@ describe('D-4: a new table is told from an edit by a flag, never by a name anoth
   const NEW_ADDRESSE = { name: 'addresse', schema: 'ccc', description: '', columns: [] };
 
   it('a save naming addresse with a home in ccc and no flag is refused, never an edit of bqs/addresse.dbml (the bug, reproduced)', () => {
-    for (const lib of [scoped(), byName()]) {
+    for (const lib of [scoped()]) {
       const before = snapshotFiles();
       expect(() => lib.applyDbmlBatch({ ops: { save: [{ model: NEW_ADDRESSE, home: { layer: 'bronze', schema: 'ccc' } }] } }))
         .toThrow(/bronze\/tables\/bqs\/addresse\.dbml already holds the table addresse, which is not in bronze\/tables\/ccc\//);
@@ -151,13 +177,6 @@ describe('D-4: a new table is told from an edit by a flag, never by a name anoth
     expect(plan.createdTables).toEqual(['addresse']);
     expect(plan.createdTablePaths).toEqual(['bronze/tables/ccc/addresse.dbml']);
     expect(scoped().tablesNamed('addresse').map((e) => rel(e.filePath))).toEqual(['bronze/tables/bqs/addresse.dbml', 'bronze/tables/ccc/addresse.dbml']);
-  });
-
-  it('without the option a create of a name the library has is refused, naming the file that has it (the old rule)', () => {
-    const before = snapshotFiles();
-    expect(() => byName().applyDbmlBatch({ ops: { save: [{ model: NEW_ADDRESSE, home: { layer: 'bronze', schema: 'ccc' }, create: true }] } }))
-      .toThrow(/bronze\/tables\/bqs\/addresse\.dbml already holds a table named addresse/);
-    expect(snapshotFiles()).toEqual(before);
   });
 
   it('an ordinary edit of bqs.addresse from a diagram whose new-table home is another schema edits bqs/addresse.dbml and creates nothing', () => {
@@ -305,13 +324,6 @@ describe('D-5 in the planner itself: an op naming a shared name alone is refused
     const model = { ...lib.getTable(CCC_ADDRESSE)!, name: 'ccc.addresse', tableName: 'addresse' };
     expect(() => planDbmlLibraryWrites(lib.dbmlSnapshot(), { save: [{ model, from: CCC_ADDRESSE }] })).toThrow(/named as a diagram names it/);
   });
-
-  it('without the option nothing about a by-name plan changes', () => {
-    const lib = byName();
-    const plan = planDbmlLibraryWrites(lib.dbmlSnapshot(), { save: [{ model: { ...lib.getTable('addresse')!, description: 'x' } }] });
-    expect(plan.writes.map((w) => w.path)).toEqual(['bronze/tables/bqs/addresse.dbml']);
-    expect(plan.identities).toBeUndefined();
-  });
 });
 
 describe('D-7: a create, rename or move onto an identity another layer or folder already has is refused, naming that file', () => {
@@ -360,7 +372,6 @@ describe('D-9: a YAML table never stores a relationship to a name DBML tables in
     expect(() => lib.planTableWrites({ save: [{ model: { ...model, relationships: [{ ...rel, toModel: 'ccc.addresse' }] } }] })).toThrow(/Convert the project to DBML first/);
     expect(() => lib.saveTable(model)).toThrow(/Convert the project to DBML first/);
     expect(snapshotFiles()).toEqual(before);
-    expect(() => byName().planTableWrites({ save: [{ model }] })).not.toThrow();
   });
 
   it('a relationship the yml already stores is left as it is (owner decision E): an edit that does not add or change it is planned, in place', () => {

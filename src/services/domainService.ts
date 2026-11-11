@@ -561,9 +561,10 @@ export class SubjectAreaService {
     const view = options.dbml;
     const library = this.tableLibraryService;
     const members = new Set(tableNamesOf(obj).map((n) => n.toLowerCase()));
-    // Told apart by identity, a member's relationships come from the library
-    // under its library reference and are drawn under the diagram's.
-    const scope = library && view && library.schemaScopedNames ? this.diagramScope(library, view) : undefined;
+    // Where two schema folders share a name, a member's relationships come from
+    // the library under its library reference and are drawn under the diagram's;
+    // while none do, every reference is the table's name.
+    const scope = library && view && library.hasSharedNames?.() === true ? this.diagramScope(library, view) : undefined;
     return buildUnifiedSubjectArea(obj, format, {
       filePath,
       domainNameFallback,
@@ -717,7 +718,7 @@ export class SubjectAreaService {
 
   /**
    * How a DBML diagram's members are read when the library tells tables
-   * apart by identity (`schemaScopedNames`): each member read once, before
+   * apart by identity (two schema folders share a name): each member read once, before
    * any relationship is drawn (`read`), so every member's file is known; and
    * for each, the library reference its relationships are owned under and
    * the diagram reference each relationship's other end is drawn under
@@ -774,7 +775,7 @@ export class SubjectAreaService {
    * of the other table of that name never lands on this one.
    */
   private legacyNamed(library: TableLibraryService, model: SemanticTable | null): SemanticTable | null {
-    if (!model || !library.schemaScopedNames || !(model.relationships ?? []).length) return model;
+    if (!model || library.hasSharedNames?.() !== true || !(model.relationships ?? []).length) return model;
     let changed = false;
     const relationships = model.relationships!.map((rel) => {
       const found = library.resolveLibraryRef(rel.toModel);
@@ -996,10 +997,10 @@ export class SubjectAreaService {
     return out;
   }
 
-  /** Whether a table's name is shared by two schema folders: two members of its diagram, or two tables of the library told apart by identity. */
+  /** Whether a table's name is shared by two schema folders: two members of its diagram, or two tables of the library. */
   private sharedNameRule(): (model: SemanticTable) => boolean {
     const library = this.tableLibraryService;
-    return (model) => tableNameOf(model) !== undefined || (!!library?.schemaScopedNames && library.isAmbiguousName(model.name));
+    return (model) => tableNameOf(model) !== undefined || library?.isAmbiguousName?.(model.name) === true;
   }
 
   /**
@@ -1067,9 +1068,11 @@ export class SubjectAreaService {
         const disabled = key === undefined ? false : manifest?.disabledModels.has(key) ?? false;
         // unique_id first, then the short-name index (catalogNodeFor — the
         // same lookup Import from dbt seeds types through); the relation index
-        // only when no manifest resolved the model.
+        // only when no manifest resolved the model. A table two schema folders share
+        // never takes the short-name index's node (owner decision H): with no
+        // manifest node to say which, only its own relation finds its columns.
         const relation = model.alias ?? tableName ?? model.name;
-        const catalogNode = (key === undefined ? undefined : catalogNodeFor(catalog, manifestModel, key))
+        const catalogNode = (key === undefined || (schemas !== undefined && !manifestModel) ? undefined : catalogNodeFor(catalog, manifestModel, key))
           ?? (manifestModel ? undefined : onlyOne((schemas ?? [model.schema]).map((s) => catalogByRelation?.get(relationKey(s, relation)))));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of

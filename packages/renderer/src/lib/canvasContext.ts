@@ -82,3 +82,13 @@ export function offDiagramChipTip(count: number): string {
     ? '1 relationship to a table not on this diagram'
     : `${count} relationships to tables not on this diagram`;
 }
+
+/**
+ * The schema folder of a DBML table file (`…/<layer>/tables/<schema>/<name>.dbml`,
+ * a `tableFiles` value), or undefined for any other file (a YAML table) or none.
+ */
+export function schemaFolderOfFile(file: string | undefined): string | undefined {
+  if (typeof file !== 'string') return undefined;
+  const match = /(?:^|\/)[^/]+\/tables\/([^/]+)\/[^/]+\.dbml$/i.exec(file);
+  return match ? match[1] : undefined;
+}

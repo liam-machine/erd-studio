@@ -692,7 +692,7 @@ function missingTableFiles(ctx: CliContext, unified: UnifiedSubjectArea, tableId
 function withOwnName(fix: Fix, ctx: CliContext, tableIds: ReadonlyMap<string, TableId>): Fix {
   const id = tableIds.get(fix.model.toLowerCase());
   if (!id) return fix;
-  const shared = !sameName(id.name, fix.model) || (ctx.tableLibraryService.schemaScopedNames && ctx.tableLibraryService.isAmbiguousName(id.name));
+  const shared = !sameName(id.name, fix.model) || ctx.tableLibraryService.isAmbiguousName(id.name);
   if (!shared) return fix;
   // A table another schema folder's table shares a name with is a dbt model only by its schema: say so.
   const explain = fix.kind === 'resolve-phantom' && fix.explain?.startsWith('dbt has no model called')

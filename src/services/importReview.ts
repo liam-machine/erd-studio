@@ -103,7 +103,8 @@ export function buildImportReview(plan: DbmlImportPlan, options: ImportReviewOpt
     title: schema ? `Schema ${schema}` : (bySchema.size === 1 ? 'New tables' : 'No schema'),
     items: [...(bySchema.get(schema) ?? [])]
       .sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))
-      .map((t): ConvertReviewItem => ({ path: t.name, tag: 'new', text: describeImportTable(t, fkCount.get(t.name) ?? 0) })),
+      // A table the plan names `<schema>.<name>` (another schema has its name) is counted under that name.
+      .map((t): ConvertReviewItem => ({ path: t.name, tag: 'new', text: describeImportTable(t, fkCount.get(t.name) ?? fkCount.get(`${t.schema || plan.layer}.${t.name}`) ?? 0) })),
   }));
 
   const library: ConvertReviewItem[] = [

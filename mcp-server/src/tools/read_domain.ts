@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { z } from 'zod';
+import { tableNameOf } from '@erd-studio/core';
 import { buildServices } from '../services.js';
 import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
 
@@ -71,24 +72,30 @@ export const read_domain = {
               stage: stage.stage,
               description: stage.description ?? null,
               model_folder: stage.modelFolder ?? null,
-              models: stage.models.map((m) => ({
-                name: m.name,
-                schema: m.schema ?? null,
-                description: m.description ?? null,
-                grain: m.grain ?? null,
-                model_role: m.modelRole ?? null,
-                rationale: m.rationale ?? null,
-                columns: (m.columns ?? []).map((c) => ({
-                  name: c.name,
-                  data_type: c.dataType ?? null,
-                  description: c.description ?? null,
-                  is_primary_key: c.isPrimaryKey === true,
-                  is_foreign_key: c.isForeignKey === true,
-                  is_natural_key: c.isNaturalKey === true,
-                  ...(c.scdType != null ? { scd_type: c.scdType } : {}),
-                  ...(c.additiveType ? { additive_type: c.additiveType } : {}),
-                })),
-              })),
+              // A table's own name; where the diagram shows two of one name it calls each `<schema>.<name>`
+              // (`ref`, what the relationships' ends say), with the schema folder read_model takes.
+              models: stage.models.map((m) => {
+                const own = tableNameOf(m);
+                return {
+                  name: own || m.name,
+                  ...(own && own !== m.name ? { ref: m.name, schema_folder: m.name.slice(0, m.name.length - own.length - 1) } : {}),
+                  schema: m.schema ?? null,
+                  description: m.description ?? null,
+                  grain: m.grain ?? null,
+                  model_role: m.modelRole ?? null,
+                  rationale: m.rationale ?? null,
+                  columns: (m.columns ?? []).map((c) => ({
+                    name: c.name,
+                    data_type: c.dataType ?? null,
+                    description: c.description ?? null,
+                    is_primary_key: c.isPrimaryKey === true,
+                    is_foreign_key: c.isForeignKey === true,
+                    is_natural_key: c.isNaturalKey === true,
+                    ...(c.scdType != null ? { scd_type: c.scdType } : {}),
+                    ...(c.additiveType ? { additive_type: c.additiveType } : {}),
+                  })),
+                };
+              }),
               relationships: stage.relationships.map((r) => ({
                 from_model: r.fromModel,
                 from_column: r.fromColumn,

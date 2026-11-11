@@ -2,7 +2,7 @@
  * The physical stage, the sync plan and the dbt selectors on two tables of
  * one name in different schema folders (the twin fixture,
  * packages/core/test/fixtures/dbml/same-name-two-schemas), with the library
- * telling tables apart by identity (`schemaScopedNames`).
+ * telling tables apart by identity.
  *
  * dbt model names are unique in a dbt project, so the two `addresse` tables
  * are two dbt models with aliases (matched by relation: schema + alias), or
@@ -44,9 +44,9 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function services(schemaScopedNames = true): { subjectAreas: SubjectAreaService; library: TableLibraryService } {
+function services(): { subjectAreas: SubjectAreaService; library: TableLibraryService } {
   const subjectAreas = new SubjectAreaService(new LayerService(root, '.erd-studio'));
-  const library = new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames });
+  const library = new TableLibraryService(root, '.erd-studio');
   subjectAreas.setTableLibraryService(library);
   return { subjectAreas, library };
 }
@@ -259,9 +259,10 @@ describe('selectors: a table whose name two schema folders share', () => {
     expect(doc.selectors.find((s) => s.name === 'domain_bronze_kunden')).toBeUndefined();
   });
 
-  it('without the identity rule, the ccc diagram\'s tables are written by name as before', () => {
+  it('in a library where no other schema folder has their names, the ccc diagram\'s tables are written by name as before', () => {
     writeDbtProject();
-    const subjectAreas = services(false).subjectAreas;
+    fs.rmSync(path.join(root, '.erd-studio', 'bronze', 'tables', 'bqs'), { recursive: true });
+    const subjectAreas = services().subjectAreas;
     new SelectorsService(subjectAreas, root, '.erd-studio').regenerate();
     const doc = parseDocument(fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8')).toJS() as {
       selectors: Array<{ name: string; definition: { union: Array<{ value: string }> } }>;

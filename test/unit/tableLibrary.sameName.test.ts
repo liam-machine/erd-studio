@@ -4,14 +4,12 @@
  * `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml` and one relationships file
  * with a Ref per schema and one between the two `addresse` tables).
  *
- * Under the internal option `schemaScopedNames` the two schema folders' tables
- * are four tables: each listed, read from its own file and given the Refs
- * that resolve to it (by the relationships file's own `use` line, then the
- * qualifier), whether the whole library is attached or only a diagram's
- * tables; addressed by a TableId everywhere; a bare name two of them share
- * still reads the first file in index order, and every write entry refuses
- * it (D-5). Without the option the fixture reads exactly as every released
- * version reads it: the second schema folder's tables are duplicates.
+ * The two schema folders' tables are four tables: each listed, read from
+ * its own file and given the Refs that resolve to it (by the relationships
+ * file's own `use` line, then the qualifier), whether the whole library is
+ * attached or only a diagram's tables; addressed by a TableId everywhere; a
+ * bare name two of them share still reads the first file in index order,
+ * and every write entry refuses it (D-5).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -45,8 +43,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-const scoped = (): TableLibraryService => new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: true });
-const byName = (): TableLibraryService => new TableLibraryService(root, '.erd-studio');
+const scoped = (): TableLibraryService => new TableLibraryService(root, '.erd-studio');
 const rel = (filePath: string): string => path.relative(semantic, filePath).split(path.sep).join('/');
 const write = (relPath: string, text: string): void => {
   const file = path.join(semantic, relPath);
@@ -77,25 +74,7 @@ function snapshotFiles(): Record<string, string> {
 const ends = (rels: ReadonlyArray<{ fromColumn: string; toModel: string; toColumn: string }> | undefined): string[] =>
   (rels ?? []).map((r) => `${r.fromColumn} > ${r.toModel}.${r.toColumn}`);
 
-describe('without the option, the twin fixture reads as every released version reads it', () => {
-  it('the second schema folder\'s tables are duplicates, and a name reads the first file', () => {
-    const lib = byName();
-    expect(lib.listTableFiles().map((e) => [rel(e.filePath), e.shadowedBy ? rel(e.shadowedBy) : null])).toEqual([
-      ['bronze/tables/bqs/addresse.dbml', null],
-      ['bronze/tables/bqs/kunde.dbml', null],
-      ['bronze/tables/ccc/addresse.dbml', 'bronze/tables/bqs/addresse.dbml'],
-      ['bronze/tables/ccc/kunde.dbml', 'bronze/tables/bqs/kunde.dbml'],
-    ]);
-    expect(lib.getTable('addresse')?.columns.map((c) => c.name)).toEqual(['id', 'strasse', 'ort']);
-    expect(lib.isAmbiguousName('addresse')).toBe(false);
-    expect(lib.libraryRef(BQS_ADDRESSE)).toBe('addresse');
-    expect(lib.dbmlSnapshot().schemaScopedNames).toBeUndefined();
-    expect([...lib.dbmlSnapshot().tables.keys()]).toEqual(['addresse', 'kunde']);
-    expect(lib.relationshipsIndex().identities).toBe(false);
-  });
-});
-
-describe('with schemaScopedNames, two tables of one name in two schema folders are two tables', () => {
+describe('two tables of one name in two schema folders are two tables', () => {
   it('lists all four, each with its identity and library reference', () => {
     const lib = scoped();
     expect(lib.listTableFiles().map((e) => [rel(e.filePath), e.shadowedBy ?? null, e.id])).toEqual([
@@ -232,8 +211,6 @@ describe('with schemaScopedNames, two tables of one name in two schema folders a
       ['ccc/kunde', { layer: 'bronze', schema: 'ccc' }],
     ]);
     expect([...tableHomesOf(entries).entries()]).toEqual([['only_bqs', { layer: 'bronze', schema: 'bqs' }]]);
-    // Under the old rule every name has its one home, as before.
-    expect([...tableHomesOf(byName().listTableFiles()).keys()]).toEqual(['addresse', 'kunde', 'only_bqs']);
   });
 
   it('a diagram\'s members with their identities (the Table Library\'s usage counts), by absolute path, cached', () => {
@@ -315,10 +292,6 @@ describe('the relationships index by identity', () => {
     expect(relationshipsImportsFor([BQS_KUNDE, BQS_ADDRESSE], index)).toEqual(['bronze/relationships/bqs.dbml']);
     // Named by bare names, as a caller not yet identity-aware does, nothing matches a twin's label.
     expect(relationshipsImportsFor(['fct_sale', 'kunde', 'addresse'], index)).toEqual([]);
-    // Under the old rule the bqs tables win the names: a TableId is matched by its name, as a string is.
-    const old = byName().relationshipsIndex();
-    expect(old.identities).toBe(false);
-    expect(relationshipsImportsFor(ccc, old)).toEqual(relationshipsImportsFor(['fct_sale', 'kunde', 'addresse'], old));
   });
 
   it('the Ref between the two addresse tables is indexed between them; a stale qualifier on one table is no Ref of it', () => {
@@ -336,15 +309,15 @@ describe('the relationships index by identity', () => {
     expect(index.refs.map((r) => `${r.ownerId} > ${r.targetId}`)).toEqual(['ccc/addresse > bqs/addresse']);
   });
 
-  it('without the option, a stale qualifier\'s self-join is no Ref of its table, as before the reader let differing qualifiers through', () => {
+  it('a stale qualifier\'s self-join is no Ref of its table, as before the reader let differing qualifiers through', () => {
     // One kunde (ccc's folder gone): `crm.kunde.id > finance.kunde.id` joins kunde.id to itself, which the
     // attach never draws; the index must not count it, place by it, or import its file for a kunde diagram.
     fs.rmSync(path.join(semantic, 'bronze/tables/ccc'), { recursive: true });
     write('bronze/relationships/bronze.dbml', 'Ref: bqs.kunde.addresse_id > bqs.addresse.id\n');
     write('bronze/relationships/stale.dbml', 'Ref: crm.kunde.id > finance.kunde.id\n');
-    for (const lib of [byName(), scoped()]) {
+    for (const lib of [scoped()]) {
       const index = lib.relationshipsIndex();
-      expect(index.refs.map((r) => `${r.file}: ${r.owner} > ${r.target}`), String(lib.schemaScopedNames)).toEqual(['bronze/relationships/bronze.dbml: kunde > addresse']);
+      expect(index.refs.map((r) => `${r.file}: ${r.owner} > ${r.target}`)).toEqual(['bronze/relationships/bronze.dbml: kunde > addresse']);
       expect(relationshipsImportsFor(['kunde', 'addresse'], index)).toEqual(['bronze/relationships/bronze.dbml']);
       expect(index.filesHoldingPair('kunde', 'kunde')).toEqual([]);
       expect(ends(lib.getTable('kunde')?.relationships)).toEqual(['addresse_id > addresse.id']);
@@ -421,12 +394,10 @@ describe('the fail-closed guard: every library write entry refuses a bare name t
     expect(after['bronze/relationships/bronze.dbml']).toBe(before['bronze/relationships/bronze.dbml']);
   });
 
-  it('a name one table has is never refused, and nothing is refused without the option', () => {
+  it('a name one table has is never refused', () => {
     write('bronze/tables/bqs/only_bqs.dbml', 'Table bqs.only_bqs {\n  id INT [pk]\n}\n');
     const lib = scoped();
     expect(() => lib.planTableWrites({ save: [{ model: { ...lib.getTable('only_bqs')!, description: 'x' } }] })).not.toThrow();
-    const old = byName();
-    expect(() => old.planTableWrites({ save: [{ model: { ...old.getTable('addresse')!, description: 'x' } }] })).not.toThrow();
   });
 });
 

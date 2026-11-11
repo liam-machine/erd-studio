@@ -7,9 +7,7 @@
  * kunden-bare.dbml), plus a diagram of bqs's tables only.
  *
  * `activate()` builds its own Table Library, which tells tables apart by
- * identity only once that is the default; until then this file turns the
- * internal option `schemaScopedNames` on for every library the extension
- * builds. Move Table, the Explorer's moves, Organise, Delete Table (by the
+ * identity. Move Table, the Explorer's moves, Organise, Delete Table (by the
  * row's own file) and Import DBML then act on one twin and leave the
  * other's file, Refs, `use` lines and diagrams as they were; a move onto an
  * identity another layer has is refused, naming that file, and writes
@@ -27,18 +25,6 @@ import { compileDbmlProject, type DbmlParserModule } from '@erd-studio/core/dbml
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 import { answerDraft, nextDraft } from './helpers/draftDriver';
-
-vi.mock('../../src/services/logicalModelService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/logicalModelService')>();
-  /** The extension's Table Library with the identity rule on, whoever builds it. */
-  class ScopedTableLibraryService extends actual.TableLibraryService {
-    constructor(...args: ConstructorParameters<typeof actual.TableLibraryService>) {
-      const [workspaceRoot, semanticDir, ownWriteTracker, options] = args;
-      super(workspaceRoot, semanticDir, ownWriteTracker, { ...options, schemaScopedNames: true });
-    }
-  }
-  return { ...actual, TableLibraryService: ScopedTableLibraryService };
-});
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const TWINS = path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'dbml', 'same-name-two-schemas');

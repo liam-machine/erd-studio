@@ -272,14 +272,14 @@ export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'
       models = subjectAreaTableNames(text, d.filePath) ?? [];
       // A member whose name another schema folder's table shares (named `<schema>.<name>` on a diagram
       // holding both): listed by its own name, with its schema folder beside it.
-      const shared = (m: string): boolean => m.includes('.') || (lib.schemaScopedNames && lib.isAmbiguousName(m));
+      const shared = (m: string): boolean => m.includes('.') || lib.isAmbiguousName(m);
       if (d.storage === 'dbml' && models.some(shared)) {
         const summary = diagramSummaryDbml(text, d.filePath);
         // A dot in a hand-written file stem is not a pair: only a member named apart from its own name
         // (`<schema>.<name>`), or a name the library shares, is listed this way.
         const named = summary !== null
           && (summary.members.some((ref, i) => ref.toLowerCase() !== summary.memberUses[i]?.name.toLowerCase())
-            || (lib.schemaScopedNames && models.some((m) => lib.isAmbiguousName(m))));
+            || models.some((m) => lib.isAmbiguousName(m)));
         if (summary && named) {
           const withUse = summary.memberUses.map((u) => ({ name: u.name, ...(tableIdOfPath(u.resolved) ? { schema: tableIdOfPath(u.resolved)!.schema } : {}) }));
           tables = [...withUse, ...summary.unlinked.map((name) => ({ name }))];
@@ -449,7 +449,7 @@ export function listLogicalTables(
   for (const entry of lib.listTableFiles()) {
     if (entry.shadowedBy) { continue; }
     // A name another schema folder's table shares: the table is read by its own file and carries its schema folder.
-    const id = lib.schemaScopedNames && lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
+    const id = lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
     if (wanted && !wanted.some((n) => sameName(n, entry.name) || (id !== undefined && sameName(n, `${id.schema}.${id.name}`)))) { continue; }
     const table = lib.getTable(id ?? entry.name);
     const unreadable = lib.getTableFileError(id ?? entry.name) !== null;

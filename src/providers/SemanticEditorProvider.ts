@@ -248,7 +248,7 @@ import { applyFileWrites, writtenPaths } from './applyFileWrites';
 import { primeLayoutOnlyReading, readDbmlDiagram } from '../services/dbmlDiagramReadings';
 import { changedMemberPath, dbmlResolverOf, diagramResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
 import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
-import type { DbmlDraftTable, DbmlTableHome, NewRefFileChoice } from '../services/dbmlLibraryWrites';
+import { isSchemaFolderName, type DbmlDraftTable, type DbmlTableHome, type NewRefFileChoice } from '../services/dbmlLibraryWrites';
 import type { AppliedFileWrites } from './applyFileWrites';
 import {
   NotASubjectAreaObject,
@@ -1363,7 +1363,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (scoped) {
           return buildCanvasContext({
             members,
-            libraryTables: library.dirExists() ? this.knownLibraryRelationships(true) : [],
+            // By identity only where a name is shared (the index reads every table file); else as named, from the Refs alone.
+            libraryTables: library.dirExists() ? this.knownLibraryRelationships(this.librarySharesNames()) : [],
             ...scoped,
             ...(diagramLayer !== undefined ? { diagramLayerLabel: labelOf(diagramLayer) } : {}),
             layerLabelOf: (name) => labelOf(scoped.entryOf(name)?.layer),
@@ -1964,9 +1965,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const ref = refs.toDiagram(libraryName);
         return members.resolve(ref)?.ref === ref ? ref : undefined;
       },
+      // Only for a table whose name another schema folder's table has: any other is added by its name.
       otherTablePathOf: (libraryName) => {
-        const file = entryOf(libraryName)?.filePath;
-        return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
+        const entry = entryOf(libraryName);
+        return entry === undefined || !library.isAmbiguousName(entry.name) ? undefined : projectRelative(this.workspaceRoot, entry.filePath);
       },
       entryOf,
     };
@@ -3495,6 +3497,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * when the diagram's directory is a configured layer AND the library has
    * opted into layer folders (see `groupsByFolder`).
    */
+  /**
+   * The schema folder a table created on the canvas of `document` goes to
+   * when it is a DBML table (`schemaFolder`, the dialog's Schema field, when
+   * it is a folder name; else the diagram's home, as the planner decides);
+   * undefined where new tables are YAML.
+   */
+  private newDbmlTableSchema(document: vscode.TextDocument, schemaFolder: string | undefined): string | undefined {
+    let home: string | DbmlTableHome | undefined;
+    try {
+      home = this.newTableFolder(document.uri.fsPath);
+    } catch {
+      return undefined;
+    }
+    if (home === undefined || typeof home === 'string') return undefined;
+    return schemaFolder !== undefined && isSchemaFolderName(schemaFolder) ? schemaFolder : home.schema;
+  }
+
   private newTableFolder(domainFilePath: string): string | DbmlTableHome | undefined {
     // One rule with the sync plan's new-table paths (syncPlanLibraryLookups).
     return this.tableLibraryService.newTableHomeFor(domainFilePath, new Set(this.layerService.getAllLayers().map((l) => l.id)));
@@ -3577,8 +3596,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     if (action === 'showTableOnOtherDiagrams') {
-      // The member's own file, where the diagram has one: the other diagrams are those that show that file's table.
-      const node = table.filePath !== undefined ? { type: 'model', name: table.name, filePath: table.filePath } : { type: 'model', name: modelName };
+      // The member's own file, where another schema folder has a table of its name: the other diagrams are those
+      // that show that file's table. A name only one table has finds it by name, as always.
+      const node = table.filePath !== undefined && this.tableLibraryService.isAmbiguousName(table.name)
+        ? { type: 'model', name: table.name, filePath: table.filePath }
+        : { type: 'model', name: modelName };
       await vscode.commands.executeCommand('erdStudio.openInDiagram', node, { excludeDiagram: document.uri.fsPath });
       return;
     }
@@ -3594,8 +3616,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const shown = projectRelativePath(this.workspaceRoot, filePath);
       await vscode.env.clipboard.writeText(shown);
       vscode.window.setStatusBarMessage(`ERD Studio: Copied ${shown}`, 4000);
-    } else if (table.filePath !== undefined) {
-      // That member's own row: another schema folder may have a table of its name.
+    } else if (table.filePath !== undefined && this.tableLibraryService.isAmbiguousName(table.name)) {
+      // That member's own row: another schema folder has a table of its name.
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name, table.filePath);
     } else {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name);
@@ -3604,20 +3626,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * The one way a handler turns a canvas message's table name into a table
-   * (the diagram boundary). Where the library tells tables apart by identity
-   * (`schemaScopedNames`) and `document` is a DBML diagram, `text` is
-   * resolved among the diagram's own members (`DiagramMemberTable`: its
-   * reference, its `<schema>.<name>`, or a bare name one member has), and
-   * the table is the file that member's `use` line reads: `id` and
-   * `filePath`. Text that names no member is refused ("not on this
-   * diagram"). A member whose `use` line names no listed file is named by
-   * its bare name, and only while no other table has that name. Anywhere
-   * else the text is the table's name, as it always was.
+   * (the diagram boundary). On a DBML diagram, `text` is resolved among the
+   * diagram's own members (`DiagramMemberTable`: its reference, its
+   * `<schema>.<name>`, or a bare name one member has), and the table is the
+   * file that member's `use` line reads: `id` and `filePath`. Text that names
+   * no member is the table's name, as it always was (a table removed in
+   * another tab, one the library does not have), unless two schema folders
+   * each hold a table of that name: then it is refused ("not on this
+   * diagram"), never answered with one of them. A member whose `use` line
+   * names no listed file is named by its bare name, and only while no other
+   * table has that name. Anywhere else the text is the table's name.
    */
   private canvasTable(document: vscode.TextDocument, text: string): CanvasTable {
     if (!this.schemaScoped() || !this.isDbmlDocument(document)) return { ref: text, name: text, library: text };
     const row = this.parseSubjectAreaFile(document).members?.resolve(text);
-    if (!row) throw new EditRefused(`Table "${text}" is not on this diagram.`);
+    if (!row) {
+      // A name no other table shares acts by name; a shared name, or another table's `<schema>.<name>`, would pick one.
+      const found = this.tableLibraryService.resolveLibraryRef(text);
+      if (found.kind === 'missing' || (found.kind === 'found' && sameName(found.entry.name, text))) return { ref: text, name: text, library: text };
+      throw new EditRefused(`Table "${text}" is not on this diagram.`);
+    }
     const filePath = row.path !== undefined && !row.path.startsWith('../') ? this.tableLibraryService.semanticAbsolute(row.path) : undefined;
     const entry = filePath !== undefined ? this.tableLibraryService.tableEntryAt(filePath) : undefined;
     if (entry?.id !== undefined && !entry.shadowedBy) {
@@ -3694,9 +3722,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return `Can't add "${name}" to this diagram: the schema folders ${this.foldersNamed(name)} each have a table called ${name}, and a JSON diagram names tables by name alone. Add it to a DBML diagram.`;
   }
 
-  /** Whether the library tells tables apart by identity (a library double without the flag does not). */
+  /**
+   * Whether the canvas resolves tables through the diagram boundary (by the
+   * files its members' `use` lines read): always, for the Table Library; a
+   * library double in a test that has no identity lookups names tables by
+   * name alone.
+   */
   private schemaScoped(): boolean {
-    return (this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'schemaScopedNames'>>).schemaScopedNames === true;
+    return typeof (this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'hasSharedNames'>>).hasSharedNames === 'function';
+  }
+
+  /** Whether two schema folders each hold a table of one name (false for a library double without the lookup). */
+  private librarySharesNames(): boolean {
+    return (this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'hasSharedNames'>>).hasSharedNames?.() === true;
   }
 
   /** The library model of a canvas table: by its identity where it has one, else by its name. */
@@ -3714,7 +3752,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Otherwise the library's tables by name, saved by name, as always.
    */
   private libraryTables(): { models: SemanticTable[]; save: (model: SemanticTable) => TableFileSave } {
-    if (!this.schemaScoped()) return { models: this.tableLibraryService.listTables(), save: (model) => ({ model }) };
+    // While no two schema folders share a name, every table's library reference is its name.
+    if (!this.librarySharesNames()) return { models: this.tableLibraryService.listTables(), save: (model) => ({ model }) };
     const ids = new Map<string, TableId>();
     const models: SemanticTable[] = [];
     for (const entry of this.tableLibraryService.listTableFiles()) {
@@ -6879,7 +6918,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: create central model file + add name reference to domain
       if (this.isSubjectAreaV5(parsed)) {
         const modelNames = (section.models ?? []) as string[];
-        const inDomain = modelNames.find((n) => sameName(n, model.name));
+        // Each member by its own name: a diagram showing two tables of one name calls them `<schema>.<name>`.
+        const rows = this.schemaScoped() && this.isDbmlDocument(document) ? this.parseSubjectAreaFile(document).members?.rows : undefined;
+        const inDomain = rows ? rows.find((r) => sameName(r.name, model.name))?.ref : modelNames.find((n) => sameName(n, model.name));
         if (inDomain !== undefined) {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
@@ -6888,7 +6929,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // The model library is shared across domains — never overwrite a
         // logical-models/{name}.yml that another domain may depend on. Case is
         // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.
-        const inLibrary = this.tableLibraryService.findTableNameIgnoringCase(model.name);
+        // A new DBML table is refused only by a table of its schema folder (any
+        // layer) or a YAML table of its name: another schema folder's is another table.
+        const home = this.schemaScoped() ? this.newDbmlTableSchema(document, schemaFolder) : undefined;
+        const taking = home !== undefined ? this.tableLibraryService.tableTakingName(model.name, home) : undefined;
+        if (taking?.storage === 'dbml') {
+          webview.postMessage({
+            type: 'error',
+            payload: {
+              message: `The schema ${taking.folder} already has a table called "${taking.name}" (${this.tableLibraryService.libraryRelativePath(taking.filePath)}). ` +
+                'Use "Add Existing Tables" to add it to this diagram, or choose another name.',
+            },
+          });
+          return;
+        }
+        const inLibrary = home === undefined ? this.tableLibraryService.findTableNameIgnoringCase(model.name) : taking?.name ?? null;
         if (inLibrary !== null) {
           webview.postMessage({
             type: 'error',
@@ -7673,15 +7728,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           });
           return;
         }
+        // A DBML table in a schema folder is refused only by its own schema folder's table of the new
+        // name (any layer) or a YAML table of it: another schema folder's is another table, and the
+        // diagram then names the two `<schema>.<name>`. Anywhere else a name is unique across the project.
+        const resolved = this.canvasTable(document, payload.oldName);
+        const ownSchema = resolved.id !== undefined && resolved.id.schema !== '' && this.isDbmlDocument(document) ? resolved.id.schema : undefined;
         const currentNames = (section.models ?? []) as string[];
-        const inDomain = currentNames.find((n) => sameName(n, trimmedNew));
+        const rows = ownSchema !== undefined ? this.parseSubjectAreaFile(document).members?.rows : undefined;
+        const inDomain = rows
+          ? rows.find((r) => sameName(r.name, trimmedNew) && (r.id === undefined || sameName(r.id.schema, ownSchema!)))?.ref
+          : currentNames.find((n) => sameName(n, trimmedNew));
         if (inDomain !== undefined) {
           webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
           return;
         }
+        const taking = ownSchema !== undefined ? this.tableLibraryService.tableTakingName(trimmedNew, ownSchema) : undefined;
+        if (taking?.storage === 'dbml') {
+          webview.postMessage({
+            type: 'error',
+            payload: {
+              message: `The schema ${taking.folder} already has a table called "${taking.name}" (${this.tableLibraryService.libraryRelativePath(taking.filePath)}). Choose a different name.`,
+            },
+          });
+          return;
+        }
         // The model library is shared across domains — renaming onto an
         // existing yml would silently replace another domain's model.
-        const inLibrary = this.tableLibraryService.findTableNameIgnoringCase(trimmedNew);
+        const inLibrary = ownSchema !== undefined ? taking?.name ?? null : this.tableLibraryService.findTableNameIgnoringCase(trimmedNew);
         if (inLibrary !== null) {
           webview.postMessage({
             type: 'error',
@@ -7693,7 +7766,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
         // The member's own file, renamed by its identity where the library tells tables apart by it.
-        const table = this.canvasTable(document, payload.oldName);
+        const table = resolved;
         // A JSON diagram cannot say which of two tables of a shared name it means (owner decision F).
         if (this.schemaScoped() && !this.isDbmlDocument(document)) this.refuseSharedNameOnJsonDiagram(table.name);
         const existingModel = this.canvasModel(table);
@@ -8576,9 +8649,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       else rest.push(i);
     });
     if (files.length === 0) return undefined;
+    // A namesake is a member of the name read from another file (the table itself, already shown, is not).
     const members = this.parseSubjectAreaFile(document).members;
-    const shown = new Set((members?.rows ?? []).map((r) => r.name.toLowerCase()));
-    const needsFile = files.some((f) => this.tableLibraryService.isAmbiguousName(f.name) || shown.has(f.name.toLowerCase()));
+    const namesake = (f: TableFileEntry): boolean => (members?.rows ?? []).some((r) => sameName(r.name, f.name)
+      && (r.path === undefined || r.path.startsWith('../') || !samePath(this.tableLibraryService.semanticAbsolute(r.path), f.filePath)));
+    const needsFile = files.some((f) => this.tableLibraryService.isAmbiguousName(f.name) || namesake(f));
     return needsFile ? { files, rest } : undefined;
   }
 

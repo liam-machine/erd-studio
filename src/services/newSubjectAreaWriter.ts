@@ -31,8 +31,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { dbmlTreePathOf, diagramPathOf, subjectAreaStorageOf, tableIdOfPath } from '@erd-studio/core';
-import type { Annotation, NodePosition } from '@erd-studio/core';
+import { assignTableRefs, dbmlTreePathOf, diagramPathOf, rekeySubjectArea, subjectAreaStorageOf, tableIdOfPath } from '@erd-studio/core';
+import type { Annotation, NodePosition, TableId } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import { renderNewSubjectAreaDbml } from './dbmlWriters';
 
@@ -72,6 +72,11 @@ export interface NewSubjectAreaWrite {
    * (it was saved with them).
    */
   changedTables: readonly SemanticTable[];
+  /**
+   * The table each of {@link changedTables} is, where its name alone cannot
+   * say (another schema folder has a table of its name): saved as that table.
+   */
+  changedTableIds?: ReadonlyMap<SemanticTable, TableId>;
   /**
    * The subject area: a JSON file's text, or (for a `.dbml` `domainPath`)
    * the v5 object a DBML diagram is rendered from (`domain`, `description`,
@@ -274,7 +279,10 @@ async function writeNewDbmlSubjectArea(
     const layer = diagramPathOf(rel)?.layer ?? write.folder;
     const saves = [
       ...write.newTables.map((model) => ({ model, create: true })),
-      ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => ({ model })),
+      ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => {
+        const from = write.changedTableIds?.get(model);
+        return from !== undefined ? { model, from } : { model };
+      }),
     ];
     const diagramWrites = (plan: DbmlLibraryWritePlan): FileWrite[] => {
       planned = true;
@@ -304,7 +312,13 @@ async function writeNewDbmlSubjectArea(
         }
         return { name: table.name, reference: table.reference, path: table.path };
       });
-      const view = (doc.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
+      // The document names a table by the plan's name for it (`<schema>.<name>` where the library has its
+      // name in another schema folder); the diagram, by what it calls its own members: its name, unless
+      // another member shares it. Positions and sticky links follow.
+      const diagramRefs = assignTableRefs(members.map((m): TableId => tableIdOfPath(m.path) ?? { schema: '', name: m.name }));
+      const respelled = new Map(names.flatMap((name, i) => (name !== diagramRefs[i] ? [[name, diagramRefs[i]] as const] : [])));
+      const shown = respelled.size > 0 ? rekeySubjectArea(doc, respelled) : doc;
+      const view = (shown.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
       const text = renderNewSubjectAreaDbml({
         filePath: rel,
         domain: typeof doc.domain === 'string' ? doc.domain : path.basename(domainPath, '.dbml'),

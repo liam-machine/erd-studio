@@ -391,7 +391,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(duplicate — ignored)';
       item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
-        `Table names are unique across all folders${this.hasDbtProject ? ', as dbt model names are' : ''}. Use "Give Duplicate Table Its Own Name" ` +
+        `A schema holds one table of a name, and a YAML table's name is one in the project${this.hasDbtProject ? ', as dbt builds one model of a name' : ''}. Use "Give Duplicate Table Its Own Name" ` +
         `to make this copy "${this.duplicateSuggestion(element)}" with the warehouse name (alias) "${element.name}".`;
       item.accessibilityInformation = { label: `${element.name}, duplicate, ignored` };
       item.resourceUri = vscode.Uri.file(element.filePath);

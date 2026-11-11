@@ -35,7 +35,7 @@ import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, 
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
-import { cardinalityLabel, offDiagramRows, offDiagramTableRows, ownValue } from '../../lib/canvasContext';
+import { cardinalityLabel, offDiagramRows, offDiagramTableRows, ownValue, schemaFolderOfFile } from '../../lib/canvasContext';
 import './DetailPanel.css';
 
 /** A relationship row: a composite foreign key carries all its column pairs. */
@@ -227,21 +227,29 @@ export function DetailPanel() {
       if (selectedTableName && trimmed !== selectedTableName && same(selectedTableName)) {
         return 'Only the upper/lower case differs — rename to another name first';
       }
+      // A DBML table is a schema folder and a name: another schema folder's table
+      // of the new name is another table (the diagram then names both
+      // `<schema>.<name>`). Where either folder is unknown (a YAML table, the
+      // host's context not in yet), the name alone decides, as before.
+      const ownFolder = selectedNode ? schemaFolderOfFile(ownValue(canvasContext?.tableFiles, selectedNode)) : undefined;
+      const clashes = (folder: string | undefined): boolean =>
+        ownFolder === undefined || folder === undefined || folder.toLowerCase() === ownFolder.toLowerCase();
       // Each table's own name: two same-named tables are named `<schema>.<name>` on the diagram.
-      if (domain && trimmed !== selectedTableName && domain.models.some((m) => same(m.tableName || m.name))) {
+      if (domain && trimmed !== selectedTableName && domain.models.some((m) => same(m.tableName || m.name)
+        && clashes(schemaFolderOfFile(ownValue(canvasContext?.tableFiles, m.name))))) {
         return 'A table with this name already exists';
       }
       // logical-models/ is shared across domains — renaming onto an existing
       // library model would overwrite a file another domain depends on.
       if (
         trimmed !== selectedTableName &&
-        existingModels.some((m) => m.source === 'logical' && same(m.name))
+        existingModels.some((m) => m.source === 'logical' && same(m.name) && clashes(m.schemaFolder))
       ) {
         return 'A table with this name already exists in the Table Library';
       }
       return '';
     },
-    [domain, selectedTableName, existingModels],
+    [domain, selectedTableName, selectedNode, existingModels, canvasContext],
   );
 
   const handleStartRename = useCallback(() => {

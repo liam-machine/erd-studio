@@ -683,8 +683,7 @@ interface ConsideredMove {
  */
 export function planDbmlExplorerMoves(input: {
   semanticRoot: string;
-  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'dbmlSnapshot' | 'getTablesDir' | 'listDbmlDiagrams' | 'listRelationshipsFiles' | 'listTableFiles'>
-    & Partial<Pick<TableLibraryService, 'schemaScopedNames'>>;
+  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'dbmlSnapshot' | 'getTablesDir' | 'listDbmlDiagrams' | 'listRelationshipsFiles' | 'listTableFiles'>;
   moves: readonly MovedDbmlFile[];
   /** A file's text (an open document's, else the disk's), byte-order mark stripped; null when there is none. */
   readText(filePath: string): string | null;
@@ -791,7 +790,6 @@ export function planDbmlExplorerMoves(input: {
   // Each table by its identity (the file the files pointing at it name): never a namesake in another schema folder.
   const tableMoves: Array<{ name: string; table: TableId; toLayer: string; toSchema: string }> = [];
   const tableRenames: Array<{ move: MovedDbmlFile; from: string; to: string; schema: string }> = [];
-  const scoped = library.schemaScopedNames === true;
   for (const { user, move, old, now } of active) {
     if (old.kind !== 'table' || !now) continue;
     const sameFolder = old.layer === now.layer && old.schema === now.schema;
@@ -804,9 +802,9 @@ export function planDbmlExplorerMoves(input: {
     if (sameName(old.name, now.name)) return bad('caseOnly');
     if (!sameFolder) return bad('renameAndMove');
     if (!TABLE_NAME_PATTERN.test(now.name)) return bad('invalid');
-    // Told apart by identity, the new name is taken only by the same schema folder's table of that name
-    // (in any layer, D-7) or a YAML table of it; else by any table of that name.
-    const takes = (e: TableFileEntry): boolean => !scoped || e.storage !== 'dbml' || sameName(e.folder, old.schema!);
+    // The new name is taken only by the same schema folder's table of that name (in any layer, D-7)
+    // or a YAML table of it: another schema folder's table of that name is another table.
+    const takes = (e: TableFileEntry): boolean => e.storage !== 'dbml' || sameName(e.folder, old.schema!);
     const taken = library.listTableFiles().find((e) => sameName(e.name, now.name) && path.resolve(e.filePath) !== path.resolve(move.to) && takes(e));
     if (taken) return bad('taken', taken.name);
     tableRenames.push({ move, from: old.name, to: now.name, schema: old.schema! });

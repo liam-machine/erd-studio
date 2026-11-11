@@ -22,7 +22,7 @@ import type { DbtKeyIndex } from './keyEvidence.js';
 import { libraryCopyRank } from './domain.js';
 import { linkKey, nextCompositeKey, reverseRelationship } from './relationships.js';
 import { dirnamePosix, normalisePosix, resolvePosix } from './storage.js';
-import { tableIdKey } from './tableIdentity.js';
+import { tableIdKey, tableIdOfPath } from './tableIdentity.js';
 
 const lower = (s: string): string => s.toLowerCase();
 
@@ -65,7 +65,7 @@ function distinct(entries: readonly DbmlAttachTable[]): DbmlAttachTable[] {
  * {@link dbmlTableLookup} documents). `exists` answers whether a use path
  * names a file that exists; without it a contested end stays lenient.
  */
-function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: DbmlRefEndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
+function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: EndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
   const byName = new Map<string, DbmlAttachTable[]>();
   const byAlias = new Map<string, DbmlAttachTable>();
   const byPath = new Map<string, DbmlAttachTable>();
@@ -109,6 +109,13 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: Db
         if (matching.length > 1) return { ambiguous: matching };
       }
     }
+    // 3'. An unqualified end whose own relationships file imports tables of its name from two or more
+    // schema folders means one of them, and nothing but the default schema folder says which: the one
+    // table of the name a narrower scope sees (a diagram showing only one of them) would be a guess.
+    if (qualifier === undefined && (hint?.useSchemas ?? 0) > 1) {
+      const inPublic = identities.filter((e) => e.schema !== undefined && lower(e.schema) === DEFAULT_SCHEMA_FOLDER);
+      return inPublic.length === 1 ? { entry: inPublic[0] } : { ambiguous: identities };
+    }
     if (identities.length === 1) {
       // 3. The one table of that name. 4. A qualifier that names none of it still lands on it (2.0 drew
       // that line), unless the end's own use line names another file that exists: that table is elsewhere.
@@ -141,7 +148,10 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: Db
  *    the table's file (`path`): exact, and what ERD Studio always writes;
  * 2. else the one table whose schema folder, then whose declared schema
  *    (`table.schema`), the end's qualifier names, without case;
- * 3. else, when one table has the name, that table;
+ * 3. else, when one table has the name, that table, unless the end is
+ *    unqualified and its relationships file's own `use` lines import tables
+ *    of its name from two or more schema folders (then rule 5 decides,
+ *    so a diagram showing one of them never draws the other's Ref on it);
  * 4. a qualifier that names none of it included (a stale qualifier draws as
  *    it always did), unless the end's use path names another file and
  *    `options.exists` says that file exists;
@@ -213,6 +223,37 @@ const useKey = (table: string, qualifier: string | undefined): string =>
  */
 const useTablesBySpelling = new WeakMap<readonly DbmlUseTable[], Map<string, DbmlUseTable>>();
 
+/**
+ * What {@link endHints} says of an end beside its {@link DbmlRefEndHint}: for
+ * an unqualified end, how many schema folders the relationships file's own
+ * `use` lines import a table of its name from (`useSchemas`). Internal: the
+ * lookup's rule 3 asks it.
+ */
+type EndHint = DbmlRefEndHint & { readonly useSchemas?: number };
+
+/** Each file's selective `use` lines by the table name they import (lower case): their schema folders. */
+const useSchemasByName = new WeakMap<object, Map<string, Set<string>>>();
+
+/** The schema folders (lower case) `item`'s `use` lines import a table called `table` from. */
+function useSchemasOf(item: DbmlAttachReading, table: string): ReadonlySet<string> | undefined {
+  const useTables = item.reading.useTables;
+  if (item.semanticPath === undefined || useTables === undefined || useTables.length === 0) return undefined;
+  let byName = useSchemasByName.get(useTables);
+  if (byName === undefined) {
+    byName = new Map();
+    for (const use of useTables) {
+      const id = tableIdOfPath(normalisePosix(resolvePosix(dirnamePosix(item.semanticPath), withDbmlExtension(use.path))));
+      if (id === undefined) continue;
+      const key = lower(id.name);
+      const schemas = byName.get(key) ?? new Set<string>();
+      schemas.add(lower(id.schema));
+      byName.set(key, schemas);
+    }
+    useSchemasByName.set(useTables, byName);
+  }
+  return byName.get(lower(table));
+}
+
 function useTableFor(useTables: readonly DbmlUseTable[] | undefined, table: string, qualifier: string | undefined): DbmlUseTable | undefined {
   if (useTables === undefined || useTables.length === 0) return undefined;
   let bySpelling = useTablesBySpelling.get(useTables);
@@ -227,11 +268,17 @@ function useTableFor(useTables: readonly DbmlUseTable[] | undefined, table: stri
   return bySpelling.get(useKey(table, qualifier));
 }
 
-function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: DbmlRefEndHint; target: DbmlRefEndHint } {
-  const hintOf = (table: string, qualifier: string | undefined): DbmlRefEndHint => {
+function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint; target: EndHint } {
+  const hintOf = (table: string, qualifier: string | undefined): EndHint => {
     const use = item.semanticPath !== undefined ? useTableFor(item.reading.useTables, table, qualifier) : undefined;
     const usePath = use ? normalisePosix(resolvePosix(dirnamePosix(item.semanticPath!), withDbmlExtension(use.path))) : undefined;
-    return { ...(qualifier !== undefined ? { qualifier } : {}), ...(usePath !== undefined ? { usePath } : {}) };
+    // An unqualified end with no use line of its own: which schema folders the file imports its name from.
+    const schemas = qualifier === undefined && usePath === undefined ? useSchemasOf(item, table) : undefined;
+    return {
+      ...(qualifier !== undefined ? { qualifier } : {}),
+      ...(usePath !== undefined ? { usePath } : {}),
+      ...(schemas !== undefined && schemas.size > 1 ? { useSchemas: schemas.size } : {}),
+    };
   };
   return { owner: hintOf(ref.owner, ref.ownerQualifier), target: hintOf(ref.target, ref.targetQualifier) };
 }

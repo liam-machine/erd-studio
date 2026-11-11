@@ -86,8 +86,8 @@ export interface DbmlSnapshotTable {
   dbmlAlias?: string;
   /**
    * The table's reference in the library where it differs from its name:
-   * `<schema folder>.<name>`, for a name tables in two schema folders share
-   * (a snapshot of `schemaScopedNames`). Its key in {@link DbmlLibrarySnapshot.tables}.
+   * `<schema folder>.<name>`, for a name tables in two schema folders share.
+   * Its key in {@link DbmlLibrarySnapshot.tables}.
    */
   ref?: string;
 }
@@ -98,14 +98,16 @@ export interface DbmlLibrarySnapshot {
   semanticDir: string;
   /**
    * Every table file the library lists (winners only), keyed lower-case by
-   * its library reference: its name, or (`schemaScopedNames`) its `ref`
-   * where tables in two schema folders share the name.
+   * its library reference: its name, or its `ref` where tables in two schema
+   * folders share the name.
    */
   tables: Map<string, DbmlSnapshotTable>;
   /**
-   * The library tells tables apart by identity (`schemaScopedNames`): its
-   * relationships index and attach resolve a Ref end by the relationships
-   * file's own `use` line and its qualifier, and name tables by reference.
+   * The library tells tables apart by identity (`TableLibraryService` always
+   * sets it): its relationships index and attach resolve a Ref end by the
+   * relationships file's own `use` line and its qualifier, and name tables by
+   * reference. A snapshot built without it is planned by name alone, which
+   * gives the same writes while no two tables share a name.
    */
   schemaScopedNames?: boolean;
   /** Every relationships file in the library (`<layer>/relationships/*.dbml`), readable or not, with its reading. */
@@ -554,16 +556,33 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   const labelOf = new Map<string, string>();
   for (const [key, t] of snapshot.tables) labelOf.set(key, scoped ? t.ref ?? t.name : t.name);
   /**
+   * The names more than one table this plan creates or renames into takes
+   * (two schema folders each getting an `addresse` in one Import): each of
+   * them is `<schema>.<name>` from the start, so the first is never the bare
+   * name a unit naming the other would resolve to.
+   */
+  const formedTwice = new Set<string>();
+  {
+    const seen = new Set<string>();
+    saves.forEach((s, i) => {
+      if (!s.create && sourceKeys[i] !== undefined && !isRename(s)) return;
+      const bare = lower(s.model.name);
+      if (seen.has(bare)) formedTwice.add(bare);
+      seen.add(bare);
+    });
+  }
+  /**
    * The key of a table new or renamed in this plan: its name, unless (told
-   * apart by identity) a table of that name stays, then `<schema>.<name>`.
-   * Existing tables keep their keys for the whole plan, so a twin appearing
-   * never changes what the plan calls its namesake.
+   * apart by identity) a table of that name stays or this plan forms
+   * another, then `<schema>.<name>`. Existing tables keep their keys for the
+   * whole plan, so a twin appearing never changes what the plan calls its
+   * namesake.
    */
   const keyFor = (name: string, schema: string | undefined, self?: string): string => {
     const bare = lower(name);
     if (!scoped || schema === undefined) return bare;
     const stays = (keysByName.get(bare) ?? []).some((k) => k !== self && after.has(k));
-    return after.has(bare) || stays ? lower(qualifiedRef(schema, name)) : bare;
+    return after.has(bare) || stays || formedTwice.has(bare) ? lower(qualifiedRef(schema, name)) : bare;
   };
   const columnsOf = (columns: readonly string[]) => (col: string): string | undefined => columns.find((c) => c === col) ?? columns.find((c) => lower(c) === lower(col));
   for (const [key, t] of snapshot.tables) {

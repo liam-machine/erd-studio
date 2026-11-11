@@ -4,13 +4,13 @@
  * Open in Diagram, the Relationships view's actions and the Explorer's
  * tooltips all ask through one {@link TableUsageKeys}, so they agree.
  *
- * Two rules, picked once by the library:
+ * Two rules, picked by the library as it is now:
  *
- * - **By name** (the rule every project has had): a table is its name,
- *   without case, and a diagram shows it when one of its members has that
- *   name. {@link tableUsageByName}.
- * - **By identity** (`TableLibraryService.schemaScopedNames`: two tables of
- *   one name may sit in different schema folders): a table is the file it
+ * - **By name** (while no two schema folders share a table name, a table's
+ *   name is its identity): a table is its name, without case, and a diagram
+ *   shows it when one of its members has that name. {@link tableUsageByName}.
+ * - **By identity** (`TableLibraryService.hasSharedNames`: two tables of
+ *   one name sit in different schema folders): a table is the file it
  *   lives in, its schema folder and name (`tableIdKey`), and a diagram shows
  *   it when a member's `use` line reads that file. A member named by name
  *   alone (a JSON diagram's, an unlinked one) is the table that name reads
@@ -165,15 +165,16 @@ export function tableUsageByIdentity(input: {
 }
 
 /**
- * The rule the library `library` follows, over the diagrams' members
- * (`members`, cached by file version): by identity when it tells tables
- * apart by their schema folders, else by name.
+ * The rule the library `library` follows now, over the diagrams' members
+ * (`members`, cached by file version): by identity when two schema folders
+ * share a table name, else by name (a library double without the lookup is
+ * read by name).
  */
 export function tableUsageOf(
-  library: Pick<TableLibraryService, 'listTableFiles' | 'resolveLibraryRef'> & { readonly schemaScopedNames?: boolean },
+  library: Pick<TableLibraryService, 'listTableFiles' | 'resolveLibraryRef'> & { readonly hasSharedNames?: () => boolean },
   members: Pick<DiagramMembers, 'of' | 'idsOf'>,
 ): TableUsageKeys {
-  if (library.schemaScopedNames !== true) return tableUsageByName((p) => members.of(p));
+  if (library.hasSharedNames?.() !== true) return tableUsageByName((p) => members.of(p));
   return tableUsageByIdentity({
     entries: library.listTableFiles(),
     memberIds: (p) => members.idsOf(p),

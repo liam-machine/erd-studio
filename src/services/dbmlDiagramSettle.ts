@@ -344,7 +344,9 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
     if (!input.mutate && !needsSettle(asSignalled(summary), signals)) continue;
     const original = input.readText(filePath);
     if (original === null) continue;
-    const oldPath = changedMemberPath(rel, original, asSignalled(summary), refusing);
+    // A caller's resolver names its tables by name (Give Duplicate's copy): those are compared with the members' names.
+    const oldPath = changedMemberPath(rel, original, asSignalled(summary), refusing)
+      ?? (plan.identities && input.resolver?.pathChanged ? changedMemberPath(rel, original, summary, { pathChanged: input.resolver.pathChanged }) : undefined);
     try {
       const obj = parseSubjectAreaDbml(original, rel).obj;
       const before = structuredClone(obj);

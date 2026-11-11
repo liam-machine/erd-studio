@@ -46,7 +46,7 @@ import { dropRelationshipsTo } from './libraryRelationships';
 import { memberAttachment } from './memberAttachment';
 import { refuseAmbiguousTableName } from './ambiguousTableName';
 import { TableLibraryIndex, foldersOf, holdsTableFiles, isLayerFolder, layersListTables, listDir, tableIdOfEntry } from './tableLibraryIndex';
-import type { LibraryRefMatch, TableLibraryIndexOptions } from './tableLibraryIndex';
+import type { LibraryRefMatch } from './tableLibraryIndex';
 import { log } from './logger';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
@@ -644,22 +644,19 @@ export class TableLibraryService {
   private memberScope: { keys: ReadonlySet<string>; computed: boolean; attachment?: DbmlAttachResult } | undefined;
 
   /**
-   * `options.schemaScopedNames` (internal, off by default): the library's
-   * shadow rule ({@link TableLibraryIndexOptions}). On, two DBML tables of
-   * one name in different schema folders are both tables, each read, attached
-   * and addressed by its identity; off, a name is unique across the library,
-   * as in every released version.
+   * A table's identity is its schema folder and name (a YAML table's, its
+   * name): two DBML tables of one name in different schema folders are both
+   * tables, each read, attached and addressed by its identity.
    */
   constructor(
     workspaceRoot: string,
     semanticDir = '.erd-studio',
     private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
-    options: TableLibraryIndexOptions = {},
   ) {
     this.semanticRoot = path.join(workspaceRoot, semanticDir);
     this.tablesDir = path.join(this.semanticRoot, LOGICAL_MODELS_DIR);
     this.v6TablesDir = path.join(this.semanticRoot, TABLES_DIR);
-    this.index = new TableLibraryIndex(this.semanticRoot, this.tablesDir, this.v6TablesDir, options);
+    this.index = new TableLibraryIndex(this.semanticRoot, this.tablesDir, this.v6TablesDir);
   }
 
   /** How many times the library index was built (tests and benchmarks). */
@@ -667,9 +664,14 @@ export class TableLibraryService {
     return this.index.builds;
   }
 
-  /** Whether the library is read by table identity ({@link TableLibraryIndexOptions.schemaScopedNames}). */
-  get schemaScopedNames(): boolean {
-    return this.index.schemaScopedNames;
+  /**
+   * Whether two schema folders each hold a table of one name somewhere in
+   * the library ({@link TableLibraryIndex.hasSharedNames}). While none do, a
+   * table's name names it everywhere, and what the sidebar and the canvas
+   * show and send is exactly what they showed and sent by name.
+   */
+  hasSharedNames(): boolean {
+    return this.index.hasSharedNames();
   }
 
   /** The table of identity `id` (its unshadowed entry), or undefined when the library has none. */
@@ -690,7 +692,7 @@ export class TableLibraryService {
     return entry === undefined ? undefined : tableIdOfEntry(entry);
   }
 
-  /** Whether tables of more than one identity are named `name` (only ever under `schemaScopedNames`). */
+  /** Whether tables of more than one identity (DBML tables in different schema folders) are named `name`. */
   isAmbiguousName(name: string): boolean {
     return this.index.isAmbiguousName(name);
   }
@@ -717,12 +719,11 @@ export class TableLibraryService {
 
   /**
    * The library reference of the table in the file `filePath`, where it
-   * differs from the table's name (a name two schema folders share, under
-   * `schemaScopedNames`); undefined otherwise, and for a shadowed copy, which
-   * the library knows by its name.
+   * differs from the table's name (a name two schema folders share);
+   * undefined otherwise, and for a shadowed copy, which the library knows by
+   * its name.
    */
   private qualifiedLibraryRefAt(filePath: string): string | undefined {
-    if (!this.index.schemaScopedNames) return undefined;
     const entry = this.index.entryAt(filePath);
     if (entry === undefined || entry.shadowedBy) return undefined;
     const ref = this.index.libraryRef(tableIdOfEntry(entry));
@@ -732,7 +733,7 @@ export class TableLibraryService {
   /**
    * The fail-closed guard every write entry asks first (D-5): throws
    * `AmbiguousTableName` when `table` is a bare name tables in more than one
-   * schema folder share (only ever under `schemaScopedNames`), so a write is
+   * schema folder share, so a write is
    * never sent to the first file of that name. A TableId, and a name one
    * table has, pass.
    */
@@ -763,7 +764,7 @@ export class TableLibraryService {
    * `.yml`: refused, never written qualified or left to resolve to either.
    */
   private refuseYamlRelationshipsToSharedNames(model: SemanticTable, storedAs: string = model.name): void {
-    if (!this.index.schemaScopedNames) return;
+    if (!this.index.hasSharedNames()) return;
     // A relationship the file already stores, unchanged, is left as it is (owner decision E): the
     // edit writes nothing new about it, and it stays unresolved until it is fixed. Only one the edit
     // adds or changes is refused.
@@ -1234,37 +1235,11 @@ export class TableLibraryService {
     if (relFiles.length === 0) return undefined;
     const entries = this.index.get().entries;
     if (entries.some((e) => !e.shadowedBy && e.storage !== 'dbml')) return this.libraryAttachment();
-    const readings = this.attachReadings(relFiles);
-    if (this.index.schemaScopedNames) return this.scopedAttachmentById(readings, keys);
-    // As `dbmlTableLookup` resolves a name over the whole library: the first
-    // unshadowed entry of that name (a `.dbml` stem equals its Table's name
-    // but for case, D2), when its file reads.
-    const byKey = new Map<string, TableFileEntry>();
-    for (const entry of entries) {
-      const key = entry.name.toLowerCase();
-      if (!entry.shadowedBy && !byKey.has(key)) byKey.set(key, entry);
-    }
-    const resolved = new Map<string, DbmlAttachTable | undefined>();
-    const resolve = (key: string): DbmlAttachTable | undefined => {
-      if (resolved.has(key)) return resolved.get(key);
-      const entry = byKey.get(key);
-      const reading = entry ? this.readDbmlTableFile(entry.filePath) : null;
-      const table: DbmlAttachTable | undefined = entry && reading?.ok && reading.table.name.toLowerCase() === key
-        ? {
-          table: { name: reading.table.name, columns: reading.table.columns },
-          storage: 'dbml',
-          ...(reading.alias !== undefined ? { dbmlAlias: reading.alias } : {}),
-        }
-        : undefined;
-      resolved.set(key, table);
-      return table;
-    };
-    return memberAttachment(readings, keys, resolve) ?? this.libraryAttachment();
+    return this.scopedAttachmentById(this.attachReadings(relFiles), keys);
   }
 
   /**
-   * {@link scopedAttachment} when tables are told apart by identity
-   * (`schemaScopedNames`): an end is resolved among the tables of its name
+   * {@link scopedAttachment}'s work: an end is resolved among the tables of its name
    * only (read now, each once), by the same rule as the whole library's
    * lookup (`dbmlTableLookup`: the file's own `use` line, then the
    * qualifier, then the one table of the name). An end that names no
@@ -1305,8 +1280,7 @@ export class TableLibraryService {
 
   /**
    * Every relationships file's reading, as the attach reads them: by path
-   * relative to the semantic dir and, when tables are told apart by identity
-   * (`schemaScopedNames`), with that path as `semanticPath`, so each file's
+   * relative to the semantic dir, with that path as `semanticPath`, so each file's
    * own `use` lines resolve its Ref ends to table files.
    */
   private attachReadings(relFiles: readonly string[]): Array<{ path: string; reading: DbmlRelationshipsReading; semanticPath?: string }> {
@@ -1315,15 +1289,14 @@ export class TableLibraryService {
       const reading = this.readRelationshipsFile(filePath);
       if (reading === null) continue;
       const rel = this.libraryRelativePath(filePath);
-      out.push({ path: rel, reading, ...(this.index.schemaScopedNames ? { semanticPath: rel } : {}) });
+      out.push({ path: rel, reading, semanticPath: rel });
     }
     return out;
   }
 
   /**
-   * What the attach knows of a table: its name, columns and DBML alias and,
-   * when tables are told apart by identity (`schemaScopedNames`), its file,
-   * its schema folder, the schema its file declares and its library
+   * What the attach knows of a table: its name, columns and DBML alias, its
+   * file, its schema folder, the schema its file declares and its library
    * reference where that differs from its name: what a Ref end's `use` line
    * and qualifier are matched with. All from the listing and the table's
    * own reading: nothing else is read.
@@ -1334,7 +1307,6 @@ export class TableLibraryService {
       storage: entry.storage,
       ...(alias !== undefined ? { dbmlAlias: alias } : {}),
     };
-    if (!this.index.schemaScopedNames) return table;
     const id = tableIdOfEntry(entry);
     // The same reference `attachOwned` fetches the table's list by.
     const ref = this.qualifiedLibraryRefAt(entry.filePath);
@@ -1359,6 +1331,11 @@ export class TableLibraryService {
    * relationships file (no DBML table owns anything then).
    */
   libraryAttachment(): DbmlAttachResult | undefined {
+    // One look at the listing for every table it asks about (each one's identity and library reference).
+    return this.index.withSnapshot(() => this.libraryAttachmentNow());
+  }
+
+  private libraryAttachmentNow(): DbmlAttachResult | undefined {
     const memo = this.attachMemo;
     if (memo && memo.quickKey === this.attachQuickKey(memo.relFiles, memo.dirs)) return memo.result;
     const relFiles = this.listRelationshipsFiles();
@@ -1411,8 +1388,8 @@ export class TableLibraryService {
       this.attachMemo = { ...memo, relFiles, dirs, quickKey: this.attachQuickKey(relFiles, dirs) };
       return memo.result;
     }
-    // Told apart by identity, a Ref end whose `use` line names another listed file is not that file's namesake (rule 4).
-    const result = attachRelationships(readings, dbmlTableLookup(tables, this.index.schemaScopedNames ? { exists: this.attachExists } : {}));
+    // A Ref end whose `use` line names another listed file is not that file's namesake (rule 4).
+    const result = attachRelationships(readings, dbmlTableLookup(tables, { exists: this.attachExists }));
     for (const warning of result.warnings) log.warn(`[LogicalModelService] ${warning}`);
     // Keyed after the reads above, which bump the generation for any table they found changed.
     this.attachMemo = { key, quickKey: this.attachQuickKey(relFiles, dirs), relFiles, dirs, result };
@@ -1565,11 +1542,13 @@ export class TableLibraryService {
       const rel = path.isAbsolute(newFilePath) ? this.semanticRelative(newFilePath) : newFilePath.replace(/\\/g, '/');
       const kind = classifySemanticFile(rel, { tablesDirIsLayer: this.tablesDirIsLayer() });
       if (kind.kind !== 'table') return undefined;
-      // Told apart by identity, the table is new when its own identity is (another schema folder may have the name).
+      // The table is new when its own identity is (another schema folder may have the name).
       const id: TableId = { schema: kind.schema ?? '', name: tableName };
-      if (this.index.schemaScopedNames && kind.schema !== undefined ? this.index.findById(id) !== undefined : this.findTableFile(tableName) !== null) return undefined;
+      if (kind.schema !== undefined ? this.index.findById(id) !== undefined : this.findTableFile(tableName) !== null) return undefined;
       const layer = kind.layer ?? this.defaultDbmlLayer();
-      const table = this.index.schemaScopedNames && kind.schema !== undefined ? id : tableName;
+      // Its Refs are counted by its identity only where another table has its name (so that table's Refs
+      // are not counted for it); otherwise by name, so Refs left naming it (its file gone) keep it with them.
+      const table = kind.schema !== undefined && this.index.entriesNamed(tableName).length > 0 ? id : tableName;
       const placed = placeNewRef({ table, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, this.relationshipsIndex()).file;
       return this.semanticAbsolute(placed);
     } catch {
@@ -1764,6 +1743,11 @@ export class TableLibraryService {
    * planner plans the move from the old place; `to` itself is not listed.
    */
   dbmlSnapshot(readText?: (filePath: string) => string | null, moved: ReadonlyArray<{ from: string; to: string }> = []): DbmlLibrarySnapshot {
+    // One look at the listing for every table it asks about (each one's identity and library reference).
+    return this.index.withSnapshot(() => this.dbmlSnapshotNow(readText, moved));
+  }
+
+  private dbmlSnapshotNow(readText: ((filePath: string) => string | null) | undefined, moved: ReadonlyArray<{ from: string; to: string }>): DbmlLibrarySnapshot {
     const tables = new Map<string, DbmlSnapshotTable>();
     const files = new Set<string>();
     const read = readText ?? ((filePath: string): string | null => {
@@ -1780,7 +1764,7 @@ export class TableLibraryService {
     // sharing there is qualified as the plan reads it.
     // Which files win is decided as before the move too: a file moved onto an identity another layer's
     // file has must not hide that file from the plan (whose refusal names it), nor be hidden by it.
-    const asBefore = moved.length > 0 && this.index.schemaScopedNames ? this.winnersAsBefore(wasAt) : undefined;
+    const asBefore = moved.length > 0 ? this.winnersAsBefore(wasAt) : undefined;
     const movedRefs = asBefore ? this.libraryRefsAsBefore(asBefore) : undefined;
     for (const entry of this.listTableFiles()) {
       const was = wasAt.get(path.resolve(entry.filePath));
@@ -1841,7 +1825,8 @@ export class TableLibraryService {
     return {
       semanticDir: this.semanticRoot,
       tables,
-      ...(this.index.schemaScopedNames ? { schemaScopedNames: true } : {}),
+      // The library tells tables apart by identity: two schema folders may each hold a table of one name.
+      schemaScopedNames: true,
       relationshipsFiles,
       files,
       readText: (rel) => {
@@ -2305,11 +2290,31 @@ export class TableLibraryService {
   }
 
   /**
+   * The table file a DBML table called `name` in the schema folder `schema`
+   * would clash with, or undefined (both compared without case): a table of
+   * that identity in any layer (the same schema folder and name: DBML cannot
+   * tell them apart), or a YAML table of that name (a YAML table's name is
+   * unique across the project). A table of that name in another schema
+   * folder is another table and no clash. The first in index order.
+   */
+  tableTakingName(name: string, schema: string): TableFileEntry | undefined {
+    if (typeof name !== 'string') return undefined;
+    const key = name.trim().toLowerCase();
+    return this.index.get().entries.find((e) => e.name.toLowerCase() === key
+      && (e.storage !== 'dbml' || e.layer === undefined || e.folder.toLowerCase() === schema.toLowerCase()));
+  }
+
+  /**
    * Read a single model from its YAML file.
    * Returns null if the name is not path-safe, or the file doesn't exist or is
    * invalid — callers render a broken-reference placeholder for null.
    */
   getTable(table: TableId | string): SemanticTable | null {
+    // One look at the listing for the table's file, its library reference and its relationships' tables.
+    return this.index.withSnapshot(() => this.getTableNow(table));
+  }
+
+  private getTableNow(table: TableId | string): SemanticTable | null {
     const filePath = this.fileOfTable(table, (n) => this.resolveTablePath(n));
     if (filePath === null) {
       return null;
@@ -2503,7 +2508,21 @@ export class TableLibraryService {
    * fail to parse.
    */
   listTables(): SemanticTable[] {
-    const models: SemanticTable[] = [];
+    return this.listTablesWithFiles().map(({ model }) => model);
+  }
+
+  /**
+   * {@link listTables}, each table with the listed entry of its file (its
+   * schema folder and identity): two tables of one name in different schema
+   * folders are told apart by it.
+   */
+  listTablesWithFiles(): Array<{ model: SemanticTable; entry: TableFileEntry }> {
+    // One look at the listing for every table it reads.
+    return this.index.withSnapshot(() => this.listTablesWithFilesNow());
+  }
+
+  private listTablesWithFilesNow(): Array<{ model: SemanticTable; entry: TableFileEntry }> {
+    const out: Array<{ model: SemanticTable; entry: TableFileEntry }> = [];
     const dbmlModels: Array<{ model: SemanticTable; ref?: string }> = [];
     for (const entry of this.listTableFiles()) {
       if (entry.shadowedBy) continue;
@@ -2511,7 +2530,7 @@ export class TableLibraryService {
         // The relationships are attached once below, not once per table.
         const model = this.readTableEntry(entry.filePath, entry.name, { relationships: false });
         if (model) {
-          models.push(model);
+          out.push({ model, entry });
           if (entry.storage === 'dbml') dbmlModels.push({ model, ref: this.qualifiedLibraryRefAt(entry.filePath) });
         }
       } catch {
@@ -2522,7 +2541,7 @@ export class TableLibraryService {
       const attachment = this.libraryAttachment();
       for (const { model, ref } of dbmlModels) this.attachOwned(model, attachment, ref);
     }
-    return models;
+    return out;
   }
 
   /**
@@ -2856,9 +2875,9 @@ export class TableLibraryService {
     for (const label of [...owners].sort()) {
       // The index names an owner by its library reference: a name two schema folders share is
       // `<schema>.<name>`, which no file is named, so it is found by that reference and saved by
-      // its identity, never by its name.
-      const found = this.index.schemaScopedNames ? this.index.resolveLibraryRef(label) : undefined;
-      const owner: TableId | string = found?.kind === 'found' ? tableIdOfEntry(found.entry) : label;
+      // its identity, never by its name. A name only one table has is that table's name.
+      const found = this.index.resolveLibraryRef(label);
+      const owner: TableId | string = found.kind === 'found' && found.entry.name.toLowerCase() !== label.toLowerCase() ? tableIdOfEntry(found.entry) : label;
       if (this.tableStorage(owner) !== 'dbml') continue;
       const model = this.getTable(owner);
       if (!model) continue;

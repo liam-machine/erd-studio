@@ -1646,14 +1646,14 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
 
   it('in a dbt project its prompt and modal say how dbt sees the name', async () => {
     const { prompt, detail } = await duplicateTexts();
-    expect(prompt).toBe('Table names are unique, as dbt model names are. The warehouse table name stays "date" (set as the table\'s alias).');
+    expect(prompt).toBe('ERD Studio reads one table of a name in a schema, as dbt builds one model of a name. The warehouse table name stays "date" (set as the table\'s alias).');
     expect(detail).toContain('so dbt still builds a table called date');
   });
 
   it('in a folder without dbt its prompt and modal say nothing about dbt', async () => {
     fs.rmSync(path.join(root, 'dbt_project.yml'));
     const { prompt, detail } = await duplicateTexts();
-    expect(prompt).toBe('Table names are unique across the library. The warehouse name stays "date" (set as the table\'s alias).');
+    expect(prompt).toBe('ERD Studio reads one table of a name in a schema. The warehouse name stays "date" (set as the table\'s alias).');
     expect(detail).toContain('The table becomes "silver_date" with alias: date, so the warehouse name stays date.');
     expect(`${prompt}\n${detail}`).not.toMatch(/dbt/i);
   });

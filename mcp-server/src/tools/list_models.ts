@@ -40,23 +40,25 @@ export const list_models = {
       };
     }
 
-    const models = tableLibraryService.listTables();
-    const formatOf = (name: string): 'dbml' | 'yaml' => tableLibraryService.tableStorage(name) ?? 'yaml';
+    const tables = tableLibraryService.listTablesWithFiles();
+    const formatOf = (entry: (typeof tables)[number]['entry']): 'dbml' | 'yaml' => entry.storage ?? 'yaml';
     return {
       content: [
         {
           type: 'text' as const,
           text: JSON.stringify(
             {
-              count: models.length,
-              models: models.map((m) => ({
+              count: tables.length,
+              models: tables.map(({ model: m, entry }) => ({
                 name: m.name,
                 schema: m.schema ?? null,
+                // The schema folder read_model's `schema` takes, where another schema folder has a table of this name.
+                ...(entry.storage === 'dbml' && entry.layer !== undefined && tableLibraryService.isAmbiguousName(m.name) ? { schema_folder: entry.folder } : {}),
                 description: m.description ?? null,
                 grain: m.grain ?? null,
                 model_role: m.modelRole ?? null,
                 column_count: m.columns?.length ?? 0,
-                file_format: formatOf(m.name),
+                file_format: formatOf(entry),
               })),
             },
             null,

@@ -304,9 +304,14 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     return total > 0 ? `${plural(total, 'relationship')} · by ${this.grouping === 'file' ? 'file' : 'table'}` : undefined;
   }
 
-  /** Whether the library tells tables apart by their schema folders (a library double without the flag does not). */
+  /**
+   * Whether tables are named and keyed by identity here: where two schema
+   * folders share a table name (a library double without the lookup never
+   * does). While none do, a table's name is its identity, and rows and ids
+   * are by name.
+   */
   private schemaScoped(): boolean {
-    return (this.tableLibraryService as { schemaScopedNames?: boolean }).schemaScopedNames === true;
+    return (this.tableLibraryService as { hasSharedNames?: () => boolean }).hasSharedNames?.() === true;
   }
 
   /**

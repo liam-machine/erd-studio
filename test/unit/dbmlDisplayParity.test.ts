@@ -56,13 +56,6 @@ function diagramsOf(project: string): string[] {
     .sort();
 }
 
-/**
- * The core twins whose host library tells tables apart by identity
- * (`schemaScopedNames`, off by default until the rule flips): two tables of
- * one name in different schema folders are two tables only then.
- */
-const SCHEMA_SCOPED = new Set([path.join(TWINS, 'same-name-two-schemas')]);
-
 const CASES: Array<[string, string, string]> = [
   ...diagramsOf(NATIVE).map((d): [string, string, string] => ['dbml-native', NATIVE, d]),
   ...diagramsOf(DBT_DBML).map((d): [string, string, string] => ['dbt-project-dbml', DBT_DBML, d]),
@@ -98,10 +91,10 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function buildProvider(schemaScopedNames = false): { provider: SemanticEditorProvider; subjectAreaService: SubjectAreaService; tables: TableLibraryService } {
+function buildProvider(): { provider: SemanticEditorProvider; subjectAreaService: SubjectAreaService; tables: TableLibraryService } {
   const layerService = new LayerService(root, SEMANTIC_DIR);
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tables = new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker(), schemaScopedNames ? { schemaScopedNames: true } : {});
+  const tables = new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker());
   subjectAreaService.setTableLibraryService(tables);
   const context = {
     extensionUri: vscode.Uri.file(path.join(root, 'no-extension')),
@@ -138,8 +131,8 @@ function drawn(display: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** The canvas: the diagram opened in the real editor, its posted logical payload. */
-async function canvasOf(diagram: string, schemaScopedNames = false): Promise<Record<string, unknown>> {
-  const { provider } = buildProvider(schemaScopedNames);
+async function canvasOf(diagram: string): Promise<Record<string, unknown>> {
+  const { provider } = buildProvider();
   const document = createMockTextDocument(at(diagram), fs.readFileSync(at(diagram), 'utf-8'), { persist: true });
   (vscode.workspace.textDocuments as unknown[]).push(document);
   const panel = createMockWebviewPanel();
@@ -174,7 +167,7 @@ describe('the canvas draws what core draws, for every DBML diagram', () => {
     fs.cpSync(source, root, { recursive: true });
     const core = drawn(await coreOf(diagram));
     // The ready load saves auto-placed positions into erd_layout (core places them the same way, in memory).
-    const canvas = drawn(await canvasOf(diagram, SCHEMA_SCOPED.has(source)));
+    const canvas = drawn(await canvasOf(diagram));
     expect(canvas).toEqual(core);
   });
 });
@@ -377,7 +370,7 @@ describe('two tables of one name in different schema folders, a file gone (owner
     fs.cpSync(TWIN, root, { recursive: true });
     fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
     const core = drawn(await coreOf('bronze/diagrams/kunden.dbml'));
-    const canvas = drawn(await canvasOf('bronze/diagrams/kunden.dbml', true));
+    const canvas = drawn(await canvasOf('bronze/diagrams/kunden.dbml'));
     expect(canvas).toEqual(core);
     const bqs = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'bqs.addresse');
     expect(bqs?.columns ?? []).toEqual([]);
@@ -393,7 +386,7 @@ describe('two tables of one name in different schema folders, a file gone (owner
       '',
     ].join('\n'));
     const core = drawn(await coreOf('bronze/diagrams/stale.dbml'));
-    const canvas = drawn(await canvasOf('bronze/diagrams/stale.dbml', true));
+    const canvas = drawn(await canvasOf('bronze/diagrams/stale.dbml'));
     expect(canvas).toEqual(core);
   });
 
@@ -411,9 +404,24 @@ describe('two tables of one name in different schema folders, a file gone (owner
       '',
     ].join('\n'));
     const core = drawn(await coreOf('bronze/diagrams/three.dbml'));
-    const canvas = drawn(await canvasOf('bronze/diagrams/three.dbml', true));
+    const canvas = drawn(await canvasOf('bronze/diagrams/three.dbml'));
     expect(canvas).toEqual(core);
     const addresse = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'addresse');
     expect(addresse?.columns ?? []).toEqual([]);
+  });
+});
+
+describe('an unqualified Ref end two schema folders share (core rule 3 counts the file\'s own use lines)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  it('the ccc-only diagram: neither side draws `ccc.kunde.full_name > addresse.street`, whose file imports addresse from bqs and ccc', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.appendFileSync(at('bronze/relationships/bronze.dbml'), 'Ref: ccc.kunde.full_name > addresse.street\n');
+    const core = drawn(await coreOf('bronze/diagrams/ccc.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/ccc.dbml'));
+    expect(canvas).toEqual(core);
+    const lines = (canvas.relationships as Array<{ fromColumn: string; toColumn: string }>).map((r) => `${r.fromColumn}>${r.toColumn}`);
+    expect(lines).toContain('addresse_id>id');
+    expect(lines).not.toContain('full_name>street');
   });
 });

@@ -3292,9 +3292,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         activeDiagramPath: activeSubjectAreaCanvasPath,
       };
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
-      // Told apart by identity, the dragged rows' files say which tables (two schema folders may share a name).
+      // Where two schema folders share a name, the dragged rows' files say which tables.
       treeProvider.setTablesDropHandler((filePath, tables, uris) => {
-        const dropped = tableLibraryService.schemaScopedNames ? tableFilesOfDroppedUris(uris, tableLibraryService.listTableFiles()) : [];
+        const dropped = tableLibraryService.hasSharedNames() ? tableFilesOfDroppedUris(uris, tableLibraryService.listTableFiles()) : [];
         return dropped.length > 0
           ? addToDiagramDeps.addTables(filePath, dropped.map((f) => f.name), dropped.map((f) => f.filePath))
           : addToDiagramDeps.addTables(filePath, tables);
@@ -3334,8 +3334,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         (filePath !== undefined ? tableLibraryService.tableEntryAt(filePath)?.id : undefined) ?? name;
       const goToTableDeps: GoToTableDeps = {
         listTableFiles: () => tableLibraryService.listTableFiles(),
-        // Keyed as the usage keys a table: by identity, each table's own home.
-        tableHomes: () => (tableLibraryService.schemaScopedNames ? tableHomesById(tableLibraryService.listTableFiles()) : tableHomes()),
+        // Keyed as the usage keys a table: where two schema folders share a name, by identity, each table's own home.
+        tableHomes: () => (tableLibraryService.hasSharedNames() ? tableHomesById(tableLibraryService.listTableFiles()) : tableHomes()),
         listSubjectAreas: deps.listSubjectAreas,
         memberNames: deps.memberNames,
         usage: tableUsage,
@@ -3421,12 +3421,12 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // would remove the file that IS in use.
       const nodes = (selection?.includes(node) ? selection : [node])
         .filter((n): n is TableLibraryTableNode => n.type === 'model' && !n.shadowedBy);
-      // Each table to delete: by name, or, where the library tells tables apart by
-      // their schema folders, by the row's own file (a DBML table by its identity,
-      // never its namesake in another schema folder), named `<schema>.<name>` in
-      // the question where another schema folder shares its name.
+      // Each table to delete: by name, or, where two schema folders share a name,
+      // by the row's own file (a DBML table by its identity, never its namesake in
+      // another schema folder), named `<schema>.<name>` in the question where
+      // another schema folder shares its name.
       const rows: Array<{ label: string; table: TableId | string; dbml: boolean }> = [];
-      if (tableLibraryService.schemaScopedNames) {
+      if (tableLibraryService.hasSharedNames()) {
         const seen = new Set<string>();
         for (const n of nodes) {
           const key = path.resolve(n.filePath);
@@ -3493,8 +3493,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       for (const summary of subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir)) {
         try {
           const names = subjectAreaTableNames(fs.readFileSync(summary.filePath, 'utf-8'), summary.filePath);
-          // Told apart by identity, a DBML diagram counts the table files its use lines read, not names.
-          const ids = tableLibraryService.schemaScopedNames && subjectAreaStorageOf(summary.filePath) === 'dbml'
+          // A DBML diagram counts the table files its use lines read, not names.
+          const ids = subjectAreaStorageOf(summary.filePath) === 'dbml'
             ? diagramMembers.idsOf(summary.filePath)?.flatMap((m) => (m.id ? [tableIdKey(m.id)] : []))
             : undefined;
           if (names) usage.push({ layer: summary.layer, modelNames: names, ...(ids ? { modelIds: ids } : {}) });
