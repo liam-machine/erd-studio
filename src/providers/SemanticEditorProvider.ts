@@ -196,6 +196,7 @@ import {
   seedTableFromDbt,
   seededColumnCount,
   configuredSchemaOf,
+  dbtModelTableOfSharedName,
   type DbtMatchTable,
   type DraftSkipped,
 } from '../services/dbtDraft';
@@ -3881,6 +3882,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const storage = this.tableLibraryService.tableStorage(name);
     if (storage === 'yaml') return `"${name}" is a YAML table, and a DBML diagram can only show DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`;
     return storage === undefined ? validateNewDbmlTableName(name) : null;
+  }
+
+  /**
+   * The table file a dbt model called `name` is on the DBML diagram
+   * `document`, where tables in two or more schema folders have its name:
+   * the one in the schema folder its table goes to (its dbt custom schema,
+   * else the diagram layer's own), the rule Draw from dbt resolves it by
+   * (owner decision H, `dbtModelTableOfSharedName`). Undefined for a JSON
+   * diagram, a name one table has (added by its name, as always), and a
+   * shared name no schema folder agrees with ({@link dbmlMemberProblem}
+   * refuses that one).
+   */
+  private dbtModelFileOnDiagram(document: vscode.TextDocument, name: string, ymlData: YmlData, manifest: ManifestData): TableFileEntry | undefined {
+    if (!this.schemaScoped() || !this.isDbmlDocument(document) || !this.tableLibraryService.isAmbiguousName(name)) return undefined;
+    const home = this.newDbmlTableSchema(document, undefined);
+    if (home === undefined) return undefined;
+    const entry = dbtModelTableOfSharedName(name, home, this.tableLibraryService, ymlData, manifest);
+    return entry !== undefined && entry.storage === 'dbml' && entry.id !== undefined && !entry.shadowedBy ? entry : undefined;
   }
 
   /**
@@ -8942,6 +8961,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
         const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
         let seededModel: import('../types/semantic').SemanticTable | undefined;
+        // A dbt model of a name two schema folders share: the table its dbt schema names, by its file (owner decision H).
+        const sharedNamed = this.dbtModelFileOnDiagram(document, payload.modelName, ymlData, manifest);
+        if (sharedNamed !== undefined) {
+          await this.addTableFiles(document, webview, [sharedNamed]);
+          return;
+        }
         const dbmlProblem = this.dbmlMemberProblem(document, payload.modelName);
         if (dbmlProblem) {
           webview.postMessage({ type: 'error', payload: { message: `Failed to add table: ${dbmlProblem}` } });
@@ -9257,13 +9282,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Re-read inside the queue: an edit may have landed while the picker was open.
       const parsed = this.parseSubjectAreaDocument(document);
       const section = this.getStageSection(parsed, 'logical');
-      // The picked files the diagram does not show yet, what it will call them, and its members' renames.
-      const members = byFile ? this.parseSubjectAreaFile(document).members : undefined;
-      const files = members ? byFile!.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && byFile!.findIndex((g) => samePath(g.filePath, f.filePath)) === i) : [];
-      const byFileAdded = members && files.length > 0 ? members.adding(files.map((f) => f.id!)) : { refs: [] as string[], renames: new Map<string, string>() };
+      // A dbt model whose name tables in two or more schema folders have is the table its dbt schema
+      // names (as Draw from dbt resolves it, owner decision H): added by that file, never by its name.
+      const sharedNamed = new Map<string, TableFileEntry>();
+      for (const name of modelNames) {
+        const entry = this.dbtModelFileOnDiagram(document, name, ymlData, manifest);
+        if (entry !== undefined) sharedNamed.set(normaliseName(name), entry);
+      }
       // A listed member with no table file is drawn as missing: picking it makes its file, and it stays listed once.
-      const existingNames = ((section.models ?? []) as string[]).filter((name) => this.tableLibraryService.tableExists(name));
-      const draft = buildDbtDraft({
+      // (A member of a shared name is another table than the one a shared-name model resolves to: the files decide.)
+      const existingNames = ((section.models ?? []) as string[])
+        .filter((name) => this.tableLibraryService.tableExists(name) && !sharedNamed.has(normaliseName(name)));
+      const built = buildDbtDraft({
         modelNames,
         ymlData,
         manifest,
@@ -9274,11 +9304,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         existingRelationships: (section.relationships ?? []) as Relationship[],
         ...(fromDbt ? {} : { limit: modelNames.length, skipDisabled: false }),
       });
+      // The draft decides which models go (disabled, over the cap, …); a shared-name one goes by its file.
+      const resolvedFiles = built.modelNames.flatMap((name) => sharedNamed.get(normaliseName(name)) ?? []);
+      const draft = resolvedFiles.length > 0 ? { ...built, modelNames: built.modelNames.filter((name) => !sharedNamed.has(normaliseName(name))) } : built;
+      const pickedFiles = resolvedFiles.length > 0 ? [...(byFile ?? []), ...resolvedFiles] : byFile;
+      // The picked files the diagram does not show yet, what it will call them, and its members' renames.
+      const members = pickedFiles ? this.parseSubjectAreaFile(document).members : undefined;
+      const files = members ? pickedFiles!.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && pickedFiles!.findIndex((g) => samePath(g.filePath, f.filePath)) === i) : [];
+      const byFileAdded = members && files.length > 0 ? members.adding(files.map((f) => f.id!)) : { refs: [] as string[], renames: new Map<string, string>() };
       // A pick is matched to the domain ignoring case, as model names are
       // unique that way, so a ticked row can already be there under another
       // case (or added since by another panel): name it rather than drop it
       // without a word. The dbt picker leaves those out up front.
-      const alreadyIn = fromDbt ? [] : draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name);
+      const alreadyIn = fromDbt ? [] : [
+        ...draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name),
+        ...(members ? resolvedFiles.filter((f) => members.memberOf(f.id!) !== undefined).map((f) => members.memberOf(f.id!)!.ref) : []),
+      ];
       const skippedNote = [
         describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
         alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',

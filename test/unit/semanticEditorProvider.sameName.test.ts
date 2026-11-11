@@ -903,6 +903,91 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     expect(changed(before, snapshot())).toEqual([]);
   });
 
+  /** Add Tables from dbt (`applyDbtModels`) of `names` to `diagram`, as the empty canvas's button does. */
+  async function addFromDbt(diagram: string, names: string[]): Promise<{ errors: string[]; changed: string[] }> {
+    const canvas = await open(diagram);
+    const before = snapshot();
+    canvas.panel._postedMessages.length = 0;
+    const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
+    await (canvas.provider as unknown as { applyDbtModels(...args: unknown[]): Promise<void> })
+      .applyDbtModels(canvas.document, canvas.panel.webview, names, ymlData(), empty);
+    const errors = canvas.panel._postedMessages
+      .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
+      .map((m) => m.payload.message);
+    return { errors, changed: changed(before, snapshot()) };
+  }
+
+  it('Add Tables from dbt with a model whose dbt schema is bqs adds bqs\'s table, by its file, as Draw from dbt resolves it (owner decision H)', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'bqs' }];
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const ccc = read('bronze/tables/ccc/addresse.dbml');
+    const r = await addFromDbt('bronze/diagrams/empty.dbml', ['addresse']);
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/empty.dbml']);
+    const text = read('bronze/diagrams/empty.dbml');
+    expect(text).toContain("from '../tables/bqs/addresse.dbml'");
+    expect(text).not.toContain('ccc');
+    expect(text).toContain("erd_schema_version: '7'");
+    expect(read('bronze/tables/ccc/addresse.dbml')).toBe(ccc);
+  });
+
+  it('Add Tables from dbt with a model whose dbt schema is ccc, on a diagram showing bqs.addresse, adds ccc\'s and makes the pair (qualified lines, version 8)', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'ccc' }];
+    fs.writeFileSync(at('bronze/diagrams/one.dbml'), [
+      'Project one {',
+      "  erd_schema_version: '7'",
+      "  erd_layout: '''",
+      '    addresse 10 20',
+      "  '''",
+      '}',
+      '',
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      '',
+    ].join('\n'));
+    const r = await addFromDbt('bronze/diagrams/one.dbml', ['addresse']);
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/one.dbml']);
+    const text = read('bronze/diagrams/one.dbml');
+    expect(text).toContain("erd_schema_version: '8'");
+    expect(text).toContain('bqs.addresse 10 20');
+    expect(text).toMatch(/^ {4}ccc\.addresse -?\d+ -?\d+$/m);
+    expect(text).toContain("from '../tables/ccc/addresse.dbml'");
+    expect(text).toContain("from '../tables/bqs/addresse.dbml'");
+  });
+
+  it('Add Tables from dbt beside a model of a name one table has: the shared one goes by its file, the other by its name, in one edit', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'ccc' }];
+    fs.writeFileSync(at('bronze/tables/bqs/solo.dbml'), 'Table bqs.solo {\n  id int [pk]\n}\n');
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const r = await addFromDbt('bronze/diagrams/empty.dbml', ['solo', 'addresse']);
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/empty.dbml']);
+    const text = read('bronze/diagrams/empty.dbml');
+    expect(text).toContain("from '../tables/ccc/addresse.dbml'");
+    expect(text).toContain("from '../tables/bqs/solo.dbml'");
+    expect(text).not.toContain('bqs/addresse');
+  });
+
+  it('a dbt model whose name one table has is added by its name whatever its dbt schema says, as before', async () => {
+    ymlModels = [{ name: 'solo', configSchema: 'zzz' }];
+    fs.writeFileSync(at('bronze/tables/bqs/solo.dbml'), 'Table bqs.solo {\n  id int [pk]\n}\n');
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const r = await addFromDbt('bronze/diagrams/empty.dbml', ['solo']);
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/empty.dbml']);
+    expect(read('bronze/diagrams/empty.dbml')).toBe("use { table bqs.solo } from '../tables/bqs/solo.dbml'\n\nProject empty {\n  erd_schema_version: '7'\n}\n");
+  });
+
+  it('Add Existing Table\'s dbt row of a shared name (no file named) is resolved the same way', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'ccc' }];
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const canvas = await open('bronze/diagrams/empty.dbml');
+    const r = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'addresse' } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/empty.dbml']);
+    expect(read('bronze/diagrams/empty.dbml')).toContain("from '../tables/ccc/addresse.dbml'");
+  });
+
   it('Reveal in Table Library and Show on Other Diagrams… from a canvas name the member\'s own file', async () => {
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
     const canvas = await open('bronze/diagrams/kunden.dbml');

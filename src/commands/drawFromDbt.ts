@@ -32,7 +32,8 @@ import { afterScope, dbtDraftFingerprint, dbtDraftLogLines, dbtDraftScopes, draf
 import type { Draft, DraftKeepOutcome, DraftPreview, DraftTarget, DraftTrigger } from '../types/draft';
 import {
   buildDbtDraft,
-  configuredSchemaOf,
+  dbtModelSchemaFolder,
+  dbtModelTableOfSharedName,
   buildDraftSubjectAreaDocument,
   listDraftModels,
   listDraftScopes,
@@ -79,7 +80,6 @@ import {
   type RefusedWrite,
 } from '../services/newSubjectAreaWriter';
 import { diagramFilePath, qualifiedRef, type TableId } from '@erd-studio/core';
-import { isSchemaFolderName } from '../services/dbmlLibraryWrites';
 import type { SemanticTable } from '../types/semantic';
 import { DbmlEditRefused } from '@erd-studio/core/dbml';
 import type { CatalogData } from '../types/catalog';
@@ -339,15 +339,12 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
   // its table goes to (its dbt custom schema, else the layer's own), or a YAML table of its name; when
   // none of them is there, nothing says which, and it is a new table beside them.
   const homeSchema = tableLibraryService.dbmlHomeOf?.(chosenLayer).schema ?? chosenLayer;
-  const schemaFor = (n: string): string => {
-    const configured = configuredSchemaOf(n, ymlData, manifest);
-    return configured !== undefined && isSchemaFolderName(configured) ? configured : homeSchema;
-  };
+  const schemaFor = (n: string): string => dbtModelSchemaFolder(n, homeSchema, ymlData, manifest);
   const libraryTableOf = (n: string): TableId | string | undefined => {
     if (!dbml || !tableLibraryService.tableTakingName || (tableLibraryService.tablesNamed?.(n).length ?? 0) < 2) {
       return tableLibraryService.tableExists(n) ? n : undefined;
     }
-    const taken = tableLibraryService.tableTakingName(n, schemaFor(n));
+    const taken = dbtModelTableOfSharedName(n, homeSchema, { tableTakingName: (name, schema) => tableLibraryService.tableTakingName!(name, schema) }, ymlData, manifest);
     if (taken === undefined) return undefined;
     return taken.storage === 'dbml' && taken.id !== undefined ? taken.id : taken.name;
   };

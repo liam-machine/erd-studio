@@ -28,6 +28,7 @@ import type { DbmlDraftTable } from './dbmlLibraryWrites';
 import { validateTableNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
 import { identifierKey, normaliseName } from './nameUtils';
+import { isSchemaFolderName } from '../types/schemaFolder';
 import { catalogNodeFor, resolveColumnType } from './columnTypes';
 
 /** Most models one draft (or one batch add) will create — a readable first diagram. */
@@ -817,6 +818,34 @@ export function configuredSchemaOf(name: string, ymlData?: YmlData, manifest?: M
     ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
   // The manifest is dbt's own resolution (yml, dbt_project.yml and config() merged): the yml only without it.
   return man ? man.configSchema : yml?.configSchema;
+}
+
+/**
+ * The schema folder a dbt model's table goes to on a DBML diagram: its dbt
+ * custom schema ({@link configuredSchemaOf}) when that can be a folder name,
+ * else the diagram layer's own schema (`homeSchema`).
+ */
+export function dbtModelSchemaFolder(name: string, homeSchema: string, ymlData?: YmlData, manifest?: ManifestData): string {
+  const configured = configuredSchemaOf(name, ymlData, manifest);
+  return configured !== undefined && isSchemaFolderName(configured) ? configured : homeSchema;
+}
+
+/**
+ * Which library table a dbt model is where tables in two or more schema
+ * folders have its name (owner decision H): the one in the schema folder its
+ * table goes to ({@link dbtModelSchemaFolder}), or a YAML table of its name
+ * (`library.tableTakingName` answers both). Undefined when none of them is
+ * there: nothing says which. Draw from dbt and the canvas's dbt adds share
+ * this one rule.
+ */
+export function dbtModelTableOfSharedName<T>(
+  name: string,
+  homeSchema: string,
+  library: { tableTakingName(name: string, schema: string): T | undefined },
+  ymlData?: YmlData,
+  manifest?: ManifestData,
+): T | undefined {
+  return library.tableTakingName(name, dbtModelSchemaFolder(name, homeSchema, ymlData, manifest));
 }
 
 /**
