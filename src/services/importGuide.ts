@@ -272,6 +272,14 @@ export interface ImportGuideSection {
   notes?: readonly string[];
   action: ImportGuideAction;
   /**
+   * Set on the one section of a card to use unless you have a reason not to,
+   * when the card offers two ways to the same import: why, in a sentence. It
+   * is listed first, badged "Recommended", and gets the card's main button.
+   */
+  recommended?: string;
+  /** On the other way: when to use it instead ("Use this instead if…"). */
+  useWhen?: string;
+  /**
    * The button's label when it is not the action's own: a second way into
    * the same import (a catalog query's CSV), counted under the same action.
    */
@@ -405,24 +413,26 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   databricks: {
     id: 'databricks',
     title: 'Databricks (Unity Catalog)',
-    what: 'Export the CREATE TABLE statements of a whole schema in one notebook cell, or run one query and download its result. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships either way.',
+    what: 'Run one query and download its result, or export the CREATE TABLE statements of a whole schema in one notebook cell. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships either way.',
     sections: [
       {
-        heading: 'CREATE TABLE statements, from a notebook',
-        steps: [
-          { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
-        ],
-        notes: ['Keeps column defaults and identity columns. A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.'],
-        action: 'databricks',
-      },
-      {
         heading: 'One query, downloaded as CSV',
+        recommended: 'One query and one download, with no notebook and nothing to copy by hand. Comments and column types come in exactly as the catalog holds them.',
         steps: [
           { text: 'Run this in the SQL editor with your catalog on its `WHERE` line, then download the whole result as CSV into this folder.', snippet: 'databricksCatalog' },
         ],
-        notes: ['No notebook and nothing to copy by hand. Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.'],
+        notes: ['Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.'],
         action: 'databricks',
         label: 'Import the CSV…',
+      },
+      {
+        heading: 'CREATE TABLE statements, from a notebook',
+        useWhen: 'Use this instead if you need column defaults or identity columns: only CREATE TABLE statements carry them.',
+        steps: [
+          { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
+        ],
+        notes: ['A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.'],
+        action: 'databricks',
       },
     ],
   },
@@ -489,11 +499,13 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'pg_dump',
+        recommended: 'Keeps the most: CHECK constraints and identity columns come in too.',
         steps: [{ text: 'Run this in a terminal in this folder (add `-n <schema>` for one schema):', snippet: 'postgres' }],
         action: 'postgres',
       },
       {
         heading: 'One query, saved as CSV',
+        useWhen: 'Use this instead if you can run a query on the database but cannot run pg_dump.',
         steps: [
           { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'postgresCatalog' },
           { text: 'Run it with psql (PostgreSQL 12 or later), which writes the CSV:', snippet: 'postgresCatalogRun' },
@@ -511,11 +523,13 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'mysqldump',
+        recommended: 'Keeps the most: CHECK constraints come in too.',
         steps: [{ text: 'Run this in a terminal in this folder:', snippet: 'mysql' }],
         action: 'mysql',
       },
       {
         heading: 'One query, saved as TSV',
+        useWhen: 'Use this instead if you can run a query on the database but cannot run mysqldump.',
         steps: [
           { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'mysqlCatalog' },
           { text: 'Run it with the mysql client (MySQL 8, or MariaDB 10.2 or later), which writes the result tab-separated:', snippet: 'mysqlCatalogRun' },
@@ -681,20 +695,31 @@ body {
   border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px;
 }
 .ig__nofolder-text { margin: 0; }
-.ig__cards { display: grid; gap: 14px; margin: 20px 0 0; padding: 0; list-style: none; }
+.ig__cards { display: grid; gap: 8px; margin: 20px 0 0; padding: 0; list-style: none; }
 .ig-card {
   /* A grid item: without min-width 0 a long snippet line widens the card (and the page) past the view. */
   min-width: 0;
-  padding: 14px 16px; border-radius: 4px;
+  padding: 10px 14px; border-radius: 4px;
   border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 }
 .ig-card--lead { border-color: var(--vscode-focusBorder); }
-.ig-card__title { margin: 0 0 6px; font-size: 1.1em; font-weight: 600; }
+/* Every source is one line until it is opened, so the whole list is in view at once; only the folder's own suggestion starts open. */
+.ig-card__summary { cursor: pointer; }
+.ig-card__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.ig-card__fold[open] > .ig-card__summary { margin-bottom: 6px; }
+.ig-card__title { display: inline; margin: 0; font-size: 1.1em; font-weight: 600; }
 .ig-card__what { margin: 0 0 10px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
 .ig-section { margin: 0 0 10px; }
 .ig-section:last-child { margin-bottom: 0; }
 .ig-section__heading { margin: 0 0 6px; font-weight: 600; }
+/* Two ways to one import: a rule between them, and the one to use says so and why. */
+.ig-section + .ig-section { padding-top: 10px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+.ig-badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 0.85em; font-weight: 600; vertical-align: 1px;
+  color: var(--vscode-badge-foreground); background: var(--vscode-badge-background);
+}
+.ig-section__why { margin: 0 0 8px; line-height: 1.5; }
 .ig-steps { margin: 0 0 10px; padding: 0 0 0 20px; }
 .ig-step { margin: 0 0 8px; line-height: 1.5; }
 .ig-step--only { margin: 0 0 10px; }
@@ -778,16 +803,22 @@ function renderSteps(section: ImportGuideSection): string {
 }
 
 function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | undefined): string {
+  // A card with two ways to one import names the one to use: only that way's button is the card's main one.
+  const hasRecommended = card.sections.some((section) => section.recommended);
   const sections = card.sections.map((section) => `
-      <div class="ig-section">${section.heading ? `
-        <h3 class="ig-section__heading">${escapeHtml(section.heading)}</h3>` : ''}
+      <div class="ig-section${section.recommended ? ' ig-section--recommended' : ''}">${section.heading ? `
+        <h3 class="ig-section__heading">${escapeHtml(section.heading)}${section.recommended ? ' <span class="ig-badge">Recommended</span>' : ''}</h3>` : ''}${section.recommended ? `
+        <p class="ig-section__why">${inline(section.recommended)}</p>` : ''}${section.useWhen ? `
+        <p class="ig-section__why">${inline(section.useWhen)}</p>` : ''}
         ${renderSteps(section)}
-        <button class="ig-btn${lead ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>
+        <button class="ig-btn${lead && (!hasRecommended || section.recommended) ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>
       </div>`).join('');
   return `
     <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
-      <h2 class="ig-card__title">${escapeHtml(card.title)}</h2>
-      <p class="ig-card__what">${inline(card.what)}</p>${sections}
+      <details class="ig-card__fold"${lead ? ' open' : ''}>
+        <summary class="ig-card__summary"><h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>
+        <p class="ig-card__what">${inline(card.what)}</p>${sections}
+      </details>
     </li>`;
 }
 

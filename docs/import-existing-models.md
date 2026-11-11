@@ -28,6 +28,8 @@ A lakehouse often declares no foreign keys, so its import has tables and no rela
 
 ## Databricks (Unity Catalog)
 
+There are two ways. **Recommended: one query, downloaded as CSV** (the second one below): one query and one download, with no notebook and nothing to copy by hand, and comments and column types come in exactly as the catalog holds them. Use the notebook cell instead if you need column defaults or identity columns: only `CREATE TABLE` statements carry them.
+
 Export the `CREATE TABLE` statements of a whole schema in one notebook cell. Declared `PRIMARY KEY` and `FOREIGN KEY` constraints become keys and relationships.
 
 Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in your project folder:
@@ -138,6 +140,8 @@ In SQL Server Management Studio, right-click the database → **Tasks → Genera
 
 ## PostgreSQL
 
+There are two ways. **Recommended: `pg_dump`**, which keeps the most: `CHECK` constraints and identity columns come in too. Use the catalog query further down instead if you can run a query on the database but cannot run `pg_dump`.
+
 `pg_dump` writes the schema without the data. Run this in a terminal in your project folder (add `-n <schema>` for one schema):
 
 ```sh
@@ -209,6 +213,8 @@ psql -d <database> --csv -f catalog.sql -o catalog.csv
 Then run **ERD Studio: Import SQL DDL…** and pick `catalog.csv`. Partitions come in as their parent table. `CHECK` constraints and identity columns do not come in this way; `pg_dump` keeps them.
 
 ## MySQL and MariaDB
+
+There are two ways. **Recommended: `mysqldump`**, which keeps the most: `CHECK` constraints come in too. Use the catalog query further down instead if you can run a query on the database but cannot run `mysqldump`.
 
 `mysqldump` writes the tables without the data (MariaDB also calls it `mariadb-dump`). Add `-h`, `-u` and `-p` as you connect:
 

@@ -157,7 +157,7 @@ describe('the cards', () => {
     expect(
       [...p.doc.querySelectorAll('[data-card="databricks"] [data-action="run"], [data-card="snowflake"] [data-action="run"], [data-card="sqlServer"] [data-action="run"], [data-card="postgres"] [data-action="run"], [data-card="mysql"] [data-action="run"]')]
         .map((b) => b.textContent),
-    ).toEqual(['Import Databricks DDL…', 'Import the CSV…', 'Import Snowflake DDL…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import the CSV…', 'Import MySQL DDL…', 'Import the TSV…']);
+    ).toEqual(['Import the CSV…', 'Import Databricks DDL…', 'Import Snowflake DDL…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import the CSV…', 'Import MySQL DDL…', 'Import the TSV…']);
     // A catalog query's button runs its card's own action (the same import, the same telemetry key): no new key.
     for (const id of ['databricks', 'postgres', 'mysql']) {
       expect([...p.doc.querySelectorAll(`[data-card="${id}"] [data-action="run"]`)].map((b) => b.getAttribute('data-guide-action'))).toEqual([id, id]);
@@ -307,7 +307,7 @@ describe('the page', () => {
     const p = page(BLANK);
     p.click('[data-card="databricks"] [data-action="run"]');
     p.click('[data-card="databricks"] [data-action="copy"]');
-    expect(p.posted).toEqual([{ type: 'run', action: 'databricks' }, { type: 'copy', snippet: 'databricksSchema' }]);
+    expect(p.posted).toEqual([{ type: 'run', action: 'databricks' }, { type: 'copy', snippet: 'databricksCatalog' }]);
     expect(p.doc.querySelector('[data-card="databricks"] [data-action="copy"]')?.textContent).toBe('Copied');
     for (const message of p.posted) expect(isImportGuideToHost(message)).toBe(true);
   });
@@ -493,9 +493,9 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
   it('sits beside each card\'s own export, in a section of its own; the other cards are as they were', () => {
     const p = page(BLANK);
     const sections = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => s.querySelector('.ig-section__heading')?.textContent ?? '');
-    expect(sections('databricks')).toEqual(['CREATE TABLE statements, from a notebook', 'One query, downloaded as CSV']);
-    expect(sections('postgres')).toEqual(['pg_dump', 'One query, saved as CSV']);
-    expect(sections('mysql')).toEqual(['mysqldump', 'One query, saved as TSV']);
+    expect(sections('databricks')).toEqual(['One query, downloaded as CSV Recommended', 'CREATE TABLE statements, from a notebook']);
+    expect(sections('postgres')).toEqual(['pg_dump Recommended', 'One query, saved as CSV']);
+    expect(sections('mysql')).toEqual(['mysqldump Recommended', 'One query, saved as TSV']);
     for (const id of ['snowflake', 'sqlServer', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
     expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
     expect(p.text).not.toMatch(/DuckDB/);
@@ -523,7 +523,7 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     }
     // The catalog queries are the long ones; Snowflake's one line stays in view.
     expect(p.doc.querySelector('[data-snippet="databricksCatalog"]')?.parentElement?.querySelector('details')).not.toBeNull();
-    expect(p.doc.querySelector('[data-card="snowflake"] details')).toBeNull();
+    expect(p.doc.querySelector('[data-card="snowflake"] details.ig-snippet__fold')).toBeNull();
   });
 
   it('a long query line scrolls inside its box: the card (a grid item) and the snippet (a flex item) may shrink, so the page never widens past the view and Copy stays on screen', () => {
@@ -538,9 +538,52 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
   it('says honestly what each Databricks route lacks', () => {
     const notes = [...page(BLANK).doc.querySelectorAll('[data-card="databricks"] .ig-note')].map((n) => n.textContent);
     expect(notes).toEqual([
-      'Keeps column defaults and identity columns. A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.',
-      'No notebook and nothing to copy by hand. Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.',
+      'Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.',
+      'A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.',
     ]);
+  });
+
+  it('a card with two ways to one import says which to use and why, lists it first and gives it the main button; the other says when to use it instead', () => {
+    const p = page(BLANK);
+    const why = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => ({
+      badge: s.querySelector('.ig-badge')?.textContent ?? '',
+      why: s.querySelector('.ig-section__why')?.textContent ?? '',
+    }));
+    expect(why('databricks')).toEqual([
+      { badge: 'Recommended', why: 'One query and one download, with no notebook and nothing to copy by hand. Comments and column types come in exactly as the catalog holds them.' },
+      { badge: '', why: 'Use this instead if you need column defaults or identity columns: only CREATE TABLE statements carry them.' },
+    ]);
+    expect(why('postgres')).toEqual([
+      { badge: 'Recommended', why: 'Keeps the most: CHECK constraints and identity columns come in too.' },
+      { badge: '', why: 'Use this instead if you can run a query on the database but cannot run pg_dump.' },
+    ]);
+    expect(why('mysql')).toEqual([
+      { badge: 'Recommended', why: 'Keeps the most: CHECK constraints come in too.' },
+      { badge: '', why: 'Use this instead if you can run a query on the database but cannot run mysqldump.' },
+    ]);
+    // One recommendation at most, always first; a card whose sections are different sources (Fabric) recommends neither.
+    for (const card of p.doc.querySelectorAll('.ig-card')) {
+      const badges = [...card.querySelectorAll('.ig-section')].map((s) => s.querySelector('.ig-badge') !== null);
+      expect(badges.filter(Boolean).length, card.getAttribute('data-card') ?? '').toBeLessThanOrEqual(1);
+      expect(badges.indexOf(true), card.getAttribute('data-card') ?? '').toBeLessThanOrEqual(0);
+    }
+    expect(p.doc.querySelector('[data-card="fabric"] .ig-badge')).toBeNull();
+  });
+
+  it('every source is one line until it is opened, so the whole list is in view; only the folder\'s own suggestion starts open', () => {
+    const open = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-card')].map((c) => c.querySelector(':scope > details.ig-card__fold')!.hasAttribute('open'));
+    for (const ctx of [NOFOLDER, BLANK, DBT]) {
+      const p = page(ctx);
+      for (const card of p.doc.querySelectorAll('.ig-card')) {
+        const fold = card.querySelector(':scope > details.ig-card__fold');
+        expect(fold, card.getAttribute('data-card') ?? '').not.toBeNull();
+        // The summary is the title alone; everything else is inside the fold.
+        expect(fold!.querySelector(':scope > summary')?.textContent?.trim()).toBe(card.querySelector('.ig-card__title')?.textContent);
+        expect(card.querySelector('.ig-section')?.closest('details.ig-card__fold')).toBe(fold);
+      }
+    }
+    expect(open(BLANK).some(Boolean)).toBe(false);
+    expect(open(DBT)).toEqual(open(DBT).map((_, i) => i === 0));
   });
 
   it('the evidence: each query\'s real export imports, with its keys and relationships', () => {
