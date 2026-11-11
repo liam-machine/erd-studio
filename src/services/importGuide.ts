@@ -327,10 +327,11 @@ export interface ImportGuideStep {
 /**
  * A part of a card: its steps, any notes, and the button that imports what
  * they made. Steps are consecutive actions: one step shows on its own, never
- * as "1."; only two or more are numbered. An alternative or a fallback (a
- * whole database instead of a schema, an option Power BI hides) is a note,
- * shown quietly after the steps, never a numbered step. Getting the DDL out
- * is one step, at schema or database grain, never one table at a time.
+ * as "1.", with the button under it; two or more are numbered, and the import
+ * is the last number. An alternative or a fallback (a whole database instead
+ * of a schema, an option Power BI hides) is a note, shown quietly after the
+ * action, never a numbered step. Getting the DDL out is at schema or database
+ * grain, never one table at a time.
  */
 export interface ImportGuideSection {
   heading?: string;
@@ -339,11 +340,16 @@ export interface ImportGuideSection {
   action: ImportGuideAction;
   /**
    * Set on the one section of a card to use unless you have a reason not to,
-   * when the card offers two ways to the same import: why, in a sentence. It
-   * is listed first, badged "Recommended", and gets the card's main button.
+   * when the card offers two ways to the same import. It is listed first and
+   * is the only way an open card shows; the reason is said where the choice
+   * is made, on the other way's {@link useWhen} line.
    */
-  recommended?: string;
-  /** On the other way: when to use it instead ("Use this instead if…"). */
+  recommended?: true;
+  /**
+   * On the other way: the one line it folds behind, a need and what to use
+   * for it ("Need column defaults? Use a notebook instead."). Opening the
+   * line shows that way's steps.
+   */
   useWhen?: string;
   /**
    * The button's label when it is not the action's own: a second way into
@@ -483,9 +489,10 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'One query, downloaded as CSV',
-        recommended: 'One query and one download, with no notebook and nothing to copy by hand. Comments and column types come in exactly as the catalog holds them.',
+        recommended: true,
         steps: [
-          { text: 'Run this in the SQL editor with your catalog on its `WHERE` line, then download the whole result as CSV into this folder.', snippet: 'databricksCatalog' },
+          { text: 'Copy this query.', snippet: 'databricksCatalog' },
+          { text: 'Run it in the Databricks SQL editor with your catalog on its `WHERE` line, and download the whole result as CSV into this folder.' },
         ],
         notes: ['Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.'],
         action: 'databricks',
@@ -493,9 +500,10 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
       },
       {
         heading: 'CREATE TABLE statements, from a notebook',
-        useWhen: 'Use this instead if you need column defaults or identity columns: only CREATE TABLE statements carry them.',
+        useWhen: 'Need column defaults or identity columns? Use a notebook instead.',
         steps: [
-          { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
+          { text: 'Copy this notebook cell.', snippet: 'databricksSchema' },
+          { text: 'Run it in a Python notebook with your catalog and schema, and copy what it prints into `schema.sql` in this folder.' },
         ],
         notes: ['A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.'],
         action: 'databricks',
@@ -508,7 +516,8 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     what: 'Snowflake writes the DDL of a whole schema, or a whole database, in one call.',
     sections: [{
       steps: [
-        { text: 'Run this in a worksheet, and copy the result into a `.sql` file in this folder.', snippet: 'snowflakeSchema' },
+        { text: 'Copy this and run it in a worksheet.', snippet: 'snowflakeSchema' },
+        { text: 'Copy the result into a `.sql` file in this folder.' },
       ],
       notes: ["For a whole database: `SELECT GET_DDL('DATABASE', '<database>');`"],
       action: 'snowflake',
@@ -554,9 +563,10 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'One query, saved as CSV',
-        recommended: 'One query in VS Code on Windows, macOS or Linux (Generate Scripts needs SQL Server Management Studio, on Windows), and computed columns come in with their type.',
+        recommended: true,
         steps: [
-          { text: 'Run this on your database in VS Code with Microsoft\'s SQL Server (mssql) extension (Execute Query), then press Save as CSV beside the result and save the file in this folder.', snippet: 'sqlServerCatalog' },
+          { text: 'Copy this query.', snippet: 'sqlServerCatalog' },
+          { text: 'Run it on your database in VS Code with Microsoft\'s SQL Server (mssql) extension (Execute Query), then press Save as CSV beside the result and save the file in this folder.' },
         ],
         notes: ['CHECK constraints do not come in; Generate Scripts keeps them. A filtered unique index (one with a WHERE) is not a unique key, so it does not come in. Save the whole result: a part of it is refused, as is sqlcmd\'s output, which does not quote a comment with a comma or a line break in it.'],
         action: 'sqlServer',
@@ -564,7 +574,7 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
       },
       {
         heading: 'Generate Scripts, in SQL Server Management Studio',
-        useWhen: 'Use this instead if you need CHECK constraints: only a script carries them.',
+        useWhen: 'Need CHECK constraints, or already in SQL Server Management Studio? Use Generate Scripts instead.',
         steps: [
           { text: 'Right-click the database → Tasks → Generate Scripts…, choose the tables, and on Set Scripting Options save to one file in this folder. Schema only is the default (Advanced → Types of data to script).' },
         ],
@@ -580,13 +590,13 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'pg_dump',
-        recommended: 'Keeps the most: CHECK constraints and identity columns come in too.',
+        recommended: true,
         steps: [{ text: 'Run this in a terminal in this folder (add `-n <schema>` for one schema):', snippet: 'postgres' }],
         action: 'postgres',
       },
       {
         heading: 'One query, saved as CSV',
-        useWhen: 'Use this instead if you can run a query on the database but cannot run pg_dump.',
+        useWhen: 'Can\'t run pg_dump? Use one query instead.',
         steps: [
           { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'postgresCatalog' },
           { text: 'Run it with psql (PostgreSQL 12 or later), which writes the CSV:', snippet: 'postgresCatalogRun' },
@@ -604,13 +614,13 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
     sections: [
       {
         heading: 'mysqldump',
-        recommended: 'Keeps the most: CHECK constraints come in too.',
+        recommended: true,
         steps: [{ text: 'Run this in a terminal in this folder:', snippet: 'mysql' }],
         action: 'mysql',
       },
       {
         heading: 'One query, saved as TSV',
-        useWhen: 'Use this instead if you can run a query on the database but cannot run mysqldump.',
+        useWhen: 'Can\'t run mysqldump? Use one query instead.',
         steps: [
           { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'mysqlCatalog' },
           { text: 'Run it with the mysql client (MySQL 8, or MariaDB 10.2 or later), which writes the result tab-separated:', snippet: 'mysqlCatalogRun' },
@@ -796,16 +806,17 @@ body {
 .ig-section { margin: 0 0 10px; }
 .ig-section:last-child { margin-bottom: 0; }
 .ig-section__heading { margin: 0 0 6px; font-weight: 600; }
-/* Two ways to one import: a rule between them, and the one to use says so and why. */
+/* Two parts of a card: a rule between them. The other way to the same import is one line until it is opened. */
 .ig-section + .ig-section { padding-top: 10px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
-.ig-badge {
-  margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 0.85em; font-weight: 600; vertical-align: 1px;
-  color: var(--vscode-badge-foreground); background: var(--vscode-badge-background);
-}
-.ig-section__why { margin: 0 0 8px; line-height: 1.5; }
+.ig-alt__summary { cursor: pointer; color: var(--vscode-textLink-foreground); }
+.ig-alt__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.ig-alt[open] > .ig-alt__summary { margin-bottom: 8px; }
 .ig-steps { margin: 0 0 10px; padding: 0 0 0 20px; }
 .ig-step { margin: 0 0 8px; line-height: 1.5; }
 .ig-step--only { margin: 0 0 10px; }
+.ig-step--import .ig-btn { margin-left: 6px; }
+.ig-btn + .ig-note { margin-top: 10px; }
+
 .ig-note { margin: 0 0 10px; line-height: 1.5; font-size: 0.95em; color: var(--vscode-descriptionForeground); }
 .ig-code {
   font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
@@ -876,11 +887,20 @@ function renderSnippet(step: ImportGuideStep): string {
     `<button class="ig-btn ig-btn--secondary ig-btn--copy" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`;
 }
 
-/** One step stands on its own (no "1."); only consecutive steps are a numbered list. Notes follow, quietly. */
-function renderSteps(section: ImportGuideSection): string {
+/** The last numbered step of a way with several: the import itself, so the button is where the reading ends. */
+export const IMPORT_GUIDE_IMPORT_STEP = 'Import the file.';
+
+/**
+ * A way in, top to bottom in the order it is done. One step stands on its own
+ * (no "1."), with the button under it; two or more are numbered, and the
+ * import is the last number, so the list is the whole job. Notes (what does
+ * not come in, a fallback) follow, quietly, after the action.
+ */
+function renderSteps(section: ImportGuideSection, button: string): string {
   const steps = section.steps.length === 1
-    ? `<div class="ig-step ig-step--only">${inline(section.steps[0].text)}${renderSnippet(section.steps[0])}</div>`
-    : `<ol class="ig-steps">${section.steps.map((step) => `<li class="ig-step">${inline(step.text)}${renderSnippet(step)}</li>`).join('')}</ol>`;
+    ? `<div class="ig-step ig-step--only">${inline(section.steps[0].text)}${renderSnippet(section.steps[0])}</div>${button}`
+    : `<ol class="ig-steps">${section.steps.map((step) => `<li class="ig-step">${inline(step.text)}${renderSnippet(step)}</li>`).join('')}` +
+      `<li class="ig-step ig-step--import">${escapeHtml(IMPORT_GUIDE_IMPORT_STEP)} ${button}</li></ol>`;
   const notes = (section.notes ?? []).map((note) => `<p class="ig-note">${inline(note)}</p>`).join('');
   return steps + notes;
 }
@@ -896,30 +916,46 @@ function renderLogo(id: ImportGuideCardId): string {
   return src ? `<img class="ig-card__logo" alt="" src="${src}">` : '<span class="ig-card__logo"></span>';
 }
 
+/**
+ * An open card shows one way in and one main button. Where a source has two
+ * ways to the same import, the recommended one is the card and the other
+ * folds behind the line that says when to use it; its button is a quiet one.
+ * A card whose sections are different sources (Fabric) shows each, headed.
+ * The opening sentence is left out where the steps already say it (a card
+ * with a recommended way).
+ */
 function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | undefined): string {
-  // A card with two ways to one import names the one to use: only that way's button is the card's main one.
   const hasRecommended = card.sections.some((section) => section.recommended);
-  const sections = card.sections.map((section) => `
-      <div class="ig-section${section.recommended ? ' ig-section--recommended' : ''}">${section.heading ? `
-        <h3 class="ig-section__heading">${escapeHtml(section.heading)}${section.recommended ? ' <span class="ig-badge">Recommended</span>' : ''}</h3>` : ''}${section.recommended ? `
-        <p class="ig-section__why">${inline(section.recommended)}</p>` : ''}${section.useWhen ? `
-        <p class="ig-section__why">${inline(section.useWhen)}</p>` : ''}
-        ${renderSteps(section)}
-        <button class="ig-btn${lead && (!hasRecommended || section.recommended) ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>
-      </div>`).join('');
+  const sections = card.sections.map((section) => {
+    const button = `<button class="ig-btn${section.useWhen ? ' ig-btn--secondary' : ''}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>`;
+    const body = renderSteps(section, button);
+    if (section.useWhen) {
+      return `
+      <details class="ig-section ig-alt">
+        <summary class="ig-alt__summary">${inline(section.useWhen)}</summary>
+        ${body}
+      </details>`;
+    }
+    return `
+      <div class="ig-section">${section.heading && !hasRecommended ? `
+        <h3 class="ig-section__heading">${escapeHtml(section.heading)}</h3>` : ''}
+        ${body}
+      </div>`;
+  }).join('');
   return `
     <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
       <details class="ig-card__fold"${lead ? ' open' : ''}>
-        <summary class="ig-card__summary">${renderLogo(card.id)}<h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>
-        <p class="ig-card__what">${inline(card.what)}</p>${sections}
+        <summary class="ig-card__summary">${renderLogo(card.id)}<h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>${hasRecommended ? '' : `
+        <p class="ig-card__what">${inline(card.what)}</p>`}${sections}
       </details>
     </li>`;
 }
 
 /**
  * The page: the intro, an open-a-folder line when none is open, then the
- * cards in {@link importGuideCards} order. Only the first card's button is a
- * primary button, and only when the folder suggested it (one primary button).
+ * cards in {@link importGuideCards} order, each folded to its name. An open
+ * card has one main button per way it shows; the other way's button, and
+ * every Copy, is a quiet one.
  */
 export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): string {
   const n = escapeHtml(nonce);

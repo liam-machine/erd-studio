@@ -41,6 +41,7 @@ import {
   isImportGuideToHost,
   parseImportGuideArgs,
   type ImportGuideContext,
+  IMPORT_GUIDE_IMPORT_STEP,
 } from '../../src/services/importGuide';
 import { SQL_DIALECTS, convertSqlDdl, detectSqlDialect, type SqlDdlFile } from '../../src/services/sqlDdlImport';
 import { dbmlCoreSqlEngine, readsAsDbml } from '../../src/services/sqlImportEngine';
@@ -107,8 +108,8 @@ describe('the cards', () => {
       const found = p.doc.querySelector('[data-card="found"]')!;
       expect(found.querySelector('.ig-card__what')?.textContent).toBe(reason);
       expect(found.querySelector('button')?.textContent).toBe(label);
-      // Its button is the page's one primary button.
-      expect([...p.doc.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')].map((b) => b.textContent)).toEqual([label]);
+      // Its card is the one that starts open, so its button is the one main button in view.
+      expect([...p.doc.querySelectorAll('.ig-card__fold[open] .ig-btn:not(.ig-btn--secondary)')].map((b) => b.textContent)).toEqual([label]);
       const command = importGuideActionCommand('found', intent)!;
       expect([command.command, ...command.args]).toEqual(run);
     }
@@ -117,18 +118,34 @@ describe('the cards', () => {
     expect(importGuideActionCommand('found', undefined)).toBeUndefined();
   });
 
-  it('has one primary button at most: the suggestion\'s, or Open Folder… in an empty window; none otherwise', () => {
-    const primaries = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')].map((b) => b.textContent);
-    expect(primaries(BLANK)).toEqual([]);
-    expect(primaries(DBT)).toEqual(['Import from dbt']);
-    expect(primaries(NOFOLDER)).toEqual(['Open Folder…']);
+  it('has one main button in view when it opens (the suggestion\'s, or Open Folder… in an empty window); an opened card has one per way it shows, and the other way\'s button and every Copy are quiet', () => {
+    const inView = (ctx: ImportGuideContext) => {
+      const doc = page(ctx).doc;
+      return [...doc.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')].filter((b) => !b.closest('.ig-card__fold:not([open])')).map((b) => b.textContent);
+    };
+    expect(inView(BLANK)).toEqual([]);
+    expect(inView(DBT)).toEqual(['Import from dbt']);
+    expect(inView(NOFOLDER)).toEqual(['Open Folder…']);
+    const p = page(BLANK);
+    for (const card of p.doc.querySelectorAll('.ig-card')) {
+      const id = card.getAttribute('data-card') ?? '';
+      for (const section of card.querySelectorAll('.ig-section')) {
+        const main = [...section.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')];
+        // The way an open card shows has exactly one main button, its import; the folded other way has none.
+        expect(main.length, id).toBe(section.classList.contains('ig-alt') ? 0 : 1);
+        for (const b of main) expect(b.getAttribute('data-action'), id).toBe('run');
+      }
+      for (const copy of card.querySelectorAll('[data-action="copy"]')) expect(copy.classList.contains('ig-btn--secondary'), id).toBe(true);
+    }
   });
 
   it('every card says what to export and has a button; every SQL card names its dialect and runs Import SQL DDL… with it', () => {
     const p = page(DBT);
     for (const card of p.doc.querySelectorAll('[data-card]')) {
       expect(card.querySelector('.ig-card__title')?.textContent?.length).toBeGreaterThan(0);
-      expect(card.querySelector('.ig-card__what')?.textContent?.length).toBeGreaterThan(10);
+      // A card with two ways in starts straight at the steps of the one to use; every other card says what to export first.
+      if (card.querySelector('.ig-alt')) expect(card.querySelector('.ig-card__what')).toBeNull();
+      else expect(card.querySelector('.ig-card__what')?.textContent?.length).toBeGreaterThan(10);
       expect(card.querySelectorAll('[data-action="run"]').length).toBeGreaterThan(0);
     }
     const run = (action: (typeof IMPORT_GUIDE_ACTIONS)[number]) => {
@@ -183,14 +200,34 @@ describe('the cards', () => {
 describe('getting the DDL out', () => {
   const SOURCES = ['databricks', 'snowflake', 'powerBi', 'sqlServer', 'postgres', 'mysql'] as const;
 
-  it('is one step per source, shown on its own (never "1."), with no numbered list of alternatives', () => {
+  it('reads top to bottom as the job: a lone step stands on its own with the button under it; several are numbered and end with the import', () => {
     const p = page(BLANK);
-    for (const id of SOURCES) {
-      // The DDL (or model) section; a catalog query is a section of its own after it.
+    const shape = (id: string) => {
       const section = p.doc.querySelector(`[data-card="${id}"] .ig-section`)!;
-      expect(section.querySelectorAll('.ig-step'), id).toHaveLength(1);
-      expect(section.querySelector('.ig-step--only'), id).not.toBeNull();
-      expect(section.querySelector('ol, li'), id).toBeNull();
+      return [...section.querySelectorAll('.ig-step')].map((s) => (s.classList.contains('ig-step--only') ? 'only' : s.classList.contains('ig-step--import') ? 'import' : 'step'));
+    };
+    // Copy it, run it and save the result, import it.
+    for (const id of ['databricks', 'snowflake', 'sqlServer']) expect(shape(id), id).toEqual(['step', 'step', 'import']);
+    // One thing to do, then the button.
+    for (const id of ['powerBi', 'postgres', 'mysql', 'dbml', 'otherTools']) expect(shape(id), id).toEqual(['only']);
+    for (const ctx of [NOFOLDER, BLANK, DBT]) {
+      for (const section of page(ctx).doc.querySelectorAll('.ig-section')) {
+        const list = section.querySelector('.ig-steps');
+        const runs = section.querySelectorAll('[data-action="run"]');
+        expect(runs.length).toBe(1);
+        if (list) {
+          // The import is the last number, with the section's one button in it.
+          const last = list.querySelector(':scope > li:last-child')!;
+          expect(last.classList.contains('ig-step--import')).toBe(true);
+          expect(last.textContent).toContain(IMPORT_GUIDE_IMPORT_STEP);
+          expect(last.querySelector('[data-action="run"]')).toBe(runs[0]);
+        } else {
+          // Under its one step, before any note.
+          expect(runs[0].previousElementSibling?.classList.contains('ig-step--only')).toBe(true);
+        }
+        // What does not come in, or a fallback, is said after the action, never before it.
+        for (const note of section.querySelectorAll('.ig-note')) expect(runs[0].compareDocumentPosition(note) & 4).toBe(4);
+      }
     }
     // No card in any window numbers a lone step, and none lists alternatives as steps.
     for (const ctx of [NOFOLDER, BLANK, DBT]) {
@@ -497,11 +534,12 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
 
   it('sits beside each card\'s own export, in a section of its own; the other cards are as they were', () => {
     const p = page(BLANK);
-    const sections = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => s.querySelector('.ig-section__heading')?.textContent ?? '');
-    expect(sections('databricks')).toEqual(['One query, downloaded as CSV Recommended', 'CREATE TABLE statements, from a notebook']);
-    expect(sections('postgres')).toEqual(['pg_dump Recommended', 'One query, saved as CSV']);
-    expect(sections('mysql')).toEqual(['mysqldump Recommended', 'One query, saved as TSV']);
-    expect(sections('sqlServer')).toEqual(['One query, saved as CSV Recommended', 'Generate Scripts, in SQL Server Management Studio']);
+    // A section is headed only where a card's sections are different sources (Fabric); the other way to one import is its fold's line.
+    const sections = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => s.querySelector('.ig-section__heading, .ig-alt__summary')?.textContent ?? '');
+    expect(sections('databricks')).toEqual(['', 'Need column defaults or identity columns? Use a notebook instead.']);
+    expect(sections('postgres')).toEqual(['', 'Can\'t run pg_dump? Use one query instead.']);
+    expect(sections('mysql')).toEqual(['', 'Can\'t run mysqldump? Use one query instead.']);
+    expect(sections('sqlServer')).toEqual(['', 'Need CHECK constraints, or already in SQL Server Management Studio? Use Generate Scripts instead.']);
     for (const id of ['snowflake', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
     expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
     expect(p.text).not.toMatch(/DuckDB/);
@@ -557,37 +595,30 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
     ]);
   });
 
-  it('a card with two ways to one import says which to use and why, lists it first and gives it the main button; the other says when to use it instead', () => {
+  it('a card with two ways to one import shows the one to use; the other is one line, saying when to use it, until it is opened', () => {
     const p = page(BLANK);
-    const why = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => ({
-      badge: s.querySelector('.ig-badge')?.textContent ?? '',
-      why: s.querySelector('.ig-section__why')?.textContent ?? '',
-    }));
-    expect(why('databricks')).toEqual([
-      { badge: 'Recommended', why: 'One query and one download, with no notebook and nothing to copy by hand. Comments and column types come in exactly as the catalog holds them.' },
-      { badge: '', why: 'Use this instead if you need column defaults or identity columns: only CREATE TABLE statements carry them.' },
-    ]);
-    expect(why('postgres')).toEqual([
-      { badge: 'Recommended', why: 'Keeps the most: CHECK constraints and identity columns come in too.' },
-      { badge: '', why: 'Use this instead if you can run a query on the database but cannot run pg_dump.' },
-    ]);
-    expect(why('mysql')).toEqual([
-      { badge: 'Recommended', why: 'Keeps the most: CHECK constraints come in too.' },
-      { badge: '', why: 'Use this instead if you can run a query on the database but cannot run mysqldump.' },
-    ]);
-    // SQL Server: the query, because it runs in VS Code anywhere and keeps a computed column's type (sqlserver/probe.csv
-    // against the SMO script of the same database, catalogCsvImport.sqlserver.test.ts); the script keeps CHECK constraints.
-    expect(why('sqlServer')).toEqual([
-      { badge: 'Recommended', why: 'One query in VS Code on Windows, macOS or Linux (Generate Scripts needs SQL Server Management Studio, on Windows), and computed columns come in with their type.' },
-      { badge: '', why: 'Use this instead if you need CHECK constraints: only a script carries them.' },
-    ]);
-    // One recommendation at most, always first; a card whose sections are different sources (Fabric) recommends neither.
+    const cardsWithTwo = ['databricks', 'sqlServer', 'postgres', 'mysql'];
     for (const card of p.doc.querySelectorAll('.ig-card')) {
-      const badges = [...card.querySelectorAll('.ig-section')].map((s) => s.querySelector('.ig-badge') !== null);
-      expect(badges.filter(Boolean).length, card.getAttribute('data-card') ?? '').toBeLessThanOrEqual(1);
-      expect(badges.indexOf(true), card.getAttribute('data-card') ?? '').toBeLessThanOrEqual(0);
+      const id = card.getAttribute('data-card') ?? '';
+      const sections = [...card.querySelectorAll('.ig-section')];
+      const alts = sections.filter((s) => s.classList.contains('ig-alt'));
+      expect(alts.length, id).toBe(cardsWithTwo.includes(id) ? 1 : 0);
+      for (const alt of alts) {
+        // After the way to use, folded, its whole body (steps, button, notes) inside the fold.
+        expect(sections.indexOf(alt), id).toBe(1);
+        expect(alt.tagName, id).toBe('DETAILS');
+        expect(alt.hasAttribute('open'), id).toBe(false);
+        expect(alt.querySelector(':scope > summary')?.textContent, id).toMatch(/\? Use .+ instead\.$/);
+        expect(alt.querySelectorAll('[data-action="run"]').length, id).toBe(1);
+      }
     }
-    expect(p.doc.querySelector('[data-card="fabric"] .ig-badge')).toBeNull();
+    // Which way each card shows: the catalog query where it was run and is the easier route (Databricks: your live
+    // export; SQL Server: sqlserver/probe.csv against the SMO script of the same database), the dump where it keeps more.
+    const shown = (id: string) => p.doc.querySelector(`[data-card="${id}"] .ig-section:not(.ig-alt) [data-action="run"]`)?.textContent;
+    expect(cardsWithTwo.map(shown)).toEqual(['Import the CSV…', 'Import the CSV…', 'Import PostgreSQL DDL…', 'Import MySQL DDL…']);
+    // Fabric's two sections are different sources: both show, headed, and neither folds.
+    expect(p.doc.querySelectorAll('[data-card="fabric"] .ig-section__heading').length).toBe(2);
+    expect(p.text).not.toMatch(/Recommended/);
   });
 
   it('each source that has a mark shows it beside its name, as a built-in image: the file unchanged, never fetched, never inline SVG', async () => {
