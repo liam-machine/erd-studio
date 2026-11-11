@@ -46,7 +46,7 @@
 import * as vscode from 'vscode';
 
 import { getErdStudioSetting } from './configService';
-import { GITHUB_REPO, hostErrorLog } from './feedbackService';
+import { GITHUB_REPO, hostErrorLog, openFixedLink } from './feedbackService';
 import {
   FEEDBACK_AI_PROVIDER_CHOICES,
   isFeedbackAiProviderChoice,
@@ -1237,7 +1237,7 @@ function showSecretStorageFailure(action: 'save' | 'clear'): void {
   showErrorWithActions(
     (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     secretStorageFailedMessage(action),
-    { [LEARN_MORE_BUTTON]: () => vscode.env.openExternal(vscode.Uri.parse(SECRET_STORAGE_HELP_URL)) },
+    { [LEARN_MORE_BUTTON]: () => openFixedLink(SECRET_STORAGE_HELP_URL) },
     (choice, err) => hostErrorLog.record(`feedbackApiKey.${choice}`, err),
   );
 }

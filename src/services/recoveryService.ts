@@ -93,5 +93,6 @@ export function unsavedFileNames(docs: readonly vscode.TextDocument[]): string[]
   const base = (d: vscode.TextDocument) => path.basename(d.uri.fsPath || d.uri.path);
   const counts = new Map<string, number>();
   for (const d of docs) counts.set(base(d), (counts.get(base(d)) ?? 0) + 1);
-  return docs.map(d => ((counts.get(base(d)) ?? 0) > 1 ? vscode.workspace.asRelativePath(d.uri, true) : base(d)));
+  // No `includeWorkspaceFolder`: VS Code's default adds the folder's name only in a multi-root workspace.
+  return docs.map(d => ((counts.get(base(d)) ?? 0) > 1 ? vscode.workspace.asRelativePath(d.uri) : base(d)));
 }

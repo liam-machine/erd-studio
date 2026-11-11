@@ -49,6 +49,11 @@ export function reportNotOpenedMessage(copied: boolean): string {
 /** VS Code could not open the browser for a new issue. */
 export const BROWSER_NOT_OPENED_MESSAGE = "ERD Studio couldn't open your browser.";
 
+/** A button's fixed page did not open: its address, to open by hand (never a prefilled link, which is too long to print). */
+export function linkNotOpenedMessage(url: string): string {
+  return `${BROWSER_NOT_OPENED_MESSAGE} The page is ${url}`;
+}
+
 /** VS Code could not open the browser for a comment; the report is already on the clipboard. */
 export function commentBrowserNotOpenedMessage(issue: number): string {
   return `${BROWSER_NOT_OPENED_MESSAGE} Your report is on the clipboard: paste it as a comment on #${issue}.`;

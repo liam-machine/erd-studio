@@ -69,7 +69,7 @@ import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, conve
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
-import { submitFeedback } from './services/feedbackService';
+import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
@@ -1157,7 +1157,7 @@ async function sendFeedbackWithoutCanvas(
       (message, ...items) => vscode.window.showErrorMessage(message, ...items),
       reportNotOpenedMessage(copied),
       {
-        [OPEN_GITHUB_ISSUES_BUTTON]: () => vscode.env.openExternal(vscode.Uri.parse(GITHUB_NEW_ISSUE_URL)),
+        [OPEN_GITHUB_ISSUES_BUTTON]: () => openFixedLink(GITHUB_NEW_ISSUE_URL),
         [TRY_AGAIN_BUTTON]: () => sendFeedbackWithoutCanvas(context, { kind, title, description }, tracking),
       },
       (choice, err) => log.error(`[ERD Studio] Send Feedback: "${choice}" failed:`, err),

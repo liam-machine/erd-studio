@@ -111,6 +111,22 @@ describe('row 1: palette Send Feedback, submit fails', () => {
     expect(clipboard).toBe('');
   });
 
+  it('Open GitHub Issues says where the page is when the browser will not open either', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue('Report a bug' as never);
+    vi.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce('T').mockResolvedValueOnce('D');
+    // The report's link throws; the button's plain link then resolves false.
+    vi.spyOn(vscode.env, 'openExternal').mockRejectedValueOnce(new Error('boom')).mockResolvedValue(false);
+    vi.mocked(vscode.window.showErrorMessage).mockResolvedValueOnce('Open GitHub Issues' as never);
+    errorCalls().length = 0;
+
+    await vscode.commands.executeCommand('erdStudio.reportBug');
+
+    await vi.waitFor(() => expect(errorCalls().map(([m]) => String(m))).toContain(
+      "ERD Studio couldn't open your browser. The page is https://github.com/liam-machine/erd-studio/issues/new",
+    ));
+  });
+
   it('Try Again asks again, with what the user typed already filled in', async () => {
     await activate(context);
     vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue('Report a bug' as never);
@@ -210,6 +226,17 @@ describe('row 5: secret storage unavailable', () => {
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     expect(String(open.mock.calls[0][0])).toMatch(/^https:\/\/code\.visualstudio\.com\/docs\//);
   });
+
+  it('Learn More says where the page is when the browser will not open', async () => {
+    const c = ctx();
+    vi.spyOn(c.secrets, 'delete').mockRejectedValue(new Error('No keyring'));
+    vi.mocked(vscode.window.showErrorMessage).mockResolvedValueOnce('Learn More' as never);
+    vi.spyOn(vscode.env, 'openExternal').mockRejectedValue(new Error('spawn xdg-open ENOENT'));
+    await clearFeedbackApiKey(c);
+    await vi.waitFor(() => expect(errorCalls()).toHaveLength(2));
+    expect(String(errorCalls()[1][0])).toMatch(/^ERD Studio couldn't open your browser\. The page is https:\/\/code\.visualstudio\.com\/docs\//);
+    expect(errorCalls().flat().join(' ')).not.toContain('ENOENT');
+  });
 });
 
 describe('row 6: reload with unsaveable files', () => {
@@ -251,6 +278,18 @@ describe('row 6: reload with unsaveable files', () => {
     await saveAllAndReload('test');
     expect(String(vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0]))
       .toMatch(/^staging\/schema\.yml and marts\/schema\.yml couldn't be saved/);
+    vscode.workspace.workspaceFolders = [];
+  });
+
+  it('adds the folder name only in a multi-root workspace', async () => {
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: '/w/shop' }, name: 'shop' }, { uri: { fsPath: '/w/billing' }, name: 'billing' }];
+    const doc = (p: string) => ({ isDirty: true, isUntitled: false, uri: vscode.Uri.file(p) });
+    (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments =
+      [doc('/w/shop/models/schema.yml'), doc('/w/billing/models/schema.yml')];
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    await saveAllAndReload('test');
+    expect(String(vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0]))
+      .toMatch(/^shop\/models\/schema\.yml and billing\/models\/schema\.yml couldn't be saved/);
     vscode.workspace.workspaceFolders = [];
   });
 

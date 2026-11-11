@@ -38,6 +38,7 @@ import {
   COPY_LINK_INSTEAD_BUTTON,
   COPY_REPORT_BUTTON,
   commentBrowserNotOpenedMessage,
+  linkNotOpenedMessage,
   reportNotOpenedMessage,
   showErrorWithActions,
 } from './commandErrors';
@@ -536,7 +537,7 @@ export async function submitFeedback(
       // Markdown report that pastes into any tracker, rather than print it.
       showFeedbackError(BROWSER_NOT_OPENED_MESSAGE, {
         [COPY_LINK_BUTTON]: () => copyToClipboard(url, 'ERD Studio: the link is on your clipboard.'),
-        [COPY_REPORT_BUTTON]: () => copyToClipboard(composeMarkdownReport(draft, diagnostics), 'ERD Studio: the report is on your clipboard.'),
+        [COPY_REPORT_BUTTON]: () => copyToClipboard(composeMarkdownReport(draft, diagnostics), REPORT_COPIED_NOTICE),
       });
       return { ok: false, error: BROWSER_NOT_OPENED_MESSAGE, failure: 'browser' };
     }
@@ -572,9 +573,27 @@ function showFeedbackError(message: string, actions: Record<string, () => unknow
   );
 }
 
+/** Said wherever the Markdown report lands on the clipboard (the dialog's Copy report, the toast's Copy Report). */
+const REPORT_COPIED_NOTICE = 'ERD Studio: the report is on your clipboard.';
+
 async function copyToClipboard(text: string, notice: string): Promise<void> {
   await vscode.env.clipboard.writeText(text);
   void vscode.window.showInformationMessage(notice);
+}
+
+/**
+ * Open one of ERD Studio's fixed pages from an error's button. A browser that
+ * will not open (VS Code resolves `false`, or throws) is said, with the
+ * address to open by hand, so the button never seems to do nothing (#285).
+ */
+export async function openFixedLink(url: string): Promise<void> {
+  let opened = false;
+  try {
+    opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+  } catch (err) {
+    hostErrorLog.record('openFixedLink', err);
+  }
+  if (!opened) void vscode.window.showErrorMessage(linkNotOpenedMessage(url));
 }
 
 /**
@@ -591,8 +610,7 @@ export async function copyFeedbackReport(
   const diagnostics = draft.includeDiagnostics
     ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
     : null;
-  await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
-  void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');
+  await copyToClipboard(composeMarkdownReport(draft, diagnostics), REPORT_COPIED_NOTICE);
 }
 
 /** Collect diagnostics and package them for the dialog (chips + exact text). */

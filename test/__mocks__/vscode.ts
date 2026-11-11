@@ -152,12 +152,20 @@ export const workspace = {
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
   textDocuments: [] as unknown[],
-  /** The path relative to the first workspace folder that holds it, else the path itself. */
-  asRelativePath(pathOrUri: string | { fsPath: string }): string {
+  /**
+   * The path relative to the first workspace folder that holds it, else the
+   * path itself. As in VS Code, the folder's name is prepended when
+   * `includeWorkspaceFolder` is true, which is the default only in a
+   * multi-root workspace.
+   */
+  asRelativePath(pathOrUri: string | { fsPath: string }, includeWorkspaceFolder?: boolean): string {
     const p = typeof pathOrUri === 'string' ? pathOrUri : pathOrUri.fsPath;
+    const withFolder = includeWorkspaceFolder ?? workspace.workspaceFolders.length > 1;
     for (const folder of workspace.workspaceFolders) {
       const root = folder.uri.fsPath.replace(/\/+$/, '');
-      if (p.startsWith(`${root}/`)) return p.slice(root.length + 1);
+      if (!p.startsWith(`${root}/`)) continue;
+      const relative = p.slice(root.length + 1);
+      return withFolder ? `${folder.name ?? root.slice(root.lastIndexOf('/') + 1)}/${relative}` : relative;
     }
     return p;
   },
