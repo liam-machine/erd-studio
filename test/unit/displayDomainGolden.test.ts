@@ -144,6 +144,10 @@ const EXPECTED_FILES = [
   'same-name-two-schemas.ccc.display.json',
   'same-name-two-schemas.kunden.display.json',
   'same-name-two-schemas.kunden-bare.display.json',
+  // Its kunden diagram (both tables of each name) exported; owned by packages/core/test/unit/exportSameName.test.ts.
+  'same-name-two-schemas.kunden.dbml',
+  'same-name-two-schemas.kunden.mmd',
+  'same-name-two-schemas.kunden.rich.dbml',
 ].sort();
 
 /**

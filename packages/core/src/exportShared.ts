@@ -79,7 +79,16 @@ export interface ExportColumn {
 }
 
 export interface ExportTable {
+  /**
+   * What the diagram calls the table (`DisplayTable.name`), unique within it:
+   * what relationship ends, positions and sticky-note links name. For two
+   * tables of one name from different schema folders this is
+   * `<schema>.<name>`, never the name a DBML `Table` line declares (see
+   * {@link declaredName}).
+   */
   name: string;
+  /** The table's own name: `DisplayTable.tableName`, else {@link name} (always from an older core). */
+  tableName: string;
   /** Empty when the model names no schema. */
   schema: string;
   alias?: string;
@@ -181,8 +190,10 @@ function readColumn(raw: Record<string, unknown>, name: string): ExportColumn {
 }
 
 function readTable(raw: Record<string, unknown>, name: string): ExportTable {
+  const own = text(raw.tableName);
   const model: ExportTable = {
     name,
+    tableName: own.trim() ? own : name,
     schema: text(raw.schema).trim(),
     description: text(raw.description),
     rationale: [],
@@ -227,6 +238,18 @@ function readTable(raw: Record<string, unknown>, name: string): ExportTable {
     model.columns.push(readColumn(col, colName));
   });
   return model;
+}
+
+/**
+ * The name a DBML `Table` line declares for `model`, after its schema: the
+ * table's own name when it has a schema (`Table bqs.addresse` and `Table
+ * ccc.addresse` for two tables of one name from different schema folders),
+ * else what the diagram calls it, the only name that is unique without a
+ * schema. Equal to `model.name` for every table whose name no other table on
+ * the diagram shares, so no export of such a diagram changes.
+ */
+export function declaredName(model: ExportTable): string {
+  return model.schema ? model.tableName : model.name;
 }
 
 /** How a link reads in a comment: `a.x -> b.y`, or `a.(x, y) -> b.(u, v)` for a composite. */
@@ -407,6 +430,9 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
       modelItems.push({ kind: 'skipped', text: `table ${index + 1} has no name` });
       return;
     }
+    // A repeat is the same diagram name twice (what an older core gives a
+    // diagram with two same-named tables); two tables of one name from
+    // different schema folders have different diagram names.
     if (seen.has(lower(name))) {
       modelItems.push({ kind: 'skipped', text: `${oneLine(name)} is listed more than once; exported once` });
       return;

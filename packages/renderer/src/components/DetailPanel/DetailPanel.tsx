@@ -204,6 +204,16 @@ export function DetailPanel() {
     el?.focus({ preventScroll: true });
   }, [selectedNode, setDetailPanelOpen, flowStore]);
 
+  // The selected table's own name: what the rename box starts from and
+  // compares with. For one of two same-named tables from different schema
+  // folders the selection is `<schema>.<name>` and this is `<name>`; the
+  // host is still told the selection (`oldName`), which names the table.
+  const selectedTableName = useMemo(() => {
+    if (!selectedNode) return null;
+    const selected = domain?.models.find((m) => m.name === selectedNode);
+    return selected?.tableName ?? selectedNode;
+  }, [domain, selectedNode]);
+
   const validateModelName = useCallback(
     (value: string): string => {
       const trimmed = value.trim();
@@ -214,31 +224,32 @@ export function DetailPanel() {
       // Names are compared without case: `DimDate` and `dimdate` are one file
       // on macOS/Windows and one table in dbt.
       const same = (name: string) => name.toLowerCase() === trimmed.toLowerCase();
-      if (selectedNode && trimmed !== selectedNode && same(selectedNode)) {
+      if (selectedTableName && trimmed !== selectedTableName && same(selectedTableName)) {
         return 'Only the upper/lower case differs — rename to another name first';
       }
-      if (domain && trimmed !== selectedNode && domain.models.some((m) => same(m.name))) {
+      // Each table's own name: two same-named tables are named `<schema>.<name>` on the diagram.
+      if (domain && trimmed !== selectedTableName && domain.models.some((m) => same(m.tableName ?? m.name))) {
         return 'A table with this name already exists';
       }
       // logical-models/ is shared across domains — renaming onto an existing
       // library model would overwrite a file another domain depends on.
       if (
-        trimmed !== selectedNode &&
+        trimmed !== selectedTableName &&
         existingModels.some((m) => m.source === 'logical' && same(m.name))
       ) {
         return 'A table with this name already exists in the Table Library';
       }
       return '';
     },
-    [domain, selectedNode, existingModels],
+    [domain, selectedTableName, existingModels],
   );
 
   const handleStartRename = useCallback(() => {
-    if (!selectedNode) return;
-    setNameValue(selectedNode);
+    if (!selectedNode || !selectedTableName) return;
+    setNameValue(selectedTableName);
     setNameError('');
     setEditingName(true);
-  }, [selectedNode]);
+  }, [selectedNode, selectedTableName]);
 
   const handleCancelRename = useCallback(() => {
     setEditingName(false);
@@ -257,7 +268,7 @@ export function DetailPanel() {
   const handleSubmitRename = useCallback(() => {
     if (!selectedNode) return;
     const trimmed = nameValue.trim();
-    if (!trimmed || trimmed === selectedNode) {
+    if (!trimmed || trimmed === selectedTableName) {
       setEditingName(false);
       setNameError('');
       return;
@@ -274,7 +285,7 @@ export function DetailPanel() {
     selectNode(trimmed);
     setEditingName(false);
     setNameError('');
-  }, [selectedNode, nameValue, host, selectNode, validateModelName]);
+  }, [selectedNode, selectedTableName, nameValue, host, selectNode, validateModelName]);
 
   const handleDeleteModel = useCallback(() => {
     if (!selectedNode) return;
@@ -660,10 +671,10 @@ export function DetailPanel() {
         ) : (
           <h3
             className={`detail-panel__title${!isReadOnly ? ' detail-panel__title--editable' : ''}`}
-            title={!isReadOnly ? 'Double-click to rename' : model.name}
+            title={!isReadOnly ? 'Double-click to rename' : (model.tableName ?? model.name)}
             onDoubleClick={!isReadOnly ? handleStartRename : undefined}
           >
-            {model.name}
+            {model.tableName ?? model.name}
           </h3>
         )}
         {!isReadOnly && !editingName && (
@@ -720,9 +731,9 @@ export function DetailPanel() {
               keeps the row it always had, worded without dbt: a page outside
               VS Code cannot know whether the project uses it. */}
           {viewer ? (
-            <AliasEditor modelName={model.name} alias={model.alias} readOnly dbtWording={false} />
+            <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly dbtWording={false} />
           ) : (!logicalOnly || model.alias?.trim()) ? (
-            <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
+            <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
           ) : null}
           {/* Physical stage only — logical models never carry provenance, so the
               logical panel does not sprout an empty row. */}

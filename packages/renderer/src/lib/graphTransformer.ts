@@ -214,6 +214,8 @@ export function transformSubjectArea(
       position,
       data: {
         modelName: model.name,
+        // One of two same-named tables (`bqs.addresse`): its own name, for the header.
+        ...(model.tableName && model.tableName !== model.name ? { tableName: model.tableName } : {}),
         ...(labels.has(model.name) ? { label: labels.get(model.name) } : {}),
         stage,
         layer,
@@ -229,7 +231,8 @@ export function transformSubjectArea(
         // badge's layer (the table's own, else the diagram's).
         ...(model.schema && model.schema.toLowerCase() !== (model.layer ?? layer ?? '').toLowerCase() ? { shownSchema: model.schema } : {}),
         ...(singleLayer ? { singleLayer: true as const } : {}),
-        ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== model.name.toLowerCase() ? { alias: model.alias.trim() } : {}),
+        // Compared with the table's own name: an alias equal to it says nothing new.
+        ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== (model.tableName ?? model.name).toLowerCase() ? { alias: model.alias.trim() } : {}),
         columns,
         isStub: domain.stubColumns?.includes(model.name) ?? false,
         ...(hasRationaleText(model.rationale) ? { hasRationale: true } : {}),
