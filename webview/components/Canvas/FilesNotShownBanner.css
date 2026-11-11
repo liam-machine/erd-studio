@@ -1,0 +1,116 @@
+/**
+ * FilesNotShownBanner styles — the "not shown" strip, one of the family of
+ * strips above the flow area (PhysicalSourceNotice, ManifestHint): it never
+ * covers a node, and its list scrolls rather than push the canvas away.
+ *
+ * Theme tokens only (packages/renderer/src/styles/theme.css); no literal colours.
+ */
+
+.files-not-shown {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* The picture itself is out of date: the strongest of the strips. */
+.files-not-shown--stale {
+  background: var(--error-bg);
+  color: var(--error-fg);
+}
+
+.files-not-shown__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.files-not-shown__icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.files-not-shown__lead {
+  flex: 1;
+}
+
+.files-not-shown__list {
+  margin: 4px 0 0;
+  padding: 0 0 0 21px;
+  list-style: none;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.files-not-shown__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.files-not-shown__item + .files-not-shown__item {
+  border-top: 1px solid var(--panel-border);
+}
+
+.files-not-shown__message {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.files-not-shown__toggle,
+.files-not-shown__file {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.files-not-shown__action {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 2px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.files-not-shown__action:hover {
+  background: var(--button-hover-bg);
+}
+
+.files-not-shown__toggle:focus-visible,
+.files-not-shown__file:focus-visible,
+.files-not-shown__action:focus-visible,
+.files-not-shown__dismiss:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.files-not-shown__dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.files-not-shown__dismiss:hover {
+  opacity: 1;
+}

@@ -9,6 +9,9 @@
  * - {semanticDir}/{logical-models,tables}/**\/*.yml and
  *   {semanticDir}/*\/tables/*\/*.dbml (table files) → one batch per burst
  * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
+ * - any other `.dbml` under {semanticDir} (a file saved where ERD Studio reads
+ *   none: a table outside a schema folder, a folder too deep) →
+ *   onUnreadFileChanged, so the open canvases can say it is not read
  * - {semanticDir}/fields.yml (the root file only) → field list reload
  *   (onFieldsConfigChanged); ERD Studio never writes it
  * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
@@ -180,6 +183,7 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onTablesChanged = new vscode.EventEmitter<{ tables: Array<{ uri: vscode.Uri; modelName: string }> }>();
   private readonly _onRelationshipsChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onForeignFormatCreated = new vscode.EventEmitter<{ uri: vscode.Uri }>();
+  private readonly _onUnreadFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onBulkChangeStarted = new vscode.EventEmitter<void>();
@@ -233,6 +237,15 @@ export class FileWatcherService implements vscode.Disposable {
    * Fires before the matching change event.
    */
   readonly onForeignFormatCreated = this._onForeignFormatCreated.event;
+  /**
+   * Fires when a `.dbml` file under the semantic dir that is no diagram,
+   * table or relationships file (by its path: `classifySemanticFile` says
+   * `other`) is created, changed or deleted by something other than ERD
+   * Studio. ERD Studio reads no such file, so nothing is redrawn; the open
+   * canvases say that it is not read ("not shown" notes). One debounced
+   * event per file.
+   */
+  readonly onUnreadFileChanged = this._onUnreadFileChanged.event;
   /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
   readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
   /** Fires when target-path or model-paths change in dbt_project.yml. */
@@ -393,7 +406,10 @@ export class FileWatcherService implements vscode.Disposable {
       }
       if (kind === 'table') return;
       const isJson = uri.fsPath.endsWith('.json');
-      if (kind === 'other' && !isJson) return;
+      if (kind === 'other' && !isJson) {
+        this.handleUnreadFileEvent(uri);
+        return;
+      }
       if (created && kind === 'domain') { createdPending.add(uri.toString()); }
       // Per-file debounce key allows parallel updates to different files
       this.debounceOwnWrite(`semantic:${uri.toString()}`, () => [uri.fsPath], () => {
@@ -422,6 +438,7 @@ export class FileWatcherService implements vscode.Disposable {
         // layers.json, templates/, logical-models/, table and relationships
         // files, .sync-plan.json etc. are not domains — never surface them
         // as "Domain file deleted".
+        if (kind === 'other' && /\.dbml$/i.test(uri.fsPath)) this.handleUnreadFileEvent(uri);
         return;
       }
       this.pendingDeletes.set(uri.toString(), uri);
@@ -455,6 +472,18 @@ export class FileWatcherService implements vscode.Disposable {
       }
       log.debug(`[FileWatcherService] External change to a relationships file: ${uri.fsPath}`);
       this.report(() => this._onRelationshipsChanged.fire({ uri }));
+    });
+  }
+
+  /** A `.dbml` where no file is read: one debounced onUnreadFileChanged per file; own writes swallowed. */
+  private handleUnreadFileEvent(uri: vscode.Uri): void {
+    this.debounceOwnWrite(`unread:${uri.toString()}`, () => [uri.fsPath], () => {
+      if (this.ownWriteTracker.consume(uri.fsPath)) {
+        log.trace(`[FileWatcherService] Own write, ignored: ${uri.fsPath}`);
+        return;
+      }
+      log.debug(`[FileWatcherService] External change to a .dbml file ERD Studio does not read: ${uri.fsPath}`);
+      this.safeFireEvent(() => this._onUnreadFileChanged.fire({ uri }));
     });
   }
 
@@ -783,6 +812,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onTablesChanged.dispose();
     this._onRelationshipsChanged.dispose();
     this._onForeignFormatCreated.dispose();
+    this._onUnreadFileChanged.dispose();
     this._onDbtYmlChanged.dispose();
     this._onProjectConfigChanged.dispose();
     this._onBulkChangeStarted.dispose();

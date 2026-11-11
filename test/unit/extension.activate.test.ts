@@ -1340,6 +1340,92 @@ describe('activate() in a 1.9 pre-release DBML tree (§1.8)', () => {
   });
 });
 
+describe('the canvas follows the files: the watcher wiring', () => {
+  let ws: string;
+  let provider: SemanticEditorProvider;
+
+  beforeEach(async () => {
+    ws = path.join(root, 'native');
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native'), ws, { recursive: true });
+    openWorkspace(ws);
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
+  });
+
+  const fire = async (rel: string, how: '_simulateChange' | '_simulateCreate' | '_simulateDelete' = '_simulateChange'): Promise<void> => {
+    const uri = vscode.Uri.file(path.join(ws, '.erd-studio', rel));
+    for (const w of vscode._mockFileWatchers) w[how](uri);
+    await vi.advanceTimersByTimeAsync(1_000);
+  };
+
+  it('a layers.json change redraws the open canvases, not only the sidebar, and writes nothing', async () => {
+    const before = listTree(ws);
+    const refresh = vi.spyOn(provider, 'refreshAllOpenSubjectAreas').mockResolvedValue(undefined);
+    await fire('layers.json');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  it('a .dbml saved where no file is read is told to the canvases; a file that is read is not', async () => {
+    const note = vi.spyOn(provider, 'noteUnreadFile').mockImplementation(() => {});
+    await fire('gold/tables/dim_store.dbml', '_simulateCreate');
+    expect(note.mock.calls.map((c) => c[0])).toEqual([path.join(ws, '.erd-studio', 'gold', 'tables', 'dim_store.dbml')]);
+    await fire('gold/tables/gold/fct_order.dbml');
+    await fire('gold/relationships/gold.dbml');
+    expect(note).toHaveBeenCalledTimes(1);
+  });
+
+  it('a change to a diagram file checks its canvas against the disk (a document that is not following its file)', async () => {
+    const sync = vi.spyOn(provider, 'syncSubjectAreaWithDisk').mockResolvedValue(undefined);
+    await fire('gold/diagrams/sales.dbml');
+    expect(sync.mock.calls.map((c) => c[0])).toEqual([path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml')]);
+  });
+
+  it('a refresh that throws is told to the canvases, with what changed', async () => {
+    const failed = vi.spyOn(provider, 'noteRefreshFailed').mockImplementation(() => {});
+    vi.spyOn(provider, 'refreshAllOpenSubjectAreas').mockRejectedValue(new Error('redraw broke'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await fire('gold/relationships/gold.dbml');
+    expect(failed.mock.calls.map((c) => c[0])).toEqual(['Table']);
+  });
+
+  it('a document saved in this window is told to the canvases; a change that reaches only the disk is not', async () => {
+    const saved = vi.spyOn(provider, 'noteDocumentSaved').mockImplementation(() => {});
+    const refresh = vi.spyOn(provider, 'refreshAllOpenSubjectAreas').mockResolvedValue(undefined);
+    const rel = path.join(ws, '.erd-studio', 'gold', 'relationships', 'gold.dbml');
+    // git, another program or an assistant writing the file: the watcher redraws, and nothing is told a save happened.
+    await fire('gold/relationships/gold.dbml');
+    expect(refresh).toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+    // A save in this window (VS Code's onDidSaveTextDocument).
+    const doc = vscode.createMockTextDocument(rel, fs.readFileSync(rel, 'utf-8'), { persist: true });
+    await doc.save();
+    expect(saved.mock.calls.map((c) => (c[0] as unknown as { uri: { fsPath: string } }).uri.fsPath)).toEqual([rel]);
+  });
+
+  it('ERD Studio: Reload Diagrams from Disk is contributed, has no legacy alias, reads again and writes nothing', async () => {
+    expect(CONTRIBUTED).toContain('erdStudio.reloadFromDisk');
+    expect(NO_LEGACY_ALIAS.has('erdStudio.reloadFromDisk')).toBe(true);
+    const before = listTree(ws);
+    const reload = vi.spyOn(provider, 'reloadFromDisk');
+    await vscode.commands.executeCommand('erdStudio.reloadFromDisk');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(listTree(ws)).toEqual(before);
+  });
+
+  it('no refresh button is contributed to the canvas title bar: the palette command is the only manual reload', () => {
+    const menus = (JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as {
+      contributes: { menus: Record<string, Array<{ command?: string }>> };
+    }).contributes.menus;
+    const placed = Object.entries(menus)
+      .filter(([, items]) => items.some((item) => item.command === 'erdStudio.reloadFromDisk'))
+      .map(([menu]) => menu);
+    expect(placed).toEqual([]);
+  });
+});
+
 describe('erdStudio.organizeModelLibrary (issue #76)', () => {
   const lib = () => path.join(root, '.erd-studio', 'logical-models');
 

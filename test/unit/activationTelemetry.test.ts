@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { activate, findHostDbtProjects, guardRefresh, recordHarnessInstalls, _resetFirstRunGuardForTests } from '../../src/extension';
+import { activate, findHostDbtProjects, guardRefresh, recordHarnessInstalls, setRefreshFailureSink, _resetFirstRunGuardForTests } from '../../src/extension';
 import { telemetry } from '../../src/services/telemetryService';
 import { ownWrites } from '../../src/services/ownWriteTracker';
 import { HARNESS_TARGETS, HarnessService } from '../../src/services/harnessService';
@@ -145,6 +145,27 @@ describe('B12: a watcher refresh that throws', () => {
     await Promise.resolve();
     expect(seen).toEqual([{ tables: ['dim_customer'] }]);
     expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe('a watcher refresh that throws is said on the canvas, not only in the log', () => {
+  afterEach(() => setRefreshFailureSink(undefined));
+
+  it('tells the sink which kind failed, for a throw and for a rejection; a listener that works tells it nothing', async () => {
+    const told: string[] = [];
+    setRefreshFailureSink((kind) => told.push(kind));
+    guardRefresh('Layers', () => { throw new Error('layers broke'); })();
+    expect(told).toEqual(['Layers']);
+    guardRefresh('Table', async () => { throw new Error('tables broke'); })();
+    await vi.waitFor(() => expect(told).toEqual(['Layers', 'Table']));
+    guardRefresh('Diagram', () => undefined)();
+    await Promise.resolve();
+    expect(told).toEqual(['Layers', 'Table']);
+  });
+
+  it('a sink that throws is contained: the watcher never sees it', () => {
+    setRefreshFailureSink(() => { throw new Error('sink broke'); });
+    expect(() => guardRefresh('Table', () => { throw new Error('tables broke'); })()).not.toThrow();
   });
 });
 

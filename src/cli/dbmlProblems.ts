@@ -26,15 +26,9 @@ import {
   DBML_DIAGRAM_QUOTE_HINT_CODES,
   DBML_QUOTE_HINT,
   DBML_TABLE_QUOTE_HINT_CODES,
-  DIAGRAMS_DIR,
-  LOGICAL_MODELS_DIR,
-  NON_SUBJECT_AREA_DIRS,
   RELATIONSHIPS_DIR,
   SEMANTIC_README_NAME,
-  TABLES_DIR,
   findConflictMarkers,
-  isDbmlLayerName,
-  isReservedLayerName,
   parseTableText,
 } from '@erd-studio/core';
 import { FIELDS_FILE_NAME } from '@erd-studio/core';
@@ -49,9 +43,13 @@ import { unimportedRelationshipsMessage } from '../services/domainService';
 import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from '../services/legacyDbmlTree';
 import { tablesDirIsLayer } from '../services/logicalModelService';
 import { listSemanticFiles } from '../services/semanticFiles';
+import { outsideKnownFoldersHint, outsideKnownFoldersMessage } from '../services/unreadDbmlFile';
 import type { CliContext } from './context';
 import { unreadableHint } from './diff';
 import { isFieldProblemCode } from './fieldFindings';
+
+// The wording of a `.dbml` the tree has no place for is shared with the canvas's "not shown" notes.
+export { outsideKnownFoldersHint };
 
 /** One problem in a DBML file. */
 export interface DbmlProblemEntry {
@@ -179,50 +177,6 @@ function projectFiles(semanticRoot: string, listing: ReadonlyArray<{ rel: string
  * field list (`fields.yml`, checked in `erd.fields`).
  */
 export const ALLOWED_ROOT_FILES: ReadonlySet<string> = new Set(['modelling-approach.md', FIELDS_FILE_NAME]);
-
-/**
- * Where a `.dbml` the tree has no place for belongs (§1.1): the hint
- * `dbmlOutsideKnownFolders` gives, by the shape of its path. The fixed names
- * are compared exactly, as the classifier compares them.
- */
-export function outsideKnownFoldersHint(rel: string): string {
-  const segments = rel.split('/');
-  const file = segments[segments.length - 1];
-  if (!file.endsWith('.dbml')) return `rename it to ${file.replace(/\.dbml$/i, '.dbml')}: the extension is lower-case`;
-  if (segments.length === 1) return `a diagram belongs at <layer>/${DIAGRAMS_DIR}/${file}, a table at <layer>/${TABLES_DIR}/<schema>/${file}`;
-  const top = segments[0];
-  if (!isDbmlLayerName(top)) {
-    const lower = top.toLowerCase();
-    if (lower !== top && isDbmlLayerName(lower)) return `layer folders are lower-case ids; rename ${top}/ to ${lower}/ and set its label in layers.json`;
-    if (top === LOGICAL_MODELS_DIR) return `the folder ${LOGICAL_MODELS_DIR}/ holds YAML tables only; a DBML table belongs at <layer>/${TABLES_DIR}/<schema>/${file}`;
-    if (isReservedLayerName(top) || NON_SUBJECT_AREA_DIRS.has(lower)) {
-      return `the folder ${top}/ cannot be a layer: ERD Studio reserves the name ${lower}. A diagram belongs at <layer>/${DIAGRAMS_DIR}/${file}, a table at <layer>/${TABLES_DIR}/<schema>/${file}`;
-    }
-    return `the folder ${top}/ is not a valid layer name: a layer folder is a lower-case id (a letter, then letters, digits, - or _)`;
-  }
-  if (segments.length === 2) return `a diagram belongs at ${top}/${DIAGRAMS_DIR}/${file}`;
-  const second = segments[1];
-  const fixed = [DIAGRAMS_DIR, TABLES_DIR, RELATIONSHIPS_DIR].find((name) => name !== second && name === second.toLowerCase());
-  if (fixed !== undefined) return `rename the folder to ${fixed} (lower-case)`;
-  if (second === RELATIONSHIPS_DIR) return `relationships files are flat in ${top}/${RELATIONSHIPS_DIR}/`;
-  if (second === DIAGRAMS_DIR) return `diagrams are flat in ${top}/${DIAGRAMS_DIR}/`;
-  if (second === TABLES_DIR) {
-    return segments.length === 3
-      ? `a table belongs in a schema folder: ${top}/${TABLES_DIR}/<schema>/${file}`
-      : `a table belongs at ${top}/${TABLES_DIR}/<schema>/${file}, one schema folder deep`;
-  }
-  return `a diagram belongs at ${top}/${DIAGRAMS_DIR}/${file}, a relationships file at ${top}/${RELATIONSHIPS_DIR}/${file}, a table at ${top}/${TABLES_DIR}/<schema>/${file}`;
-}
-
-/**
- * `dbmlOutsideKnownFolders`' message for `rel` (relative to the semantic dir).
- * Every hint starts with a word, never a folder name, so capitalising it never
- * misspells a folder (case matters in the tree, §1.1).
- */
-function outsideKnownFoldersMessage(rel: string): string {
-  const hint = outsideKnownFoldersHint(rel);
-  return `ERD Studio does not read this file: it is outside the folders of a DBML project. ${hint[0].toUpperCase()}${hint.slice(1)}.`;
-}
 
 const stemOf = (rel: string): string => path.posix.basename(rel).replace(/\.dbml$/i, '');
 
