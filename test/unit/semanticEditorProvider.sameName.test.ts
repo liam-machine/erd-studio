@@ -388,6 +388,34 @@ describe('the diagram showing both', () => {
   });
 });
 
+describe('a rename into a name another schema folder\'s table has (the rule flipped: refused only in its own schema folder)', () => {
+  it('ddd.kunde2 renamed addresse beside bqs.addresse: both keep their positions under <schema>.<name>, the diagram turns 8, bqs\'s file is untouched', async () => {
+    fs.mkdirSync(at('bronze/tables/ddd'), { recursive: true });
+    fs.writeFileSync(at('bronze/tables/ddd/kunde2.dbml'), 'Table ddd.kunde2 {\n  id INT [pk]\n}\n');
+    fs.writeFileSync(at('bronze/diagrams/pairform.dbml'), [
+      'Project pairform {', "  erd_schema_version: '7'", "  erd_layout: '''", '    addresse 10 20', '    kunde2 300 20', "  '''", '}', '',
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ddd.kunde2 }   from '../tables/ddd/kunde2.dbml'", '',
+    ].join('\n'));
+    const bqs = read('bronze/tables/bqs/addresse.dbml');
+    const canvas = await open('bronze/diagrams/pairform.dbml');
+    const r = await canvas.send({ type: 'renameModel', payload: { oldName: 'kunde2', newName: 'addresse' } });
+    expect(r.errors).toEqual([]);
+    expect(read('bronze/tables/ddd/addresse.dbml')).toMatch(/^Table ddd\.addresse \{/m);
+    expect(read('bronze/tables/bqs/addresse.dbml')).toBe(bqs);
+    const diagram = read('bronze/diagrams/pairform.dbml');
+    expect(diagram).toContain("erd_schema_version: '8'");
+    expect(diagram).toMatch(/^\s+bqs\.addresse 10 20$/m);
+    expect(diagram).toMatch(/^\s+ddd\.addresse 300 20$/m);
+    // Renaming bqs's onto a name its own schema folder has is refused, naming the schema.
+    fs.writeFileSync(at('bronze/tables/bqs/ort.dbml'), 'Table bqs.ort {\n  id INT [pk]\n}\n');
+    const again = await open('bronze/diagrams/pairform.dbml');
+    const refused = await again.send({ type: 'renameModel', payload: { oldName: 'bqs.addresse', newName: 'Ort' } });
+    expect(refused.errors).toEqual(['The schema bqs already has a table called "ort" (bronze/tables/bqs/ort.dbml). Choose a different name.']);
+    expect(refused.changed).toEqual([]);
+  });
+});
+
 describe('the canvas context and the Add Existing rows, by file', () => {
   /** The last `canvasContext` posted, once its background work is done. */
   async function contextOf(canvas: Canvas): Promise<{ tableFiles: Record<string, string>; offDiagram: Record<string, Array<Record<string, unknown>>> }> {

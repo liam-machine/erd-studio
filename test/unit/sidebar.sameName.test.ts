@@ -293,6 +293,16 @@ describe('Add to Diagram… and Open in Diagram', () => {
     expect(addTables).toHaveBeenCalledWith(diagramPath('bqs'), ['addresse'], [ccc.filePath]);
   });
 
+  it('a JSON diagram (names alone) is not offered for a table of a shared name it cannot show; it is for the one its name reads', () => {
+    const s = services();
+    const json = { domain: 'legacy', layer: 'bronze', filePath: at('bronze/legacy.json'), storage: 'json' as const };
+    const summaries = [...s.subjectAreaService.listSubjectAreas(root, '.erd-studio'), json];
+    const ccc = { name: 'addresse', filePath: at('bronze/tables/ccc/addresse.dbml') };
+    const bqs = { name: 'addresse', filePath: at('bronze/tables/bqs/addresse.dbml') };
+    expect(diagramPickItems(summaries, () => null, () => 'Bronze', [ccc], s.usage()).map((i) => i.label)).not.toContain('legacy');
+    expect(diagramPickItems(summaries, () => [], () => 'Bronze', [bqs], s.usage()).map((i) => i.label)).toContain('legacy');
+  });
+
   it('a right-click on both rows of a name names two tables', () => {
     const a = { type: 'model', name: 'addresse', filePath: at('bronze/tables/bqs/addresse.dbml') };
     const b = { type: 'model', name: 'addresse', filePath: at('bronze/tables/ccc/addresse.dbml') };

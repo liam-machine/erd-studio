@@ -952,7 +952,21 @@ function planTableNames(
     const base = sanitiseDbmlTableName(t.name);
     if (sameName(t) && t.schema) return sanitiseDbmlTableName(`${t.schema}_${base}`);
     const hit = base === t.name ? findInLibrary(t) : null;
-    if (hit === null) return base;
+    if (hit === null) {
+      // A DBML diagram: an earlier import kept this table as its own copy (`ccc_addresse`, alias `addresse`)
+      // in the same schema, before two schemas could each have the name. Same columns: that copy, never a second.
+      if (scoped && base === t.name) {
+        const columns = fileColumnKeys(t);
+        const copy = (library.earlierCopiesOf?.(t.name) ?? [])
+          .sort((a, b) => a.localeCompare(b, 'en'))
+          .find((n) => {
+            const c = library.getTable(n);
+            return !!c && normaliseName(c.schema ?? '') === folderOf(t) && hasSameColumns(c, columns);
+          });
+        if (copy !== undefined) { earlierCopy[i] = copy; return copy; }
+      }
+      return base;
+    }
     const own = library.getTable(hit);
     if (!own) {
       // Nothing to compare: the library's table is taken on trust, as before (a file mid-merge is not a reason to copy it).

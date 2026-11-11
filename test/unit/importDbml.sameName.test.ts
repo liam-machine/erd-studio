@@ -182,4 +182,16 @@ describe('#269 Import DBML: a table whose name another layer already has', () =>
       .toContain('Ref: warehouse.customer.country_code >? warehouse.country.country_code');
     expect(snapshot('reports/')).toEqual(reports);
   });
+
+  it('D-14: re-importing over the old workaround (warehouse_customer, alias customer) reuses that copy: no second customer is created', async () => {
+    fs.mkdirSync(erd('warehouse/tables/warehouse'), { recursive: true });
+    fs.writeFileSync(erd('warehouse/tables/warehouse/warehouse_customer.dbml'),
+      "Table warehouse.warehouse_customer [alias: 'customer'] {\n  customer_id int [pk]\n  name varchar\n  country_code varchar\n  segment varchar\n}\n");
+    const workaround = fs.readFileSync(erd('warehouse/tables/warehouse/warehouse_customer.dbml'), 'utf-8');
+    const { result, asked } = await run('warehouse.dbml', UNQUALIFIED_WAREHOUSE, 'warehouse', 'auto');
+    expect(asked).toEqual([]);
+    expect(result?.plan.reusedTables).toEqual(['warehouse_customer']);
+    expect(fs.existsSync(erd('warehouse/tables/warehouse/customer.dbml'))).toBe(false);
+    expect(fs.readFileSync(erd('warehouse/tables/warehouse/warehouse_customer.dbml'), 'utf-8')).toBe(workaround);
+  });
 });
