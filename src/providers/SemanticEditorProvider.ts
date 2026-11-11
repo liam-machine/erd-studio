@@ -3764,13 +3764,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * folders share its name), and `save` turns a model those change back
    * into a save of its own file under its own name (by its identity).
    * Otherwise the library's tables by name, saved by name, as always.
+   * `only` (library references) limits it, where a name is shared, to the
+   * tables those name: a caller that needs a few tables reads only them.
    */
-  private libraryTables(): { models: SemanticTable[]; save: (model: SemanticTable) => TableFileSave } {
+  private libraryTables(only?: Iterable<string>): { models: SemanticTable[]; save: (model: SemanticTable) => TableFileSave } {
     // While no two schema folders share a name, every table's library reference is its name.
     if (!this.librarySharesNames()) return { models: this.tableLibraryService.listTables(), save: (model) => ({ model }) };
     const ids = new Map<string, TableId>();
     const models: SemanticTable[] = [];
-    for (const entry of this.tableLibraryService.listTableFiles()) {
+    const entries = only === undefined
+      ? this.tableLibraryService.listTableFiles()
+      : [...new Set([...only].map((ref) => ref.toLowerCase()))].flatMap((ref) => {
+        const found = this.tableLibraryService.resolveLibraryRef(ref);
+        return found.kind === 'found' ? [found.entry] : [];
+      });
+    for (const entry of entries) {
       if (entry.shadowedBy || entry.id === undefined) continue;
       const model = this.tableLibraryService.getTable(entry.id);
       if (!model) continue;
@@ -8814,7 +8822,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       tests.unique,
     );
     if (relationships.length === 0) return { saves: seeded, onDiagram: [] };
-    const library = this.libraryTables();
+    // Only the tables the relationships join (each is stored in its foreign-key table's file).
+    const library = this.libraryTables(relationships.flatMap((r) => [r.fromModel, r.toModel]));
     const byRef = new Map(library.models.map((m) => [m.name.toLowerCase(), m]));
     const { kept, changed } = routeToLibrary(relationships, byName.newModels, (ref) => byRef.get(ref.toLowerCase()) ?? null, []);
     const unstored = describeUnstoredRelationships(kept);

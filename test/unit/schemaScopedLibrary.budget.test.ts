@@ -23,6 +23,14 @@ import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
 import type { TableId } from '../../src/types/tableId';
+import * as vscode from 'vscode';
+import { _resetMockWorkspace, createMockTextDocument, createMockWebviewPanel } from '../__mocks__/vscode';
+import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { SelectorsService } from '../../src/services/selectorsService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import type { ManifestService } from '../../src/services/manifestService';
+import type { YmlParserService } from '../../src/services/ymlParserService';
+import type { TemplateService } from '../../src/services/templateService';
 
 const SCHEMAS = 15;
 const TABLES = 869;
@@ -208,6 +216,94 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
         }
       }
     } finally {
+      fs.rmSync(path.dirname(diagramPath), { recursive: true, force: true });
+    }
+  });
+
+  it('Add Existing by file in a dbt project: the relationship dbt tests give is routed over its two tables, not the library', async () => {
+    _resetMockWorkspace();
+    const diagramPath = path.join(semantic, 'bronze', 'diagrams', 'dbt.dbml');
+    fs.mkdirSync(path.dirname(diagramPath), { recursive: true });
+    const [member, added] = [ids[0], ids[1]];
+    fs.writeFileSync(diagramPath, [
+      "Project dbt {\n  erd_schema_version: '7'\n}",
+      `use { table ${member.schema}.${member.name} } from '../tables/${member.schema}/${member.name}.dbml'`,
+      `use * from '../relationships/${member.schema}.dbml'`,
+      '',
+    ].join('\n'));
+    const before = new Map(['tables', 'relationships'].flatMap((d) => fs.readdirSync(path.join(semantic, 'bronze', d), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile()).map((e) => path.join(e.parentPath ?? (e as unknown as { path: string }).path, e.name)))
+      .map((f) => [f, fs.readFileSync(f, 'utf-8')] as const));
+    const layerService = new LayerService(root, '.erd-studio');
+    const subjectAreas = new SubjectAreaService(layerService);
+    const lib = library();
+    subjectAreas.setTableLibraryService(lib);
+    const yml = {
+      models: new Map([member, added].map((id) => [id.name, { name: id.name, description: '', columns: [], filePath: path.join(root, 'models', 'schema.yml'), tags: [], configSchema: id.schema }])),
+      relationshipTests: [{ fromModel: added.name, fromColumn: 'b_id', toModel: member.name, toColumn: 'id' }],
+      uniqueColumns: new Map(),
+      compositeUniqueGroups: new Map(),
+    };
+    const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
+    const selectors = new SelectorsService(subjectAreas, root, '.erd-studio');
+    (selectors as unknown as { scheduleRegenerate: () => void }).scheduleRegenerate = () => undefined;
+    const provider = new SemanticEditorProvider(
+      {
+        extensionUri: vscode.Uri.file(path.join(root, 'no-extension')),
+        globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
+        extension: { packageJSON: { version: '0.0.0-test' } },
+        globalState: { get: () => true, update: async () => {} },
+        workspaceState: { get: () => true, update: async () => {} },
+        subscriptions: [],
+      } as unknown as vscode.ExtensionContext,
+      subjectAreas,
+      { loadManifest: async () => empty, getRelationshipTests: () => [] } as unknown as ManifestService,
+      { loadYmlData: async () => yml } as unknown as YmlParserService,
+      { loadTemplates: () => [] } as unknown as TemplateService,
+      layerService,
+      root,
+      selectors,
+      lib,
+      new OwnWriteTracker(),
+    );
+    provider.setLogicalOnly(true);
+    const document = createMockTextDocument(diagramPath, fs.readFileSync(diagramPath, 'utf-8'), { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(document);
+    const panel = createMockWebviewPanel();
+    try {
+      await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+      await panel._simulateMessage({ type: 'ready' });
+      // Every table read once already (the editor's first plan reads the library, as every edit's does): what
+      // is measured is the add itself.
+      lib.listTables();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      panel._postedMessages.length = 0;
+      const perFile = new Map<string, number>();
+      const started = performance.now();
+      (cjsFs as { readFileSync: unknown }).readFileSync = function (this: unknown, ...args: unknown[]) {
+        const p = String(args[0]).split(path.sep).join('/');
+        if (/\/bronze\/tables\//.test(p)) perFile.set(p, (perFile.get(p) ?? 0) + 1);
+        return (realReadFileSync as (...a: unknown[]) => unknown).apply(this, args);
+      };
+      syncBuiltinESMExports();
+      try {
+        await panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: added.name, sourcePath: `.erd-studio/bronze/tables/${added.schema}/${added.name}.dbml` } });
+      } finally {
+        (cjsFs as { readFileSync: unknown }).readFileSync = realReadFileSync;
+        syncBuiltinESMExports();
+      }
+      const elapsed = performance.now() - started;
+      const tableReads = [...perFile.values()].reduce((a, b) => a + b, 0);
+      if (LOG || elapsed > 150) console.warn(`[schemaScopedLibrary] Add Existing by file with dbt: ${elapsed.toFixed(0)} ms (budget 150 ms, fails above ${MARGIN}×), ${tableReads} table reads`);
+      // Routing the one relationship to its file works on its two tables; over every table of the library it took ~200 ms.
+      expect(elapsed).toBeLessThanOrEqual(150 * MARGIN);
+      expect(panel._postedMessages.filter((m) => (m as { type: string }).type === 'error')).toEqual([]);
+      const rels = fs.readFileSync(path.join(semantic, 'bronze', 'relationships', `${added.schema}.dbml`), 'utf-8');
+      expect(rels).toMatch(new RegExp(`^Ref: ${added.schema}\\.${added.name}\\.b_id >\\?? ?${member.schema}\\.${member.name}\\.id$`, 'm'));
+      // The two tables (and the files the edit wrote), never every table file.
+      expect(tableReads).toBeLessThan(TABLES / 4);
+    } finally {
+      for (const [f, text] of before) fs.writeFileSync(f, text);
       fs.rmSync(path.dirname(diagramPath), { recursive: true, force: true });
     }
   });
