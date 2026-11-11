@@ -931,6 +931,24 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     expect(read('bronze/tables/ccc/addresse.dbml')).toBe(ccc);
   });
 
+  it('a dbt model spelled Addresse whose schema is BQS is bqs\'s addresse: names and schemas are compared without case', async () => {
+    ymlModels = [{ name: 'Addresse', configSchema: 'BQS' }];
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const ccc = read('bronze/tables/ccc/addresse.dbml');
+    const r = await addFromDbt('bronze/diagrams/empty.dbml', ['Addresse']);
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/empty.dbml']);
+    expect(read('bronze/diagrams/empty.dbml')).toContain("from '../tables/bqs/addresse.dbml'");
+    expect(read('bronze/tables/ccc/addresse.dbml')).toBe(ccc);
+  });
+
+  it('Add Tables from dbt with a shared-name model whose table the diagram already shows adds nothing (as for any model already in it)', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'bqs' }];
+    const r = await addFromDbt('bronze/diagrams/bqs.dbml', ['addresse']);
+    expect(r.errors).toEqual(['No tables were added from dbt.']);
+    expect(r.changed).toEqual([]);
+  });
+
   it('Add Tables from dbt with a model whose dbt schema is ccc, on a diagram showing bqs.addresse, adds ccc\'s and makes the pair (qualified lines, version 8)', async () => {
     ymlModels = [{ name: 'addresse', configSchema: 'ccc' }];
     fs.writeFileSync(at('bronze/diagrams/one.dbml'), [

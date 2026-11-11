@@ -416,6 +416,14 @@ describe('a qualified Ref end naming a schema folder with no table of its name (
     expect(warnings).toEqual([]);
     expect(links(await load(files, diagramPath('mix'), { findDbmlTable: dbmlTableFinder(listingOf(files)) }).promise)).toEqual(['kunde.addresse_id>addresse.id']);
   });
+
+  it('rule 4 holds where one table has the name and a copy of it sits in another layer (a duplicate, the finder\'s first): still drawn', async () => {
+    const files = mix();
+    delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+    // `archive` sorts before `bronze`, so the finder answers the copy's file: the same schema folder and name, one table.
+    files['.erd-studio/archive/tables/ccc/addresse.dbml'] = files['.erd-studio/bronze/tables/ccc/addresse.dbml'];
+    expect(links(await load(files, diagramPath('mix'), { findDbmlTable: dbmlTableFinder(listingOf(files)) }).promise)).toEqual(['kunde.addresse_id>addresse.id']);
+  });
 });
 
 describe('golden: what core draws for the twin fixture', () => {
