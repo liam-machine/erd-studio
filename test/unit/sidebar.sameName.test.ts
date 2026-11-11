@@ -142,6 +142,15 @@ describe('the Table Library: two ordinary rows', () => {
     const { provider } = listing();
     expect(provider.findTableNode('addresse', at('bronze/tables/ccc/addresse.dbml'))?.filePath).toBe(at('bronze/tables/ccc/addresse.dbml'));
     expect(provider.findTableNode('addresse')?.filePath).toBe(at('bronze/tables/bqs/addresse.dbml'));
+    // A file no row is: by its name only while one row has it, never one of two.
+    expect(provider.findTableNode('addresse', at('bronze/tables/zzz/addresse.dbml'))).toBeUndefined();
+    fs.rmSync(at('bronze/tables/ccc/kunde.dbml'));
+    expect(listing().provider.findTableNode('kunde', at('bronze/tables/zzz/kunde.dbml'))?.filePath).toBe(at('bronze/tables/bqs/kunde.dbml'));
+  });
+
+  it('with the option off, a file given that no row is still finds the row by its name, as before', () => {
+    const { provider } = listing(false);
+    expect(provider.findTableNode('addresse', at('bronze/tables/ccc/addresse.dbml'))?.filePath).toBe(at('bronze/tables/bqs/addresse.dbml'));
   });
 
   it('with the option off, the second file is still the duplicate that is ignored (the rule until it flips)', () => {
@@ -190,6 +199,23 @@ describe('the usage rule (sidebarTables.ts)', () => {
     expect(u.refOn(diagramPath('bqs'), { name: 'addresse', filePath: at('bronze/tables/ccc/addresse.dbml') })).toBeUndefined();
     // A library reference names its table too (the Relationships view's names).
     expect(u.keyOf('ccc.addresse')).toBe(u.keyOf({ name: 'addresse', filePath: at('bronze/tables/ccc/addresse.dbml') }));
+  });
+
+  it('a stale line never counts for a table another member\'s own use line reads: that member is the one named (owner decision B)', () => {
+    // kunden lists bqs.addresse first; its file goes, so ccc's is the only addresse, and it is ccc.addresse's own.
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    const { usage } = services();
+    const u = usage();
+    const ccc = { name: 'addresse', filePath: at('bronze/tables/ccc/addresse.dbml') };
+    expect(u.refOn(diagramPath('kunden'), ccc)).toBe('ccc.addresse');
+    expect(u.membersOf(diagramPath('kunden'))!.filter((k) => k === u.keyOf(ccc))).toHaveLength(1);
+    // With no other member reading it, the one table of the name is the stale line's (a table moved to another schema).
+    write('bronze/diagrams/moved.dbml', [
+      'Project moved {', "  erd_schema_version: '7'", '}', '',
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      '',
+    ].join('\n'));
+    expect(u.refOn(diagramPath('moved'), ccc)).toBe('addresse');
   });
 
   it('a JSON diagram\'s bare name is the table that name reads in the library (the first listed)', () => {
@@ -397,6 +423,37 @@ describe('the Diagrams view: Table Library rows dropped on a diagram\'s row', ()
     const target = { type: 'domain', summary: { domain: 'ccc', layer: 'bronze', filePath: diagramPath('ccc') }, modelCount: 2 };
     await provider.handleDrop(target as never, transfer, {} as never);
     expect(handler).toHaveBeenCalledWith(diagramPath('ccc'), ['addresse'], uris);
+  });
+});
+
+describe('the Diagrams view: other-layer counts and the schema: facet', () => {
+  it('count each table of a shared name by the file its use line reads', async () => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [...LAYERS, { id: 'silver', label: 'Silver', color: '#c0c0c0', creatable: true, order: 2 }] }));
+    write('silver/diagrams/both.dbml', [
+      'Project both {', "  erd_schema_version: '8'", '}', '',
+      "use { table bqs.addresse } from '../../bronze/tables/bqs/addresse.dbml'",
+      "use { table ccc.addresse } from '../../bronze/tables/ccc/addresse.dbml'",
+      "use { table ccc.kunde } from '../../bronze/tables/ccc/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const s = services();
+    const provider = new SubjectAreaTreeProvider(s.subjectAreaService, s.layerService, root, '.erd-studio', undefined, undefined,
+      () => new Map([['addresse', { layer: 'bronze', schema: 'bqs' }]]));
+    const both = async () => {
+      const roots = await provider.getChildren();
+      const silver = roots.find((r) => r.type === 'layer' && r.layer === 'silver')!;
+      return (await provider.getChildren(silver)).find((c) => c.type === 'domain') as { otherLayers?: unknown };
+    };
+    // By name (the homes given: one per name), as before: the pair's references name no home, so nothing is counted.
+    expect((await both()).otherLayers).toBeUndefined();
+    // Told apart by identity: three tables, each its own file.
+    provider.setTableIdentity(s.usage, () => tableHomesById(s.tables.listTableFiles()));
+    provider.refresh();
+    expect((await both()).otherLayers).toEqual([{ layer: 'bronze', count: 3 }]);
+    provider.setFilter('schema:ccc');
+    const filtered = await provider.getChildren();
+    const silver = filtered.find((r) => r.type === 'layer' && r.layer === 'silver');
+    expect(silver).toBeDefined();
   });
 });
 

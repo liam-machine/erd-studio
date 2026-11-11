@@ -714,6 +714,21 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     expect(reveals.map((m) => m.payload.modelName)).toEqual(['ccc.addresse']);
   });
 
+  it('a JSON diagram (names alone) is never given the other table of a shared name: ccc\'s is refused, bqs\'s (the one the name reads) is added', async () => {
+    fs.writeFileSync(at('bronze/empty.json'), `${JSON.stringify({ schemaVersion: 5, domain: 'empty', layer: 'bronze', description: '', logical: { models: [], relationships: [], viewConfig: {} } }, null, 2)}\n`);
+    const canvas = await open('bronze/empty.json');
+    const before = snapshot();
+    canvas.panel._postedMessages.length = 0;
+    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/empty.json')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')]);
+    const errors = canvas.panel._postedMessages
+      .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
+      .map((m) => m.payload.message);
+    expect(errors).toEqual(['Can\'t add "addresse" to this diagram: the schema folders bqs and ccc each have a table called addresse, and a JSON diagram names tables by name alone. Add it to a DBML diagram.']);
+    expect(changed(before, snapshot())).toEqual([]);
+    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/empty.json')), ['addresse'], [at('bronze/tables/bqs/addresse.dbml')]);
+    expect(JSON.parse(read('bronze/empty.json')).logical.models).toEqual(['addresse']);
+  });
+
   it('Reveal in Table Library and Show on Other Diagrams… from a canvas name the member\'s own file', async () => {
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
     const canvas = await open('bronze/diagrams/kunden.dbml');

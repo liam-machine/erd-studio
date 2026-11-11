@@ -1878,6 +1878,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // Which table a sidebar row or command means, and which diagrams show it: by name, or, where the
   // library tells tables apart by their schema folders, by the file each diagram's `use` line reads.
   const tableUsage = (): TableUsageKeys => tableUsageOf(tableLibraryService, diagramMembers);
+  // The Diagrams view's other-layer counts and `schema:` facet count each table by the same rule.
+  treeProvider.setTableIdentity(tableUsage, () => tableHomesById(tableLibraryService.listTableFiles()));
   // The repository's CODEOWNERS (read only): "Reviewed by …" on a table's tooltip.
   const codeOwners = new CodeOwnersReader(() => {
     const folder = vscode.workspace.getWorkspaceFolder?.(vscode.Uri.file(workspaceRoot))?.uri.fsPath;

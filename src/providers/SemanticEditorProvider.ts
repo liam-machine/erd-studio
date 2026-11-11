@@ -3667,9 +3667,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private refuseSharedNameOnJsonDiagram(name: string): void {
     if (!this.tableLibraryService.isAmbiguousName(name)) return;
+    throw new EditRefused(`Can't change "${name}" from this diagram: the schema folders ${this.foldersNamed(name)} each have a table called ${name}, and a JSON diagram names tables by name alone. Make the change on a DBML diagram that shows the table.`);
+  }
+
+  /** The schema folders that each have a table called `name`, in words ("bqs and ccc"). */
+  private foldersNamed(name: string): string {
     const folders = this.tableLibraryService.tablesNamed(name).map((entry) => entry.folder);
-    const listed = folders.length > 2 ? `${folders.slice(0, -1).join(', ')} and ${folders[folders.length - 1]}` : folders.join(' and ');
-    throw new EditRefused(`Can't change "${name}" from this diagram: the schema folders ${listed} each have a table called ${name}, and a JSON diagram names tables by name alone. Make the change on a DBML diagram that shows the table.`);
+    return folders.length > 2 ? `${folders.slice(0, -1).join(', ')} and ${folders[folders.length - 1]}` : folders.join(' and ');
+  }
+
+  /**
+   * Why the table files `files` (absolute, index for index with `names`)
+   * cannot be added to the JSON diagram they are being added to, or null
+   * (owner decision F): a JSON diagram names tables by name alone, and a
+   * name two schema folders share reads the library's first table of it, so
+   * any other table of that name cannot join it.
+   */
+  private sharedNameAddRefusal(names: readonly string[], files: readonly string[]): string | null {
+    const i = names.findIndex((name, at) => {
+      if (!this.tableLibraryService.isAmbiguousName(name)) return false;
+      const byName = this.tableLibraryService.findTableFile(name);
+      return byName === null || files[at] === undefined || !samePath(byName, files[at]);
+    });
+    if (i < 0) return null;
+    const name = names[i];
+    return `Can't add "${name}" to this diagram: the schema folders ${this.foldersNamed(name)} each have a table called ${name}, and a JSON diagram names tables by name alone. Add it to a DBML diagram.`;
   }
 
   /** Whether the library tells tables apart by identity (a library double without the flag does not). */
@@ -6623,6 +6645,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     if (action.add && action.files && this.schemaScoped() && this.isDbmlDocument(panel.document)) {
       await this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
+      return;
+    }
+    // A JSON diagram adds by name, which reads the library's first table of a shared name: any other is refused, never swapped.
+    const refused = action.add && action.files && this.schemaScoped() ? this.sharedNameAddRefusal(action.add, action.files) : null;
+    if (refused !== null) {
+      this.post(panel.webview, { type: 'error', payload: { message: refused } });
       return;
     }
     let reveal = action.reveal;

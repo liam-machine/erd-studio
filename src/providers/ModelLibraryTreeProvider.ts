@@ -557,24 +557,30 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
    * The row of the table named `name` (ignoring case) in a fresh listing,
    * never a duplicate that is ignored; undefined when the library has no such table.
    * Given the table's file (`filePath`), the row of that file: two schema
-   * folders may each hold a table of the name.
+   * folders may each hold a table of the name. When no row is that file (its
+   * path spelled another way, or a duplicate that is ignored), the row of the
+   * name, but only while one row has it: of two, neither is guessed.
    */
   findTableNode(name: string, filePath?: string): TableLibraryTableNode | undefined {
     const wanted = name.trim().toLowerCase();
+    const named: TableLibraryTableNode[] = [];
+    let atFile: TableLibraryTableNode | undefined;
     const atPath = filePath !== undefined ? path.resolve(filePath) : undefined;
-    const search = (nodes: readonly TableLibraryNode[]): TableLibraryTableNode | undefined => {
+    const search = (nodes: readonly TableLibraryNode[]): void => {
       for (const node of nodes) {
+        if (atFile) return;
         if (node.type === 'model') {
           if (node.shadowedBy) continue;
-          if (atPath !== undefined ? path.resolve(node.filePath) === atPath : node.name.toLowerCase() === wanted) return node;
+          if (atPath !== undefined && path.resolve(node.filePath) === atPath) atFile = node;
+          else if (node.name.toLowerCase() === wanted) named.push(node);
         } else {
-          const found = search(node.children);
-          if (found) return found;
+          search(node.children);
         }
       }
-      return undefined;
     };
-    return search(this.getChildren() ?? []);
+    search(this.getChildren() ?? []);
+    if (atFile) return atFile;
+    return atPath === undefined || named.length === 1 ? named[0] : undefined;
   }
 
   private rootChildren(): TableLibraryNode[] {

@@ -17,7 +17,8 @@
  *   in the library: the first listed, as the canvas draws it. A member whose
  *   `use` line names a file the library does not list (moved or deleted
  *   outside the extension) is the one table of its name, or none when
- *   several share it (owner decision B: never guessed).
+ *   several share it or when that one is another member's own file (owner
+ *   decision B: never guessed, as the canvas draws it).
  *   {@link tableUsageByIdentity}.
  *
  * A key is only ever compared, never shown or written. Never writes, no `vscode`.
@@ -121,24 +122,39 @@ export function tableUsageByIdentity(input: {
     const entry = entryOf(asTable(table));
     return entry ? entryKey(entry) : normaliseName(asTable(table).name);
   };
-  const memberKey = (member: DiagramMemberId): string => {
+  // `own`: the listed tables the diagram's members' own `use` lines read.
+  const memberKey = (member: DiagramMemberId, own: ReadonlySet<string>): string => {
     if (member.id === undefined) return byName(member.ref);
     const key = tableIdKey(member.id);
     if (listed.has(key)) return key;
-    // Its file is not listed: the one table of its name, never one of several.
+    // Its file is not listed: the one table of its name, never one of several, and never
+    // a table another member's own `use` line reads (that member's; owner decision B).
     const named = identitiesNamed.get(normaliseName(member.id.name));
-    return named?.size === 1 ? [...named][0] : key;
+    const only = named?.size === 1 ? [...named][0] : undefined;
+    return only !== undefined && !own.has(only) ? only : key;
+  };
+  // Each member's key, in member order.
+  const keysOf = (members: readonly DiagramMemberId[]): string[] => {
+    const own = new Set<string>();
+    for (const member of members) {
+      const key = member.id === undefined ? undefined : tableIdKey(member.id);
+      if (key !== undefined && listed.has(key)) own.add(key);
+    }
+    return members.map((member) => memberKey(member, own));
   };
   return {
     byIdentity: true,
     keyOf,
     membersOf: (diagramPath) => {
       const members = input.memberIds(diagramPath);
-      return members === null ? null : [...new Set(members.map(memberKey))];
+      return members === null ? null : [...new Set(keysOf(members))];
     },
     refOn: (diagramPath, table) => {
       const wanted = keyOf(table);
-      return input.memberIds(diagramPath)?.find((member) => memberKey(member) === wanted)?.ref;
+      const members = input.memberIds(diagramPath);
+      if (!members) return undefined;
+      const keys = keysOf(members);
+      return members.find((_member, i) => keys[i] === wanted)?.ref;
     },
     tableOf: (table) => {
       const given = asTable(table);

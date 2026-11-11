@@ -33,6 +33,7 @@ import { CONVERT_ROW_DESCRIPTION, CONVERT_ROW_LABEL, CONVERT_ROW_TOOLTIP } from 
 import { START_COMMAND } from '../types/startActions';
 import { layerSwatchIcon } from './layerSwatch';
 import { otherLayerCounts, type TableHome } from '../services/tableHomes';
+import type { TableUsageKeys } from '../services/sidebarTables';
 import { LAYER_DEFINITION } from '../services/layerWording';
 import {
   DIAGRAMS_FILTER,
@@ -241,6 +242,14 @@ export class SubjectAreaTreeProvider
    * share a name.
    */
   private tablesDropHandler: ((filePath: string, tables: string[], uris: string[]) => Promise<void>) | undefined;
+  /**
+   * Where the library tells tables apart by their schema folders (set by
+   * the extension): which table each diagram member is (`usage`) and each
+   * table's home by identity (`homes`, `tableHomesById`), so a diagram's
+   * other-layer counts and `schema:` facet count each table of a shared name
+   * by the file its `use` line reads. Unset, or `usage` by name: by name.
+   */
+  private tableIdentity: { usage: () => TableUsageKeys; homes: () => ReadonlyMap<string, TableHome> } | undefined;
 
   constructor(
     private readonly subjectAreaService: SubjectAreaService,
@@ -334,6 +343,36 @@ export class SubjectAreaTreeProvider
         workspaceRoot: this.projectPath, layersPath: this.layerService.getConfigPath(),
         doing: 'while saving layers.json', outcome: 'The layers weren\'t reordered.',
       }), err);
+    }
+  }
+
+  /** How diagram members are matched to tables, and each table's home by identity (see {@link tableIdentity}). */
+  setTableIdentity(usage: () => TableUsageKeys, homes: () => ReadonlyMap<string, TableHome>): void {
+    this.tableIdentity = { usage, homes };
+  }
+
+  /** The member keys of tables told apart by identity, when they are; undefined by name. */
+  private identityKeys(): TableUsageKeys | undefined {
+    const keys = this.tableIdentity?.usage();
+    return keys?.byIdentity ? keys : undefined;
+  }
+
+  /** Each table's home, keyed as `keys` keys a member (by identity), else by lower-cased name. */
+  private homesFor(keys: TableUsageKeys | undefined): ReadonlyMap<string, TableHome> | undefined {
+    return keys && this.tableIdentity ? this.tableIdentity.homes() : this.tableHomes?.();
+  }
+
+  /**
+   * The tables a diagram's members are, as `keys` keys them (by identity),
+   * else its member names; what other-layer counts and the `schema:` facet
+   * look up in the homes.
+   */
+  private homeKeysOf(keys: TableUsageKeys | undefined, filePath: string, members: readonly string[] | null): readonly string[] | null {
+    if (!keys) return members;
+    try {
+      return keys.membersOf(filePath);
+    } catch {
+      return null;
     }
   }
 
@@ -611,7 +650,8 @@ export class SubjectAreaTreeProvider
     const start = Date.now();
     const layers = this.layerService.getAllLayers();
     const byLayer = this.listByLayer();
-    const homes = this.tableHomes?.();
+    const keys = this.identityKeys();
+    const homes = this.homesFor(keys);
     const order = layers.map((l) => l.id);
     const generation = this.filterGeneration;
     const filtered = new Map<string, TreeElement[]>();
@@ -624,9 +664,10 @@ export class SubjectAreaTreeProvider
       const kept: SubjectAreaNode[] = [];
       for (const summary of summaries) {
         const { modelCount, members, description } = this.getDiagramSummary(summary.filePath, true);
-        const match = matchTreeQuery(query, this.diagramSubject(summary, members, description, homes));
+        const homeKeys = this.homeKeysOf(keys, summary.filePath, members);
+        const match = matchTreeQuery(query, this.diagramSubject(summary, members, description, homes, homeKeys));
         if (!match) continue;
-        const otherLayers = homes && homes.size > 0 && members ? otherLayerCounts(members, layer, homes, order) : [];
+        const otherLayers = homes && homes.size > 0 && homeKeys ? otherLayerCounts(homeKeys, layer, homes, order) : [];
         kept.push({ type: 'domain', summary, modelCount, ...(otherLayers.length > 0 ? { otherLayers } : {}), match });
       }
       if (kept.length === 0) continue;
@@ -648,9 +689,11 @@ export class SubjectAreaTreeProvider
     members: readonly string[] | null,
     description: string | undefined,
     homes: ReadonlyMap<string, TableHome> | undefined,
+    /** What `homes` is keyed by for this diagram's members (default: their names). */
+    homeKeys: readonly string[] | null = members,
   ): SearchSubject {
-    const schemas = homes && members
-      ? [...new Set(members.map((m) => homes.get(m.toLowerCase())?.schema).filter((s): s is string => !!s))]
+    const schemas = homes && homeKeys
+      ? [...new Set(homeKeys.map((m) => homes.get(m.toLowerCase())?.schema).filter((s): s is string => !!s))]
       : [];
     return {
       name: summary.domain,
@@ -685,8 +728,9 @@ export class SubjectAreaTreeProvider
     const layerDomains = [...(byLayer.get(layer) ?? [])].sort((a, b) => a.domain.localeCompare(b.domain));
     // Worked out once per listing, and only for a layer that has a diagram.
     let homes: ReadonlyMap<string, TableHome> | undefined;
+    const keys = this.tableHomes && layerDomains.length > 0 ? this.identityKeys() : undefined;
     if (this.tableHomes && layerDomains.length > 0) {
-      homes = fromMemo ? (memo!.homes ??= this.tableHomes()) : this.tableHomes();
+      homes = fromMemo ? (memo!.homes ??= this.homesFor(keys)) : this.homesFor(keys);
     }
     // A YAML project's tables have no layer: no diagram names another one, so no names are read.
     const wantMembers = homes !== undefined && homes.size > 0;
@@ -694,7 +738,8 @@ export class SubjectAreaTreeProvider
 
     const domainNodes: SubjectAreaNode[] = layerDomains.map((summary) => {
       const { modelCount, members } = this.getDiagramSummary(summary.filePath, wantMembers);
-      const otherLayers = homes && members ? otherLayerCounts(members, layer, homes, order) : [];
+      const homeKeys = members ? this.homeKeysOf(keys, summary.filePath, members) : null;
+      const otherLayers = homes && homeKeys ? otherLayerCounts(homeKeys, layer, homes, order) : [];
       return {
         type: 'domain' as const,
         summary,
