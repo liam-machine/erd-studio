@@ -999,6 +999,18 @@ describe('a project where no two tables share a name is left as it was', () => {
     expect(resolves.mock.calls.length).toBeLessThanOrEqual(2 * 6);
   });
 
+  it('New Relationship\'s files and a multi-remove parse the diagram a fixed number of times, not once per member', async () => {
+    useFixture('dbml-native');
+    const canvas = await open('gold/diagrams/sales.dbml');
+    const parses = vi.spyOn(canvas.provider as unknown as { parseSubjectAreaFile(...args: unknown[]): unknown }, 'parseSubjectAreaFile');
+    await canvas.panel._simulateMessage({ type: 'requestNewRelationshipFiles' });
+    expect(parses.mock.calls.length).toBeLessThanOrEqual(2);
+    parses.mockClear();
+    vi.spyOn(canvas.provider as unknown as { applySubjectAreaEdit(...args: unknown[]): Promise<boolean> }, 'applySubjectAreaEdit').mockResolvedValue(false);
+    await canvas.panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_date', 'dim_region', 'bridge_empty', 'customer_profile'] } });
+    expect(parses.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
   it('a mixed diagram\'s unlinked YAML member keeps its file and is not offered by Add Existing', async () => {
     useFixture('dbml-convert/mixed');
     const canvas = await open('gold/diagrams/sales.dbml');

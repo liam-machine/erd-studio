@@ -3648,10 +3648,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram"), never answered with one of them. A member whose `use` line
    * names no listed file is named by its bare name, and only while no other
    * table has that name. Anywhere else the text is the table's name.
+   * `members` is the diagram's member table when the caller already parsed
+   * it (a handler resolving many names parses the diagram once).
    */
-  private canvasTable(document: vscode.TextDocument, text: string): CanvasTable {
+  private canvasTable(document: vscode.TextDocument, text: string, members?: DiagramMemberTable): CanvasTable {
     if (!this.schemaScoped() || !this.isDbmlDocument(document)) return { ref: text, name: text, library: text };
-    const row = this.parseSubjectAreaFile(document).members?.resolve(text);
+    const row = (members ?? this.parseSubjectAreaFile(document).members)?.resolve(text);
     if (!row) {
       // A name no other table shares acts by name; a shared name, or another table's `<schema>.<name>`, would pick one.
       const found = this.tableLibraryService.resolveLibraryRef(text);
@@ -5747,10 +5749,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Told apart by identity, each member is placed by the file its `use` line reads, and answered
       // under what the diagram calls it (the dialog looks each table up by its name on the canvas).
       const byRef = new Map<string, string>();
+      const members = this.schemaScoped() && this.isDbmlDocument(document) ? this.parseSubjectAreaFile(document).members : undefined;
       const asked: Array<string | TableId> = this.schemaScoped() && this.isDbmlDocument(document)
         ? names.map((name) => {
           try {
-            const table = this.canvasTable(document, name);
+            const table = this.canvasTable(document, name, members);
             if (!table.id) return name;
             byRef.set(tableIdKey(table.id), name.toLowerCase());
             return table.id;
@@ -8031,10 +8034,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isSubjectAreaV5(parsed)) {
         // Each removed member's own file, found while it is still on the diagram: the "delete its
         // file too?" offer names that file (two schema folders may each hold a table of its name).
+        const members = this.schemaScoped() && this.isDbmlDocument(document) ? this.parseSubjectAreaFile(document).members : undefined;
         const removedTables = this.schemaScoped() && this.isDbmlDocument(document)
           ? [...namesSet].flatMap((name) => {
             try {
-              return [this.canvasTable(document, name)];
+              return [this.canvasTable(document, name, members)];
             } catch {
               return [];
             }
