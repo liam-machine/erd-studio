@@ -1277,12 +1277,14 @@ describe('submitting', () => {
 
     act(() => {
       for (const listener of busListeners) {
-        listener({ type: 'feedbackSubmitted', payload: { ok: false, error: 'Could not open the browser.' } });
+        listener({ type: 'feedbackSubmitted', payload: { ok: false, error: "ERD Studio couldn't open your browser." } });
       }
     });
 
-    expect(text('.feedback__status--error')).toBe('Could not open the browser.');
+    expect(text('.feedback__status--error')).toBe("ERD Studio couldn't open your browser.");
     expect(primaryButton().hasAttribute('disabled')).toBe(false);
+    // Nothing typed is lost (#285): Copy report stays usable after a failure.
+    expect(buttonWithText('Copy report')?.hasAttribute('disabled')).toBe(false);
     expect(setFeedbackDialogOpen).not.toHaveBeenCalledWith(false);
   });
 

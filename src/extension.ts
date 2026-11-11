@@ -69,7 +69,7 @@ import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, conve
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
-import { submitFeedback } from './services/feedbackService';
+import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
@@ -96,6 +96,7 @@ import {
   CHOOSE_ANOTHER_NAME_BUTTON,
   NO_LAYERS_MESSAGE,
   OPEN_FILE_BUTTON,
+  OPEN_GITHUB_ISSUES_BUTTON,
   OPEN_IT_BUTTON,
   RELOAD_WINDOW_BUTTON,
   SAVE_ALL_BUTTON,
@@ -104,6 +105,7 @@ import {
   diagramNameTakenMessage,
   feedbackPrefill,
   oursMessage,
+  reportNotOpenedMessage,
   showErrorWithActions,
 } from './services/commandErrors';
 import {
@@ -157,7 +159,7 @@ import {
   type GoToTableDeps,
   type TableDetails,
 } from './commands/goToTable';
-import type { FeedbackKind } from './types/feedback';
+import { GITHUB_NEW_ISSUE_URL, type FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
 import {
   GettingStartedPanel,
@@ -1151,9 +1153,35 @@ async function sendFeedbackWithoutCanvas(
   if (description === undefined) return;
   const result = await submitFeedback(context, { kind, title, description, includeDiagnostics: true });
   // The browser is where the issue is actually filed, so all we can record is
-  // that one was opened; the tracker reconciles it against GitHub later.
+  // that one was opened; the tracker reconciles it against GitHub later. A
+  // failed globalState write is never reported as a failed report.
   if (result.ok && result.commentedOn === undefined) {
-    await tracking?.recordPending(title, kind);
+    try {
+      await tracking?.recordPending(title, kind);
+    } catch (err) {
+      log.error('[ERD Studio] Send Feedback: recording the report failed:', err);
+    }
+  }
+  // A failure of ours would otherwise end silently, with what the user typed
+  // gone (#285): keep the text on the clipboard and say what to do next. A
+  // browser failure has already been shown, with its own buttons.
+  if (!result.ok && result.failure === 'ours') {
+    let copied = false;
+    try {
+      await vscode.env.clipboard.writeText(description.trim() ? `${title}\n\n${description}` : title);
+      copied = true;
+    } catch (err) {
+      log.error('[ERD Studio] Send Feedback: copying the text failed:', err);
+    }
+    showErrorWithActions(
+      (message, ...items) => vscode.window.showErrorMessage(message, ...items),
+      reportNotOpenedMessage(copied),
+      {
+        [OPEN_GITHUB_ISSUES_BUTTON]: () => openFixedLink(GITHUB_NEW_ISSUE_URL),
+        [TRY_AGAIN_BUTTON]: () => sendFeedbackWithoutCanvas(context, { kind, title, description }, tracking),
+      },
+      (choice, err) => log.error(`[ERD Studio] Send Feedback: "${choice}" failed:`, err),
+    );
   }
 }
 

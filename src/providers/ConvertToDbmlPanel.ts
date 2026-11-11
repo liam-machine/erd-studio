@@ -186,7 +186,7 @@ export class ConvertToDbmlPanel {
           await openTableFileAt(filePath, location.line, undefined, vscode.ViewColumn.Beside);
         } catch (err) {
           log.error('[ConvertToDbmlPanel] Could not open', location.path, err);
-          void vscode.window.showErrorMessage(`${CONVERT_PANEL_TITLE}: could not open ${location.path}.`);
+          void vscode.window.showErrorMessage(`${CONVERT_PANEL_TITLE}: could not open ${location.path}. It may have been moved or deleted.`);
         }
         return;
       }

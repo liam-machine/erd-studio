@@ -1214,7 +1214,7 @@ describe('feedback (submitFeedback message)', () => {
     expect(typeof lastSubmitted(panel)?.error).toBe('string');
   });
 
-  it('tells the user when the browser could not be opened, including the link', async () => {
+  it('tells the user when the browser could not be opened, offering the link and the report', async () => {
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(false);
     const showError = vi.spyOn(vscode.window, 'showErrorMessage');
@@ -1222,9 +1222,9 @@ describe('feedback (submitFeedback message)', () => {
     panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
     await vi.waitFor(() =>
-      expect(showError).toHaveBeenCalledWith(expect.stringMatching(/could not open the browser.*github\.com\/liam-machine\/erd-studio/)),
+      expect(showError).toHaveBeenCalledWith("ERD Studio couldn't open your browser.", 'Copy Link', 'Copy Report'),
     );
-    await vi.waitFor(() => expect(lastSubmitted(panel)?.ok).toBe(false));
+    await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({ ok: false, error: "ERD Studio couldn't open your browser." }));
     expect(lastError(panel)).toBeUndefined();
   });
 
@@ -1234,7 +1234,11 @@ describe('feedback (submitFeedback message)', () => {
 
     panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
-    await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({ ok: false, error: 'EPERM' }));
+    // The dialog gets a sentence, never the raw exception (#285); the log keeps it.
+    await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({
+      ok: false,
+      error: "ERD Studio couldn't open your report on GitHub. This is a problem in ERD Studio, not something you did.",
+    }));
     expect(hostErrorLog.recent().at(-1)).toMatch(/\[submitFeedback\] EPERM$/);
     expect(types(panel)).not.toContain('error');
   });

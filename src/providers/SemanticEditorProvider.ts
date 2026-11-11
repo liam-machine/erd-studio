@@ -80,7 +80,7 @@ import { runDbtCompile } from '../commands/runDbtCompile';
 import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND } from '../commands/importDbml';
 import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
-import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, oursMessage, projectRelative, reportNotOpenedMessage, showErrorWithActions, type FeedbackPrefill } from '../services/commandErrors';
 import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
 import { askNoReadyRecovery } from './noReadyRecovery';
 import { ManifestService } from '../services/manifestService';
@@ -2910,12 +2910,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                   hostErrorLog.record('submitFeedback.recordPending', err);
                 }
               }
-              this.post(webviewPanel.webview, { type: 'feedbackSubmitted', payload: result });
+              // `failure` is host-only; the dialog's message carries the sentence.
+              const { ok, commentedOn, error } = result;
+              this.post(webviewPanel.webview, {
+                type: 'feedbackSubmitted',
+                payload: { ok, ...(commentedOn !== undefined ? { commentedOn } : {}), ...(error !== undefined ? { error } : {}) },
+              });
             } catch (err) {
+              // Never the raw exception (#285): it is recorded for the next report.
               hostErrorLog.record('submitFeedback', err);
               this.post(webviewPanel.webview, {
                 type: 'feedbackSubmitted',
-                payload: { ok: false, error: err instanceof Error ? err.message : String(err) },
+                payload: { ok: false, error: reportNotOpenedMessage(false) },
               });
             }
             break;
