@@ -698,9 +698,35 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
             // Unknown: the end stays on the one table of its name, as it always drew.
           }
         });
+        // A contested path that is gone (the table moved): the host's finder, asked as for a stale member
+        // line, says where the table of that name and schema now is. When that is not the one table of
+        // its name on this diagram (or nowhere one table says), the end means a table elsewhere, as the
+        // extension, which lists the library, reads it. A finder that cannot tell changes nothing.
+        const elsewhere = new Set<string>();
+        if (findDbmlTable) {
+          const gone = probes.filter((rel) => tableFileExists.get(rel) === false);
+          await mapWithLimit(gone, maxParallelReads, async (rel) => {
+            const tree = dbmlTreePathOf(rel);
+            if (tree?.kind !== 'table' || tree.name === undefined) return;
+            let found: string | null | undefined;
+            try {
+              found = await findDbmlTable(tree.name, {
+                ...(tree.schema !== undefined ? { schema: tree.schema } : {}),
+                ...(tree.layer !== undefined ? { layer: tree.layer } : {}),
+                stalePath: rel,
+              });
+            } catch {
+              return;
+            }
+            if (found === undefined) return;
+            const lowerName = tree.name.trim().toLowerCase();
+            const own = entries.filter((e) => e.path !== undefined && e.table.name.toLowerCase() === lowerName).map((e) => normalisePosix(e.path!).toLowerCase());
+            if (found === null || !own.includes(normalisePosix(found).toLowerCase())) elsewhere.add(rel);
+          });
+        }
         // Only the members were read, so a Ref whose owner is off this
         // diagram (or did not read) is no orphan here (§2.4: `partial`).
-        const lookup = dbmlTableLookup(entries, { exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true });
+        const lookup = dbmlTableLookup(entries, { exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true || elsewhere.has(normalisePosix(rel)) });
         const attached = attachRelationships(readings, lookup, { partial: true });
         for (const message of attached.warnings) warn(message);
         // A Ref whose other end names a table that more than one schema folder has, with nothing to say which,

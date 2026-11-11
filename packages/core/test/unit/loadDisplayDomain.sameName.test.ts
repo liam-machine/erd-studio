@@ -196,6 +196,39 @@ describe('a member whose file is gone (the stale-path rule)', () => {
     expect(warnings.some((w) => w.includes('it was read from bronze/tables/ddd/addresse.dbml'))).toBe(true);
   });
 
+  it('with the finder, a Ref end whose use line names a file that is gone is not drawn on a namesake when the finder says the table is elsewhere', async () => {
+    // The ccc-only diagram imports r.dbml, which names bqs.addresse by a use line to bqs's file; that file was
+    // moved to ddd/. On the diagram the one addresse is ccc's, which the Ref never meant (the extension draws nothing).
+    const files = fixture();
+    files['.erd-studio/bronze/tables/ddd/addresse.dbml'] = files['.erd-studio/bronze/tables/bqs/addresse.dbml'].replace('bqs.addresse', 'ddd.addresse');
+    delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+    delete files['.erd-studio/bronze/relationships/bronze.dbml'];
+    files['.erd-studio/bronze/relationships/r.dbml'] = [
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      'Ref: ccc.kunde.addresse_id > bqs.addresse.id', '',
+    ].join('\n');
+    files[diagramPath('ccc')] = files[diagramPath('ccc')].replace("use * from '../relationships/bronze.dbml'", "use * from '../relationships/r.dbml'");
+    const listing = Object.keys(files).filter((p) => p.startsWith('.erd-studio/')).map((p) => p.slice('.erd-studio/'.length));
+    const withFinder = await load(files, diagramPath('ccc'), { findDbmlTable: dbmlTableFinder(listing) }).promise;
+    expect(links(withFinder)).toEqual([]);
+    // The table moved, and is the one of its name the diagram shows: the end still lands on it, as it always did.
+    const moved = fixture();
+    moved['.erd-studio/bronze/tables/ddd/addresse.dbml'] = moved['.erd-studio/bronze/tables/ccc/addresse.dbml'].replace('ccc.addresse', 'ddd.addresse');
+    for (const f of ['bronze/tables/bqs/addresse.dbml', 'bronze/tables/ccc/addresse.dbml', 'bronze/relationships/bronze.dbml']) delete moved[`.erd-studio/${f}`];
+    moved['.erd-studio/bronze/relationships/r.dbml'] = files['.erd-studio/bronze/relationships/r.dbml'];
+    moved[diagramPath('one')] = [
+      "Project one {\n  erd_schema_version: '7'\n}",
+      "use { table ddd.addresse } from '../tables/ddd/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      "use * from '../relationships/r.dbml'",
+      '',
+    ].join('\n');
+    const movedListing = Object.keys(moved).filter((p) => p.startsWith('.erd-studio/')).map((p) => p.slice('.erd-studio/'.length));
+    const stillDrawn = await load(moved, diagramPath('one'), { findDbmlTable: dbmlTableFinder(movedListing) }).promise;
+    expect(links(stillDrawn)).toEqual(['kunde.addresse_id>addresse.id']);
+  });
+
   describe('with no finder, in the folders the lines name (owner decision B, as the host)', () => {
     /** A diagram of bqs.addresse (its file gone), ccc.kunde and ddd.kunde: its lines name bqs, ccc and ddd. */
     function threeFolders(withDdd: boolean): Files {
