@@ -131,6 +131,14 @@ const EXPECTED_FILES = [
   // The rich DBML goldens (positions in erd_layout), owned by exportDiagram.golden.test.ts and exportDbmlRich.test.ts.
   ...Object.keys(SUBJECT_AREA_CASES).flatMap((c) => [`${c}.rich.dbml`]),
   'rich-features.rich.dbml',
+  // The alias-workaround project (ccc_addresse with alias addresse), owned by
+  // packages/core/test/unit/aliasWorkaround.golden.test.ts: made by the code
+  // before schema-scoped table identity, and never regenerated.
+  'alias-workaround.ccc.display.json',
+  'alias-workaround.kunden.display.json',
+  'alias-workaround.kunden.dbml',
+  'alias-workaround.kunden.mmd',
+  'alias-workaround.kunden.rich.dbml',
 ].sort();
 
 /**

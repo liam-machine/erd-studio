@@ -93,9 +93,9 @@ const TWINS_DIR = path.resolve(__dirname, '../fixtures/dbml');
 const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => name !== 'missing-model');
 
 describe('the DBML twins compile clean as multi-file projects, the way other DBML tools read them', () => {
-  it('the clean twins are the four §9.2 cases, Convert\'s missing-model output (D26/D27), the context-field spellings and an imported table\'s settings', () => {
+  it('the clean twins are the four §9.2 cases, Convert\'s missing-model output (D26/D27), the context-field spellings, an imported table\'s settings and the alias workaround', () => {
     expect([...CLEAN_TWINS].sort()).toEqual([
-      'composite-and-self', 'fields-new', 'fields-old', 'import-settings-new', 'import-settings-old', 'library-relationships', 'missing-model-converted',
+      'alias-workaround', 'composite-and-self', 'fields-new', 'fields-old', 'import-settings-new', 'import-settings-old', 'library-relationships', 'missing-model-converted',
       'missing-positions', 'showcase',
     ]);
   });

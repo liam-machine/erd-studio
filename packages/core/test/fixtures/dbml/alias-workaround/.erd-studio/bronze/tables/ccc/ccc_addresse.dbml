@@ -1,0 +1,8 @@
+// The workaround 2.0 needed: the warehouse table is ccc.addresse, renamed so its name is unique in the project.
+Table ccc.ccc_addresse [alias: 'addresse'] {
+  id INT [pk]
+  street VARCHAR
+  city VARCHAR
+  postcode VARCHAR
+  Note: 'Addresses from the CCC system'
+}

@@ -1,0 +1,6 @@
+Table ccc.ccc_kunde [alias: 'kunde'] {
+  id INT [pk]
+  full_name VARCHAR
+  addresse_id INT [foreign_key: 'true']
+  Note: 'Customers from the CCC system'
+}
