@@ -35,7 +35,7 @@ import {
   samePath,
   type DbtProjectResolution,
 } from './services/projectDiscovery';
-import { YmlParserService } from './services/ymlParserService';
+import { YmlParserService, emptyYmlData } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
@@ -1749,6 +1749,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     {
       // Paths compared as the file system does (a `c:` drive letter, a folder in another case).
       isFileDirtyInEditor: (filePath) => dirtyFiles([filePath]).length > 0,
+      // A table whose name two schema folders share is written as the dbt model it was found as (D-12).
+      dbtModelsOf: (unified) => subjectAreaService.dbtModelNamesOf(unified, ymlParserService.peekYmlData() ?? emptyYmlData(), manifestService.peekManifest()),
       onSkipped: (info) => {
         const message = info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +

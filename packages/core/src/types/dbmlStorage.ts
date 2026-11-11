@@ -402,4 +402,26 @@ export interface DbmlAttachResult {
    * than 2.0's leaves it unset.
    */
   locations?: Map<string, DbmlRefLocation>;
+  /**
+   * Refs not drawn because of what their ends name: an end that tables in
+   * more than one schema folder could be and nothing decides (`ambiguous`,
+   * with those tables' schema folders), or two ends that land on one table
+   * with the same columns (`selfJoin`: a stale qualifier). Each also has its
+   * sentence in `warnings`. Optional: an attach step older than this field
+   * leaves it unset.
+   */
+  unresolved?: DbmlUnresolvedRef[];
+}
+
+/** A Ref {@link DbmlAttachResult.unresolved} names: where it is written, why it is not drawn, and the end that says so. */
+export interface DbmlUnresolvedRef {
+  /** The relationships file, as the caller named it. */
+  path: string;
+  /** 1-based line of the Ref. */
+  line: number;
+  kind: 'ambiguous' | 'selfJoin';
+  /** The end's table as written (ambiguous), or the one table both ends land on (selfJoin). */
+  table: string;
+  /** Ambiguous: the schema folders of the tables it could be, in listing order. */
+  schemas?: string[];
 }

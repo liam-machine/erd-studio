@@ -1128,6 +1128,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       panel?: vscode.WebviewPanel;
       /** Cached discrepancy report from the last comparison (used by sync plan generation). */
       lastDiscrepancyReport?: DiscrepancyReport | null;
+      /** What the last comparison knew of tables two schema folders share (`tableIdsOf`, `dbtModelNamesOf`), by lower-case reference. */
+      lastDiscrepancyTables?: { ids: ReadonlyMap<string, TableId>; dbtModels: ReadonlyMap<string, string | null> };
       /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
       lastCompareAgainst?: Stage;
       /**
@@ -9544,7 +9546,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const targetStage = payload.compareAgainst;
 
       // The one comparison orchestration, shared with the `erd-studio diff` CLI.
-      const { report } = computeSubjectAreaDiff(
+      const { report, unified } = computeSubjectAreaDiff(
         { subjectAreaService: this.subjectAreaService, ymlData, manifest, catalog },
         document.uri.fsPath,
         sourceStage,
@@ -9556,6 +9558,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const panelEntry = this.openPanels.get(panelKey);
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = report;
+        // A table two schema folders share: its own file, and the dbt model the comparison found it as.
+        panelEntry.lastDiscrepancyTables = {
+          ids: this.subjectAreaService.tableIdsOf(unified),
+          dbtModels: this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest),
+        };
         panelEntry.lastCompareAgainst = targetStage;
       }
 
@@ -9621,7 +9628,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           layerIds: new Set(this.layerService.getAllLayers().map((l) => l.id)),
           manifest,
           ymlData,
+          tableIdOf: (name) => panel.lastDiscrepancyTables?.ids.get(name.toLowerCase()),
         }),
+        dbtModelOf: (name) => panel.lastDiscrepancyTables?.dbtModels.get(name.toLowerCase()),
       });
 
       const totalActions = countSyncPlanActions(syncPlan);

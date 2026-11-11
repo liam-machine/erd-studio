@@ -66,6 +66,7 @@ import { toUnreadableTableFile, unreadableHint, type UnreadableTableFile } from 
 import { collectDbmlProblems, FORMAT_CONFLICT_CODE, LEGACY_DBML_TREE_CODE, type DbmlProblemEntry } from './dbmlProblems';
 import { collectFieldsSummary, startingSetSummary, type FieldsSummary } from './fieldFindings';
 import type { DbmlTableReading } from '@erd-studio/core';
+import { tableIdOfEntry } from '../services/tableLibraryIndex';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
@@ -276,6 +277,8 @@ export interface ConflictedSubjectAreaFile {
 
 export interface DataTypeAliasFile {
   name: string;
+  /** The table's schema folder, where another schema folder has a table of its name (additive). */
+  schema?: string;
   /** Project-relative, forward slashes. */
   file: string;
   /**
@@ -502,13 +505,16 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   }
   const unreadable: UnreadableTableFile[] = [];
   const aliased: DataTypeAliasFile[] = [];
-  for (const entry of ctx.tableLibraryService.listTableFiles()) {
+  const lib = ctx.tableLibraryService;
+  for (const entry of lib.listTableFiles()) {
     if (entry.shadowedBy) { continue; }
-    const err = ctx.tableLibraryService.getTableFileError(entry.name);
+    // A name another schema folder's table shares: read by the table's own file, listed with its schema folder.
+    const id = lib.schemaScopedNames && lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
+    const err = lib.getTableFileError(id ?? entry.name);
     if (err) { unreadable.push(toUnreadableTableFile(ctx.root, err)); continue; }
-    const { columns, ignored, anchored } = ctx.tableLibraryService.dataTypeAliasColumns(entry.name);
+    const { columns, ignored, anchored } = lib.dataTypeAliasColumns(id ?? entry.name);
     if (columns.length + ignored.length + anchored.length > 0) {
-      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored, anchored });
+      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored, anchored, ...(id ? { schema: id.schema } : {}) });
     }
   }
   // The extension's own answer (#182), so doctor and the canvas never disagree.

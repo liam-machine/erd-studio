@@ -9,7 +9,11 @@
  * what dbt built (physical) and drives the sync plan. Nothing here looks at
  * dbt, and nothing here decides a fix.
  *
- * - Tables match by name, without case. One removed and one added table
+ * - Tables match by name, without case; where two schema folders share a
+ *   name, by identity (schema folder and name), so a second table of a name
+ *   appearing is one added table and no change to the first. A table found
+ *   under neither on one side and the other, one of that name each way, is
+ *   the same table (moved). One removed and one added table
  *   with the same columns (names and types, in order) and no other such
  *   pair is a rename; anything less certain stays an add and a remove.
  * - A table moved when its layer or its schema changed (each compared only
@@ -138,6 +142,48 @@ function columnSignature(t: SnapshotTable): string {
   return t.columns.map((c) => `${lower(c.name)}:${lower(c.dataType.trim())}`).join('\u0001');
 }
 
+/**
+ * The tables of `base` and `head` that are one table: the same key (a name,
+ * or `<schema>.<name>` where two schema folders share it), else the same
+ * identity (a reference that changed because a second table of the name
+ * appeared or went), else the one table of a name on each side (a table
+ * moved to another schema folder).
+ */
+function pairTables(base: ReadonlyMap<string, SnapshotTable>, head: ReadonlyMap<string, SnapshotTable>): Array<[SnapshotTable, SnapshotTable]> {
+  const pairs: Array<[SnapshotTable, SnapshotTable]> = [];
+  const leftBase = new Map(base);
+  const leftHead = new Map(head);
+  for (const [key, now] of head) {
+    const was = leftBase.get(key);
+    if (!was) continue;
+    pairs.push([was, now]);
+    leftBase.delete(key);
+    leftHead.delete(key);
+  }
+  const byId = (tables: ReadonlyMap<string, SnapshotTable>): Map<string, string> =>
+    new Map([...tables].filter(([, t]) => t.id !== undefined).map(([k, t]) => [t.id!, k]));
+  const baseIds = byId(leftBase);
+  for (const [key, now] of [...leftHead]) {
+    const baseKey = now.id !== undefined ? baseIds.get(now.id) : undefined;
+    if (baseKey === undefined) continue;
+    pairs.push([leftBase.get(baseKey)!, now]);
+    leftBase.delete(baseKey);
+    leftHead.delete(key);
+  }
+  const byName = (tables: ReadonlyMap<string, SnapshotTable>): Map<string, string[]> => {
+    const out = new Map<string, string[]>();
+    for (const [k, t] of tables) out.set(lower(t.name), [...(out.get(lower(t.name)) ?? []), k]);
+    return out;
+  };
+  const baseNames = byName(leftBase);
+  for (const [name, headKeys] of byName(leftHead)) {
+    const baseKeys = baseNames.get(name);
+    if (headKeys.length !== 1 || baseKeys?.length !== 1) continue;
+    pairs.push([leftBase.get(baseKeys[0])!, leftHead.get(headKeys[0])!]);
+  }
+  return pairs;
+}
+
 /** Pairs of removed → added tables that are certainly renames: identical, non-empty columns, one candidate each way. */
 function detectRenames(removed: SnapshotTable[], added: SnapshotTable[]): Array<[SnapshotTable, SnapshotTable]> {
   const bySignature = (list: SnapshotTable[]): Map<string, SnapshotTable[]> => {
@@ -218,17 +264,20 @@ function facing(base: SnapshotRelationship, head: SnapshotRelationship): Cardina
 export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): ModelChanges {
   const byName = (a: { name: string }, b: { name: string }): number => byteOrder(lower(a.name), lower(b.name)) || byteOrder(a.name, b.name);
 
-  // Tables.
-  const removedTables = [...base.tables].filter(([k]) => !head.tables.has(k)).map(([, t]) => t);
-  const addedTables = [...head.tables].filter(([k]) => !base.tables.has(k)).map(([, t]) => t);
+  // Tables: by key (name, or reference where a name is shared), then by identity, then one of a name each way.
+  const pairs = pairTables(base.tables, head.tables);
+  const pairedBase = new Set(pairs.map(([was]) => was));
+  const pairedHead = new Set(pairs.map(([, now]) => now));
+  const removedTables = [...base.tables.values()].filter((t) => !pairedBase.has(t));
+  const addedTables = [...head.tables.values()].filter((t) => !pairedHead.has(t));
   const renames = detectRenames(removedTables, addedTables);
-  const renamedFrom = new Set(renames.map(([from]) => lower(from.name)));
-  const renamedTo = new Set(renames.map(([, to]) => lower(to.name)));
+  const renamedFrom = new Set(renames.map(([from]) => from));
+  const renamedTo = new Set(renames.map(([, to]) => to));
 
   const changed: TableChange[] = [];
   const moved: ModelChanges['tables']['moved'] = [];
   const matched: Array<[SnapshotTable, SnapshotTable, string | undefined]> = [
-    ...[...head.tables].filter(([k]) => base.tables.has(k)).map(([k, t]) => [base.tables.get(k)!, t, undefined] as [SnapshotTable, SnapshotTable, undefined]),
+    ...pairs.map(([was, now]) => [was, now, undefined] as [SnapshotTable, SnapshotTable, undefined]),
     ...renames.map(([from, to]) => [from, to, from.name] as [SnapshotTable, SnapshotTable, string]),
   ];
   for (const [was, now, renamed] of matched) {
@@ -245,8 +294,15 @@ export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): Mo
   const relationshipsAdded: RelationshipAt[] = [];
   const relationshipsRemoved: RelationshipAt[] = [];
   const relationshipsChanged: ModelChanges['relationships']['changed'] = [];
+  // A relationship of a table whose reference changed (a second table of its name appeared) is matched by identity.
+  const baseById = new Map([...base.relationships.values()].filter((r) => r.idKey !== undefined).map((r) => [r.idKey!, r]));
+  const headById = new Map([...head.relationships.values()].filter((r) => r.idKey !== undefined).map((r) => [r.idKey!, r]));
+  const wasOf = (key: string, r: SnapshotRelationship): SnapshotRelationship | undefined =>
+    base.relationships.get(key) ?? (r.idKey !== undefined && !head.relationships.has(baseById.get(r.idKey)?.key ?? '') ? baseById.get(r.idKey) : undefined);
+  const nowOf = (key: string, r: SnapshotRelationship): SnapshotRelationship | undefined =>
+    head.relationships.get(key) ?? (r.idKey !== undefined && !base.relationships.has(headById.get(r.idKey)?.key ?? '') ? headById.get(r.idKey) : undefined);
   for (const [key, r] of head.relationships) {
-    const was = base.relationships.get(key);
+    const was = wasOf(key, r);
     if (!was) {
       relationshipsAdded.push(relationshipAt(r));
     } else if (facing(was, r) !== was.cardinality) {
@@ -254,7 +310,7 @@ export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): Mo
     }
   }
   for (const [key, r] of base.relationships) {
-    if (!head.relationships.has(key)) relationshipsRemoved.push(relationshipAt(r));
+    if (!nowOf(key, r)) relationshipsRemoved.push(relationshipAt(r));
   }
   const relOrder = (a: RelationshipAt, b: RelationshipAt): number =>
     byteOrder(lower(`${a.fromTable}.${a.fromColumn}`), lower(`${b.fromTable}.${b.fromColumn}`))
@@ -306,8 +362,8 @@ export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): Mo
 
   return {
     tables: {
-      added: addedTables.filter((t) => !renamedTo.has(lower(t.name))).map(tableAt).sort(byName),
-      removed: removedTables.filter((t) => !renamedFrom.has(lower(t.name))).map(tableAt).sort(byName),
+      added: addedTables.filter((t) => !renamedTo.has(t)).map(tableAt).sort(byName),
+      removed: removedTables.filter((t) => !renamedFrom.has(t)).map(tableAt).sort(byName),
       renamed: renames.map(([from, to]) => ({ from: from.name, to: to.name, file: to.file })).sort((a, b) => byteOrder(lower(a.to), lower(b.to))),
       moved: moved.sort(byName),
       changed: changed.sort(byName),

@@ -398,8 +398,9 @@ export function attachRelationships(
       };
       for (const [name, end] of [[rels[0].fromModel, owner], [rels[0].toModel, target]] as const) {
         if (!end.ambiguous) continue;
-        const schemas = end.ambiguous.map((e) => e.schema ?? '').join(', ');
-        result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
+        const schemas = end.ambiguous.map((e) => e.schema ?? '');
+        result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
+        (result.unresolved ??= []).push({ path, line: ref.line, kind: 'ambiguous', table: name, schemas });
       }
       if (!ownerEntry && options.partial) continue;
       // The reader keeps a Ref whose ends' qualifiers differ (`ccc.addresse.id > bqs.addresse.id` joins two
@@ -408,6 +409,7 @@ export function attachRelationships(
       if (ownerEntry && targetEntry && identityOf(ownerEntry) === identityOf(targetEntry)
         && rels.every((r) => lower(r.fromColumn) === lower(r.toColumn))) {
         result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} joins a column set to itself (both ends name ${location.owner}); it is not drawn`);
+        (result.unresolved ??= []).push({ path, line: ref.line, kind: 'selfJoin', table: location.owner });
         continue;
       }
       if (!ownerEntry || ownerEntry.storage !== 'dbml') {

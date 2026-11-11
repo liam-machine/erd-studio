@@ -17,10 +17,12 @@ import { redactPaths } from '../types/feedback';
 import type { Cardinality, Relationship, SubjectAreaSummary, UnifiedSubjectArea } from '../types/semantic';
 import { detectSubjectAreaFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
+import { sameName } from '../types/naming';
+import type { TableId } from '../types/tableId';
 import { SubjectAreaFileError } from '../services/domainService';
 import type { TableFileError, TableFileErrorKind } from '../services/logicalModelService';
 import { usesLibraryRelationships } from '../services/libraryRelationships';
-import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship, subjectAreaStorageOf } from '@erd-studio/core';
+import { DBML_TABLE_QUOTE_HINT_CODES, canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship, subjectAreaStorageOf, tableNameOf } from '@erd-studio/core';
 import type { ColumnPair } from '@erd-studio/core';
 import { usePathBetween } from '@erd-studio/core/dbml';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
@@ -45,7 +47,10 @@ export type FixKind =
 export interface Fix {
   severity: 'blocking' | 'advisory';
   kind: FixKind;
+  /** The table's own name (its file's stem). */
   model: string;
+  /** The table's schema folder, where another schema folder has a table of its name (additive). */
+  schema?: string;
   column?: string;
   /**
    * The file to edit, project-relative: the table's file (`<layer>/tables/<schema>/<m>.dbml`,
@@ -613,6 +618,9 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
     .filter((m) => m.existsInProject !== false && m.columns.length === 0)
     .map((m) => m.name);
 
+  // A table two schema folders share: its own file, and the dbt model the comparison found it as.
+  const tableIds = ctx.subjectAreaService.tableIdsOf(unified);
+  const dbtModels = ctx.subjectAreaService.dbtModelNamesOf(unified, ctx.ymlData, ctx.manifest);
   const plan = buildSyncPlan(report, allSelections(report, 'physical'), {
     manifest: ctx.manifest,
     ymlData: ctx.ymlData,
@@ -626,9 +634,11 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       layerIds: new Set(ctx.layerService.getAllLayers().map((l) => l.id)),
       manifest: ctx.manifest,
       ymlData: ctx.ymlData,
+      tableIdOf: (name) => tableIds.get(name.toLowerCase()),
     }),
+    dbtModelOf: (name) => dbtModels.get(name.toLowerCase()),
   });
-  const unreadableModelFiles = unreadableTables(ctx, unified);
+  const unreadableModelFiles = unreadableTables(ctx, unified, tableIds);
   // The entry each link is drawn from (core's read winner), keyed by link.
   const libraryLines = mergeLibraryRelationships(unified.logical.models, []);
   const relationshipHome: RelationshipHome = {
@@ -641,7 +651,8 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       ctx.tableLibraryService.hasDbmlLibrary(),
     ),
   };
-  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);
+  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome)
+    .map((fix) => withOwnName(fix, ctx, tableIds));
   const blocking = fixes.filter((f) => f.severity === 'blocking').length;
   const advisory = fixes.length - blocking;
 
@@ -656,7 +667,7 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
       matchedRelationships: report.relationships.filter((r) => r.status === 'matched').length,
     },
     phantoms,
-    missingModelFiles: missingTableFiles(ctx, unified),
+    missingModelFiles: missingTableFiles(ctx, unified, tableIds),
     unreadableModelFiles,
     modelsWithoutColumns,
     fixes,
@@ -665,16 +676,37 @@ export function diffSubjectArea(ctx: CliContext, file: string, strict: boolean):
   };
 }
 
-function missingTableFiles(ctx: CliContext, unified: UnifiedSubjectArea): string[] {
+function missingTableFiles(ctx: CliContext, unified: UnifiedSubjectArea, tableIds: ReadonlyMap<string, TableId> = new Map()): string[] {
+  // A member read from its own file has one; one named `<schema>.<name>` is looked for by its own name.
   return unified.logical.models
-    .map((m) => m.name)
-    .filter((name) => !ctx.tableLibraryService.tableExists(name));
+    .filter((m) => !tableIds.has(m.name.toLowerCase()) && !ctx.tableLibraryService.tableExists(tableNameOf(m) ?? m.name))
+    .map((m) => m.name);
 }
 
-function unreadableTables(ctx: CliContext, unified: UnifiedSubjectArea): UnreadableTableFile[] {
+/**
+ * `fix` naming its table by the table's own name, with its schema folder
+ * beside it (`schema`, additive) where another schema folder's table has that
+ * name: the plan names it by the diagram's reference (`<schema>.<name>` on a
+ * diagram holding both), which `file` already resolves.
+ */
+function withOwnName(fix: Fix, ctx: CliContext, tableIds: ReadonlyMap<string, TableId>): Fix {
+  const id = tableIds.get(fix.model.toLowerCase());
+  if (!id) return fix;
+  const shared = !sameName(id.name, fix.model) || (ctx.tableLibraryService.schemaScopedNames && ctx.tableLibraryService.isAmbiguousName(id.name));
+  if (!shared) return fix;
+  // A table another schema folder's table shares a name with is a dbt model only by its schema: say so.
+  const explain = fix.kind === 'resolve-phantom' && fix.explain?.startsWith('dbt has no model called')
+    ? `No dbt model is ${id.schema}'s ${id.name}: another schema folder has a table named ${id.name}, so its dbt model is the one built in schema ${id.schema} `
+      + `(as ${id.schema}.${id.name} or its alias, or called ${id.name} with that schema) — ask which dbt model it is, or whether it should be removed from this diagram.`
+    : fix.explain;
+  return { ...fix, model: id.name, schema: id.schema, ...(explain !== undefined ? { explain } : {}) };
+}
+
+function unreadableTables(ctx: CliContext, unified: UnifiedSubjectArea, tableIds: ReadonlyMap<string, TableId> = new Map()): UnreadableTableFile[] {
   const out: UnreadableTableFile[] = [];
   for (const m of unified.logical.models) {
-    const err = ctx.tableLibraryService.getTableFileError(m.name);
+    // By the member's own file: a name two schema folders share names two files.
+    const err = ctx.tableLibraryService.getTableFileError(tableIds.get(m.name.toLowerCase()) ?? m.name);
     if (err) { out.push(toUnreadableTableFile(ctx.root, err)); }
   }
   return out;
