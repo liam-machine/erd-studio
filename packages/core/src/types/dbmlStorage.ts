@@ -425,4 +425,6 @@ export interface DbmlUnresolvedRef {
   table: string;
   /** Ambiguous: the schema folders of the tables it could be, in listing order. */
   schemas?: string[];
+  /** Ambiguous: the schema the end wrote before the table (`zzz` in `zzz.addresse`), when it wrote one. */
+  qualifier?: string;
 }

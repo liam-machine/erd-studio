@@ -128,8 +128,9 @@ describe('doctor: two tables of one name in different schema folders', () => {
     const found = (await problems()).filter((p) => p.file.endsWith('bronze/relationships/r.dbml') && p.code === 'ambiguousTableReference');
     expect(found).toEqual([{
       file: '.erd-studio/bronze/relationships/r.dbml', line: 2, code: 'ambiguousTableReference',
-      message: 'This Ref names addresse, which tables in more than one schema folder have (bqs, ccc), and nothing says which, so it is not drawn. '
-        + 'Write the end as <schema>.addresse, with a use line for that table.',
+      // The end already names a schema: the message says that schema has no such table, not that nothing says which.
+      message: 'This Ref names zzz.addresse, but the schema folder zzz has no table called addresse; the tables called addresse are in bqs and ccc, '
+        + 'so it is not drawn. Write the end as bqs.addresse or ccc.addresse, with a use line for that table.',
     }]);
   });
 

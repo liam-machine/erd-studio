@@ -295,6 +295,12 @@ describe('attachRelationships: resolving an end among tables of one name (rule 2
     const result = attachRelationships([reading(text)], dbmlTableLookup([kundeCcc, ccc]), { partial: true });
     expect(result.warnings.filter((w) => w.includes('more than one schema folder'))).toEqual([expect.stringContaining('(bqs, ccc)')]);
     expect(result.unresolved).toEqual([expect.objectContaining({ kind: 'ambiguous', table: 'addresse', schemas: ['bqs', 'ccc'] })]);
+    expect(result.unresolved![0]).not.toHaveProperty('qualifier');
+  });
+
+  it('(e\') a qualified end that names neither schema folder is reported with the qualifier it wrote, so a checker can say that schema has no such table', () => {
+    const result = attachRelationships([reading('Ref: ccc.kunde.addresse_id > zzz.addresse.id\n')], dbmlTableLookup(all));
+    expect(result.unresolved).toEqual([{ path: expect.any(String), line: 1, kind: 'ambiguous', table: 'addresse', schemas: ['bqs', 'ccc'], qualifier: 'zzz' }]);
   });
 
   it('(d) an unqualified end the file says is another schema folder\'s table (its own use line, or its use lines only from there) is contested, never drawn on a namesake whose file exists elsewhere', () => {

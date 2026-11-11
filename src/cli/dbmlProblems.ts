@@ -194,6 +194,10 @@ export const ALLOWED_ROOT_FILES: ReadonlySet<string> = new Set(['modelling-appro
 
 const stemOf = (rel: string): string => path.posix.basename(rel).replace(/\.dbml$/i, '');
 
+/** `a`, `a and b`, `a, b and c` (or `or` in place of `and`). */
+const listInWords = (words: readonly string[], conjunction: 'and' | 'or' = 'and'): string =>
+  words.length > 2 ? `${words.slice(0, -1).join(', ')} ${conjunction} ${words[words.length - 1]}` : words.join(` ${conjunction} `);
+
 /**
  * The first line of git conflict markers in `f` that is not inside a
  * diagram's `erd_layout` (§1.6): the value's span is blanked (its line
@@ -738,11 +742,17 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   }
   // Refs the attach leaves undrawn because of what their ends name (told apart by identity).
   for (const u of attachment?.unresolved ?? []) {
+    const schemas = u.schemas ?? [];
+    // An end that wrote a schema none of the tables is in (`zzz.addresse`): that schema has no such table.
+    const strayQualifier = u.qualifier !== undefined && schemas.length > 0 && !schemas.some((s) => s.toLowerCase() === u.qualifier!.toLowerCase());
     push(u.kind === 'ambiguous'
       ? {
         file: projectRel(libraryRel(u.path)), line: u.line, code: 'ambiguousTableReference',
-        message: `This Ref names ${u.table}, which tables in more than one schema folder have (${(u.schemas ?? []).join(', ')}), and nothing says which, `
-          + `so it is not drawn. Write the end as <schema>.${u.table}, with a use line for that table.`,
+        message: strayQualifier
+          ? `This Ref names ${u.qualifier}.${u.table}, but the schema folder ${u.qualifier} has no table called ${u.table}; the tables called ${u.table} `
+            + `are in ${listInWords(schemas)}, so it is not drawn. Write the end as ${listInWords(schemas.map((s) => `${s}.${u.table}`), 'or')}, with a use line for that table.`
+          : `This Ref names ${u.table}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which, `
+            + `so it is not drawn. Write the end as <schema>.${u.table}, with a use line for that table.`,
       }
       : {
         file: projectRel(libraryRel(u.path)), line: u.line, code: 'unreadableRef',

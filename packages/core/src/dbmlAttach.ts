@@ -561,11 +561,12 @@ export function attachRelationships(
         ...(ownerEntry?.path !== undefined ? { ownerPath: ownerEntry.path } : {}),
         ...(targetEntry?.path !== undefined ? { targetPath: targetEntry.path } : {}),
       };
-      for (const [name, end] of [[rels[0].fromModel, owner], [rels[0].toModel, target]] as const) {
+      for (const [name, end, hint] of [[rels[0].fromModel, owner, ownerHint], [rels[0].toModel, target, targetHint]] as const) {
         if (!end.ambiguous) continue;
         const schemas = end.schemas ?? end.ambiguous.map((e) => e.schema ?? '');
         result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
-        (result.unresolved ??= []).push({ path, line: ref.line, kind: 'ambiguous', table: name, schemas });
+        // The schema the end wrote, so a checker can say that schema has no table of the name.
+        (result.unresolved ??= []).push({ path, line: ref.line, kind: 'ambiguous', table: name, schemas, ...(hint?.qualifier !== undefined ? { qualifier: hint.qualifier } : {}) });
       }
       if (!ownerEntry && options.partial) continue;
       // The reader keeps a Ref whose ends' qualifiers differ (`ccc.addresse.id > bqs.addresse.id` joins two
