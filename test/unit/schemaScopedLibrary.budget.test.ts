@@ -162,4 +162,27 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
     }
     expect(result.imports.every((files) => files.length >= 1 && files.length <= 3)).toBe(true);
   });
+
+  it('one relationships file for the layer (where new Refs go by default): every `use` line and Ref in it, still linear', () => {
+    // The same tables and Refs, moved into `bronze/relationships/bronze.dbml`: 869 `use` lines and
+    // 1,738 Refs in one file. Each Ref end finds its `use` line from a map built once per file; a
+    // scan of the file's `use` lines per end made this quadratic.
+    const dir = path.join(semantic, 'bronze', 'relationships');
+    const files = fs.readdirSync(dir).map((f) => path.join(dir, f));
+    const texts = files.map((f) => fs.readFileSync(f, 'utf-8'));
+    const lines = texts.flatMap((t) => t.split('\n'));
+    try {
+      for (const f of files) fs.rmSync(f);
+      fs.writeFileSync(path.join(dir, 'bronze.dbml'), [...lines.filter((l) => l.startsWith('use ')), '', ...lines.filter((l) => l.startsWith('Ref:')), ''].join('\n'));
+      for (const scopedNames of [false, true]) {
+        const lib = new TableLibraryService(root, '.erd-studio', undefined, { schemaScopedNames: scopedNames });
+        lib.listTables();
+        const { result } = measure(`the index over one layer file (schemaScopedNames ${scopedNames})`, 150, () => lib.relationshipsIndex());
+        expect(result.refs).toHaveLength(TABLES * 2);
+      }
+    } finally {
+      fs.rmSync(path.join(dir, 'bronze.dbml'));
+      files.forEach((f, i) => fs.writeFileSync(f, texts[i]));
+    }
+  });
 });

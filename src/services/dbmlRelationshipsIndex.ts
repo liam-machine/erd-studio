@@ -155,9 +155,16 @@ export function refEntriesOf(file: string, reading: DbmlRelationshipsReading, lo
     const targetQualifier = turned ? ref.ownerQualifier : ref.targetQualifier;
     const ownerId = identityKeyOf(read.owner);
     const targetId = identityKeyOf(read.target);
-    // Both ends on one table with the same columns (a stale qualifier on one end): it joins a
-    // column set to itself, which the attach never draws, so it is no Ref of that table here either.
-    if (ownerId !== undefined && ownerId === targetId && read.rels.every((r) => lower(r.fromColumn) === lower(r.toColumn))) return;
+    // Both ends on one table with the same columns (a stale qualifier on one end, `crm.x.id > finance.x.id`):
+    // it joins a column set to itself, which the attach never draws, so it is no Ref of that table here
+    // either. Where neither end's identity is known, "one table" is one table name, the rule the reader
+    // kept before it let differing qualifiers through: so a library told apart by name indexes exactly
+    // what it always did.
+    const sameColumns = read.rels.every((r) => lower(r.fromColumn) === lower(r.toColumn));
+    const oneTable = ownerId !== undefined || targetId !== undefined
+      ? ownerId === targetId
+      : lower(read.rels[0].fromModel) === lower(read.rels[0].toModel);
+    if (oneTable && sameColumns) return;
     out.push({
       file, owner: lower(read.unit.from), target: lower(read.unit.to), unit: read.unit, links: unitLinks(read.unit), pending, line: ref.line,
       ...(ownerQualifier !== undefined ? { ownerQualifier } : {}),

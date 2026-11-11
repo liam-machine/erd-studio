@@ -727,6 +727,14 @@ export class TableLibraryService {
     refuseAmbiguousTableName(table, this.index.identitiesNamed(table).map(tableIdOfEntry));
   }
 
+  /** {@link refuseAmbiguousName} for every table a batch of library writes names: saved (by its old name for a rename), deleted, moved or gaining its file. */
+  private refuseAmbiguousOps(ops: Pick<DbmlLibraryOps, 'save' | 'delete' | 'move' | 'gainFile'> | undefined): void {
+    for (const name of ops?.delete ?? []) this.refuseAmbiguousName(name);
+    for (const { model, fromName } of ops?.save ?? []) this.refuseAmbiguousName(fromName ?? model.name);
+    for (const { name } of ops?.move ?? []) this.refuseAmbiguousName(name);
+    for (const name of ops?.gainFile ?? []) this.refuseAmbiguousName(name);
+  }
+
   /** {@link findTableFile} without throwing: null for an unsafe name. */
   private findFileOrNull(name: string): string | null {
     try {
@@ -1811,8 +1819,7 @@ export class TableLibraryService {
     options: { dbml?: boolean; readText?: (filePath: string) => string | null; schemaFromSource?: boolean } = {},
   ): { writes: FileWrite[]; plan?: DbmlLibraryWritePlan } {
     // A table named by a name tables in two schema folders share is refused before anything is planned.
-    for (const name of ops?.delete ?? []) this.refuseAmbiguousName(name);
-    for (const { model, fromName } of ops?.save ?? []) this.refuseAmbiguousName(fromName ?? model.name);
+    this.refuseAmbiguousOps(ops);
     const layerFolder = typeof home === 'string' ? home : home?.layer;
     const writes: FileWrite[] = [];
     const dbmlOps: DbmlLibraryOps = { save: [], delete: [] };
@@ -1939,6 +1946,8 @@ export class TableLibraryService {
      */
     extraWrites?: (plan: DbmlLibraryWritePlan) => FileWrite[];
   }): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
+    // A table named by a name tables in two schema folders share is refused before anything is planned.
+    this.refuseAmbiguousOps(input.ops);
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(input.readText), input.ops);
     const writes = plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite);
     if (input.extraWrites) writes.push(...input.extraWrites(plan));
@@ -2711,7 +2720,11 @@ export class TableLibraryService {
       if (gone.has(ref.target) && !gone.has(ref.owner)) owners.add(ref.owner);
     }
     const saves: SemanticTable[] = [];
-    for (const owner of [...owners].sort()) {
+    for (const label of [...owners].sort()) {
+      // The index names an owner by its library reference: a name two schema folders share is
+      // `<schema>.<name>`, which no file is named, so it is found by that reference, never by name.
+      const found = this.index.schemaScopedNames ? this.index.resolveLibraryRef(label) : undefined;
+      const owner: TableId | string = found?.kind === 'found' ? tableIdOfEntry(found.entry) : label;
       if (this.tableStorage(owner) !== 'dbml') continue;
       const model = this.getTable(owner);
       if (!model) continue;

@@ -16,6 +16,7 @@ import type {
   DbmlRefLocation,
   DbmlRelationshipsReading,
   DbmlStoredRef,
+  DbmlUseTable,
 } from './types/dbmlStorage.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
 import { libraryCopyRank } from './domain.js';
@@ -201,12 +202,34 @@ export function dbmlRefEndHints(item: DbmlAttachReading, ref: DbmlStoredRef): { 
   return endHints(item, ref);
 }
 
+/** A `use` specifier's spelling as one key: its qualifier (or none) and its name, without case. */
+const useKey = (table: string, qualifier: string | undefined): string =>
+  `${qualifier === undefined ? '\u0001' : lower(qualifier)}\u0000${lower(table)}`;
+
+/**
+ * Each file's selective `use` lines by spelling ({@link useKey}), the first
+ * line of a spelling kept: built once per reading, so resolving every Ref end
+ * of a file that imports hundreds of tables stays linear.
+ */
+const useTablesBySpelling = new WeakMap<readonly DbmlUseTable[], Map<string, DbmlUseTable>>();
+
+function useTableFor(useTables: readonly DbmlUseTable[] | undefined, table: string, qualifier: string | undefined): DbmlUseTable | undefined {
+  if (useTables === undefined || useTables.length === 0) return undefined;
+  let bySpelling = useTablesBySpelling.get(useTables);
+  if (bySpelling === undefined) {
+    bySpelling = new Map();
+    for (const use of useTables) {
+      const key = useKey(use.table, use.qualifier);
+      if (!bySpelling.has(key)) bySpelling.set(key, use);
+    }
+    useTablesBySpelling.set(useTables, bySpelling);
+  }
+  return bySpelling.get(useKey(table, qualifier));
+}
+
 function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: DbmlRefEndHint; target: DbmlRefEndHint } {
   const hintOf = (table: string, qualifier: string | undefined): DbmlRefEndHint => {
-    const use = item.semanticPath !== undefined
-      ? item.reading.useTables?.find((u) => lower(u.table) === lower(table)
-        && (u.qualifier === undefined ? qualifier === undefined : qualifier !== undefined && lower(u.qualifier) === lower(qualifier)))
-      : undefined;
+    const use = item.semanticPath !== undefined ? useTableFor(item.reading.useTables, table, qualifier) : undefined;
     const usePath = use ? normalisePosix(resolvePosix(dirnamePosix(item.semanticPath!), withDbmlExtension(use.path))) : undefined;
     return { ...(qualifier !== undefined ? { qualifier } : {}), ...(usePath !== undefined ? { usePath } : {}) };
   };

@@ -335,6 +335,21 @@ describe('the relationships index by identity', () => {
     const index = scoped().relationshipsIndex();
     expect(index.refs.map((r) => `${r.ownerId} > ${r.targetId}`)).toEqual(['ccc/addresse > bqs/addresse']);
   });
+
+  it('without the option, a stale qualifier\'s self-join is no Ref of its table, as before the reader let differing qualifiers through', () => {
+    // One kunde (ccc's folder gone): `crm.kunde.id > finance.kunde.id` joins kunde.id to itself, which the
+    // attach never draws; the index must not count it, place by it, or import its file for a kunde diagram.
+    fs.rmSync(path.join(semantic, 'bronze/tables/ccc'), { recursive: true });
+    write('bronze/relationships/bronze.dbml', 'Ref: bqs.kunde.addresse_id > bqs.addresse.id\n');
+    write('bronze/relationships/stale.dbml', 'Ref: crm.kunde.id > finance.kunde.id\n');
+    for (const lib of [byName(), scoped()]) {
+      const index = lib.relationshipsIndex();
+      expect(index.refs.map((r) => `${r.file}: ${r.owner} > ${r.target}`), String(lib.schemaScopedNames)).toEqual(['bronze/relationships/bronze.dbml: kunde > addresse']);
+      expect(relationshipsImportsFor(['kunde', 'addresse'], index)).toEqual(['bronze/relationships/bronze.dbml']);
+      expect(index.filesHoldingPair('kunde', 'kunde')).toEqual([]);
+      expect(ends(lib.getTable('kunde')?.relationships)).toEqual(['addresse_id > addresse.id']);
+    }
+  });
 });
 
 describe('relationship health needs no identity of its own: it keys links by the names it is given (D-15)', () => {
@@ -364,6 +379,43 @@ describe('the fail-closed guard: every library write entry refuses a bare name t
     expect(() => lib.renameTable('addresse', 'adr')).toThrow(AmbiguousTableName);
     expect(() => lib.deleteTable('addresse')).toThrow(AmbiguousTableName);
     expect(() => lib.dbmlDeleteCascadeOps(['kunde'])).toThrow(AmbiguousTableName);
+    expect(snapshotFiles()).toEqual(before);
+  });
+
+  it('the batch planner every other write goes through refuses it too: a save, a rename, a delete, a move', () => {
+    const lib = scoped();
+    const before = snapshotFiles();
+    const model = { ...lib.getTable(BQS_ADDRESSE)!, description: 'changed' };
+    for (const ops of [
+      { save: [{ model }] },
+      { save: [{ model: { ...model, name: 'adr' }, fromName: 'addresse' }] },
+      { delete: ['kunde'] },
+      { move: [{ name: 'addresse', toSchema: 'ddd' }] },
+    ]) {
+      expect(() => lib.planDbmlBatch({ ops }), JSON.stringify(Object.keys(ops))).toThrow(AmbiguousTableName);
+      expect(() => lib.applyDbmlBatch({ ops }), JSON.stringify(Object.keys(ops))).toThrow(AmbiguousTableName);
+    }
+    expect(snapshotFiles()).toEqual(before);
+  });
+
+  it('deleting a table one of two same-named tables points at never leaves that Ref behind: it is refused, nothing written', () => {
+    // bqs.kunde (a name ccc shares) owns a Ref to x, a name only bqs has.
+    write('bronze/tables/bqs/x.dbml', 'Table bqs.x {\n  id INT [pk]\n}\n');
+    write('bronze/tables/bqs/kunde.dbml', 'Table bqs.kunde {\n  id INT [pk]\n  name VARCHAR\n  addresse_id INT\n  x_id INT\n}\n');
+    write('bronze/relationships/x.dbml', [
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table bqs.x } from '../tables/bqs/x.dbml'",
+      'Ref: bqs.kunde.x_id > bqs.x.id',
+      '',
+    ].join('\n'));
+    const lib = scoped();
+    // The cascade finds the owner by its library reference, with the Ref to x cut.
+    const cascade = lib.dbmlDeleteCascadeOps(['x']);
+    expect(cascade.save.map(({ model }) => [model.name, model.schema, ends(model.relationships)])).toEqual([['kunde', 'bqs', ['addresse_id > bqs.addresse.id']]]);
+    // Its save names kunde by name, which two tables share: refused before anything is written.
+    const before = snapshotFiles();
+    expect(() => lib.deleteTable('x')).toThrow(AmbiguousTableName);
+    expect(() => lib.planTableWrites(cascade)).toThrow(AmbiguousTableName);
     expect(snapshotFiles()).toEqual(before);
   });
 
