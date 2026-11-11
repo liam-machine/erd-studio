@@ -29,7 +29,6 @@ beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS);
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const ROOT = path.join(FIXTURES, 'dbml', 'alias-workaround');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
-const UPDATE = process.env.UPDATE_GOLDEN === '1';
 
 /** The fixture's diagrams: golden name → diagram path. */
 const DIAGRAMS: Record<string, string> = {
@@ -52,10 +51,13 @@ async function load(domainPath: string, warnings: string[] = []) {
   return loadDisplaySubjectArea({ domainPath, readFile, readOnly: false, warn: (m) => warnings.push(m), dbml: dbmlStorageReader });
 }
 
+/**
+ * Compare with a golden, which this test never writes: UPDATE_GOLDEN=1, run
+ * for an intended change to some other golden, must not quietly rewrite
+ * these, so a change in how this project draws fails here whatever is set.
+ */
 function matchText(file: string, text: string): void {
-  const golden = path.join(GOLDEN_DIR, file);
-  if (UPDATE) fs.writeFileSync(golden, text);
-  expect(text).toBe(fs.readFileSync(golden, 'utf-8'));
+  expect(text).toBe(fs.readFileSync(path.join(GOLDEN_DIR, file), 'utf-8'));
 }
 
 describe('a project that used the alias workaround (ccc_addresse with alias addresse)', () => {
