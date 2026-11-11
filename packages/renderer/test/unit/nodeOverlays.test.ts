@@ -143,3 +143,43 @@ describe('applyNodeOverlays — the shared connectivity rule', () => {
     expect(bright).toEqual([...computeCanvasFocus(edges, { node: 'a' })!.nodes].sort());
   });
 });
+
+describe('applyNodeOverlays table detail level', () => {
+  it('copies the level to every table and leaves annotations alone', () => {
+    const note = { id: 'note-1', type: 'annotation', position: { x: 0, y: 0 }, data: { text: 'hi' } } as unknown as AnnotationFlowNode;
+    const nodes = [makeNode('a', { onToggleExpansion: toggle }), note];
+    const result = applyNodeOverlays(nodes, [], { ...baseState, tableDetail: 'keys' });
+    expect(result.nodes).not.toBe(nodes);
+    expect((result.nodes[0] as TableFlowNode).data.tableDetail).toBe('keys');
+    expect(result.nodes[1]).toBe(note);
+  });
+
+  it('returns the same array when the level is the one the nodes already carry', () => {
+    const nodes = [makeNode('a', { dimmed: false, isExpanded: false, tableDetail: 'keys', onToggleExpansion: toggle })];
+    expect(applyNodeOverlays(nodes, [], { ...baseState, tableDetail: 'keys' }).nodes).toBe(nodes);
+  });
+
+  it('rebuilds every table when the level changes, and only then', () => {
+    const nodes = [
+      makeNode('a', { tableDetail: 'keys', onToggleExpansion: toggle }),
+      makeNode('b', { tableDetail: 'keys', onToggleExpansion: toggle }),
+    ];
+    const result = applyNodeOverlays(nodes, [], { ...baseState, tableDetail: 'name' });
+    expect(result.nodes.map((n) => (n as TableFlowNode).data.tableDetail)).toEqual(['name', 'name']);
+    expect(result.nodes[0]).not.toBe(nodes[0]);
+    expect(result.nodes[1]).not.toBe(nodes[1]);
+  });
+
+  it('drops the level from the nodes when the state has none (null or absent)', () => {
+    const nodes = [makeNode('a', { tableDetail: 'all', onToggleExpansion: toggle })];
+    for (const state of [{ ...baseState, tableDetail: null }, baseState]) {
+      const result = applyNodeOverlays(nodes, [], state);
+      expect((result.nodes[0] as TableFlowNode).data.tableDetail).toBeUndefined();
+    }
+  });
+
+  it('does not rebuild level-less nodes for a state with no level', () => {
+    const nodes = [makeNode('a', { onToggleExpansion: toggle })];
+    expect(applyNodeOverlays(nodes, [], { ...baseState, tableDetail: null }).nodes).toBe(nodes);
+  });
+});

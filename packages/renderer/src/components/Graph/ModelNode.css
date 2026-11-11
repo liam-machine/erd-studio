@@ -633,6 +633,16 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+/* A table with only the button in its body (no rows drawn): the button
+   is the whole body, so it sits flush between header and footer. */
+.model-node__columns--closed {
+  padding: 0;
+}
+
+.model-node__columns--closed .model-node__expand-button {
+  border-top: none;
+}
+
 .model-node__expand-button:hover {
   background: var(--selection-bg);
   color: var(--vscode-textLink-activeForeground, #2563eb);
@@ -654,6 +664,34 @@
   text-align: center;
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #888);
+}
+
+/* The footer as a button: a closed table at the name level, which it opens. */
+.model-node__footer--toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  border-right: none;
+  border-bottom: none;
+  border-left: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.model-node__footer--toggle:hover {
+  background: var(--selection-bg);
+  color: var(--editor-fg);
+}
+
+.model-node__footer--toggle:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.model-node__footer-chevron {
+  margin-left: 6px;
+  color: var(--vscode-textLink-foreground, #3b82f6);
 }
 
 .model-node__footer-disc {

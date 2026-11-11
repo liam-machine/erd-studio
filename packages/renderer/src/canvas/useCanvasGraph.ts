@@ -76,6 +76,7 @@ export function useCanvasGraph({
   const searchQuery = useEditorStore((s) => s.searchQuery);
 
   const { isExpanded, toggleExpansion } = useColumnExpansion();
+  const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
 
   // Latest callback without re-running the transform when it changes.
   const onTransformedRef = useRef(onTransformed);
@@ -106,12 +107,15 @@ export function useCanvasGraph({
           nodeDimensions.set(n.id, { width: n.measured.width, height: n.measured.height });
         }
       }
-      const isExpandedNow = (id: string) => state.allExpanded || state.expandedNodes.has(id);
+      const tableDetailNow = state.tableDetail ?? null;
+      const isExpandedNow = (id: string) =>
+        (tableDetailNow === null && state.allExpanded) || state.expandedNodes.has(id);
 
       const transformOptions = {
         ...(discrepancyVisible && discrepancyReport ? { discrepancyReport } : {}),
         nodeDimensions,
         isExpanded: isExpandedNow,
+        ...(tableDetailNow ? { tableDetail: tableDetailNow } : {}),
       };
       let { nodes: newNodes, edges: newEdges } = transformSubjectArea(domain, transformOptions);
 
@@ -130,6 +134,7 @@ export function useCanvasGraph({
         searchQuery: state.searchQuery,
         isExpanded: isExpandedNow,
         toggleExpansion,
+        tableDetail: tableDetailNow,
       }));
 
       // Preserve React Flow's current selection across this rebuild.
@@ -188,11 +193,12 @@ export function useCanvasGraph({
       searchQuery,
       isExpanded,
       toggleExpansion,
+      tableDetail,
     });
     if (result.nodes !== currentNodes) setNodes(result.nodes);
     if (result.edges !== currentEdges) setEdges(result.edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, setNodes, setEdges]);
+  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, tableDetail, setNodes, setEdges]);
 
   // Handle node clicks to open the detail panel (model nodes) or select (annotations).
   const onNodeClick = useCallback(

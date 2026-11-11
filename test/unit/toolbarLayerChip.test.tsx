@@ -66,7 +66,7 @@ function renderToolbar(domain: Record<string, unknown>) {
     readOnly: false,
     ...domain,
   };
-  return render(<Toolbar nodes={[]} edges={[]} allExpanded={false} onExpandAll={vi.fn()} onCollapseAll={vi.fn()} />);
+  return render(<Toolbar nodes={[]} edges={[]} />);
 }
 
 afterEach(cleanup);

@@ -5,6 +5,13 @@ export {
   NODE_WIDTH,
   estimateNodeHeight,
   countVisibleColumnRows,
+  isBareTableBody,
   resolveNodeDimensions,
   estimateNodeWidth,
 } from './lib/nodeSizing';
+export {
+  defaultTableDetail,
+  resolveVisibleColumns,
+  type VisibleColumns,
+  type VisibleColumnsInput,
+} from './lib/tableDetail';

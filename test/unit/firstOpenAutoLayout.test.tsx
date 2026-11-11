@@ -90,7 +90,7 @@ async function renderToolbar(nodeList: TableFlowNode[] = nodes) {
   await act(async () => {
     render(
       <StrictMode>
-        <Toolbar nodes={nodeList} edges={edges} allExpanded={false} onExpandAll={vi.fn()} onCollapseAll={vi.fn()} />
+        <Toolbar nodes={nodeList} edges={edges} />
       </StrictMode>,
     );
   });
