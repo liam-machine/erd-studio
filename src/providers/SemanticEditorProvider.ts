@@ -3731,6 +3731,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return storage === undefined ? validateNewDbmlTableName(name) : null;
   }
 
+  /**
+   * The own names of the DBML diagram `document`'s members (`addresse` for a
+   * member the diagram calls `ccc.addresse`, because another member has its
+   * name), for the lookups that name a changed table by its name alone. Empty
+   * for a JSON diagram, and for one that does not parse.
+   */
+  private dbmlMemberNames(document: vscode.TextDocument): string[] {
+    if (!this.isDbmlDocument(document)) return [];
+    try {
+      return (this.parseSubjectAreaFile(document).members?.rows ?? []).map((row) => row.name);
+    } catch {
+      return [];
+    }
+  }
+
   /** Whether `document` is a DBML diagram (`.dbml`). */
   private isDbmlDocument(document: vscode.TextDocument): boolean {
     return codecFor(document.uri.fsPath).storage === 'dbml';
@@ -4339,6 +4354,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private otherLibrarySaves(exclude: CanvasTable, change: (others: SemanticTable[]) => SemanticTable[]): TableFileSave[] {
     const library = this.libraryTables();
     return change(library.models.filter((m) => !sameName(m.name, exclude.library))).map(library.save);
+  }
+
+  /**
+   * Run `change` over `model` (the canvas table `table`, as the library
+   * read it, under its own name) named as the library's relationships name
+   * it (`table.library`: `<schema>.<name>` where another schema folder has a
+   * table of its name), so its own relationships are matched by the same
+   * name as every other table's; their changes are kept on `model`.
+   */
+  private asLibraryNamed(model: SemanticTable, table: CanvasTable, change: (named: SemanticTable) => void): void {
+    if (sameName(model.name, table.library)) {
+      change(model);
+      return;
+    }
+    const named: SemanticTable = { ...model, name: table.library };
+    change(named);
+    if (named.relationships) model.relationships = named.relationships;
+    else delete model.relationships;
   }
 
   private async applyTableEdit(
@@ -6275,7 +6308,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // lines — and tolerates junk entries.
         const names = subjectAreaTableNames(document.getText(), document.uri.fsPath);
         if (names === null) throw new Error(`${this.shownSubjectAreaPath(document.uri.fsPath)} does not parse`);
-        if (names.some((n) => wanted.has(normaliseName(n)))) {
+        // A DBML diagram that names a member `<schema>.<name>` (another member has its name) is
+        // asked by its members' own names too: a changed table is named by its own name.
+        const qualified = names.some((n) => n.includes('.'));
+        if (names.some((n) => wanted.has(normaliseName(n))) || (qualified && this.dbmlMemberNames(document).some((n) => wanted.has(normaliseName(n))))) {
           await this.sendSubjectAreaData(document, webview, panelKey);
         }
       } catch (err) {
@@ -6928,7 +6964,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(existing.meta ? { meta: existing.meta } : {}),
           } as ColumnDef;
           if (columnRenamed) {
-            renameColumnInRelationships([model], table.library, payload.oldColumnName, payload.column.name);
+            this.asLibraryNamed(model, table, (named) => renameColumnInRelationships([named], table.library, payload.oldColumnName, payload.column.name));
           }
         }, domainMutator, columnRenamed
           // Library relationships in other models that point at the renamed column (#126).
@@ -7034,7 +7070,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const idx = columns.findIndex((c) => c.name === payload.columnName);
             if (idx === -1) return;
             columns.splice(idx, 1);
-            removeColumnRelationships([model], table.library, payload.columnName, library);
+            this.asLibraryNamed(model, table, (named) => removeColumnRelationships([named], table.library, payload.columnName, library));
           },
           (sec) => {
             // A composite key loses all its members with one column (#133 L2), the library's included.

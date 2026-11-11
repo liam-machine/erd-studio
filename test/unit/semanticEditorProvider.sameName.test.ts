@@ -172,6 +172,48 @@ describe('an edit goes to the file the member was read from', () => {
     expect(shown?.columns.map((c) => c.name)).toEqual(['id', 'street', 'city', 'postcode', 'country']);
   });
 
+  it('removing a column of ccc\'s addresse cuts the Refs at that column, its own and the one to it, and leaves bqs\'s', async () => {
+    const canvas = await open('bronze/diagrams/ccc.dbml');
+    const r = await canvas.send({ type: 'removeColumn', payload: { modelName: 'addresse', columnName: 'id' } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed).not.toContain('bronze/tables/bqs/addresse.dbml');
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).not.toContain('Ref: ccc.kunde.addresse_id >? ccc.addresse.id');
+    // ccc.addresse's own Ref starts at the removed column: it goes too, never left pointing at nothing.
+    expect(rels).not.toContain('Ref: ccc.addresse.id >? bqs.addresse.id');
+    expect(rels).toContain('Ref: bqs.kunde.addresse_id >? bqs.addresse.id');
+  });
+
+  it('renaming a column of ccc\'s addresse renames it in ccc\'s Refs only', async () => {
+    const canvas = await open('bronze/diagrams/ccc.dbml');
+    const r = await canvas.send({ type: 'updateColumn', payload: { modelName: 'addresse', oldColumnName: 'id', column: { name: 'addr_id', dataType: 'INT', description: '', isPrimaryKey: true } } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/relationships/bronze.dbml', 'bronze/tables/ccc/addresse.dbml']);
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).toContain('Ref: ccc.kunde.addresse_id >? ccc.addresse.addr_id');
+    expect(rels).toContain('Ref: ccc.addresse.addr_id >? bqs.addresse.id');
+    expect(rels).toContain('Ref: bqs.kunde.addresse_id >? bqs.addresse.id');
+  });
+
+  it('an edit made on one diagram redraws another open diagram that shows the table under <schema>.<name>', async () => {
+    const { provider } = buildProvider();
+    const openOn = async (diagram: string): Promise<ReturnType<typeof createMockWebviewPanel>> => {
+      const document = createMockTextDocument(at(diagram), read(diagram), { persist: true });
+      (vscode.workspace.textDocuments as unknown[]).push(document);
+      const panel = createMockWebviewPanel();
+      await provider.resolveCustomTextEditor(document as unknown as vscode.TextDocument, panel as unknown as vscode.WebviewPanel, {} as vscode.CancellationToken);
+      await panel._simulateMessage({ type: 'ready' });
+      return panel;
+    };
+    const ccc = await openOn('bronze/diagrams/ccc.dbml');
+    const kunden = await openOn('bronze/diagrams/kunden.dbml');
+    kunden._postedMessages.length = 0;
+    await ccc._simulateMessage({ type: 'updateModelDescription', payload: { modelName: 'addresse', description: 'CCC addresses, cleaned' } });
+    const loaded = kunden._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded') as Array<{ payload: { models: Array<{ name: string; description?: string }> } }>;
+    expect(loaded.length).toBeGreaterThan(0);
+    expect(loaded[loaded.length - 1].payload.models.find((m) => m.name === 'ccc.addresse')?.description).toBe('CCC addresses, cleaned');
+  });
+
   it('a name the diagram does not show is refused, and nothing is written', async () => {
     const canvas = await open('bronze/diagrams/ccc.dbml');
     const r = await canvas.send({ type: 'updateModelDescription', payload: { modelName: 'bqs.addresse', description: 'x' } });
