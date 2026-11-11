@@ -47,7 +47,19 @@
  * compile here until it has a key: append `importCause<Cause>` to FEATURES
  * in `telemetryPayload.ts` and `telemetry/src/index.js` (same order), list it
  * under "Keys added in 2.0.0" in `telemetry/README.md` and in `telemetry.json`,
- * and deploy the Worker before the release.
+ * and deploy the Worker before the release (the README test for that list
+ * covers the keys up to `draftDropTimeLimit`; a key appended now goes under
+ * "Keys added after 2.0.0").
+ *
+ * An import started from the import guide's Microsoft Fabric card (either of
+ * its SQL buttons) also counts `importFabricOutcome<Outcome>`
+ * ({@link GUIDE_SOURCE_OUTCOME_FEATURES}), beside the importer's and the
+ * dialect's keys, never instead of them: Fabric is read as SQL Server, so
+ * without it a Fabric failure could not be told from a SQL Server one. The
+ * marker is one fixed literal ({@link IMPORT_GUIDE_SOURCES}) the guide's own
+ * button passes; it says which card the import started from, never what was
+ * imported. Its keys are listed under "Keys added after 2.0.0" in
+ * `telemetry/README.md`.
  */
 
 import type { LedgerCause, LedgerEntry } from './importLedger';
@@ -157,6 +169,41 @@ export const SQL_DIALECT_OUTCOME_FEATURES: Readonly<Partial<Record<SqlDialect, R
   },
 };
 
+/**
+ * The import guide cards whose SQL imports are also counted by where they
+ * started: Microsoft Fabric only (a Warehouse or a Lakehouse's SQL analytics
+ * endpoint, read as SQL Server). `erdStudio.importSqlDdl`'s argument carries
+ * it as `{ source }` ({@link importGuideSourceOfImportArg}).
+ */
+export const IMPORT_GUIDE_SOURCES = ['fabric'] as const;
+export type ImportGuideSource = (typeof IMPORT_GUIDE_SOURCES)[number];
+
+/** Guide source × outcome, beside the SQL importer's and the dialect's keys (only when the import started from that card). */
+export const GUIDE_SOURCE_OUTCOME_FEATURES: Readonly<Record<ImportGuideSource, Readonly<Record<ImportOutcome, TelemetryFeature>>>> = {
+  fabric: {
+    clean: 'importFabricOutcomeClean',
+    repaired: 'importFabricOutcomeRepaired',
+    partial: 'importFabricOutcomePartial',
+    failed: 'importFabricOutcomeFail',
+    cancelled: 'importFabricOutcomeCancelled',
+    timedOut: 'importFabricOutcomeTimedOut',
+  },
+};
+
+/**
+ * The import guide card `erdStudio.importSqlDdl`'s argument says the import
+ * started from (`{ dialect: 'sqlserver', source: 'fabric' }`, the Fabric
+ * card's SQL buttons): one fixed literal, counted with the import's outcome
+ * and used for nothing else. Anything else — no argument, another string, a
+ * `{ quick: true }` (a start, never the guide), an array — is undefined.
+ */
+export function importGuideSourceOfImportArg(arg: unknown): ImportGuideSource | undefined {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return undefined;
+  const { source, quick } = arg as { source?: unknown; quick?: unknown };
+  if (quick === true) return undefined;
+  return (IMPORT_GUIDE_SOURCES as readonly unknown[]).includes(source) ? source as ImportGuideSource : undefined;
+}
+
 /** One key per ledger cause class, in `LedgerCause`'s order (the order they are recorded in). */
 export const LEDGER_CAUSE_FEATURES: Readonly<Record<LedgerCause, TelemetryFeature>> = {
   parseError: 'importCauseParseError',
@@ -211,13 +258,16 @@ export interface ImportOutcomeReport {
   outcome?: ImportOutcome;
   /** SQL only: the dialect the conversion ran with. */
   dialect?: SqlDialect;
+  /** SQL only: the import guide card the import started from (Microsoft Fabric's SQL buttons); absent for every other start. */
+  guideSource?: ImportGuideSource;
   /** The import's loss ledger, conversion and plan together; its cause classes are counted once each. */
   ledger?: readonly LedgerEntry[];
 }
 
 /**
  * The keys one import records: its importer and outcome, its dialect and
- * outcome (SQL with a dialect), then one key per cause class its ledger holds,
+ * outcome (SQL with a dialect), its guide source and outcome (SQL started
+ * from the guide's Fabric card), then one key per cause class its ledger holds,
  * in {@link LEDGER_CAUSE_FEATURES}' order. Each key at most once.
  */
 export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFeature[] {
@@ -230,6 +280,10 @@ export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFea
   if (report.importer === 'sql' && report.dialect) {
     const byDialect = keyIn(keyIn(SQL_DIALECT_OUTCOME_FEATURES, report.dialect), outcome);
     if (isFeature(byDialect)) keys.push(byDialect);
+  }
+  if (report.importer === 'sql' && report.guideSource) {
+    const bySource = keyIn(keyIn(GUIDE_SOURCE_OUTCOME_FEATURES, report.guideSource), outcome);
+    if (isFeature(bySource)) keys.push(bySource);
   }
   const met = new Set<unknown>();
   for (const e of ledger) if (e.count > 0) met.add(e.cause);

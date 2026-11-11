@@ -102,7 +102,7 @@ import {
   type ImportReportSource,
 } from '../services/importReport';
 import { recordImportReport, updateImportReport } from '../services/importReportStore';
-import { recordImportOutcome, type ImportOutcome, type ImportOutcomeImporter } from '../services/importOutcomeTelemetry';
+import { recordImportOutcome, type ImportGuideSource, type ImportOutcome, type ImportOutcomeImporter } from '../services/importOutcomeTelemetry';
 import type { SqlDialect } from '../services/sqlDdlModel';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
@@ -276,6 +276,12 @@ export interface ImportDbmlDeps {
   /** With `'sql'`: the dialect the conversion ran with (counted with the import's outcome, nothing else). */
   sqlDialect?: SqlDialect;
   /**
+   * With `'sql'`: the import guide card the import started from (the Fabric
+   * card's SQL buttons), counted with the import's outcome and nothing else.
+   * It travels with `deps`, so Try Again and Choose Another Name keep it.
+   */
+  guideSource?: ImportGuideSource;
+  /**
    * A DBML file in the open folder (the start screen's look at it found one),
    * which the Open dialog then starts on, chosen, so Import takes it in one
    * press. Bounded and quiet: undefined (or a rejection) opens the dialog on
@@ -397,7 +403,7 @@ interface ImportRunProgress {
  * run, never for the example. Off the onboarding trail (`featureQuiet`).
  */
 function countImportOutcome(
-  deps: Pick<ImportDbmlDeps, 'source' | 'sqlDialect'>,
+  deps: Pick<ImportDbmlDeps, 'source' | 'sqlDialect' | 'guideSource'>,
   progress: ImportRunProgress,
   report: { outcome?: ImportOutcome; ledger?: readonly LedgerEntry[] },
 ): void {
@@ -408,6 +414,7 @@ function countImportOutcome(
     importer,
     ...report,
     ...(importer === 'sql' && deps.sqlDialect ? { dialect: deps.sqlDialect } : {}),
+    ...(importer === 'sql' && deps.guideSource ? { guideSource: deps.guideSource } : {}),
   });
 }
 

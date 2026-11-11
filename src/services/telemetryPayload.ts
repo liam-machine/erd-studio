@@ -715,6 +715,19 @@ export const FEATURES = [
   'importCauseOther',
   // The automatic draft stopped by the import's time limit before it read a table.
   'draftDropTimeLimit',
+  // Added after 2.0.0. The import guide's Microsoft Fabric card: its catalog
+  // query's Import the CSV… button, a copy of that query (beside
+  // importGuideCopied), and how an import started from either of the card's
+  // SQL buttons ended (beside importOutcomeSqlDdl* and importSqlOutcome*,
+  // never instead of them: Fabric is read as SQL Server).
+  'importGuideActionFabricCatalog',
+  'importGuideCopiedFabricCatalog',
+  'importFabricOutcomeClean',
+  'importFabricOutcomeRepaired',
+  'importFabricOutcomePartial',
+  'importFabricOutcomeFail',
+  'importFabricOutcomeCancelled',
+  'importFabricOutcomeTimedOut',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

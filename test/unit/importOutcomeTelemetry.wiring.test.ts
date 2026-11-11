@@ -16,7 +16,7 @@ import type * as vscode from 'vscode';
 import { _resetMockWorkspace } from '../__mocks__/vscode';
 import { fakeDraftPreview } from './helpers/draftDriver';
 import { importDbml, type ImportDbmlDeps, type ImportDbmlUi } from '../../src/commands/importDbml';
-import { importSqlDdl, type ImportSqlDdlDeps, type ImportSqlDdlUi, type SqlSources } from '../../src/commands/importSqlDdl';
+import { TRY_ANOTHER_DIALECT_BUTTON, importSqlDdl, type ImportSqlDdlDeps, type ImportSqlDdlUi, type SqlPreset, type SqlSources } from '../../src/commands/importSqlDdl';
 import { importSemanticModel, type ImportSemanticModelUi } from '../../src/commands/importSemanticModel';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -144,6 +144,99 @@ describe('Import SQL DDL… — its outcome', () => {
     await importSqlDdl(sqlDeps(sqlUi(undefined)));
     const file = writeFile('e.sql', 'CREATE TABLE a (id int);\n');
     await importSqlDdl(sqlDeps(sqlUi({ files: [file] }, undefined)));
+    expect(outcomes()).toEqual([]);
+  });
+});
+
+describe('Import SQL DDL… started from the import guide\'s Fabric card ({ source: \'fabric\' }) — its Fabric outcome, beside the others', () => {
+  /** What the guide's Fabric SQL buttons pass, as the command hands it on. */
+  const FABRIC: SqlPreset = { dialect: 'sqlserver', dialectChosen: true, guideSource: 'fabric' };
+  const CATALOG = path.join(__dirname, '../fixtures/catalog-csv');
+  const fabricKeys = (): string[] => outcomes().filter((k) => k.startsWith('importFabric'));
+  const flush = async (): Promise<void> => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+
+  it('a catalog CSV that reads: the importer\'s key and the Fabric key (a CSV has no dialect)', async () => {
+    await importSqlDdl(sqlDeps(sqlUi({ files: [path.join(CATALOG, 'sqlserver', 'probe.csv')] })), undefined, FABRIC);
+    const [importer, fabric] = outcomes();
+    expect(importer).toMatch(/^importOutcomeSqlDdl(Clean|Repaired|Partial)$/);
+    expect(fabric).toBe(importer.replace('importOutcomeSqlDdl', 'importFabricOutcome'));
+    expect(fabricKeys()).toEqual([fabric]);
+    expect(outcomes().filter((k) => k.startsWith('importSqlOutcome'))).toEqual([]);
+    // Off the onboarding trail, like every outcome key.
+    expect(feature.mock.calls.map((c: unknown[]) => String(c[0])).filter((k) => k.startsWith('importFabric'))).toEqual([]);
+  });
+
+  it('a CSV that is not a catalog export (what a query that went wrong may leave): importFabricOutcomeFail beside importOutcomeSqlDdlFail', async () => {
+    const file = writeFile('result.csv', 'Msg,Level,State\n208,16,1\n');
+    await importSqlDdl(sqlDeps(sqlUi({ files: [file] })), undefined, FABRIC);
+    expect(outcomes().slice(0, 2)).toEqual(['importOutcomeSqlDdlFail', 'importFabricOutcomeFail']);
+    expect(fabricKeys()).toEqual(['importFabricOutcomeFail']);
+  });
+
+  it('a Warehouse script that reads: the importer\'s, SQL Server\'s and the Fabric key, in that order', async () => {
+    await importSqlDdl(sqlDeps(sqlUi({ folder: path.join(SQL_FIXTURES, 'fabric-warehouse') })), undefined, FABRIC);
+    const [importer, dialect, fabric] = outcomes();
+    expect(importer).toMatch(/^importOutcomeSqlDdl(Clean|Repaired|Partial)$/);
+    expect(dialect).toBe(importer.replace('importOutcomeSqlDdl', 'importSqlOutcomeSqlserver'));
+    expect(fabric).toBe(importer.replace('importOutcomeSqlDdl', 'importFabricOutcome'));
+    expect(fabricKeys()).toEqual([fabric]);
+  });
+
+  it('a script no table reads from: importFabricOutcomeFail beside the importer\'s and SQL Server\'s; Try Another Dialect keeps where it started', async () => {
+    const file = writeFile('c.sql', '-- broken\n\nCREATE TABLE t (\n  id int,,\n  x int\n);\n');
+    let asked = 0;
+    const ui: ImportSqlDdlUi = {
+      ...sqlUi({ files: [file] }, 'postgres'),
+      showErrorMessage: async (_message, ...items) => (asked++ === 0 && items.includes(TRY_ANOTHER_DIALECT_BUTTON) ? TRY_ANOTHER_DIALECT_BUTTON : undefined),
+    };
+    await importSqlDdl(sqlDeps(ui), undefined, FABRIC);
+    await flush();
+    expect(asked).toBe(2);
+    const keys = outcomes().filter((k) => !k.startsWith('importCause'));
+    expect(keys).toEqual([
+      'importOutcomeSqlDdlFail', 'importSqlOutcomeSqlserverFail', 'importFabricOutcomeFail',
+      // Read again as the dialect then picked: still an import that started from the Fabric card.
+      'importOutcomeSqlDdlFail', 'importSqlOutcomePostgresFail', 'importFabricOutcomeFail',
+    ]);
+  });
+
+  it('a folder with no scripts (nothing was saved from Fabric): failed, with the Fabric key', async () => {
+    const empty = path.join(tmp, 'empty');
+    fs.mkdirSync(empty);
+    await importSqlDdl(sqlDeps(sqlUi({ folder: empty })), undefined, FABRIC);
+    expect(outcomes()).toEqual(['importOutcomeSqlDdlFail', 'importFabricOutcomeFail']);
+  });
+
+  it('a reading cancelled before a table: importFabricOutcomeCancelled beside the importer\'s and SQL Server\'s', async () => {
+    const cancelAtOnce: ImportSqlDdlUi['withProgress'] = async (_title, task) => {
+      const c = new AbortController();
+      c.abort();
+      return task({ report: () => {} }, c.signal);
+    };
+    await importSqlDdl(sqlDeps({ ...sqlUi({ folder: path.join(SQL_FIXTURES, 'fabric-warehouse') }), withProgress: cancelAtOnce }), undefined, FABRIC);
+    await flush();
+    expect(outcomes().filter((k) => !k.startsWith('importCause'))).toEqual(['importOutcomeSqlDdlCancelled', 'importSqlOutcomeSqlserverCancelled', 'importFabricOutcomeCancelled']);
+  });
+
+  it('the same files without the marker (the SQL Server card, the palette): no Fabric key; a closed picker is no outcome', async () => {
+    await importSqlDdl(sqlDeps(sqlUi({ files: [path.join(CATALOG, 'sqlserver', 'probe.csv')] })), undefined, { dialect: 'sqlserver', dialectChosen: true });
+    await importSqlDdl(sqlDeps(sqlUi({ files: [writeFile('result.csv', 'Msg,Level,State\n208,16,1\n')] })));
+    await importSqlDdl(sqlDeps(sqlUi({ folder: path.join(SQL_FIXTURES, 'fabric-warehouse') })), undefined, { dialect: 'sqlserver', dialectChosen: true });
+    expect(outcomes().length).toBeGreaterThan(0);
+    expect(fabricKeys()).toEqual([]);
+    quietKeys.mockClear();
+    await importSqlDdl(sqlDeps(sqlUi(undefined)), undefined, FABRIC);
+    expect(outcomes()).toEqual([]);
+  });
+
+  it('the automatic draft\'s quiet early end records no outcome, so no Fabric key either (it never has a guide origin; this hands it one anyway)', async () => {
+    const file = writeFile('result.csv', 'Msg,Level,State\n208,16,1\n');
+    const draft = { preview: fakeDraftPreview(['discard']), trigger: 'sidebar' as const, quiet: true, quietDrop: () => {} };
+    await importSqlDdl(
+      sqlDeps(sqlUi({ files: [file] }), { draft }),
+      { files: [{ name: 'result.csv', text: fs.readFileSync(file, 'utf-8') }], fullPaths: new Map([['result.csv', file]]), fileName: 'result.csv', sourceLabel: 'result.csv' },
+      FABRIC,
+    );
     expect(outcomes()).toEqual([]);
   });
 });

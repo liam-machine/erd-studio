@@ -132,7 +132,9 @@ Tables, columns and relationships come across; DAX measures stay in Power BI. A 
 
 **A semantic model:** connect the workspace to a Git repository (**Workspace settings → Git integration**) and commit. Each semantic model is a `<Name>.SemanticModel` folder in the repository: open the repository in VS Code and run **ERD Studio: Import Power BI or Fabric Semantic Model…**.
 
-**A Warehouse or a Lakehouse's SQL analytics endpoint:** connect to its SQL connection string in SQL Server Management Studio, select the tables in **Object Explorer Details** (F7), right-click → **Script Table as → CREATE To → File…**, and save the `.sql` file in your project folder. Then run **ERD Studio: Import SQL DDL…** and choose **SQL Server / Azure SQL**: keys declared `NOT ENFORCED` come across as keys and relationships.
+**A Warehouse or a Lakehouse's SQL analytics endpoint, with one query:** run the query under [SQL Server and Azure SQL](#sql-server-and-azure-sql) on the Warehouse or the SQL analytics endpoint, and save the whole result as a CSV file in your project folder. In VS Code, Microsoft's **SQL Server (mssql)** extension connects with its SQL connection string: **Execute Query**, then **Save as CSV** beside the result. Then run **ERD Studio: Import SQL DDL…** and pick the file. This is the SQL Server query, and it has not been tried on every Fabric item. In a Lakehouse, columns with complex types (struct, array, map) may not come in. **ERD Studio: Bring In Your Data Model…** has the same query with a **Copy** button on its Microsoft Fabric card.
+
+**A Warehouse or a Lakehouse's SQL analytics endpoint, with scripts:** connect to its SQL connection string in SQL Server Management Studio, select the tables in **Object Explorer Details** (F7), right-click → **Script Table as → CREATE To → File…**, and save the `.sql` file in your project folder. Then run **ERD Studio: Import SQL DDL…** and choose **SQL Server / Azure SQL**: keys declared `NOT ENFORCED` come across as keys and relationships.
 
 ## SQL Server and Azure SQL
 

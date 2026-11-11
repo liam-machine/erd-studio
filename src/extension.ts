@@ -185,6 +185,7 @@ import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
 import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
 import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, sqlImportTimeLimitMs, type ImportSqlDdlDeps } from './commands/importSqlDdl';
 import { sqlDialectOfImportArg } from './services/sqlDdlImport';
+import { importGuideSourceOfImportArg } from './services/importOutcomeTelemetry';
 import {
   IMPORT_GUIDE_COMMAND,
   IMPORT_GUIDE_OPENED_FEATURE,
@@ -3906,7 +3907,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         return;
       }
       const dialect = sqlDialectOfImportArg(arg);
-      await importSqlDdl(deps, undefined, dialect ? { dialect, dialectChosen: true } : {});
+      // The guide's Fabric card also passes { source: 'fabric' }: counted with the import's outcome, nothing else.
+      const guideSource = importGuideSourceOfImportArg(arg);
+      await importSqlDdl(deps, undefined, { ...(dialect ? { dialect, dialectChosen: true } : {}), ...(guideSource ? { guideSource } : {}) });
     }),
     vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
       const deps = semanticModelDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));

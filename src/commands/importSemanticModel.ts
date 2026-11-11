@@ -123,7 +123,7 @@ export interface ImportSemanticModelUi {
   showImportReport?(reportId?: number): Promise<void>;
 }
 
-export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
+export interface ImportSemanticModelDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect' | 'guideSource'> {
   modelUi?: ImportSemanticModelUi;
   /** The Import DBML half (layer, name, dry run, open). */
   ui?: ImportDbmlUi;

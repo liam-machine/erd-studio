@@ -460,6 +460,33 @@ or the draft keys instead. A stop before the reading reached a statement has
 an empty ledger and no cause key. The other importers' `Cancelled` /
 `TimedOut` stay 0: they do not read in a worker.
 
+**Microsoft Fabric.** A Fabric Warehouse or SQL analytics endpoint is read as
+SQL Server, and its catalog query is SQL Server's, offered without having been
+run on every Fabric item. An import started from the Fabric card's SQL buttons
+also counts `importFabricOutcome<Outcome>` (definitions under "Keys added
+after 2.0.0"), so a Fabric failure can be told from a SQL Server one. There
+are two places it can fail, read differently:
+
+- **Inside ERD Studio** (the CSV or the script did not read, or only partly):
+  `importFabricOutcomeFail` / `Partial`, with the `importCause*` keys of the
+  same day. A catalog CSV has no dialect, so its import has no
+  `importSqlOutcomeSqlserver*` key; a script has both.
+- **Inside Fabric** (the query errors in Fabric's own editor, so no file ever
+  reaches ERD Studio): nothing is imported and no outcome is counted. The only
+  sign is an install with `importGuideCopiedFabricCatalog` and no
+  `importFabricOutcome*` key on that day or the days after. Someone who copied
+  the query and has not run it yet looks the same, so read it as a ceiling.
+
+```bash
+# Fabric: buttons, copies and outcomes (installs and events, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS events FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'importFabricOutcome%' OR j.key IN ('importGuideActionFabric', 'importGuideActionFabricWarehouse', 'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog')) GROUP BY j.key ORDER BY j.key"
+
+# Fabric: installs that copied the query and never had a Fabric import outcome (the query may have failed in Fabric itself)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT COUNT(*) AS copied_no_outcome FROM (SELECT h.install_id FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 GROUP BY h.install_id HAVING SUM(CASE WHEN j.key = 'importGuideCopiedFabricCatalog' THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN j.key LIKE 'importFabricOutcome%' THEN 1 ELSE 0 END) = 0)"
+```
+
 ### Onboarding funnel (the first five minutes)
 
 Why installs stop using ERD Studio, step by step. The start screen
@@ -494,7 +521,7 @@ appended after the native DBML keys:
 | Picked an import source | `importPickDbml`, `importPickSqlDdl`, `importPickSemanticModel`; `importPickCancelled` (the source picker was closed) |
 | Nothing to start from | No longer sent since Draft-first (a folder with nothing found gets the example draft on the ERD Studio icon instead, `draftShownAuto` + `draftExampleShown`); kept for older versions: `suggestPromptNothingShown` (the **nothing-found** notification, `runNothingFoundPrompt` in `src/services/startSuggestion.ts`: a folder with no diagram, no table and nothing obvious to import, shown only once its empty Diagrams view was opened — never on activation alone — at most three times per folder, never on a first run, whose walkthrough keeps the window). Its answer: `suggestPromptNothingNewDiagram` (New Diagram; counts as having chosen a start), `suggestPromptNothingGuide` (Show Me How: the import guide), `suggestPromptNothingOff` (Don't Ask Again for This Folder). Closed without a choice is shown minus the three: no key of its own |
 | Windows and dbt detection | `activatedDbt`, `activatedLogical`, `activatedNoFolder`: each window's activation outcome (a dbt project, a folder without dbt, no folder), counted on every activation, so a day with several windows shows all of them (the `activation` field keeps only the day's last). `dbtProjectUnused` (featureOnce): a `dbt_project.yml` exists in the workspace that this window does not use, seen by project discovery (`erdStudio.projectPath` names a plain folder), the host's late search, the start screen's look at the folder, or the tooling scan (`noteUnusedDbtProject` in `src/extension.ts`); the user sees one log line, never a prompt |
-| Import guide | `importGuideOpened` (**Bring In an Existing Data Model…** opened, from anywhere), and where from: `importGuideFromWelcome`, `importGuideFromWalkthrough`, `importGuideFromSidebar` (the quiet "See how to bring it in" link on each start surface), `importGuideFromPicker` (Import…'s last item), `importGuideFromStartPick` (the start quick pick's last item), `importGuideFromPrompt` (Show Me How, before Draft-first), `importGuideFromDraft` (a draft's Bring In My Model…); the palette is opened minus the others. One feature key per surface rather than a surface field: the heartbeat's `features` is a flat allowlisted key → count map, and a new field would need a schema change. Which card's button: `importGuideActionDatabricks`, `importGuideActionSnowflake`, `importGuideActionPowerBi`, `importGuideActionFabric` (a Fabric semantic model), `importGuideActionFabricWarehouse` (a Warehouse / SQL analytics endpoint), `importGuideActionSqlServer`, `importGuideActionPostgres`, `importGuideActionMysql`, `importGuideActionDbml`, `importGuideActionOtherTools`, `importGuideActionDbt`, `importGuideActionFound` (the import of what the folder holds), `importGuideActionFeedback` (Not yet → Send Feedback: someone wants a source ERD Studio lacks); `importGuideCopied` (a Copy button; never what was copied). Read a card's action against its import's own key (`importSqlDialectDatabricks`, `importSqlDdl`, `importSqlDdlInvalid`…): many presses with few finished imports means its export step is wrong |
+| Import guide | `importGuideOpened` (**Bring In an Existing Data Model…** opened, from anywhere), and where from: `importGuideFromWelcome`, `importGuideFromWalkthrough`, `importGuideFromSidebar` (the quiet "See how to bring it in" link on each start surface), `importGuideFromPicker` (Import…'s last item), `importGuideFromStartPick` (the start quick pick's last item), `importGuideFromPrompt` (Show Me How, before Draft-first), `importGuideFromDraft` (a draft's Bring In My Model…); the palette is opened minus the others. One feature key per surface rather than a surface field: the heartbeat's `features` is a flat allowlisted key → count map, and a new field would need a schema change. Which card's button: `importGuideActionDatabricks`, `importGuideActionSnowflake`, `importGuideActionPowerBi`, `importGuideActionFabric` (a Fabric semantic model), `importGuideActionFabricWarehouse` (a Warehouse / SQL analytics endpoint, its script), `importGuideActionFabricCatalog` (the same, its catalog query's CSV), `importGuideActionSqlServer`, `importGuideActionPostgres`, `importGuideActionMysql`, `importGuideActionDbml`, `importGuideActionOtherTools`, `importGuideActionDbt`, `importGuideActionFound` (the import of what the folder holds), `importGuideActionFeedback` (Not yet → Send Feedback: someone wants a source ERD Studio lacks); `importGuideCopied` (a Copy button; never what was copied; the Fabric card's query also counts `importGuideCopiedFabricCatalog`). Read a card's action against its import's own key (`importSqlDialectDatabricks`, `importSqlDdl`, `importSqlDdlInvalid`…): many presses with few finished imports means its export step is wrong |
 | Quick import | the start suggestion's Create Diagram and a surface's primary import run the **quick path** (defaults chosen, one confirm): `quickImport` (it created a diagram, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml`), `quickImportChangeOptions` (its Change Options… was chosen: a default was wrong), `quickImportFellBack` (it found nothing to take, so it asked step by step); `importReviewOpened` (any import's dry run: Review All… was opened; no longer sent since Draft-first, whose details drawer counts `draftDetailsOpened`). Since Draft-first the quick path ends in the draft rather than a confirm |
 | Gave up inside a start | `blankDiagramCancelled`, `importDbmlCancelled`, `importSqlDdlCancelled`, `importSemanticModelCancelled`, `exampleCancelled`, `drawCancelScope` / `drawCancelLayer` / `drawCancelName`, `convertToDbmlCancelled` |
 | The user's files did not read | `importDbmlInvalid`, `importSqlDdlInvalid` (+ the dialect it ran as: `importSqlDialectPostgres`, `importSqlDialectMysql`, `importSqlDialectSqlserver`, `importSqlDialectSnowflake`, `importSqlDialectDatabricks`, counted when the conversion runs), `importSemanticModelInvalid` |
@@ -1361,6 +1388,32 @@ Each loss-ledger cause class the import's ledger holds, once per import (with an
 **B15 — trail marker.**
 
 - `dayContinued` (trail marker) — the first entry of a trail whose window was activated on an earlier UTC day (it crossed midnight).
+
+## Keys added after 2.0.0
+
+Appended to `FEATURES` after the 2.0.0 list above (in
+`src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
+the same terms: fixed keys, never a name, a path, a message or a count of
+tables. Deploy the Worker before the extension release that records them, or
+their counts are dropped.
+
+**The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
+analytics endpoint is read as SQL Server, so without these a Fabric import
+counts only as a SQL Server one. The outcome keys are recorded **beside**
+`importOutcomeSqlDdl*` (and `importSqlOutcomeSqlserver*` for a script), never
+instead of them, and only for an import started from one of the card's two SQL
+buttons (`importGuideActionFabricWarehouse`, `importGuideActionFabricCatalog`):
+the button passes one fixed marker, which says where the import started and
+nothing about what was imported.
+
+- `importGuideActionFabricCatalog` — **Import the CSV…** was pressed under the Fabric card's catalog query (Warehouse or SQL analytics endpoint).
+- `importGuideCopiedFabricCatalog` — the Fabric card's catalog query was copied (counted beside `importGuideCopied`).
+- `importFabricOutcomeClean` — an import started from the Fabric card's SQL buttons ended clean.
+- `importFabricOutcomeRepaired` — an import started from the Fabric card's SQL buttons ended repaired.
+- `importFabricOutcomePartial` — an import started from the Fabric card's SQL buttons ended partial.
+- `importFabricOutcomeFail` — an import started from the Fabric card's SQL buttons brought nothing in.
+- `importFabricOutcomeCancelled` — an import started from the Fabric card's SQL buttons was cancelled while reading.
+- `importFabricOutcomeTimedOut` — an import started from the Fabric card's SQL buttons hit the time limit while reading.
 
 ## The local archive
 
