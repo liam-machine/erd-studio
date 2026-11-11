@@ -25,6 +25,7 @@ import { computeSubjectAreaDiff } from '../../src/services/stageDiff';
 import { allSelections, buildSyncPlan, syncPlanLibraryLookups } from '../../src/services/syncPlanBuilder';
 import { emptyYmlData } from '../../src/services/ymlParserService';
 import { columnKey, tableKey } from '../../src/types/syncPlan';
+import type { CatalogData } from '../../src/types/catalog';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
 import type { YmlData } from '../../src/types/ymlData';
@@ -131,6 +132,20 @@ describe('physical stage: a table whose name two schema folders share', () => {
     const display = subjectAreas.buildPhysicalSubjectArea(unified, ymlOf(), manifest);
     expect(display.relationships.map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}`)).toEqual(['kunde.addresse_id>addresse.id']);
     expect(display.models.map((m) => [m.name, m.existsInProject !== false])).toEqual([['addresse', true], ['kunde', true]]);
+  });
+
+  it('with no manifest, a shared table found through the schema yml never takes the catalog\'s node of its short name (owner decision H)', () => {
+    const { subjectAreas } = services();
+    const yml = emptyYmlData();
+    yml.models.set('addresse', { name: 'addresse', description: '', columns: [{ name: 'id', description: '' }], filePath: path.join(root, 'models', 'schema.yml'), tags: [], configSchema: 'bqs' } as never);
+    // The catalog's only node of that short name is built in ccc: it is not bqs's table, whatever its name.
+    const ccc = { uniqueId: 'model.p.addresse', resourceType: 'model' as const, name: 'addresse', relationName: 'addresse', schema: 'ccc', database: null, comment: null,
+      columns: [{ name: 'id', dataType: 'int', comment: null, index: 1 }, { name: 'ccc_only', dataType: 'text', comment: null, index: 2 }] };
+    const catalog = { byUniqueId: new Map([[ccc.uniqueId, ccc]]), byName: new Map([['addresse', ccc]]), generatedAt: null } as unknown as CatalogData;
+    const display = subjectAreas.buildPhysicalSubjectArea(subjectAreas.getSubjectArea(diagram('kunden')), yml, undefined, catalog);
+    const bqs = display.models.find((m) => m.name === 'bqs.addresse');
+    expect(bqs?.existsInProject).not.toBe(false);
+    expect(bqs?.columns.map((c) => c.name)).not.toContain('ccc_only');
   });
 
   it('a table whose name is unique matches as before: by its name first, then its relation', () => {

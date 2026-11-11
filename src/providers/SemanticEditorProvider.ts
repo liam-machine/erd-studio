@@ -6931,7 +6931,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.
         // A new DBML table is refused only by a table of its schema folder (any
         // layer) or a YAML table of its name: another schema folder's is another table.
-        const home = this.schemaScoped() ? this.newDbmlTableSchema(document, schemaFolder) : undefined;
+        // A JSON diagram names tables by name alone and reads the library's first of a
+        // name (owner decision F), so there a name any table has is refused, as before.
+        const home = this.schemaScoped() && this.isDbmlDocument(document) ? this.newDbmlTableSchema(document, schemaFolder) : undefined;
         const taking = home !== undefined ? this.tableLibraryService.tableTakingName(model.name, home) : undefined;
         if (taking?.storage === 'dbml') {
           webview.postMessage({

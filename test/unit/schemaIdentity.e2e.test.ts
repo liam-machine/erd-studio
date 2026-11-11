@@ -202,6 +202,7 @@ describe('fifteen schema folders with repeated table names, from Import DBML to 
     expect(r.changed).toEqual([imported]);
     expect(read(imported)).toMatch(/^\s+s01\.addresse 777 888$/m);
     twinUntouched();
+    expect(await doctorProblems()).toEqual([]);
 
     // 4. A diagram of s01's addresse alone (version 7, a bare line); add s02's beside it (8), remove it again (7).
     fs.writeFileSync(at('bronze/diagrams/single.dbml'), [

@@ -20,10 +20,12 @@ const LAYERS = JSON.stringify({ schemaVersion: 1, layers: [
 ] }, null, 2);
 
 // Both files keep their tables in the schema shop, so each layer's shop folder holds them: one schema folder and
-// name in two layers is one table to DBML, the #269 case. (Unqualified, each file's tables would go to its own
-// layer's folder, reports/ or warehouse/: two schema folders, two tables, and no question: see D-14 below.)
+// name in two layers is one table to DBML, the #269 case. Unqualified, a name names the project's one table of
+// it, as #269 shipped; two schemas (crm, erp) are two tables, and nothing is asked (D-14, below).
 const REPORTS = 'Table shop.customer {\n  customer_id int [pk]\n  name varchar\n}\nTable shop.sale {\n  sale_id int [pk]\n  customer_id int\n}\nRef: shop.sale.customer_id > shop.customer.customer_id\n';
 const WAREHOUSE = 'Table shop.customer {\n  customer_id int [pk]\n  name varchar\n  country_code varchar\n  segment varchar\n}\nTable shop.country {\n  country_code varchar [pk]\n}\nRef: shop.customer.country_code > shop.country.country_code\n';
+const QUALIFIED_REPORTS = 'Table crm.customer {\n  customer_id int [pk]\n  name varchar\n}\nTable crm.sale {\n  sale_id int [pk]\n  customer_id int\n}\nRef: crm.sale.customer_id > crm.customer.customer_id\n';
+const QUALIFIED_WAREHOUSE = 'Table erp.customer {\n  customer_id int [pk]\n  name varchar\n  country_code varchar\n  segment varchar\n}\nTable erp.country {\n  country_code varchar [pk]\n}\nRef: erp.customer.country_code > erp.country.country_code\n';
 const UNQUALIFIED_REPORTS = 'Table customer {\n  customer_id int [pk]\n  name varchar\n}\nTable sale {\n  sale_id int [pk]\n  customer_id int\n}\nRef: sale.customer_id > customer.customer_id\n';
 const UNQUALIFIED_WAREHOUSE = 'Table customer {\n  customer_id int [pk]\n  name varchar\n  country_code varchar\n  segment varchar\n}\nTable country {\n  country_code varchar [pk]\n}\nRef: customer.country_code > country.country_code\n';
 
@@ -163,24 +165,48 @@ describe('#269 Import DBML: a table whose name another layer already has', () =>
     expect(result?.plan.modelNames).toEqual(['warehouse_customer', 'country']);
   });
 
-  // D-14: a table is its schema folder and name. Unqualified, the Reports file's customer is reports.customer and the
-  // Warehouse file's is warehouse.customer: two tables, imported under their own names, and nothing is asked.
+  // D-14: a table is its schema folder and name. The Reports file's crm.customer and the Warehouse file's erp.customer
+  // are two tables, imported under their own names in their own schema folders, and nothing is asked.
   it('D-14: a table of the name in another schema folder is another table: no question, its own name, no alias', async () => {
+    await run('reports.dbml', QUALIFIED_REPORTS, 'reports');
+    const reports = snapshot('reports/');
+    const { result, asked } = await run('warehouse.dbml', QUALIFIED_WAREHOUSE, 'warehouse', 'auto');
+    expect(asked).toEqual([]);
+    // The plan names it by its schema while another schema folder has its name; its file and diagram member by its own.
+    expect(result?.plan.modelNames).toEqual(['erp.customer', 'country']);
+    const diagram = fs.readFileSync(result!.domainPath, 'utf-8');
+    expect(diagram).toMatch(/use \{ table erp\.customer \} +from '\.\.\/tables\/erp\/customer\.dbml'/);
+    expect(diagram).not.toContain('reports/');
+    const own = fs.readFileSync(erd('warehouse/tables/erp/customer.dbml'), 'utf-8');
+    expect(own).toMatch(/^Table erp\.customer \{/m);
+    expect(own).not.toContain('alias');
+    expect(fs.readFileSync(erd('warehouse/relationships/warehouse.dbml'), 'utf-8'))
+      .toContain('Ref: erp.customer.country_code >? erp.country.country_code');
+    expect(snapshot('reports/')).toEqual(reports);
+  });
+
+  // A table the file writes with no schema names none: like any bare name, it is the project's one table of that name
+  // (#269 as it shipped), never a second table in the importing layer's own schema folder.
+  it('an unqualified table whose name one project table has is that table: the issue\'s repro, asked as before', async () => {
     await run('reports.dbml', UNQUALIFIED_REPORTS, 'reports');
     const reports = snapshot('reports/');
     const { result, asked } = await run('warehouse.dbml', UNQUALIFIED_WAREHOUSE, 'warehouse', 'auto');
-    expect(asked).toEqual([]);
-    // The plan names it by its schema while another schema folder has its name; its file and diagram member by its own.
-    expect(result?.plan.modelNames).toEqual(['warehouse.customer', 'country']);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].placeHolder).toBe('customer is already in your project (Reports layer) with other columns. Import the file\'s table as its own, or use the project\'s?');
     const diagram = fs.readFileSync(result!.domainPath, 'utf-8');
-    expect(diagram).toMatch(/use \{ table warehouse\.customer \} +from '\.\.\/tables\/warehouse\/customer\.dbml'/);
-    expect(diagram).not.toContain('reports/');
-    const own = fs.readFileSync(erd('warehouse/tables/warehouse/customer.dbml'), 'utf-8');
-    expect(own).toMatch(/^Table warehouse\.customer \{/m);
-    expect(own).not.toContain('alias');
-    expect(fs.readFileSync(erd('warehouse/relationships/warehouse.dbml'), 'utf-8'))
-      .toContain('Ref: warehouse.customer.country_code >? warehouse.country.country_code');
+    expect(diagram).toContain("use { table warehouse.warehouse_customer } from '../tables/warehouse/warehouse_customer.dbml'");
+    expect(files()).not.toContain('warehouse/tables/warehouse/customer.dbml');
+    expect(fs.readFileSync(erd('warehouse/tables/warehouse/warehouse_customer.dbml'), 'utf-8')).toContain("alias: 'customer'");
     expect(snapshot('reports/')).toEqual(reports);
+  });
+
+  it('the same unqualified file again into another layer: reused without a question, no table in a second schema folder', async () => {
+    await run('reports.dbml', UNQUALIFIED_REPORTS, 'reports');
+    const { result, asked } = await run('again.dbml', UNQUALIFIED_REPORTS, 'warehouse');
+    expect(asked).toEqual([]);
+    expect(result?.plan.reusedTables).toEqual(['customer', 'sale']);
+    expect(fs.readFileSync(result!.domainPath, 'utf-8')).toContain('reports/tables/reports/customer.dbml');
+    expect(files().filter((f) => f.startsWith('warehouse/tables/'))).toEqual([]);
   });
 
   it('D-14: re-importing over the old workaround (warehouse_customer, alias customer) reuses that copy: no second customer is created', async () => {

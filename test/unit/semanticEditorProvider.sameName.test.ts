@@ -770,3 +770,25 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     );
   });
 });
+
+describe('New Table on a JSON diagram (names alone, owner decision F)', () => {
+  it('a name one schema folder already has is refused as before: the JSON diagram would read that table, not the new one', async () => {
+    fs.writeFileSync(at('bronze/tables/bqs/solo.dbml'), 'Table bqs.solo {\n  id int [pk]\n}\n');
+    writeJsonDiagram();
+    const before = snapshot();
+    const canvas = await open('bronze/legacy.json');
+    const r = await canvas.send({ type: 'addModel', payload: { name: 'solo', description: '', columns: [{ name: 'id', dataType: 'int', description: '' }] } });
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]).toContain('Table "solo" already exists in the Table Library');
+    expect(changed(before, snapshot())).toEqual([]);
+  });
+
+  it('a name no table has is still created', async () => {
+    writeJsonDiagram();
+    const canvas = await open('bronze/legacy.json');
+    const r = await canvas.send({ type: 'addModel', payload: { name: 'fresh', description: '', columns: [{ name: 'id', dataType: 'int', description: '' }] } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed.some((f) => f.endsWith('/fresh.dbml'))).toBe(true);
+    expect(read('bronze/legacy.json')).toContain('"fresh"');
+  });
+});

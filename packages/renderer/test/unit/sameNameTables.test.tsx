@@ -250,6 +250,44 @@ describe('detail panel', () => {
   });
 });
 
+describe('detail panel rename: a DBML table is its schema folder and its name', () => {
+  // kunde lives in `kundenSchema`; ccc.addresse and bqs.addresse in their own schema folders.
+  function renameKundeTo(value: string, kundenSchema: string, existingSchemaFolder?: string): string | null {
+    const store = createCanvasStore({ domain: kunden(), selectedNode: 'kunde', detailPanelOpen: true });
+    store.getState().setCanvasContext({
+      tableFiles: {
+        'bqs.addresse': '.erd-studio/bronze/tables/bqs/addresse.dbml',
+        'ccc.addresse': '.erd-studio/bronze/tables/ccc/addresse.dbml',
+        kunde: `.erd-studio/bronze/tables/${kundenSchema}/kunde.dbml`,
+      },
+      offDiagram: {},
+    });
+    if (existingSchemaFolder !== undefined) {
+      store.getState().setExistingModels([{ name: 'lieferant', schema: existingSchemaFolder, description: '', columnCount: 1, source: 'logical', sourcePath: `.erd-studio/bronze/tables/${existingSchemaFolder}/lieferant.dbml`, layer: 'bronze', schemaFolder: existingSchemaFolder }] as never);
+    }
+    const { container } = render(
+      <CanvasStoreProvider store={store}>
+        <CanvasEnvironmentProvider host={{ postMessage: () => {} }}>
+          <ReactFlowProvider><DetailPanel /></ReactFlowProvider>
+        </CanvasEnvironmentProvider>
+      </CanvasStoreProvider>,
+    );
+    fireEvent.click(container.querySelector('.detail-panel__title-edit-btn')!);
+    fireEvent.change(container.querySelector<HTMLInputElement>('.detail-panel__title-input')!, { target: { value } });
+    return container.querySelector('.detail-panel__title-error')?.textContent ?? null;
+  }
+
+  it('refuses the name a table of its own schema folder has, on the diagram or in the Table Library', () => {
+    expect(renameKundeTo('addresse', 'ccc')).toBe('A table with this name already exists');
+    expect(renameKundeTo('lieferant', 'ccc', 'ccc')).toBe('A table with this name already exists in the Table Library');
+  });
+
+  it('allows a name only other schema folders\' tables have', () => {
+    expect(renameKundeTo('addresse', 'ddd')).toBeNull();
+    expect(renameKundeTo('lieferant', 'ddd', 'ccc')).toBeNull();
+  });
+});
+
 describe('AliasEditor', () => {
   function setup(alias?: string) {
     const posted: unknown[] = [];

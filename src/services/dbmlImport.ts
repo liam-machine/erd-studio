@@ -935,13 +935,16 @@ function planTableNames(
   /**
    * The library's table this one is, by its name as the library spells it (or its library reference
    * where two schema folders share it): any of the name; for a DBML diagram, the one in the table's own
-   * schema folder, or a YAML table of the name (a YAML table's name is unique across the project).
+   * schema folder, or a YAML table of the name (a YAML table's name is unique across the project). A
+   * table the file writes with no schema names none: like any bare name, it is the library's one table
+   * of that name when only one has it (#269 asks about it as before), and a table of its own otherwise.
    */
   const findInLibrary = (t: DbmlTable): string | null => {
     if (!scoped || !library.tablesNamed) return library.findTableName(t.name);
     const named = library.tablesNamed(t.name);
     const same = named.find((n) => n.schema === '' || normaliseName(n.schema) === folderOf(t));
-    return same ? same.ref : null;
+    if (same) return same.ref;
+    return !t.schema && named.length === 1 ? named[0].ref : null;
   };
   /** Per table: the library table it is (a name the file wrote), an earlier copy it reuses, or the library table it steers clear of. */
   const libraryHit: Array<string | null> = tables.map(() => null);

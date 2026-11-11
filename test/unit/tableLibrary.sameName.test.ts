@@ -422,3 +422,21 @@ describe('a drag\'s remembered reading equals a fresh read of what it wrote, on 
     });
   }
 });
+
+describe('tableTakingName: what a new DBML table of a name in a schema folder would clash with', () => {
+  it('the same schema folder in any layer and any case, or a YAML table of the name; never another schema folder\'s table', () => {
+    write('silver/tables/sales/orders.dbml', 'Table sales.orders {\n  id int\n}\n');
+    write('logical-models/calendar.yml', 'name: calendar\ncolumns:\n  - name: day\n    data_type: date\n');
+    const lib = scoped();
+    // Another schema folder's table of the name is another table.
+    expect(lib.tableTakingName('addresse', 'ddd')).toBeUndefined();
+    // The same schema folder's, without case (name and folder).
+    expect(rel(lib.tableTakingName('Addresse', 'BQS')!.filePath)).toBe('bronze/tables/bqs/addresse.dbml');
+    expect(rel(lib.tableTakingName('addresse', 'ccc')!.filePath)).toBe('bronze/tables/ccc/addresse.dbml');
+    // The same schema folder in another layer: DBML cannot tell `Table sales.orders` in two layers apart.
+    expect(rel(lib.tableTakingName('orders', 'sales')!.filePath)).toBe('silver/tables/sales/orders.dbml');
+    expect(lib.tableTakingName('orders', 'crm')).toBeUndefined();
+    // A YAML table's name is unique across the project, whichever schema folder the new one goes to.
+    expect(lib.tableTakingName('Calendar', 'bqs')?.storage).toBe('yaml');
+  });
+});
