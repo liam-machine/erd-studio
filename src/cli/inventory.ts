@@ -275,7 +275,12 @@ export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'
       const shared = (m: string): boolean => m.includes('.') || (lib.schemaScopedNames && lib.isAmbiguousName(m));
       if (d.storage === 'dbml' && models.some(shared)) {
         const summary = diagramSummaryDbml(text, d.filePath);
-        if (summary) {
+        // A dot in a hand-written file stem is not a pair: only a member named apart from its own name
+        // (`<schema>.<name>`), or a name the library shares, is listed this way.
+        const named = summary !== null
+          && (summary.members.some((ref, i) => ref.toLowerCase() !== summary.memberUses[i]?.name.toLowerCase())
+            || (lib.schemaScopedNames && models.some((m) => lib.isAmbiguousName(m))));
+        if (summary && named) {
           const withUse = summary.memberUses.map((u) => ({ name: u.name, ...(tableIdOfPath(u.resolved) ? { schema: tableIdOfPath(u.resolved)!.schema } : {}) }));
           tables = [...withUse, ...summary.unlinked.map((name) => ({ name }))];
           models = tables.map((t) => t.name);

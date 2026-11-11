@@ -804,8 +804,11 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       continue;
     }
     // D-2: a diagram showing two tables of one name from different schema folders reads only in versions that
-    // know it ('8'); older ones open a '7' file and draw one table twice.
-    const twins = [...new Set((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref.toLowerCase() !== u.name.toLowerCase()).map((u) => u.name))];
+    // know it ('8'); older ones open a '7' file and draw one table twice. Only where tables are told apart by
+    // identity: under the old rule the second table is a duplicate, and doctor says so.
+    const twins = lib.schemaScopedNames
+      ? [...new Set((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref.toLowerCase() !== u.name.toLowerCase()).map((u) => u.name))]
+      : [];
     if (twins.length > 0 && reading.schemaVersion < 8) {
       push({
         file: projectRel(f.rel), code: 'twinDiagramVersion',

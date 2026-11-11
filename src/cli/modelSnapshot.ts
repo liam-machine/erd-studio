@@ -128,8 +128,9 @@ export interface SnapshotProblem {
 export interface ModelSnapshot {
   /**
    * By lower-case name; the first file in path order wins a name written
-   * twice, except that tables of one name in different schema folders are
-   * each kept, by lower-case `<schema>.<name>` (their reference).
+   * twice, except that, read with `schemaScopedNames`, tables of one name in
+   * different schema folders are each kept, by lower-case `<schema>.<name>`
+   * (their reference).
    */
   tables: Map<string, SnapshotTable>;
   /** By `linkKey`. */
@@ -235,7 +236,18 @@ function addRelationship(out: Map<string, SnapshotRelationship>, rel: Relationsh
  * Read a snapshot. `files` are posix paths relative to the semantic dir, as
  * `listSemanticFiles` lists them or `git ls-tree` prints them under it.
  */
-export function readModelSnapshot(files: readonly string[], read: SnapshotReader): ModelSnapshot {
+export function readModelSnapshot(
+  files: readonly string[],
+  read: SnapshotReader,
+  /**
+   * `schemaScopedNames`: tell tables of one name in different schema folders
+   * apart by identity, as the Table Library does with that option (off by
+   * default until the rule flips). Off, a name is one table, the first file
+   * in path order, exactly as before.
+   */
+  options: { schemaScopedNames?: boolean } = {},
+): ModelSnapshot {
+  const scoped = options.schemaScopedNames === true;
   const sorted = [...new Set(files)].sort(byteOrder);
   const snapshot: ModelSnapshot = {
     tables: new Map(),
@@ -248,6 +260,7 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
   const classified = sorted.map((rel) => ({ rel, cls: classifySemanticFile(rel, { tablesDirIsLayer }) }));
 
   // The library's tables are keyed once all are read: by name, or by `<schema>.<name>` where two schema folders share it.
+  // A v4 diagram's inline models, read after that, are added by name, first wins, as ever.
   const libraryTables: SnapshotTable[] = [];
   let keyed = false;
   const addTable = (t: SnapshotTable): void => {
@@ -264,6 +277,9 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
     if (!folderOfId.has(tableIdKey(id))) folderOfId.set(tableIdKey(id), id.schema);
     return id;
   };
+  // A table's identity only where tables are told apart by it: otherwise a name is one table.
+  const withId = (t: SnapshotTable, name: string, schemaFolder: string | undefined): SnapshotTable =>
+    (scoped ? { ...t, id: tableIdKey(identityOf(name, schemaFolder)) } : t);
 
   // Tables first: relationships and diagrams resolve against them.
   for (const { rel, cls } of classified) {
@@ -272,21 +288,22 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
     const stem = cls.name ?? fileStem(rel);
     if (text === null) {
       snapshot.problems.push({ file: rel, message: 'The file could not be read.' });
-      addTable({ name: stem, file: rel, storage: cls.storage === 'dbml' ? 'dbml' : 'yaml', columns: [], unreadable: true });
+      // An unreadable file still has its identity: it never hides a readable table of its name in another schema folder.
+      addTable(withId({ name: stem, file: rel, storage: cls.storage === 'dbml' ? 'dbml' : 'yaml', columns: [], unreadable: true }, stem, cls.storage === 'dbml' ? cls.schema : undefined));
       continue;
     }
     if (cls.storage === 'dbml') {
       const reading = parseTableDbml(text, stem, cls.schema !== undefined ? { schemaFolder: cls.schema } : {});
       if (!reading.ok) {
         snapshot.problems.push({ file: rel, message: reading.error.message });
-        addTable({ name: stem, file: rel, storage: 'dbml', ...(cls.layer ? { layer: cls.layer } : {}), columns: [], unreadable: true });
+        addTable(withId({ name: stem, file: rel, storage: 'dbml', ...(cls.layer ? { layer: cls.layer } : {}), columns: [], unreadable: true }, stem, cls.schema));
         continue;
       }
-      addTable({ ...tableOf(reading.table, rel, 'dbml', cls.layer, reading.table.schema ?? cls.schema), id: tableIdKey(identityOf(reading.table.name, cls.schema)) });
+      addTable(withId(tableOf(reading.table, rel, 'dbml', cls.layer, reading.table.schema ?? cls.schema), reading.table.name, cls.schema));
       attachTables.push({
         table: reading.table, storage: 'dbml', ...(reading.alias ? { dbmlAlias: reading.alias } : {}),
         // Its file and schema folder, so a Ref end is told apart by identity, as the canvas tells it.
-        path: rel, ...(cls.schema !== undefined ? { schema: cls.schema } : {}),
+        ...(scoped ? { path: rel, ...(cls.schema !== undefined ? { schema: cls.schema } : {}) } : {}),
       });
       continue;
     }
@@ -294,17 +311,17 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
       const table = parseTableText(text, stem, { duplicateKeys: 'last' });
       if (!table) {
         snapshot.problems.push({ file: rel, message: 'The file holds no table (no name).' });
-        addTable({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true });
+        addTable(withId({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true }, stem, undefined));
         continue;
       }
-      addTable({ ...tableOf(table, rel, 'yaml', cls.folder, table.schema), id: tableIdKey(identityOf(table.name, undefined)) });
-      attachTables.push({ table, storage: 'yaml', path: rel });
+      addTable(withId(tableOf(table, rel, 'yaml', cls.folder, table.schema), table.name, undefined));
+      attachTables.push({ table, storage: 'yaml', ...(scoped ? { path: rel } : {}) });
       for (const r of table.relationships ?? []) {
         libraryRelationships.push({ rel: { ...r, fromModel: table.name } as Relationship, file: rel });
       }
     } catch (err) {
       snapshot.problems.push({ file: rel, message: messageOf(err) });
-      addTable({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true });
+      addTable(withId({ name: stem, file: rel, storage: 'yaml', columns: [], unreadable: true }, stem, undefined));
     }
   }
 
@@ -314,7 +331,10 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
   libraryTables.forEach((t, i) => { if (t.id !== undefined && !firstOfIdentity.has(t.id)) firstOfIdentity.set(t.id, i); });
   const distinct = [...firstOfIdentity.values()].map((i) => libraryTables[i]);
   const refs = assignTableRefs(distinct.map((t) => ({ schema: folderOfId.get(t.id!) ?? '', name: t.name })));
-  const refOfId = new Map(distinct.map((t, i) => [t.id!, refs[i]]));
+  // A name a table outside any schema folder has (a YAML table) stays one table, the first file kept:
+  // YAML keeps its bare-name rule, and doctor reports the DBML copies as a format conflict.
+  const unscopedNames = new Set(distinct.filter((t) => (folderOfId.get(t.id!) ?? '') === '').map((t) => lower(t.name)));
+  const refOfId = new Map(distinct.map((t, i) => [t.id!, unscopedNames.has(lower(t.name)) ? t.name : refs[i]]));
   const idOfRef = new Map<string, string>();
   for (const t of libraryTables) {
     const ref = t.id !== undefined ? refOfId.get(t.id) ?? t.name : t.name;
@@ -331,7 +351,7 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
   const idOf = (table: string): string | undefined => idOfRef.get(lower(table));
 
   // DBML relationships files: each Ref attached to its table the canvas's way.
-  const readings: Array<{ path: string; reading: DbmlRelationshipsReading; semanticPath: string }> = [];
+  const readings: Array<{ path: string; reading: DbmlRelationshipsReading; semanticPath?: string }> = [];
   for (const { rel, cls } of classified) {
     if (cls.kind !== 'relationships') continue;
     const text = read(rel);
@@ -342,7 +362,7 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
       snapshot.relationshipsFiles.set(rel, { file: rel, refs: new Map(), unreadable: true });
       continue;
     }
-    readings.push({ path: rel, reading, semanticPath: rel });
+    readings.push({ path: rel, reading, ...(scoped ? { semanticPath: rel } : {}) });
   }
   const lookup = dbmlTableLookup(attachTables);
   // An end's table as the canvas names it (its reference), found by what the end and its use line say.
@@ -354,8 +374,8 @@ export function readModelSnapshot(files: readonly string[], read: SnapshotReader
     const { path, reading } = item;
     const refs = new Map<string, string>();
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
-      const hints = dbmlRefEndHints(item, ref);
-      const hintOf = (end: string): DbmlRefEndHint | undefined => (lower(end) === lower(ref.owner) ? hints.owner : lower(end) === lower(ref.target) ? hints.target : undefined);
+      const hints = scoped ? dbmlRefEndHints(item, ref) : undefined;
+      const hintOf = (end: string): DbmlRefEndHint | undefined => (!hints ? undefined : lower(end) === lower(ref.owner) ? hints.owner : lower(end) === lower(ref.target) ? hints.target : undefined);
       const pairs = ref.relationships.map((r) => ({ ...r, fromModel: realName(r.fromModel, hintOf(r.fromModel)), toModel: realName(r.toModel, hintOf(r.toModel)) }));
       const identity = pairs.map((r) => linkKey(r)).sort(byteOrder).join('\u0001');
       const says = pairs

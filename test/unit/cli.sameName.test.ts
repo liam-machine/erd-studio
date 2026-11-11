@@ -19,13 +19,16 @@ import { diffModelSnapshots } from '../../src/cli/modelChanges';
 import { readModelSnapshot } from '../../src/cli/modelSnapshot';
 import { listSemanticFiles } from '../../src/services/semanticFiles';
 
+/** Whether the CLI's Table Library tells tables apart by identity: on, but for the tests of the old rule. */
+const rule = vi.hoisted(() => ({ scoped: true }));
+
 vi.mock('../../src/services/logicalModelService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/services/logicalModelService')>();
   /** The CLI's Table Library with the identity rule on, whoever builds it. */
   class ScopedTableLibraryService extends actual.TableLibraryService {
     constructor(...args: ConstructorParameters<typeof actual.TableLibraryService>) {
       const [workspaceRoot, semanticDir, ownWriteTracker, options] = args;
-      super(workspaceRoot, semanticDir, ownWriteTracker, { ...options, schemaScopedNames: true });
+      super(workspaceRoot, semanticDir, ownWriteTracker, { ...options, schemaScopedNames: rule.scoped });
     }
   }
   return { ...actual, TableLibraryService: ScopedTableLibraryService };
@@ -44,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rule.scoped = true;
   vi.restoreAllMocks();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -56,13 +60,13 @@ async function problems(): Promise<Array<{ file: string; line?: number; code: st
   return r.erd.dbmlProblems.map((p) => ({ file: p.file, ...(p.line !== undefined ? { line: p.line } : {}), code: p.code, message: p.message }));
 }
 
-/** A snapshot of the project's files as they are now (what `changes` reads for the working tree). */
-function snapshotNow() {
+/** A snapshot of the project's files as they are now (what `changes` reads for the working tree), told apart by identity. */
+function snapshotNow(schemaScopedNames = true) {
   const semanticRoot = path.join(root, '.erd-studio');
   const files = listSemanticFiles(semanticRoot, { tablesDirIsLayer: false }).map((e) => e.rel);
   return readModelSnapshot(files, (rel) => {
     try { return fs.readFileSync(path.join(semanticRoot, rel), 'utf-8'); } catch { return null; }
-  });
+  }, { schemaScopedNames });
 }
 
 describe('doctor: two tables of one name in different schema folders', () => {
@@ -77,6 +81,13 @@ describe('doctor: two tables of one name in different schema folders', () => {
     expect(version.message).toMatch(/two tables named addresse, kunde from different schema folders/);
     expect(version.message).toMatch(/erd_schema_version '7'/);
     expect(version.message).toMatch(/ERD Studio 2\.0\.4 and later/);
+  });
+
+  it('under the old rule, the 2.0.2-style diagram is not reported for its version: the second table is a duplicate', async () => {
+    rule.scoped = false;
+    const codes = (await problems()).map((p) => p.code);
+    expect(codes).toContain('duplicateTableName');
+    expect(codes).not.toContain('twinDiagramVersion');
   });
 
   it('a Ref whose table the file does not import names the right table\'s use line', async () => {
@@ -149,6 +160,17 @@ describe('inventory: two tables of one name in different schema folders', () => 
       { name: 'addresse', schema: 'bqs' }, { name: 'kunde', schema: 'bqs' }, { name: 'addresse', schema: 'ccc' }, { name: 'kunde', schema: 'ccc' },
     ]);
   });
+
+  it('a dot in a hand-written file stem is not a pair: the diagram is listed as before', async () => {
+    rule.scoped = false;
+    fs.mkdirSync(semantic('bronze/tables/sales'), { recursive: true });
+    fs.writeFileSync(semantic('bronze/tables/sales/ord.v2.dbml'), 'Table sales."ord.v2" {\n  id int [pk]\n}\n');
+    fs.writeFileSync(semantic('bronze/diagrams/orders.dbml'), "Project orders {\n  erd_schema_version: '7'\n}\n\nuse { table sales.\"ord.v2\" } from '../tables/sales/ord.v2.dbml'\n");
+    const r = runInventory(await buildCliContext({ project: root, semanticDir: '.erd-studio' }));
+    const orders = r.domains.find((d) => d.domain === 'orders')!;
+    expect(orders.models).toEqual(['ord.v2']);
+    expect(orders.tables).toBeUndefined();
+  });
 });
 
 describe('diff: two tables of one name in different schema folders', () => {
@@ -213,5 +235,31 @@ describe('changes: two tables of one name in different schema folders', () => {
     expect(changes.tables.moved.map((m) => [m.name, m.from.file, m.to.file])).toEqual([['kunde', 'bronze/tables/ccc/kunde.dbml', 'bronze/tables/ddd/kunde.dbml']]);
     expect(changes.tables.removed.map((t) => t.file)).toEqual(['bronze/tables/bqs/kunde.dbml']);
     expect(changes.tables.added).toEqual([]);
+    // One table of the name kept its columns in another folder: moved, never renamed to itself.
+    expect(changes.tables.renamed).toEqual([]);
+  });
+
+  it('under the old rule a name is one table, the first file in path order, exactly as before', () => {
+    const snapshot = snapshotNow(false);
+    expect([...snapshot.tables.keys()].sort()).toEqual(['addresse', 'kunde']);
+    expect(snapshot.tables.get('addresse')!.file).toBe('bronze/tables/bqs/addresse.dbml');
+    expect([...snapshot.tables.values()].some((t) => t.id !== undefined)).toBe(false);
+    expect([...snapshot.relationships.values()].some((r) => r.idKey !== undefined)).toBe(false);
+  });
+
+  it('a YAML table and DBML tables of its name stay one table (a format conflict), never a pair', () => {
+    fs.mkdirSync(semantic('logical-models'), { recursive: true });
+    fs.writeFileSync(semantic('logical-models/addresse.yml'), 'name: addresse\ncolumns:\n  - name: id\n');
+    const snapshot = snapshotNow();
+    expect([...snapshot.tables.keys()].filter((k) => k.endsWith('addresse'))).toEqual(['addresse']);
+    expect(snapshot.tables.get('addresse')!.file).toBe('bronze/tables/bqs/addresse.dbml');
+  });
+
+  it('an unreadable table file never hides the readable table of its name in another schema folder', () => {
+    fs.writeFileSync(semantic('bronze/tables/bqs/addresse.dbml'), 'Table bqs.addresse {\n  id int [pk\n');
+    const snapshot = snapshotNow();
+    expect(snapshot.tables.get('ccc.addresse')?.file).toBe('bronze/tables/ccc/addresse.dbml');
+    expect(snapshot.tables.get('ccc.addresse')?.unreadable).toBeUndefined();
+    expect(snapshot.tables.get('bqs.addresse')?.unreadable).toBe(true);
   });
 });

@@ -270,14 +270,18 @@ export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): Mo
   const pairedHead = new Set(pairs.map(([, now]) => now));
   const removedTables = [...base.tables.values()].filter((t) => !pairedBase.has(t));
   const addedTables = [...head.tables.values()].filter((t) => !pairedHead.has(t));
-  const renames = detectRenames(removedTables, addedTables);
-  const renamedFrom = new Set(renames.map(([from]) => from));
-  const renamedTo = new Set(renames.map(([, to]) => to));
+  // Same columns under the same name is one table that moved schema folder (two of that name were on one
+  // side, so the name alone could not pair it): moved, never renamed to itself.
+  const sameColumns = detectRenames(removedTables, addedTables);
+  const renames = sameColumns.filter(([from, to]) => lower(from.name) !== lower(to.name));
+  const movedPairs = sameColumns.filter(([from, to]) => lower(from.name) === lower(to.name));
+  const renamedFrom = new Set(sameColumns.map(([from]) => from));
+  const renamedTo = new Set(sameColumns.map(([, to]) => to));
 
   const changed: TableChange[] = [];
   const moved: ModelChanges['tables']['moved'] = [];
   const matched: Array<[SnapshotTable, SnapshotTable, string | undefined]> = [
-    ...pairs.map(([was, now]) => [was, now, undefined] as [SnapshotTable, SnapshotTable, undefined]),
+    ...[...pairs, ...movedPairs].map(([was, now]) => [was, now, undefined] as [SnapshotTable, SnapshotTable, undefined]),
     ...renames.map(([from, to]) => [from, to, from.name] as [SnapshotTable, SnapshotTable, string]),
   ];
   for (const [was, now, renamed] of matched) {
