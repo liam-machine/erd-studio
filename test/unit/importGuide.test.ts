@@ -501,6 +501,31 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
     expect(p.text).not.toMatch(/DuckDB/);
   });
 
+  it('a long snippet starts folded behind its line count, with Copy outside the fold; a short one is shown whole', () => {
+    const p = page(BLANK);
+    const snippets = [...p.doc.querySelectorAll('.ig-snippet')];
+    expect(snippets.length).toBeGreaterThan(0);
+    for (const el of snippets) {
+      const copy = el.querySelector(':scope > [data-action="copy"]');
+      expect(copy, 'Copy is a direct child, never inside the fold').not.toBeNull();
+      const id = copy!.getAttribute('data-snippet') as keyof typeof IMPORT_GUIDE_SNIPPETS;
+      const lines = IMPORT_GUIDE_SNIPPETS[id].replace(/\n+$/, '').split('\n').length;
+      const fold = el.querySelector(':scope > details.ig-snippet__fold');
+      if (lines > 6) {
+        expect(fold, id).not.toBeNull();
+        expect(fold!.hasAttribute('open'), id).toBe(false);
+        expect(fold!.querySelector('summary')?.textContent, id).toBe(`Show all ${lines} lines`);
+      } else {
+        expect(fold, id).toBeNull();
+      }
+      // Folded or not, the whole text is on the page.
+      expect(el.querySelector('.ig-snippet__code')?.textContent, id).toBe(IMPORT_GUIDE_SNIPPETS[id]);
+    }
+    // The catalog queries are the long ones; Snowflake's one line stays in view.
+    expect(p.doc.querySelector('[data-snippet="databricksCatalog"]')?.parentElement?.querySelector('details')).not.toBeNull();
+    expect(p.doc.querySelector('[data-card="snowflake"] details')).toBeNull();
+  });
+
   it('a long query line scrolls inside its box: the card (a grid item) and the snippet (a flex item) may shrink, so the page never widens past the view and Copy stays on screen', () => {
     const rule = (selector: string): string => new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`).exec(IMPORT_GUIDE_STYLE)?.[1] ?? '';
     expect(rule('.ig-card')).toMatch(/min-width: 0;/);

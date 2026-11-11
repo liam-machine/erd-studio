@@ -710,6 +710,11 @@ body {
   font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
   border-radius: 3px; background: var(--vscode-textCodeBlock-background);
 }
+/* A folded snippet takes the code's place in the row: the same shrink rule, so Copy stays in view open or shut. */
+.ig-snippet__fold { flex: 1 1 auto; min-width: 0; border-radius: 3px; background: var(--vscode-textCodeBlock-background); }
+.ig-snippet__summary { padding: 6px 10px; cursor: pointer; color: var(--vscode-textLink-foreground); }
+.ig-snippet__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.ig-snippet__fold .ig-snippet__code { max-height: 22em; overflow-y: auto; background: none; }
 .ig-btn {
   padding: 5px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; cursor: pointer;
   font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
@@ -742,11 +747,25 @@ const SCRIPT = `
 })();
 `;
 
+/** A snippet longer than this many lines starts folded, so a long query does not push the other cards off the page. */
+export const IMPORT_GUIDE_FOLD_LINES = 6;
+
+/**
+ * A short snippet is shown whole. A long one (a catalog query, the Databricks
+ * notebook cell) starts folded behind its line count, in a native `<details>`
+ * (no script, so the CSP is unchanged); Copy stays outside the fold, so the
+ * usual path — copy, paste, run — needs no unfolding.
+ */
 function renderSnippet(step: ImportGuideStep): string {
-  return step.snippet
-    ? `<div class="ig-snippet"><pre class="ig-snippet__code"><code>${escapeHtml(IMPORT_GUIDE_SNIPPETS[step.snippet])}</code></pre>` +
-      `<button class="ig-btn ig-btn--secondary ig-btn--copy" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`
-    : '';
+  if (!step.snippet) return '';
+  const text = IMPORT_GUIDE_SNIPPETS[step.snippet];
+  const lines = text.replace(/\n+$/, '').split('\n').length;
+  const code = `<pre class="ig-snippet__code"><code>${escapeHtml(text)}</code></pre>`;
+  const body = lines > IMPORT_GUIDE_FOLD_LINES
+    ? `<details class="ig-snippet__fold"><summary class="ig-snippet__summary">Show all ${lines} lines</summary>${code}</details>`
+    : code;
+  return `<div class="ig-snippet">${body}` +
+    `<button class="ig-btn ig-btn--secondary ig-btn--copy" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`;
 }
 
 /** One step stands on its own (no "1."); only consecutive steps are a numbered list. Notes follow, quietly. */
