@@ -152,6 +152,15 @@ export const workspace = {
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
   textDocuments: [] as unknown[],
+  /** The path relative to the first workspace folder that holds it, else the path itself. */
+  asRelativePath(pathOrUri: string | { fsPath: string }): string {
+    const p = typeof pathOrUri === 'string' ? pathOrUri : pathOrUri.fsPath;
+    for (const folder of workspace.workspaceFolders) {
+      const root = folder.uri.fsPath.replace(/\/+$/, '');
+      if (p.startsWith(`${root}/`)) return p.slice(root.length + 1);
+    }
+    return p;
+  },
   // Replaced below with implementations backed by the mock document registry.
   applyEdit: async (_edit: unknown): Promise<boolean> => true,
   openTextDocument: async (_uriOrPath: unknown): Promise<unknown> => { throw new Error('not initialised'); },

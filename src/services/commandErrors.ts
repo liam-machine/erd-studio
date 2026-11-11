@@ -30,6 +30,50 @@ export const SAVE_AND_TRY_AGAIN_BUTTON = 'Save and Try Again';
 export const SAVE_ALL_BUTTON = 'Save All';
 export const RELOAD_WINDOW_BUTTON = 'Reload Window';
 
+/** Send Feedback's own failures (#285): the report must never vanish silently. */
+export const OPEN_GITHUB_ISSUES_BUTTON = 'Open GitHub Issues';
+export const COPY_LINK_BUTTON = 'Copy Link';
+export const COPY_REPORT_BUTTON = 'Copy Report';
+/** The comment path's report is already on the clipboard; the link replaces it. */
+export const COPY_LINK_INSTEAD_BUTTON = 'Copy Link Instead';
+export const LEARN_MORE_BUTTON = 'Learn More';
+export const SHOW_FILES_BUTTON = 'Show Files';
+export const RELOAD_ANYWAY_BUTTON = 'Reload Anyway';
+
+/** Building or opening the report hit a bug of ours (never the raw exception). */
+export function reportNotOpenedMessage(copied: boolean): string {
+  return "ERD Studio couldn't open your report on GitHub. This is a problem in ERD Studio, not something you did."
+    + (copied ? ' Your text has been copied to the clipboard.' : '');
+}
+
+/** VS Code could not open the browser for a new issue. */
+export const BROWSER_NOT_OPENED_MESSAGE = "ERD Studio couldn't open your browser.";
+
+/** VS Code could not open the browser for a comment; the report is already on the clipboard. */
+export function commentBrowserNotOpenedMessage(issue: number): string {
+  return `${BROWSER_NOT_OPENED_MESSAGE} Your report is on the clipboard: paste it as a comment on #${issue}.`;
+}
+
+/** The feedback API key could not be stored or cleared: usually the machine's keyring, not ERD Studio. */
+export function secretStorageFailedMessage(action: 'save' | 'clear'): string {
+  return `ERD Studio couldn't ${action} the API key: VS Code's secret storage isn't available on this machine.`
+    + (action === 'save' ? ' Feedback still works without a key.' : '');
+}
+
+/**
+ * Save All left files unsaved before a reload: name up to three of them, so
+ * the user can tell what reloading would lose. `names` are as shown (base
+ * names, or relative paths where base names collide).
+ */
+export function unsavedFilesMessage(names: readonly string[]): string {
+  const shown = names.slice(0, 3);
+  const more = names.length - shown.length;
+  const list = more > 0
+    ? `${shown.join(', ')} and ${more} more`
+    : shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0] ?? 'Some files';
+  return `${list} couldn't be saved. Reload anyway? Unsaved changes will be lost.`;
+}
+
 /** The buttons and words every way of making a diagram shares (#204, #229). */
 export const ADD_LAYER_BUTTON = 'Add Layer';
 export const OPEN_IT_BUTTON = 'Open It';

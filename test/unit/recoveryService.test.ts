@@ -81,7 +81,7 @@ describe('recoveryService', () => {
 
     it('prompts before reloading when documents remain dirty after save', async () => {
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [
-        { isDirty: true, isUntitled: false },
+        { isDirty: true, isUntitled: false, uri: vscode.Uri.file('/p/orders.sql') },
       ];
       const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
       const warn = vi.spyOn(vscode.window, 'showWarningMessage')
@@ -95,10 +95,11 @@ describe('recoveryService', () => {
 
     it('aborts the reload when the user cancels the dirty-files prompt', async () => {
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [
-        { isDirty: true, isUntitled: false },
+        { isDirty: true, isUntitled: false, uri: vscode.Uri.file('/p/orders.sql') },
       ];
       const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
-      vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Cancel' as never);
+      // A modal's Cancel (or Escape) resolves undefined.
+      vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
 
       const reloaded = await saveAllAndReload('test reason');
 

@@ -23,6 +23,10 @@ export type FeedbackKind = 'bug' | 'feature';
  * re-exports it.
  */
 export const GITHUB_REPO = 'liam-machine/erd-studio';
+/** The plain new-issue page (no prefill): the way out when a prefilled report could not open (#285). */
+export const GITHUB_NEW_ISSUE_URL = `https://github.com/${GITHUB_REPO}/issues/new`;
+/** VS Code's troubleshooting for its secret storage (the OS keyring), for a key that could not be stored. */
+export const SECRET_STORAGE_HELP_URL = 'https://code.visualstudio.com/docs/configure/settings-sync#_troubleshoot-credential-store-issues';
 
 export const FEEDBACK_KINDS: readonly FeedbackKind[] = ['bug', 'feature'];
 

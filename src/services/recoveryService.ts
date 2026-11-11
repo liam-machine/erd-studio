@@ -8,7 +8,9 @@
  * losing the user's unsaved work.
  */
 
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { RELOAD_ANYWAY_BUTTON, SHOW_FILES_BUTTON, unsavedFilesMessage } from './commandErrors';
 import { log } from './logger';
 
 /**
@@ -56,18 +58,40 @@ export async function saveAllAndReload(reason: string): Promise<boolean> {
   // saveAll returns void and won't surface per-file failures (read-only files,
   // save validators vetoing, etc.). Re-check dirty state and gate the reload
   // behind an explicit confirmation if anything is still unsaved.
+  // A modal naming the files (#285): a toast that can lose work could be
+  // clicked through or time out unseen. VS Code adds Cancel (and Escape).
   const stillDirty = vscode.workspace.textDocuments.filter(d => d.isDirty && !d.isUntitled);
   if (stillDirty.length > 0) {
     const choice = await vscode.window.showWarningMessage(
-      `${stillDirty.length} file(s) could not be saved. Reload anyway? Unsaved changes will be lost.`,
-      'Reload Anyway',
-      'Cancel',
+      unsavedFilesMessage(unsavedFileNames(stillDirty)),
+      { modal: true },
+      SHOW_FILES_BUTTON,
+      RELOAD_ANYWAY_BUTTON,
     );
-    if (choice !== 'Reload Anyway') return false;
+    if (choice === SHOW_FILES_BUTTON) {
+      try {
+        await vscode.window.showTextDocument(stillDirty[0], { preview: false });
+      } catch (err) {
+        log.error('[ERD Studio] Show Files failed:', err);
+      }
+    }
+    if (choice !== RELOAD_ANYWAY_BUTTON) return false;
   }
 
   // Brief delay so the status bar message is visible before the reload kicks in.
   await new Promise(resolve => setTimeout(resolve, 600));
   await vscode.commands.executeCommand('workbench.action.reloadWindow');
   return true;
+}
+
+/**
+ * The unsaved documents' names, as the user knows them: the base name, or the
+ * workspace-relative path (with its folder's name in a multi-root workspace)
+ * where two share a base name (two `schema.yml`).
+ */
+export function unsavedFileNames(docs: readonly vscode.TextDocument[]): string[] {
+  const base = (d: vscode.TextDocument) => path.basename(d.uri.fsPath || d.uri.path);
+  const counts = new Map<string, number>();
+  for (const d of docs) counts.set(base(d), (counts.get(base(d)) ?? 0) + 1);
+  return docs.map(d => ((counts.get(base(d)) ?? 0) > 1 ? vscode.workspace.asRelativePath(d.uri, true) : base(d)));
 }
