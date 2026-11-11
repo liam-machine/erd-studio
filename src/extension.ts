@@ -2570,7 +2570,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(guardRefresh('Table', ({ tables: changed }) => {
     draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
-    tableLibraryService.invalidateTables(names);
+    // By name, and by each changed file's own path: a name two schema folders share is two files.
+    tableLibraryService.invalidateTables(names, changed.map((t) => t.uri.fsPath));
     // Batched: a bulk change (git checkout, an assistant's edit) redraws each canvas once.
     for (const name of names) editorProvider.queueTableRefresh(name);
     treeProvider.refresh();

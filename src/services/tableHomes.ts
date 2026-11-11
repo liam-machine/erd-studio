@@ -7,7 +7,9 @@
  * Only DBML tables have a home: a YAML table (a project from before 2.0) has
  * no layer of its own, so the views show it as they always have.
  */
+import { tableIdKey } from '@erd-studio/core';
 import type { TableFileEntry } from './logicalModelService';
+import { tableIdOfEntry } from './tableLibraryIndex';
 
 export interface TableHome {
   /** The layer folder: `gold` of `gold/tables/sales/fct_order.dbml`. */
@@ -16,13 +18,39 @@ export interface TableHome {
   readonly schema: string;
 }
 
-/** Each DBML table's home, by lower-cased name. A duplicate (`shadowedBy`) is left out: diagrams never use it. */
-export function tableHomesOf(entries: readonly TableFileEntry[]): Map<string, TableHome> {
+/**
+ * Each DBML table's home, by its identity key (`tableIdKey`: its schema
+ * folder and name), so two tables of one name in different schema folders
+ * each have their own. A duplicate (`shadowedBy`) is left out: diagrams
+ * never use it.
+ */
+export function tableHomesById(entries: readonly TableFileEntry[]): Map<string, TableHome> {
   const homes = new Map<string, TableHome>();
   for (const entry of entries) {
     if (entry.layer === undefined || entry.shadowedBy) continue;
-    homes.set(entry.name.toLowerCase(), { layer: entry.layer, schema: entry.folder });
+    const key = tableIdKey(tableIdOfEntry(entry));
+    if (!homes.has(key)) homes.set(key, { layer: entry.layer, schema: entry.folder });
   }
+  return homes;
+}
+
+/**
+ * Each DBML table's home, by lower-cased name: what a caller holding only a
+ * name may ask. A duplicate (`shadowedBy`) is left out: diagrams never use
+ * it. A name tables in more than one schema folder share is left out too
+ * (the answer is undefined): it names no one home; ask {@link tableHomesById}.
+ */
+export function tableHomesOf(entries: readonly TableFileEntry[]): Map<string, TableHome> {
+  const homes = new Map<string, TableHome>();
+  const shared = new Set<string>();
+  for (const entry of entries) {
+    if (entry.layer === undefined || entry.shadowedBy) continue;
+    const name = entry.name.toLowerCase();
+    const held = homes.get(name);
+    if (held !== undefined && held.schema.toLowerCase() !== entry.folder.toLowerCase()) shared.add(name);
+    homes.set(name, { layer: entry.layer, schema: entry.folder });
+  }
+  for (const name of shared) homes.delete(name);
   return homes;
 }
 

@@ -24,13 +24,24 @@
  * (a `stat` says so), so a YAML project lists no DBML folder and a DBML
  * project lists `1 + layers × (2 + schemas)` directories.
  *
+ * Every entry carries its identity (`TableId`): a DBML table's schema folder
+ * and file stem, a YAML table's name alone. Which entries are shadowed
+ * depends on the rule the index is built with ({@link TableLibraryIndexOptions}):
+ * by name across the whole library (the rule every released version keeps),
+ * or, with `schemaScopedNames`, by identity, so two DBML tables of one name in
+ * different schema folders are both tables. The identity, the reference each
+ * table has in the library (its name, or `<schema>.<name>` where another
+ * table has the name) and the lookups by either all come from the listing:
+ * no table file is read to learn them.
+ *
  * No `vscode`: the CLI bundles it.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, classifySemanticFile, isDbmlLayerName, isLibraryFolderName } from '@erd-studio/core';
+import { LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, assignTableRefs, classifySemanticFile, isDbmlLayerName, isLibraryFolderName, qualifiedRef, tableIdKey } from '@erd-studio/core';
+import type { TableId } from '@erd-studio/core';
 import type { TableFileEntry } from './logicalModelService';
 import { createLogger } from './logger';
 
@@ -226,6 +237,53 @@ export interface TableLibraryIndexData {
   readonly firstNameByKey: ReadonlyMap<string, string>;
   /** The §3.4 lookup order. */
   readonly lookup: readonly LookupDir[];
+  /** Identity key (`tableIdKey`) → the table of that identity (unshadowed entries only, the first listed). */
+  readonly byId: ReadonlyMap<string, TableFileEntry>;
+  /** Trimmed lower-case name → every unshadowed entry of that name, in index order. */
+  readonly byName: ReadonlyMap<string, readonly TableFileEntry[]>;
+  /** Every listed entry (shadowed ones too) by its file's resolved path. */
+  readonly byPath: ReadonlyMap<string, TableFileEntry>;
+  /** Identity key → the table's reference in the library (`assignTableRefs` over the unshadowed entries). */
+  readonly libraryRefs: ReadonlyMap<string, string>;
+  /** Lower-case `<schema folder>.<name>` → the unshadowed DBML entries it spells, in index order. */
+  readonly byQualified: ReadonlyMap<string, readonly TableFileEntry[]>;
+  /** Lower-case library reference → the first unshadowed entry it names. */
+  readonly byRef: ReadonlyMap<string, TableFileEntry>;
+}
+
+/** How an index decides which table files are shadowed. */
+export interface TableLibraryIndexOptions {
+  /**
+   * Off (the default, every released version's rule): a DBML table is
+   * shadowed by any earlier file with its name, so a name is unique across
+   * the library. On: a DBML table is shadowed only by an earlier file of the
+   * same identity (schema folder and name, without case; the layer is not
+   * part of it) or by a YAML table of its name, so two tables of one name in
+   * different schema folders are both tables.
+   */
+  readonly schemaScopedNames?: boolean;
+}
+
+/** What text names among the library's tables ({@link TableLibraryIndex.resolveLibraryRef}). */
+export type LibraryRefMatch =
+  | { readonly kind: 'found'; readonly entry: TableFileEntry }
+  | { readonly kind: 'ambiguous'; readonly entries: readonly TableFileEntry[] }
+  | { readonly kind: 'missing' };
+
+/** An entry's identity: a DBML table's schema folder and name, a YAML table's name alone. */
+export function tableIdOfEntry(entry: Pick<TableFileEntry, 'name' | 'folder' | 'storage' | 'layer'> & { readonly id?: TableId }): TableId {
+  return entry.id ?? { schema: entry.storage === 'dbml' && entry.layer !== undefined ? entry.folder : '', name: entry.name };
+}
+
+/** The entries of distinct identities among `entries`, each the first listed. */
+function distinctIdentities(entries: readonly TableFileEntry[]): TableFileEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const key = tableIdKey(tableIdOfEntry(e));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Whether `filePath` (a symbolic link) points at a file. */
@@ -238,6 +296,41 @@ function isFileTarget(filePath: string): boolean {
 }
 
 const nameKey = (name: string): string => name.trim().toLowerCase();
+
+/**
+ * The lookups by identity, name, path and library reference over a listing
+ * (`entries`, in index order): built once per listing, so resolving a table
+ * never walks the library. Only unshadowed entries are tables; `byPath`
+ * lists every file.
+ */
+function identitiesOf(entries: readonly TableFileEntry[]): Pick<TableLibraryIndexData, 'byId' | 'byName' | 'byPath' | 'libraryRefs' | 'byQualified' | 'byRef'> {
+  const byPath = new Map<string, TableFileEntry>();
+  for (const entry of entries) byPath.set(path.resolve(entry.filePath), entry);
+  const tables = entries.filter((e) => !e.shadowedBy);
+  const ids = tables.map(tableIdOfEntry);
+  const refs = assignTableRefs(ids);
+  const byId = new Map<string, TableFileEntry>();
+  const libraryRefs = new Map<string, string>();
+  const byName = new Map<string, TableFileEntry[]>();
+  const byQualified = new Map<string, TableFileEntry[]>();
+  const byRef = new Map<string, TableFileEntry>();
+  const push = (map: Map<string, TableFileEntry[]>, key: string, entry: TableFileEntry): void => {
+    const list = map.get(key);
+    if (list) list.push(entry);
+    else map.set(key, [entry]);
+  };
+  tables.forEach((entry, i) => {
+    const key = tableIdKey(ids[i]);
+    if (!byId.has(key)) {
+      byId.set(key, entry);
+      libraryRefs.set(key, refs[i]);
+    }
+    push(byName, nameKey(entry.name), entry);
+    if (ids[i].schema !== '') push(byQualified, nameKey(qualifiedRef(ids[i].schema, ids[i].name)), entry);
+    if (!byRef.has(nameKey(refs[i]))) byRef.set(nameKey(refs[i]), entry);
+  });
+  return { byId, byName, byPath, libraryRefs, byQualified, byRef };
+}
 
 /**
  * The index of one semantic dir's table library. `get()` answers from the
@@ -255,11 +348,17 @@ export class TableLibraryIndex {
   /** Inside a snapshot: the index was validated (or built) once already, so `get()` trusts it. */
   private snapshotChecked = false;
 
+  /** {@link TableLibraryIndexOptions.schemaScopedNames}. */
+  readonly schemaScopedNames: boolean;
+
   constructor(
     private readonly semanticRoot: string,
     private readonly v5Dir: string,
     private readonly v6Dir: string,
-  ) {}
+    options: TableLibraryIndexOptions = {},
+  ) {
+    this.schemaScopedNames = options.schemaScopedNames === true;
+  }
 
   /** Drop the index: the next lookup lists the library again. */
   invalidate(): void {
@@ -330,6 +429,62 @@ export class TableLibraryIndex {
       }
     }
     return null;
+  }
+
+  /** The table of identity `id` (an unshadowed entry), or undefined when the library has none. */
+  findById(id: TableId): TableFileEntry | undefined {
+    return this.get().byId.get(tableIdKey(id));
+  }
+
+  /** The listed entry of the file `filePath` (shadowed or not), or undefined when it is not a listed table file. */
+  entryAt(filePath: string): TableFileEntry | undefined {
+    return this.get().byPath.get(path.resolve(filePath));
+  }
+
+  /** Every unshadowed entry named `name` (without case), in index order. */
+  entriesNamed(name: string): readonly TableFileEntry[] {
+    return typeof name === 'string' ? this.get().byName.get(nameKey(name)) ?? [] : [];
+  }
+
+  /** Whether tables of more than one identity have the bare name `name`: only ever under `schemaScopedNames`. */
+  isAmbiguousName(name: string): boolean {
+    const named = this.entriesNamed(name);
+    return named.length > 1 && distinctIdentities(named).length > 1;
+  }
+
+  /** The tables of distinct identities named `name`, each the first listed. */
+  identitiesNamed(name: string): TableFileEntry[] {
+    return distinctIdentities(this.entriesNamed(name));
+  }
+
+  /**
+   * The reference of the table of identity `id` in the library: its name,
+   * or `<schema folder>.<name>` (the folder as listed) where another table of
+   * the library has its name. Undefined when the library has no such table.
+   */
+  libraryRef(id: TableId): string | undefined {
+    return this.get().libraryRefs.get(tableIdKey(id));
+  }
+
+  /**
+   * What `text` names among the library's tables, compared without case and
+   * never by splitting it (core's `matchTableRef` order, from maps built once
+   * per listing): a table whose library reference it is; else the one table
+   * whose `<schema folder>.<name>` it is; else the one table with that bare
+   * name. Tables of several identities at a step are `ambiguous`.
+   */
+  resolveLibraryRef(text: string): LibraryRefMatch {
+    if (typeof text !== 'string') return { kind: 'missing' };
+    const data = this.get();
+    const wanted = nameKey(text);
+    const byRef = data.byRef.get(wanted);
+    if (byRef !== undefined) return { kind: 'found', entry: byRef };
+    for (const matches of [data.byQualified.get(wanted), data.byName.get(wanted)]) {
+      if (matches === undefined || matches.length === 0) continue;
+      const identities = distinctIdentities(matches);
+      return identities.length === 1 ? { kind: 'found', entry: identities[0] } : { kind: 'ambiguous', entries: identities };
+    }
+    return { kind: 'missing' };
   }
 
   private signaturesHold(): boolean {
@@ -445,9 +600,17 @@ export class TableLibraryIndex {
    * folder in order), then `tables/` (listed only while it is the YAML
    * library), then each DBML layer's schema folders (`<layer>/tables/<schema>/`,
    * layers and schemas in `compareNames` order); a name seen before is
-   * `shadowedBy` the first file.
+   * `shadowedBy` the first file. With `schemaScopedNames`, a DBML table is
+   * shadowed only by an earlier DBML file of its identity (the same schema
+   * folder and name in another layer, or in a folder spelled in another case)
+   * or by a YAML table of its name. Every entry carries its identity.
    */
-  private entriesOf(v5: LibraryScan, v6: LibraryScan, v6IsLibrary: boolean, layers: readonly LayerScan[]): Pick<TableLibraryIndexData, 'entries' | 'tableFiles' | 'firstNameByKey'> {
+  private entriesOf(
+    v5: LibraryScan,
+    v6: LibraryScan,
+    v6IsLibrary: boolean,
+    layers: readonly LayerScan[],
+  ): Pick<TableLibraryIndexData, 'entries' | 'tableFiles' | 'firstNameByKey' | 'byId' | 'byName' | 'byPath' | 'libraryRefs' | 'byQualified' | 'byRef'> {
     const entries: TableFileEntry[] = [];
     // Exact name → winner (within the YAML libraries a name matches exactly),
     // and lower-case name → the first winner: a `tables/` file of the same
@@ -456,6 +619,11 @@ export class TableLibraryIndex {
     const winners = new Map<string, string>();
     const v5Winners = new Map<string, string>();
     const anyWinners = new Map<string, string>();
+    // The schema-scoped rule's two: lower-case name → the first YAML winner,
+    // and identity key → the first DBML winner.
+    const yamlWinners = new Map<string, string>();
+    const dbmlWinners = new Map<string, string>();
+    const scoped = this.schemaScopedNames;
     const add = (scan: LibraryScan, libraryName: string, folder: string, phase: 'v5' | 'v6' | 'dbml', layer?: string): void => {
       const listing = this.listingOf(scan, folder);
       if (listing === null) return;
@@ -473,16 +641,22 @@ export class TableLibraryIndex {
       for (const { file, name, storage } of files) {
         const filePath = path.join(dir, file);
         const lower = name.toLowerCase();
-        const winner = winners.get(name)
-          ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
+        // A YAML folder is organisational: a YAML table's identity is its name alone.
+        const id: TableId = { schema: phase === 'dbml' ? folder : '', name };
+        const key = tableIdKey(id);
+        const winner = phase === 'dbml' && scoped
+          ? yamlWinners.get(lower) ?? dbmlWinners.get(key)
+          : winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
         const tag: Pick<TableFileEntry, 'library' | 'layer'> = phase === 'v6' ? { library: TABLES_DIR } : layer !== undefined ? { layer } : {};
         if (winner === undefined) {
           winners.set(name, filePath);
           if (phase === 'v5') v5Winners.set(lower, filePath);
           if (!anyWinners.has(lower)) anyWinners.set(lower, filePath);
-          entries.push({ name, folder, filePath, storage, ...tag });
+          if (phase !== 'dbml' && !yamlWinners.has(lower)) yamlWinners.set(lower, filePath);
+          if (phase === 'dbml' && !dbmlWinners.has(key)) dbmlWinners.set(key, filePath);
+          entries.push({ name, folder, filePath, storage, ...tag, id });
         } else {
-          entries.push({ name, folder, filePath, shadowedBy: winner, storage, ...tag });
+          entries.push({ name, folder, filePath, shadowedBy: winner, storage, ...tag, id });
         }
       }
     };
@@ -503,7 +677,7 @@ export class TableLibraryIndex {
       const key = nameKey(entry.name);
       if (!firstNameByKey.has(key)) firstNameByKey.set(key, entry.name);
     }
-    return { entries, tableFiles: new Set(entries.map((e) => path.resolve(e.filePath))), firstNameByKey };
+    return { entries, tableFiles: new Set(entries.map((e) => path.resolve(e.filePath))), firstNameByKey, ...identitiesOf(entries) };
   }
 
   /** `listRelationshipsFiles`: every DBML layer's `relationships/*.dbml` (flat), by semantic-relative path in byte order. */

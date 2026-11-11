@@ -51,7 +51,7 @@ import {
   relationshipsImportsFor as importsFor,
   unitLinks,
 } from './dbmlRelationshipsIndex';
-import type { IndexedRef, RelationshipsIndex } from './dbmlRelationshipsIndex';
+import type { IndexLookup, IndexedRef, RelationshipsIndex } from './dbmlRelationshipsIndex';
 import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';
@@ -80,14 +80,30 @@ export interface DbmlSnapshotTable {
   primaryKey?: string[];
   /** A DBML alias Refs may use (`Table fct_order as FO`). */
   dbmlAlias?: string;
+  /**
+   * The table's reference in the library where it differs from its name:
+   * `<schema folder>.<name>`, for a name tables in two schema folders share
+   * (a snapshot of `schemaScopedNames`). Its key in {@link DbmlLibrarySnapshot.tables}.
+   */
+  ref?: string;
 }
 
 /** What the planner reads (§2.4 step 1). */
 export interface DbmlLibrarySnapshot {
   /** The semantic dir, for messages only. */
   semanticDir: string;
-  /** Every table file the library lists (winners only), keyed lower-case. */
+  /**
+   * Every table file the library lists (winners only), keyed lower-case by
+   * its library reference: its name, or (`schemaScopedNames`) its `ref`
+   * where tables in two schema folders share the name.
+   */
   tables: Map<string, DbmlSnapshotTable>;
+  /**
+   * The library tells tables apart by identity (`schemaScopedNames`): its
+   * relationships index and attach resolve a Ref end by the relationships
+   * file's own `use` line and its qualifier, and name tables by reference.
+   */
+  schemaScopedNames?: boolean;
   /** Every relationships file in the library (`<layer>/relationships/*.dbml`), readable or not, with its reading. */
   relationshipsFiles: Map<string, DbmlRelationshipsReading>;
   /** Every existing path the snapshot knows (tables, relationships files, diagrams). */
@@ -278,12 +294,19 @@ function describeUnit(unit: RefUnit): string {
 }
 
 /** The attach step's view of the snapshot's tables. */
-function attachTablesOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables'>): DbmlAttachTable[] {
+function attachTablesOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'schemaScopedNames'>): DbmlAttachTable[] {
   return [...snapshot.tables.values()].map((t) => ({
     table: { name: t.name, columns: t.columns.map((c) => ({ name: c, dataType: '', description: '', ...((t.primaryKey ?? []).some((k) => lower(k) === lower(c)) ? { isPrimaryKey: true } : {}) })) },
     storage: t.storage,
     ...(t.dbmlAlias !== undefined ? { dbmlAlias: t.dbmlAlias } : {}),
+    // Told apart by identity: the file a `use` line can name, the folder a qualifier can, the name Refs are attached under.
+    ...(snapshot.schemaScopedNames ? { path: t.path, ...(t.schema !== undefined ? { schema: t.schema } : {}), ...(t.ref !== undefined ? { ref: t.ref } : {}) } : {}),
   }));
+}
+
+/** The snapshot's relationships files as the attach reads them: with their own path as `semanticPath` when tables are told apart by identity. */
+function attachReadingsOf(snapshot: Pick<DbmlLibrarySnapshot, 'relationshipsFiles' | 'schemaScopedNames'>): Array<{ path: string; reading: DbmlRelationshipsReading; semanticPath?: string }> {
+  return [...snapshot.relationshipsFiles.entries()].map(([path, reading]) => ({ path, reading, ...(snapshot.schemaScopedNames ? { semanticPath: path } : {}) }));
 }
 
 /**
@@ -291,9 +314,8 @@ function attachTablesOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables'>): DbmlAtta
  * the planner's own attach step reads them (a table's complete list, for a
  * save that keeps them: a rename planned from a snapshot, not a canvas).
  */
-export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles'>, name: string): TableRelationship[] {
-  const readings = [...snapshot.relationshipsFiles.entries()].map(([path, reading]) => ({ path, reading }));
-  const owned = attachRelationships(readings, dbmlTableLookup(attachTablesOf(snapshot))).byOwner.get(lower(name));
+export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames'>, name: string): TableRelationship[] {
+  const owned = attachRelationships(attachReadingsOf(snapshot), dbmlTableLookup(attachTablesOf(snapshot))).byOwner.get(lower(name));
   return owned ? structuredClone(owned) : [];
 }
 
@@ -303,8 +325,8 @@ export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables
  * tables each file's `use` lines name.
  */
 export function relationshipsIndexOf(
-  snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles'>,
-  lookup: (name: string) => DbmlAttachTable | undefined = dbmlTableLookup(attachTablesOf(snapshot)),
+  snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames'>,
+  lookup: IndexLookup = dbmlTableLookup(attachTablesOf(snapshot)),
 ): RelationshipsIndex {
   const refs: IndexedRef[] = [];
   const unreadable: string[] = [];
@@ -320,7 +342,10 @@ export function relationshipsIndexOf(
       useTargets.set(file, reading.uses.map((p) => normalisePosix(resolvePosix(dir, withExtension(p)))));
     }
   }
-  return buildRelationshipsIndex({ files: [...snapshot.relationshipsFiles.keys()], refs, unreadable, useTargets });
+  return buildRelationshipsIndex({
+    files: [...snapshot.relationshipsFiles.keys()], refs, unreadable, useTargets,
+    ...(snapshot.schemaScopedNames ? { identities: true } : {}),
+  });
 }
 
 /**
@@ -372,7 +397,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
 
   // --- The library before: its attachment and its one index ----------------------------------
   const lookup = dbmlTableLookup(attachTablesOf(snapshot));
-  const readings = [...snapshot.relationshipsFiles.entries()].map(([path, reading]) => ({ path, reading }));
+  const readings = attachReadingsOf(snapshot);
   const attachment = attachRelationships(readings, lookup);
   const index = relationshipsIndexOf(snapshot, lookup);
   const refsByOwner = new Map<string, IndexedRef[]>();

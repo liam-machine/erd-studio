@@ -190,10 +190,17 @@ export interface DbmlAttachReading {
 const withDbmlExtension = (path: string): string => (lower(path).endsWith('.dbml') ? path : `${path}.dbml`);
 
 /**
- * What each end of `ref` says beside its table part: its qualifier, and the
+ * What each end of `ref` (a Ref or pending line of `item`) says beside its
+ * table part, as {@link attachRelationships} reads it: its qualifier, and the
  * table file the file's `use` line for that exact spelling (qualifier and
- * name, without case) names, resolved against the file's folder.
+ * name, without case) names, resolved against the file's folder
+ * (`item.semanticPath`; without it, no use path). The ends as written: a
+ * caller that turns a bare one-to-one round swaps them too.
  */
+export function dbmlRefEndHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: DbmlRefEndHint; target: DbmlRefEndHint } {
+  return endHints(item, ref);
+}
+
 function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: DbmlRefEndHint; target: DbmlRefEndHint } {
   const hintOf = (table: string, qualifier: string | undefined): DbmlRefEndHint => {
     const use = item.semanticPath !== undefined
