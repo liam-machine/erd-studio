@@ -27,6 +27,7 @@
 
 import * as path from 'path';
 
+import { tableIdKey, tableIdOfPath } from '@erd-studio/core';
 import { DbmlEditRefused, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
 
@@ -92,14 +93,74 @@ export function dbmlResolverOf(plan: DbmlLibraryWritePlan, semanticRoot: string)
   };
 }
 
-/** What the settle rule reads of a plan ({@link needsSettle}). */
+/**
+ * What the settle rule reads of a plan ({@link needsSettle}). Where the plan
+ * tells tables apart by identity, tables are named by their identity keys
+ * (`ccc/addresse`), and a diagram's members by the files their `use` lines
+ * read ({@link identitySummaryOf}), so a change to one table never settles,
+ * or is refused by, a diagram that shows only its namesake in another schema
+ * folder. Unlinked members (no file) are still named by name.
+ */
 export function settleSignalsOf(plan: DbmlLibraryWritePlan): SettleSignals {
+  const ids = plan.identities;
   return {
-    pathChanged: pathChangedNames(plan),
-    createdTables: new Set(plan.createdTables.map((n) => n.toLowerCase())),
-    requalified: plan.requalified,
+    pathChanged: ids ? ids.pathChanged : pathChangedNames(plan),
+    createdTables: new Set([...plan.createdTables.map((n) => n.toLowerCase()), ...(ids?.created ?? [])]),
+    requalified: ids ? ids.requalified : plan.requalified,
     changedPairs: plan.changedPairs,
     importsFor: (members, current, unlinked) => plan.relationshipsImportsFor(members, current, unlinked),
+  };
+}
+
+/** The identity key of the table file `relPath` (semantic-relative), or undefined for a path outside the table tree. */
+function identityKeyOfPath(relPath: string): string | undefined {
+  const id = tableIdOfPath(relPath);
+  return id ? tableIdKey(id) : undefined;
+}
+
+/**
+ * `summary` with each `use` member named by the identity key of the file its
+ * `use` line reads (`bqs/addresse`), as {@link settleSignalsOf} names tables
+ * for a plan that tells them apart by identity. A member whose path is not a
+ * table file keeps its name.
+ */
+export function identitySummaryOf(summary: DiagramSummary): DiagramSummary {
+  return { ...summary, members: summary.members.map((m, i) => identityKeyOfPath(summary.memberPaths[i] ?? '') ?? m.toLowerCase()) };
+}
+
+/**
+ * The resolver for one diagram of a plan that tells tables apart by identity:
+ * each member is the table its own `use` path reads, as the plan leaves it
+ * (`tableAtPath`), never the first table of its name; its `pathChanged` names
+ * exactly the members whose file the plan changes, by their references on
+ * this diagram; the relationships files it imports are asked for by those
+ * tables' identities. A member whose file is gone is answered by its name
+ * only where the plan knows one table of that name (D-6).
+ */
+function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: DiagramSummary, base: SubjectAreaResolver): SubjectAreaResolver {
+  const ids = plan.identities!;
+  /** Each member by its file; null for one whose file the plan deletes (never answered by its name). */
+  const byRef = new Map<string, DbmlDiagramTable | null>();
+  const changed = new Set(plan.createdTables.map((n) => n.toLowerCase()));
+  summary.members.forEach((member, i) => {
+    const usePath = summary.memberPaths[i];
+    if (usePath === undefined) return;
+    const table = plan.tableAtPath?.(usePath);
+    if (table !== undefined) byRef.set(member.toLowerCase(), table);
+    if (ids.changedPaths.has(usePath.toLowerCase())) changed.add(member.toLowerCase());
+  });
+  const resolveTable = (name: string): DbmlDiagramTable | undefined => {
+    const own = byRef.get(name.toLowerCase());
+    return own === null ? undefined : own ?? base.resolveTable(name);
+  };
+  return {
+    ...base,
+    resolveTable,
+    relationshipsImportsFor: (names, current, unlinked) => plan.relationshipsImportsFor(names.map((name) => {
+      const table = resolveTable(name);
+      return (table?.storage === 'dbml' ? identityKeyOfPath(table.path) : undefined) ?? name;
+    }), current, unlinked),
+    ...(changed.size > 0 ? { pathChanged: changed } : { pathChanged: undefined }),
   };
 }
 
@@ -231,6 +292,8 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
   const { plan } = input;
   if (!input.mutate && settlesNothing(plan)) return [];
   const signals = settleSignalsOf(plan);
+  /** Told apart by identity, a diagram's members are compared with the plan by the files they read. */
+  const asSignalled = (summary: DiagramSummary): DiagramSummary => (plan.identities ? identitySummaryOf(summary) : summary);
   // The tables whose path changes, which make an unsettled diagram refuse: the plan's, and a
   // caller's resolver's own (Give Duplicate renames the copy outside the plan); never a created one.
   const refusing = { ...signals, pathChanged: new Set([...signals.pathChanged, ...[...input.resolver?.pathChanged ?? []].filter((n) => !signals.createdTables.has(n))]) };
@@ -252,16 +315,16 @@ export function settleDbmlDiagramWrites(input: SettleInput): FileWrite[] {
       log.warn(`[ERD Studio] ${rel} left as it is: it does not read`);
       continue;
     }
-    if (!input.mutate && !needsSettle(summary, signals)) continue;
+    if (!input.mutate && !needsSettle(asSignalled(summary), signals)) continue;
     const original = input.readText(filePath);
     if (original === null) continue;
-    const oldPath = changedMemberPath(rel, original, summary, refusing);
+    const oldPath = changedMemberPath(rel, original, asSignalled(summary), refusing);
     try {
       const obj = parseSubjectAreaDbml(original, rel).obj;
       const before = structuredClone(obj);
       const mutated = input.mutate?.(filePath, obj) ?? false;
-      if (!mutated && (input.mutatedOnly || !needsSettle(summary, signals))) continue;
-      const text = renderDbmlDiagram(original, rel, before, obj, resolver);
+      if (!mutated && (input.mutatedOnly || !needsSettle(asSignalled(summary), signals))) continue;
+      const text = renderDbmlDiagram(original, rel, before, obj, plan.identities ? diagramResolverOf(plan, summary, resolver) : resolver);
       if (text !== original) out.push({ kind: 'replace', path: filePath, text });
     } catch (err) {
       if (oldPath !== undefined) throw unsettledDiagramRefusal(rel, problemOf(err, rel), oldPath);

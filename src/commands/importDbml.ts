@@ -800,7 +800,8 @@ async function runImportDbml(
     // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
     // Each new table keeps the schema the file gives it (its qualifier), as the layer's folder spells it (§2.4).
     const planWrites = dbml && tableLibraryService.planTableWrites
-      ? tableLibraryService.planTableWrites({ save: [...plan.newTables, ...plan.changedLibraryTables].map((model) => ({ model })) }, folder, { dbml: true, schemaFromSource: true })
+      // New tables and changed library tables are told apart (D-4): a new one is never an edit of a namesake.
+      ? tableLibraryService.planTableWrites({ save: [...plan.newTables.map((model) => ({ model, create: true })), ...plan.changedLibraryTables.map((model) => ({ model }))] }, folder, { dbml: true, schemaFromSource: true })
       : undefined;
     planned = (planWrites?.writes ?? []).map((w) => w.path);
     if (planWrites?.plan) {

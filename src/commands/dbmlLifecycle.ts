@@ -14,8 +14,8 @@
 
 import * as path from 'path';
 
-import { DIAGRAMS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, classifySemanticFile, dbmlName, dbmlTreePathOf, diagramFilePath, isDbmlLayerName } from '@erd-studio/core';
-import type { DbmlRelationshipsReading } from '@erd-studio/core';
+import { DIAGRAMS_DIR, RELATIONSHIPS_DIR, TABLES_DIR, classifySemanticFile, dbmlName, dbmlTreePathOf, diagramFilePath, isDbmlLayerName, qualifiedRef, tableIdOfPath } from '@erd-studio/core';
+import type { DbmlRelationshipsReading, TableId } from '@erd-studio/core';
 import { DbmlEditRefused, diagramSummaryDbml, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readRelationshipsDbml, usePathBetween } from '@erd-studio/core/dbml';
 import type { DbmlResolvedTable } from '@erd-studio/core/dbml';
 import { TABLE_NAME_PATTERN, sameName } from '../types/naming';
@@ -25,7 +25,7 @@ import { useDeclarationLines } from '../services/dbmlImportParse';
 import type { FileWrite } from '../services/fileWrites';
 import { dbmlResolverOf, settleDbmlDiagramWrites, type SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 import { buildRelationshipsIndex, refEntriesOf, relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
-import type { TableLibraryService } from '../services/logicalModelService';
+import type { TableFileEntry, TableLibraryService } from '../services/logicalModelService';
 import { isSchemaFolderName, ownedRelationshipsOf } from '../services/dbmlLibraryWrites';
 import { renameTableInRelationships, renameTableInSubjectArea } from '../services/libraryRelationships';
 import type { SemanticTable } from '../types/semantic';
@@ -271,18 +271,31 @@ export function dbmlMoveTouches(input: { semanticRoot: string; writes: readonly 
  */
 export function planDbmlTableMoves(input: {
   tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'getTablesDir'>;
-  moves: ReadonlyArray<{ name: string; toLayer: string; toSchema?: string }>;
+  /**
+   * Each table by its name and, where the caller holds it, its file
+   * (absolute): a table is then moved by its identity, never by a name
+   * another schema folder may share.
+   */
+  moves: ReadonlyArray<{ name: string; filePath?: string; toLayer: string; toSchema?: string }>;
   /** Every DBML diagram, absolute paths. */
   diagrams: readonly string[];
   readText(filePath: string): string | null;
 }): { writes: FileWrite[]; requalified: string[] } {
-  const { writes, plan } = input.tableLibraryService.planDbmlLibraryOps({
-    move: input.moves.map((m) => ({ name: m.name, toLayer: m.toLayer, ...(m.toSchema !== undefined ? { toSchema: m.toSchema } : {}) })),
-  }, input.readText);
   const semanticRoot = path.dirname(input.tableLibraryService.getTablesDir());
+  const idOf = (filePath: string | undefined): TableId | undefined => {
+    const id = filePath === undefined ? undefined : tableIdOfPath(relPosix(semanticRoot, filePath));
+    return id ? { schema: id.schema, name: id.name } : undefined;
+  };
+  const ids = input.moves.map((m) => idOf(m.filePath));
+  const { writes, plan } = input.tableLibraryService.planDbmlLibraryOps({
+    move: input.moves.map((m, i) => ({ name: m.name, ...(ids[i] ? { table: ids[i] } : {}), toLayer: m.toLayer, ...(m.toSchema !== undefined ? { toSchema: m.toSchema } : {}) })),
+  }, input.readText);
+  // Told apart by identity, the plan names a table whose name two schema folders share `<schema>.<name>`.
+  const requalified = (m: { name: string }, i: number): boolean =>
+    plan.requalified.has(m.name.toLowerCase()) || (ids[i] !== undefined && plan.requalified.has(qualifiedRef(ids[i]!.schema, ids[i]!.name).toLowerCase()));
   return {
     writes: [...writes, ...settleDbmlDiagramWrites({ semanticRoot, diagrams: input.diagrams, plan, readText: input.readText })],
-    requalified: input.moves.filter((m) => plan.requalified.has(m.name.toLowerCase())).map((m) => m.name),
+    requalified: input.moves.filter(requalified).map((m) => m.name),
   };
 }
 
@@ -663,7 +676,8 @@ interface ConsideredMove {
  */
 export function planDbmlExplorerMoves(input: {
   semanticRoot: string;
-  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'dbmlSnapshot' | 'getTablesDir' | 'listDbmlDiagrams' | 'listRelationshipsFiles' | 'listTableFiles'>;
+  tableLibraryService: Pick<TableLibraryService, 'planDbmlLibraryOps' | 'dbmlSnapshot' | 'getTablesDir' | 'listDbmlDiagrams' | 'listRelationshipsFiles' | 'listTableFiles'>
+    & Partial<Pick<TableLibraryService, 'schemaScopedNames'>>;
   moves: readonly MovedDbmlFile[];
   /** A file's text (an open document's, else the disk's), byte-order mark stripped; null when there is none. */
   readText(filePath: string): string | null;
@@ -767,13 +781,15 @@ export function planDbmlExplorerMoves(input: {
   if (active.length === 0) return { kind: 'none' };
 
   // Tables: a move to another schema folder, or a rename (the stem is the table's name).
-  const tableMoves: Array<{ name: string; toLayer: string; toSchema: string }> = [];
+  // Each table by its identity (the file the files pointing at it name): never a namesake in another schema folder.
+  const tableMoves: Array<{ name: string; table: TableId; toLayer: string; toSchema: string }> = [];
   const tableRenames: Array<{ move: MovedDbmlFile; from: string; to: string; schema: string }> = [];
+  const scoped = library.schemaScopedNames === true;
   for (const { user, move, old, now } of active) {
     if (old.kind !== 'table' || !now) continue;
     const sameFolder = old.layer === now.layer && old.schema === now.schema;
     if (old.name === now.name) {
-      if (!sameFolder) tableMoves.push({ name: old.name, toLayer: now.layer, toSchema: now.schema! });
+      if (!sameFolder) tableMoves.push({ name: old.name, table: { schema: old.schema!, name: old.name }, toLayer: now.layer, toSchema: now.schema! });
       continue;
     }
     const bad = (reason: 'invalid' | 'taken' | 'caseOnly' | 'renameAndMove', taken?: string): DbmlExplorerMovesPlan =>
@@ -781,7 +797,10 @@ export function planDbmlExplorerMoves(input: {
     if (sameName(old.name, now.name)) return bad('caseOnly');
     if (!sameFolder) return bad('renameAndMove');
     if (!TABLE_NAME_PATTERN.test(now.name)) return bad('invalid');
-    const taken = library.listTableFiles().find((e) => sameName(e.name, now.name) && path.resolve(e.filePath) !== path.resolve(move.to));
+    // Told apart by identity, the new name is taken only by the same schema folder's table of that name
+    // (in any layer, D-7) or a YAML table of it; else by any table of that name.
+    const takes = (e: TableFileEntry): boolean => !scoped || e.storage !== 'dbml' || sameName(e.folder, old.schema!);
+    const taken = library.listTableFiles().find((e) => sameName(e.name, now.name) && path.resolve(e.filePath) !== path.resolve(move.to) && takes(e));
     if (taken) return bad('taken', taken.name);
     tableRenames.push({ move, from: old.name, to: now.name, schema: old.schema! });
   }
@@ -805,13 +824,17 @@ export function planDbmlExplorerMoves(input: {
       if (!reading?.ok) {
         throw new DbmlEditRefused(rel(r.move.to), `${rel(r.move.to)} does not read as the table ${r.from}${reading && !reading.ok ? ` (${reading.error.message})` : ''}; fix it first, then rename it.`);
       }
-      const model: SemanticTable = { ...structuredClone(reading.table), name: r.to, relationships: ownedRelationshipsOf(snapshot!, r.from) };
+      // The relationships it owns, under the name the snapshot gives it (`<schema>.<name>` where two schema folders share it).
+      const oldPath = rel(r.move.from).toLowerCase();
+      const own = [...snapshot!.tables.values()].find((t) => t.path.toLowerCase() === oldPath);
+      const ownName = own?.ref ?? r.from;
+      const model: SemanticTable = { ...structuredClone(reading.table), name: r.to, relationships: ownedRelationshipsOf(snapshot!, ownName) };
       // Its own self-references follow, as on the canvas.
-      renameTableInRelationships([model], r.from, r.to);
-      return { model, fromName: r.from };
+      renameTableInRelationships([model], ownName, r.to);
+      return { model, fromName: r.from, from: { schema: r.schema, name: r.from } };
     });
     const { writes, plan } = library.planDbmlLibraryOps(
-      { move: tableMoves, save: saves, delete: tableRenames.map((r) => r.from) },
+      { move: tableMoves, save: saves, delete: tableRenames.map((r) => ({ schema: r.schema, name: r.from })) },
       input.readText,
       libraryMoves,
     );
@@ -823,7 +846,9 @@ export function planDbmlExplorerMoves(input: {
       readText: readBefore,
       // A moved diagram's summary is read from its text (its old path holds no file).
       openText: (filePath) => (nowAt.has(path.resolve(filePath)) ? readBefore(filePath) ?? undefined : undefined),
-      ...(tableRenames.length > 0
+      // By name only where the plan names tables by name: told apart by identity, the settle finds each
+      // renamed member by the file its own `use` line reads, so a namesake in another schema folder keeps its name.
+      ...(tableRenames.length > 0 && !plan.identities
         ? { mutate: (_filePath: string, obj: Record<string, unknown>) => tableRenames.reduce((changed, r) => renameTableInSubjectArea(obj, r.from, r.to, 'dbml') || changed, false) }
         : {}),
     });

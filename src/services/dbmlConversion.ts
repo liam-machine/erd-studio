@@ -72,6 +72,7 @@ import type {
   Relationship,
   SemanticFileKind,
   SemanticTable,
+  TableId,
   TableRelationship,
 } from '@erd-studio/core';
 import {
@@ -91,6 +92,7 @@ import { canonicalDbml, formatWrittenDbml, renderNewSubjectAreaDbml, renderNewTa
 import { DbmlFileCompileMemo, compileDbmlFilesSeparately, compileDbmlFilesSeparatelyAsync } from './dbmlFileCompile';
 import { isSchemaFolderName as isNewSchemaFolderName, planDbmlLibraryWrites } from './dbmlLibraryWrites';
 import type { DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable } from './dbmlLibraryWrites';
+import { AmbiguousTableName } from './ambiguousTableName';
 import { planMoveToLibrary } from './libraryRelationships';
 import { dbmlResolverOf, renderDbmlDiagram, settleSignalsOf } from './dbmlDiagramSettle';
 import type { SubjectAreaResolver } from './dbmlDiagramSettle';
@@ -967,7 +969,8 @@ async function planOnce(
   }
   for (const t of existingDbml) {
     if (resumedTables.has(t.path)) continue;
-    library.set(lower(t.name), t);
+    // First wins, as the library's index orders a name tables in two schema folders share.
+    if (!library.has(lower(t.name))) library.set(lower(t.name), t);
   }
 
   await breathe();
@@ -1411,6 +1414,28 @@ async function planOnce(
     const want = desired(t);
     const key = (list: readonly TableRelationship[]): string => list.map((r) => identity({ ...r, fromModel: t.name } as Relationship)).sort().join('\n');
     if (key(current) !== key(want)) saves.push({ model: { ...t.model, relationships: want } });
+  }
+  // Fail closed (D-5): Convert names tables by name, so a relationship it writes to a name DBML tables
+  // in two schema folders share, or a save of one of them, cannot say which table it means. Refused.
+  {
+    const folders = new Map<string, Map<string, TableId>>();
+    for (const t of existingDbml) {
+      const byFolder = folders.get(lower(t.name)) ?? new Map<string, TableId>();
+      folders.set(lower(t.name), byFolder);
+      if (!byFolder.has(lower(t.schema))) byFolder.set(lower(t.schema), { schema: t.schema, name: t.name });
+    }
+    const shared = (name: string): TableId[] | undefined => {
+      const byFolder = folders.get(lower(name));
+      return byFolder && byFolder.size > 1 ? [...byFolder.values()] : undefined;
+    };
+    for (const { model } of saves) {
+      for (const name of [model.name, ...(model.relationships ?? []).map((r) => r.toModel)]) {
+        const candidates = shared(name);
+        if (!candidates) continue;
+        refusals.push(`Convert can't write the table library: ${new AmbiguousTableName(name, candidates).message}`);
+        return { plan: withoutWrites(plan), leaveMore };
+      }
+    }
   }
   let libraryPlan: DbmlLibraryWritePlan;
   try {

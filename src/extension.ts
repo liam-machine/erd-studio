@@ -3487,7 +3487,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           const diagrams = tableLibraryService.listDbmlDiagrams();
           dbmlPlan = planDbmlTableMoves({
             tableLibraryService,
-            moves: dbmlMoves.map((m) => ({ name: m.name, toLayer: m.layer })),
+            moves: dbmlMoves.map((m) => ({ name: m.name, filePath: m.from, toLayer: m.layer })),
             diagrams,
             readText: openOrDiskText,
           });

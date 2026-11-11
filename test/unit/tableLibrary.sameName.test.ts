@@ -398,7 +398,7 @@ describe('the fail-closed guard: every library write entry refuses a bare name t
     expect(snapshotFiles()).toEqual(before);
   });
 
-  it('deleting a table one of two same-named tables points at never leaves that Ref behind: it is refused, nothing written', () => {
+  it('deleting a table one of two same-named tables points at never leaves that Ref behind: the twin is saved by its identity', () => {
     // bqs.kunde (a name ccc shares) owns a Ref to x, a name only bqs has.
     write('bronze/tables/bqs/x.dbml', 'Table bqs.x {\n  id INT [pk]\n}\n');
     write('bronze/tables/bqs/kunde.dbml', 'Table bqs.kunde {\n  id INT [pk]\n  name VARCHAR\n  addresse_id INT\n  x_id INT\n}\n');
@@ -409,14 +409,16 @@ describe('the fail-closed guard: every library write entry refuses a bare name t
       '',
     ].join('\n'));
     const lib = scoped();
-    // The cascade finds the owner by its library reference, with the Ref to x cut.
+    // The cascade finds the owner by its library reference, with the Ref to x cut, and saves it by its identity
+    // (stage 6: before it, its save named kunde by name and the whole delete was refused).
     const cascade = lib.dbmlDeleteCascadeOps(['x']);
-    expect(cascade.save.map(({ model }) => [model.name, model.schema, ends(model.relationships)])).toEqual([['kunde', 'bqs', ['addresse_id > bqs.addresse.id']]]);
-    // Its save names kunde by name, which two tables share: refused before anything is written.
+    expect(cascade.save.map(({ model, from }) => [model.name, model.schema, ends(model.relationships), from])).toEqual([['kunde', 'bqs', ['addresse_id > bqs.addresse.id'], BQS_KUNDE]]);
     const before = snapshotFiles();
-    expect(() => lib.deleteTable('x')).toThrow(AmbiguousTableName);
-    expect(() => lib.planTableWrites(cascade)).toThrow(AmbiguousTableName);
-    expect(snapshotFiles()).toEqual(before);
+    lib.deleteTable('x');
+    const after = snapshotFiles();
+    expect(after['bronze/tables/bqs/x.dbml']).toBeUndefined();
+    expect(after['bronze/relationships/x.dbml'] ?? '').not.toContain('Ref:');
+    expect(after['bronze/relationships/bronze.dbml']).toBe(before['bronze/relationships/bronze.dbml']);
   });
 
   it('a name one table has is never refused, and nothing is refused without the option', () => {

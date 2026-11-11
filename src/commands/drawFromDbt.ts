@@ -414,7 +414,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
     }
     const planned = dbml && tableLibraryService.planTableWrites
       // Every file the DBML save writes (relationships files too); a refusal surfaces here, before any write.
-      ? tableLibraryService.planTableWrites({ save: [...draft.newModels, ...routed.changed].map((model) => ({ model })) }, folder, { dbml: true })
+      // New tables and changed library tables are told apart (D-4): a new one is never an edit of a namesake.
+      ? tableLibraryService.planTableWrites({ save: [...draft.newModels.map((model) => ({ model, create: true })), ...routed.changed.map((model) => ({ model }))] }, folder, { dbml: true })
         .writes.map((w) => w.path)
       : [];
     dirty = dirtyFiles([

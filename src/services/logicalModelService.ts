@@ -18,10 +18,10 @@ import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import {
   DIAGRAMS_DIR, LAYERS_CONFIG_FILE, LOGICAL_MODELS_DIR, RATIONALE_FIELD_KEYS, RELATIONSHIPS_DIR, TABLES_DIR, TableDbmlError, classifySemanticFile, classifyTableLoadError,
-  dbmlName, dbmlTablePath, dbmlTreePathOf, diagramPathOf, isDbmlLayerName, isLibraryFolderName, linkKey, subjectAreaStorageOf, tableIdKey, tableLoadWarningOf, parseTableText,
+  dbmlName, dbmlTablePath, dbmlTreePathOf, diagramPathOf, isDbmlLayerName, isLibraryFolderName, linkKey, qualifiedRef, subjectAreaStorageOf, tableIdKey, tableLoadWarningOf, parseTableText,
   writesDbml, writesTableNaming,
 } from '@erd-studio/core';
-import { attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
+import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused, attachRelationships, dbmlTableLookup, parseTableDbml, readRelationshipsDbml } from '@erd-studio/core/dbml';
 import { projectNamingOf } from './projectNaming';
 import { projectStorageIn } from './projectStorage';
 import type {
@@ -51,10 +51,15 @@ import { log } from './logger';
 
 /** Table file writes an editor edit bundles with its diagram change (one WorkspaceEdit). */
 export interface TableFileOps {
-  /** Tables whose file is written in full (created if missing); `fromName` renames. A DBML table's `configuredSchema` (dbt) picks its schema folder (§2.4). */
-  save?: Array<{ model: DbmlDraftTable; fromName?: string }>;
-  /** Table names whose file is deleted. */
-  delete?: string[];
+  /**
+   * Tables whose file is written in full (created if missing); `fromName`
+   * renames. A DBML table's `configuredSchema` (dbt) picks its schema folder
+   * (§2.4). DBML only (D-4): `create` marks a new table, `from` names the
+   * existing one by identity (see `DbmlLibrarySave`).
+   */
+  save?: Array<{ model: DbmlDraftTable; fromName?: string; from?: TableId; create?: boolean }>;
+  /** Tables whose file is deleted: by identity, or by a name only one table has. */
+  delete?: Array<string | TableId>;
   /**
    * DBML only: the relationships file the New Relationship dialog picked for
    * the relationship being added (`planDbmlLibraryWrites`' `newRefFile`),
@@ -727,12 +732,39 @@ export class TableLibraryService {
     refuseAmbiguousTableName(table, this.index.identitiesNamed(table).map(tableIdOfEntry));
   }
 
-  /** {@link refuseAmbiguousName} for every table a batch of library writes names: saved (by its old name for a rename), deleted, moved or gaining its file. */
+  /**
+   * {@link refuseAmbiguousName} for every table a batch of library writes
+   * names: saved (by its old name for a rename), deleted, moved or gaining
+   * its file. A save marked `create` names a new table, and one with `from`
+   * or a move with `table` names its table by identity: none of them is
+   * ambiguous (D-4: a new `addresse` in ccc is not an edit of bqs's).
+   */
   private refuseAmbiguousOps(ops: Pick<DbmlLibraryOps, 'save' | 'delete' | 'move' | 'gainFile'> | undefined): void {
     for (const name of ops?.delete ?? []) this.refuseAmbiguousName(name);
-    for (const { model, fromName } of ops?.save ?? []) this.refuseAmbiguousName(fromName ?? model.name);
-    for (const { name } of ops?.move ?? []) this.refuseAmbiguousName(name);
+    for (const { model, fromName, from, create } of ops?.save ?? []) if (!create && from === undefined) this.refuseAmbiguousName(fromName ?? model.name);
+    for (const { name, table } of ops?.move ?? []) if (table === undefined) this.refuseAmbiguousName(name);
     for (const name of ops?.gainFile ?? []) this.refuseAmbiguousName(name);
+  }
+
+  /**
+   * D-9's write half: a YAML table names the tables its relationships point
+   * at by name alone, so, told apart by identity, a relationship from a YAML
+   * table to a name DBML tables in two schema folders share (or to one of
+   * them by its `<schema>.<name>` reference) cannot be written into its
+   * `.yml`: refused, never written qualified or left to resolve to either.
+   */
+  private refuseYamlRelationshipsToSharedNames(model: SemanticTable): void {
+    if (!this.index.schemaScopedNames) return;
+    for (const rel of model.relationships ?? []) {
+      const found = this.index.resolveLibraryRef(rel.toModel);
+      const shared = this.index.isAmbiguousName(rel.toModel)
+        || (found.kind === 'found' && found.entry.name.toLowerCase() !== rel.toModel.toLowerCase());
+      if (!shared) continue;
+      const named = this.index.identitiesNamed(found.kind === 'found' ? found.entry.name : rel.toModel).map(tableIdOfEntry);
+      throw new DbmlEditRefused(this.semanticRelative(this.tablePath(model.name)),
+        `Can't store the relationship ${model.name}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn}: more than one table is named ${named[0]?.name ?? rel.toModel} `
+        + `(${named.map((id) => qualifiedRef(id.schema, id.name)).join(', ')}), and a YAML table's relationships name tables by name alone. ${DBML_CONVERT_FIRST_MESSAGE}.`);
+    }
   }
 
   /** {@link findTableFile} without throwing: null for an unsafe name. */
@@ -1729,6 +1761,10 @@ export class TableLibraryService {
     });
     const wasAt = new Map(moved.map((m) => [path.resolve(m.to), path.resolve(m.from)]));
     const nowAt = new Map(moved.map((m) => [path.resolve(m.from), path.resolve(m.to)]));
+    // Told apart by identity, each table's library reference as the snapshot sees the library: a moved
+    // file counts at its old place (the index lists it at its new one), so a name it shared or stops
+    // sharing there is qualified as the plan reads it.
+    const movedRefs = moved.length > 0 && this.index.schemaScopedNames ? this.libraryRefsAsBefore(wasAt) : undefined;
     for (const entry of this.listTableFiles()) {
       const was = wasAt.get(path.resolve(entry.filePath));
       files.add(this.semanticRelative(was ?? entry.filePath));
@@ -1763,7 +1799,7 @@ export class TableLibraryService {
       const dbmlTree = entry.storage === 'dbml' && layer !== undefined;
       const fallbackReference = dbmlTree ? `${dbmlName(folder)}.${dbmlName(name)}` : dbmlName(name);
       // Told apart by identity, a name tables in two schema folders share is keyed by each one's library reference.
-      const ref = this.qualifiedLibraryRefAt(entry.filePath);
+      const ref = movedRefs ? movedRefs.get(path.resolve(entry.filePath)) : this.qualifiedLibraryRefAt(entry.filePath);
       tables.set((ref ?? name).toLowerCase(), {
         name,
         reference: reference ?? fallbackReference,
@@ -1801,6 +1837,33 @@ export class TableLibraryService {
   }
 
   /**
+   * Each unshadowed table's library reference where it differs from its name
+   * (`<schema folder>.<name>`, where another table shares the name), by
+   * absolute path, with the files in `wasAt` (now → before) counted at their
+   * old place: {@link dbmlSnapshot}'s view of an Explorer move.
+   */
+  private libraryRefsAsBefore(wasAt: ReadonlyMap<string, string>): Map<string, string> {
+    const rows = this.listTableFiles().filter((e) => !e.shadowedBy).map((e) => {
+      const was = wasAt.get(path.resolve(e.filePath));
+      const tree = was !== undefined ? dbmlTreePathOf(this.semanticRelative(was)) : undefined;
+      return {
+        filePath: path.resolve(e.filePath),
+        name: tree?.kind === 'table' ? tree.name : e.name,
+        schema: e.storage === 'dbml' ? (tree?.kind === 'table' && tree.schema !== undefined ? tree.schema : e.folder) : '',
+      };
+    });
+    const schemasOf = new Map<string, Set<string>>();
+    for (const r of rows) {
+      const schemas = schemasOf.get(r.name.toLowerCase()) ?? new Set<string>();
+      schemasOf.set(r.name.toLowerCase(), schemas);
+      schemas.add(r.schema.toLowerCase());
+    }
+    const out = new Map<string, string>();
+    for (const r of rows) if (r.schema !== '' && (schemasOf.get(r.name.toLowerCase())?.size ?? 0) > 1) out.set(r.filePath, qualifiedRef(r.schema, r.name));
+    return out;
+  }
+
+  /**
    * The table file writes for `ops` (§5.1), with absolute paths: YAML tables
    * as today (`serializeTable`, in place), DBML tables through
    * `planDbmlLibraryWrites`. A new table is DBML when `options.dbml` (it is
@@ -1823,24 +1886,26 @@ export class TableLibraryService {
     const layerFolder = typeof home === 'string' ? home : home?.layer;
     const writes: FileWrite[] = [];
     const dbmlOps: DbmlLibraryOps = { save: [], delete: [] };
-    const storageOf = (name: string): 'yaml' | 'dbml' | undefined => this.tableStorage(name);
+    const storageOf = (table: TableId | string): 'yaml' | 'dbml' | undefined => this.tableStorage(table);
     for (const name of ops?.delete ?? []) {
       if (storageOf(name) === 'dbml') {
         dbmlOps.delete!.push(name);
         continue;
       }
-      if (!this.tableExists(name)) continue;
+      if (typeof name !== 'string' || !this.tableExists(name)) continue;
       writes.push({ kind: 'delete', path: this.tablePath(name) });
     }
     for (const save of ops?.save ?? []) {
       const { model, fromName } = save;
       // A new table is DBML when it joins a DBML diagram (D20), or when the
       // project writes DBML (§3.2); an existing one keeps its format.
-      const storage = storageOf(fromName ?? model.name) ?? (options.dbml || this.writesDbml() ? 'dbml' : 'yaml');
+      const existing = save.create ? undefined : storageOf(save.from ?? fromName ?? model.name);
+      const storage = existing ?? (save.create || options.dbml || this.writesDbml() ? 'dbml' : 'yaml');
       if (storage === 'dbml') {
         dbmlOps.save!.push(save);
         continue;
       }
+      this.refuseYamlRelationshipsToSharedNames(model);
       // A renamed file stays in its own library and folder (#182).
       const renamed = fromName !== undefined && fromName !== model.name;
       const modelPath = renamed ? this.renamedTablePath(fromName, model.name) : this.tablePath(model.name, layerFolder);
@@ -1893,6 +1958,8 @@ export class TableLibraryService {
     readText?: (filePath: string) => string | null,
     moved: ReadonlyArray<{ from: string; to: string }> = [],
   ): { writes: FileWrite[]; plan: DbmlLibraryWritePlan } {
+    // A table named by a name tables in two schema folders share is refused before anything is planned.
+    this.refuseAmbiguousOps(ops);
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(readText, moved), ops);
     return { writes: plan.writes.map((w) => ({ ...w, path: this.semanticAbsolute(w.path) }) as FileWrite), plan };
   }
@@ -2579,6 +2646,7 @@ export class TableLibraryService {
       this.applyDbmlBatch({ ops: { save: [{ model }], newTableHome: this.dbmlHomeOf(folder) } });
       return;
     }
+    this.refuseYamlRelationshipsToSharedNames(model);
     const { configuredSchema: _transient, ...yamlModel } = model;
     model = yamlModel;
     const filePath = this.tablePath(model.name, folder);
@@ -2686,8 +2754,17 @@ export class TableLibraryService {
   /**
    * Delete a model's YAML file.
    */
-  deleteTable(name: string): void {
-    this.refuseAmbiguousName(name);
+  deleteTable(table: TableId | string): void {
+    this.refuseAmbiguousName(table);
+    if (typeof table !== 'string') {
+      // By identity: a DBML table's own file, never its namesake's (a YAML table is named by its name).
+      if (this.tableStorage(table) === 'dbml') {
+        this.applyDbmlBatch({ ops: this.dbmlDeleteCascadeOps([table]) });
+        return;
+      }
+      if (this.tableStorage(table) === undefined) return;
+    }
+    const name = typeof table === 'string' ? table : table.name;
     const filePath = this.tablePath(name);
     if (isDbmlFile(filePath)) {
       // D16: the file, the Refs it owns and other DBML owners' Refs to it, in
@@ -2712,27 +2789,31 @@ export class TableLibraryService {
    * its relationship in its yml (the planner writes DBML tables only), as
    * deleting a YAML table leaves it today.
    */
-  dbmlDeleteCascadeOps(names: readonly string[]): { delete: string[]; save: Array<{ model: SemanticTable }> } {
-    for (const name of names) this.refuseAmbiguousName(name);
-    const gone = new Set(names.map((n) => n.toLowerCase()));
+  dbmlDeleteCascadeOps(tables: ReadonlyArray<TableId | string>): { delete: Array<TableId | string>; save: Array<{ model: SemanticTable; from?: TableId }> } {
+    for (const table of tables) this.refuseAmbiguousName(table);
+    // Each deleted table by its library reference, as the index names Ref ends and a model's
+    // relationships name it: `<schema>.<name>` where two schema folders share its name.
+    const refs = tables.map((t) => (typeof t === 'string' ? t : this.index.libraryRef(t) ?? t.name));
+    const gone = new Set(refs.map((n) => n.toLowerCase()));
     const owners = new Set<string>();
     for (const ref of this.relationshipsIndex().refs) {
       if (gone.has(ref.target) && !gone.has(ref.owner)) owners.add(ref.owner);
     }
-    const saves: SemanticTable[] = [];
+    const saves: Array<{ model: SemanticTable; from?: TableId }> = [];
     for (const label of [...owners].sort()) {
       // The index names an owner by its library reference: a name two schema folders share is
-      // `<schema>.<name>`, which no file is named, so it is found by that reference, never by name.
+      // `<schema>.<name>`, which no file is named, so it is found by that reference and saved by
+      // its identity, never by its name.
       const found = this.index.schemaScopedNames ? this.index.resolveLibraryRef(label) : undefined;
       const owner: TableId | string = found?.kind === 'found' ? tableIdOfEntry(found.entry) : label;
       if (this.tableStorage(owner) !== 'dbml') continue;
       const model = this.getTable(owner);
       if (!model) continue;
       let copy = model;
-      for (const name of names) copy = dropRelationshipsTo([copy], name)[0] ?? copy;
-      if (copy !== model) saves.push(copy);
+      for (const ref of refs) copy = dropRelationshipsTo([copy], ref)[0] ?? copy;
+      if (copy !== model) saves.push({ model: copy, ...(typeof owner !== 'string' ? { from: owner } : {}) });
     }
-    return { delete: [...names], save: saves.map((model) => ({ model })) };
+    return { delete: [...tables], save: saves };
   }
 
   /**
@@ -2746,18 +2827,20 @@ export class TableLibraryService {
    * non-editor callers. The editor renames through a WorkspaceEdit and gets
    * the same document carry-over via `serializeTable(model, fromName)`.
    */
-  renameTable(oldName: string, newName: string): void {
-    this.refuseAmbiguousName(oldName);
-    const model = this.getTable(oldName);
+  renameTable(table: TableId | string, newName: string): void {
+    this.refuseAmbiguousName(table);
+    const oldName = typeof table === 'string' ? table : table.name;
+    const model = this.getTable(table);
     if (!model) {
       throw new Error(`Table "${oldName}" not found in the Table Library`);
     }
     if (newName !== oldName && this.tableExists(newName)) {
       throw new Error(`Table "${newName}" already exists in the Table Library`);
     }
-    if (this.tableStorage(oldName) === 'dbml') {
-      // The file is renamed with its Table name spliced; every Ref naming it is re-spelled (§4.6).
-      this.applyDbmlBatch({ ops: { save: [{ model: { ...model, name: newName }, fromName: oldName }] } });
+    if (this.tableStorage(table) === 'dbml') {
+      // The file is renamed with its Table name spliced; every Ref naming it is re-spelled (§4.6),
+      // and, named by identity, only the Refs and `use` lines that name this table.
+      this.applyDbmlBatch({ ops: { save: [{ model: { ...model, name: newName }, fromName: oldName, ...(typeof table !== 'string' ? { from: table } : {}) }] } });
       return;
     }
     // Carry the existing document (comments, key order, extra keys) across

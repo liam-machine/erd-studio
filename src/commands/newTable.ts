@@ -203,13 +203,14 @@ export async function createDbmlTable(deps: NewTableDeps, home: NewTableHome, ra
   let filePath: string | undefined;
   try {
     const planned = deps.tableLibraryService.planDbmlBatch({
-      ops: { save: [{ model: { name, schema: home.schema, description: '', columns: [] }, home }] },
+      // A new table (D-4): never an edit of a table of that name in another schema folder.
+      ops: { save: [{ model: { name, schema: home.schema, description: '', columns: [] }, home, create: true }] },
       dirtyFiles: deps.dirtyFiles,
       readText: deps.readText,
     });
     writes = planned.writes;
     // The file as the plan spells it (an existing schema folder's spelling wins).
-    const rel = planned.plan.resolveTable(name)?.path;
+    const rel = planned.plan.createdTablePaths?.[0] ?? planned.plan.resolveTable(name)?.path;
     filePath = rel !== undefined ? path.join(deps.semanticRoot, ...rel.split('/')) : undefined;
   } catch (err) {
     if (isRefusedWrite(err)) {

@@ -385,7 +385,7 @@ export class MigrationService {
     const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
     const groupByFolder = this.tableLibraryService.groupsByFolder(layerIds);
     // The DBML tables are one batch (§2.6): one plan, one settle, one write.
-    const dbmlSaves: Array<{ model: SemanticTable; home: { layer: string; schema: string } }> = [];
+    const dbmlSaves: Array<{ model: SemanticTable; home: { layer: string; schema: string }; create: true }> = [];
     for (const [name, { model, sources }] of allModels) {
       if (!this.tableLibraryService.tableExists(name)) {
         // The domain's layer is its parent directory name.
@@ -394,7 +394,7 @@ export class MigrationService {
         const configured = only !== undefined && layerIds.has(only) ? only : undefined;
         if (this.tableLibraryService.writesTableAsDbml(name)) {
           // A DBML table always sits in a layer: its domain's when that is a configured layer (§2.4).
-          dbmlSaves.push({ model, home: this.tableLibraryService.dbmlHomeOf(configured) });
+          dbmlSaves.push({ model, home: this.tableLibraryService.dbmlHomeOf(configured), create: true });
           result.modelsCreated++;
           continue;
         }

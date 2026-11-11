@@ -30,9 +30,12 @@ import {
   dbmlTreePathOf,
   dirnamePosix,
   normalisePosix,
+  qualifiedRef,
   resolvePosix,
+  tableIdKey,
+  tableIdOfPath,
 } from '@erd-studio/core';
-import type { DbmlAttachTable, DbmlRelationshipsReading } from '@erd-studio/core';
+import type { DbmlAttachTable, DbmlRelationshipsReading, TableId } from '@erd-studio/core';
 import {
   DBML_CONVERT_FIRST_MESSAGE,
   DbmlEditRefused,
@@ -51,7 +54,8 @@ import {
   relationshipsImportsFor as importsFor,
   unitLinks,
 } from './dbmlRelationshipsIndex';
-import type { IndexLookup, IndexedRef, RelationshipsIndex } from './dbmlRelationshipsIndex';
+import type { IndexLookup, IndexedRef, IndexedTable, RelationshipsIndex } from './dbmlRelationshipsIndex';
+import { refuseAmbiguousTableName } from './ambiguousTableName';
 import type { DbmlResolvedTable, RefUnit, RelationshipsFileEdit } from '@erd-studio/core/dbml';
 
 import type { FileWrite } from './fileWrites';
@@ -133,18 +137,15 @@ export type DbmlDraftTable = SemanticTable & { configuredSchema?: string };
 
 /** What to write (§2.4 step 2). */
 export interface DbmlLibraryOps {
+  /** DBML tables only: see {@link DbmlLibrarySave}. */
+  save?: DbmlLibrarySave[];
+  /** Tables whose file is deleted: each by its identity, or by a name only one table has. */
+  delete?: Array<string | TableId>;
   /**
-   * DBML tables only; a save with `fromName` renames. `asWritten` (Convert
-   * only): the table's file already holds exactly this table, as
-   * `renderNewTableDbml` wrote it from this model, so the plan neither edits
-   * nor re-reads it and only places its relationships. `home` (a new table
-   * only) wins over `newTableHome`, for a batch whose new tables go to
-   * different layers.
+   * A table to another layer and/or schema folder (Organise); its Refs stay
+   * where they are. `table` (its identity) names it where given, else `name`.
    */
-  save?: Array<{ model: DbmlDraftTable; fromName?: string; asWritten?: boolean; home?: DbmlTableHome }>;
-  delete?: string[];
-  /** A table to another layer and/or schema folder (Organise); its Refs stay where they are. */
-  move?: Array<{ name: string; toLayer?: string; toSchema?: string }>;
+  move?: Array<{ name: string; table?: TableId; toLayer?: string; toSchema?: string }>;
   /** Where new tables go (the diagram's layer, its name as the schema); default: the first layer listed, else `main`. */
   newTableHome?: DbmlTableHome;
   /**
@@ -160,7 +161,7 @@ export interface DbmlLibraryOps {
    * every relationships file whose Refs name one re-resolves its `use` lines,
    * so a Ref written against the table while it was YAML compiles after.
    */
-  gainFile?: string[];
+  gainFile?: Array<string | TableId>;
   /**
    * Convert only: a relationship that cannot be a live Ref yet (an end with
    * no `.dbml` table file, a YAML end, or a missing column) is written as a
@@ -185,6 +186,34 @@ export interface DbmlLibraryOps {
    * refused rather than left where the user did not choose.
    */
   newRefFile?: NewRefFileChoice;
+}
+
+/**
+ * One table to write (D-4: every save says which table it is). `create`: a
+ * new table, never matched to an existing one; its identity is its home's
+ * schema folder and its name, so a table of that name in another schema
+ * folder is no reason to edit it (and, with the library told apart by
+ * identity, no reason to refuse it). `from`: the existing table it edits or
+ * renames, by identity. With neither, the save is an edit of the table
+ * `fromName ?? model.name` names (a rename when the two differ), or a new
+ * table when none has that name; such an edit is refused when its own
+ * `home` disagrees with the table's folder, since the caller meant another
+ * table. The model's `name` is always a bare table name (never a diagram's
+ * `<schema>.<name>` reference; a model with a `tableName` is refused).
+ *
+ * `asWritten` (Convert only): the table's file already holds exactly this
+ * table, as `renderNewTableDbml` wrote it from this model, so the plan
+ * neither edits nor re-reads it and only places its relationships. `home`
+ * (a new table only) wins over `newTableHome`, for a batch whose new tables
+ * go to different layers.
+ */
+export interface DbmlLibrarySave {
+  model: DbmlDraftTable;
+  fromName?: string;
+  from?: TableId;
+  create?: boolean;
+  asWritten?: boolean;
+  home?: DbmlTableHome;
 }
 
 /** Where the New Relationship dialog asks a new relationship to be saved ({@link DbmlLibraryOps.newRefFile}). */
@@ -212,7 +241,7 @@ export interface DbmlLibraryWritePlan {
    * `current` (its imports now) that does not read. Byte-sorted; only files
    * that exist after.
    */
-  relationshipsImportsFor(members: Iterable<string>, current?: readonly string[], unlinked?: Iterable<string>): string[];
+  relationshipsImportsFor(members: Iterable<IndexedTable>, current?: readonly string[], unlinked?: Iterable<string>): string[];
   /** The table pairs (`pairKey`) whose set of files holding a Ref or a pending line the plan changes. */
   changedPairs: Set<string>;
   /** Tables whose qualifier the plan changes (a move to another schema), lower-case, named as after the plan. */
@@ -229,6 +258,33 @@ export interface DbmlLibraryWritePlan {
    * naming one becomes a live Ref (D27).
    */
   createdTables: string[];
+  /**
+   * The table whose file was `path` before the plan (any case), as the plan
+   * leaves it: null when the plan deletes it, undefined when no table was
+   * there. How a diagram's member is found by its `use` path, never by a
+   * name another schema folder may share.
+   */
+  tableAtPath?(path: string): DbmlPlannedTable | null | undefined;
+  /** The files of the tables this plan creates (in {@link createdTables}' order). */
+  createdTablePaths?: string[];
+  /**
+   * Set when the library tells tables apart by identity (`schemaScopedNames`):
+   * the plan's names are library references (`ccc.addresse` where two schema
+   * folders share `addresse`), its relationships indexes carry identities,
+   * {@link changedPairs} names pairs by identity keys (`ccc/addresse`), and
+   * these sets hold the identity keys the plan touches, before and after, so
+   * the settle compares a diagram's members by the files they read.
+   */
+  identities?: {
+    /** Tables whose path changes or that are deleted: identity keys before and after. */
+    pathChanged: ReadonlySet<string>;
+    /** Tables the plan creates. */
+    created: ReadonlySet<string>;
+    /** Tables moved to another schema folder, before and after. */
+    requalified: ReadonlySet<string>;
+    /** Lower-case paths before the plan of every table whose path changes, that is deleted or re-qualified. */
+    changedPaths: ReadonlySet<string>;
+  };
   /** The project's relationships files before the plan (the index every placement read). */
   index: RelationshipsIndex;
   /** The same after the plan, worked out without re-reading (§2.4 step 6). */
@@ -304,6 +360,18 @@ function attachTablesOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'schemaSc
   }));
 }
 
+/**
+ * The lookup the planner, its index and the attach resolve Ref ends with.
+ * Told apart by identity, it knows which files exist (rule 2(d): a stale
+ * qualifier lands on the one table of its name unless its `use` line names
+ * another file that exists), as the library's own attach does.
+ */
+function lookupOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'schemaScopedNames' | 'files'>): IndexLookup {
+  if (!snapshot.schemaScopedNames) return dbmlTableLookup(attachTablesOf(snapshot));
+  const listed = new Set([...snapshot.files].map(lower));
+  return dbmlTableLookup(attachTablesOf(snapshot), { exists: (p) => snapshot.files.has(p) || listed.has(lower(p)) });
+}
+
 /** The snapshot's relationships files as the attach reads them: with their own path as `semanticPath` when tables are told apart by identity. */
 function attachReadingsOf(snapshot: Pick<DbmlLibrarySnapshot, 'relationshipsFiles' | 'schemaScopedNames'>): Array<{ path: string; reading: DbmlRelationshipsReading; semanticPath?: string }> {
   return [...snapshot.relationshipsFiles.entries()].map(([path, reading]) => ({ path, reading, ...(snapshot.schemaScopedNames ? { semanticPath: path } : {}) }));
@@ -314,8 +382,8 @@ function attachReadingsOf(snapshot: Pick<DbmlLibrarySnapshot, 'relationshipsFile
  * the planner's own attach step reads them (a table's complete list, for a
  * save that keeps them: a rename planned from a snapshot, not a canvas).
  */
-export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames'>, name: string): TableRelationship[] {
-  const owned = attachRelationships(attachReadingsOf(snapshot), dbmlTableLookup(attachTablesOf(snapshot))).byOwner.get(lower(name));
+export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames' | 'files'>, name: string): TableRelationship[] {
+  const owned = attachRelationships(attachReadingsOf(snapshot), lookupOf(snapshot)).byOwner.get(lower(name));
   return owned ? structuredClone(owned) : [];
 }
 
@@ -325,8 +393,8 @@ export function ownedRelationshipsOf(snapshot: Pick<DbmlLibrarySnapshot, 'tables
  * tables each file's `use` lines name.
  */
 export function relationshipsIndexOf(
-  snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames'>,
-  lookup: IndexLookup = dbmlTableLookup(attachTablesOf(snapshot)),
+  snapshot: Pick<DbmlLibrarySnapshot, 'tables' | 'relationshipsFiles' | 'schemaScopedNames' | 'files'>,
+  lookup: IndexLookup = lookupOf(snapshot),
 ): RelationshipsIndex {
   const refs: IndexedRef[] = [];
   const unreadable: string[] = [];
@@ -389,14 +457,85 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     return { layer, schema: layer };
   };
 
+  // --- Tables by identity and by name -------------------------------------------------------
+  // Told apart by identity (`schemaScopedNames`), the snapshot's keys are library references
+  // (`ccc.addresse` where two schema folders share `addresse`), and every op is turned into one
+  // of them here, once: by its TableId, or by a string only one table answers to.
+  const scoped = snapshot.schemaScopedNames === true;
+  /** A table's identity: a DBML file's schema folder and stem; a YAML table's name. */
+  const idOf = (t: Pick<DbmlSnapshotTable, 'path' | 'name' | 'storage'>): TableId =>
+    (t.storage === 'dbml' ? tableIdOfPath(t.path) : undefined) ?? { schema: '', name: t.name };
+  const keyById = new Map<string, string>();
+  const keysByName = new Map<string, string[]>();
+  for (const [key, t] of snapshot.tables) {
+    const id = tableIdKey(idOf(t));
+    if (!keyById.has(id)) keyById.set(id, key);
+    const named = keysByName.get(lower(t.name)) ?? [];
+    keysByName.set(lower(t.name), named);
+    named.push(key);
+  }
+  /**
+   * The snapshot key of the table `table` names, or undefined when none: a
+   * TableId's own table; a string as the key it is (a name, or a library
+   * reference), else (told apart by identity) the one table of that name. A
+   * name tables in two schema folders share throws `AmbiguousTableName`
+   * (D-5): it is never answered with the first of them.
+   */
+  const keyOf = (table: string | TableId): string | undefined => {
+    if (typeof table !== 'string') return keyById.get(tableIdKey(table));
+    if (snapshot.tables.has(lower(table))) return lower(table);
+    if (!scoped) return undefined;
+    const named = keysByName.get(lower(table)) ?? [];
+    if (named.length > 1) refuseAmbiguousTableName(table, named.map((k) => idOf(snapshot.tables.get(k)!)));
+    return named[0];
+  };
+  /**
+   * D-4 and D-7: a table that a create, rename or move gives the identity
+   * `(schema, name)` must not meet another table of that identity in any
+   * layer or case-twin folder (DBML cannot tell them apart), nor a YAML table
+   * of that name; told apart by name alone, no other table may have the
+   * name. `self` is the table being renamed or moved. The refusal names the
+   * other file.
+   */
+  const refuseTaken = (name: string, schema: string, path: string, self: string | undefined, outcome: string): void => {
+    const others = (keysByName.get(lower(name)) ?? []).filter((k) => k !== self && after.has(k));
+    const clash = scoped
+      ? others.find((k) => tableIdKey(idOf(snapshot.tables.get(k)!)) === tableIdKey({ schema, name })) ?? others.find((k) => snapshot.tables.get(k)!.storage === 'yaml')
+      : others[0];
+    if (clash === undefined) return;
+    const other = snapshot.tables.get(clash)!;
+    const layer = dbmlTreePathOf(other.path)?.layer;
+    refuse(path, scoped && other.storage === 'dbml'
+      ? `${qualifiedRef(schema, name)} already exists${layer !== undefined ? ` in layer ${layer}` : ''} (${other.path}); ${outcome}`
+      : `${other.path} already holds a table named ${other.name}; ${outcome}`);
+  };
+
   // --- 0. Normalise: a delete of a rename's old name is part of the rename ------------------
   const saves = (ops.save ?? []).map((s) => ({ ...s }));
-  const renamedFrom = new Set(saves.filter((s) => s.fromName !== undefined && s.fromName !== s.model.name).map((s) => lower(s.fromName!)));
-  const deletes = [...new Set((ops.delete ?? []).map(lower))].filter((name) => !renamedFrom.has(name));
+  for (const { model } of saves) {
+    // A diagram's `<schema>.<name>` reference is never a table's name: it would be written into its file.
+    if ((model as { tableName?: unknown }).tableName !== undefined) {
+      throw new Error(`planDbmlLibraryWrites: ${model.name} is named as a diagram names it; save the table under its own name.`);
+    }
+  }
+  const oldNameOfSave = (s: DbmlLibrarySave): string | undefined => (s.from !== undefined ? s.from.name : s.fromName);
+  const isRename = (s: DbmlLibrarySave): boolean => oldNameOfSave(s) !== undefined && oldNameOfSave(s) !== s.model.name;
+  /** Each save's table before the plan (its snapshot key); undefined for a new one. */
+  const sourceKeys = saves.map((s) => (s.create ? undefined : keyOf(s.from ?? s.fromName ?? s.model.name)));
+  const renamedFrom = new Set(saves.flatMap((s, i) => (isRename(s) ? [sourceKeys[i] ?? lower(s.fromName ?? s.model.name)] : [])));
+  const deletes = [...new Set((ops.delete ?? []).flatMap((d) => {
+    const key = typeof d === 'string' && !scoped ? lower(d) : keyOf(d);
+    return key === undefined ? [] : [key];
+  }))].filter((key) => !renamedFrom.has(key));
   const moves = ops.move ?? [];
+  /** Tables that gain their file, by key. */
+  const gained = (ops.gainFile ?? []).flatMap((g) => {
+    const key = typeof g === 'string' && !scoped ? lower(g) : keyOf(g);
+    return key === undefined ? [] : [key];
+  });
 
   // --- The library before: its attachment and its one index ----------------------------------
-  const lookup = dbmlTableLookup(attachTablesOf(snapshot));
+  const lookup = lookupOf(snapshot);
   const readings = attachReadingsOf(snapshot);
   const attachment = attachRelationships(readings, lookup);
   const index = relationshipsIndexOf(snapshot, lookup);
@@ -411,6 +550,21 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
 
   // --- 1. The path overlay ------------------------------------------------------------------
   const after = new Map<string, DbmlPlannedTable>();
+  /** How the plan names each table, by key: its library reference (its name, unless two schema folders share it). */
+  const labelOf = new Map<string, string>();
+  for (const [key, t] of snapshot.tables) labelOf.set(key, scoped ? t.ref ?? t.name : t.name);
+  /**
+   * The key of a table new or renamed in this plan: its name, unless (told
+   * apart by identity) a table of that name stays, then `<schema>.<name>`.
+   * Existing tables keep their keys for the whole plan, so a twin appearing
+   * never changes what the plan calls its namesake.
+   */
+  const keyFor = (name: string, schema: string | undefined, self?: string): string => {
+    const bare = lower(name);
+    if (!scoped || schema === undefined) return bare;
+    const stays = (keysByName.get(bare) ?? []).some((k) => k !== self && after.has(k));
+    return after.has(bare) || stays ? lower(qualifiedRef(schema, name)) : bare;
+  };
   const columnsOf = (columns: readonly string[]) => (col: string): string | undefined => columns.find((c) => c === col) ?? columns.find((c) => lower(c) === lower(col));
   for (const [key, t] of snapshot.tables) {
     after.set(key, {
@@ -472,13 +626,27 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   }
 
   // Saves (edits, renames, new tables).
-  for (const { model: draft, fromName, asWritten, home } of saves) {
+  const newTables: string[] = [];
+  const createdKeys: string[] = [];
+  const createdPaths: string[] = [];
+  for (const [at, save] of saves.entries()) {
+    const { model: draft, asWritten, home } = save;
     const { configuredSchema, ...given } = draft;
     let model: SemanticTable = given;
-    const sourceKey = lower(fromName ?? model.name);
-    const t = snapshot.tables.get(sourceKey);
-    const renamed = t !== undefined && fromName !== undefined && fromName !== model.name;
+    const sourceKey = sourceKeys[at] ?? lower(save.fromName ?? model.name);
+    const t = save.create ? undefined : snapshot.tables.get(sourceKey);
+    if (save.from !== undefined && !t) {
+      refuse('', `The table ${qualifiedRef(save.from.schema, save.from.name)} is not in the table library; nothing was changed.`);
+    }
+    const renamed = t !== undefined && isRename(save);
     if (t && t.storage !== 'dbml') throw new Error(`planDbmlLibraryWrites: ${t.name} is not a DBML table`);
+    // D-4: an edit named by its name alone whose own home is another folder meant another table.
+    if (t && save.from === undefined && home !== undefined) {
+      const tree = dbmlTreePathOf(t.path);
+      if (tree?.kind === 'table' && (lower(tree.layer) !== lower(home.layer) || lower(tree.schema ?? '') !== lower(home.schema))) {
+        refuse(t.path, `${t.path} already holds the table ${t.name}, which is not in ${home.layer}/tables/${home.schema}/; the change does not say whether it means that table or a new one, so nothing was changed.`);
+      }
+    }
     let path: string;
     let text: string;
     if (!t) {
@@ -490,11 +658,17 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       plannedSchemas.set(`${lower(where.layer)}\u0000${lower(schema)}`, schema);
       model = { ...model, schema };
       path = dbmlTablePath(where.layer, schema, model.name);
+      if (save.create) refuseTaken(model.name, schema, path, undefined, 'choose another name.');
       if (fileListed(path)) refuse(path, `${path} already exists; choose another name.`);
       text = renderNewTableDbml(model);
       writes.push({ kind: 'create', path, text });
     } else if (renamed) {
       path = `${dirOf(t.path)}/${model.name}.dbml`;
+      if (scoped) {
+        const schema = dbmlTreePathOf(path)?.schema;
+        if (schema !== undefined) refuseTaken(model.name, schema, path, sourceKey, 'choose another name.');
+        if (lower(path) !== lower(t.path) && fileListed(path)) refuse(path, `${path} already exists; choose another name.`);
+      }
       text = editTableDbml(tableText(t.path), model, { rename: true, file: t.path, fileStem: stemOf(t.path), ...schemaFolderOf(t.path) });
       writes.push({ kind: 'create', path, text }, { kind: 'delete', path: t.path });
       after.delete(sourceKey);
@@ -507,27 +681,41 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       if (text !== old) writes.push({ kind: 'replace', path, text });
     }
     const planned = plannedTable(text, path, model, asWritten === true && !!t && !renamed);
-    after.set(lower(model.name), planned);
+    const afterKey = t && !renamed ? sourceKey : keyFor(model.name, dbmlTreePathOf(path)?.schema, t ? sourceKey : undefined);
+    if (renamed) {
+      labelOf.set(afterKey, scoped && afterKey !== lower(model.name) ? qualifiedRef(dbmlTreePathOf(path)!.schema!, model.name) : model.name);
+      renames.set(sourceKey, labelOf.get(afterKey)!);
+    } else if (!t) {
+      labelOf.set(afterKey, scoped && afterKey !== lower(model.name) ? qualifiedRef(model.schema ?? '', model.name) : model.name);
+      newTables.push(model.name);
+      createdKeys.push(afterKey);
+      createdPaths.push(path);
+    }
+    after.set(afterKey, planned);
     if (t) {
       const columnsRenamed = renamedColumnsOf(t.columns, (model.columns ?? []).map((c) => c.name));
       if (columnsRenamed.size > 0) {
-        columnRenames.set(lower(model.name), columnsRenamed);
+        columnRenames.set(afterKey, columnsRenamed);
         columnRenamesBefore.set(sourceKey, columnsRenamed);
       }
     }
-    // Relationships: placed when they changed, or the owner was renamed or is new.
+    // Relationships: placed when they changed, or the owner was renamed or is new. Told apart by
+    // identity, an owner's units are named by its library reference, as the index names them.
     const desired = model.relationships ?? [];
-    const current = t ? attachment.byOwner.get(lower(t.name)) ?? [] : [];
-    const changed = renamed || !t || unitsKey(planned.name, desired) !== unitsKey(t.name, current);
+    const ownerAfter = scoped ? labelOf.get(afterKey)! : planned.name;
+    const ownerBefore = t ? labelOf.get(sourceKey) ?? t.name : undefined;
+    const current = t ? attachment.byOwner.get(lower(scoped ? ownerBefore! : t.name)) ?? [] : [];
+    const changed = renamed || !t || unitsKey(ownerAfter, desired) !== unitsKey(scoped ? ownerBefore! : t.name, current);
     if (changed && (t || desired.length > 0)) {
-      affected.set(lower(model.name), { name: planned.name, relationships: desired });
-      oldNameOf.set(lower(model.name), t ? lower(t.name) : lower(model.name));
+      affected.set(afterKey, { name: ownerAfter, relationships: desired });
+      oldNameOf.set(afterKey, t ? (scoped ? sourceKey : lower(t.name)) : afterKey);
     }
   }
 
   // Moves (Organise): the file goes to another layer and/or schema folder; its Refs stay where they are.
-  for (const { name, toLayer, toSchema } of moves) {
-    const key = lower(name);
+  for (const { name, table, toLayer, toSchema } of moves) {
+    const key = scoped || table !== undefined ? keyOf(table ?? name) : lower(name);
+    if (key === undefined) continue;
     const current = after.get(key);
     const t = snapshot.tables.get(key);
     if (!current || !t) continue;
@@ -541,6 +729,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     if (path === current.path) continue;
     if (lower(path) === lower(current.path)) refuse(current.path, 'A move that only changes case is not supported; rename the folder by hand.');
     if (fileListed(path)) refuse(path, `${path} already exists; nothing was moved.`);
+    if (scoped) refuseTaken(stem, schema, path, key, 'nothing was moved.');
     const pending = writes.findIndex((w) => w.path === current.path && w.kind !== 'delete');
     let text = pending >= 0 ? (writes[pending] as { text: string }).text : tableText(current.path);
     if (pending >= 0) writes.splice(pending, 1);
@@ -569,9 +758,17 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   /** A stored Ref's unit as it reads after the plan's renames. */
   const storedAfter = (ref: IndexedRef): RefUnit => withRenamedColumns({ ...ref.unit, from: renamedName(ref.unit.from), to: renamedName(ref.unit.to) });
 
-  const resolveTable = (name: string): DbmlPlannedTable | undefined => {
+  /** The key after the plan of the table `name` names: a key (renamed tables followed), else its name. */
+  const keyAfter = (name: string): string | undefined => {
     const key = renames.get(lower(name)) !== undefined ? lower(renames.get(lower(name))!) : lower(name);
-    return after.get(key) ?? [...after.values()].find((t) => lower(t.name) === lower(name));
+    if (after.has(key)) return key;
+    // A name only one table has after the plan; told apart by identity, a shared one names none of them.
+    const named = [...after].filter(([, t]) => lower(t.name) === lower(name));
+    return named.length === 1 || (!scoped && named.length > 0) ? named[0][0] : undefined;
+  };
+  const resolveTable = (name: string): DbmlPlannedTable | undefined => {
+    const key = keyAfter(name);
+    return key === undefined ? undefined : after.get(key);
   };
   /** Both ends have `.dbml` files with these columns after the plan: the unit can be a live Ref. */
   const liveable = (unit: RefUnit): boolean => [[unit.from, unit.fromColumns], [unit.to, unit.toColumns]].every(([n, cs]) => {
@@ -828,9 +1025,8 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   }
 
   // --- 4. Re-spelling: files whose Refs or use lines name a table whose path, name or columns change ---
-  const newTables = saves.filter((s) => !snapshot.tables.has(lower(s.fromName ?? s.model.name))).map((s) => s.model.name);
-  const changedNames = new Set<string>([...pathChanged.keys(), ...requalified, ...(ops.gainFile ?? []).map(lower), ...newTables.map(lower)]);
-  const pathChangedAfter = new Set<string>([...(ops.gainFile ?? []), ...newTables].map((name) => lower(renamedName(name))));
+  const changedNames = new Set<string>([...pathChanged.keys(), ...requalified, ...gained, ...createdKeys]);
+  const pathChangedAfter = new Set<string>([...gained, ...createdKeys].map((key) => lower(renamedName(key))));
   for (const [oldKey, newPath] of pathChanged) {
     if (newPath === null) pathChangedAfter.add(oldKey);
     else pathChangedAfter.add(lower(renames.get(oldKey) ?? oldKey));
@@ -855,7 +1051,25 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
 
   // --- 6. The after-state, without re-reading ------------------------------------------------------
   const pendingBeforeKeys = new Set(pendingBefore.map((u) => unitIdentity(withRenamedColumns({ ...u, from: renamedName(u.from), to: renamedName(u.to) }))));
-  const realName = (name: string): string => resolveTable(name)?.name ?? name;
+  // Told apart by identity, a unit's ends keep the plan's names (library references): a twin's real
+  // name would make its Refs its namesake's.
+  const realName = (name: string): string => {
+    if (!scoped) return resolveTable(name)?.name ?? name;
+    const key = keyAfter(name);
+    return key === undefined ? name : labelOf.get(key) ?? name;
+  };
+  /** A table's identity key after the plan, by its key; undefined when it has no table after. */
+  const idAfter = (key: string): string | undefined => {
+    const t = after.get(key);
+    return t === undefined ? undefined : tableIdKey(idOf(t));
+  };
+  /** Told apart by identity, an after-index entry carries its ends' identities, as the index before does. */
+  const idsOf = (owner: string, target: string, ref?: IndexedRef): Pick<IndexedRef, 'ownerId' | 'targetId'> => {
+    if (!scoped) return {};
+    const ownerId = idAfter(owner) ?? ref?.ownerId;
+    const targetId = idAfter(target) ?? ref?.targetId;
+    return { ...(ownerId !== undefined ? { ownerId } : {}), ...(targetId !== undefined ? { targetId } : {}) };
+  };
   const afterRefs: IndexedRef[] = [];
   const renamesNothing = renames.size === 0 && columnRenames.size === 0;
   for (const ref of edits.size === 0 ? [] : index.refs) {
@@ -866,11 +1080,14 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       continue;
     }
     const unit = storedAfter(ref);
+    const owner = lower(renames.get(ref.owner) ?? ref.owner);
+    const target = lower(renames.get(ref.target) ?? ref.target);
     afterRefs.push({
       ...ref,
       // The index's names are the real ones already; only a rename changes them.
-      owner: lower(renames.get(ref.owner) ?? ref.owner),
-      target: lower(renames.get(ref.target) ?? ref.target),
+      owner,
+      target,
+      ...idsOf(owner, target, ref),
       unit,
       links: renamesNothing ? ref.links : unitLinks(unit),
       // An edited file turns a pending line live once it can be (D27).
@@ -886,7 +1103,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       // One entry per stored copy (a duplicate stays a duplicate, and is refused below), else the placement.
       const at = stored ? stored.map((r) => ({ file: r.file, line: r.line })) : filesOf(plan, member).map((file) => ({ file, line: 0 }));
       for (const { file, line } of at) {
-        afterRefs.push({ file, owner: lower(unit.from), target: lower(unit.to), unit, links: unitLinks(unit), pending, line });
+        afterRefs.push({ file, owner: lower(unit.from), target: lower(unit.to), ...idsOf(keyAfter(unit.from) ?? lower(unit.from), keyAfter(unit.to) ?? lower(unit.to)), unit, links: unitLinks(unit), pending, line });
       }
     }
   }
@@ -896,6 +1113,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     files: [...index.files, ...createdFiles.filter((f) => afterRefs.some((r) => r.file === f))],
     refs: afterRefs,
     unreadable: index.unreadable,
+    ...(scoped ? { identities: true } : {}),
   });
 
   // Duplicate links, on the library as it will be (pending lines counted).
@@ -917,7 +1135,15 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   const createdRelationshipsFiles: string[] = [];
   // Ref ends written anew: a table moved to another schema, and one that gains its file (Convert), whose
   // ends a file may spell as it was while it was YAML (`dim`, not `gold.dim`).
-  const endsRespelled = new Set<string>([...requalified, ...(ops.gainFile ?? []).map(lower)]);
+  const endsRespelled = new Set<string>([...requalified, ...gained]);
+  // Told apart by identity, the writer names each Ref end and `use` specifier by the table its own `use`
+  // line and qualifier say (its key before the plan), so an edit of one table never touches its namesake's.
+  const identify = scoped
+    ? (table: { name: string; qualifier?: string; path?: string }): string | undefined => {
+      const entry = lookup(table.name, { ...(table.qualifier !== undefined ? { qualifier: table.qualifier } : {}), ...(table.path !== undefined ? { usePath: table.path } : {}) });
+      return entry === undefined ? undefined : entry.ref ?? entry.table.name;
+    }
+    : undefined;
   for (const file of [...edits.keys()].sort(byteOrder)) {
     const e = edits.get(file)!;
     const exists = snapshot.relationshipsFiles.has(file) || fileListed(file);
@@ -934,6 +1160,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       ...(ops.writePending ? { writePending: true } : {}),
       ...(pendingBefore.length > 0 ? { pendingBefore } : {}),
       ...(columnChanges.has(file) ? { columnChanges: columnChanges.get(file)! } : {}),
+      ...(identify ? { identify } : {}),
       resolve: resolveForWriter,
     };
     const text = editRelationshipsDbml(oldText, fileEdit);
@@ -948,6 +1175,44 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
 
   const merged = mergeFileWrites(writes);
   const fileExists = (p: string): boolean => created.has(p) || (snapshot.files.has(p) && !deleted.has(p));
+  /** Each table's key by its file before the plan (lower-case path). */
+  const keyAtPath = new Map([...snapshot.tables].map(([key, t]) => [lower(t.path), key]));
+  const tableAtPath = (p: string): DbmlPlannedTable | null | undefined => {
+    const key = keyAtPath.get(lower(p));
+    if (key === undefined) return undefined;
+    const renamedTo = renames.get(key);
+    return after.get(renamedTo !== undefined ? lower(renamedTo) : key) ?? null;
+  };
+  let identities: DbmlLibraryWritePlan['identities'];
+  if (scoped) {
+    const before = (key: string): DbmlSnapshotTable | undefined => snapshot.tables.get(key);
+    const idsChanged = new Set<string>();
+    const changedPaths = new Set<string>();
+    for (const [key, newPath] of pathChanged) {
+      const t = before(key);
+      if (t) {
+        idsChanged.add(tableIdKey(idOf(t)));
+        changedPaths.add(lower(t.path));
+      }
+      const id = newPath === null ? undefined : tableIdOfPath(newPath);
+      if (id) idsChanged.add(tableIdKey(id));
+    }
+    const idsRequalified = new Set<string>();
+    for (const key of requalified) {
+      const t = before(key);
+      if (t) {
+        idsRequalified.add(tableIdKey(idOf(t)));
+        changedPaths.add(lower(t.path));
+      }
+      const now = idAfter(key);
+      if (now !== undefined) idsRequalified.add(now);
+    }
+    const idsCreated = new Set(createdPaths.flatMap((p) => {
+      const id = tableIdOfPath(p);
+      return id ? [tableIdKey(id)] : [];
+    }));
+    identities = { pathChanged: idsChanged, created: idsCreated, requalified: idsRequalified, changedPaths };
+  }
   return {
     writes: merged,
     resolveTable,
@@ -958,6 +1223,9 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     createdRelationshipsFiles,
     pathChanged,
     createdTables: newTables,
+    createdTablePaths: createdPaths,
+    tableAtPath,
+    ...(identities ? { identities } : {}),
     index,
     afterIndex,
   };

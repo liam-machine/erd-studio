@@ -163,6 +163,24 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
     expect(result.imports.every((files) => files.length >= 1 && files.length <= 3)).toBe(true);
   });
 
+  it('the write planner by identity: a rename and a relationship change of one table of a name eight folders share', () => {
+    const lib = library();
+    const target = ids[0];
+    const model = lib.getTable(target)!;
+    const { result, maxReadsOfOneFile } = measure('plan a rename and a relationship edit', 400, () => lib.planDbmlBatch({
+      ops: {
+        save: [
+          { model: { ...model, name: 'renamed_one' }, fromName: target.name, from: target },
+          { model: { ...lib.getTable(ids[1])!, relationships: [] }, from: ids[1] },
+        ],
+      },
+    }));
+    expect(maxReadsOfOneFile).toBeLessThanOrEqual(2);
+    // Only the renamed table's file and its own schema folder's relationships file change.
+    const written = result.writes.map((w) => path.relative(semantic, w.path).split(path.sep).join('/')).sort();
+    expect(written).toEqual([`bronze/relationships/${target.schema}.dbml`, `bronze/tables/${target.schema}/${target.name}.dbml`, `bronze/tables/${target.schema}/renamed_one.dbml`].sort());
+  });
+
   it('one relationships file for the layer (where new Refs go by default): every `use` line and Ref in it, still linear', () => {
     // The same tables and Refs, moved into `bronze/relationships/bronze.dbml`: 869 `use` lines and
     // 1,738 Refs in one file. Each Ref end finds its `use` line from a map built once per file; a
