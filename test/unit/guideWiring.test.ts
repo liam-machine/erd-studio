@@ -298,9 +298,70 @@ describe('once per machine: when each phase runs', () => {
   });
 });
 
+describe('the host hears that the guide showed (it spends the major update notice)', () => {
+  function heard(initial?: GuideStatus) {
+    let status: GuideStatus | undefined = initial;
+    const onShown = vi.fn();
+    const warned: string[] = [];
+    const guide = new OnboardingGuide({
+      getStatus: () => status, setStatus: (s) => { status = s; }, feature: () => undefined,
+      executeCommand: async () => undefined, openExternal: async () => undefined,
+      semanticDir: () => '.erd-studio', dbml: () => true, holdPrompts: () => undefined,
+      onShown, warn: (message) => { warned.push(message); },
+    });
+    return { guide, onShown, warned };
+  }
+
+  it('every way a run begins: by itself on the first draft, and Show Me Around on a draft, an open draft, a diagram that loads and an open diagram', () => {
+    const first = heard();
+    expect(first.guide.takeDraft(sqlDraft())).toBeDefined();
+    expect(first.onShown).toHaveBeenCalledTimes(1);
+    // The same run going on to another draft is not a new one.
+    first.guide.takeDraft(sqlDraft());
+    expect(first.onShown).toHaveBeenCalledTimes(1);
+
+    const asked = heard('skipped');
+    asked.guide.requestDraft();
+    asked.guide.takeDraft(sqlDraft('start'));
+    expect(asked.onShown).toHaveBeenCalledTimes(1);
+
+    const openDraft = heard('done');
+    openDraft.guide.startOnOpenDraft();
+    expect(openDraft.onShown).toHaveBeenCalledTimes(1);
+
+    const loads = heard('done');
+    loads.guide.requestCanvas();
+    expect(loads.guide.takeCanvas()).toBeDefined();
+    expect(loads.onShown).toHaveBeenCalled();
+
+    const openCanvas = heard('skipped');
+    openCanvas.guide.startOnCanvas();
+    expect(openCanvas.onShown).toHaveBeenCalled();
+  });
+
+  it('the canvas part carrying on in a later window counts too; a draft or a diagram with no guide does not', () => {
+    const carried = heard('draft');
+    expect(carried.guide.takeCanvas()).toBeDefined();
+    expect(carried.onShown).toHaveBeenCalledTimes(1);
+
+    const had = heard('done');
+    expect(had.guide.takeDraft(sqlDraft())).toBeUndefined();
+    expect(had.guide.takeCanvas()).toBeUndefined();
+    had.guide.onCanvasAction({ action: 'step', step: 'canvasTable' });
+    expect(had.onShown).not.toHaveBeenCalled();
+  });
+
+  it('a host that throws there never stops the guide', () => {
+    const h = heard();
+    h.onShown.mockImplementation(() => { throw new Error('storage gone'); });
+    expect(h.guide.takeDraft(sqlDraft())).toBeDefined();
+    expect(h.warned).toEqual(['Could not note that the guide showed:']);
+  });
+});
+
 describe('nothing else pops over the canvas part', () => {
   it('while phase B is owed, activation holds back the prompts that would cover its canvas (each keeps its flag)', () => {
-    for (const kind of ['diagramsNudge', 'harnessInstall', 'harnessUpdate', 'upgradeNotice', 'migrateToV5', 'saveLayers'] as const) {
+    for (const kind of ['diagramsNudge', 'harnessInstall', 'harnessUpdate', 'majorUpdateNotice', 'upgradeNotice', 'migrateToV5', 'saveLayers'] as const) {
       expect(guideDefersPrompt(kind, 'draft'), kind).toBe(true);
       expect(guideDefersPrompt(kind, undefined), kind).toBe(false);
       expect(guideDefersPrompt(kind, 'done'), kind).toBe(false);
@@ -322,7 +383,7 @@ describe('nothing else pops over the canvas part', () => {
     });
     h.takeCanvas();
     expect(gate.claimed).toBe('guide');
-    for (const kind of ['harnessInstall', 'diagramsNudge', 'dbmlConversion', 'namingMigration'] as const) expect(gate.claim(kind)).toBe(false);
+    for (const kind of ['harnessInstall', 'diagramsNudge', 'majorUpdateNotice', 'dbmlConversion', 'namingMigration'] as const) expect(gate.claim(kind)).toBe(false);
   });
 
   it('a phase B that starts while the start suggestion still looks takes the window as soon as it is handed on', () => {

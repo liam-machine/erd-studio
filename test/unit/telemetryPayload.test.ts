@@ -679,11 +679,13 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.indexOf('importOutcomeSqlDdlClean')).toBe(FEATURES.indexOf('crashFallbackFeedback') + 1);
     // The automatic draft's time-limit drop is appended after them.
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
-    // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys), never put before it.
+    // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
+    // major update notice's), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
       'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
+      'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
     ]);
     // #262's per-step load codes follow the logged-error ones.
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
@@ -719,6 +721,7 @@ describe('allowlists agree with the Worker', () => {
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
       'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
+      'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
