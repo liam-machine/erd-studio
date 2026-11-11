@@ -69,7 +69,7 @@ import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, conve
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
-import { submitFeedback } from './services/feedbackService';
+import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
@@ -96,6 +96,7 @@ import {
   CHOOSE_ANOTHER_NAME_BUTTON,
   NO_LAYERS_MESSAGE,
   OPEN_FILE_BUTTON,
+  OPEN_GITHUB_ISSUES_BUTTON,
   OPEN_IT_BUTTON,
   RELOAD_WINDOW_BUTTON,
   SAVE_ALL_BUTTON,
@@ -104,6 +105,7 @@ import {
   diagramNameTakenMessage,
   feedbackPrefill,
   oursMessage,
+  reportNotOpenedMessage,
   showErrorWithActions,
 } from './services/commandErrors';
 import {
@@ -157,7 +159,7 @@ import {
   type GoToTableDeps,
   type TableDetails,
 } from './commands/goToTable';
-import type { FeedbackKind } from './types/feedback';
+import { GITHUB_NEW_ISSUE_URL, type FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
 import {
   GettingStartedPanel,
@@ -207,6 +209,7 @@ import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
 import { CUSTOMISE_FIELDS_COMMAND, customiseFields } from './commands/customiseFields';
+import { SUGGEST_RELATIONSHIPS_COMMAND } from './providers/suggestRelationshipsFlow';
 import { EXPORT_ALL_DIAGRAMS_COMMAND, exportAllDiagramsCommand } from './commands/exportAllDiagrams';
 import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
@@ -717,15 +720,34 @@ export const NEEDS_DBT_PROJECT_MESSAGE =
 const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is no selectors.yml to generate.';
 
 /**
+ * Who is told that a guarded refresh failed ({@link guardRefresh}): the
+ * editor provider, set by `activate()`, so the open canvases can say they
+ * may be out of date. Unset outside a project.
+ */
+let refreshFailureSink: ((kind: RefreshKind) => void) | undefined;
+
+/** Set (or, with `undefined`, clear) who {@link guardRefresh} tells about a failed refresh. */
+export function setRefreshFailureSink(sink: ((kind: RefreshKind) => void) | undefined): void {
+  refreshFailureSink = sink;
+}
+
+/**
  * A file watcher's listener, guarded (B12): a refresh that throws or rejects
- * counts `refreshFailed` and its kind, and is logged here instead of
- * becoming an unhandled rejection. What the listener does is unchanged.
+ * counts `refreshFailed` and its kind, is logged here instead of becoming an
+ * unhandled rejection, and is reported to the open canvases (a "not shown"
+ * note with Reload from disk). What the listener does is unchanged.
  */
 export function guardRefresh<A extends unknown[]>(kind: RefreshKind, listener: (...args: A) => unknown): (...args: A) => void {
   const failed = (err: unknown): void => {
     telemetry.error('refreshFailed');
     telemetry.error(REFRESH_FAILED[kind]);
     log.error(`[ERD Studio] A refresh after a ${kind} change failed:`, err);
+    // The open canvases may be out of date now: they say so (never thrown from here).
+    try {
+      refreshFailureSink?.(kind);
+    } catch (sinkErr) {
+      log.error('[ERD Studio] Telling the canvases about a failed refresh failed:', sinkErr);
+    }
   };
   return (...args: A): void => {
     try {
@@ -798,6 +820,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.goToTable',
   'erdStudio.addToDiagram',
   'erdStudio.revealInTableLibrary',
+  'erdStudio.reloadFromDisk',
   'erdStudio.filterDiagrams',
   'erdStudio.clearDiagramsFilter',
   'erdStudio.filterTableLibrary',
@@ -818,6 +841,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showMeAround',
   'erdStudio.customiseFields',
   'erdStudio.showImportReport',
+  'erdStudio.suggestRelationships',
 ]);
 
 /**
@@ -1131,9 +1155,35 @@ async function sendFeedbackWithoutCanvas(
   if (description === undefined) return;
   const result = await submitFeedback(context, { kind, title, description, includeDiagnostics: true });
   // The browser is where the issue is actually filed, so all we can record is
-  // that one was opened; the tracker reconciles it against GitHub later.
+  // that one was opened; the tracker reconciles it against GitHub later. A
+  // failed globalState write is never reported as a failed report.
   if (result.ok && result.commentedOn === undefined) {
-    await tracking?.recordPending(title, kind);
+    try {
+      await tracking?.recordPending(title, kind);
+    } catch (err) {
+      log.error('[ERD Studio] Send Feedback: recording the report failed:', err);
+    }
+  }
+  // A failure of ours would otherwise end silently, with what the user typed
+  // gone (#285): keep the text on the clipboard and say what to do next. A
+  // browser failure has already been shown, with its own buttons.
+  if (!result.ok && result.failure === 'ours') {
+    let copied = false;
+    try {
+      await vscode.env.clipboard.writeText(description.trim() ? `${title}\n\n${description}` : title);
+      copied = true;
+    } catch (err) {
+      log.error('[ERD Studio] Send Feedback: copying the text failed:', err);
+    }
+    showErrorWithActions(
+      (message, ...items) => vscode.window.showErrorMessage(message, ...items),
+      reportNotOpenedMessage(copied),
+      {
+        [OPEN_GITHUB_ISSUES_BUTTON]: () => openFixedLink(GITHUB_NEW_ISSUE_URL),
+        [TRY_AGAIN_BUTTON]: () => sendFeedbackWithoutCanvas(context, { kind, title, description }, tracking),
+      },
+      (choice, err) => log.error(`[ERD Studio] Send Feedback: "${choice}" failed:`, err),
+    );
   }
 }
 
@@ -1881,6 +1931,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   editorProviderForFeedback = editorProvider;
   // The detail panel's "Reviewed by" reads the same CODEOWNERS as the Table Library's tooltips.
   editorProvider.useCodeOwners(codeOwners);
+  // A watcher's refresh that throws is said on the open canvases, not only in the log.
+  setRefreshFailureSink((kind) => editorProvider.noteRefreshFailed(kind));
 
   // Report tracking is constructed here, before refreshContextKeys() is defined
   // and called below, so nothing can reference a service that does not exist
@@ -2282,12 +2334,38 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
+    // A canvas whose document is not following its file (left unsaved by a
+    // failed save, or never synced) is redrawn from the file. Never writes.
+    void editorProvider.syncSubjectAreaWithDisk(uri.fsPath).catch((err) => {
+      log.error('[ERD Studio] Redraw of a diagram from its file failed:', err);
+    });
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
     tableLibraryProvider.refresh();
     // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
     refreshContextKeys();
   }));
+
+  // A .dbml saved where ERD Studio reads no file (a table outside a schema
+  // folder, a folder too deep): nothing to redraw, but the open canvases say
+  // the file is not read, so it never looks like a reload that failed.
+  const unreadFileSubscription = fileWatcherService.onUnreadFileChanged(({ uri }) => {
+    editorProvider.noteUnreadFile(uri.fsPath);
+  });
+
+  // A relationships file saved in THIS window (typed and saved, formatted or
+  // auto-saved here): an open logical canvas whose diagram now needs to
+  // import it gets the import added, as Add the import does (one edit, one
+  // undo step). A change that only reaches the disk (git, another program,
+  // an assistant writing the file) fires no save event and never writes: the
+  // strip offers the button. ERD Studio's own saves are skipped inside.
+  const savedDocumentSubscription = vscode.workspace.onDidSaveTextDocument((document) => {
+    try {
+      editorProvider.noteDocumentSaved(document);
+    } catch (err) {
+      log.warn('[ERD Studio] Could not check a saved file for relationships imports:', err);
+    }
+  });
 
   // Rename Subject Area records its created and deleted files as own writes,
   // so the watcher skips them: the side effects its change and delete events
@@ -2436,7 +2514,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // layers.json changed externally (git pull, manual edit, delete) → drop the
   // cached layer list so the tree, decorations and domain listing pick up the
   // new layers; warn if the file is now unreadable.
-  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(guardRefresh('Layers', () => {
+  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(guardRefresh('Layers', async () => {
     draftGeneration.bump();
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea();
@@ -2445,6 +2523,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     decorationProvider.refresh();
     refreshContextKeys();
     warnIfLayerConfigBroken();
+    // The open canvases draw the layer's label and colour, and a diagram
+    // opens only in a configured layer: they follow the file too. Never writes.
+    await editorProvider.refreshAllOpenSubjectAreas();
   }));
 
   // fields.yml (the project's field list) changed outside ERD Studio → drop
@@ -2881,6 +2962,12 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     ...(quiet ? { quiet, quietDrop } : {}),
     generation: () => draftGeneration.value,
   });
+  // Every import through Import DBML's flow (a DBML file, SQL scripts or a catalog export, a semantic model):
+  // once Keep has written the diagram, its canvas offers the relationships it can suggest (it writes none).
+  const refreshAfterImport = (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }): void => {
+    refreshAfterNewSubjectArea(written);
+    editorProvider.offerSuggestionsWhenOpened(written.domainPath);
+  };
   const importDbmlDeps = (draft?: ImportDraftOptions): ImportDbmlDeps => ({
     workspaceRoot,
     semanticDir,
@@ -2888,7 +2975,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     subjectAreaService,
     tableLibraryService,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     // "This folder has a DBML file": the one the look counted (never ERD Studio's own export);
     // the quick path drafts it and the Open dialog starts on it, chosen.
     findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir),
@@ -2902,7 +2989,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     tableLibraryService,
     extensionPath: context.extensionPath,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     timeLimitMs: sqlImportTimeLimitMs(),
     ...(draft ? { draft } : {}),
   });
@@ -2913,7 +3000,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     subjectAreaService,
     tableLibraryService,
     validateDomainName: validateNewSlug,
-    onWritten: refreshAfterNewSubjectArea,
+    onWritten: refreshAfterImport,
     ...(draft ? { draft } : {}),
   });
   const dbtDeps = (draft?: DbtDraftOptions): DrawFromDbtDeps => ({
@@ -3078,6 +3165,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     semanticChangedSubscription,
     relationshipsChangedSubscription,
     foreignFormatSubscription,
+    unreadFileSubscription,
+    savedDocumentSubscription,
+    { dispose: () => setRefreshFailureSink(undefined) },
     editorWroteSubscription,
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
@@ -3731,6 +3821,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
     // holding the starting set. Writes nothing (the user saves it).
     vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, () => customiseFields(fullSemanticDirPath)),
+    // Suggest Relationships…: on the active canvas (the editor title menu passes its Uri). Writes only what the user accepts.
+    vscode.commands.registerCommand(SUGGEST_RELATIONSHIPS_COMMAND, (arg?: unknown) =>
+      editorProvider.suggestRelationships(arg instanceof vscode.Uri ? arg : undefined)),
     // Export a domain's logical design as Mermaid or DBML. The argument is
     // the canvas's document Uri, the domain tree's node, or nothing (the
     // focused canvas, else the domain picker). Writes no ERD Studio file.
@@ -4088,6 +4181,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         await openRenamed();
       },
     ),
+    // The escape hatch for a setup where file events do not arrive, and the
+    // "not shown" strip's Reload from disk: read every file again, redraw the
+    // open canvases and refresh the sidebar. Read-only: it writes nothing.
+    vscode.commands.registerCommand('erdStudio.reloadFromDisk', async () => {
+      draftGeneration.bump();
+      treeProvider.invalidateSubjectArea();
+      await editorProvider.reloadFromDisk();
+      treeProvider.refresh();
+      tableLibraryProvider.refresh();
+      decorationProvider.refresh();
+      refreshContextKeys();
+    }),
     vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
       if (!hasDbt) {
         void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);

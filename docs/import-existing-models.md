@@ -6,6 +6,8 @@ The same steps are inside ERD Studio: run **ERD Studio: Bring In Your Data Model
 
 Every import works the same way once you have the files: you pick the files (or a folder), a layer and a name, and ERD Studio shows what it will create before anything is written. A table whose name your project already has is used as it is only when it has the same columns; otherwise the import keeps the file's table as its own, named after the new diagram (`warehouse_customer`), and the draft says so (step by step, it asks first). **Review All…** lists every table, relationship and anything it left out: from SQL scripts, anything that is not a table (views, indexes, grants and the like) is listed as not imported. **ERD Studio: Show Import Report** (also a link on the draft) lists what the last import imported, repaired, could not import and skipped, grouped and counted, each with its file and line. A large set of SQL scripts shows its progress with a **Cancel** button and stops at a time limit (two minutes by default; the `erdStudio.import.timeLimitSeconds` setting changes it, `0` for none): either way the tables read so far are imported, and the report lists the rest from the line where each file stopped. Nothing leaves your machine.
 
+A lakehouse often declares no foreign keys, so its import has tables and no relationships. When the new diagram has none, ERD Studio offers **Review Suggestions**: the relationships the column names and keys point at, each with its reasons, only the ones a declared key backs ticked. Nothing is added until you press OK, and **Edit > Undo** takes them all back. **ERD Studio: Suggest Relationships…** runs the same review on any diagram.
+
 - [Databricks (Unity Catalog)](#databricks-unity-catalog)
 - [Snowflake](#snowflake)
 - [Power BI](#power-bi)
@@ -17,12 +19,16 @@ Every import works the same way once you have the files: you pick the files (or 
 - [Google BigQuery](#google-bigquery)
 - [Amazon Redshift](#amazon-redshift)
 - [SQLite](#sqlite)
+- [DuckDB](#duckdb)
+- [A catalog export from another database](#a-catalog-export-from-another-database)
 - [dbdiagram.io and other DBML tools](#dbdiagramio-and-other-dbml-tools)
 - [Other modelling tools](#other-modelling-tools)
 - [dbt](#dbt)
 - [Not yet](#not-yet)
 
 ## Databricks (Unity Catalog)
+
+There are two ways. **Recommended: one query, downloaded as CSV** (the second one below): one query and one download, with no notebook and nothing to copy by hand, and comments and column types come in exactly as the catalog holds them. Use the notebook cell instead if you need column defaults or identity columns: only `CREATE TABLE` statements carry them.
 
 Export the `CREATE TABLE` statements of a whole schema in one notebook cell. Declared `PRIMARY KEY` and `FOREIGN KEY` constraints become keys and relationships.
 
@@ -40,6 +46,63 @@ for t in tables:
 ```
 
 Then run **ERD Studio: Import SQL DDL…**, pick the file and choose **Databricks / Spark SQL** (the guide's **Import Databricks DDL…** button chooses it for you). Delta settings (`USING DELTA`, `TBLPROPERTIES`, `CLUSTER BY`, `LOCATION`) are left out; `ARRAY`, `STRUCT` and `MAP` columns keep their types.
+
+This keeps column defaults and identity columns. A comment with a backslash in it can come in changed: `SHOW CREATE TABLE` writes the backslash as it is.
+
+**Or one query, downloaded as CSV.** No notebook and nothing to copy by hand: run this in the SQL editor with your catalog on its `WHERE` line, and download the whole result as CSV into your project folder.
+
+```sql
+-- One row per column of every table and view in a catalog, for ERD Studio. Put your catalog on the WHERE line.
+SELECT c.table_schema,
+       c.table_name,
+       t.table_type,
+       coalesce(t.comment, '') AS table_comment,
+       c.column_name,
+       c.ordinal_position,
+       c.full_data_type AS data_type,
+       c.is_nullable,
+       coalesce(c.column_default, '') AS column_default,
+       coalesce(c.comment, '') AS column_comment,
+       CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key,
+       coalesce(cast(pk.ordinal_position AS STRING), '') AS pk_ordinal,
+       coalesce(fk.constraint_name, '') AS fk_constraint_name,
+       coalesce(cast(fk.fk_ordinal AS STRING), '') AS fk_ordinal,
+       coalesce(fk.fk_table_catalog, '') AS fk_table_catalog,
+       coalesce(fk.fk_table_schema, '') AS fk_table_schema,
+       coalesce(fk.fk_table, '') AS fk_table,
+       coalesce(fk.fk_column, '') AS fk_column,
+       count(*) OVER () AS total_rows
+FROM system.information_schema.columns c
+JOIN system.information_schema.tables t
+  ON t.table_catalog = c.table_catalog AND t.table_schema = c.table_schema AND t.table_name = c.table_name
+LEFT JOIN (
+  SELECT k.table_catalog, k.table_schema, k.table_name, k.column_name, k.ordinal_position
+  FROM system.information_schema.table_constraints tc
+  JOIN system.information_schema.key_column_usage k
+    ON k.constraint_catalog = tc.constraint_catalog AND k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name
+   AND k.table_schema = tc.table_schema AND k.table_name = tc.table_name
+  WHERE tc.constraint_type = 'PRIMARY KEY'
+) pk ON pk.table_catalog = c.table_catalog AND pk.table_schema = c.table_schema AND pk.table_name = c.table_name AND pk.column_name = c.column_name
+LEFT JOIN (
+  SELECT k.table_catalog, k.table_schema, k.table_name, k.column_name, k.constraint_name, k.ordinal_position AS fk_ordinal,
+         r.table_catalog AS fk_table_catalog, r.table_schema AS fk_table_schema, r.table_name AS fk_table, r.column_name AS fk_column
+  FROM system.information_schema.table_constraints tc
+  JOIN system.information_schema.key_column_usage k
+    ON k.constraint_catalog = tc.constraint_catalog AND k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name
+   AND k.table_schema = tc.table_schema AND k.table_name = tc.table_name
+  JOIN system.information_schema.referential_constraints rc
+    ON rc.constraint_catalog = k.constraint_catalog AND rc.constraint_schema = k.constraint_schema AND rc.constraint_name = k.constraint_name
+  JOIN system.information_schema.key_column_usage r
+    ON r.constraint_catalog = rc.unique_constraint_catalog AND r.constraint_schema = rc.unique_constraint_schema AND r.constraint_name = rc.unique_constraint_name
+   AND r.ordinal_position = k.position_in_unique_constraint
+  WHERE tc.constraint_type = 'FOREIGN KEY'
+) fk ON fk.table_catalog = c.table_catalog AND fk.table_schema = c.table_schema AND fk.table_name = c.table_name AND fk.column_name = c.column_name
+WHERE c.table_catalog = 'my_catalog'
+  AND c.table_schema <> 'information_schema'
+ORDER BY c.table_schema, c.table_name, c.ordinal_position, fk.constraint_name;
+```
+
+Then run **ERD Studio: Import SQL DDL…** and pick the `.csv` file (the guide's **Import the CSV…** button). Unity Catalog's `information_schema` does not show column defaults or identity columns, so they do not come in this way. The query counts its own rows (`total_rows`), so a download of only the first rows (the SQL editor offers the first 1,000) is refused rather than imported half.
 
 ## Snowflake
 
@@ -73,9 +136,83 @@ Tables, columns and relationships come across; DAX measures stay in Power BI. A 
 
 ## SQL Server and Azure SQL
 
-In SQL Server Management Studio, right-click the database → **Tasks → Generate Scripts…**, choose the tables, and on **Set Scripting Options** save to one file in your project folder. Schema only is the default (**Advanced → Types of data to script**). Then run **ERD Studio: Import SQL DDL…** and choose **SQL Server / Azure SQL**. Column descriptions written as `MS_Description` extended properties come across as notes.
+There are two ways. **Recommended: one query, saved as CSV** (the first one below): it runs in VS Code on Windows, macOS or Linux, where Generate Scripts needs SQL Server Management Studio, which runs on Windows only, and computed columns come in with their type. Use Generate Scripts instead if you need `CHECK` constraints: only a script carries them.
+
+**One query, saved as CSV.** Open a new query on your database in VS Code with Microsoft's **SQL Server (mssql)** extension, run this (**Execute Query**), then press **Save as CSV** beside the result and save the file in your project folder:
+
+```sql
+-- One row per column of every table and view, for ERD Studio (SQL Server 2017 or later, Azure SQL Database, Azure SQL Managed Instance).
+SELECT s.name AS table_schema,
+       o.name AS table_name,
+       CASE o.type WHEN 'V' THEN 'VIEW' ELSE 'BASE TABLE' END AS table_type,
+       CAST(tp.value AS nvarchar(max)) AS table_comment,
+       c.name AS column_name,
+       c.column_id AS ordinal_position,
+       CASE WHEN ty.is_user_defined = 1 THEN SCHEMA_NAME(ty.schema_id) + '.' + ty.name
+            WHEN ty.name IN ('varchar', 'char', 'varbinary', 'binary') THEN ty.name + '(' + CASE WHEN c.max_length = -1 THEN 'max' ELSE CAST(c.max_length AS varchar(10)) END + ')'
+            WHEN ty.name IN ('nvarchar', 'nchar') THEN ty.name + '(' + CASE WHEN c.max_length = -1 THEN 'max' ELSE CAST(c.max_length / 2 AS varchar(10)) END + ')'
+            WHEN ty.name IN ('decimal', 'numeric') THEN ty.name + '(' + CAST(c.precision AS varchar(5)) + ',' + CAST(c.scale AS varchar(5)) + ')'
+            WHEN ty.name IN ('datetime2', 'time', 'datetimeoffset') THEN ty.name + '(' + CAST(c.scale AS varchar(5)) + ')'
+            WHEN ty.name = 'xml' AND c.xml_collection_id <> 0 THEN 'xml(' + CASE WHEN c.is_xml_document = 1 THEN 'DOCUMENT ' ELSE 'CONTENT ' END
+                 + (SELECT SCHEMA_NAME(x.schema_id) + '.' + x.name FROM sys.xml_schema_collections x WHERE x.xml_collection_id = c.xml_collection_id) + ')'
+            ELSE ty.name END AS data_type,
+       CASE WHEN c.is_nullable = 1 THEN 'YES' ELSE 'NO' END AS is_nullable,
+       -- SQL Server keeps a default in parentheses, a number in two: ('AU'), ((0)), (getdate()).
+       CASE WHEN dc.d LIKE '(%)' AND TRY_CONVERT(float, SUBSTRING(dc.d, 2, LEN(dc.d) - 2)) IS NOT NULL THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 2)
+            WHEN dc.d LIKE 'N''%''' THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 1)
+            ELSE dc.d END AS column_default,
+       CAST(cp.value AS nvarchar(max)) AS column_comment,
+       CASE WHEN c.is_identity = 1 THEN 'YES' ELSE 'NO' END AS is_identity,
+       CASE WHEN pk.key_ordinal IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key,
+       pk.key_ordinal AS pk_ordinal,
+       uq.name AS unique_constraint_name,
+       fk.name AS fk_constraint_name,
+       fk.ord AS fk_ordinal,
+       fk.ref_schema AS fk_table_schema,
+       fk.ref_table AS fk_table,
+       fk.ref_column AS fk_column,
+       COUNT(*) OVER () AS total_rows
+FROM sys.objects o
+JOIN sys.schemas s ON s.schema_id = o.schema_id
+JOIN sys.columns c ON c.object_id = o.object_id
+JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+LEFT JOIN sys.extended_properties tp ON tp.class = 1 AND tp.major_id = o.object_id AND tp.minor_id = 0 AND tp.name = 'MS_Description'
+LEFT JOIN sys.extended_properties cp ON cp.class = 1 AND cp.major_id = o.object_id AND cp.minor_id = c.column_id AND cp.name = 'MS_Description'
+LEFT JOIN (
+  SELECT parent_object_id, parent_column_id, SUBSTRING(definition, 2, LEN(definition) - 2) AS d FROM sys.default_constraints
+) dc ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id
+LEFT JOIN (
+  SELECT ic.object_id, ic.column_id, ic.key_ordinal
+  FROM sys.key_constraints kc
+  JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+  WHERE kc.type = 'PK'
+) pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id
+LEFT JOIN (
+  -- Each unique key (constraint or index) the column is a key column of: never a filtered or disabled index, never an included column.
+  SELECT i.object_id, ic.column_id, i.name
+  FROM sys.indexes i
+  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0 AND ic.is_included_column = 0
+  WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND i.has_filter = 0 AND i.is_disabled = 0 AND i.is_hypothetical = 0
+) uq ON uq.object_id = c.object_id AND uq.column_id = c.column_id
+LEFT JOIN (
+  SELECT fkc.parent_object_id, fkc.parent_column_id, f.name, fkc.constraint_column_id AS ord,
+         SCHEMA_NAME(r.schema_id) AS ref_schema, r.name AS ref_table, rc.name AS ref_column
+  FROM sys.foreign_keys f
+  JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = f.object_id
+  JOIN sys.objects r ON r.object_id = fkc.referenced_object_id
+  JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+) fk ON fk.parent_object_id = c.object_id AND fk.parent_column_id = c.column_id
+WHERE o.type IN ('U', 'V') AND o.is_ms_shipped = 0 AND NOT (s.name = 'dbo' AND o.name = 'sysdiagrams')
+ORDER BY table_schema, table_name, ordinal_position, unique_constraint_name, fk_constraint_name;
+```
+
+Then run **ERD Studio: Import SQL DDL…** and pick the `.csv` file (the guide's **Import the CSV…** button). Tables, columns and their types, `NOT NULL`, primary keys, unique keys, foreign keys, identity columns, defaults and `MS_Description` descriptions all come in; views are listed as not imported. `CHECK` constraints do not come in this way; Generate Scripts keeps them. A filtered unique index (one with a `WHERE`) is not a unique key, so it does not come in. Save the whole result: the query counts its own rows (`total_rows`), so a save of part of it is refused rather than imported half. Use **Save as CSV**, not `sqlcmd`: `sqlcmd` does not quote a value with a comma or a line break in it, so a description like that splits its row, and the file is refused.
+
+**Or Generate Scripts, in SQL Server Management Studio.** Right-click the database → **Tasks → Generate Scripts…**, choose the tables, and on **Set Scripting Options** save to one file in your project folder. Schema only is the default (**Advanced → Types of data to script**). Then run **ERD Studio: Import SQL DDL…** and choose **SQL Server / Azure SQL**. Column descriptions written as `MS_Description` extended properties come across as notes, and `CHECK` constraints come in too. Leave out `dbo.sysdiagrams` (SQL Server Management Studio's own diagrams) when you choose the tables, or it comes in as a table. A computed column comes in without its type.
 
 ## PostgreSQL
+
+There are two ways. **Recommended: `pg_dump`**, which keeps the most: `CHECK` constraints and identity columns come in too. Use the catalog query further down instead if you can run a query on the database but cannot run `pg_dump`.
 
 `pg_dump` writes the schema without the data. Run this in a terminal in your project folder (add `-n <schema>` for one schema):
 
@@ -85,7 +222,71 @@ pg_dump --schema-only --no-owner --no-privileges -d <database> -f schema.sql
 
 Then run **ERD Studio: Import SQL DDL…** and choose **PostgreSQL**. Keys that `pg_dump` adds afterwards (`ALTER TABLE … ADD CONSTRAINT`) are read with their tables.
 
+**Or one query, saved as CSV** (PostgreSQL 12 or later). Save this as `catalog.sql` in your project folder:
+
+```sql
+-- One row per column of every table and view, for ERD Studio (PostgreSQL 12 or later). System schemas and partitions are left out.
+SELECT n.nspname AS table_schema,
+       c.relname AS table_name,
+       CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' ELSE 'BASE TABLE' END AS table_type,
+       obj_description(c.oid, 'pg_class') AS table_comment,
+       a.attname AS column_name,
+       a.attnum AS ordinal_position,
+       format_type(a.atttypid, a.atttypmod) AS data_type,
+       CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+       pg_get_expr(d.adbin, d.adrelid) AS column_default,
+       col_description(c.oid, a.attnum) AS column_comment,
+       CASE WHEN pk.ord IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key,
+       pk.ord AS pk_ordinal,
+       uq.unique_name AS unique_constraint_name,
+       fk.conname AS fk_constraint_name,
+       fk.ord AS fk_ordinal,
+       fk.ref_schema AS fk_table_schema,
+       fk.ref_table AS fk_table,
+       fk.ref_column AS fk_column,
+       count(*) OVER () AS total_rows
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+LEFT JOIN LATERAL (
+  SELECT k.ord FROM pg_constraint p, unnest(p.conkey) WITH ORDINALITY AS k(attnum, ord)
+  WHERE p.conrelid = c.oid AND p.contype = 'p' AND k.attnum = a.attnum
+) pk ON true
+LEFT JOIN LATERAL (
+  -- Each unique key (constraint or index) the column is in, over columns only: never partial or on an expression.
+  SELECT ic.relname AS unique_name FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid
+  WHERE i.indrelid = c.oid AND i.indisunique AND NOT i.indisprimary AND i.indpred IS NULL AND i.indexprs IS NULL
+    AND a.attnum = ANY ((i.indkey::int2[])[0:i.indnkeyatts - 1])
+) uq ON true
+LEFT JOIN LATERAL (
+  -- A partitioned table's foreign keys include those declared on its partitions, pointing at the referenced table's root.
+  SELECT f.conname, k.ord, rn.nspname AS ref_schema, rc.relname AS ref_table, ra.attname AS ref_column
+  FROM pg_constraint f
+  CROSS JOIN LATERAL unnest(f.conkey, f.confkey) WITH ORDINALITY AS k(attnum, refattnum, ord)
+  JOIN pg_attribute fa ON fa.attrelid = f.conrelid AND fa.attnum = k.attnum
+  JOIN pg_attribute ra ON ra.attrelid = f.confrelid AND ra.attnum = k.refattnum
+  JOIN pg_class rc ON rc.oid = coalesce(pg_partition_root(f.confrelid), f.confrelid)
+  JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+  WHERE f.contype = 'f' AND f.conparentid = 0 AND fa.attname = a.attname
+    AND (f.conrelid = c.oid OR f.conrelid IN (SELECT relid FROM pg_partition_tree(c.oid)))
+) fk ON true
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\_%'
+ORDER BY 1, 2, 6, 13, 14;
+```
+
+Run it with `psql`, which writes the CSV:
+
+```sh
+psql -d <database> --csv -f catalog.sql -o catalog.csv
+```
+
+Then run **ERD Studio: Import SQL DDL…** and pick `catalog.csv`. Partitions come in as their parent table. `CHECK` constraints and identity columns do not come in this way; `pg_dump` keeps them.
+
 ## MySQL and MariaDB
+
+There are two ways. **Recommended: `mysqldump`**, which keeps the most: `CHECK` constraints come in too. Use the catalog query further down instead if you can run a query on the database but cannot run `mysqldump`.
 
 `mysqldump` writes the tables without the data (MariaDB also calls it `mariadb-dump`). Add `-h`, `-u` and `-p` as you connect:
 
@@ -94,6 +295,55 @@ mysqldump --no-data --result-file=schema.sql <database>
 ```
 
 `--result-file` writes the file as it is on every system (a `>` redirect in Windows PowerShell can change its encoding). Then run **ERD Studio: Import SQL DDL…** and choose **MySQL / MariaDB**.
+
+**Or one query, saved as TSV** (MySQL 8, or MariaDB 10.2 or later). Save this as `catalog.sql` in your project folder:
+
+```sql
+-- One row per column of every table and view, for ERD Studio (MySQL 8 or MariaDB 10.2 or later). System schemas are left out.
+SELECT c.TABLE_SCHEMA AS table_schema,
+       c.TABLE_NAME AS table_name,
+       t.TABLE_TYPE AS table_type,
+       t.TABLE_COMMENT AS table_comment,
+       c.COLUMN_NAME AS column_name,
+       c.ORDINAL_POSITION AS ordinal_position,
+       c.COLUMN_TYPE AS data_type,
+       c.IS_NULLABLE AS is_nullable,
+       c.COLUMN_DEFAULT AS column_default,
+       c.EXTRA AS extra,
+       c.COLUMN_COMMENT AS column_comment,
+       CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key,
+       pk.ORDINAL_POSITION AS pk_ordinal,
+       uq.INDEX_NAME AS unique_constraint_name,
+       fk.CONSTRAINT_NAME AS fk_constraint_name,
+       fk.ORDINAL_POSITION AS fk_ordinal,
+       fk.REFERENCED_TABLE_SCHEMA AS fk_table_schema,
+       fk.REFERENCED_TABLE_NAME AS fk_table,
+       fk.REFERENCED_COLUMN_NAME AS fk_column,
+       COUNT(*) OVER () AS total_rows
+FROM information_schema.COLUMNS c
+JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+LEFT JOIN information_schema.KEY_COLUMN_USAGE pk
+       ON pk.TABLE_SCHEMA = c.TABLE_SCHEMA AND pk.TABLE_NAME = c.TABLE_NAME AND pk.COLUMN_NAME = c.COLUMN_NAME AND pk.CONSTRAINT_NAME = 'PRIMARY'
+LEFT JOIN information_schema.STATISTICS uq
+       ON uq.TABLE_SCHEMA = c.TABLE_SCHEMA AND uq.TABLE_NAME = c.TABLE_NAME AND uq.COLUMN_NAME = c.COLUMN_NAME
+      AND uq.NON_UNIQUE = 0 AND uq.INDEX_NAME <> 'PRIMARY'
+      -- Unique on whole columns only: never on an expression or a prefix of a column.
+      AND NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS e
+                      WHERE e.TABLE_SCHEMA = uq.TABLE_SCHEMA AND e.TABLE_NAME = uq.TABLE_NAME AND e.INDEX_NAME = uq.INDEX_NAME
+                        AND (e.COLUMN_NAME IS NULL OR e.SUB_PART IS NOT NULL))
+LEFT JOIN information_schema.KEY_COLUMN_USAGE fk
+       ON fk.TABLE_SCHEMA = c.TABLE_SCHEMA AND fk.TABLE_NAME = c.TABLE_NAME AND fk.COLUMN_NAME = c.COLUMN_NAME AND fk.REFERENCED_TABLE_NAME IS NOT NULL
+WHERE c.TABLE_SCHEMA NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')
+ORDER BY 1, 2, 6, 14, 15;
+```
+
+Run it with the `mysql` client, which writes the result tab-separated:
+
+```sh
+mysql --batch --execute="source catalog.sql" > catalog.tsv
+```
+
+Then run **ERD Studio: Import SQL DDL…** and pick `catalog.tsv`. `CHECK` constraints do not come in this way; `mysqldump` keeps them.
 
 ## Oracle
 
@@ -138,6 +388,76 @@ sqlite3 my.db .schema > schema.sql
 ```
 
 Then run **ERD Studio: Import SQL DDL…** and choose **SQLite**. Square-bracket names, `AUTOINCREMENT` and foreign keys inside the tables come across; a column without a type is imported as `unknown` (and listed), and virtual tables (`USING fts5` and the like), SQLite's own tables (`sqlite_sequence`, which `.schema` prints whenever a table uses `AUTOINCREMENT`) and triggers are left out.
+
+## DuckDB
+
+DuckDB has no `CREATE TABLE` export, so read its catalog instead. Run this in the `duckdb` shell (or any client) on your database file; it writes `catalog.csv`:
+
+```sql
+COPY (
+-- One row per column of every table and view, for ERD Studio (DuckDB). DuckDB's own catalog is left out.
+WITH rel AS (
+  SELECT schema_name, table_name, table_oid, 'BASE TABLE' AS table_type, comment FROM duckdb_tables() WHERE NOT internal
+  UNION ALL
+  SELECT schema_name, view_name, view_oid, 'VIEW', comment FROM duckdb_views() WHERE NOT internal
+), pk AS (
+  SELECT table_oid, unnest(constraint_column_names) AS column_name, generate_subscripts(constraint_column_names, 1) AS ord
+  FROM duckdb_constraints() WHERE constraint_type = 'PRIMARY KEY'
+), uq AS (
+  SELECT table_oid, constraint_name, unnest(constraint_column_names) AS column_name
+  FROM duckdb_constraints() WHERE constraint_type = 'UNIQUE'
+), fk AS (
+  SELECT table_oid, constraint_name, schema_name AS ref_schema, referenced_table,
+         unnest(constraint_column_names) AS column_name, unnest(referenced_column_names) AS ref_column,
+         generate_subscripts(constraint_column_names, 1) AS ord
+  FROM duckdb_constraints() WHERE constraint_type = 'FOREIGN KEY'
+)
+SELECT rel.schema_name AS table_schema, rel.table_name, rel.table_type, rel.comment AS table_comment,
+       c.column_name, c.column_index AS ordinal_position, c.data_type,
+       CASE WHEN c.is_nullable THEN 'YES' ELSE 'NO' END AS is_nullable,
+       c.column_default, c.comment AS column_comment,
+       CASE WHEN pk.ord IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key, pk.ord AS pk_ordinal,
+       uq.constraint_name AS unique_constraint_name,
+       fk.constraint_name AS fk_constraint_name, fk.ord AS fk_ordinal,
+       fk.ref_schema AS fk_table_schema, fk.referenced_table AS fk_table, fk.ref_column AS fk_column,
+       count(*) OVER () AS total_rows
+FROM rel
+JOIN duckdb_columns() c ON c.table_oid = rel.table_oid
+LEFT JOIN pk ON pk.table_oid = rel.table_oid AND pk.column_name = c.column_name
+LEFT JOIN uq ON uq.table_oid = rel.table_oid AND uq.column_name = c.column_name
+LEFT JOIN fk ON fk.table_oid = rel.table_oid AND fk.column_name = c.column_name
+ORDER BY 1, 2, 6, 13, 14
+) TO 'catalog.csv' (HEADER);
+```
+
+Then run **ERD Studio: Import SQL DDL…** and pick `catalog.csv`.
+
+## A catalog export from another database
+
+**ERD Studio: Import SQL DDL…** also reads a CSV (or TSV) of a database's columns, one row per column, from any database. The queries above write one; for another database, write a query over its catalog with the column names below and save the result as CSV. Column names are read in any case, with spaces or underscores. Only `table_name`, `column_name` and `data_type` are needed; every other column adds what it holds. ERD Studio reads only the file, never the database, and it does not guess which database wrote it.
+
+| Column | Also read as | What it gives |
+|---|---|---|
+| `table_name` | `table`, `relname` | the table (required) |
+| `column_name` | `column`, `col_name`, `name` | the column (required) |
+| `data_type` | `full_data_type`, `column_type`, `type`, `type_name` | the type (required). A value with its size (`varchar(50)`, `decimal(18,4)`, `struct<…>`) is kept as it is |
+| `table_schema` | `schema`, `schema_name`, `owner` | the schema |
+| `table_catalog` | `catalog`, `catalog_name` | tells apart tables of one name in two catalogs |
+| `table_type` | `object_type` | rows of a `VIEW` (or materialized view) are skipped, and said; without this column views come in as tables, and the import says so |
+| `ordinal_position` | `column_id`, `ordinal`, `position` | the column order (0- or 1-based: only the order matters); without it, the file's row order |
+| `is_nullable` | `nullable`; `notnull` the other way round | `NO` is NOT NULL |
+| `character_maximum_length`, `numeric_precision`, `numeric_scale` | `data_length`, `data_precision`, `data_scale` | the size of a `varchar`, `char`, `decimal`, `numeric` or `number` given without one |
+| `column_default` | `data_default`, `default` | the default |
+| `column_comment` | `comment`, `comments`, `description`, `remarks` | the column's description |
+| `table_comment` | `table_comments`, `table_description` | the table's description |
+| `is_primary_key` | `primary_key`, `pk`; MySQL's `column_key` (`PRI`) | the primary key; `pk_ordinal` orders a composite one |
+| `is_unique` | `unique`; `unique_constraint_name` groups a composite one | unique keys |
+| `fk_constraint_name`, `fk_table_schema`, `fk_table`, `fk_column` | `referenced_table_schema`, `referenced_table_name`, `referenced_column_name` | foreign keys; `fk_ordinal` pairs a composite one's columns in order, and a column in two foreign keys is two rows |
+| `constraint_name`, `constraint_type` | | the constraint-join shape: one row per column per constraint (`PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, or Oracle's `P`, `U`, `R`) |
+| `is_identity` | `extra` (`auto_increment`) | identity columns |
+| `total_rows` | | the query's row count (`count(*) OVER ()`): a file with fewer rows than it says was cut short, and is refused |
+
+A column that appears on several rows (one per constraint it is in) is read once. A file without key columns imports its tables and columns, and the draft says the file had no keys (not that the tables have none). `NULL` may be written as nothing, `NULL`, `null` or `\N`. System schemas (`information_schema`, `pg_catalog`, `sys`) are left out. A file with more than 100,000 rows is refused: export one schema at a time.
 
 ## dbdiagram.io and other DBML tools
 

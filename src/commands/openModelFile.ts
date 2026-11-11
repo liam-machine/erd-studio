@@ -47,7 +47,7 @@ export function showRefusedWrite(
     location ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) } : {},
     (choice, failure) => {
       log.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
-      void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}.`);
+      void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}. It may have been moved or deleted.`);
     },
   );
 }

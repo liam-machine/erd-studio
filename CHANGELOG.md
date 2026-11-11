@@ -8,6 +8,38 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **Import SQL DDL… reads a catalog export too:** pick a `.csv` (or `.tsv`) of your database's columns, one row per column, in the same Open dialog, and it becomes a draft like any import, with keys and relationships when the file has them. **Bring In Your Data Model…** gives the query for Databricks (Unity Catalog), SQL Server and Azure SQL, PostgreSQL and MySQL, beside each card's own export: one query and a download, no notebook (Databricks' catalog does not show column defaults or identity columns, so the notebook route still keeps those). The docs add DuckDB's and list the column names any other database's query can use. A file without key columns imports its tables and columns, and the draft says the file had no keys. A download that holds only the first rows (the query counts its rows) is refused, and so is a file of more than 100,000 columns: export one schema at a time.
+
+- **ERD Studio: Suggest Relationships…** proposes the relationships a diagram's column names and keys point at, for you to accept or leave: a list in four parts (**Strong**, **Likely**, **Possible**, **Direction unknown**), each with the reasons in plain words. Only the strong ones (a declared key backs them) are ticked; with no key declared, nothing is ticked and the list says why. For one whose direction nothing settles, it asks "Which way does this relationship point?", as the New Relationship dialog does, or you skip it. Everything you accept is added in one change, stored as a relationship you drew yourself, and **Edit > Undo** takes them all back; nothing is kept about the ones you leave. Run it from the Command Palette or the canvas tab's **⋯** menu. After an import whose diagram has no relationships, a notification offers **Review Suggestions** once, when ERD Studio found at least one likely relationship (its number counts only those).
+- **The canvas tells you what it is not drawing.** When something you wrote in a file cannot be drawn, a strip above the diagram now says so, with the file, the line and a link to open it, and it stays until the file is fixed. It covers a relationships file your diagram does not import (with an **Add the import** button, one edit you can undo), a `Ref` or `[ref: …]` written inside a table file, a relationships file with a syntax error or merge conflict, and a `.dbml` saved in a folder ERD Studio does not read (it says where the file belongs). Before, these were written only to the log, or shown once per session, so a hand edit could look like a reload that had failed.
+- **A relationship you write by hand is drawn when you save it.** When you save a relationships file in VS Code and an open diagram needs to import it (the first `Ref` between two of its tables, even in the layer's own relationships file, or a `Ref` in a new file), ERD Studio adds the `use *` line to the diagram for you and the line appears, with a short note naming the file. It is one edit you can undo with Cmd+Z (Ctrl+Z). A file changed outside this window (a git checkout or pull, another program, an AI assistant writing the file) never changes your diagrams: the strip offers **Add the import** instead.
+- **ERD Studio: Reload Diagrams from Disk** (Command Palette): reads every file again and redraws the open diagrams. You should not need it, since diagrams redraw by themselves when a file is saved; it is there for a folder where file changes do not reach VS Code (some network drives and containers). It writes nothing.
+
+### Changed
+
+- **Bring In Your Data Model… is in the Diagrams view's + menu**, under the imports, so a project that already has diagrams has a visible way to the import guide besides the Command Palette.
+- **The import guide shows every source at once.** Each source (Databricks, Snowflake, Power BI, Fabric, SQL Server, PostgreSQL, MySQL, DBML and the rest) is one line until you open it, so the whole list fits in view without scrolling; a source ERD Studio found in your folder starts open.
+- **Each source in the import guide shows its logo** beside its name, so you can spot the one you use.
+- **An open source in the import guide reads as steps.** Copy the query, run it and save the result, import the file: numbered, with one main button at the end, and what does not come in said after it. Where a source has two ways in, the card shows the one to use and the other is a single line saying when to use it (on Databricks: "Need column defaults or identity columns? Use a notebook instead."); on PostgreSQL and MySQL the dump is shown and the catalog query is the other way.
+- **Bring In Your Data Model… is also a row in Help & Feedback.**
+- **The import guide folds its long queries.** A query or notebook cell longer than six lines shows as one line ("Show all 48 lines") with **Copy** beside it, so the Databricks, SQL Server, PostgreSQL and MySQL cards no longer push the other sources off the page.
+- **A diagram whose file has a mistake keeps saying so.** The red message over the diagram now comes back on every save while the file is still broken, and the strip above the diagram says the picture is the last one that could be read, until the file reads again. Before, a dismissed message stayed gone and the old picture was left with no explanation.
+- **The "does not import it" message no longer says any edit to the diagram adds the import.** Moving a table saves only positions. The canvas now offers **Add the import**, and `erd-studio doctor` gives the line to write.
+
+### Fixed
+
+- **Send Feedback** no longer fails silently from the Command Palette: if the report can't be opened, ERD Studio says so, copies your title and description to the clipboard, and offers **Open GitHub Issues** and **Try Again**. The Send Feedback dialog shows the same plain sentence instead of a raw error.
+- When VS Code can't open your browser, Send Feedback offers **Copy Link** and **Copy Report** instead of printing a long link in the message. When commenting on an existing issue, it tells you the report is already on the clipboard and which issue to paste it on.
+- When the feedback API key can't be saved or cleared, the message explains that VS Code's secret storage isn't available on this machine, and **Learn More** opens VS Code's troubleshooting page.
+- When ERD Studio needs to reload the window (after an update, or when a diagram loses its connection) and some files couldn't be saved, it now asks in a dialog that names them, with **Show Files** to open the first one.
+- **Hand edits are picked up in more cases.** A change to `layers.json` (a layer's name or colour) now redraws the open diagrams, not only the sidebar. A diagram also checks its files when you click back into it, and redraws if a table or relationships file changed without VS Code telling ERD Studio.
+- **A diagram no longer gets stuck when its file could not be saved or changed behind an unsaved copy.** It is drawn from the file on disk and says that the open copy has unsaved changes.
+- **A redraw that fails inside ERD Studio is no longer silent.** The diagram says it may be out of date and offers **Reload from disk**.
+
 ## 2.0.2 — 2026-11-10
 
 ### Fixed

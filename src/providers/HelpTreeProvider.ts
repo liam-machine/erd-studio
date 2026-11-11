@@ -11,7 +11,7 @@ import * as vscode from 'vscode';
 
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { MyReportsTreeProvider, type MyReportNode } from './MyReportsTreeProvider';
-import { TOUR_LABEL } from '../types/startActions';
+import { IMPORT_GUIDE_COMMAND, IMPORT_GUIDE_LABEL, TOUR_LABEL } from '../types/startActions';
 import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from '../types/onboardingGuide';
 
 export interface HelpActionNode {
@@ -34,6 +34,10 @@ export const HELP_ACTIONS: readonly HelpActionNode[] = [
   {
     type: 'action', id: 'aiHelper', label: 'Set Up My AI Helper', icon: 'sparkle', command: 'erdStudio.setupAiHelper',
     tooltip: 'Teach your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to read and write your diagrams.',
+  },
+  {
+    type: 'action', id: 'importGuide', label: IMPORT_GUIDE_LABEL, icon: 'cloud-download', command: IMPORT_GUIDE_COMMAND,
+    tooltip: 'How to export the model you already have from Databricks, Snowflake, Power BI, Fabric or a database, and import it.',
   },
   {
     type: 'action', id: 'gettingStarted', label: TOUR_LABEL, icon: 'play-circle', command: 'erdStudio.showGettingStarted',

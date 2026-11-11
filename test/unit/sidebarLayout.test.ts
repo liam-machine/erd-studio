@@ -92,8 +92,12 @@ describe('sidebar views', () => {
   it('put every way to start a diagram, and New Layer, in the + menu', () => {
     expect(contributes.submenus).toContainEqual({ id: 'erdStudio.newMenu', label: 'New…', icon: '$(add)' });
     expect(contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual([
-      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.addLayer',
+      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.showImportGuide', 'erdStudio.addLayer',
     ]);
+    // The guide to every source sits in a group of its own under the imports, so a project that already has diagrams
+    // (no welcome view, no start screen) still has a visible way to it besides the Command Palette.
+    expect(contributes.menus['erdStudio.newMenu'].find((m) => m.command === 'erdStudio.showImportGuide'))
+      .toEqual({ command: 'erdStudio.showImportGuide', when: 'erdStudio.hasProject', group: '1_import_guide@1' });
     // The imports sit together, after Import DBML…, in the diagram group.
     expect(contributes.menus['erdStudio.newMenu'].filter((m) => m.command?.startsWith('erdStudio.import')).map((m) => m.group))
       .toEqual(['1_diagram@3', '1_diagram@4', '1_diagram@5']);
@@ -159,7 +163,7 @@ describe('HelpTreeProvider', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Bring In Your Data Model…', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
     for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);
@@ -169,10 +173,10 @@ describe('HelpTreeProvider', () => {
   it('adds My Reports after Send Feedback once there is a report, with the open count', () => {
     const provider = new HelpTreeProvider(tracking([report(2), report(1, 'closed')]));
     const rows = provider.getChildren();
-    expect(rows[4]).toEqual({ type: 'reports' });
-    const item = provider.getTreeItem(rows[4]);
+    expect(rows[5]).toEqual({ type: 'reports' });
+    const item = provider.getTreeItem(rows[5]);
     expect([item.label, item.description, item.contextValue]).toEqual(['My Reports', '1 open', 'myReports']);
-    expect(provider.getChildren(rows[4]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
+    expect(provider.getChildren(rows[5]).map((r) => provider.getTreeItem(r).label)).toEqual(['#2 Issue 2', '#1 Issue 1']);
     provider.dispose();
   });
 });

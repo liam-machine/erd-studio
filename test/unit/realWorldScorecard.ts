@@ -187,7 +187,7 @@ export function importDbmlFlow(
   dbml: string,
   fileName: string,
   importSource: 'file' | 'sql' | 'semanticModel',
-  origin?: { from: string; description?: string; notes: readonly string[]; skipped: readonly string[]; ledger?: readonly LedgerEntry[] },
+  origin?: { from: string; description?: string; notes: readonly string[]; skipped: readonly string[]; ledger?: readonly LedgerEntry[]; notice?: string },
 ): ImportRun {
   const read = readDbml(dbml);
   if (!read.ok) {

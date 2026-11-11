@@ -1197,6 +1197,50 @@ export class TableLibraryService {
     ].join('\n');
   }
 
+  /**
+   * The reader's problems for `name`'s `.dbml` table file (through the cache,
+   * so the answer is the file as it is on disk now), with the file: what
+   * `doctor` reports for it and what the canvas's "not shown" notes are
+   * arranged from (`src/services/filesNotShown.ts`). Null for a YAML table, a
+   * name with no file, and a file that does not read (its card says why).
+   * Reads only; never throws.
+   */
+  dbmlTableProblems(name: string): { filePath: string; problems: readonly DbmlProblem[] } | null {
+    try {
+      const filePath = this.findTableFile(name);
+      if (filePath === null || !isDbmlFile(filePath)) return null;
+      const reading = this.readDbmlTableFile(filePath);
+      return reading?.ok ? { filePath, problems: reading.problems } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * One string that changes whenever a file a diagram of `members` is drawn
+   * from changes on disk: each member's table file (its path, so a table
+   * that moved or appeared counts, and its `mtime:size`) and every
+   * relationships file of the library. A stat per file, nothing read: the
+   * canvas compares it with the one it drew from to tell whether it still
+   * shows the files (`SemanticEditorProvider.revalidateAgainstDisk`).
+   */
+  filesSignature(members: Iterable<string>): string {
+    return this.index.withSnapshot(() => {
+      const parts: string[] = [];
+      for (const name of members) {
+        let filePath: string | null = null;
+        try {
+          filePath = this.findTableFile(name);
+        } catch {
+          filePath = null;
+        }
+        parts.push(`${name.toLowerCase()}=${filePath ?? ''}@${filePath === null ? '' : fileSignature(filePath) ?? ''}`);
+      }
+      for (const filePath of this.listRelationshipsFiles()) parts.push(`${filePath}@${fileSignature(filePath) ?? ''}`);
+      return parts.join('\n');
+    });
+  }
+
   /** How `name`'s file stores it: `yaml`, `dbml`, or undefined when there is no file (or the name is unsafe). */
   tableStorage(name: string): 'yaml' | 'dbml' | undefined {
     try {

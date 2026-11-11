@@ -70,6 +70,18 @@ export async function _fireDidChangeTextDocument(
   await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges, reason })));
 }
 
+/** Listeners registered through workspace.onDidSaveTextDocument. */
+const _saveListeners: Array<(document: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidSaveTextDocument for `document`, as VS Code does once a
+ * save of an open document has written it (a mock document's save() calls
+ * this too). Resolves once every (async) listener has finished.
+ */
+export async function _fireDidSaveTextDocument(document: unknown): Promise<void> {
+  await Promise.all([..._saveListeners].map((listener) => listener(document)));
+}
+
 /** Listeners registered through workspace.onDidRenameFiles. */
 const _renameFilesListeners: Array<(e: unknown) => unknown> = [];
 
@@ -152,6 +164,23 @@ export const workspace = {
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
   textDocuments: [] as unknown[],
+  /**
+   * The path relative to the first workspace folder that holds it, else the
+   * path itself. As in VS Code, the folder's name is prepended when
+   * `includeWorkspaceFolder` is true, which is the default only in a
+   * multi-root workspace.
+   */
+  asRelativePath(pathOrUri: string | { fsPath: string }, includeWorkspaceFolder?: boolean): string {
+    const p = typeof pathOrUri === 'string' ? pathOrUri : pathOrUri.fsPath;
+    const withFolder = includeWorkspaceFolder ?? workspace.workspaceFolders.length > 1;
+    for (const folder of workspace.workspaceFolders) {
+      const root = folder.uri.fsPath.replace(/\/+$/, '');
+      if (!p.startsWith(`${root}/`)) continue;
+      const relative = p.slice(root.length + 1);
+      return withFolder ? `${folder.name ?? root.slice(root.lastIndexOf('/') + 1)}/${relative}` : relative;
+    }
+    return p;
+  },
   // Replaced below with implementations backed by the mock document registry.
   applyEdit: async (_edit: unknown): Promise<boolean> => true,
   openTextDocument: async (_uriOrPath: unknown): Promise<unknown> => { throw new Error('not initialised'); },
@@ -171,6 +200,8 @@ export const workspace = {
       },
     };
   },
+  /** Registers a listener; a mock document's save() and `_fireDidSaveTextDocument` call it. */
+  onDidSaveTextDocument: (listener: (document: unknown) => unknown) => _listen(_saveListeners, listener),
   /** Registers a listener; `_fireDidRenameFiles` (and a WorkspaceEdit's renameFile) calls it. */
   onDidRenameFiles: (listener: (e: unknown) => unknown) => {
     _renameFilesListeners.push(listener);
@@ -973,6 +1004,7 @@ export function _resetMockWorkspace(): void {
   _textDocumentChangeListeners.length = 0;
   _renameFilesListeners.length = 0;
   _deleteFilesListeners.length = 0;
+  _saveListeners.length = 0;
   _tabListeners.length = 0;
   _tabGroupListeners.length = 0;
   _contentProviders.length = 0;
@@ -1018,6 +1050,8 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
         fs.writeFileSync(fsPath, current, 'utf-8');
       }
       doc.isDirty = false;
+      // VS Code fires onDidSaveTextDocument for every save of an open document, an extension's included.
+      for (const listener of [..._saveListeners]) void listener(doc);
       return true;
     },
     _setText: (next: string) => {
