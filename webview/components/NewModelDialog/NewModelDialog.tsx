@@ -203,16 +203,20 @@ export function NewTableDialog() {
   const requiresEntityInputs = template?.requiresLeftEntity || template?.requiresRightEntity;
 
   // Each table's own name: two tables of one name are named `<schema>.<name>` on the diagram.
+  // A DBML table (it has a layer) in another schema folder than the new table's is another
+  // table: the new one joins it as the second of a pair. A YAML table refuses its name anywhere.
+  const newTableSchema = schemaField?.schema;
   const existingModelNames = useMemo(
-    () => (domain?.models ?? []).map((m) => m.tableName || m.name),
-    [domain],
+    () => (domain?.models ?? [])
+      .filter((m) => newTableSchema === undefined || m.layer === undefined || !m.schema || sameName(m.schema, newTableSchema))
+      .map((m) => m.tableName || m.name),
+    [domain, newTableSchema],
   );
 
   // Models that already have a logical-models/*.yml but are not in this domain.
   // Creating a "new" model with one of these names would overwrite a shared file.
   // A DBML table in another schema folder than the new table's is another table:
   // only the chosen schema folder's tables (and YAML tables, unique by name) refuse it.
-  const newTableSchema = schemaField?.schema;
   const libraryModelNames = useMemo(
     () => existingModels
       .filter((m) => m.source === 'logical'
