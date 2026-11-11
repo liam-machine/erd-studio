@@ -327,16 +327,31 @@ describe('refusals and limits', () => {
   });
 
   it(`a name longer than ${MAX_CATALOG_NAME_CHARS} characters leaves its table or column out, said with its line`, () => {
-    const r = ok(csv('table_name,column_name,data_type', `${'x'.repeat(5000)},id,int`, `t,${'y'.repeat(200)},int`, 't,ok,int'));
+    const r = ok(csv('table_name,column_name,data_type', `${'x'.repeat(5000)},id,int`, `t,${'y'.repeat(256)},int`, 't,ok,int'));
     expect(r.tableCount).toBe(1);
     expect(r.columnCount).toBe(1);
     expect(r.problems.map((p) => p.message)).toEqual([
-      'A table has a name longer than 128 characters, so it is left out.',
-      'A column of t has a name longer than 128 characters, so it is left out.',
+      'A table has a name longer than 255 characters, so it is left out.',
+      'A column of t has a name longer than 255 characters, so it is left out.',
     ]);
     expect(r.ledger.filter((e) => e.outcome === 'problem').map((e) => e.where?.line)).toEqual([2, 3]);
     // Never the name itself in full.
     expect(JSON.stringify(r.ledger)).not.toContain('x'.repeat(100));
+  });
+
+  it('a name of exactly 255 characters (the most Snowflake and Databricks allow) comes in whole; 256 is left out', () => {
+    expect(MAX_CATALOG_NAME_CHARS).toBe(255);
+    const table = `t${'a'.repeat(254)}`;
+    const column = `c${'b'.repeat(254)}`;
+    const r = ok(csv('table_name,column_name,data_type', `${table},${column},int`, `${table},id,int`, `u${'a'.repeat(255)},id,int`, `t,${column}x,int`, 't,id,int'));
+    expect(r.tableCount).toBe(2);
+    expect(r.columnCount).toBe(3);
+    expect(r.dbml).toContain(`"${table}"`);
+    expect(r.dbml).toContain(`"${column}"`);
+    expect(r.problems.map((p) => p.message)).toEqual([
+      'A table has a name longer than 255 characters, so it is left out.',
+      'A column of t has a name longer than 255 characters, so it is left out.',
+    ]);
   });
 });
 

@@ -36,8 +36,11 @@ import { cardinalityOf, ownerOfLine, writeDbmlMapped } from './sqlDdlWriter';
 export const MAX_CATALOG_ROWS = 100_000;
 /** At most this many characters of CSV in one import (checked before the rows are read). */
 export const MAX_CATALOG_CHARS = 64 * 1024 * 1024;
-/** A table or column name longer than this is not a name (a broken export): that table or column is left out, and said. */
-export const MAX_CATALOG_NAME_CHARS = 128;
+/**
+ * A table or column name longer than this is not a name (a broken export): that table or column is left out, and said.
+ * 255 is the longest Snowflake and Databricks (Unity Catalog) allow.
+ */
+export const MAX_CATALOG_NAME_CHARS = 255;
 
 /** Whether a file is a catalog export by its name: `.csv` or `.tsv`, any case. */
 export function isCatalogCsvName(name: string): boolean {

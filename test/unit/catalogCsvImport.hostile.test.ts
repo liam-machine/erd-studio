@@ -200,7 +200,17 @@ describe('hostile catalog exports: converted, with Import DBML reading the resul
   it('a 5,000-character table name is left out and said (it was imported whole before); the rest comes in', () => {
     const { result } = converts(`table_name,column_name,data_type\n${'x'.repeat(5000)},id,int\nok,id,int\n`);
     expect(result.tableCount).toBe(1);
-    expect(result.problems[0].message).toBe('A table has a name longer than 128 characters, so it is left out.');
+    expect(result.problems[0].message).toBe('A table has a name longer than 255 characters, so it is left out.');
+  });
+
+  it('255-character table and column names (Snowflake\'s and Databricks\' longest) come in whole, and Import DBML reads them', () => {
+    const table = `t${'a'.repeat(254)}`;
+    const column = `c${'b'.repeat(254)}`;
+    const { result, run } = converts(`table_name,column_name,data_type,is_primary_key,fk_table_name,fk_column_name\n${table},${column},int,YES,,\nok,id,int,YES,,\nok,ref,int,NO,${table},${column}\n`);
+    expect(result.problems).toEqual([]);
+    expect(run.tables.map((t) => t.name).sort()).toEqual(['ok', table]);
+    expect(run.tables.find((t) => t.name === table)?.columns?.map((c) => c.name)).toEqual([column]);
+    expect(result.refCount).toBe(1);
   });
 
   it('a seed that happens to have table_name, column_name and data_type (a data dictionary) reads as one', () => {
