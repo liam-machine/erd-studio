@@ -181,7 +181,7 @@ describe('Suggest Relationships on a DBML project', () => {
     expect(ui.errors).toEqual([]);
   });
 
-  it('several accepted (a composite among them): still ONE WorkspaceEdit, one undo step; the composite is one Ref', async () => {
+  it('several accepted (a composite among them, and dim_date in another layer): still ONE WorkspaceEdit, one undo step; the composite is one Ref', async () => {
     useDbmlProject();
     const provider = buildProvider();
     await open(provider, 'gold/diagrams/sales.dbml');
@@ -230,6 +230,26 @@ describe('Suggest Relationships on a DBML project', () => {
     expect(ui.errors[0]).toMatch(/^Couldn't add the suggested relationships: .*customers\.dbml/);
     expect(read('gold/relationships/gold.dbml')).toBe(before);
     expect(ui.infos).toEqual([]);
+  });
+
+  it('a diagram file ERD Studio will not edit (a second Project, written by hand): the refusal is shown; nothing is written', async () => {
+    useDbmlProject();
+    fs.appendFileSync(at('gold/diagrams/sales.dbml'), "\nProject other {\n  Note: 'x'\n}\n");
+    const provider = buildProvider();
+    await open(provider, 'gold/diagrams/sales.dbml');
+    const ui = fakeUi();
+    provider.useSuggestionUi(ui);
+    _appliedEdits.length = 0;
+    const before = { gold: read('gold/relationships/gold.dbml'), sales: read('gold/diagrams/sales.dbml') };
+    const outcome = await provider.suggestRelationships();
+    // Refused, by the write path itself, in plain words; nothing is written.
+    expect(outcome).toBe('notWritten');
+    expect(ui.errors).toEqual([
+      "Couldn't add the suggested relationships: gold/diagrams/sales.dbml: Line 36: the diagram has a second Project; the first is read, and ERD Studio will not edit the file until there is one.",
+    ]);
+    expect(ui.infos).toEqual([]);
+    expect(read('gold/relationships/gold.dbml')).toBe(before.gold);
+    expect(read('gold/diagrams/sales.dbml')).toBe(before.sales);
   });
 
   it('an edit in flight: the write waits for it, checks the list again, and leaves out what it drew', async () => {
