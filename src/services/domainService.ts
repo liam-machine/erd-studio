@@ -191,6 +191,8 @@ interface DbmlDiagramView {
    * that file's, never the library's first file of its name.
    */
   memberFiles: Map<string, string | null>;
+  /** Each member's `use` path, resolved and lower-cased, → the lower-case references that name it; built on first use. */
+  membersByPath?: Map<string, string[]>;
 }
 
 /**
@@ -723,10 +725,17 @@ export class SubjectAreaService {
         log.warn(`[DomainService] Table "${name}" is not at its use line's path (${usePath}), and more than one other schema folder has a table of that name: it is drawn missing until the line is fixed`);
       }
     }
-    if (found !== null && [...view.memberPaths].some(([other, use]) => other !== ref.toLowerCase() && !use.startsWith('../')
-      && path.resolve(library.semanticAbsolute(use)).toLowerCase() === path.resolve(found!).toLowerCase())) {
-      return null;
+    // The member's own file (the usual case) is no other member's: only another file is looked up.
+    if (found === null || own) return found;
+    if (!view.membersByPath) {
+      view.membersByPath = new Map();
+      for (const [other, use] of view.memberPaths) {
+        if (use.startsWith('../')) continue;
+        const key = path.resolve(library.semanticAbsolute(use)).toLowerCase();
+        view.membersByPath.set(key, [...(view.membersByPath.get(key) ?? []), other]);
+      }
     }
+    if ((view.membersByPath.get(path.resolve(found).toLowerCase()) ?? []).some((other) => other !== ref.toLowerCase())) return null;
     return found;
   }
 

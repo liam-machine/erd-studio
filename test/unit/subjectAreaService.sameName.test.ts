@@ -166,3 +166,29 @@ describe('SubjectAreaService, its library telling tables apart by identity', () 
     expect(unified.viewConfig.positions?.addresse).toEqual({ x: 10, y: 20 });
   });
 });
+
+describe('SubjectAreaService: a large diagram where no two tables share a name', () => {
+  it('reads each member\'s file without comparing it with every other member\'s use path (linear, not quadratic)', () => {
+    const N = 300;
+    const base = path.join(root, '.erd-studio');
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.mkdirSync(path.join(base, 'gold', 'tables', 'gold'), { recursive: true });
+    fs.mkdirSync(path.join(base, 'gold', 'diagrams'), { recursive: true });
+    const names = Array.from({ length: N }, (_v, i) => `t_${String(i).padStart(4, '0')}`);
+    for (const name of names) fs.writeFileSync(path.join(base, 'gold', 'tables', 'gold', `${name}.dbml`), `Table gold.${name} {\n  id INT [pk]\n}\n`);
+    fs.writeFileSync(path.join(base, 'gold', 'diagrams', 'big.dbml'), [
+      "Project big {\n  erd_schema_version: '7'\n}",
+      ...names.map((n) => `use { table gold.${n} } from '../tables/gold/${n}.dbml'`),
+      '',
+    ].join('\n'));
+    const subjectAreas = new SubjectAreaService(new LayerService(root, '.erd-studio'));
+    const library = new TableLibraryService(root, '.erd-studio');
+    subjectAreas.setTableLibraryService(library);
+    const file = path.join(base, 'gold', 'diagrams', 'big.dbml');
+    expect(subjectAreas.getSubjectArea(file).logical.models).toHaveLength(N);
+    const resolves = vi.spyOn(library, 'semanticAbsolute');
+    expect(subjectAreas.getSubjectArea(file).logical.models).toHaveLength(N);
+    // A few per member; one per pair of members (N² ≈ 90,000) is the regression.
+    expect(resolves.mock.calls.length).toBeLessThanOrEqual(10 * N);
+  });
+});
