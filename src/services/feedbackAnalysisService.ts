@@ -46,7 +46,7 @@
 import * as vscode from 'vscode';
 
 import { getErdStudioSetting } from './configService';
-import { GITHUB_REPO, hostErrorLog } from './feedbackService';
+import { GITHUB_REPO, hostErrorLog, openFixedLink } from './feedbackService';
 import {
   FEEDBACK_AI_PROVIDER_CHOICES,
   isFeedbackAiProviderChoice,
@@ -58,7 +58,9 @@ import {
   type FeedbackKind,
   type DuplicateCandidate,
   redactPaths,
+  SECRET_STORAGE_HELP_URL,
 } from '../types/feedback';
+import { LEARN_MORE_BUTTON, secretStorageFailedMessage, showErrorWithActions } from './commandErrors';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1211,7 +1213,7 @@ export async function setFeedbackApiKey(context: vscode.ExtensionContext): Promi
     void vscode.window.showInformationMessage('ERD Studio: the feedback API key is stored.');
   } catch (err) {
     hostErrorLog.record('setFeedbackApiKey', err);
-    void vscode.window.showErrorMessage('ERD Studio: the feedback API key could not be stored.');
+    showSecretStorageFailure('save');
   }
 }
 
@@ -1222,8 +1224,22 @@ export async function clearFeedbackApiKey(context: vscode.ExtensionContext): Pro
     void vscode.window.showInformationMessage('ERD Studio: the feedback API key is cleared.');
   } catch (err) {
     hostErrorLog.record('clearFeedbackApiKey', err);
-    void vscode.window.showErrorMessage('ERD Studio: the feedback API key could not be cleared.');
+    showSecretStorageFailure('clear');
   }
+}
+
+/**
+ * A key that could not be stored or cleared (#285): usually the machine's
+ * keyring (none on many Linux machines and containers), not ERD Studio, so
+ * say so and point at VS Code's own troubleshooting, a fixed link.
+ */
+function showSecretStorageFailure(action: 'save' | 'clear'): void {
+  showErrorWithActions(
+    (message, ...items) => vscode.window.showErrorMessage(message, ...items),
+    secretStorageFailedMessage(action),
+    { [LEARN_MORE_BUTTON]: () => openFixedLink(SECRET_STORAGE_HELP_URL) },
+    (choice, err) => hostErrorLog.record(`feedbackApiKey.${choice}`, err),
+  );
 }
 
 // ---------------------------------------------------------------------------

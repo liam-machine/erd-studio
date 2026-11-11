@@ -32,6 +32,16 @@ import {
   type FeedbackKind,
   redactPaths,
 } from '../types/feedback';
+import {
+  BROWSER_NOT_OPENED_MESSAGE,
+  COPY_LINK_BUTTON,
+  COPY_LINK_INSTEAD_BUTTON,
+  COPY_REPORT_BUTTON,
+  commentBrowserNotOpenedMessage,
+  linkNotOpenedMessage,
+  reportNotOpenedMessage,
+  showErrorWithActions,
+} from './commandErrors';
 import { LOG_BUFFER_CAPACITY, recentLogLines, writeLog } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -478,14 +488,17 @@ export interface SubmitLogOptions {
  * notification whose whole job was to explain which of those happened.
  *
  * Never throws: failures are recorded on `hostErrorLog` and returned so the
- * dialog can un-stick its primary button.
+ * dialog can un-stick its primary button. `error` is a sentence for the user,
+ * never the raw exception (#285); `failure` says which kind it was, so a
+ * caller adds its own words only for a failure of ours (`browser` has already
+ * been shown, with its buttons).
  */
 export async function submitFeedback(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
   options: SubmitLogOptions = {},
-): Promise<{ ok: boolean; commentedOn?: number; error?: string }> {
+): Promise<SubmitFeedbackResult> {
   try {
     const diagnostics = draft.includeDiagnostics
       ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
@@ -497,10 +510,11 @@ export async function submitFeedback(
       const url = `https://github.com/${GITHUB_REPO}/issues/${commentOn}#issuecomment-new`;
       const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
       if (!opened) {
-        void vscode.window.showErrorMessage(
-          'ERD Studio: could not open the browser. Copy this link to file the issue: ' + url,
-        );
-        return { ok: false, error: 'Could not open the browser.' };
+        // The report is already on the clipboard; copying the link replaces it, and the button says so.
+        showFeedbackError(commentBrowserNotOpenedMessage(commentOn), {
+          [COPY_LINK_INSTEAD_BUTTON]: () => copyToClipboard(url, 'ERD Studio: the link is on your clipboard, in place of the report.'),
+        });
+        return { ok: false, error: commentBrowserNotOpenedMessage(commentOn), failure: 'browser' };
       }
       // Deliberately not awaited: a notification carrying an action button is
       // sticky, and the dialog stays disabled until this function returns.
@@ -519,16 +533,67 @@ export async function submitFeedback(
     const url = buildIssueUrl(fields, urlOptions);
     const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
     if (!opened) {
-      void vscode.window.showErrorMessage(
-        'ERD Studio: could not open the browser. Copy this link to file the issue: ' + url,
-      );
-      return { ok: false, error: 'Could not open the browser.' };
+      // The prefilled link is thousands of characters: offer it, and the
+      // Markdown report that pastes into any tracker, rather than print it.
+      showFeedbackError(BROWSER_NOT_OPENED_MESSAGE, {
+        [COPY_LINK_BUTTON]: () => copyToClipboard(url, 'ERD Studio: the link is on your clipboard.'),
+        [COPY_REPORT_BUTTON]: () => copyToClipboard(composeMarkdownReport(draft, diagnostics), REPORT_COPIED_NOTICE),
+      });
+      return { ok: false, error: BROWSER_NOT_OPENED_MESSAGE, failure: 'browser' };
     }
     return { ok: true };
   } catch (err) {
     hostErrorLog.record('submitFeedback', err);
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: reportNotOpenedMessage(false), failure: 'ours' };
   }
+}
+
+/** What `submitFeedback` returns. `failure` is host-only: the dialog gets `ok`, `commentedOn` and `error`. */
+export interface SubmitFeedbackResult {
+  ok: boolean;
+  commentedOn?: number;
+  error?: string;
+  failure?: 'browser' | 'ours';
+}
+
+/**
+ * A Send Feedback error with its buttons. Never awaited: a notification with
+ * buttons is sticky, and the dialog's primary button waits for
+ * `submitFeedback` to return.
+ */
+function showFeedbackError(message: string, actions: Record<string, () => unknown>): void {
+  showErrorWithActions(
+    (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+    message,
+    actions,
+    (choice, err) => {
+      hostErrorLog.record(`submitFeedback.${choice}`, err);
+      void vscode.window.showErrorMessage(`ERD Studio: "${choice}" didn't work, so nothing was copied.`);
+    },
+  );
+}
+
+/** Said wherever the Markdown report lands on the clipboard (the dialog's Copy report, the toast's Copy Report). */
+const REPORT_COPIED_NOTICE = 'ERD Studio: the report is on your clipboard.';
+
+async function copyToClipboard(text: string, notice: string): Promise<void> {
+  await vscode.env.clipboard.writeText(text);
+  void vscode.window.showInformationMessage(notice);
+}
+
+/**
+ * Open one of ERD Studio's fixed pages from an error's button. A browser that
+ * will not open (VS Code resolves `false`, or throws) is said, with the
+ * address to open by hand, so the button never seems to do nothing (#285).
+ */
+export async function openFixedLink(url: string): Promise<void> {
+  let opened = false;
+  try {
+    opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+  } catch (err) {
+    hostErrorLog.record('openFixedLink', err);
+  }
+  if (!opened) void vscode.window.showErrorMessage(linkNotOpenedMessage(url));
 }
 
 /**
@@ -545,8 +610,7 @@ export async function copyFeedbackReport(
   const diagnostics = draft.includeDiagnostics
     ? collectDiagnostics(context, domain, draft.webviewErrors ?? [], { includeLog: draft.includeLog === true, log: options.previewedLog ?? [] })
     : null;
-  await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
-  void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');
+  await copyToClipboard(composeMarkdownReport(draft, diagnostics), REPORT_COPIED_NOTICE);
 }
 
 /** Collect diagnostics and package them for the dialog (chips + exact text). */

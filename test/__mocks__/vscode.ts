@@ -164,6 +164,23 @@ export const workspace = {
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
   textDocuments: [] as unknown[],
+  /**
+   * The path relative to the first workspace folder that holds it, else the
+   * path itself. As in VS Code, the folder's name is prepended when
+   * `includeWorkspaceFolder` is true, which is the default only in a
+   * multi-root workspace.
+   */
+  asRelativePath(pathOrUri: string | { fsPath: string }, includeWorkspaceFolder?: boolean): string {
+    const p = typeof pathOrUri === 'string' ? pathOrUri : pathOrUri.fsPath;
+    const withFolder = includeWorkspaceFolder ?? workspace.workspaceFolders.length > 1;
+    for (const folder of workspace.workspaceFolders) {
+      const root = folder.uri.fsPath.replace(/\/+$/, '');
+      if (!p.startsWith(`${root}/`)) continue;
+      const relative = p.slice(root.length + 1);
+      return withFolder ? `${folder.name ?? root.slice(root.lastIndexOf('/') + 1)}/${relative}` : relative;
+    }
+    return p;
+  },
   // Replaced below with implementations backed by the mock document registry.
   applyEdit: async (_edit: unknown): Promise<boolean> => true,
   openTextDocument: async (_uriOrPath: unknown): Promise<unknown> => { throw new Error('not initialised'); },
