@@ -623,6 +623,18 @@ describe('New Table on a DBML diagram, in a schema folder another table of its n
   });
 });
 
+describe('opening a diagram is never a write', () => {
+  it('a version-7 diagram listing both tables of a pair (bare layout lines) is drawn with every table placed, and its file is left as it is', async () => {
+    const before = snapshot();
+    const canvas = await open('bronze/diagrams/kunden-bare.dbml');
+    expect(changed(before, snapshot())).toEqual([]);
+    expect(Object.keys(canvas.posted().viewConfig.positions).sort()).toEqual(['bqs.addresse', 'bqs.kunde', 'ccc.addresse', 'ccc.kunde']);
+    // The next real edit is what moves it to version 8 (doctor's twinDiagramVersion says so).
+    const r = await canvas.send({ type: 'updateModelDescription', payload: { modelName: 'ccc.addresse', description: 'CCC' } });
+    expect(r.errors).toEqual([]);
+  });
+});
+
 describe('Delete Table File for one table of a pair', () => {
   it('Remove from the diagram showing both, then Delete Table File: only ccc\'s file, Refs and places go; bqs\'s stay byte for byte', async () => {
     const canvas = await open('bronze/diagrams/kunden.dbml');

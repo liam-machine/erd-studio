@@ -6377,7 +6377,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // path never fails on a write: the canvas still loads with the computed
     // positions, and the next open asks again.
     try {
-      if (this.parseSubjectAreaFile(document).writable === false) return false;
+      const file = this.parseSubjectAreaFile(document);
+      if (file.writable === false) return false;
+      // A diagram below version 8 that lists both tables of a pair (as 2.0.2 left it) would be lifted to
+      // version 8 with qualified lines by this write: opening it writes nothing (D-17), the canvas places
+      // the tables from the payload, and the next real edit makes the switch (as doctor says).
+      const pair = (file.members?.rows ?? []).some((r) => r.ref.toLowerCase() !== r.name.toLowerCase());
+      if (pair && (file.dbmlSchemaVersion ?? 7) < 8) return false;
       return await save();
     } catch (err) {
       if (err instanceof EditRefused || err instanceof DbmlEditRefused) {
