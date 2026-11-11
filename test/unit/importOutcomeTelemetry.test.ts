@@ -174,8 +174,9 @@ describe('an import started from the import guide\'s Microsoft Fabric card', () 
     ]);
     expect(FABRIC_KEYS.filter((k) => /Failed$/.test(k))).toEqual([]);
     // Appended (the contract is additive): after the 2.0.0 list's last key, the guide's two Fabric keys first.
+    // What was appended after them (the major update notice's keys) comes after, never between.
     const at = FEATURES.indexOf('draftDropTimeLimit');
-    expect(FEATURES.slice(at + 1)).toEqual(['importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog', ...FABRIC_KEYS]);
+    expect(FEATURES.slice(at + 1, at + 3 + FABRIC_KEYS.length)).toEqual(['importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog', ...FABRIC_KEYS]);
   });
 
   it('counts the Fabric key beside the importer\'s and the dialect\'s, for every outcome, never instead of them', () => {

@@ -555,6 +555,23 @@ export async function notePendingUpdate(context: vscode.ExtensionContext, previo
   }
 }
 
+/**
+ * Whether this machine recorded a start after a major update
+ * (`erdStudio.telemetry.majorSeenDay` holds a day). Read by the major update
+ * notice's one catch-up look (`src/services/majorUpdateNotice.ts`) and by
+ * nothing else; only whether it is set is used, never the day, and nothing is
+ * sent. It is honest but not complete: the day is written only while
+ * telemetry is on and is cleared when telemetry is switched off, so `false`
+ * means "not recorded", never "no major update". Never throws.
+ */
+export function majorUpdateRecorded(context: vscode.ExtensionContext): boolean {
+  try {
+    return typeof context.globalState.get<unknown>(MAJOR_SEEN_KEY) === 'string';
+  } catch {
+    return false;
+  }
+}
+
 let active: TelemetryService | undefined;
 
 let errorCodeListener: ((code: TelemetryErrorCode) => void) | undefined;

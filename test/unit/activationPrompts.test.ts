@@ -22,11 +22,24 @@ describe('pickActivationPrompt', () => {
     expect(pickActivationPrompt(['saveLayers'])).toBe('saveLayers');
   });
 
+  it('the major update notice waits for whatever opens or protects the user\'s own work, and comes before the other news and offers', () => {
+    for (const first of ['diagramsNudge', 'startSuggestion', 'walkthrough', 'harnessUpdate', 'migrateToV5'] as const) {
+      expect(pickActivationPrompt(['majorUpdateNotice', first]), first).toBe(first);
+    }
+    for (const later of ['upgradeNotice', 'harnessInstall', 'saveLayers'] as const) {
+      expect(pickActivationPrompt([later, 'majorUpdateNotice']), later).toBe('majorUpdateNotice');
+    }
+    expect(pickActivationPrompt(['saveLayers', 'harnessInstall', 'upgradeNotice', 'majorUpdateNotice'])).toBe('majorUpdateNotice');
+    expect(pickActivationPrompt(['majorUpdateNotice'])).toBe('majorUpdateNotice');
+    expect(ACTIVATION_PROMPT_PRIORITY.indexOf('majorUpdateNotice')).toBe(ACTIVATION_PROMPT_PRIORITY.indexOf('migrateToV5') + 1);
+    expect(ACTIVATION_PROMPT_PRIORITY.indexOf('upgradeNotice')).toBe(ACTIVATION_PROMPT_PRIORITY.indexOf('majorUpdateNotice') + 1);
+  });
+
   it('nothing offered, nothing shown; the canvas offers are never picked at activation', () => {
     expect(pickActivationPrompt([])).toBeUndefined();
     expect(pickActivationPrompt(['dbmlConversion', 'namingMigration'])).toBeUndefined();
     expect(ACTIVATION_PROMPT_PRIORITY).toEqual([
-      'diagramsNudge', 'startSuggestion', 'walkthrough', 'harnessUpdate', 'migrateToV5', 'upgradeNotice', 'harnessInstall', 'saveLayers',
+      'diagramsNudge', 'startSuggestion', 'walkthrough', 'harnessUpdate', 'migrateToV5', 'majorUpdateNotice', 'upgradeNotice', 'harnessInstall', 'saveLayers',
     ]);
   });
 });
@@ -63,6 +76,7 @@ describe('SessionPromptGate.reserve: a start on screen keeps the window', () => 
     expect(gate.claimed).toBe('draft');
     expect(gate.claim('harnessInstall')).toBe(false);
     expect(gate.claim('upgradeNotice')).toBe(false);
+    expect(gate.claim('majorUpdateNotice')).toBe(false);
   });
 
   it('the first diagram made in a window keeps it too; a holder that shows stays the holder', () => {
