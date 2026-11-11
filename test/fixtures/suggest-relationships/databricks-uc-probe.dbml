@@ -1,0 +1,101 @@
+// A live Unity Catalog probe (schemas probe_ref and probe_sales), as the catalog-CSV import reads it:
+// information_schema columns + primary keys + foreign keys, exported 2026-11-11. Nine foreign-key pairs:
+// a composite (order_line_note -> order_line), a self reference (employee.manager_id), two FKs to one
+// parent (fx_transfer.from_currency / to_currency), a cross-schema FK and one FK from two schemas to dup_a.
+// Used by test/unit/relationshipSuggestions.measure.test.ts.
+
+Table "probe_ref"."currency" {
+  "currency_code" varchar(3) [pk]
+  "currency_name" string
+}
+
+Table "probe_ref"."customer" {
+  "customer_id" bigint [pk, note: 'Surrogate key, plain comment']
+  "CustomerKey" varchar(50) [note: '''Comma, "double" it's back\\slash
+second line''']
+  "customer_name" string [note: '''Name, "quoted" - O'Brien \\ C:\\temp
+line two''']
+
+  Note: '''Customer, "master" table - it's got a back\\slash
+and a newline'''
+}
+
+Table "probe_ref"."dup_a" {
+  "k" int [pk]
+}
+
+Table "probe_ref"."dup_c" {
+  "k" int [pk]
+  "parent_k" int
+}
+
+Table "probe_ref"."employee" {
+  "employee_id" int [pk]
+  "manager_id" int
+  "full_name" string
+}
+
+Table "probe_sales"."dup_b" {
+  "k" int [pk]
+  "parent_k" int
+}
+
+Table "probe_sales"."event_log" {
+  "logged_at" timestamp
+  "message" string
+}
+
+Table "probe_sales"."fx_transfer" {
+  "transfer_id" bigint [pk]
+  "from_currency" varchar(3)
+  "to_currency" varchar(3)
+}
+
+Table "probe_sales"."order_line" {
+  "order_id" bigint [not null]
+  "line_no" int [not null]
+  "amount" decimal(18,4)
+
+  Indexes {
+    ("order_id", "line_no") [pk]
+  }
+}
+
+Table "probe_sales"."order_line_note" {
+  "ln_no" int [not null]
+  "ord_id" bigint [not null]
+  "note" string
+}
+
+Table "probe_sales"."orders" {
+  "order_id" bigint [pk]
+  "customer_id" bigint
+  "order" int [note: 'reserved-word column name']
+  "order_date" date
+}
+
+Table "probe_sales"."type_zoo" {
+  "id" bigint [pk]
+  "c_decimal" decimal(18,4)
+  "c_varchar" varchar(50)
+  "c_string" string
+  "c_bigint" bigint
+  "c_int" int
+  "c_boolean" boolean
+  "c_date" date
+  "c_timestamp" timestamp
+  "c_timestamp_ntz" timestamp_ntz
+  "c_array" "array<string>"
+  "c_map" "map<string,int>"
+  "c_struct" "struct<a:int,b:array<string>>"
+}
+
+Ref: "probe_ref"."dup_c"."parent_k" > "probe_ref"."dup_a"."k"
+Ref: "probe_ref"."employee"."manager_id" > "probe_ref"."employee"."employee_id"
+Ref: "probe_sales"."dup_b"."parent_k" > "probe_ref"."dup_a"."k"
+Ref: "probe_sales"."fx_transfer"."from_currency" > "probe_ref"."currency"."currency_code"
+Ref: "probe_sales"."fx_transfer"."to_currency" > "probe_ref"."currency"."currency_code"
+Ref: "probe_sales"."order_line"."order_id" > "probe_sales"."orders"."order_id"
+Ref: "probe_sales"."order_line_note".("ln_no", "ord_id") > "probe_sales"."order_line".("line_no", "order_id")
+Ref: "probe_sales"."order_line_note"."ord_id" > "probe_sales"."orders"."order_id"
+Ref: "probe_sales"."orders"."customer_id" > "probe_ref"."customer"."customer_id"
