@@ -22,6 +22,7 @@ import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { TableTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
 import type { ErrorMessage, RevealRelationshipMessage } from '../../src/types/messages';
+import type { FileNote } from '../../src/types/filesNotShown';
 import type {
   FeedbackAnalysis,
   FeedbackCapabilities,
@@ -213,6 +214,14 @@ export interface EditorState extends CanvasState {
    * import. Cleared by every `domainLoaded`; the host re-sends it after one.
    */
   embeddedTables: boolean;
+  /**
+   * What the files hold that this canvas is not drawing (`filesNotShown`):
+   * the strip above the diagram lists them. The host posts the whole list
+   * after every logical-stage load and whenever it changes, so it is
+   * deliberately NOT touched by `setDomain`: a note stays until the host
+   * takes it back.
+   */
+  filesNotShown: FileNote[];
 }
 
 export interface EditorActions extends CanvasActions {
@@ -237,6 +246,8 @@ export interface EditorActions extends CanvasActions {
   setManifestMissing: (missing: boolean) => void;
   /** Show (or clear) the "This file holds its own tables" banner. */
   setEmbeddedTables: (embedded: boolean) => void;
+  /** Replace the "not shown" notes with the host's latest list. */
+  setFilesNotShown: (items: FileNote[]) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -399,6 +410,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dragHintDismissed: false,
   logicalOnly: false,
   embeddedTables: false,
+  filesNotShown: [],
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -416,6 +428,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
+  setFilesNotShown: (items) => set({ filesNotShown: items }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly

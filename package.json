@@ -209,6 +209,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.reloadFromDisk",
+        "title": "Reload Diagrams from Disk",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.renameDomain",
         "title": "Rename Diagram…",
         "category": "ERD Studio"

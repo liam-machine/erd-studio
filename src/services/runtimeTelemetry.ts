@@ -147,6 +147,9 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   layoutFinished: 'layout',
   webviewError: 'other',
   crashFallback: 'other',
+  openNotedFile: 'other',
+  addRelationshipsImports: 'relationship',
+  reloadFromDisk: 'refresh',
 };
 
 const HANDLER_FAILED: Record<Exclude<HandlerGroup, 'relationship'>, TelemetryErrorCode> = {

@@ -717,15 +717,34 @@ export const NEEDS_DBT_PROJECT_MESSAGE =
 const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is no selectors.yml to generate.';
 
 /**
+ * Who is told that a guarded refresh failed ({@link guardRefresh}): the
+ * editor provider, set by `activate()`, so the open canvases can say they
+ * may be out of date. Unset outside a project.
+ */
+let refreshFailureSink: ((kind: RefreshKind) => void) | undefined;
+
+/** Set (or, with `undefined`, clear) who {@link guardRefresh} tells about a failed refresh. */
+export function setRefreshFailureSink(sink: ((kind: RefreshKind) => void) | undefined): void {
+  refreshFailureSink = sink;
+}
+
+/**
  * A file watcher's listener, guarded (B12): a refresh that throws or rejects
- * counts `refreshFailed` and its kind, and is logged here instead of
- * becoming an unhandled rejection. What the listener does is unchanged.
+ * counts `refreshFailed` and its kind, is logged here instead of becoming an
+ * unhandled rejection, and is reported to the open canvases (a "not shown"
+ * note with Reload from disk). What the listener does is unchanged.
  */
 export function guardRefresh<A extends unknown[]>(kind: RefreshKind, listener: (...args: A) => unknown): (...args: A) => void {
   const failed = (err: unknown): void => {
     telemetry.error('refreshFailed');
     telemetry.error(REFRESH_FAILED[kind]);
     log.error(`[ERD Studio] A refresh after a ${kind} change failed:`, err);
+    // The open canvases may be out of date now: they say so (never thrown from here).
+    try {
+      refreshFailureSink?.(kind);
+    } catch (sinkErr) {
+      log.error('[ERD Studio] Telling the canvases about a failed refresh failed:', sinkErr);
+    }
   };
   return (...args: A): void => {
     try {
@@ -798,6 +817,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.goToTable',
   'erdStudio.addToDiagram',
   'erdStudio.revealInTableLibrary',
+  'erdStudio.reloadFromDisk',
   'erdStudio.filterDiagrams',
   'erdStudio.clearDiagramsFilter',
   'erdStudio.filterTableLibrary',
@@ -1881,6 +1901,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   editorProviderForFeedback = editorProvider;
   // The detail panel's "Reviewed by" reads the same CODEOWNERS as the Table Library's tooltips.
   editorProvider.useCodeOwners(codeOwners);
+  // A watcher's refresh that throws is said on the open canvases, not only in the log.
+  setRefreshFailureSink((kind) => editorProvider.noteRefreshFailed(kind));
 
   // Report tracking is constructed here, before refreshContextKeys() is defined
   // and called below, so nothing can reference a service that does not exist
@@ -2282,12 +2304,38 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
+    // A canvas whose document is not following its file (left unsaved by a
+    // failed save, or never synced) is redrawn from the file. Never writes.
+    void editorProvider.syncSubjectAreaWithDisk(uri.fsPath).catch((err) => {
+      log.error('[ERD Studio] Redraw of a diagram from its file failed:', err);
+    });
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
     tableLibraryProvider.refresh();
     // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
     refreshContextKeys();
   }));
+
+  // A .dbml saved where ERD Studio reads no file (a table outside a schema
+  // folder, a folder too deep): nothing to redraw, but the open canvases say
+  // the file is not read, so it never looks like a reload that failed.
+  const unreadFileSubscription = fileWatcherService.onUnreadFileChanged(({ uri }) => {
+    editorProvider.noteUnreadFile(uri.fsPath);
+  });
+
+  // A relationships file saved in THIS window (typed and saved, formatted or
+  // auto-saved here): an open logical canvas whose diagram now needs to
+  // import it gets the import added, as Add the import does (one edit, one
+  // undo step). A change that only reaches the disk (git, another program,
+  // an assistant writing the file) fires no save event and never writes: the
+  // strip offers the button. ERD Studio's own saves are skipped inside.
+  const savedDocumentSubscription = vscode.workspace.onDidSaveTextDocument((document) => {
+    try {
+      editorProvider.noteDocumentSaved(document);
+    } catch (err) {
+      log.warn('[ERD Studio] Could not check a saved file for relationships imports:', err);
+    }
+  });
 
   // Rename Subject Area records its created and deleted files as own writes,
   // so the watcher skips them: the side effects its change and delete events
@@ -2436,7 +2484,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // layers.json changed externally (git pull, manual edit, delete) → drop the
   // cached layer list so the tree, decorations and domain listing pick up the
   // new layers; warn if the file is now unreadable.
-  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(guardRefresh('Layers', () => {
+  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(guardRefresh('Layers', async () => {
     draftGeneration.bump();
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea();
@@ -2445,6 +2493,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     decorationProvider.refresh();
     refreshContextKeys();
     warnIfLayerConfigBroken();
+    // The open canvases draw the layer's label and colour, and a diagram
+    // opens only in a configured layer: they follow the file too. Never writes.
+    await editorProvider.refreshAllOpenSubjectAreas();
   }));
 
   // fields.yml (the project's field list) changed outside ERD Studio → drop
@@ -3078,6 +3129,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     semanticChangedSubscription,
     relationshipsChangedSubscription,
     foreignFormatSubscription,
+    unreadFileSubscription,
+    savedDocumentSubscription,
+    { dispose: () => setRefreshFailureSink(undefined) },
     editorWroteSubscription,
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
@@ -4088,6 +4142,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         await openRenamed();
       },
     ),
+    // The escape hatch for a setup where file events do not arrive, and the
+    // "not shown" strip's Reload from disk: read every file again, redraw the
+    // open canvases and refresh the sidebar. Read-only: it writes nothing.
+    vscode.commands.registerCommand('erdStudio.reloadFromDisk', async () => {
+      draftGeneration.bump();
+      treeProvider.invalidateSubjectArea();
+      await editorProvider.reloadFromDisk();
+      treeProvider.refresh();
+      tableLibraryProvider.refresh();
+      decorationProvider.refresh();
+      refreshContextKeys();
+    }),
     vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
       if (!hasDbt) {
         void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);

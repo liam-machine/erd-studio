@@ -26,6 +26,9 @@ import {
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
   validateImportEmbeddedTablesPayload,
+  validateOpenNotedFilePayload,
+  validateAddRelationshipsImportsPayload,
+  validateReloadFromDiskPayload,
   validateExportDiagramPayload,
   validateNoRelationshipsFile,
   validateRelationshipsFileChoice,
@@ -314,6 +317,35 @@ describe('validateImportEmbeddedTablesPayload (native DBML storage, §2.5)', () 
 
   it.each([null, 'x', 3, [], { file: '/etc/passwd' }])('rejects %j', (value) => {
     expect(validateImportEmbeddedTablesPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('the "not shown" strip\'s messages', () => {
+  it('openNotedFile: a relative path inside the workspace folder, and an optional positive line', () => {
+    expect(validateOpenNotedFilePayload({ file: '.erd-studio/gold/relationships/gold.dbml' })).toBeNull();
+    expect(validateOpenNotedFilePayload({ file: '.erd-studio/gold/tables/gold/fct_order.dbml', line: 12 })).toBeNull();
+  });
+
+  it.each([undefined, null, 'x', [], {}, { file: '' }, { file: 3 }, { file: 'a'.repeat(1025) }])('openNotedFile rejects %j: no file', (value) => {
+    expect(validateOpenNotedFilePayload(value)).toBe('Opening a file needs the file to open.');
+  });
+
+  it.each(['/etc/passwd', '../outside.dbml', '.erd-studio/../../x', 'C:/x.dbml', 'a\\b.dbml', 'a//b.dbml', 'a/\0b'])('openNotedFile rejects %j: not inside the project', (file) => {
+    expect(validateOpenNotedFilePayload({ file })).toBe('That file is not inside this project.');
+  });
+
+  it.each([0, -1, 1.5, '3', null])('openNotedFile rejects line %j', (line) => {
+    expect(validateOpenNotedFilePayload({ file: 'a/b.dbml', line })).toBe('The line to open must be a positive whole number.');
+  });
+
+  it('addRelationshipsImports and reloadFromDisk carry nothing', () => {
+    for (const validate of [validateAddRelationshipsImportsPayload, validateReloadFromDiskPayload]) {
+      expect(validate(undefined)).toBeNull();
+      expect(validate({})).toBeNull();
+      for (const value of [null, 'x', 3, [], { file: 'gold/relationships/other.dbml' }]) {
+        expect(validate(value)).toMatch(/takes no payload/);
+      }
+    }
   });
 });
 

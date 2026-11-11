@@ -842,6 +842,52 @@ export function validateImportEmbeddedTablesPayload(value: unknown): string | nu
 }
 
 /**
+ * Validate an `openNotedFile` payload (a "not shown" note's file link): a
+ * relative path with `/` separators that never climbs out of the workspace
+ * folder, and an optional positive integer `line`. The host still checks the
+ * file is inside the project's ERD Studio folder before opening it.
+ */
+export function validateOpenNotedFilePayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Opening a file needs the file to open.';
+  }
+  const { file, line } = value as { file?: unknown; line?: unknown };
+  if (typeof file !== 'string' || file.trim() === '' || file.length > 1024) {
+    return 'Opening a file needs the file to open.';
+  }
+  if (file.includes('\0') || file.includes('\\') || file.startsWith('/') || /^[A-Za-z]:/.test(file)
+    || file.split('/').some((segment) => segment === '..' || segment === '')) {
+    return 'That file is not inside this project.';
+  }
+  if (line !== undefined && !(typeof line === 'number' && Number.isInteger(line) && line >= 1)) {
+    return 'The line to open must be a positive whole number.';
+  }
+  return null;
+}
+
+/** `addRelationshipsImports` (a "not shown" note's Add the import) carries nothing. */
+export function validateAddRelationshipsImportsPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Adding the import takes no payload.';
+  }
+  return null;
+}
+
+/** `reloadFromDisk` (a "not shown" note's Reload from disk) carries nothing. */
+export function validateReloadFromDiskPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Reloading from disk takes no payload.';
+  }
+  return null;
+}
+
+/**
  * Validate an `exportDiagram` payload. It carries nothing — the host asks for
  * the format and the action — so only an absent payload or an empty object
  * passes, like `addModelsFromDbt`.

@@ -193,10 +193,16 @@ function listingOf(library: TableLibraryService, view: DbmlDiagramView): NonNull
   return view.listing;
 }
 
-/** The canvas warning for a relationships file a diagram does not import but holds a Ref between its tables. */
+/**
+ * What the log and `doctor` say of a relationships file that holds a Ref
+ * between two of a diagram's tables while the diagram does not import it
+ * (`doctor` adds the line to write; the canvas has its own note with a
+ * button, `relationshipsNotImportedMessage`). It promises no automatic fix:
+ * moving a table saves only positions and leaves the imports as they are.
+ */
 export function unimportedRelationshipsMessage(file: string): string {
-  return `${file} holds a relationship between tables of this diagram, but the diagram does not import it; `
-    + 'other DBML tools do not draw it. Any edit to this diagram adds the import.';
+  return `${file} holds a relationship between tables of this diagram, but the diagram does not import it, `
+    + 'so neither ERD Studio nor other DBML tools draw it.';
 }
 
 export class SubjectAreaService {

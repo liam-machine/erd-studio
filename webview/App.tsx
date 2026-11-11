@@ -55,6 +55,7 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
 import { EmbeddedTablesBanner } from './components/Canvas/EmbeddedTablesBanner';
+import { FilesNotShownBanner } from './components/Canvas/FilesNotShownBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DragHint } from './components/Canvas/DragHint';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
@@ -69,9 +70,13 @@ import { CanvasGuide } from './components/Guide/CanvasGuide';
 import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
 import { isCanvasGuideStart, type CanvasGuideStart } from '../src/types/onboardingGuide';
 import { isCanvasLineStyle } from '../src/types/lineStyle';
+import { isFileNote } from '../src/types/filesNotShown';
 import type { DisplaySubjectArea } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 import { orientDraggedRelationship } from './lib/relationshipDirection';
+
+/** How long a `canvasNotice` stays before it hides by itself (it names a file, so a little longer than a plain toast). */
+const CANVAS_NOTICE_DISMISS_MS = 6000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,6 +231,10 @@ function EditorCanvas() {
   // diagram or an error arrives: proof the host is connected.
   const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
 
+  // A brief note from the host about something it did by itself (`canvasNotice`): an info toast that hides by itself.
+  const [notice, setNotice] = useState<string | null>(null);
+  const dismissNotice = useCallback(() => setNotice(null), []);
+
   // The onboarding guide's phase B (Show Me Around), when the host starts it on this canvas.
   const [guide, setGuide] = useState<CanvasGuideStart | null>(null);
   const endGuide = useCallback(() => setGuide(null), []);
@@ -309,6 +318,10 @@ function EditorCanvas() {
             useEditorStore.getState().setCanvasContext(msg.payload);
           }
           break;
+        case 'filesNotShown':
+          // What the files hold that the canvas is not drawing: the whole list each time (empty clears the strip).
+          useEditorStore.getState().setFilesNotShown(Array.isArray(msg.payload?.items) ? msg.payload.items.filter(isFileNote) : []);
+          break;
         case 'revealRelationship':
           // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
           useEditorStore.getState().setPendingReveal(msg.payload);
@@ -332,6 +345,10 @@ function EditorCanvas() {
           break;
         case 'guideStart':
           if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
+          break;
+        case 'canvasNotice':
+          // Something the host did by itself (it added a relationships import after a save): said briefly.
+          if (typeof msg.payload?.message === 'string' && msg.payload.message !== '') setNotice(msg.payload.message);
           break;
       }
     },
@@ -797,6 +814,8 @@ function EditorCanvas() {
       <ManifestHint />
       {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
       <EmbeddedTablesBanner />
+      {/* What the files hold that the canvas is not drawing, each with its file and line. */}
+      <FilesNotShownBanner />
 
       <ReactFlow
         className={flowClassName}
@@ -861,6 +880,11 @@ function EditorCanvas() {
 
       {activeToastMessage && (
         <Toast message={activeToastMessage} variant="warning" onDismiss={dismissToast} />
+      )}
+
+      {/* The host's brief note (canvasNotice), under any other toast: they share the corner. */}
+      {notice && !activeToastMessage && !error && (
+        <Toast message={notice} variant="info" autoDismissMs={CANVAS_NOTICE_DISMISS_MS} onDismiss={dismissNotice} />
       )}
 
       {/* Host error surfaced over the live canvas. Sticky until dismissed or the
