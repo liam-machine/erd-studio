@@ -5,8 +5,11 @@ import { classifySemanticFile } from '@erd-studio/core';
 
 import type { LayerService } from '../services/layerService';
 import type { TableFileEntry } from '../services/logicalModelService';
-import { otherLayerCounts, tableHomesOf } from '../services/tableHomes';
+import { otherLayerCounts, tableHomesById, tableHomesOf } from '../services/tableHomes';
 import { plural } from '../services/logger';
+import type { TableUsageKeys } from '../services/sidebarTables';
+import { tableIdOfEntry } from '../services/tableLibraryIndex';
+import type { TableId } from '../types/tableId';
 
 /**
  * Where the Explorer's tooltips get their counts: the Table Library's
@@ -17,12 +20,19 @@ import { plural } from '../services/logger';
 export interface ExplorerFactsSource {
   /** The library's table files, listed (not read). */
   listTableFiles(): readonly TableFileEntry[];
-  /** A table's warehouse name (`alias`) when its file has been read already; never a read. */
-  peekAlias?(name: string): string | undefined;
+  /** A table's warehouse name (`alias`) when its file has been read already; never a read. Told apart by identity, the table is named by its TableId. */
+  peekAlias?(name: TableId | string): string | undefined;
   /** Every diagram, with its layer. */
   listDiagrams(): ReadonlyArray<{ filePath: string; layer: string }>;
   /** A diagram's member table names (cached by file version); may throw for a file that cannot be read. */
   diagramMembers(filePath: string): string[] | null;
+  /**
+   * How tables and diagram members are matched (`tableUsageOf`). Optional:
+   * without it (or by name), by the names {@link diagramMembers} gives. Told
+   * apart by identity, a table file is counted on the diagrams whose `use`
+   * lines read it, never on those showing another schema folder's table of its name.
+   */
+  usage?(): TableUsageKeys;
   /** The library's relationships files (`<layer>/relationships/*.dbml`). */
   listRelationshipsFiles?(): readonly string[];
   /** How many relationships (Refs) a relationships file holds, or undefined when it does not read. */
@@ -228,7 +238,10 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     this.again = false;
     try {
       const entries = source.listTableFiles();
-      const homes = tableHomesOf(entries);
+      const keys = source.usage?.();
+      const byIdentity = keys?.byIdentity === true;
+      // By identity, homes and counts are keyed by each table's identity (`TableUsageKeys.keyOf`), not its name.
+      const homes = byIdentity ? tableHomesById(entries) : tableHomesOf(entries);
       const order = typeof this.layerService.getAllLayers === 'function' ? this.layerService.getAllLayers().map((l) => l.id) : [];
       const usage = new Map<string, number>();
       const diagrams = new Map<string, { tables: number; others: ReadonlyArray<{ layer: string; count: number }> }>();
@@ -243,7 +256,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
         if (this.disposed) return;
         let names: string[] | null;
         try {
-          names = source.diagramMembers(diagram.filePath);
+          names = byIdentity ? keys!.membersOf(diagram.filePath) : source.diagramMembers(diagram.filePath);
         } catch {
           continue;
         }
@@ -257,12 +270,12 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
         if (entry.layer === undefined || entry.shadowedBy) continue;
         await breathe();
         if (this.disposed) return;
-        const alias = source.peekAlias?.(entry.name);
+        const alias = source.peekAlias?.(byIdentity ? tableIdOfEntry(entry) : entry.name);
         tables.set(factKey(entry.filePath), {
           name: entry.name,
           schema: entry.folder,
           ...(alias ? { alias } : {}),
-          diagrams: usage.get(entry.name.toLowerCase()) ?? 0,
+          diagrams: usage.get(byIdentity ? keys!.keyOf({ name: entry.name, filePath: entry.filePath }) : entry.name.toLowerCase()) ?? 0,
         });
       }
       const relationships = new Map<string, number>();

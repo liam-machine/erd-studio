@@ -28,6 +28,13 @@
  * relationships file; compact, a layer row says `Layer` and a table or file
  * row only its count (`2 · 1 problem`), the rest in the hover.
  *
+ * Where the library tells tables apart by their schema folders, each table
+ * is named by its library reference: its name, or `<schema>.<name>` where
+ * another schema folder has a table of that name. Two such tables are then
+ * two rows (each row's id is its table's identity), each with its own
+ * relationships, layer and schema, and two relationships that differ only by
+ * schema are two rows.
+ *
  * Read-only, like every view here. The data is {@link buildRelationshipsOverview}
  * over the library's tables (and, for a YAML/JSON project, the relationships
  * still kept in diagram files); table files never read yet are read first, a
@@ -55,6 +62,8 @@ import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { layerSwatchIcon } from './layerSwatch';
 import { createLogger, elapsedMs, plural } from '../services/logger';
 import type { TableHome } from '../services/tableHomes';
+import type { SemanticTable } from '../types/semantic';
+import { tableIdKey } from '../types/tableId';
 import type { LayerConfig } from '../types/layer';
 import {
   RELATIONSHIPS_FILTER,
@@ -148,7 +157,8 @@ export type RelationshipsNode =
   | RelationshipsNoMatchNode;
 
 const ATTENTION_ID = 'erdStudio.relationships.attention';
-const tableId = (name: string): string => `erdStudio.relationships.table:${name.toLowerCase()}`;
+/** A table row's id: by its name, or (told apart by identity) its identity key, which holds a `/` no name can. */
+const tableId = (key: string): string => `erdStudio.relationships.table:${key.toLowerCase()}`;
 const fileId = (filePath: string): string => `erdStudio.relationships.file:${filePath.toLowerCase()}`;
 const layerId = (layer: string | undefined): string => `erdStudio.relationships.layer:${layer ?? ''}`;
 
@@ -218,11 +228,24 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     private readonly relationshipLocation?: (rel: RelationshipEntry['first']) => { filePath: string; line: number } | undefined,
   ) {}
 
-  /** The homes the last root listing read (empty when the project has no layered tables). */
-  private homes: ReadonlyMap<string, TableHome> = new Map();
+  /**
+   * The homes the last root listing read (empty when the project has no
+   * layered tables), by lower-cased table name; told apart by identity, by
+   * lower-cased library reference, each with the table's own name.
+   */
+  private homes: ReadonlyMap<string, TableHome & { readonly name?: string }> = new Map();
+  /** Told apart by identity: each table's identity key, by lower-cased library reference (the last root listing's). */
+  private identityKeys: ReadonlyMap<string, string> = new Map();
 
   /** Under each table (the default), or by the relationships file that stores them. */
   private grouping: RelationshipsGrouping = 'table';
+  /** Told apart by identity: the homes {@link loadOverview} read, by lower-cased library reference. */
+  private libraryHomes: ReadonlyMap<string, TableHome & { readonly name: string }> | undefined;
+
+  /** A table row's id key: its identity where tables are told apart by it, else its name. */
+  private tableKey(table: string): string {
+    return this.identityKeys.get(table.toLowerCase()) ?? table;
+  }
 
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
@@ -281,12 +304,43 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     return total > 0 ? `${plural(total, 'relationship')} · by ${this.grouping === 'file' ? 'file' : 'table'}` : undefined;
   }
 
+  /** Whether the library tells tables apart by their schema folders (a library double without the flag does not). */
+  private schemaScoped(): boolean {
+    return (this.tableLibraryService as { schemaScopedNames?: boolean }).schemaScopedNames === true;
+  }
+
+  /**
+   * Told apart by identity: every library table named by its library
+   * reference (its relationships already name their other ends so), with the
+   * homes and identity keys the rows look up by that reference.
+   */
+  private tablesByLibraryRef(): { tables: SemanticTable[]; homes: Map<string, TableHome & { name: string }>; keys: Map<string, string> } {
+    const service = this.tableLibraryService;
+    const tables: SemanticTable[] = [];
+    const homes = new Map<string, TableHome & { name: string }>();
+    const keys = new Map<string, string>();
+    for (const entry of service.listTableFiles()) {
+      if (entry.shadowedBy || entry.id === undefined) continue;
+      const ref = service.libraryRef(entry.id) ?? entry.name;
+      keys.set(ref.toLowerCase(), tableIdKey(entry.id));
+      if (entry.layer !== undefined) homes.set(ref.toLowerCase(), { layer: entry.layer, schema: entry.folder, name: entry.name });
+      const model = service.getTable(entry.id);
+      if (model) tables.push(ref === model.name ? model : { ...model, name: ref });
+    }
+    return { tables, homes, keys };
+  }
+
   /** The overview the view shows, computed afresh (reading unread table files first). */
   async loadOverview(): Promise<RelationshipsOverview> {
     await this.readUnreadTables();
     const start = Date.now();
     const service = this.tableLibraryService;
-    const tables = service.dirExists()
+    const byRef = service.dirExists() && this.schemaScoped()
+      ? (typeof service.withIndexSnapshot === 'function' ? service.withIndexSnapshot(() => this.tablesByLibraryRef()) : this.tablesByLibraryRef())
+      : undefined;
+    this.identityKeys = byRef?.keys ?? new Map();
+    this.libraryHomes = byRef?.homes;
+    const tables = byRef ? byRef.tables : service.dirExists()
       ? (typeof service.withIndexSnapshot === 'function' ? service.withIndexSnapshot(() => service.listTables()) : service.listTables())
       : [];
     // A DBML diagram holds no relationships (they live in relationships/), so this reads JSON diagrams only.
@@ -300,7 +354,7 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     if (!element) {
       const full = await this.loadOverview();
       this.overview = full;
-      this.homes = this.tableHomes?.() ?? new Map();
+      this.homes = this.libraryHomes ?? this.tableHomes?.() ?? new Map();
       const query = this.filterQuery;
       // Filtered: the matching relationships, under the rows they sit in.
       const overview = query ? this.filterOverview(full, query) : full;
@@ -339,7 +393,7 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
       return element.entries.map((entry) => ({ type: 'relationship', entry, side: 'problem', parentId: ATTENTION_ID }));
     }
     if (element.type === 'table') {
-      const parentId = tableId(element.group.table);
+      const parentId = tableId(this.tableKey(element.group.table));
       return [
         ...element.group.outgoing.map((entry): RelationshipNode => ({ type: 'relationship', entry, side: 'from', parentId })),
         ...element.group.incoming.map((entry): RelationshipNode => ({ type: 'relationship', entry, side: 'to', parentId })),
@@ -664,7 +718,7 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
   private tableItem(element: RelationshipsTableNode): vscode.TreeItem {
     const { group } = element;
     const item = new vscode.TreeItem(group.table, vscode.TreeItemCollapsibleState.Collapsed);
-    item.id = tableId(group.table);
+    item.id = tableId(this.tableKey(group.table));
     const count = group.outgoing.length + group.incoming.length;
     const problems = [...group.outgoing, ...group.incoming].filter((e) => e.problems.length > 0).length;
     const counted = plural(count, 'relationship') + (problems > 0 ? ` · ${plural(problems, 'problem')}` : '');
@@ -672,7 +726,7 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     item.description = this.rowDetails === 'compact' ? countText(count, problems) : counted;
     const home = this.homes.get(group.table.toLowerCase());
     item.tooltip = [
-      home ? `${home.schema}.${group.table} — ${this.layerLabel(home.layer)} layer` : undefined,
+      home ? `${home.schema}.${home.name ?? group.table} — ${this.layerLabel(home.layer)} layer` : undefined,
       counted,
       [
         group.outgoing.length > 0 ? `Points at ${plural(new Set(group.outgoing.map((e) => e.toModel.toLowerCase())).size, 'table')}` : undefined,
@@ -785,9 +839,12 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
   private async readUnreadTables(): Promise<void> {
     const service = this.tableLibraryService;
     if (typeof service.peekTableFileError !== 'function' || !service.dirExists()) return;
+    // Told apart by identity, each table's own file (never its namesake's in another schema folder).
+    const scoped = this.schemaScoped();
     const queue = service.listTableFiles()
-      .filter((e) => !e.shadowedBy && service.peekTableFileError(e.name) === undefined)
-      .map((e) => e.name);
+      .filter((e) => !e.shadowedBy)
+      .map((e) => (scoped && e.id !== undefined ? e.id : e.name))
+      .filter((table) => service.peekTableFileError(table) === undefined);
     while (queue.length > 0) {
       const started = Date.now();
       while (queue.length > 0 && Date.now() - started < READ_SLICE_MS) service.getTableFileError(queue.shift()!);

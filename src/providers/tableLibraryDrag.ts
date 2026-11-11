@@ -7,7 +7,9 @@
  * an ignored duplicate — and puts their files in `text/uri-list` (so a drop
  * in a text editor or the Explorer behaves as for any file) and their names
  * under {@link TABLE_LIBRARY_DRAG_MIME}. It then reports the drag
- * (`onDragStarted`): the editor provider remembers it for a minute and tells
+ * (`onDragStarted`, with each table's file where the extension asks for
+ * them: two schema folders may each hold a table of one name, and only the
+ * file says which): the editor provider remembers it for a minute and tells
  * the open canvases, which show "Hold Shift and drop to add … to this
  * diagram".
  *
@@ -25,6 +27,7 @@ import * as vscode from 'vscode';
 import type { TableLibraryNode } from './ModelLibraryTreeProvider';
 import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME } from '../types/messages';
 import { normaliseName } from '../services/nameUtils';
+import { tableIdKey } from '../types/tableId';
 
 export { TABLE_LIBRARY_DRAG_MIME };
 
@@ -38,7 +41,10 @@ export interface DraggedTables {
  * The tables of the dragged rows, in tree order, each once (ignoring case),
  * at most `limit` (the Add Existing Tables cap): a table row is itself, a
  * schema or YAML folder row its tables, a layer row the tables of all its
- * schemas. A duplicate that is ignored is never dragged.
+ * schemas. A duplicate that is ignored is never dragged. "Once" is per
+ * table: a DBML row is its schema folder and name, so the tables of one name
+ * in two schema folders are both dragged; a row selected with its own
+ * schema or layer row is dragged once.
  */
 export function tablesOfDraggedRows(rows: readonly TableLibraryNode[], limit = ADD_EXISTING_TABLES_LIMIT): DraggedTables {
   const names: string[] = [];
@@ -51,7 +57,7 @@ export function tablesOfDraggedRows(rows: readonly TableLibraryNode[], limit = A
       return;
     }
     if (node.shadowedBy) return;
-    const key = normaliseName(node.name);
+    const key = node.layer !== undefined ? tableIdKey({ schema: node.folder ?? '', name: node.name }) : normaliseName(node.name);
     if (seen.has(key)) return;
     seen.add(key);
     names.push(node.name);
@@ -67,8 +73,10 @@ export class TableLibraryDragController implements vscode.TreeDragAndDropControl
   readonly dropMimeTypes: readonly string[] = [];
 
   constructor(
-    /** Told the drag's table names once they are known (`SemanticEditorProvider.noteLibraryDrag`). */
-    private readonly onDragStarted: (tables: string[]) => void,
+    /** Told the drag's table names once they are known (`SemanticEditorProvider.noteLibraryDrag`), and their files when `withFiles`. */
+    private readonly onDragStarted: (tables: string[], files?: string[]) => void,
+    /** `withFiles`: each dragged table's file (absolute) is reported too, index for index, so a drop adds that file. */
+    private readonly options: { withFiles?: boolean } = {},
   ) {}
 
   handleDrag(source: readonly TableLibraryNode[], dataTransfer: vscode.DataTransfer): void {
@@ -76,6 +84,7 @@ export class TableLibraryDragController implements vscode.TreeDragAndDropControl
     if (names.length === 0) return;
     dataTransfer.set('text/uri-list', new vscode.DataTransferItem(filePaths.map((p) => vscode.Uri.file(p).toString()).join('\r\n')));
     dataTransfer.set(TABLE_LIBRARY_DRAG_MIME, new vscode.DataTransferItem(names));
-    this.onDragStarted(names);
+    if (this.options.withFiles) this.onDragStarted(names, filePaths);
+    else this.onDragStarted(names);
   }
 }

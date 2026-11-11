@@ -419,6 +419,17 @@ interface CanvasTable {
   filePath?: string;
 }
 
+/**
+ * A table reveal (Open in Diagram, Go to Table) or Add to Diagram… for one
+ * diagram: the table to select, and the tables to add first, with each
+ * one's file (absolute, index for index) when the sidebar knew it.
+ */
+interface TableAction {
+  reveal: string;
+  add?: string[];
+  files?: string[];
+}
+
 /** Why a chosen dbt model was left out of a batch add, in words. */
 const DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
   'invalid-name': 'name cannot be used as a file name',
@@ -1178,7 +1189,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * had loaded, by diagram path; run by the `ready` handler, dropped after
    * {@link PENDING_REVEAL_MS} like {@link pendingReveals}.
    */
-  private readonly pendingTableActions = new Map<string, { reveal: string; add?: string[]; at: number }>();
+  private readonly pendingTableActions = new Map<string, TableAction & { at: number }>();
 
   /**
    * The last drag that started in the Table Library ({@link noteLibraryDrag}):
@@ -3558,15 +3569,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
   ): Promise<void> {
-    if (action === 'showTableOnOtherDiagrams') {
-      await vscode.commands.executeCommand('erdStudio.openInDiagram', { type: 'model', name: modelName }, { excludeDiagram: document.uri.fsPath });
-      return;
-    }
     let table: CanvasTable;
     try {
       table = this.canvasTable(document, modelName);
     } catch (err) {
       this.post(webview, { type: 'error', payload: { message: err instanceof Error ? err.message : String(err) } });
+      return;
+    }
+    if (action === 'showTableOnOtherDiagrams') {
+      // The member's own file, where the diagram has one: the other diagrams are those that show that file's table.
+      const node = table.filePath !== undefined ? { type: 'model', name: table.name, filePath: table.filePath } : { type: 'model', name: modelName };
+      await vscode.commands.executeCommand('erdStudio.openInDiagram', node, { excludeDiagram: document.uri.fsPath });
       return;
     }
     // The member's own file (two schema folders may each hold a table of its name), else the table by name.
@@ -3581,6 +3594,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const shown = projectRelativePath(this.workspaceRoot, filePath);
       await vscode.env.clipboard.writeText(shown);
       vscode.window.setStatusBarMessage(`ERD Studio: Copied ${shown}`, 4000);
+    } else if (table.filePath !== undefined) {
+      // That member's own row: another schema folder may have a table of its name.
+      await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name, table.filePath);
     } else {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name);
     }
@@ -6470,9 +6486,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * the diagram already, the first is selected and named instead. The caller
    * opens the diagram.
    */
-  async addTablesToDiagram(uri: vscode.Uri, modelNames: readonly string[]): Promise<void> {
+  async addTablesToDiagram(
+    uri: vscode.Uri,
+    modelNames: readonly string[],
+    /**
+     * Each table's file (absolute), index for index with `modelNames`: where
+     * the library tells tables apart by identity, each is added (and found on
+     * the diagram) by its file, never by a name another schema folder shares.
+     */
+    files?: readonly string[],
+  ): Promise<void> {
     if (modelNames.length === 0) return;
-    await this.runTableAction(uri, { reveal: modelNames[0], add: [...modelNames] });
+    await this.runTableAction(uri, {
+      reveal: modelNames[0],
+      add: [...modelNames],
+      ...(files !== undefined && files.length === modelNames.length ? { files: [...files] } : {}),
+    });
   }
 
   /**
@@ -6576,7 +6605,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Run a table action on a loaded canvas of `uri` now, or hold it for its `ready`. */
-  private async runTableAction(uri: vscode.Uri, action: { reveal: string; add?: string[] }): Promise<void> {
+  private async runTableAction(uri: vscode.Uri, action: TableAction): Promise<void> {
     const open = Array.from(this.openPanels.entries()).find(([, p]) =>
       p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
     if (!open) {
@@ -6586,11 +6615,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     await this.applyTableAction(open[0], action);
   }
 
-  private async applyTableAction(panelKey: string, action: { reveal: string; add?: string[] }): Promise<void> {
+  private async applyTableAction(panelKey: string, action: TableAction): Promise<void> {
     const panel = this.openPanels.get(panelKey);
     if (!panel) return;
     if (panel.activeStage !== 'logical') {
       await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
+    }
+    if (action.add && action.files && this.schemaScoped() && this.isDbmlDocument(panel.document)) {
+      await this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
+      return;
     }
     let reveal = action.reveal;
     if (action.add) {
@@ -6613,6 +6646,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+  }
+
+  /**
+   * Add to Diagram… and a drop on a diagram's row, where the library tells
+   * tables apart by identity and the DBML diagram's tables are its `use`
+   * lines' files: each table is the file named (`files`), so a table whose
+   * name another schema folder's table on the diagram has is still added
+   * (both then named `<schema>.<name>`), and one whose own file is already
+   * there is named instead. The add itself is Add Existing Tables' edit, by
+   * those files (one edit, one undo step); the first table added is selected.
+   */
+  private async applyTableFilesAction(
+    panelKey: string,
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    names: readonly string[],
+    files: readonly string[],
+  ): Promise<void> {
+    const entries = files.map((f) => this.tableLibraryService.tableEntryAt(f));
+    const shownAs = (i: number): string | undefined => {
+      const id = entries[i]?.id;
+      return id !== undefined ? this.parseSubjectAreaFile(document).members?.memberOf(id)?.ref : undefined;
+    };
+    const fresh = names.map((_n, i) => i).filter((i) => shownAs(i) === undefined);
+    if (fresh.length === 0) {
+      // All there already: select the first and say so, briefly.
+      void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+      this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(0) ?? names[0] } } satisfies RevealTableMessage);
+      return;
+    }
+    // Every table goes to the add, so its note names the ones already here.
+    await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, {
+      sourcePaths: files.map((f) => this.workspaceRelative(f)),
+    }));
+    // A refused add has said why: nothing to select.
+    const added = fresh.map(shownAs).find((ref) => ref !== undefined);
+    if (added !== undefined) this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
   }
 
   /** Run the table action held for the diagram at `fsPath`, if it is still fresh. */

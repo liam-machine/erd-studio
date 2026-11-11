@@ -9,12 +9,11 @@
  * `activate()` builds its own Table Library, which tells tables apart by
  * identity only once that is the default; until then this file turns the
  * internal option `schemaScopedNames` on for every library the extension
- * builds. Move Table, the Explorer's moves, Organise, Delete Table and
- * Import DBML then act on one twin and leave the other's file, Refs, `use`
- * lines and diagrams as they were; a move onto an identity another layer
- * has is refused, naming that file, and writes nothing (D-7); a command
- * that still names a table by a shared name alone is refused, never sent to
- * the first file of that name (D-5).
+ * builds. Move Table, the Explorer's moves, Organise, Delete Table (by the
+ * row's own file) and Import DBML then act on one twin and leave the
+ * other's file, Refs, `use` lines and diagrams as they were; a move onto an
+ * identity another layer has is refused, naming that file, and writes
+ * nothing (D-7).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -304,13 +303,27 @@ describe('Organise Table Library with two tables of one name', () => {
 });
 
 describe('Delete Table on one of two tables of one name', () => {
-  it('still acts by name here, so it is refused, never the first file of that name; nothing is deleted', async () => {
+  it('deletes the row\'s own file: only its own Refs and diagram places go, and the question counts only those', async () => {
     await activate(context);
     const before = snapshot();
     warnings.mockImplementation((async (...args: unknown[]) => (args.includes('Delete') ? 'Delete' : undefined)) as never);
     await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', row('bronze/tables/ccc/addresse.dbml'));
-    expect(errors.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/more than one table is named addresse/i);
-    expect(snapshot()).toEqual(before);
+    expect(errors).not.toHaveBeenCalled();
+    // The question names the table by its schema (another schema folder has one of its name) and counts its own Refs and diagrams.
+    const question = String(warnings.mock.calls.find((c) => c.includes('Delete'))?.[0]);
+    expect(question).toBe('Delete table "ccc.addresse"? This removes the table\'s file, its 2 relationships and its place in 3 diagrams.');
+    const after = snapshot();
+    expect(after['bronze/tables/ccc/addresse.dbml']).toBeUndefined();
+    expect(bqsSide(after)).toEqual(bqsSide(before));
+    const refs = (files: Record<string, string>): string[] => files['bronze/relationships/bronze.dbml'].split('\n').filter((l) => l.startsWith('Ref:'));
+    expect(refs(after)).toEqual(['Ref: bqs.kunde.addresse_id >? bqs.addresse.id']);
+    // Each diagram loses the member whose use line read ccc's file, and only that one.
+    for (const d of ['bronze/diagrams/ccc.dbml', 'bronze/diagrams/kunden.dbml', 'bronze/diagrams/kunden-bare.dbml']) {
+      expect(after[d], d).not.toContain('../tables/ccc/addresse.dbml');
+      expect(after[d], d).toContain('../tables/ccc/kunde.dbml');
+    }
+    expect(after['bronze/diagrams/kunden.dbml']).toContain("use { table bqs.addresse } from '../tables/bqs/addresse.dbml'");
+    compilesClean();
   });
 });
 

@@ -79,6 +79,21 @@ export async function draggedTableNames(item: vscode.DataTransferItem): Promise<
   return names;
 }
 
+/**
+ * The `file:` URIs a Table Library drag put in `text/uri-list` (each dragged
+ * table's file, in drag order), at most {@link ADD_EXISTING_TABLES_LIMIT};
+ * empty when the drag carries none.
+ */
+export async function draggedTableUris(dataTransfer: vscode.DataTransfer): Promise<string[]> {
+  const item = dataTransfer.get('text/uri-list');
+  if (!item) return [];
+  let text = typeof item.value === 'string' ? item.value : '';
+  if (!text) {
+    try { text = await item.asString(); } catch { text = ''; }
+  }
+  return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^file:/i.test(line)).slice(0, ADD_EXISTING_TABLES_LIMIT);
+}
+
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
 // ---------------------------------------------------------------------------
@@ -219,8 +234,13 @@ export class SubjectAreaTreeProvider
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_DRAG_MIME];
   readonly dragMimeTypes = [LAYER_DRAG_MIME_TYPE];
-  /** Adds Table Library rows dropped on a diagram's row to that diagram (set by the extension: Add to Diagram's write). */
-  private tablesDropHandler: ((filePath: string, tables: string[]) => Promise<void>) | undefined;
+  /**
+   * Adds Table Library rows dropped on a diagram's row to that diagram (set
+   * by the extension: Add to Diagram's write). `uris` are the dragged tables'
+   * files (`text/uri-list`), which say which table where two schema folders
+   * share a name.
+   */
+  private tablesDropHandler: ((filePath: string, tables: string[], uris: string[]) => Promise<void>) | undefined;
 
   constructor(
     private readonly subjectAreaService: SubjectAreaService,
@@ -277,7 +297,7 @@ export class SubjectAreaTreeProvider
     // does not depend on a drag reaching the canvas webview.
     const tablesItem = dataTransfer.get(TABLE_LIBRARY_DRAG_MIME);
     if (tablesItem) {
-      await this.dropTables(target, await draggedTableNames(tablesItem));
+      await this.dropTables(target, await draggedTableNames(tablesItem), await draggedTableUris(dataTransfer));
       return;
     }
 
@@ -318,19 +338,19 @@ export class SubjectAreaTreeProvider
   }
 
   /** Who adds tables dropped on a diagram's row (the extension wires Add to Diagram's write here). */
-  setTablesDropHandler(handler: (filePath: string, tables: string[]) => Promise<void>): void {
+  setTablesDropHandler(handler: (filePath: string, tables: string[], uris: string[]) => Promise<void>): void {
     this.tablesDropHandler = handler;
   }
 
   /** Table Library rows dropped on `target`: added when it is a diagram's row, else the user is told where to drop. */
-  private async dropTables(target: TreeElement | undefined, tables: string[]): Promise<void> {
+  private async dropTables(target: TreeElement | undefined, tables: string[], uris: string[]): Promise<void> {
     if (tables.length === 0 || !this.tablesDropHandler) return;
     if (!target || target.type !== 'domain') {
       void vscode.window.showInformationMessage('ERD Studio: Drop tables on a diagram\'s name to add them to that diagram.');
       return;
     }
     try {
-      await this.tablesDropHandler(target.summary.filePath, tables);
+      await this.tablesDropHandler(target.summary.filePath, tables, uris);
     } catch (err) {
       log.error('[DomainTreeProvider] Adding dropped tables to a diagram failed:', err);
       const message = err instanceof Error ? err.message : String(err);
