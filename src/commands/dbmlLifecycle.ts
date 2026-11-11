@@ -27,7 +27,7 @@ import { dbmlResolverOf, settleDbmlDiagramWrites, type SubjectAreaResolver } fro
 import { buildRelationshipsIndex, refEntriesOf, relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
 import type { TableFileEntry, TableLibraryService } from '../services/logicalModelService';
 import { isSchemaFolderName, ownedRelationshipsOf } from '../services/dbmlLibraryWrites';
-import { renameTableInRelationships, renameTableInSubjectArea } from '../services/libraryRelationships';
+import { renameTableInSubjectArea } from '../services/libraryRelationships';
 import type { SemanticTable } from '../types/semantic';
 
 /** A path relative to `root`, posix. */
@@ -834,11 +834,9 @@ export function planDbmlExplorerMoves(input: {
       const own = [...snapshot!.tables.values()].find((t) => t.path.toLowerCase() === oldPath);
       const ownName = own?.ref ?? r.from;
       const model: SemanticTable = { ...structuredClone(reading.table), name: r.to, relationships: ownedRelationshipsOf(snapshot!, ownName) };
-      // Its own self-references follow, as on the canvas. Told apart by identity they keep its old
-      // library reference, which the plan follows to the renamed table: its new bare name may be a
-      // name another schema folder's table already has (ccc.addresse renamed to orte beside bqs.orte),
-      // and would then name that table.
-      if (!snapshot!.schemaScopedNames) renameTableInRelationships([model], ownName, r.to);
+      // Its own self-references keep its old library reference, which the plan follows to the renamed
+      // table: its new bare name may be a name another schema folder's table already has (ccc.addresse
+      // renamed to orte beside bqs.orte), and would then name that table.
       return { model, fromName: r.from, from: { schema: r.schema, name: r.from } };
     });
     const { writes, plan } = library.planDbmlLibraryOps(

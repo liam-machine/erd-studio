@@ -479,7 +479,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   const endTableOf = (f: ProjectFile, name: string, qualifier: string | undefined): ReturnType<typeof tableOf> => {
     const direct = tableOf(name);
     const candidates = named.get(name.toLowerCase()) ?? [];
-    if (!scoped || candidates.length < 2) return direct ?? candidates[0];
+    // (The snapshot is always scoped when there is one; without one there are no candidates.)
+    if (candidates.length < 2) return direct ?? candidates[0];
     const q = qualifier?.replace(/^"(.*)"$/, '$1').toLowerCase();
     const spelled = (q === undefined ? name : `${q}.${name}`).toLowerCase();
     const use = outline(f).uses.find((u) => !u.wildcard && (u.specifiers ?? []).some((sp) => sp.toLowerCase() === spelled));
@@ -552,7 +553,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   const readsCleanly = (t: { name: string; path: string }): boolean => {
     try {
       // By its own file: a name two schema folders share names two files.
-      const err = scoped ? lib.getTableFileErrorAt(path.join(semanticRoot, t.path), t.name) : lib.getTableFileError(t.name);
+      const err = lib.getTableFileErrorAt(path.join(semanticRoot, t.path), t.name);
       return !err || err.readable === true;
     } catch {
       return false;
@@ -981,11 +982,11 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       // A member is asked for by the file its use line reads, so a diagram of one schema's tables needs no
       // other's Refs. A use line naming no table file (a stale path) is the member by its name, as it is read.
       const useOf = (m: string) => (reading!.uses ?? []).find((u) => (u.ref ?? u.name).toLowerCase() === m.toLowerCase());
-      const members = scoped ? linked.map((m) => {
+      const members = linked.map((m) => {
         const use = useOf(m);
         const id = use && byPath.has(use.resolved.toLowerCase()) ? tableIdOfPath(use.resolved) : undefined;
         return id ? { schema: id.schema, name: id.name } : m;
-      }) : linked;
+      });
       const want = relationshipsImportsFor({ members, unlinked }, index, { current: reading.relationshipsUses });
       const imported = new Set(reading.relationshipsUses);
       for (const file of want) {
