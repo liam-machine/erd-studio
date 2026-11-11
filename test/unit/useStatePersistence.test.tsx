@@ -221,3 +221,80 @@ describe('useStatePersistence persist', () => {
     expect(mockVsCode.setState).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useStatePersistence table detail level', () => {
+  const base = { selectedNode: null, viewport: { x: 0, y: 0, zoom: 1 }, detailPanelOpen: false };
+
+  it('restores the level and the tables opened on their own', () => {
+    mockVsCode.getState.mockReturnValue({ ...base, expandedNodes: ['a'], allExpanded: false, tableDetail: 'name' } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    const s = useEditorStore.getState();
+    expect(s.tableDetail).toBe('name');
+    expect([...s.expandedNodes]).toEqual(['a']);
+    expect(s.allExpanded).toBe(false);
+  });
+
+  it('reads a blob from before the levels: "all expanded" is the all level', () => {
+    mockVsCode.getState.mockReturnValue({ ...base, expandedNodes: ['a', 'b'], allExpanded: true } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    const s = useEditorStore.getState();
+    expect(s.tableDetail).toBe('all');
+    expect(s.allExpanded).toBe(true);
+    expect(s.expandedNodes.size).toBe(0);
+  });
+
+  it('reads a blob from before the levels: collapsed is the keys level, with the expanded tables still opened', () => {
+    mockVsCode.getState.mockReturnValue({ ...base, expandedNodes: ['a'], allExpanded: false } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    const s = useEditorStore.getState();
+    expect(s.tableDetail).toBe('keys');
+    expect(s.allExpanded).toBe(false);
+    expect([...s.expandedNodes]).toEqual(['a']);
+  });
+
+  it('ignores a level it does not know and falls back to the expansion state', () => {
+    mockVsCode.getState.mockReturnValue({ ...base, expandedNodes: [], allExpanded: true, tableDetail: 'everything' });
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    expect(useEditorStore.getState().tableDetail).toBe('all');
+  });
+
+  it('leaves the level alone for a blob with no expansion state at all', () => {
+    mockVsCode.getState.mockReturnValue({ ...base });
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    expect(useEditorStore.getState().tableDetail ?? null).toBeNull();
+  });
+
+  it('writes the chosen level and the opened tables', () => {
+    vi.useFakeTimers();
+    useEditorStore.setState({ domain: subjectArea });
+    renderHook(() => useStatePersistence());
+
+    act(() => {
+      useEditorStore.getState().setTableDetail('keys');
+      useEditorStore.getState().toggleExpansion('a');
+    });
+    act(() => { vi.advanceTimersByTime(400); });
+
+    const written = mockVsCode.setState.mock.calls.at(-1)![0] as PersistedState;
+    expect(written).toMatchObject({ tableDetail: 'keys', expandedNodes: ['a'], allExpanded: false });
+
+    act(() => { useEditorStore.getState().setTableDetail('all'); });
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(mockVsCode.setState.mock.calls.at(-1)![0]).toMatchObject({ tableDetail: 'all', expandedNodes: [], allExpanded: true });
+  });
+});

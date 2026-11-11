@@ -109,9 +109,6 @@ describe('layoutDraft', () => {
       render(createElement(Toolbar, {
         nodes: graph.nodes as TableFlowNode[],
         edges: graph.edges as FkFlowEdge[],
-        allExpanded: false,
-        onExpandAll: vi.fn(),
-        onCollapseAll: vi.fn(),
       }));
     });
     await vi.waitFor(() => expect(mockRunElkLayout).toHaveBeenCalledTimes(1));

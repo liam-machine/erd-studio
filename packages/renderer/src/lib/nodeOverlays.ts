@@ -4,6 +4,7 @@
  *
  *   - `dimmed`: search-miss or not-connected-to-selection dimming (F402)
  *   - `isExpanded` / `onToggleExpansion`: column expansion (F405)
+ *   - `tableDetail`: the diagram's table detail level
  *
  * `applyNodeOverlays` is a pure function that preserves object identity for
  * every node/edge whose overlay values did not change, so React Flow's
@@ -30,6 +31,7 @@ import type {
 } from '../types/graph';
 import { matchesTableSearch } from './modelLabels';
 import { computeCanvasFocus } from './canvasFocus';
+import type { TableDetail } from './tableDetail';
 
 export type GraphNode = TableFlowNode | AnnotationFlowNode;
 export type GraphEdge = FkFlowEdge | AnnotationFlowEdge;
@@ -45,6 +47,11 @@ export interface OverlayState {
   isExpanded: (modelName: string) => boolean;
   /** Stable toggle callback injected into node data. */
   toggleExpansion: (modelName: string) => void;
+  /**
+   * The diagram's table detail level, copied to every table. Null or absent:
+   * no level, and the nodes carry none (they draw as before the levels).
+   */
+  tableDetail?: TableDetail | null;
 }
 
 /**
@@ -58,6 +65,7 @@ export function applyNodeOverlays(
   state: OverlayState,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const { selectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion } = state;
+  const tableDetail = state.tableDetail ?? undefined;
   const hasSelection = selectedNode !== null || selectedEdge !== null;
   // The shared connectivity rule (`computeCanvasFocus`): a selected node and
   // its FK neighbours, or a selected edge's two endpoints. An unknown edge
@@ -82,6 +90,7 @@ export function applyNodeOverlays(
     if (
       (data.dimmed ?? false) === dimmed &&
       (data.isExpanded ?? false) === expanded &&
+      data.tableDetail === tableDetail &&
       data.onToggleExpansion === toggleExpansion
     ) {
       return node;
@@ -93,6 +102,7 @@ export function applyNodeOverlays(
         ...data,
         dimmed,
         isExpanded: expanded,
+        tableDetail,
         onToggleExpansion: toggleExpansion,
       },
     } as TableFlowNode;

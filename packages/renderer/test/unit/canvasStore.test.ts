@@ -122,6 +122,73 @@ describe('createCanvasStore', () => {
   });
 });
 
+describe('table detail level', () => {
+  it('starts with no level, where the older actions behave as before', () => {
+    const store = createCanvasStore();
+    expect(store.getState().tableDetail).toBeNull();
+    store.getState().expandAll(['a', 'b']);
+    expect(store.getState()).toMatchObject({ tableDetail: null, allExpanded: true });
+    expect([...store.getState().expandedNodes]).toEqual(['a', 'b']);
+    store.getState().collapseAll();
+    expect(store.getState()).toMatchObject({ tableDetail: null, allExpanded: false });
+  });
+
+  it('setTableDetail sets the level, mirrors "all" in allExpanded and closes the opened tables', () => {
+    const store = createCanvasStore();
+    store.getState().setTableDetail('keys');
+    store.getState().toggleExpansion('a');
+    store.getState().toggleExpansion('b');
+    expect([...store.getState().expandedNodes]).toEqual(['a', 'b']);
+    expect(store.getState()).toMatchObject({ tableDetail: 'keys', allExpanded: false });
+
+    store.getState().setTableDetail('name');
+    expect(store.getState()).toMatchObject({ tableDetail: 'name', allExpanded: false });
+    expect(store.getState().expandedNodes.size).toBe(0);
+
+    store.getState().setTableDetail('all');
+    expect(store.getState()).toMatchObject({ tableDetail: 'all', allExpanded: true });
+  });
+
+  it('choosing the level already on closes the opened tables, and is no write when none is', () => {
+    const store = createCanvasStore({ tableDetail: 'keys' });
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const before = store.getState().expandedNodes;
+    store.getState().setTableDetail('keys');
+    expect(store.getState().expandedNodes).toBe(before);
+    expect(listener).not.toHaveBeenCalled();
+
+    store.getState().toggleExpansion('a');
+    store.getState().setTableDetail('keys');
+    expect(store.getState().expandedNodes.size).toBe(0);
+  });
+
+  it('opening one table at a level keeps the level and the allExpanded mirror', () => {
+    const store = createCanvasStore();
+    store.getState().setTableDetail('keys');
+    store.getState().toggleExpansion('a');
+    expect(store.getState()).toMatchObject({ tableDetail: 'keys', allExpanded: false });
+    store.getState().toggleExpansion('a');
+    expect(store.getState().expandedNodes.size).toBe(0);
+  });
+
+  it('the older actions map onto the levels: expandAll is all, collapseAll is keys', () => {
+    const store = createCanvasStore({ tableDetail: 'name' });
+    store.getState().toggleExpansion('a');
+    store.getState().expandAll(['a', 'b']);
+    expect(store.getState()).toMatchObject({ tableDetail: 'all', allExpanded: true });
+    expect(store.getState().expandedNodes.size).toBe(0);
+    store.getState().collapseAll();
+    expect(store.getState()).toMatchObject({ tableDetail: 'keys', allExpanded: false });
+  });
+
+  it('setTableDetail(null) drops the level with every table collapsed', () => {
+    const store = createCanvasStore({ tableDetail: 'all', allExpanded: true });
+    store.getState().setTableDetail(null);
+    expect(store.getState()).toMatchObject({ tableDetail: null, allExpanded: false });
+  });
+});
+
 describe('CanvasStoreProvider', () => {
   it('supplies its store to useEditorStore and useEditorStoreApi', () => {
     const store = createCanvasStore({ searchQuery: 'cust' });

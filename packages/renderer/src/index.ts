@@ -6,6 +6,7 @@
 
 export { ErdCanvas, type ErdCanvasProps, type ErdCanvasHandle } from './ErdCanvas';
 export { LINE_STYLES, DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
+export { TABLE_DETAILS, isTableDetail, type TableDetail } from './lib/tableDetail';
 
 export {
   transformSubjectArea,

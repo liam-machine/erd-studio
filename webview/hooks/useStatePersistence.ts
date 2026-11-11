@@ -2,7 +2,7 @@
  * useStatePersistence — persists webview UI state to VS Code's webview state API.
  *
  * Subscribes to relevant Zustand store slices (selectedNode, viewport,
- * detailPanelOpen, expandedNodes, allExpanded, canvasMode, discrepancy
+ * detailPanelOpen, expandedNodes, allExpanded, tableDetail, canvasMode, discrepancy
  * overlay state, sync-merge selections and the drag-to-relate tip's
  * dismissal) and debounces writes to
  * vscode.setState(). On mount, restores state from vscode.getState() if
@@ -18,6 +18,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Viewport } from '@xyflow/react';
 
 import { useVsCodeApi } from './useVsCodeApi';
+import { isTableDetail, type TableDetail } from '@erd-studio/renderer/editor';
+
 import { useEditorStore } from '../store/editorStore';
 import type { Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
@@ -31,8 +33,15 @@ export interface PersistedState {
   selectedNode: string | null;
   viewport: Viewport;
   detailPanelOpen: boolean;
+  /** The tables opened on their own (before the detail levels: every expanded table). */
   expandedNodes: string[];
   allExpanded: boolean;
+  /**
+   * The diagram's table detail level. Optional: a blob written before the
+   * levels has only the two fields above, read as `all` when `allExpanded`
+   * and as `keys` (with `expandedNodes` still opened) otherwise.
+   */
+  tableDetail?: TableDetail;
   /** Canvas interaction mode (pan / select). Optional for pre-existing state blobs. */
   canvasMode?: 'pan' | 'select';
   /** Whether the cross-stage discrepancy overlay was on. */
@@ -74,6 +83,7 @@ export function useStatePersistence(): {
   const domain = useEditorStore((s) => s.domain);
   const expandedNodes = useEditorStore((s) => s.expandedNodes);
   const allExpanded = useEditorStore((s) => s.allExpanded);
+  const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
   const canvasMode = useEditorStore((s) => s.canvasMode);
   const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
   const discrepancyCompareStage = useEditorStore((s) => s.discrepancyCompareStage);
@@ -87,6 +97,7 @@ export function useStatePersistence(): {
   const setViewport = useEditorStore((s) => s.setViewport);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setExpandedNodes = useEditorStore((s) => s.setExpandedNodes);
+  const setTableDetail = useEditorStore((s) => s.setTableDetail);
   const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const setDiscrepancyVisible = useEditorStore((s) => s.setDiscrepancyVisible);
   const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
@@ -125,6 +136,7 @@ export function useStatePersistence(): {
   const detailPanelOpenRef = useRef(detailPanelOpen);
   const expandedNodesRef = useRef(expandedNodes);
   const allExpandedRef = useRef(allExpanded);
+  const tableDetailRef = useRef(tableDetail);
   const canvasModeRef = useRef(canvasMode);
   const discrepancyVisibleRef = useRef(discrepancyVisible);
   const discrepancyCompareStageRef = useRef(discrepancyCompareStage);
@@ -140,6 +152,7 @@ export function useStatePersistence(): {
     detailPanelOpenRef.current = detailPanelOpen;
     expandedNodesRef.current = expandedNodes;
     allExpandedRef.current = allExpanded;
+    tableDetailRef.current = tableDetail;
     canvasModeRef.current = canvasMode;
     discrepancyVisibleRef.current = discrepancyVisible;
     discrepancyCompareStageRef.current = discrepancyCompareStage;
@@ -148,7 +161,7 @@ export function useStatePersistence(): {
     syncInferredTableKeysRef.current = syncInferredTableKeys;
     dragHintDismissedRef.current = dragHintDismissed;
   }, [
-    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded,
+    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
     syncInferredTableKeys, dragHintDismissed,
   ]);
@@ -161,6 +174,7 @@ export function useStatePersistence(): {
       detailPanelOpen: detailPanelOpenRef.current,
       expandedNodes: [...expandedNodesRef.current],
       allExpanded: allExpandedRef.current,
+      ...(tableDetailRef.current ? { tableDetail: tableDetailRef.current } : {}),
       canvasMode: canvasModeRef.current,
       discrepancyVisible: discrepancyVisibleRef.current,
       discrepancyCompareStage: discrepancyCompareStageRef.current,
@@ -219,8 +233,17 @@ export function useStatePersistence(): {
     }
 
     // Restore column expansion state
-    if (restored.expandedNodes !== undefined) {
-      setExpandedNodes(restored.expandedNodes, restored.allExpanded ?? false);
+    // Restore the table detail level and the tables opened on their own. A
+    // blob from before the levels had only the expansion state: "all
+    // expanded" is the `all` level, anything else `keys` with the tables the
+    // reader had expanded still opened.
+    if (restored.expandedNodes !== undefined || isTableDetail(restored.tableDetail)) {
+      const level: TableDetail = isTableDetail(restored.tableDetail)
+        ? restored.tableDetail
+        : restored.allExpanded ? 'all' : 'keys';
+      const opened = Array.isArray(restored.expandedNodes) ? restored.expandedNodes : [];
+      setTableDetail(level);
+      setExpandedNodes(level === 'all' ? [] : opened, level === 'all');
     }
 
     // Restore canvas interaction mode
@@ -269,7 +292,7 @@ export function useStatePersistence(): {
       vscode.postMessage(message);
     }
   }, [
-    domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes,
+    domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes, setTableDetail,
     setCanvasMode, setDiscrepancyVisible, setDiscrepancyCompareStage, setSyncMode, setSyncSelectionBulk,
     restoreSyncInferredTableKeys, setDragHintDismissed,
   ]);
@@ -303,7 +326,7 @@ export function useStatePersistence(): {
       }
     };
   }, [
-    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded,
+    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
     syncInferredTableKeys, dragHintDismissed, persistState,
   ]);

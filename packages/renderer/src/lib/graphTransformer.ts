@@ -29,6 +29,7 @@ import type {
 } from '../types/graph';
 import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
+import type { TableDetail } from './tableDetail';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeTableLabels } from './modelLabels';
 import { isSingleLayerProject } from './layerCues';
@@ -59,6 +60,8 @@ export interface TransformOptions {
   nodeDimensions?: ReadonlyMap<string, NodeDimensions>;
   /** Column expansion state per model — sharpens the height estimate fallback. */
   isExpanded?: (modelName: string) => boolean;
+  /** The diagram's table detail level, for the same size estimate. Absent: no level. */
+  tableDetail?: TableDetail;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +188,11 @@ export function transformSubjectArea(
   const dimensionsFor = (id: string, data: TableFlowNode['data']): NodeDimensions =>
     options?.nodeDimensions?.get(id)
       ?? resolveNodeDimensions({
-        data: { ...data, isExpanded: options?.isExpanded?.(id) ?? false },
+        data: {
+          ...data,
+          isExpanded: options?.isExpanded?.(id) ?? false,
+          ...(options?.tableDetail ? { tableDetail: options.tableDetail } : {}),
+        },
         measured: undefined,
       });
 

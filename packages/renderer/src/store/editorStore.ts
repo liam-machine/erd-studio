@@ -20,6 +20,7 @@ import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, Annotat
 import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
 import type { RoutedEdge } from '../lib/edgeRouting/types';
 import { DEFAULT_LINE_STYLE, type LineStyle } from '../lib/edgeRouting/lineStyle';
+import type { TableDetail } from '../lib/tableDetail';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,10 +105,25 @@ export interface CanvasState {
   annotationLinkDrag: AnnotationLinkDragState | null;
   /** Set of "modelName:columnName" keys for columns involved in selected edges. */
   highlightedColumns: Set<string>;
-  /** Set of model IDs with columns expanded. */
+  /**
+   * Set of model IDs with columns expanded. At a table detail level these are
+   * the tables opened on their own (the per-table override).
+   */
   expandedNodes: Set<string>;
-  /** Whether columns are in global "all expanded" mode. */
+  /**
+   * Whether columns are in global "all expanded" mode. At a table detail
+   * level it only mirrors `tableDetail === 'all'`.
+   */
   allExpanded: boolean;
+  /**
+   * How much of every table the diagram draws: `name`, `keys` or `all`
+   * (`lib/tableDetail.ts`). A reader's view preference, never written to a
+   * file or posted. Null or absent: no level, so tables draw as they did
+   * before the levels existed (the first few columns until expanded) — what
+   * an `ErdCanvas` without the `tableDetail` prop shows. Optional, so a host
+   * that hand-builds `CanvasState` need not add it.
+   */
+  tableDetail?: TableDetail | null;
   /** Selected column names in the DetailPanel (scoped to current model). */
   selectedColumns: string[];
   /** Anchor column for Shift+click range selection. */
@@ -202,16 +218,25 @@ export interface CanvasActions {
   endAnnotationLinkDrag: () => void;
   /** Set highlighted columns (for edge click). */
   setHighlightedColumns: (columns: Set<string>) => void;
-  /** Expand all listed model IDs (sets allExpanded mode). */
+  /**
+   * Expand all listed model IDs (sets allExpanded mode). At a table detail
+   * level this is the `all` level.
+   */
   expandAll: (modelIds: string[]) => void;
   /** Expand only new model IDs without resetting existing state. */
   expandNew: (modelIds: string[]) => void;
-  /** Collapse all models. */
+  /** Collapse all models. At a table detail level this is the `keys` level. */
   collapseAll: () => void;
   /** Toggle expand/collapse for a single model. */
   toggleExpansion: (modelId: string) => void;
   /** Restore expansion state from persisted data. */
   setExpandedNodes: (nodes: string[], allExpanded: boolean) => void;
+  /**
+   * Choose the diagram's table detail level. Every table goes to the level:
+   * the tables opened on their own are closed. Null drops the level, with
+   * every table collapsed.
+   */
+  setTableDetail: (tableDetail: TableDetail | null) => void;
   /** Select a single column (replaces selection, sets anchor). */
   selectColumn: (name: string) => void;
   /** Toggle a column in/out of the selection (Ctrl+click). */
@@ -270,6 +295,7 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     highlightedColumns: new Set<string>(),
     expandedNodes: new Set<string>(),
     allExpanded: false,
+    tableDetail: null,
     selectedColumns: [],
     lastSelectedColumn: null,
     editingColumn: null,
@@ -333,14 +359,24 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
       ),
     endAnnotationLinkDrag: () => set({ annotationLinkDrag: null }),
     setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
-    expandAll: (modelIds) => set({ expandedNodes: new Set(modelIds), allExpanded: true }),
+    expandAll: (modelIds) =>
+      set((state) =>
+        state.tableDetail != null
+          ? { tableDetail: 'all', expandedNodes: new Set<string>(), allExpanded: true }
+          : { expandedNodes: new Set(modelIds), allExpanded: true },
+      ),
     expandNew: (modelIds) =>
       set((state) => {
         const next = new Set(state.expandedNodes);
         modelIds.forEach((id) => next.add(id));
         return { expandedNodes: next };
       }),
-    collapseAll: () => set({ expandedNodes: new Set(), allExpanded: false }),
+    collapseAll: () =>
+      set((state) => ({
+        expandedNodes: new Set<string>(),
+        allExpanded: false,
+        ...(state.tableDetail != null ? { tableDetail: 'keys' as const } : {}),
+      })),
     toggleExpansion: (modelId) =>
       set((state) => {
         const next = new Set(state.expandedNodes);
@@ -349,10 +385,21 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
         } else {
           next.add(modelId);
         }
-        return { expandedNodes: next, allExpanded: false };
+        // At a level `allExpanded` mirrors the level, so it is left alone.
+        return state.tableDetail != null ? { expandedNodes: next } : { expandedNodes: next, allExpanded: false };
       }),
     setExpandedNodes: (nodes, allExpanded) =>
       set({ expandedNodes: new Set(nodes), allExpanded }),
+    setTableDetail: (tableDetail) =>
+      set((state) => {
+        const current = state.tableDetail ?? null;
+        if (current === tableDetail && state.expandedNodes.size === 0) return state;
+        return {
+          tableDetail,
+          expandedNodes: new Set<string>(),
+          allExpanded: tableDetail === 'all',
+        };
+      }),
 
     // Column selection actions
     selectColumn: (name) => set({ selectedColumns: [name], lastSelectedColumn: name, editingColumn: null }),

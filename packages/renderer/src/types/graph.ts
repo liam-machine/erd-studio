@@ -11,6 +11,7 @@ import type { AnnotationColor, Cardinality, ColumnPair, DbtKeyHint, Layer, Meta,
 import type { LayerConfig } from '@erd-studio/core';
 import type { TableDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
+import type { TableDetail } from '../lib/tableDetail';
 
 // ---------------------------------------------------------------------------
 // Column display
@@ -83,11 +84,17 @@ export type TableNodeData = {
   /** Whether the node is dimmed (doesn't match current search query). */
   dimmed?: boolean;
   /**
-   * Whether columns are expanded.
-   * When false, only first N columns are shown with node-level handles only.
-   * Ephemeral state — not persisted, resets on domain refresh.
+   * Whether this one table is opened: every column shown, whatever the
+   * diagram's {@link tableDetail}. Without a level, false shows only the
+   * first few columns.
    */
   isExpanded?: boolean;
+  /**
+   * The diagram's table detail level (`name`, `keys` or `all`), copied to the
+   * node by `applyNodeOverlays`. Absent: the node draws as it did before the
+   * levels existed. See `resolveVisibleColumns`.
+   */
+  tableDetail?: TableDetail;
   /** Callback to toggle expansion state. Receives model name as argument. */
   onToggleExpansion?: (modelName: string) => void;
   /** Whether this model has design rationale metadata. */
