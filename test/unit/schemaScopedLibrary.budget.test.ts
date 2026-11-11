@@ -143,8 +143,41 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
       lib.readingTables(members.map((id) => id.name), () => members.map((id) => lib.getTable(id)?.relationships)));
     expect(result).toEqual(expected);
     expect(maxReadsOfOneFile).toBe(1);
-    // Its members' names and the other ends of their Refs: most of the library here (most names are in most folders), never more.
+    // Its members' names and the other ends of their Refs, in every folder that has them: most of the library
+    // here (300 members cover almost every name, and most names are in most folders). The test below bounds
+    // the reads where that set is a small part of the library.
     expect(tableReads).toBeLessThanOrEqual(TABLES);
+  });
+
+  it('a diagram of 20 tables of one schema reads its members\' names and their Refs\' other ends, in every folder that has them, and no other table', () => {
+    // Host scoping is by name: the Refs that name a member's name (in any schema folder's file) are
+    // attached, each end resolved among every table of its name, so a shared name widens what is read to
+    // all tables of the names those Refs join. Every other name is never read.
+    const members = ids.slice(0, 20);
+    const memberNames = new Set(members.map((id) => id.name));
+    const involved = new Set(memberNames);
+    for (let k = 0; k < SCHEMAS; k++) {
+      const names = tablesOf(k).map(nameOf);
+      names.forEach((n, j) => {
+        for (const to of [names[(j + 1) % names.length], names[(j + 2) % names.length]]) {
+          if (memberNames.has(n) || memberNames.has(to)) {
+            involved.add(n);
+            involved.add(to);
+          }
+        }
+      });
+    }
+    const mayRead = ids.filter((id) => involved.has(id.name)).length;
+    expect(mayRead).toBeLessThan(TABLES / 2);
+    const whole = library();
+    const expected = members.map((id) => whole.getTable(id)?.relationships);
+    const lib = library();
+    const { result, tableReads, maxReadsOfOneFile } = measure('a 20-table diagram\'s tables, scoped', 300, () =>
+      lib.readingTables(members.map((id) => id.name), () => members.map((id) => lib.getTable(id)?.relationships)));
+    expect(result).toEqual(expected);
+    expect(maxReadsOfOneFile).toBe(1);
+    expect(tableReads).toBeGreaterThanOrEqual(members.length);
+    expect(tableReads).toBeLessThanOrEqual(mayRead);
   });
 
   it('a 300-table DBML diagram opened by the editor: each member read from its own file, every relationship drawn under the diagram\'s names', () => {
