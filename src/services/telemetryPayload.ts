@@ -728,6 +728,13 @@ export const FEATURES = [
   'importFabricOutcomeFail',
   'importFabricOutcomeCancelled',
   'importFabricOutcomeTimedOut',
+  // The major update notice (src/services/majorUpdateNotice.ts), once per
+  // machine per major version: it showed, its Show Me Around was pressed
+  // (beside the guide's own keys), its What's New was pressed (the bundled
+  // changelog opened). Never a version.
+  'majorUpdateNoticeShown',
+  'majorUpdateNoticeShowMeAround',
+  'majorUpdateNoticeWhatsNew',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

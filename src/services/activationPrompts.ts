@@ -6,7 +6,8 @@
  * diagram?"),
  * the Get Started walkthrough, the "This project has N ERD Studio diagrams" notice, the AI
  * helper offer, an update for old AI helper files, the v4 migration, a
- * `layers.json` to save, the upgrade notice, and on a canvas's first open
+ * `layers.json` to save, the major update notice ("ERD Studio 2.0 has a short
+ * guide…"), the upgrade notice, and on a canvas's first open
  * the Convert Project to DBML and file-naming offers. Showing them together
  * buries the one that matters, so each is only *offered* to a
  * `SessionPromptGate`; activation shows the most useful one
@@ -67,6 +68,12 @@ export type SessionPromptKind =
   | 'harnessUpdate'
   /** Diagrams that keep their tables inside the diagram file (v4): Migrate Now. */
   | 'migrateToV5'
+  /**
+   * The first window after a major update (1.x to 2.x): the new version has
+   * a guide. Show Me Around / What's New / Not now, once per machine per
+   * major (`src/services/majorUpdateNotice.ts`).
+   */
+  | 'majorUpdateNotice'
   /** The upgrader's one notice about the Welcome page (once per machine). */
   | 'upgradeNotice'
   /** No AI helper files: Set Up My AI Helper (once per workspace). */
@@ -83,8 +90,9 @@ export type SessionPromptKind =
  * folder with none whose start is obvious is offered that start; an empty
  * window gets the walkthrough (a folder gets the draft instead, which is not
  * an activation prompt); then whatever keeps the project's own
- * files working (old AI helper files, the v4 format) before news and
- * set-up offers.
+ * files working (old AI helper files, the v4 format) before news (a major
+ * update's guide first: it is about the version now running, the upgrade
+ * notice about a page from long ago) and set-up offers.
  */
 export const ACTIVATION_PROMPT_PRIORITY: readonly SessionPromptKind[] = [
   'diagramsNudge',
@@ -92,6 +100,7 @@ export const ACTIVATION_PROMPT_PRIORITY: readonly SessionPromptKind[] = [
   'walkthrough',
   'harnessUpdate',
   'migrateToV5',
+  'majorUpdateNotice',
   'upgradeNotice',
   'harnessInstall',
   'saveLayers',

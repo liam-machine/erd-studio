@@ -41,6 +41,7 @@ import { clearLogBuffer, hasLogSink, recentLogLines } from '../../src/services/l
 import { START_COMMAND, moreStartsCommandLink, parseStartArgs, parseStartPickArgs, startCommandLink } from '../../src/types/startActions';
 import { CONVERT_NOTICE_BUTTON, convertNoticeMessage } from '../../src/services/convertOffer';
 import { DBML_CONVERSION_DECLINED_KEY } from '../../src/providers/SemanticEditorProvider';
+import { MAJOR_NOTICE_CATCH_UP_KEY, MAJOR_NOTICE_OWED_KEY, MAJOR_NOTICE_SHOWN_KEY, majorOf, majorUpdateNoticeMessage } from '../../src/services/majorUpdateNotice';
 
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { answerDraft, closeDraft, flush, nextDraft } from './helpers/draftDriver';
@@ -58,6 +59,9 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.jso
   contributes: { commands: Array<{ command: string }> };
 };
 const CONTRIBUTED = packageJson.contributes.commands.map((c) => c.command);
+/** The major of the version these tests run as (package.json's), and a version of the major before it. */
+const RUNNING_MAJOR = majorOf(packageJson.version)!;
+const OLDER_MAJOR_VERSION = `${RUNNING_MAJOR - 1}.7.4`;
 const legacyAlias = (command: string) => command.replace(/^erdStudio\./, 'dbtSemantic.');
 
 type Context = import('vscode').ExtensionContext;
@@ -2360,7 +2364,8 @@ describe('Welcome panel: first run', () => {
   it('an upgrader gets one non-modal notice and no panel', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openWorkspace(root);
-    const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
+    // Already on this major (an update across a major owes its own notice first: "the major update notice").
+    const globalState = new Map<string, unknown>([['lastActivatedVersion', packageJson.version]]);
     context = makeContext(root, { globalState });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
 
@@ -2379,7 +2384,7 @@ describe('Welcome panel: first run', () => {
   it('"Watch" on the upgrade notice opens the panel', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openWorkspace(root);
-    context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]) });
+    context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', packageJson.version]]) });
     vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
       (message.includes('a short tour') ? 'Watch the Tour' : undefined)) as never);
 
@@ -3265,13 +3270,15 @@ describe('one activation prompt per window', () => {
   });
 
   const UPGRADE = 'a short tour';
+  const MAJOR = 'has a short guide';
   const NUDGE = 'This project has';
   const OFFER = 'Let your AI assistant';
   const shown = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.map((c) => String(c[0]))
-    .map((m) => [UPGRADE, NUDGE, OFFER].find((p) => m.includes(p)) ?? m);
+    .map((m) => [UPGRADE, MAJOR, NUDGE, OFFER].find((p) => m.includes(p)) ?? m);
 
   it('shows the most useful one and leaves the rest, flags untouched, for the next windows', async () => {
-    // An upgrader, a project with diagrams and no AI helper files: three prompts are owed.
+    // An upgrader from 1.0 (a major update, and from before the Welcome page), a project with
+    // diagrams and no AI helper files: four prompts are owed.
     fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true });
     const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
     const workspaceState = new Map<string, unknown>();
@@ -3281,7 +3288,16 @@ describe('one activation prompt per window', () => {
     await activate(context);
     expect(shown(info)).toEqual([NUDGE]);
     expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
     expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+
+    // The news about the version now running comes before the older notice.
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(shown(info)).toEqual([MAJOR]);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
 
     tearDownActivation();
     info.mockClear();
@@ -3312,6 +3328,9 @@ describe('one activation prompt per window', () => {
     expect(warn.mock.calls.filter((c) => String(c[0]).includes('come from an older ERD Studio'))).toHaveLength(1);
     expect(info).not.toHaveBeenCalled();
     expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+    // …and before the major update notice, which stays owed.
+    expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
   });
 
   it('a second activation in the same window shows none', async () => {
@@ -3330,6 +3349,312 @@ describe('one activation prompt per window', () => {
     await activate(context);
     expect(info).not.toHaveBeenCalled();
     expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
+  });
+});
+
+describe('the major update notice', () => {
+  const GUIDE_KEY = 'erdStudio.onboardingGuide';
+  const MAJOR_SEEN_DAY: [string, unknown] = ['erdStudio.telemetry.majorSeenDay', '2026-11-10'];
+  const MESSAGE = majorUpdateNoticeMessage(RUNNING_MAJOR);
+  const BUTTONS = ['Show Me Around', "What's New", 'Not now'];
+  const notices = (info: ReturnType<typeof vi.spyOn>) => info.mock.calls.filter((c) => c[0] === MESSAGE);
+  /** A machine that has seen the Welcome page and last ran `previous`: only this notice can be owed. */
+  const machine = (previous: unknown = OLDER_MAJOR_VERSION, extra: Array<[string, unknown]> = []) =>
+    new Map<string, unknown>([['lastActivatedVersion', previous], ['erdStudio.gettingStartedShown', true], ...extra]);
+  const noticeKeys = (feature: ReturnType<typeof vi.spyOn>) =>
+    feature.mock.calls.map((c) => String(c[0])).filter((k) => k.startsWith('majorUpdateNotice'));
+  const erdFolder = () => fs.readdirSync(path.join(root, '.erd-studio'), { recursive: true, encoding: 'utf-8' }).sort()
+    .map((f) => {
+      const full = path.join(root, '.erd-studio', f);
+      return fs.statSync(full).isFile() ? `${f}:${fs.readFileSync(full, 'utf-8')}` : f;
+    });
+  const finance = () => path.join(root, '.erd-studio', 'gold', 'finance.json');
+  const makeFinanceNewest = () => {
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(finance(), future, future);
+  };
+  /** The guide's canvas part needs a webview: stand in for the canvas, as the diagrams notice's tests do. */
+  async function withoutCanvas() {
+    const { OnboardingGuide } = await import('../../src/providers/guideWiring');
+    const { SemanticEditorProvider: Provider } = await import('../../src/providers/SemanticEditorProvider');
+    const requestCanvas = vi.spyOn(OnboardingGuide.prototype, 'requestCanvas');
+    vi.spyOn(Provider.prototype, 'startGuideOnActiveCanvas').mockReturnValue(false);
+    const run = vscode.commands.executeCommand.bind(vscode.commands);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(((command: string, ...args: unknown[]) =>
+      (command === 'erdStudio.openDomain' ? Promise.resolve(undefined) : run(command, ...args))) as never);
+    return { requestCanvas, exec };
+  }
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('the first window after a major update says the new version has a guide: one sentence, three buttons, once per machine', async () => {
+    const globalState = machine();
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.diagramsNudgeShown', true], SUGGESTIONS_ANSWERED]);
+    context = makeContext(root, { globalState, workspaceState });
+    // Closed without a choice: the same as Not now.
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const before = erdFolder();
+    const workspaceKeys = [...workspaceState.keys()];
+
+    await activate(context);
+
+    expect(info.mock.calls).toEqual([[MESSAGE, ...BUTTONS]]);
+    // The running version's own major, never a fixed "2.0".
+    expect(MESSAGE).toBe(`ERD Studio ${RUNNING_MAJOR}.0 has a short guide that shows you around.`);
+    expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+    expect(noticeKeys(feature)).toEqual(['majorUpdateNoticeShown']);
+    expect(recentLogLines().some((l) => l.includes('Activation prompt: majorUpdateNotice'))).toBe(true);
+    // Nothing runs unasked, and nothing is written to the workspace: globalState only.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(exec.mock.calls.filter((c) => c[0] === 'erdStudio.showMeAround' || c[0] === 'markdown.showPreview' || c[0] === 'erdStudio.openDomain')).toEqual([]);
+    expect(erdFolder()).toEqual(before);
+    expect([...workspaceState.keys()]).toEqual(workspaceKeys);
+
+    // Every later window: never again for this major.
+    for (let i = 0; i < 2; i++) {
+      tearDownActivation();
+      info.mockClear();
+      await activate(context);
+      expect(info).not.toHaveBeenCalled();
+    }
+    expect(noticeKeys(feature)).toEqual(['majorUpdateNoticeShown']);
+  });
+
+  it('a patch or minor update, the same version and a fresh install never get it', async () => {
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    for (const globalState of [machine(`${RUNNING_MAJOR}.0.0`), machine(packageJson.version), machine(`${RUNNING_MAJOR + 1}.0.0`), new Map<string, unknown>()]) {
+      context = makeContext(root, { globalState });
+      await activate(context);
+      tearDownActivation();
+      await activate(context);
+      tearDownActivation();
+      expect(notices(info)).toEqual([]);
+      expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBeUndefined();
+      expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
+      // The catch-up had its one look (nothing recorded on this machine: left out).
+      expect(globalState.get(MAJOR_NOTICE_CATCH_UP_KEY)).toBe(true);
+    }
+  });
+
+  it('a version last activated that is malformed, tagged or not text never throws and never owes it; a 1.9.x pre-release is the major before', async () => {
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    for (const previous of [`${RUNNING_MAJOR}.0.0-beta.1`, 'garbage', '', '1', '1.x', 'v1.7.4', 7, null, { major: 1 }]) {
+      const globalState = machine(previous);
+      context = makeContext(root, { globalState });
+      await expect(activate(context), String(previous)).resolves.toBeUndefined();
+      tearDownActivation();
+      expect(notices(info), String(previous)).toEqual([]);
+      expect(globalState.get(MAJOR_NOTICE_OWED_KEY), String(previous)).toBeUndefined();
+    }
+    // 1.9.9 was the pre-release of 2.0: by its number it is the older major, so the update to 2.0 owes the notice.
+    const globalState = machine(`${RUNNING_MAJOR - 1}.9.9`);
+    context = makeContext(root, { globalState });
+    await activate(context);
+    expect(notices(info)).toHaveLength(1);
+  });
+
+  it('waits while another prompt has the window (its flag untouched) and shows in the next one', async () => {
+    const globalState = machine();
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], [DBML_CONVERSION_DECLINED_KEY, true]]);
+    context = makeContext(root, { globalState, workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+
+    await activate(context);
+    // This window is the diagrams notice's (Not now there).
+    expect(info.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/^This project has \d+ ERD Studio diagrams\.$/)]);
+    expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
+    expect(noticeKeys(feature)).toEqual([]);
+    expect(recentLogLines().some((l) => l.includes('Activation prompt: diagramsNudge') && l.includes('majorUpdateNotice'))).toBe(true);
+
+    // The next window: the version last activated is the running one now, and it is still owed.
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(info.mock.calls).toEqual([[MESSAGE, ...BUTTONS]]);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('Show Me Around runs the command itself: the newest diagram opens with the guide\'s canvas part, counted', async () => {
+    makeFinanceNewest();
+    const globalState = machine();
+    context = makeContext(root, { globalState });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message === MESSAGE ? 'Show Me Around' : undefined)) as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const { requestCanvas, exec } = await withoutCanvas();
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.showMeAround'));
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.openDomain', finance()));
+    expect(requestCanvas).toHaveBeenCalledTimes(1);
+    expect(noticeKeys(feature)).toEqual(['majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround']);
+    expect(exec.mock.calls.some((c) => c[0] === 'markdown.showPreview')).toBe(false);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+  });
+
+  it('What\'s New opens the changelog that ships with the extension in the Markdown preview, counted', async () => {
+    const globalState = machine();
+    context = makeContext(root, { globalState });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message === MESSAGE ? "What's New" : undefined)) as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const asText = vi.spyOn(vscode.window, 'showTextDocument');
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(exec.mock.calls.some((c) => c[0] === 'markdown.showPreview')).toBe(true));
+    const previews = exec.mock.calls.filter((c) => c[0] === 'markdown.showPreview');
+    expect(previews).toHaveLength(1);
+    // The bundled file under the extension's own folder: never a URL, never a path from anywhere else.
+    const uri = previews[0][1] as { fsPath: string; scheme: string };
+    expect(uri.scheme).toBe('file');
+    expect(path.resolve(uri.fsPath)).toBe(path.join(REPO_ROOT, 'CHANGELOG.md'));
+    expect(fs.readFileSync(uri.fsPath, 'utf-8')).toMatch(/^# Changelog/);
+    // …and it is in the VSIX.
+    expect(fs.readFileSync(path.join(REPO_ROOT, '.vscodeignore'), 'utf-8').split('\n').map((l) => l.trim())).toContain('!CHANGELOG.md');
+    expect(asText).not.toHaveBeenCalled();
+    expect(noticeKeys(feature)).toEqual(['majorUpdateNoticeShown', 'majorUpdateNoticeWhatsNew']);
+    expect(exec.mock.calls.some((c) => c[0] === 'erdStudio.showMeAround')).toBe(false);
+  });
+
+  it('What\'s New on a host with no Markdown preview opens the same file as text', async () => {
+    context = makeContext(root, { globalState: machine() });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message === MESSAGE ? "What's New" : undefined)) as never);
+    const run = vscode.commands.executeCommand.bind(vscode.commands);
+    vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(((command: string, ...args: unknown[]) =>
+      (command === 'markdown.showPreview' ? Promise.reject(new Error("command 'markdown.showPreview' not found")) : run(command, ...args))) as never);
+    const asText = vi.spyOn(vscode.window, 'showTextDocument');
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(asText).toHaveBeenCalledTimes(1));
+    expect(path.resolve((asText.mock.calls[0][0] as unknown as { fsPath: string }).fsPath)).toBe(path.join(REPO_ROOT, 'CHANGELOG.md'));
+  });
+
+  it('Show Me Around on the diagrams notice spends it: the major update notice never shows for this major', async () => {
+    makeFinanceNewest();
+    const globalState = machine();
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], [DBML_CONVERSION_DECLINED_KEY, true]]);
+    context = makeContext(root, { globalState, workspaceState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message.startsWith('This project has') ? 'Show Me Around' : undefined)) as never);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const { exec } = await withoutCanvas();
+
+    await activate(context);
+
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.openDomain', finance()));
+    await vi.waitFor(() => expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR));
+    expect(feature.mock.calls.map((c) => c[0])).toContain('diagramsNudgeShowMeAround');
+
+    for (let i = 0; i < 2; i++) {
+      tearDownActivation();
+      info.mockClear();
+      await activate(context);
+      expect(info).not.toHaveBeenCalled();
+    }
+    // Spent, not shown: nothing is counted for it.
+    expect(noticeKeys(feature)).toEqual([]);
+  });
+
+  it('while the guide\'s canvas part is owed it is held back like the other notices, and shows once that part has run', async () => {
+    const globalState = machine(OLDER_MAJOR_VERSION, [[GUIDE_KEY, 'draft']]);
+    context = makeContext(root, { globalState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+    expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
+    expect(recentLogLines().some((l) => l.includes("the onboarding guide's canvas part is owed") && l.includes('majorUpdateNotice'))).toBe(true);
+
+    // The canvas part was skipped in between (no run of the guide in this window): it is due again.
+    tearDownActivation();
+    globalState.set(GUIDE_KEY, 'skipped');
+    await activate(context);
+    expect(notices(info)).toHaveLength(1);
+  });
+
+  it('not in an empty window or a plain folder: it stays owed for a window that has a project', async () => {
+    const globalState = machine();
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    vscode.workspace.workspaceFolders = [];
+    context = makeContext(root, { globalState });
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+    expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+
+    // A plain folder (no dbt_project.yml, no .erd-studio): a quiet activation.
+    tearDownActivation();
+    const plain = path.join(root, 'plain');
+    fs.mkdirSync(plain);
+    fs.writeFileSync(path.join(plain, 'notes.md'), '# notes\n');
+    openWorkspace(plain);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(notices(info)).toEqual([]);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
+
+    tearDownActivation();
+    openWorkspace(root);
+    await activate(context);
+    expect(notices(info)).toHaveLength(1);
+    expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+  });
+
+  it('a machine already on this major is caught up once, only when it recorded its major update and never had the guide', async () => {
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const sameMajor = `${RUNNING_MAJOR}.0.0`;
+
+    // It updated from 1.x before this notice existed, with telemetry on: the day of that start is on the machine.
+    const caught = machine(sameMajor, [MAJOR_SEEN_DAY]);
+    context = makeContext(root, { globalState: caught });
+    await activate(context);
+    expect(info.mock.calls).toEqual([[MESSAGE, ...BUTTONS]]);
+    expect(caught.get(MAJOR_NOTICE_CATCH_UP_KEY)).toBe(true);
+    tearDownActivation();
+    info.mockClear();
+    await activate(context);
+    expect(info).not.toHaveBeenCalled();
+    tearDownActivation();
+
+    // Nothing recorded (telemetry off, or a fresh install of this major): left out, and a record made later changes nothing.
+    const left = machine(sameMajor);
+    context = makeContext(root, { globalState: left });
+    await activate(context);
+    tearDownActivation();
+    left.set(MAJOR_SEEN_DAY[0], MAJOR_SEEN_DAY[1]);
+    await activate(context);
+    tearDownActivation();
+    expect(info).not.toHaveBeenCalled();
+    expect(left.get(MAJOR_NOTICE_OWED_KEY)).toBeUndefined();
+
+    // The guide has already started on this machine: it has nothing to say.
+    for (const status of ['draft', 'canvas', 'done', 'skipped']) {
+      const guided = machine(sameMajor, [MAJOR_SEEN_DAY, [GUIDE_KEY, status]]);
+      context = makeContext(root, { globalState: guided });
+      await activate(context);
+      tearDownActivation();
+      expect(notices(info), status).toEqual([]);
+      expect(guided.get(MAJOR_NOTICE_OWED_KEY), status).toBeUndefined();
+    }
   });
 });
 
@@ -4198,6 +4523,25 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
       expect(draftPosts().at(-1)).toEqual({ type: 'guide', nothingFound: true, semanticDir: '.erd-studio' });
       expect(globalState.get(GUIDE_KEY)).toBe('draft');
       expect(keys()).toEqual(expect.arrayContaining(['guideStarted', 'guideStartedFromCommand']));
+    });
+
+    it('run by hand, it spends a major update notice that was still waiting: that notice never shows for this major', async () => {
+      folderWith({ 'notes.md': '# notes\n' });
+      const globalState = new Map<string, unknown>([['lastActivatedVersion', OLDER_MAJOR_VERSION], ['erdStudio.gettingStartedShown', true], ['erdStudio.exampleDraftShown', true]]);
+      context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+      await activate(context);
+      await settle();
+      // A plain folder: the notice is owed and waits for a window that has a project.
+      expect(globalState.get(MAJOR_NOTICE_OWED_KEY)).toBe(RUNNING_MAJOR);
+      expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBeUndefined();
+      void vscode.commands.executeCommand('erdStudio.showMeAround');
+      await nextDraft();
+      await flush();
+      expect(keys()).toContain('guideStartedFromCommand');
+      expect(globalState.get(MAJOR_NOTICE_SHOWN_KEY)).toBe(RUNNING_MAJOR);
+      expect(info.mock.calls.filter((c) => c[0] === majorUpdateNoticeMessage(RUNNING_MAJOR))).toEqual([]);
+      expect(keys().filter((k) => k.startsWith('majorUpdateNotice'))).toEqual([]);
+      expect(recentLogLines().some((l) => l.includes('The major update notice is spent'))).toBe(true);
     });
 
     it('while its canvas part is owed, activation holds back the diagrams notice (it keeps its flag)', async () => {

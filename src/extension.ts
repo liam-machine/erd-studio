@@ -72,7 +72,7 @@ import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, hasOpenSubj
 import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
-import { TelemetryService, notePendingUpdate, telemetry } from './services/telemetryService';
+import { TelemetryService, majorUpdateRecorded, notePendingUpdate, telemetry } from './services/telemetryService';
 import { startKnownFixes } from './services/knownFixesService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { saveFailureCodes, tableFileErrorCode, type SaveFailure } from './services/telemetryPayload';
@@ -229,6 +229,16 @@ import { dbmlFileIcon } from './providers/dbmlFileKinds';
 import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
 import { pickActivationPrompt, SessionPromptGate, type SessionPromptKind } from './services/activationPrompts';
 import {
+  MAJOR_NOTICE_NOT_NOW,
+  MARKDOWN_PREVIEW_COMMAND,
+  WHATS_NEW_FILE,
+  WHATS_NEW_LABEL,
+  majorNoticeDue,
+  majorUpdateNoticeMessage,
+  markMajorNoticeShown,
+  noteMajorUpdate,
+} from './services/majorUpdateNotice';
+import {
   OPEN_SETTINGS_BUTTON,
   START_SUGGESTIONS_OFF_CONTEXT_KEY,
   START_SUGGESTIONS_OFF_MESSAGE,
@@ -330,6 +340,22 @@ async function openWalkthrough(fallback: () => void): Promise<void> {
     telemetry.error('walkthroughFailed');
     log.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
     fallback();
+  }
+}
+
+/**
+ * The major update notice's What's New: the changelog that ships inside the
+ * extension (`WHATS_NEW_FILE` under `extensionUri`, never a URL), in VS
+ * Code's Markdown preview. A host without the preview command (the built-in
+ * Markdown extension switched off, a fork without it) gets the file as text.
+ */
+async function openWhatsNew(extensionUri: vscode.Uri): Promise<void> {
+  const changelog = vscode.Uri.joinPath(extensionUri, WHATS_NEW_FILE);
+  try {
+    await vscode.commands.executeCommand(MARKDOWN_PREVIEW_COMMAND, changelog);
+  } catch (err) {
+    log.info(`No Markdown preview for What's New (${err instanceof Error ? err.name : 'error'}): opening the changelog as text`);
+    await vscode.window.showTextDocument(changelog, { preview: true });
   }
 }
 
@@ -1298,6 +1324,27 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // Telemetry's update flag (no version text), written before the reload
   // below can return, so the next activation still counts the update.
   await notePendingUpdate(context, previousVersion, currentVersion);
+  // The major update notice (src/services/majorUpdateNotice.ts): whether it
+  // is owed is recorded here, before the version last activated is
+  // overwritten, because the notice itself may wait for a later window. One
+  // or two globalState keys; nothing in the workspace. Never throws.
+  {
+    const guideStatus = context.globalState.get<unknown>(GUIDE_STATE_KEY);
+    await noteMajorUpdate(context.globalState, previousVersion, currentVersion, {
+      majorUpdateSeen: majorUpdateRecorded(context),
+      guideStarted: isGuideStatus(guideStatus),
+    });
+  }
+  /**
+   * The guide ran, or is about to (any route: the command, the Help & Feedback
+   * row, a draft's own start, the diagrams notice): a major update notice
+   * still waiting has nothing left to say, so it is marked shown.
+   */
+  const spendMajorUpdateNotice = (): void => {
+    void markMajorNoticeShown(context.globalState, currentVersion).then((major) => {
+      if (major !== undefined) log.info('The major update notice is spent: the guide ran before it showed');
+    });
+  };
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   // Fresh install: remember that the Welcome panel is owed, even if this
   // activation has no dbt project and returns early below. Captured here,
@@ -1413,6 +1460,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     semanticDir: () => guideSemanticDir(),
     dbml: () => guideDbml(),
     holdPrompts: () => { sessionPrompts.reserve('guide'); },
+    onShown: spendMajorUpdateNotice,
     statusMessage: (text) => { vscode.window.setStatusBarMessage(text, GUIDE_RERUN_STATUS_MS); },
     log: (message) => log.info(message),
     warn: (message, err) => log.warn(`[ERD Studio] ${message}`, err),
@@ -5121,6 +5169,41 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     });
   }
 
+  // The major update notice (src/services/majorUpdateNotice.ts): the first
+  // window after a major update that it wins says the new version has a
+  // guide. Owed since the top of activate(); never in a quiet activation (it
+  // stays owed for a folder that has something to work on). Its shown flag is
+  // written only when it shows, and before it does, so a crash cannot repeat it.
+  if (!quietActivation && majorNoticeDue(context.globalState, currentVersion) !== undefined) {
+    activationPrompts.set('majorUpdateNotice', async () => {
+      // Looked at again: the guide may have run (or another window shown it) since it was offered.
+      const major = await markMajorNoticeShown(context.globalState, currentVersion);
+      if (major === undefined) {
+        log.info('The major update notice is no longer due: nothing shown');
+        return;
+      }
+      telemetry.feature('majorUpdateNoticeShown');
+      void Promise.resolve(vscode.window.showInformationMessage(
+        majorUpdateNoticeMessage(major),
+        SHOW_ME_AROUND_LABEL,
+        WHATS_NEW_LABEL,
+        MAJOR_NOTICE_NOT_NOW,
+      )).then((choice) => {
+        if (choice === SHOW_ME_AROUND_LABEL) {
+          // The command itself, as the Help & Feedback row runs it: the newest diagram with the
+          // guide's canvas part, else the folder's draft (or the example) with its draft part.
+          telemetry.feature('majorUpdateNoticeShowMeAround');
+          return vscode.commands.executeCommand(SHOW_ME_AROUND_COMMAND);
+        }
+        if (choice === WHATS_NEW_LABEL) {
+          telemetry.feature('majorUpdateNoticeWhatsNew');
+          return openWhatsNew(context.extensionUri);
+        }
+        return undefined;
+      }).then(undefined, (err: unknown) => log.warn('[ERD Studio] The major update notice\'s button failed:', err));
+    });
+  }
+
   // An example project from Open an Example Project… opens in a window of
   // its own; its first diagram opens here, so one click lands on a canvas.
   // (No "This project has N diagrams" toast on top of it.)
@@ -5158,6 +5241,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // no draft, so the guide would not start by itself here. It opens the same diagram.
       const showMeAround = (): void => {
         telemetry.feature('diagramsNudgeShowMeAround');
+        // The major update notice would offer this same button: it has done its job.
+        spendMajorUpdateNotice();
         showMeAroundOnDiagram(latest.filePath).then(undefined, (err: unknown) => log.warn('[ERD Studio] Could not show the guide on the diagram:', err));
       };
       // A project from before 2.0: the one next step is Convert (the start screen's
