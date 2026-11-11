@@ -146,15 +146,26 @@ describe('runElkLayout worker guard', () => {
     expect(stackSafeFallbacks({ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'NONE' })).toEqual([]);
   });
 
-  it('an overflow of every fallback, or another error, is not retried further', async () => {
+  it('an overflow of every fallback fails with the first error', async () => {
     let calls = 0;
     fakes.state.layoutImpl = () => { calls++; return Promise.reject(new RangeError('Maximum call stack size exceeded')); };
     await expect(runElkLayout([node], [])).rejects.toThrow('Maximum call stack size exceeded');
     expect(calls).toBe(3);
+  });
+
+  // ELK's own failures on the default layout (its compaction's "Invalid
+  // hitboxes for scanline" on two-way relationships) take the same fallbacks.
+  it('any other failure of the default layout takes the fallbacks too, and is the error reported when none works', async () => {
+    let calls = 0; let told = 0;
+    fakes.state.layoutImpl = () => { calls++; return calls === 1 ? Promise.reject(new Error('Invalid hitboxes for scanline constraint calculation.')) : Promise.resolve({ id: 'root', children: [{ id: 'a', x: 5, y: 6 }] }); };
+    expect(await runElkLayout([node], [], undefined, 'auto', { onStackFallback: () => { told++; } })).toEqual({ a: { x: 5, y: 6 } });
+    expect(calls).toBe(2);
+    // Only a stack overflow is reported as the stack fallback.
+    expect(told).toBe(0);
     calls = 0;
-    fakes.state.layoutImpl = () => { calls++; return Promise.reject(new Error('cycle detected')); };
+    fakes.state.layoutImpl = () => { calls++; return Promise.reject(new Error(calls === 1 ? 'cycle detected' : 'later failure')); };
     await expect(runElkLayout([node], [])).rejects.toThrow('cycle detected');
-    expect(calls).toBe(1);
+    expect(calls).toBe(3);
     expect(isStackOverflow(new Error('too much recursion'))).toBe(true);
     expect(isStackOverflow(new Error('ELK layout timed out after 30s'))).toBe(false);
   });

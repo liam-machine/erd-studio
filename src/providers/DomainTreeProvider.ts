@@ -28,6 +28,7 @@ import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
+import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME } from '../types/messages';
 import { CONVERT_ROW_DESCRIPTION, CONVERT_ROW_LABEL, CONVERT_ROW_TOOLTIP } from '../services/convertOffer';
 import { START_COMMAND } from '../types/startActions';
 import { layerSwatchIcon } from './layerSwatch';
@@ -52,6 +53,31 @@ const treeLog = createLogger('Subject Areas');
 
 /** MIME type for layer drag-drop within the tree. */
 export const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
+
+/**
+ * The table names a Table Library drag carries (`TableLibraryDragController`
+ * sets an array of names): read as the value itself, or as its JSON text when
+ * VS Code hands the item over serialised. Names only, each once, at most the
+ * Add Existing Tables cap.
+ */
+export async function draggedTableNames(item: vscode.DataTransferItem): Promise<string[]> {
+  let value: unknown = item.value;
+  if (typeof value === 'string' || value === undefined || value === null) {
+    let text = typeof value === 'string' ? value : '';
+    if (!text) {
+      try { text = await item.asString(); } catch { text = ''; }
+    }
+    try { value = JSON.parse(text); } catch { value = []; }
+  }
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.length === 0 || names.includes(entry)) continue;
+    names.push(entry);
+    if (names.length >= ADD_EXISTING_TABLES_LIMIT) break;
+  }
+  return names;
+}
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
@@ -191,8 +217,10 @@ export class SubjectAreaTreeProvider
   private diagramTotal: number | undefined;
 
   // TreeDragAndDropController properties
-  readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
+  readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_DRAG_MIME];
   readonly dragMimeTypes = [LAYER_DRAG_MIME_TYPE];
+  /** Adds Table Library rows dropped on a diagram's row to that diagram (set by the extension: Add to Diagram's write). */
+  private tablesDropHandler: ((filePath: string, tables: string[]) => Promise<void>) | undefined;
 
   constructor(
     private readonly subjectAreaService: SubjectAreaService,
@@ -244,6 +272,15 @@ export class SubjectAreaTreeProvider
     dataTransfer: vscode.DataTransfer,
     _token: vscode.CancellationToken,
   ): Promise<void> {
+    // Table Library rows dropped on a diagram's row: added to that diagram.
+    // This drop stays inside VS Code's own trees, so it needs no Shift and
+    // does not depend on a drag reaching the canvas webview.
+    const tablesItem = dataTransfer.get(TABLE_LIBRARY_DRAG_MIME);
+    if (tablesItem) {
+      await this.dropTables(target, await draggedTableNames(tablesItem));
+      return;
+    }
+
     const transferItem = dataTransfer.get(LAYER_DRAG_MIME_TYPE);
     if (!transferItem) return;
 
@@ -277,6 +314,27 @@ export class SubjectAreaTreeProvider
         workspaceRoot: this.projectPath, layersPath: this.layerService.getConfigPath(),
         doing: 'while saving layers.json', outcome: 'The layers weren\'t reordered.',
       }), err);
+    }
+  }
+
+  /** Who adds tables dropped on a diagram's row (the extension wires Add to Diagram's write here). */
+  setTablesDropHandler(handler: (filePath: string, tables: string[]) => Promise<void>): void {
+    this.tablesDropHandler = handler;
+  }
+
+  /** Table Library rows dropped on `target`: added when it is a diagram's row, else the user is told where to drop. */
+  private async dropTables(target: TreeElement | undefined, tables: string[]): Promise<void> {
+    if (tables.length === 0 || !this.tablesDropHandler) return;
+    if (!target || target.type !== 'domain') {
+      void vscode.window.showInformationMessage('ERD Studio: Drop tables on a diagram\'s name to add them to that diagram.');
+      return;
+    }
+    try {
+      await this.tablesDropHandler(target.summary.filePath, tables);
+    } catch (err) {
+      log.error('[DomainTreeProvider] Adding dropped tables to a diagram failed:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(`ERD Studio: The tables weren't added to ${target.summary.domain}. ${message}`);
     }
   }
 

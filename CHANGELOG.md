@@ -12,6 +12,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Added
 
+- **Drag tables from the Table Library onto a diagram's name in the Diagrams view** to add them to that diagram: one table, a selection, a schema or a layer. This drop needs no Shift, so it works where dropping on the canvas itself does not. The diagram opens with the tables added in one step, and **Edit > Undo** takes them back.
 - **New Table…** and **New Schema…** in the Table Library: right-click a layer (or use its `+`) to add a table or a schema to it, right-click a schema to add a table to it, or pick either from the view's `…` menu or the Command Palette. The table's file is created in `<layer>/tables/<schema>/` and is on no diagram until you add it. A schema is created with its first table. DBML projects only.
 - **Choose how much of every table a diagram shows: Names, Keys or All.** A new three-way switch on the canvas toolbar sets it for the whole diagram. **Names** shows each table's name only, so a diagram of hundreds of tables fits on the screen. **Keys** shows only the key columns (primary, foreign and natural keys). **All** shows every column. In Names a table is its name and a column count, and clicking the count opens just that table. In Keys a table says how many of its columns are shown, and its **Show all N columns** button opens it. **Show name only** (or **Show keys only**) closes an opened table again, and picking a level on the toolbar puts every table back at it. The choice is remembered for each diagram while it stays open in VS Code, and changes nothing in your files. It replaces the Expand All / Collapse All button.
 
@@ -41,6 +42,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Fixed
 
+- **Auto Layout tries its lighter layouts after any failure of the first one**, not only after it runs out of room to compute: a diagram the layout engine refused (two-way relationships between the same tables could do it) is now laid out instead of showing an error.
 - **Dropping tables on the Physical tab says why nothing was added**, instead of doing nothing: tables are added on the Logical tab.
 - **Dragging a schema or a layer together with tables from the Table Library adds all of them.** A Shift-drop of a mixed selection used to add only the table rows, fewer than the hint said.
 - **Auto Layout no longer fails with "Maximum call stack size exceeded" on a diagram with many relationships.** The layout already fell back to a lighter way of placing tables when a large diagram ran out of room to compute; a diagram of around 130 tables with many lines between them could run out again in the last tightening step. It now leaves that step out too and lays the diagram out, a little less tightly packed.

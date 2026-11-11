@@ -548,28 +548,34 @@ export async function runElkLayout(
   try {
     layouted = await layoutWithGuard(elk, graph);
   } catch (err) {
-    // The layered algorithm recurses deeply on a large or densely related
-    // diagram and overflows the worker's stack: lay it out again with each
-    // stack-safe fallback in turn rather than fail.
-    if (!isStackOverflow(err)) throw err;
+    // The default layout failed. On a large or densely related diagram its
+    // node placement and its post-compaction recurse deeply and overflow the
+    // worker's stack, the compaction can throw on what it is given (ELK's
+    // "Invalid hitboxes for scanline", seen with two-way relationships).
+    // Lay it out again with each lighter fallback in turn rather than fail;
+    // the first error is the one reported when none of them works. A layout
+    // that ran out of time, or whose worker died, is not laid out again:
+    // the user has waited long enough, and the worker has been replaced.
+    const failure = classifyLayoutFailure(err);
+    if (failure === 'timeout' || failure === 'worker') throw err;
     const fallbacks = stackSafeFallbacks(mergedOptions);
     if (fallbacks.length === 0) throw err;
-    try {
-      hooks.onStackFallback?.();
-    } catch {
-      // Telemetry never stops a layout.
+    if (isStackOverflow(err)) {
+      try {
+        hooks.onStackFallback?.();
+      } catch {
+        // Telemetry never stops a layout.
+      }
     }
-    let lastError: unknown = err;
     for (const fallbackOptions of fallbacks) {
       try {
         layouted = await layoutWithGuard(getElk(), { ...graph, layoutOptions: fallbackOptions });
         break;
-      } catch (fallbackErr) {
-        if (!isStackOverflow(fallbackErr)) throw fallbackErr;
-        lastError = fallbackErr;
+      } catch {
+        // The next fallback, if any.
       }
     }
-    if (!layouted) throw lastError;
+    if (!layouted) throw err;
   }
 
   // Extract positions from the layouted graph

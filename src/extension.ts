@@ -54,7 +54,7 @@ import {
   type ManifestMissingReasonDeps,
 } from './services/manifestMissingReasons';
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
-import { TableLibraryDragController } from './providers/tableLibraryDrag';
+import { TableLibraryDragController, TABLE_LIBRARY_DRAG_MIME } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
@@ -1551,7 +1551,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // and then a blank pane while activation and the first listing run. The
   // real provider is attached below; the view then lists once.
   const domainTreeData = workspaceRoot
-    ? new DeferredTreeDataProvider<TreeElement>([LAYER_DRAG_MIME_TYPE], [LAYER_DRAG_MIME_TYPE])
+    ? new DeferredTreeDataProvider<TreeElement>([LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_DRAG_MIME], [LAYER_DRAG_MIME_TYPE])
     : undefined;
   const domainTreeView = domainTreeData
     ? vscode.window.createTreeView('erdStudio.domainTree', {
@@ -3276,6 +3276,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         // The diagram in front of the user is offered first.
         activeDiagramPath: activeSubjectAreaCanvasPath,
       };
+      // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
+      treeProvider.setTablesDropHandler((filePath, tables) => addToDiagramDeps.addTables(filePath, tables));
       // A table's warehouse name and owner, from the cached reading of a file
       // already read (`read` reads it first, with no copy or relationships
       // attach): undefined while unread.
