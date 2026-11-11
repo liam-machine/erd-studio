@@ -16,6 +16,11 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 - **ERD Studio: Suggest Relationships…** proposes the relationships a diagram's column names and keys point at, for you to accept or leave: a list in four parts (**Strong**, **Likely**, **Possible**, **Direction unknown**), each with the reasons in plain words. Only the strong ones (a declared key backs them) are ticked; with no key declared, nothing is ticked and the list says why. For one whose direction nothing settles, it asks "Which way does this relationship point?", as the New Relationship dialog does, or you skip it. Everything you accept is added in one change, stored as a relationship you drew yourself, and **Edit > Undo** takes them all back; nothing is kept about the ones you leave. Run it from the Command Palette or the canvas tab's **⋯** menu. After an import whose diagram has no relationships, a notification offers **Review Suggestions** once, when ERD Studio found at least one likely relationship (its number counts only those).
 
+### Changed
+
+- **Bring In Your Data Model… is in the Diagrams view's + menu**, under the imports, so a project that already has diagrams has a visible way to the import guide besides the Command Palette.
+- **The import guide folds its long queries.** A query or notebook cell longer than six lines shows as one line ("Show all 48 lines") with **Copy** beside it, so the Databricks, PostgreSQL and MySQL cards no longer push the other sources off the page.
+
 ### Fixed
 
 - **Send Feedback** no longer fails silently from the Command Palette: if the report can't be opened, ERD Studio says so, copies your title and description to the clipboard, and offers **Open GitHub Issues** and **Try Again**. The Send Feedback dialog shows the same plain sentence instead of a raw error.

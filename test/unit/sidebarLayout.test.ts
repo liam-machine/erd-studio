@@ -92,8 +92,12 @@ describe('sidebar views', () => {
   it('put every way to start a diagram, and New Layer, in the + menu', () => {
     expect(contributes.submenus).toContainEqual({ id: 'erdStudio.newMenu', label: 'New…', icon: '$(add)' });
     expect(contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual([
-      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.addLayer',
+      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.showImportGuide', 'erdStudio.addLayer',
     ]);
+    // The guide to every source sits in a group of its own under the imports, so a project that already has diagrams
+    // (no welcome view, no start screen) still has a visible way to it besides the Command Palette.
+    expect(contributes.menus['erdStudio.newMenu'].find((m) => m.command === 'erdStudio.showImportGuide'))
+      .toEqual({ command: 'erdStudio.showImportGuide', when: 'erdStudio.hasProject', group: '1_import_guide@1' });
     // The imports sit together, after Import DBML…, in the diagram group.
     expect(contributes.menus['erdStudio.newMenu'].filter((m) => m.command?.startsWith('erdStudio.import')).map((m) => m.group))
       .toEqual(['1_diagram@3', '1_diagram@4', '1_diagram@5']);
