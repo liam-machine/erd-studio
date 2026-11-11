@@ -326,6 +326,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.suggestRelationships",
+        "title": "Suggest Relationships…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.addToDiagram",
         "title": "Add to Diagram…",
         "category": "ERD Studio"
@@ -1031,6 +1036,13 @@
           "group": "7_modification@9"
         }
       ],
+      "editor/title": [
+        {
+          "command": "erdStudio.suggestRelationships",
+          "when": "activeCustomEditorId == erdStudio.domainEditor",
+          "group": "erdStudio@1"
+        }
+      ],
       "view/title": [
         {
           "submenu": "erdStudio.newMenu",
@@ -1255,6 +1267,10 @@
         },
         {
           "command": "erdStudio.customiseFields",
+          "when": "erdStudio.hasProject"
+        },
+        {
+          "command": "erdStudio.suggestRelationships",
           "when": "erdStudio.hasProject"
         },
         {

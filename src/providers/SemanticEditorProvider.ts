@@ -104,6 +104,7 @@ import {
   linkKey,
   normaliseSubjectAreaDocument,
   sameLink,
+  tableLoadErrorOf,
   builtInField,
   setMetaEntry,
   toDisplaySubjectArea,
@@ -226,6 +227,11 @@ import type { NamingMigrationPlan } from '../services/namingMigration';
 import type { ProjectNaming } from '@erd-studio/core';
 import type { RelationshipAudit } from '../services/relationshipHealth';
 import { DbmlTableWriteRefused, DuplicateKeyWriteRefused, RelationshipsRewriteRefused, TableNamingWriteRefused } from '../services/logicalModelService';
+import { runSuggestRelationships, vscodeSuggestRelationshipsUi, type SuggestOutcome, type SuggestRelationshipsUi, type SuggestionRead } from './suggestRelationshipsFlow';
+import {
+  DONT_ASK_AGAIN_BUTTON, NOT_NOW_BUTTON, NO_CANVAS_MESSAGE, REVIEW_SUGGESTIONS_BUTTON, computeSuggestions, importOfferMessage, notAddedMessage,
+  offerAfterImport, unreadableDiagramMessage,
+} from '../services/relationshipSuggestionReview';
 import { tableHomesOf } from '../services/tableHomes';
 import { buildCanvasContext } from '../services/canvasContext';
 import type { CodeOwnersReader } from '../services/codeOwners';
@@ -636,6 +642,13 @@ export const NAMING_MIGRATION_DECLINED_KEY = 'erdStudio.namingMigrationDeclined'
  * to DBML (native DBML storage, §6.4). Per workspace.
  */
 export const DBML_CONVERSION_DECLINED_KEY = 'erdStudio.dbmlConversionDeclined';
+
+/**
+ * workspaceState key: "Don't Ask Again" on the offer to review suggested
+ * relationships after an import. Per workspace, like the offers above; the
+ * command stays.
+ */
+export const RELATIONSHIP_SUGGESTIONS_DECLINED_KEY = 'erdStudio.relationshipSuggestionsDeclined';
 
 /** How long outside changes to table files are collected into one canvas refresh. */
 export const TABLE_REFRESH_BATCH_MS = 150;
@@ -1785,6 +1798,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 // window's one prompt and none of them pops over it.
                 const guideStart = this.onboardingGuide?.takeCanvas();
                 if (guideStart) this.post(webviewPanel.webview, { type: 'guideStart', payload: guideStart });
+                // The after-import suggestion offer waits for the guide to end on this canvas.
+                if (guideStart) this.guideCanvas = panelKey;
               }
             }
             void this.offerRelationshipPrompts(document, webviewPanel.webview, panelKey);
@@ -1854,6 +1869,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             this.onboardingGuide?.onCanvasAction(action);
+            if (action.action === 'complete' || action.action === 'skip' || action.action === 'star') this.guideEnded(panelKey);
             break;
           }
           case 'openGettingStarted':
@@ -2969,6 +2985,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (await this.maybeOfferDbmlConversion()) return;
     if (await this.maybeOfferNamingMigration()) return;
     if (await this.maybeOfferRelationshipMove()) return;
+    // Just imported with no relationships: the suggestion offer, instead of the turn-round one (it has none to offer).
+    if (await this.maybeOfferSuggestionsAfterImport(document, panelKey)) return;
     await this.maybeOfferTurnRound(document, webview, panelKey);
   }
 
@@ -3250,6 +3268,177 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
     } catch (err) {
       log.warn('[SemanticEditorProvider] Turn-round offer skipped:', err);
+    }
+  }
+
+  // --- Suggest Relationships (src/providers/suggestRelationshipsFlow.ts) ---
+
+  /** The review's UI; a test swaps in a fake ({@link useSuggestionUi}). */
+  private suggestionUi: SuggestRelationshipsUi = vscodeSuggestRelationshipsUi();
+  /** Diagrams an import just wrote, by path, waiting for their canvas's `ready` to make the offer once. */
+  private readonly pendingSuggestionOffers = new Map<string, number>();
+  /** Diagrams offered suggestions this session: never twice. */
+  private readonly suggestionsOffered = new Set<string>();
+  /** The canvas the onboarding guide (phase B) started on, and the offer held back until it ends there. */
+  private guideCanvas?: string;
+  private offerAfterGuide?: string;
+
+  /** Swap the review's UI (tests). */
+  useSuggestionUi(ui: SuggestRelationshipsUi): void {
+    this.suggestionUi = ui;
+  }
+
+  /**
+   * ERD Studio: Suggest Relationships… on the diagram `uri` (the editor title
+   * menu passes it), else the active canvas. The physical stage writes
+   * nothing. Every accepted relationship goes through
+   * `commitRelationshipWrite` in the diagram's edit queue: one
+   * WorkspaceEdit, one save, one undo step.
+   */
+  async suggestRelationships(uri?: vscode.Uri): Promise<SuggestOutcome | 'noCanvas'> {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    const panelKey = uri ? uri.toString() : input instanceof vscode.TabInputCustom ? input.uri.toString() : undefined;
+    const panel = panelKey ? this.openPanels.get(panelKey) : undefined;
+    const ui = this.suggestionUi;
+    if (!panelKey || !panel) {
+      ui.info(NO_CANVAS_MESSAGE);
+      return 'noCanvas';
+    }
+    const { document, webview } = panel;
+    return runSuggestRelationships({
+      stage: panel.activeStage,
+      dbt: !this.logicalOnly,
+      ui,
+      read: () => this.readForSuggestions(document),
+      inQueue: (fn) => this.queueEdit(panelKey, fn),
+      write: async (ops) => {
+        let applied = false;
+        try {
+          const written = await this.commitRelationshipWrite(
+            document, webview, ops, 'logical',
+            "Couldn't add the suggested relationships: VS Code didn't accept the change, so nothing was changed.",
+            () => { applied = true; },
+          );
+          return written !== null;
+        } catch (err) {
+          this.recordRelationshipFailure(err);
+          if (isExplainedRefusal(err)) {
+            // The planner's or the writer's refusal, in plain words: nothing was written.
+            ui.error(notAddedMessage(err instanceof Error ? err.message : String(err)));
+            return false;
+          }
+          // Anything else is ours (#219): never the raw exception, which goes to the log and the report.
+          log.error('[SemanticEditorProvider] Suggest Relationships failed:', err);
+          const doing = applied ? 'after adding the suggested relationships' : 'while adding the suggested relationships';
+          showErrorWithActions(
+            (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+            applied
+              ? 'Adding the suggested relationships hit a problem in ERD Studio, not in your diagram. The change was made; Edit > Undo takes it back.'
+              : "Couldn't add the suggested relationships: that's a problem in ERD Studio, not your diagram. Nothing was changed.",
+            { [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill('Suggest Relationships', doing, err)) },
+            (choice, actionErr) => log.error(`[SemanticEditorProvider] Suggest Relationships: "${choice}" failed:`, actionErr),
+          );
+          return false;
+        }
+      },
+    });
+  }
+
+  /**
+   * What the engine reads for one diagram, as it is now: its tables
+   * (unreadable ones left out) and the relationships it draws, with dbt's key
+   * evidence and relationships tests in a dbt project — the same cached reads
+   * the canvas and every relationship write already make.
+   */
+  private async readForSuggestions(document: vscode.TextDocument): Promise<SuggestionRead> {
+    const fsPath = document.uri.fsPath;
+    const fileName = path.basename(fsPath).replace(/\.(json|dbml)$/i, '');
+    try {
+      const dbtKeyIndex = await this.loadDbtKeyIndex();
+      const domain = this.subjectAreaService.getSubjectArea(fsPath, { dbtKeyIndex });
+      let dbtTests: ReturnType<typeof dbtTestsOf>['relationshipTests'] = [];
+      if (!this.logicalOnly) {
+        try {
+          const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+          const manifest = await this.manifestService.loadManifest(this.workspaceRoot).catch(() => undefined);
+          dbtTests = dbtTestsOf(ymlData, manifest).relationshipTests;
+        } catch (err) {
+          log.warn(`[SemanticEditorProvider] Suggest Relationships: dbt's tests not read: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      return {
+        ok: true,
+        diagramName: domain.domain || fileName,
+        tables: domain.logical.models.filter((t) => !tableLoadErrorOf(t)),
+        relationships: domain.logical.relationships ?? [],
+        dbtKeyIndex,
+        dbtTests,
+      };
+    } catch (err) {
+      return { ok: false, message: unreadableDiagramMessage(fileName, err instanceof Error ? err.message : String(err)) };
+    }
+  }
+
+  /**
+   * An import's Keep wrote `domainPath` and is opening it: when its canvas
+   * says `ready`, offer the review once (the import itself writes no
+   * suggestion). Never on a plain open.
+   */
+  offerSuggestionsWhenOpened(domainPath: string): void {
+    this.pendingSuggestionOffers.set(path.resolve(domainPath), Date.now());
+  }
+
+  /**
+   * The after-import offer, from a canvas's `ready`: once per diagram per
+   * session, never after Don't Ask Again, only on the logical stage of a
+   * diagram with no relationship and at least one suggestion that is likely
+   * or stronger. Held back while the onboarding guide runs on this canvas.
+   * True when it took this open's one prompt.
+   */
+  private async maybeOfferSuggestionsAfterImport(document: vscode.TextDocument, panelKey: string): Promise<boolean> {
+    const fsPath = path.resolve(document.uri.fsPath);
+    const at = this.pendingSuggestionOffers.get(fsPath);
+    if (at === undefined) return false;
+    this.pendingSuggestionOffers.delete(fsPath);
+    if (Date.now() - at > PENDING_REVEAL_MS) return false;
+    if (this.guideCanvas === panelKey) {
+      this.offerAfterGuide = panelKey;
+      return true;
+    }
+    return this.showSuggestionOffer(document, panelKey);
+  }
+
+  /** The guide ended on `panelKey`: a suggestion offer it held back is made now. */
+  private guideEnded(panelKey: string): void {
+    if (this.guideCanvas === panelKey) this.guideCanvas = undefined;
+    if (this.offerAfterGuide !== panelKey) return;
+    this.offerAfterGuide = undefined;
+    const panel = this.openPanels.get(panelKey);
+    if (panel) void this.showSuggestionOffer(panel.document, panelKey);
+  }
+
+  private async showSuggestionOffer(document: vscode.TextDocument, panelKey: string): Promise<boolean> {
+    const fsPath = path.resolve(document.uri.fsPath);
+    try {
+      if (this.suggestionsOffered.has(fsPath)) return false;
+      if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_SUGGESTIONS_DECLINED_KEY)) return false;
+      if (this.openPanels.get(panelKey)?.activeStage !== 'logical') return false;
+      const read = await this.readForSuggestions(document);
+      if (!read.ok) return false;
+      const suggestions = computeSuggestions(read);
+      if (!offerAfterImport(read.relationships.length, suggestions)) return false;
+      this.suggestionsOffered.add(fsPath);
+      // Not awaited: the canvas's `ready` must not wait on the toast.
+      void Promise.resolve(vscode.window.showInformationMessage(
+        importOfferMessage(suggestions.length), REVIEW_SUGGESTIONS_BUTTON, NOT_NOW_BUTTON, DONT_ASK_AGAIN_BUTTON,
+      )).then(async (choice) => {
+        if (choice === REVIEW_SUGGESTIONS_BUTTON) await this.suggestRelationships(document.uri);
+        else if (choice === DONT_ASK_AGAIN_BUTTON) await this.context.workspaceState?.update(RELATIONSHIP_SUGGESTIONS_DECLINED_KEY, true);
+      }).catch((err: unknown) => log.warn('[SemanticEditorProvider] The suggestion offer failed:', err));
+      return true;
+    } catch (err) {
+      log.warn('[SemanticEditorProvider] Suggestion offer skipped:', err);
+      return false;
     }
   }
 
