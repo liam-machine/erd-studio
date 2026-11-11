@@ -5148,17 +5148,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * {@link applySubjectAreaEdit} for a DBML diagram, or a project whose
-   * library holds DBML (§2.6): the library writes are planned
-   * (`planTableWrites`), the diagram is rendered against the library as the
-   * edit leaves it (its relationships imports recomputed on every edit,
-   * which also heals one it lacked), other diagrams the edit renames in are
-   * re-rendered, and every other DBML diagram whose `use` lines the edit
-   * invalidates is settled — all in ONE WorkspaceEdit applied by
-   * `applyFileWrites`, with the primary's replace first so the step undoes
-   * as one.
-   */
-  /**
    * The rows of the DBML diagram `file`'s members as read that its edited
    * object still lists, by their reference before the edit or the one
    * `renamedMembers` gives it. Undefined for a file with no member table.
@@ -5179,6 +5168,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return (Array.isArray(logical.models) ? logical.models : []).filter((m): m is string => typeof m === 'string' && !known.has(m.toLowerCase()));
   }
 
+  /**
+   * {@link applySubjectAreaEdit} for a DBML diagram, or a project whose
+   * library holds DBML (§2.6): the library writes are planned
+   * (`planTableWrites`), the diagram is rendered against the library as the
+   * edit leaves it (its relationships imports recomputed on every edit,
+   * which also heals one it lacked), other diagrams the edit renames in are
+   * re-rendered, and every other DBML diagram whose `use` lines the edit
+   * invalidates is settled — all in ONE WorkspaceEdit applied by
+   * `applyFileWrites`, with the primary's replace first so the step undoes
+   * as one.
+   */
   private async applyStorageEdit(
     document: vscode.TextDocument,
     file: ParsedSubjectArea,
