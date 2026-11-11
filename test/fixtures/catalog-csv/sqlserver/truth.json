@@ -1,5 +1,5 @@
 {
-  "about": "What probe-schema.sql declares, written by hand from it: the truth an export of ../queries/sqlserver.sql on that schema is checked against. Two types are derived, not yet observed: order_line.line_total (a computed int * decimal(18,4), read as decimal(29,4)) and the view's total (sum of decimal(18,4), decimal(38,4)).",
+  "about": "What probe-schema.sql declares, written by hand from it: the truth an export of ../queries/sqlserver.sql on that schema is checked against. Every type here was checked against SQL Server 2022 (16.0.4315.2): the computed order_line.line_total (int * decimal(18,4)) reads as decimal(29,4) and the view's total (sum of decimal(18,4)) as decimal(38,4), as derived. dbo.sysdiagrams (what SSMS's diagrams create) is in the schema and must not be imported.",
   "tables": [
     {
       "schema": "ref",
@@ -344,13 +344,13 @@
           false
         ],
         [
-          "ord_id",
-          "bigint",
+          "ln_no",
+          "smallint",
           false
         ],
         [
-          "ln_no",
-          "smallint",
+          "ord_id",
+          "bigint",
           false
         ],
         [
@@ -424,6 +424,11 @@
           "at_time",
           "time(7)",
           true
+        ],
+        [
+          "context",
+          "xml",
+          true
         ]
       ]
     }
@@ -447,6 +452,15 @@
     }
   ],
   "uniques": [
+    {
+      "schema": "ref",
+      "table": "currency",
+      "name": "currency_name_ux",
+      "columns": [
+        "name"
+      ],
+      "note": "a plain unique index, not a constraint"
+    },
     {
       "schema": "sales",
       "table": "customer",
@@ -496,6 +510,12 @@
       "table": "product",
       "name": "product_legacy_code_ux",
       "why": "filtered (WHERE legacy_code IS NOT NULL)"
+    },
+    {
+      "schema": "sales",
+      "table": "product",
+      "name": "product_barcode_ux (INCLUDE unit_price)",
+      "why": "an included column is not part of the key: unit_price is never unique"
     }
   ],
   "foreignKeys": [
@@ -624,14 +644,27 @@
       "name": "shipment_line_order_line_fk",
       "from": "sales.shipment_line",
       "columns": [
-        "ln_no",
-        "ord_id"
+        "ord_id",
+        "ln_no"
       ],
       "to": "sales.order_line",
       "refColumns": [
-        "line_no",
+        "order_id",
+        "line_no"
+      ],
+      "note": "the many end's columns sit in the table as ln_no, ord_id: the opposite order to the key"
+    },
+    {
+      "name": "shipment_line_order_fk",
+      "from": "sales.shipment_line",
+      "columns": [
+        "ord_id"
+      ],
+      "to": "sales.order_header",
+      "refColumns": [
         "order_id"
-      ]
+      ],
+      "note": "ord_id is in two foreign keys"
     },
     {
       "name": "OrderNote_order_fk",

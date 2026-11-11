@@ -1,0 +1,3 @@
+# Byte for byte as SQL Server tools wrote them (a CRLF inside a quoted cell is data; the script is UTF-16).
+probe.csv -text
+probe-smo-script.sql -text

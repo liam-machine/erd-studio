@@ -60,8 +60,9 @@ export function scoreDbml(dbml: string, truth: Truth): RouteScore {
     if (!t) continue;
     s.tables[0]++;
     if (tt.comment) { if (t.note === tt.comment) s.tableComments[0]++; else s.commentMismatches.push(`${tt.name}: ${JSON.stringify(t.note)}`); }
+    // In key order: a composite key's column order is part of it.
     const pkCols = [...t.fields.filter((f) => f.pk).map((f) => f.name), ...t.indexes.filter((i) => i.pk).flatMap((i) => i.columns.map((c) => c.value))];
-    if (tt.pk.length && sameSet(pkCols, tt.pk)) s.primaryKeys[0]++;
+    if (tt.pk.length && pkCols.length === tt.pk.length && pkCols.every((c, i) => c.toLowerCase() === tt.pk[i].toLowerCase())) s.primaryKeys[0]++;
     for (const [name, type, nullable, def, comment] of tt.columns) {
       const f = t.fields.find((x) => x.name.toLowerCase() === name.toLowerCase());
       if (!f) continue;

@@ -1,5 +1,9 @@
 -- A synthetic probe schema for the SQL Server catalog query (made up for the test: no real names or data).
 -- Run in an empty database. sqlcmd splits batches on GO.
+-- sqlcmd starts with QUOTED_IDENTIFIER OFF (SSMS and the VS Code extension start with it ON); a filtered index needs it ON.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
 CREATE SCHEMA ref;
 GO
 CREATE SCHEMA sales;
@@ -15,6 +19,8 @@ CREATE TABLE ref.currency (
   name varchar(50) NOT NULL,
   minor_units smallint NOT NULL CONSTRAINT currency_minor_units_df DEFAULT 2
 );
+-- A plain unique index (not a constraint): a unique key over name.
+CREATE UNIQUE NONCLUSTERED INDEX currency_name_ux ON ref.currency (name);
 CREATE TABLE ref.exchange_rate (
   from_currency char(3) NOT NULL,
   to_currency char(3) NOT NULL,
@@ -81,20 +87,24 @@ CREATE TABLE sales.order_line (
   order_id bigint NOT NULL,
   line_no smallint NOT NULL,
   product_id int NOT NULL,
-  quantity int NOT NULL CONSTRAINT order_line_quantity_df DEFAULT 1,
+  quantity int NOT NULL CONSTRAINT order_line_quantity_df DEFAULT 1 CONSTRAINT order_line_quantity_ck CHECK (quantity > 0),
   amount decimal(18,4) NULL,
   line_total AS (quantity * amount),
   CONSTRAINT order_line_pk PRIMARY KEY (order_id, line_no),
   CONSTRAINT order_line_order_fk FOREIGN KEY (order_id) REFERENCES sales.order_header (order_id),
   CONSTRAINT order_line_product_fk FOREIGN KEY (product_id) REFERENCES sales.product (product_id)
 );
--- A composite foreign key declared in the opposite order to the key it references.
+-- A composite foreign key whose columns sit in this table in the opposite order to the key it references
+-- (ln_no before ord_id; the key is order_id, line_no). Pairing by column position would cross them.
+-- SQL Server will not let the REFERENCES list itself be reordered (Msg 1776: it must match a key's order).
 CREATE TABLE sales.shipment_line (
   shipment_id bigint NOT NULL CONSTRAINT shipment_line_pk PRIMARY KEY,
-  ord_id bigint NOT NULL,
   ln_no smallint NOT NULL,
+  ord_id bigint NOT NULL,
   shipped_at datetime2(6) NULL,
-  CONSTRAINT shipment_line_order_line_fk FOREIGN KEY (ln_no, ord_id) REFERENCES sales.order_line (line_no, order_id)
+  CONSTRAINT shipment_line_order_line_fk FOREIGN KEY (ord_id, ln_no) REFERENCES sales.order_line (order_id, line_no),
+  -- ord_id is in two foreign keys: two rows for one column.
+  CONSTRAINT shipment_line_order_fk FOREIGN KEY (ord_id) REFERENCES sales.order_header (order_id)
 );
 CREATE TABLE sales.[OrderNote] (
   [NoteId] int NOT NULL CONSTRAINT [OrderNote_pk] PRIMARY KEY,
@@ -109,7 +119,17 @@ CREATE TABLE sales.audit_log (
   actor varchar(50) NULL,
   payload nvarchar(max) NULL,
   is_system bit NULL,
-  at_time time(7) NULL
+  at_time time(7) NULL,
+  context xml NULL
+);
+-- What SSMS's database diagrams create (in dbo): the catalog query leaves it out.
+CREATE TABLE dbo.sysdiagrams (
+  name sysname NOT NULL,
+  principal_id int NOT NULL,
+  diagram_id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+  version int NULL,
+  definition varbinary(max) NULL,
+  CONSTRAINT UK_principal_name UNIQUE (principal_id, name)
 );
 GO
 CREATE VIEW sales.v_order_totals AS
