@@ -196,6 +196,53 @@ describe('a member whose file is gone (the stale-path rule)', () => {
     expect(warnings.some((w) => w.includes('it was read from bronze/tables/ddd/addresse.dbml'))).toBe(true);
   });
 
+  describe('with no finder, in the folders the lines name (owner decision B, as the host)', () => {
+    /** A diagram of bqs.addresse (its file gone), ccc.kunde and ddd.kunde: its lines name bqs, ccc and ddd. */
+    function threeFolders(withDdd: boolean): Files {
+      const files = fixture();
+      files['.erd-studio/bronze/tables/ddd/kunde.dbml'] = files['.erd-studio/bronze/tables/ccc/kunde.dbml'].replace('ccc.kunde', 'ddd.kunde');
+      if (withDdd) files['.erd-studio/bronze/tables/ddd/addresse.dbml'] = files['.erd-studio/bronze/tables/ccc/addresse.dbml'].replace('ccc.addresse', 'ddd.addresse');
+      delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+      files[diagramPath('three')] = [
+        "Project three {\n  erd_schema_version: '7'\n}",
+        "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+        "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+        "use { table ddd.kunde } from '../tables/ddd/kunde.dbml'",
+        '',
+      ].join('\n');
+      return files;
+    }
+
+    it('two other schema folders hold the name: the member is drawn missing, with a warning (both probed)', async () => {
+      const { promise, reads, warnings } = load(threeFolders(true), diagramPath('three'));
+      const display = await promise;
+      expect(display.models.find((m) => m.name === 'addresse')!.columns).toEqual([]);
+      expect(warnings.some((w) => w.includes('more than one other schema folder has a table of that name'))).toBe(true);
+      expect(reads.filter((p) => p.endsWith('/addresse.dbml'))).toEqual([
+        '.erd-studio/bronze/tables/bqs/addresse.dbml',
+        '.erd-studio/bronze/tables/ccc/addresse.dbml',
+        '.erd-studio/bronze/tables/ddd/addresse.dbml',
+      ]);
+    });
+
+    it('one other schema folder holds it: the member is read from there, as before', async () => {
+      const { promise, warnings } = load(threeFolders(false), diagramPath('three'));
+      const display = await promise;
+      expect(display.models.find((m) => m.name === 'addresse')!.columns.map((c) => c.name)).toEqual(['id', 'street', 'city', 'postcode']);
+      expect(warnings.some((w) => w.includes('it was read from bronze/tables/ccc/addresse.dbml'))).toBe(true);
+    });
+
+    it('its own schema folder in another layer comes before another schema folder', async () => {
+      const files = threeFolders(true);
+      files['.erd-studio/layers.json'] = JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze' }, { id: 'silver' }] });
+      files['.erd-studio/silver/tables/bqs/addresse.dbml'] = 'Table bqs.addresse {\n  id INT [pk]\n  silver_only VARCHAR\n}\n';
+      files['.erd-studio/silver/tables/bqs/x.dbml'] = 'Table bqs.x {\n  id INT [pk]\n}\n';
+      files[diagramPath('three')] += "use { table bqs.x } from '../../silver/tables/bqs/x.dbml'\n";
+      const display = await load(files, diagramPath('three')).promise;
+      expect(display.models.find((m) => m.name === 'addresse')!.columns.map((c) => c.name)).toEqual(['id', 'silver_only']);
+    });
+  });
+
   it('a leftover stale line beside the real one: the table that exists keeps the old bare position', async () => {
     const files: Files = {
       '.erd-studio/layers.json': fixture()['.erd-studio/layers.json'],

@@ -513,21 +513,73 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     const tableFileExists = new Map<string, boolean>();
     // Each such member's layer: the layer folder of the file it was read from.
     tableLayers = new Map<string, string>();
+    // A stale use line's table in the other table folders the lines name (owner decision B, as the
+    // host's finder answers): a file of the name in the line's own schema folder (its layer's first);
+    // else, in another schema folder, only when one schema folder holds the name. A file another
+    // member's line points at counts as holding it (that member's table, never read for this one),
+    // and is never this member's. Undefined when it is drawn missing (the host's finder, if any, is
+    // still asked: an answer that is another member's file or one of these folders' is ignored).
+    const staleFallback = async (ref: string, name: string, use: DbmlMemberUse, schema: string, dirs: readonly string[]): Promise<{ rel: string; text: string } | undefined> => {
+      const paths = [...new Set([...dirs].sort(byteOrder).map((dir) => `${dir}/${name}.dbml`))]
+        .filter((path) => isInsideSemanticDir(path) && path !== use.resolved);
+      const schemaOf = (path: string): string => (dbmlTreePathOf(path)?.schema ?? '').toLowerCase();
+      const layerOf = (path: string): string | undefined => dbmlTreePathOf(path)?.layer;
+      const probe = async (path: string): Promise<string | undefined> => {
+        const text = await readFile(`${prefix}${path}`);
+        tableFileExists.set(normalisePosix(path), text !== null && text !== undefined);
+        return text === null || text === undefined ? undefined : text;
+      };
+      const own = paths.filter((path) => schemaOf(path) === schema);
+      for (const path of [...own.filter((p) => layerOf(p) === use.layer), ...own.filter((p) => layerOf(p) !== use.layer)]) {
+        if (anotherMembers(path, ref)) return undefined;
+        const text = await probe(path);
+        if (text !== undefined) return { rel: path, text };
+      }
+      let first: { rel: string; text?: string } | undefined;
+      for (const path of paths.filter((p) => schemaOf(p) !== schema)) {
+        if (first !== undefined && schemaOf(path) === schemaOf(first.rel)) continue;
+        const text = anotherMembers(path, ref) ? undefined : await probe(path);
+        if (text === undefined && !anotherMembers(path, ref)) continue;
+        if (first !== undefined) {
+          warn(`Table "${name}" is not at its use line's path (${use.resolved}), and more than one other schema folder has a table of that name: it is drawn missing until the line is fixed`);
+          return undefined;
+        }
+        first = { rel: path, ...(text !== undefined ? { text } : {}) };
+      }
+      return first?.text === undefined ? undefined : { rel: first.rel, text: first.text };
+    };
     await mapWithLimit(names, maxParallelReads, async (ref) => {
       const name = bareName(ref);
       const use = memberUses.get(ref);
       // One lane probes one candidate at a time, so maxParallelReads holds.
       const dbmlPaths = dbmlCandidates(ref);
       // `logical-models/` then `tables/` (#162), each top level first: YAML only.
-      const candidates = [
-        ...dbmlPaths.map((rel) => `${prefix}${rel}`),
-        ...(offeredYaml.has(ref) ? tableFileCandidates(prefix, name, folders) : []),
-      ];
+      const yamlPaths = offeredYaml.has(ref) ? tableFileCandidates(prefix, name, folders) : [];
       let text: string | null | undefined;
-      let index = -1;
-      while ((text === null || text === undefined) && ++index < candidates.length) {
-        text = await readFile(candidates[index]);
-        if (index < dbmlPaths.length) tableFileExists.set(normalisePosix(dbmlPaths[index]), text !== null && text !== undefined);
+      // The `.dbml` file it was read from (relative to the semantic dir), else the YAML file's path.
+      let dbmlRel: string | undefined;
+      let yamlPath: string | undefined;
+      // A stale use line that says its schema folder is looked for by owner decision B.
+      const schema = (use?.schema ?? use?.qualifier ?? '').toLowerCase();
+      if (use !== undefined && reading && schema !== '' && dbmlPaths[0] === use.resolved) {
+        text = await readFile(`${prefix}${use.resolved}`);
+        tableFileExists.set(normalisePosix(use.resolved), text !== null && text !== undefined);
+        if (text !== null && text !== undefined) {
+          dbmlRel = use.resolved;
+        } else {
+          const found = await staleFallback(ref, name, use, schema, reading.useTableDirs);
+          if (found !== undefined) ({ rel: dbmlRel, text } = found);
+        }
+      } else {
+        for (let i = 0; (text === null || text === undefined) && i < dbmlPaths.length; i++) {
+          text = await readFile(`${prefix}${dbmlPaths[i]}`);
+          tableFileExists.set(normalisePosix(dbmlPaths[i]), text !== null && text !== undefined);
+          if (text !== null && text !== undefined) dbmlRel = dbmlPaths[i];
+        }
+      }
+      for (let i = 0; (text === null || text === undefined) && i < yamlPaths.length; i++) {
+        text = await readFile(yamlPaths[i]);
+        if (text !== null && text !== undefined) yamlPath = yamlPaths[i];
       }
       let foundRel: string | undefined;
       if ((text === null || text === undefined) && findDbmlTable && use !== undefined) {
@@ -554,9 +606,9 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         parsed.set(ref, NO_TABLE);
         return;
       }
-      const path = foundRel !== undefined ? `${prefix}${foundRel}` : candidates[index];
-      if (dbml && (foundRel !== undefined || index < dbmlPaths.length)) {
-        const rel = foundRel ?? dbmlPaths[index];
+      const path = foundRel !== undefined ? `${prefix}${foundRel}` : dbmlRel !== undefined ? `${prefix}${dbmlRel}` : yamlPath!;
+      if (dbml && (foundRel !== undefined || dbmlRel !== undefined)) {
+        const rel = (foundRel ?? dbmlRel)!;
         if (foundRel === undefined && use !== undefined && rel !== use.resolved) {
           // Found by name in another folder the lines name: say so, as for a file the host finds.
           warn(`Table "${name}" is not at its use line's path (${use.resolved}); it was read from ${rel}. The next ERD Studio edit fixes the line`);

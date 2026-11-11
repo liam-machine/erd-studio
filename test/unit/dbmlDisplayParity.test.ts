@@ -396,4 +396,24 @@ describe('two tables of one name in different schema folders, a file gone (owner
     const canvas = drawn(await canvasOf('bronze/diagrams/stale.dbml', true));
     expect(canvas).toEqual(core);
   });
+
+  it('a diagram whose lines name three schema folders, bqs/addresse.dbml deleted, ccc and ddd each holding an addresse no member reads: both sides draw it missing', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    fs.mkdirSync(at('bronze/tables/ddd'), { recursive: true });
+    fs.writeFileSync(at('bronze/tables/ddd/addresse.dbml'), fs.readFileSync(at('bronze/tables/ccc/addresse.dbml'), 'utf-8').replace('ccc.addresse', 'ddd.addresse'));
+    fs.writeFileSync(at('bronze/tables/ddd/kunde.dbml'), fs.readFileSync(at('bronze/tables/ccc/kunde.dbml'), 'utf-8').replace('ccc.kunde', 'ddd.kunde'));
+    fs.writeFileSync(at('bronze/diagrams/three.dbml'), [
+      "Project three {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      "use { table ddd.kunde } from '../tables/ddd/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const core = drawn(await coreOf('bronze/diagrams/three.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/three.dbml', true));
+    expect(canvas).toEqual(core);
+    const addresse = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'addresse');
+    expect(addresse?.columns ?? []).toEqual([]);
+  });
 });
