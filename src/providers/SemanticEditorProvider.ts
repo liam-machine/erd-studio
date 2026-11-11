@@ -1946,10 +1946,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const members = this.parseSubjectAreaFile(document).members;
     if (!refs || !members) return undefined;
     const library = this.tableLibraryService;
+    const read = this.subjectAreaService.dbmlMemberFiles(document.uri.fsPath);
     const memberFile = (ref: string): string | undefined => {
       const row = members.resolve(ref);
-      if (row?.path === undefined || row.path.startsWith('../')) return undefined;
-      return library.tableEntryAt(library.semanticAbsolute(row.path))?.filePath;
+      if (row?.path?.startsWith('../')) return undefined;
+      const own = row?.path === undefined ? undefined : library.tableEntryAt(library.semanticAbsolute(row.path))?.filePath;
+      if (own !== undefined) return own;
+      // No `use` line (erd_unlinked_tables), or one whose path is gone: the file the member was read from.
+      const file = read?.get((row?.ref ?? ref).toLowerCase());
+      return file ? library.tableEntryAt(file)?.filePath : undefined;
     };
     const entryOf = (libraryName: string): TableFileEntry | undefined => {
       const found = library.resolveLibraryRef(libraryName);
@@ -1985,9 +1990,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (text === null) return undefined;
     try {
       const members = codecFor(diagramPath).parse(text, this.shownSubjectAreaPath(diagramPath)).members;
-      return new Set((members?.rows ?? []).flatMap((r) => (r.path !== undefined && !r.path.startsWith('../')
+      const files = new Set((members?.rows ?? []).flatMap((r) => (r.path !== undefined && !r.path.startsWith('../')
         ? [path.resolve(this.tableLibraryService.semanticAbsolute(r.path)).toLowerCase()]
         : [])));
+      // And the files the members were read from: a member with no `use` line, or one whose path is gone.
+      for (const file of this.subjectAreaService.dbmlMemberFiles(diagramPath)?.values() ?? []) {
+        if (file) files.add(path.resolve(file).toLowerCase());
+      }
+      return files;
     } catch {
       return undefined;
     }
@@ -8653,8 +8663,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (files.length === 0) return undefined;
     // A namesake is a member of the name read from another file (the table itself, already shown, is not).
     const members = this.parseSubjectAreaFile(document).members;
+    const read = this.subjectAreaService.dbmlMemberFiles(document.uri.fsPath);
+    const readFrom = (ref: string, f: TableFileEntry): boolean => {
+      const file = read?.get(ref.toLowerCase());
+      return !!file && samePath(file, f.filePath);
+    };
     const namesake = (f: TableFileEntry): boolean => (members?.rows ?? []).some((r) => sameName(r.name, f.name)
-      && (r.path === undefined || r.path.startsWith('../') || !samePath(this.tableLibraryService.semanticAbsolute(r.path), f.filePath)));
+      && (r.path === undefined || r.path.startsWith('../') || !samePath(this.tableLibraryService.semanticAbsolute(r.path), f.filePath))
+      // A member read from this very file (its `use` path is gone, decision B) is the table itself.
+      && !readFrom(r.ref, f));
     const needsFile = files.some((f) => this.tableLibraryService.isAmbiguousName(f.name) || namesake(f));
     return needsFile ? { files, rest } : undefined;
   }

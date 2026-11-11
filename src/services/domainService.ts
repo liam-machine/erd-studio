@@ -248,6 +248,8 @@ export class SubjectAreaService {
   private readonly warningCodes = new Map<string, ReadonlySet<LoaderWarningCode>>();
   /** Each DBML diagram read's members' table files, by the UnifiedSubjectArea the read returned (lower-case reference -> file, null for one drawn missing). */
   private readonly memberFilesByRead = new WeakMap<UnifiedSubjectArea, ReadonlyMap<string, string | null>>();
+  /** The last read of each DBML diagram: the table file each member was read from (path → lower-case reference → file, null for one drawn missing). */
+  private readonly lastMemberFiles = new Map<string, ReadonlyMap<string, string | null>>();
 
   constructor(private readonly layerService: LayerService) {}
 
@@ -436,6 +438,7 @@ export class SubjectAreaService {
       }
       this.memberLayers.set(path.resolve(filePath), view.memberLayers!);
       this.memberFilesByRead.set(unified, view.memberFiles);
+      this.lastMemberFiles.set(path.resolve(filePath), view.memberFiles);
       const drift = [...view.drift].sort();
       this.importDrift.set(path.resolve(filePath), drift);
       for (const file of drift) log.warn(`[DomainService] ${filePath}: ${unimportedRelationshipsMessage(file)}`);
@@ -532,6 +535,17 @@ export class SubjectAreaService {
    */
   dbmlMemberLayers(filePath: string): ReadonlyMap<string, string> | undefined {
     return this.memberLayers.get(path.resolve(filePath));
+  }
+
+  /**
+   * Each member of the DBML diagram `filePath`, as its last read found it: the
+   * table file it was read from (its `use` path, the stale-path fallback of
+   * owner decision B, or, for a member with no `use` line, the library's file
+   * of its name), by lower-case reference; null for one drawn missing.
+   * Undefined when it was never read or is not a DBML diagram.
+   */
+  dbmlMemberFiles(filePath: string): ReadonlyMap<string, string | null> | undefined {
+    return this.lastMemberFiles.get(path.resolve(filePath));
   }
 
   /** `buildUnifiedSubjectArea` with this host's library and layers. */

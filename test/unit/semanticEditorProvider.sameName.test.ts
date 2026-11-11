@@ -792,3 +792,75 @@ describe('New Table on a JSON diagram (names alone, owner decision F)', () => {
     expect(read('bronze/legacy.json')).toContain('"fresh"');
   });
 });
+
+describe('a project where no two tables share a name is left as it was', () => {
+  /** Work on a copy of `fixture` (under test/fixtures) instead of the twin fixture. */
+  function useFixture(fixture: string): void {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    fs.cpSync(path.resolve(__dirname, '../fixtures', fixture), root, { recursive: true });
+  }
+
+  async function contextOf(canvas: Canvas): Promise<{ tableFiles: Record<string, string> }> {
+    for (let i = 0; i < 6; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    const all = canvas.panel._postedMessages.filter((m) => (m as { type: string }).type === 'canvasContext') as Array<{ payload: { tableFiles: Record<string, string> } }>;
+    return all[all.length - 1].payload;
+  }
+
+  async function existingRows(canvas: Canvas): Promise<Array<[string, string]>> {
+    await canvas.panel._simulateMessage({ type: 'requestExistingTables' });
+    const sent = canvas.panel._postedMessages.filter((m) => (m as { type: string }).type === 'existingTables') as Array<{ payload: { existingModels: Array<{ name: string; sourcePath: string }> } }>;
+    return sent[sent.length - 1].payload.existingModels.map((m) => [m.name, m.sourcePath]);
+  }
+
+  /** dbml-native with calendar.dim_date moved by hand to the schema folder calendar2; the diagram's use line still names the old path. */
+  function moveDimDateToCalendar2(): void {
+    useFixture('dbml-native');
+    const from = at('silver/tables/calendar/dim_date.dbml');
+    const text = fs.readFileSync(from, 'utf-8').replace('Table calendar.dim_date', 'Table calendar2.dim_date');
+    fs.mkdirSync(at('silver/tables/calendar2'), { recursive: true });
+    fs.writeFileSync(at('silver/tables/calendar2/dim_date.dbml'), text);
+    fs.rmSync(from);
+  }
+
+  it('a member read through the stale-path fallback keeps its file and is not offered again by Add Existing', async () => {
+    moveDimDateToCalendar2();
+    const canvas = await open('gold/diagrams/sales.dbml');
+    expect((await contextOf(canvas)).tableFiles.dim_date).toBe('.erd-studio/silver/tables/calendar2/dim_date.dbml');
+    expect((await existingRows(canvas)).map(([name]) => name)).not.toContain('dim_date');
+  });
+
+  it('Add Existing by that file, or dropping it from the Explorer, says it is already there and writes nothing', async () => {
+    moveDimDateToCalendar2();
+    const canvas = await open('gold/diagrams/sales.dbml');
+    const before = snapshot();
+    const byFile = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'dim_date', sourcePath: '.erd-studio/silver/tables/calendar2/dim_date.dbml' } });
+    expect(byFile.errors).toEqual(['Table "dim_date" already exists in this diagram.']);
+    expect(changed(before, snapshot())).toEqual([]);
+    const info = vi.mocked(vscode.window.showInformationMessage);
+    info.mockClear();
+    const dropped = await canvas.send({ type: 'dropTables', payload: { position: { x: 0, y: 0 }, uris: [pathToFileURL(at('silver/tables/calendar2/dim_date.dbml')).href] } });
+    expect(dropped.errors).toEqual([]);
+    expect(changed(before, snapshot())).toEqual([]);
+    expect(info).toHaveBeenCalledWith('ERD Studio: "dim_date" is already on this diagram.');
+  });
+
+  it('a member whose file was moved by hand to another layer is not offered again either', async () => {
+    useFixture('dbml-native');
+    fs.mkdirSync(at('gold/tables/calendar'), { recursive: true });
+    fs.renameSync(at('silver/tables/calendar/dim_date.dbml'), at('gold/tables/calendar/dim_date.dbml'));
+    const canvas = await open('gold/diagrams/sales.dbml');
+    expect((await existingRows(canvas)).map(([name]) => name)).not.toContain('dim_date');
+    const before = snapshot();
+    const r = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'dim_date', sourcePath: '.erd-studio/gold/tables/calendar/dim_date.dbml' } });
+    expect(r.errors).toEqual(['Table "dim_date" already exists in this diagram.']);
+    expect(changed(before, snapshot())).toEqual([]);
+  });
+
+  it('a mixed diagram\'s unlinked YAML member keeps its file and is not offered by Add Existing', async () => {
+    useFixture('dbml-convert/mixed');
+    const canvas = await open('gold/diagrams/sales.dbml');
+    expect((await contextOf(canvas)).tableFiles.fct_refund).toBe('.erd-studio/tables/gold/fct_refund.yml');
+    expect((await existingRows(canvas)).map(([name]) => name)).toEqual(['fct_visit']);
+  });
+});
