@@ -392,7 +392,10 @@ export function planDbmlDuplicateRename(input: {
   const dot = declared.lastIndexOf('.');
   const reference = dot > 0 && !declared.endsWith('"') ? `${declared.slice(0, dot)}.${dbmlName(input.newName)}` : dbmlName(input.newName);
   // Ends spelled as the copy declares itself are the copy's, unless the table the library uses is spelled the same.
-  const winner = plan.resolveTable(input.copy.name);
+  // The table the library uses for the copy's identity: told apart by identity, a name another schema folder
+  // shares names no one table, so the winner is the one of the copy's own schema folder and name.
+  const winner = plan.resolveTable(input.copy.name)
+    ?? (plan.identities && schemaFolder !== undefined ? plan.resolveTable(qualifiedRef(schemaFolder, input.copy.name)) : undefined);
   const distinct = winner === undefined || winner.reference !== declared;
   const columns = new Map((reading.table.columns ?? []).map((c) => [c.name.toLowerCase(), c.name]));
   const renamed: DbmlResolvedTable = {
@@ -454,6 +457,7 @@ export function planDbmlDuplicateRename(input: {
   // may import a file only the copy's Refs justified. It is re-rendered with no change of its own.
   const candidates: string[] = [];
   const importsCopyRefs = new Set<string>();
+  const copyRefs = new Map<string, string>();
   for (const diagram of input.diagrams) {
     const text = input.readText(diagram);
     if (text === null) continue;
@@ -463,6 +467,9 @@ export function planDbmlDuplicateRename(input: {
       if (hasUseLineTo(text, rel, copyRel)) candidates.push(diagram);
     } else if (summary.memberUses.some((u) => u.resolved.toLowerCase() === copyRel.toLowerCase())) {
       candidates.push(diagram);
+      // What the diagram calls the copy: `<schema>.<name>` where it also shows a table of its name from another schema folder.
+      const at = summary.memberUses.findIndex((u) => u.resolved.toLowerCase() === copyRel.toLowerCase());
+      if (summary.members[at] !== undefined) copyRefs.set(diagram, summary.members[at]);
     } else if (summary.relationshipsUses.some((f) => copyRefFiles.has(f.toLowerCase()))) {
       candidates.push(diagram);
       importsCopyRefs.add(diagram);
@@ -494,7 +501,7 @@ export function planDbmlDuplicateRename(input: {
     resolver,
     mutatedOnly: true,
     // A diagram only re-importing lists the winner, never the copy: its members stay as they are.
-    mutate: (filePath, obj) => importsCopyRefs.has(filePath) || repointMember(obj, input.copy.name, input.newName),
+    mutate: (filePath, obj) => importsCopyRefs.has(filePath) || repointMember(obj, copyRefs.get(filePath) ?? input.copy.name, input.newName),
   });
   // Repointed: the diagrams that name the copy (one only re-importing is written, never announced as repointed).
   repointed.unshift(...settled.filter((w) => !importsCopyRefs.has(w.path)).map((w) => w.path));
@@ -829,8 +836,11 @@ export function planDbmlExplorerMoves(input: {
       const own = [...snapshot!.tables.values()].find((t) => t.path.toLowerCase() === oldPath);
       const ownName = own?.ref ?? r.from;
       const model: SemanticTable = { ...structuredClone(reading.table), name: r.to, relationships: ownedRelationshipsOf(snapshot!, ownName) };
-      // Its own self-references follow, as on the canvas.
-      renameTableInRelationships([model], ownName, r.to);
+      // Its own self-references follow, as on the canvas. Told apart by identity they keep its old
+      // library reference, which the plan follows to the renamed table: its new bare name may be a
+      // name another schema folder's table already has (ccc.addresse renamed to orte beside bqs.orte),
+      // and would then name that table.
+      if (!snapshot!.schemaScopedNames) renameTableInRelationships([model], ownName, r.to);
       return { model, fromName: r.from, from: { schema: r.schema, name: r.from } };
     });
     const { writes, plan } = library.planDbmlLibraryOps(

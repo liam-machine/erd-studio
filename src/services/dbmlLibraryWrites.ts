@@ -758,13 +758,30 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   /** A stored Ref's unit as it reads after the plan's renames. */
   const storedAfter = (ref: IndexedRef): RefUnit => withRenamedColumns({ ...ref.unit, from: renamedName(ref.unit.from), to: renamedName(ref.unit.to) });
 
+  /** Each table's key after the plan by its `<schema folder>.<name>`, lower-case (told apart by identity; built on first use). */
+  let keysByQualified: Map<string, string[]> | undefined;
   /** The key after the plan of the table `name` names: a key (renamed tables followed), else its name. */
   const keyAfter = (name: string): string | undefined => {
     const key = renames.get(lower(name)) !== undefined ? lower(renames.get(lower(name))!) : lower(name);
     if (after.has(key)) return key;
     // A name only one table has after the plan; told apart by identity, a shared one names none of them.
     const named = [...after].filter(([, t]) => lower(t.name) === lower(name));
-    return named.length === 1 || (!scoped && named.length > 0) ? named[0][0] : undefined;
+    if (named.length === 1 || (!scoped && named.length > 0)) return named[0][0];
+    if (!scoped || named.length > 0) return undefined;
+    // A diagram names each table of a pair `<schema folder>.<name>` (D-3), also one the plan still keys by its
+    // bare name because the pair forms in this plan (ccc.x renamed to orte beside bqs.orte, which a diagram
+    // holding both now calls bqs.orte). `after` is final here, so its qualified names are listed once.
+    if (keysByQualified === undefined) {
+      keysByQualified = new Map();
+      for (const [k, t] of after) {
+        const schema = t.storage === 'dbml' ? dbmlTreePathOf(t.path)?.schema : undefined;
+        if (schema === undefined) continue;
+        const q = lower(qualifiedRef(schema, t.name));
+        keysByQualified.set(q, [...(keysByQualified.get(q) ?? []), k]);
+      }
+    }
+    const qualified = keysByQualified.get(lower(name)) ?? [];
+    return qualified.length === 1 ? qualified[0] : undefined;
   };
   const resolveTable = (name: string): DbmlPlannedTable | undefined => {
     const key = keyAfter(name);

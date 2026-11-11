@@ -27,7 +27,7 @@
 
 import * as path from 'path';
 
-import { tableIdKey, tableIdOfPath } from '@erd-studio/core';
+import { dbmlTreePathOf, qualifiedRef, tableIdKey, tableIdOfPath } from '@erd-studio/core';
 import { DbmlEditRefused, parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import type { DbmlDiagramTable } from '@erd-studio/core/dbml';
 
@@ -141,17 +141,34 @@ function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: DiagramSummary, 
   const ids = plan.identities!;
   /** Each member by its file; null for one whose file the plan deletes (never answered by its name). */
   const byRef = new Map<string, DbmlDiagramTable | null>();
+  /**
+   * Each member's table by the references the writer gives it after the plan (its bare name, and
+   * `<schema folder>.<name>`): a renamed member may now share its new name with a table of another
+   * schema folder, which the plan alone would answer for that name. Null where two members share it.
+   */
+  const byNewRef = new Map<string, DbmlDiagramTable | null>();
+  const addNewRef = (ref: string, table: DbmlDiagramTable): void => {
+    const key = ref.toLowerCase();
+    const had = byNewRef.get(key);
+    byNewRef.set(key, had === undefined || had === table ? table : null);
+  };
   const changed = new Set(plan.createdTables.map((n) => n.toLowerCase()));
   summary.members.forEach((member, i) => {
     const usePath = summary.memberPaths[i];
     if (usePath === undefined) return;
     const table = plan.tableAtPath?.(usePath);
     if (table !== undefined) byRef.set(member.toLowerCase(), table);
+    if (table) {
+      addNewRef(table.name, table);
+      const schema = table.storage === 'dbml' ? dbmlTreePathOf(table.path)?.schema : undefined;
+      if (schema !== undefined) addNewRef(qualifiedRef(schema, table.name), table);
+    }
     if (ids.changedPaths.has(usePath.toLowerCase())) changed.add(member.toLowerCase());
   });
   const resolveTable = (name: string): DbmlDiagramTable | undefined => {
     const own = byRef.get(name.toLowerCase());
-    return own === null ? undefined : own ?? base.resolveTable(name);
+    if (own !== undefined) return own ?? undefined;
+    return byNewRef.get(name.toLowerCase()) ?? base.resolveTable(name);
   };
   return {
     ...base,

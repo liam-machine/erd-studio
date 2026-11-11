@@ -1920,15 +1920,18 @@ export class TableLibraryService {
         dbmlOps.delete!.push(name);
         continue;
       }
-      if (typeof name !== 'string' || !this.tableExists(name)) continue;
-      writes.push({ kind: 'delete', path: this.tablePath(name) });
+      // A YAML table's identity is its name (schema ''); a DBML identity no table has deletes nothing.
+      const yamlName = typeof name === 'string' ? name : name.schema === '' ? name.name : undefined;
+      if (yamlName === undefined || !this.tableExists(yamlName)) continue;
+      writes.push({ kind: 'delete', path: this.tablePath(yamlName) });
     }
     for (const save of ops?.save ?? []) {
       const { model, fromName } = save;
       // A new table is DBML when it joins a DBML diagram (D20), or when the
       // project writes DBML (§3.2); an existing one keeps its format.
       const existing = save.create ? undefined : storageOf(save.from ?? fromName ?? model.name);
-      const storage = existing ?? (save.create || options.dbml || this.writesDbml() ? 'dbml' : 'yaml');
+      // `create` only says the table is new: where it is written is decided as for any new table.
+      const storage = existing ?? (options.dbml || this.writesDbml() ? 'dbml' : 'yaml');
       if (storage === 'dbml') {
         dbmlOps.save!.push(save);
         continue;

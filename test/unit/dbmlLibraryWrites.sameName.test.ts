@@ -23,7 +23,7 @@ import { TableLibraryService } from '../../src/services/logicalModelService';
 import { AmbiguousTableName } from '../../src/services/ambiguousTableName';
 import { planDbmlLibraryWrites } from '../../src/services/dbmlLibraryWrites';
 import { clearDiagramSummaries } from '../../src/services/dbmlDiagramSummaries';
-import { planDbmlExplorerMoves, planDbmlTableMoves } from '../../src/commands/dbmlLifecycle';
+import { planDbmlDuplicateRename, planDbmlExplorerMoves, planDbmlTableMoves } from '../../src/commands/dbmlLifecycle';
 import { writeFilesWithRollback } from '../../src/services/fsFileWrites';
 import type { FileWrite } from '../../src/services/fileWrites';
 import { planDbmlConversion } from '../../src/services/dbmlConversion';
@@ -506,5 +506,150 @@ describe('D-5: Convert, Import and Move Relationships to Library refuse a shared
     expect(errors.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/orders\.json has a relationship to addresse, and more than one table has that name \(bronze\/tables\/bqs\/addresse\.dbml, bronze\/tables\/ccc\/addresse\.dbml\)/);
     expect(snapshotFiles()).toEqual(before);
     errors.mockRestore();
+  });
+});
+
+describe('a rename into a name another schema folder\'s table has (a pair formed by the rename)', () => {
+  const readText = (f: string): string | null => (fs.existsSync(f) ? fs.readFileSync(f, 'utf-8') : null);
+  /** bqs.orte (a name only bqs has) and ccc.x, which points at it; on diagrams holding both, and ccc's alone. */
+  const orteProject = (): void => {
+    write('bronze/tables/bqs/orte.dbml', 'Table bqs.orte {\n  id INT [pk]\n}\n');
+    write('bronze/tables/bqs/z.dbml', 'Table bqs.z {\n  id INT [pk]\n  orte_id INT\n}\n');
+    write('bronze/tables/ccc/x.dbml', 'Table ccc.x {\n  id INT [pk]\n  orte_id INT\n}\n');
+    write('bronze/tables/ccc/y.dbml', 'Table ccc.y {\n  id INT [pk]\n  x_id INT\n}\n');
+    write('bronze/relationships/o.dbml', [
+      "use { table bqs.orte } from '../tables/bqs/orte.dbml'",
+      "use { table bqs.z } from '../tables/bqs/z.dbml'",
+      "use { table ccc.x } from '../tables/ccc/x.dbml'",
+      "use { table ccc.y } from '../tables/ccc/y.dbml'",
+      'Ref: ccc.x.orte_id > bqs.orte.id',
+      'Ref: ccc.y.x_id > ccc.x.id',
+      'Ref: bqs.z.orte_id > bqs.orte.id',
+      '',
+    ].join('\n'));
+    const diagram = (name: string, lines: string[], uses: string[], extra: string[] = []): void => write(`bronze/diagrams/${name}.dbml`, [
+      `Project ${name} {`, "  erd_schema_version: '7'", "  erd_layout: '''", ...lines, "  '''", '}', '', ...uses, "use * from '../relationships/o.dbml'", '', ...extra,
+    ].join('\n'));
+    diagram('both', ['    orte 10 20', '    x 300 20', '    note/n1 500 500 100 100'],
+      ["use { table bqs.orte } from '../tables/bqs/orte.dbml'", "use { table ccc.x } from '../tables/ccc/x.dbml'"],
+      ['Note "n1" [linked_table: \'orte\'] {', "  'hi'", '}', '']);
+    diagram('cccside', ['    x 10 20', '    y 300 20'],
+      ["use { table ccc.x } from '../tables/ccc/x.dbml'", "use { table ccc.y } from '../tables/ccc/y.dbml'"]);
+    diagram('bqsside', ['    orte 10 20', '    z 300 20'],
+      ["use { table bqs.orte } from '../tables/bqs/orte.dbml'", "use { table bqs.z } from '../tables/bqs/z.dbml'"]);
+  };
+  const renameX = (): void => {
+    const lib = scoped();
+    lib.applyDbmlBatch({ ops: { save: [{ model: { ...lib.getTable({ schema: 'ccc', name: 'x' })!, name: 'orte' }, from: { schema: 'ccc', name: 'x' } }] } });
+  };
+
+  it('a diagram holding both qualifies both lines, keeps its relationships import and its sticky\'s link, and turns version 8', () => {
+    orteProject();
+    renameX();
+    const both = read('bronze/diagrams/both.dbml');
+    expect(both).toContain("erd_schema_version: '8'");
+    expect(both).toMatch(/\n {4}bqs\.orte 10 20\n {4}ccc\.orte 300 20\n/);
+    expect(both).toContain("linked_table: 'bqs.orte'");
+    // Its Refs are between its two members still: the import stays.
+    expect(both).toContain("use * from '../relationships/o.dbml'");
+    expect(read('bronze/relationships/o.dbml')).toContain('Ref: ccc.orte.orte_id > bqs.orte.id');
+  });
+
+  it('a diagram showing only the renamed table keeps the import of its own Refs; one showing only the other is untouched', () => {
+    orteProject();
+    const before = read('bronze/diagrams/bqsside.dbml');
+    renameX();
+    const ccc = read('bronze/diagrams/cccside.dbml');
+    expect(ccc).toContain("use { table ccc.orte } from '../tables/ccc/orte.dbml'");
+    expect(ccc).toContain("use * from '../relationships/o.dbml'");
+    expect(ccc).toMatch(/\n {4}orte 10 20\n/);
+    expect(read('bronze/diagrams/bqsside.dbml')).toBe(before);
+  });
+
+  it('the plan answers a diagram\'s <schema>.<name> for a table it still keys by its bare name', () => {
+    orteProject();
+    const lib = scoped();
+    const { plan } = lib.planDbmlBatch({ ops: { save: [{ model: { ...lib.getTable({ schema: 'ccc', name: 'x' })!, name: 'orte' }, from: { schema: 'ccc', name: 'x' } }] } });
+    expect(plan.resolveTable('bqs.orte')?.path).toBe('bronze/tables/bqs/orte.dbml');
+    expect(plan.resolveTable('ccc.orte')?.path).toBe('bronze/tables/ccc/orte.dbml');
+    expect(plan.resolveTable('orte')?.path).toBe('bronze/tables/bqs/orte.dbml');
+  });
+
+  it('an Explorer rename keeps the renamed table\'s self-reference on itself, never on the other folder\'s table of its new name', () => {
+    write('bronze/tables/ccc/addresse.dbml', 'Table ccc.addresse {\n  id INT [pk]\n  parent_id INT\n  street VARCHAR\n}\n');
+    write('bronze/tables/bqs/orte.dbml', 'Table bqs.orte {\n  id INT [pk]\n  parent_id INT\n}\n');
+    write('bronze/relationships/bronze.dbml', `${read('bronze/relationships/bronze.dbml')}Ref: ccc.addresse.parent_id > ccc.addresse.id\n`);
+    const from = path.join(semantic, 'bronze/tables/ccc/addresse.dbml');
+    const to = path.join(semantic, 'bronze/tables/ccc/orte.dbml');
+    fs.renameSync(from, to);
+    const plan = planDbmlExplorerMoves({ semanticRoot: semantic, tableLibraryService: scoped(), moves: [{ from, to }], readText });
+    expect(plan.kind).toBe('update');
+    if (plan.kind !== 'update') return;
+    applyWritesToDisk(plan.writes);
+    const refs = read('bronze/relationships/bronze.dbml').split('\n').filter((l) => l.startsWith('Ref:'));
+    expect(refs).toEqual([
+      'Ref: bqs.kunde.addresse_id >? bqs.addresse.id',
+      'Ref: ccc.kunde.addresse_id >? ccc.orte.id',
+      'Ref: ccc.orte.id >? bqs.addresse.id',
+      'Ref: ccc.orte.parent_id > ccc.orte.id',
+    ]);
+  });
+});
+
+describe('create and TableId deletes in a YAML project (planTableWrites)', () => {
+  it('a save marked create is written as YAML where new tables are YAML; a YAML table deletes by its TableId', () => {
+    const yamlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-same-name-yaml-'));
+    try {
+      fs.mkdirSync(path.join(yamlRoot, '.erd-studio', 'logical-models'), { recursive: true });
+      fs.writeFileSync(path.join(yamlRoot, '.erd-studio', 'logical-models', 'a.yml'), 'name: a\ncolumns:\n  - name: id\n    dataType: INT\n');
+      const lib = new TableLibraryService(yamlRoot, '.erd-studio');
+      expect(lib.writesDbml()).toBe(false);
+      const created = lib.planTableWrites({ save: [{ model: { name: 'b', description: '', columns: [] }, create: true }] });
+      expect(created.writes.map((w) => `${w.kind} ${path.basename(w.path)}`)).toEqual(['create b.yml']);
+      const deleted = lib.planTableWrites({ delete: [{ schema: '', name: 'a' }] });
+      expect(deleted.writes.map((w) => `${w.kind} ${path.basename(w.path)}`)).toEqual(['delete a.yml']);
+    } finally {
+      fs.rmSync(yamlRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Give Duplicate Table Its Own Name on a copy in another layer of one of two same-named tables', () => {
+  const readText = (f: string): string | null => (fs.existsSync(f) ? fs.readFileSync(f, 'utf-8') : null);
+  /** silver/tables/ccc/addresse.dbml: the same identity as bronze's ccc.addresse, so a duplicate the library ignores. */
+  const silverCopy = (): void => {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', creatable: true, order: 1 }, { id: 'silver', label: 'Silver', creatable: true, order: 2 }] }));
+    write('silver/tables/ccc/addresse.dbml', 'Table ccc.addresse {\n  id INT [pk]\n  zz VARCHAR\n}\n');
+  };
+  const giveOwnName = (): FileWrite[] => {
+    const lib = scoped();
+    return planDbmlDuplicateRename({
+      tableLibraryService: lib, copy: { filePath: path.join(semantic, 'silver/tables/ccc/addresse.dbml'), name: 'addresse' },
+      newName: 'addresse_s', alias: 'addresse', diagrams: lib.listDbmlDiagrams(), readText,
+    }).writes;
+  };
+
+  it('the Refs of the table the library uses (bronze ccc.addresse, declared the same way) keep their bytes', () => {
+    silverCopy();
+    const before = snapshotFiles();
+    applyWritesToDisk(giveOwnName());
+    expect(changedFiles(before, snapshotFiles())).toEqual(['+silver/tables/ccc/addresse_s.dbml', '-silver/tables/ccc/addresse.dbml']);
+  });
+
+  it('a diagram showing the copy beside bqs.addresse is repointed by what it calls the copy (ccc.addresse), never left on the deleted file', () => {
+    silverCopy();
+    write('silver/diagrams/pair.dbml', [
+      'Project pair {', "  erd_schema_version: '8'", "  erd_layout: '''", '    bqs.addresse 1 2', '    ccc.addresse 3 4', "  '''", '}', '',
+      "use { table bqs.addresse } from '../../bronze/tables/bqs/addresse.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      '',
+    ].join('\n'));
+    applyWritesToDisk(giveOwnName());
+    const pair = read('silver/diagrams/pair.dbml');
+    expect(pair).toContain("use { table ccc.addresse_s } from '../tables/ccc/addresse_s.dbml'");
+    expect(pair).not.toContain('ccc/addresse.dbml');
+    // No pair is left: bare lines with their coordinates, and version 7.
+    expect(pair).toMatch(/\n {4}addresse 1 2\n {4}addresse_s 3 4\n/);
+    expect(pair).toContain("erd_schema_version: '7'");
   });
 });
