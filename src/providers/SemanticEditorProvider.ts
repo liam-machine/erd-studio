@@ -7794,9 +7794,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // which the plan follows to the renamed file, so a new name another schema
         // folder's table has can never be read as that table.
         if (!table.id) renameTableInRelationships([renamedModel], payload.oldName, trimmedNew);
-        const pointingAtIt: TableFileSave[] = table.id
+        // A YAML table's stored relationships name tables by name alone: they follow the rename when that
+        // name is this table's only (a name two schema folders share is left alone, owner decision E).
+        const yamlOwners = (): SemanticTable[] => (this.tableLibraryService.isAmbiguousName(table.name)
           ? []
-          : renameTableInRelationships(this.otherLibraryTables(payload.oldName), payload.oldName, trimmedNew).map((model) => ({ model }));
+          : this.tableLibraryService.listTableFiles()
+            .filter((e) => e.storage === 'yaml' && !e.shadowedBy && !sameName(e.name, table.name))
+            .flatMap((e) => {
+              try {
+                return [this.tableLibraryService.getTable(e.name)].filter((m): m is SemanticTable => m !== null);
+              } catch {
+                return [];
+              }
+            }));
+        const pointingAtIt: TableFileSave[] = renameTableInRelationships(
+          table.id ? yamlOwners() : this.otherLibraryTables(payload.oldName),
+          table.id ? table.name : payload.oldName,
+          trimmedNew,
+        ).map((model) => ({ model }));
         // Told apart by identity, the other DBML diagrams follow the rename by the file their `use`
         // lines read (the settle); a JSON diagram names tables by name alone, and follows it only
         // when its name reads this table (the library's first file of the name).

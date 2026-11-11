@@ -857,6 +857,20 @@ describe('a project where no two tables share a name is left as it was', () => {
     expect(changed(before, snapshot())).toEqual([]);
   });
 
+  it('in a mixed project, renaming a DBML table on a DBML canvas re-spells a YAML table\'s relationship to it, as on a JSON canvas', async () => {
+    useFixture('dbml-convert/mixed');
+    const canvas = await open('gold/diagrams/sales.dbml');
+    const r = await canvas.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toContain('tables/fct_visit.yml');
+    expect(read('tables/fct_visit.yml')).toContain('toTable: dim_client');
+    expect(read('tables/fct_visit.yml')).not.toContain('dim_customer');
+    const region = await canvas.send({ type: 'renameModel', payload: { oldName: 'dim_region', newName: 'dim_area' } });
+    expect(region.errors).toEqual([]);
+    expect(read('tables/fct_visit.yml')).toContain('toTable: dim_area');
+    expect(read('tables/fct_visit.yml')).toContain('# Written by an AI helper set up before 2.0.');
+  });
+
   it('a mixed diagram\'s unlinked YAML member keeps its file and is not offered by Add Existing', async () => {
     useFixture('dbml-convert/mixed');
     const canvas = await open('gold/diagrams/sales.dbml');
