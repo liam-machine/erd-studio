@@ -72,7 +72,7 @@ function renderToolbar(search: string, stage: 'logical' | 'physical' = 'logical'
     readOnly: stage === 'physical',
     existingModels: [library('dim_customer'), library('dim_region'), library('fct_return')],
   };
-  return render(<Toolbar nodes={[node('fct_order')]} edges={[]} allExpanded={false} onExpandAll={vi.fn()} onCollapseAll={vi.fn()} />);
+  return render(<Toolbar nodes={[node('fct_order')]} edges={[]} />);
 }
 
 afterEach(() => {

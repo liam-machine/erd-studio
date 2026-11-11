@@ -1,0 +1,53 @@
+/* TableDetailSwitch — Names / Keys / All, a compact segmented control in the
+   toolbar (the same shape as LineStyleSwitch). Theme variables only. */
+
+.table-detail-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+
+.table-detail-switch__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.1s ease, color 0.1s ease, opacity 0.1s ease;
+}
+
+.table-detail-switch__option:hover:not(.table-detail-switch__option--on) {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.table-detail-switch__option:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.table-detail-switch__option--on {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-detail-switch__option {
+    transition: none;
+  }
+}

@@ -127,9 +127,6 @@ function makeNode(id: string): TableFlowNode {
 const defaultProps = {
   nodes: [makeNode('model_a')],
   edges: [] as FkFlowEdge[],
-  allExpanded: false,
-  onExpandAll: vi.fn(),
-  onCollapseAll: vi.fn(),
 };
 
 function layoutButton() {
@@ -583,5 +580,28 @@ describe('Toolbar Fit leaves room for itself (dev-host finding 7)', () => {
       maxZoom: 1,
       duration: 200,
     });
+  });
+});
+
+describe('Toolbar table detail switch', () => {
+  afterEach(() => {
+    cleanup();
+    mockStoreState.domain = mockSubjectArea;
+    delete mockStoreState.tableDetail;
+  });
+
+  it('offers Names / Keys / All in place of the Expand All / Collapse All button', () => {
+    mockStoreState.tableDetail = 'keys';
+    render(<Toolbar {...defaultProps} />);
+    const group = screen.getByRole('radiogroup', { name: 'Table detail' });
+    expect([...group.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual(['Names', 'Keys', 'All']);
+    expect(screen.getByRole('radio', { name: 'Key columns only' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByRole('button', { name: /expand all columns|collapse all columns/i })).toBeNull();
+  });
+
+  it('is there on a read-only diagram too (a view preference, not an edit)', () => {
+    mockStoreState.domain = { ...mockSubjectArea, stage: 'physical' as const, readOnly: true };
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.getByRole('radiogroup', { name: 'Table detail' })).toBeTruthy();
   });
 });

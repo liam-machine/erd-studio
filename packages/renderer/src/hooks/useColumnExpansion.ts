@@ -1,29 +1,29 @@
 /**
  * useColumnExpansion — manages column expansion state for ModelNodes.
  *
- * Tracks which model nodes have their columns expanded (showing all columns
- * vs collapsed showing first N columns). State lives in the Zustand store
- * so it can be persisted across tab switches via useStatePersistence.
+ * Tracks which model nodes are opened on their own (every column shown,
+ * whatever the diagram's table detail level). State lives in the Zustand
+ * store so it can be persisted across tab switches via useStatePersistence.
  *
- * Smart collapsing: columns only collapse automatically when there are enough
- * nodes (NODE_THRESHOLD) to warrant performance optimization. Below that
- * threshold, all columns are shown by default.
+ * A diagram opens with every column shown below NODE_THRESHOLD tables, and
+ * with less above it (`defaultTableDetail` in lib/tableDetail.ts).
  *
  * @module F405 Performance optimization
  */
 
 import { useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { LEGACY_COLLAPSED_COLUMN_LIMIT, TABLE_DETAIL_ALL_BELOW } from '../lib/tableDetail';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Number of columns to show when collapsed. */
-export const COLLAPSED_COLUMN_LIMIT = 5;
+/** Number of columns a table with no detail level shows when collapsed. */
+export const COLLAPSED_COLUMN_LIMIT = LEGACY_COLLAPSED_COLUMN_LIMIT;
 
-/** Number of nodes required before auto-collapsing columns for performance. */
-export const NODE_THRESHOLD = 30;
+/** Number of nodes at which a diagram stops opening with every column shown. */
+export const NODE_THRESHOLD = TABLE_DETAIL_ALL_BELOW;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,9 +59,14 @@ export function useColumnExpansion(): UseColumnExpansionReturn {
   const collapseAll = useEditorStore((s) => s.collapseAll);
   const expandAll = useEditorStore((s) => s.expandAll);
 
+  const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
+
+  // At a table detail level `expandedNodes` holds the tables opened on their
+  // own; `allExpanded` only mirrors the `all` level. Without a level it is
+  // the older global switch.
   const isExpanded = useCallback(
-    (modelId: string) => allExpanded || expandedNodes.has(modelId),
-    [expandedNodes, allExpanded],
+    (modelId: string) => (tableDetail === null && allExpanded) || expandedNodes.has(modelId),
+    [expandedNodes, allExpanded, tableDetail],
   );
 
   return { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded };
