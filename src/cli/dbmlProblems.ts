@@ -856,7 +856,9 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     if (twins.length > 0 && reading.schemaVersion < 8) {
       push({
         file: projectRel(f.rel), code: 'twinDiagramVersion',
-        message: `This diagram shows two tables named ${twins.join(', ')} from different schema folders, but says erd_schema_version '${reading.schemaVersion}'. `
+        // The reader reads a diagram with no version line as '7': say what the file says, not the default.
+        message: `This diagram shows two tables named ${twins.join(', ')} from different schema folders, but `
+          + (/^[ \t]*erd_schema_version[ \t]*:/m.test(f.text) ? `says erd_schema_version '${reading.schemaVersion}'. ` : "has no erd_schema_version '8'. ")
           + `ERD Studio ${TWIN_DIAGRAM_MIN_VERSION} and later draw both; older versions open it, draw one table twice and can save an edit to the wrong file. `
           + 'ERD Studio sets erd_schema_version to \'8\' on its next edit of this diagram, which older versions refuse with an update message; or set it yourself.',
       });
@@ -912,10 +914,15 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       if (!t && sharedName(use.name)) {
         // D-10: neither its path nor its specifier says which of the tables of its name it means.
         const ts = named.get(use.name.toLowerCase()) ?? [];
+        // Never a file another of the diagram's use lines already imports: that is another member's (owner decision B).
+        const taken = new Set((reading.uses ?? []).filter((u) => u !== use).map((u) => u.resolved.toLowerCase()));
+        const example = ts.find((x) => !taken.has(x.path.toLowerCase()));
         push({
           file: projectRel(f.rel), line: use.line, code: 'ambiguousTableReference',
           message: `This use line names ${use.name}, which tables in the schema folders ${ts.map((x) => tableIdOfPath(x.path)?.schema ?? '').join(', ')} have, and its path is no table file, so nothing says which one it means; `
-            + `the member is drawn missing. Point it at one of them, as: use { table ${ts[0]?.reference ?? use.name} } from '${ts[0] ? usePathBetween(f.rel, ts[0].path) : use.resolved}'`,
+            + (example
+              ? `the member is drawn missing. Point it at one of them, as: use { table ${example.reference} } from '${usePathBetween(f.rel, example.path)}'`
+              : 'the member is drawn missing. Point it at its table\'s file, or remove the line.'),
         });
         continue;
       }

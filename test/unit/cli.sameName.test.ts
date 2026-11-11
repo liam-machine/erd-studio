@@ -65,6 +65,25 @@ describe('doctor: two tables of one name in different schema folders', () => {
     expect(version.message).toMatch(/ERD Studio 2\.0\.4 and later/);
   });
 
+  it('a stale use line\'s advice never points at a file another member\'s line already imports', async () => {
+    // bqs/addresse.dbml moved by hand to ddd/; kunden.dbml still imports it from bqs/ on line 13, and ccc's on line 15.
+    fs.mkdirSync(semantic('bronze/tables/ddd'), { recursive: true });
+    fs.writeFileSync(semantic('bronze/tables/ddd/addresse.dbml'), fs.readFileSync(semantic('bronze/tables/bqs/addresse.dbml'), 'utf-8').replace('Table bqs.addresse', 'Table ddd.addresse'));
+    fs.rmSync(semantic('bronze/tables/bqs/addresse.dbml'));
+    const stale = (await problems()).filter((p) => p.file.endsWith('bronze/diagrams/kunden.dbml') && p.code === 'ambiguousTableReference');
+    expect(stale.map((p) => p.line)).toEqual([13]);
+    expect(stale[0].message).toContain("use { table ddd.addresse } from '../tables/ddd/addresse.dbml'");
+    expect(stale[0].message).not.toContain("from '../tables/ccc/addresse.dbml'");
+  });
+
+  it('a diagram of a pair with no version line is said to have none, not to say \'7\'', async () => {
+    const file = semantic('bronze/diagrams/kunden-bare.dbml');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace("  erd_schema_version: '7'\n", ''));
+    const version = (await problems()).find((p) => p.code === 'twinDiagramVersion')!;
+    expect(version.message).not.toMatch(/says erd_schema_version '7'/);
+    expect(version.message).toMatch(/has no erd_schema_version '8'/);
+  });
+
   it('the same schema folder and name in two layers is still a duplicate, reworded; one name in two schema folders never is', async () => {
     fs.cpSync(semantic('bronze/tables/ccc'), semantic('silver/tables/ccc'), { recursive: true });
     const dup = (await problems()).filter((p) => p.code === 'duplicateTableName');
