@@ -7,7 +7,8 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted, filesNotShown
+ *                         revealTable, libraryDragStarted, filesNotShown,
+ *                         canvasNotice
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), dropTables, updatePositions, switchStage,
@@ -429,6 +430,18 @@ export interface FilesNotShownMessage {
 }
 
 /**
+ * A brief, dismissable note on the canvas about something ERD Studio did by
+ * itself (an info toast that hides after a few seconds). Today only one
+ * sender: the relationships imports added to a diagram after a relationships
+ * file was saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
+ * `importsAddedMessage`). Plain words, never an error.
+ */
+export interface CanvasNoticeMessage {
+  type: 'canvasNotice';
+  payload: { message: string };
+}
+
+/**
  * Select and centre one table, with its detail panel open, as clicking it
  * does (Open in Diagram and Go to Table on a table, Add to Diagram…). Sent
  * once the canvas has loaded its diagram (`SemanticEditorProvider.revealTable`
@@ -501,6 +514,7 @@ export type ExtensionMessage =
   | RevealRelationshipMessage
   | CanvasContextMessage
   | FilesNotShownMessage
+  | CanvasNoticeMessage
   | RevealTableMessage
   | LibraryDragStartedMessage
   | ErrorMessage;

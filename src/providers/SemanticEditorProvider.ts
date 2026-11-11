@@ -823,6 +823,20 @@ const EDIT_FEATURES: Partial<Record<string, TelemetryFeature>> = {
 /** How long VS Code's own undo/redo has to finish rewinding every document of the step. */
 const NATIVE_UNDO_SETTLE_MS = 50;
 
+/** How long a burst of saves (Save All) is gathered before the open canvases are settled once. */
+const SAVED_RELATIONSHIPS_SETTLE_MS = 100;
+
+/**
+ * The brief note after ERD Studio added relationships imports to a diagram
+ * by itself, because a relationships file was saved in this window. `files`
+ * are paths inside the ERD Studio folder, as the strip names them.
+ */
+export function importsAddedMessage(files: readonly string[]): string {
+  if (files.length <= 1) return `Added ${files[0] ?? 'a relationships file'} to this diagram so its relationships are drawn.`;
+  const list = `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}`;
+  return `Added ${list} to this diagram so their relationships are drawn.`;
+}
+
 export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Guard flags to prevent re-sending domain data to the webview when
@@ -1597,29 +1611,164 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram edit uses), so the lines its files already hold are drawn. One
    * WorkspaceEdit, one save, one undo step; nothing else in the diagram
    * changes, and no relationship is created, moved or rewritten.
+   *
+   * `afterSave` is the same edit made by itself after a relationships file
+   * was saved in this window ({@link settleImportsAfterSave}): it says
+   * nothing when it cannot be made (the strip keeps its button), redraws
+   * the canvas itself, and marks the canvas unsaved when its save fails.
+   * Returns whether the edit was made.
    */
-  private async handleAddRelationshipsImports(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
+  private async handleAddRelationshipsImports(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    afterSave = false,
+  ): Promise<boolean> {
+    const say = (message: string): void => {
+      if (!afterSave) this.post(webview, { type: 'error', payload: { message } });
+    };
     if (!this.isDbmlDocument(document)) {
-      this.post(webview, { type: 'error', payload: { message: 'Only a DBML diagram imports relationships files.' } });
-      return;
+      say('Only a DBML diagram imports relationships files.');
+      return false;
     }
     this.refuseIfSubjectAreaFileGone(document);
     const text = document.getText();
     const file = this.parseSubjectAreaFile(document, text);
     // Nothing to import (the file was fixed meanwhile): the strip is only out of date.
     if (this.subjectAreaService.relationshipsImportDrift(document.uri.fsPath).length === 0) {
-      this.refreshFilesNotShown();
-      return;
+      if (!afterSave) this.refreshFilesNotShown();
+      return false;
     }
     if (file.writable === false || file.holdsOwnTables) {
-      this.post(webview, { type: 'error', payload: { message: `ERD Studio can't edit ${this.shownSubjectAreaPath(document.uri.fsPath)} as it is. Add the use * line to it by hand.` } });
-      return;
+      say(`ERD Studio can't edit ${this.shownSubjectAreaPath(document.uri.fsPath)} as it is. Add the use * line to it by hand.`);
+      return false;
     }
-    await this.applyStorageEdit(document, file, text, {
+    if (!afterSave) {
+      return this.applyStorageEdit(document, file, text, {
+        stage: 'logical',
+        webview,
+        errorLabel: 'Failed to add the import.',
+      });
+    }
+    // No webview: a rejected edit or a failed save posts no toast (a convenience
+    // that did not happen is not an error); the canvas is redrawn below instead.
+    const panelKey = document.uri.toString();
+    const applied = await this.applyStorageEdit(document, file, text, {
       stage: 'logical',
-      webview,
-      errorLabel: 'Failed to add the import.',
+      onUnsaved: () => {
+        const entry = this.openPanels.get(panelKey);
+        if (entry?.webview === webview) entry.saveFailed = true;
+      },
     });
+    if (applied && !this.disposedWebviews.has(webview)) await this.sendSubjectAreaData(document, webview, panelKey);
+    return applied;
+  }
+
+  // -------------------------------------------------------------------------
+  // The import settle after a relationships file is saved in this window
+  // -------------------------------------------------------------------------
+
+  /** Relationships files saved in this window by the user, waiting for {@link settleImportsAfterSave} (resolved paths). */
+  private readonly savedRelationshipsFiles = new Set<string>();
+  private savedRelationshipsTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The settle under way (tests await it). */
+  private importsSettle: Promise<void> = Promise.resolve();
+
+  /**
+   * A text document was saved in this window (`workspace.onDidSaveTextDocument`,
+   * wired in `extension.ts`). When it is a relationships file, the open
+   * logical canvases whose diagrams now need to import it are settled
+   * ({@link settleImportsAfterSave}), once for a burst of saves (Save All).
+   *
+   * This is the one place a change to a file outside the diagram writes the
+   * diagram, and it is deliberately narrow: only a save made in this window
+   * (typed, formatted on save, auto-saved, or an extension's edit saved
+   * here) gets here. A change that arrives on disk (git, another program, an
+   * AI assistant writing the file, another window) fires no save event: the
+   * watcher redraws, and the strip offers Add the import. ERD Studio's own
+   * saves (an edit's, an undo's) were announced to the own-write tracker
+   * before they started, and are skipped.
+   */
+  noteDocumentSaved(document: vscode.TextDocument): void {
+    if (document.uri.scheme !== 'file' || !/\.dbml$/i.test(document.uri.fsPath)) return;
+    const fsPath = path.resolve(document.uri.fsPath);
+    if (this.ownWriteTracker.isPending(fsPath)) return;
+    const rel = path.relative(this.semanticRootDir(), fsPath).split(path.sep).join('/');
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return;
+    const tablesDirIsLayer = this.tableLibraryService.tablesDirIsLayer();
+    if (classifySemanticFile(rel, { tablesDirIsLayer }).kind !== 'relationships') return;
+    this.savedRelationshipsFiles.add(fsPath);
+    clearTimeout(this.savedRelationshipsTimer);
+    this.savedRelationshipsTimer = setTimeout(() => {
+      this.savedRelationshipsTimer = undefined;
+      this.importsSettle = this.importsSettle.then(() => this.settleImportsAfterSave());
+    }, SAVED_RELATIONSHIPS_SETTLE_MS);
+  }
+
+  /** Resolves once every settle asked for so far has finished (tests). */
+  async importsSettled(): Promise<void> {
+    while (this.savedRelationshipsTimer !== undefined) await new Promise((resolve) => setTimeout(resolve, SAVED_RELATIONSHIPS_SETTLE_MS));
+    await this.importsSettle;
+  }
+
+  /**
+   * After relationships files were saved in this window: every open, loaded
+   * logical canvas of a DBML diagram that now needs to import one of them
+   * (the one import rule, `relationshipsImportsFor`, read as the diagram
+   * reader's drift) gets Add the import's edit, queued behind its other
+   * edits. Each canvas is its own edit and its own undo step. Never throws.
+   */
+  private async settleImportsAfterSave(): Promise<void> {
+    const saved = [...this.savedRelationshipsFiles];
+    this.savedRelationshipsFiles.clear();
+    // A bulk command holds the canvases: it redraws them when it is done, and the strip offers the button.
+    if (saved.length === 0 || this.refreshHolds > 0) return;
+    try {
+      this.tableLibraryService.invalidatePaths(saved);
+    } catch {
+      // The readings are checked against the disk regardless.
+    }
+    const runs: Array<Promise<void>> = [];
+    for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
+      const { webview } = entry;
+      runs.push(this.queueEdit(panelKey, async () => {
+        try {
+          await this.addImportsAfterSave(panelKey, webview, saved);
+        } catch (err) {
+          // A convenience: the strip still offers the button.
+          log.debug(`[SemanticEditorProvider] Imports not added after a save: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }));
+    }
+    await Promise.all(runs);
+  }
+
+  /** {@link settleImportsAfterSave} for one canvas. Returns whether the diagram was written. */
+  private async addImportsAfterSave(panelKey: string, webview: vscode.Webview, saved: readonly string[]): Promise<boolean> {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry || entry.webview !== webview || !entry.loaded || this.disposedWebviews.has(webview)) return false;
+    // The physical stage is read-only; an edit or a hold already under way is never interleaved with.
+    if (entry.activeStage !== 'logical' || this.refreshHolds > 0 || this.pendingUpdates.get(panelKey)) return false;
+    const { document } = entry;
+    if (document.uri.scheme !== 'file' || !this.isDbmlDocument(document)) return false;
+    // A document that is not the file on disk (unsaved, a failed save) or a file that does not read: left alone.
+    if (document.isDirty || entry.saveFailed || entry.staleNote !== undefined) return false;
+    const fsPath = document.uri.fsPath;
+    const semanticRoot = this.semanticRootDir();
+    // Only a saved file that reads can be imported (the rule never adds an unreadable one).
+    const readable = new Set(saved
+      .filter((p) => this.tableLibraryService.readRelationshipsFile(p)?.readable === true)
+      .map((p) => path.relative(semanticRoot, p).split(path.sep).join('/')));
+    if (readable.size === 0) return false;
+    // The diagram read again, as the files are now: its reader records the imports it lacks.
+    this.subjectAreaService.getSubjectArea(fsPath);
+    const before = this.subjectAreaService.relationshipsImportDrift(fsPath);
+    if (!before.some((file) => readable.has(file))) return false;
+    if (!(await this.handleAddRelationshipsImports(document, webview, true))) return false;
+    const after = new Set(this.subjectAreaService.relationshipsImportDrift(fsPath));
+    const added = before.filter((file) => !after.has(file));
+    if (added.length > 0) this.post(webview, { type: 'canvasNotice', payload: { message: importsAddedMessage(added) } });
+    log.info(`[SemanticEditorProvider] ${this.shownSubjectAreaPath(fsPath)}: added the import of ${added.join(', ')} after a save`);
+    return true;
   }
 
   /**

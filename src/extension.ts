@@ -2323,6 +2323,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     editorProvider.noteUnreadFile(uri.fsPath);
   });
 
+  // A relationships file saved in THIS window (typed and saved, formatted or
+  // auto-saved here): an open logical canvas whose diagram now needs to
+  // import it gets the import added, as Add the import does (one edit, one
+  // undo step). A change that only reaches the disk (git, another program,
+  // an assistant writing the file) fires no save event and never writes: the
+  // strip offers the button. ERD Studio's own saves are skipped inside.
+  const savedDocumentSubscription = vscode.workspace.onDidSaveTextDocument((document) => {
+    try {
+      editorProvider.noteDocumentSaved(document);
+    } catch (err) {
+      log.warn('[ERD Studio] Could not check a saved file for relationships imports:', err);
+    }
+  });
+
   // Rename Subject Area records its created and deleted files as own writes,
   // so the watcher skips them: the side effects its change and delete events
   // drive are issued here instead, and the created-here marks it would have
@@ -3116,6 +3130,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     relationshipsChangedSubscription,
     foreignFormatSubscription,
     unreadFileSubscription,
+    savedDocumentSubscription,
     { dispose: () => setRefreshFailureSink(undefined) },
     editorWroteSubscription,
     semanticDeletedSubscription,

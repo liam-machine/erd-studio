@@ -1391,6 +1391,20 @@ describe('the canvas follows the files: the watcher wiring', () => {
     expect(failed.mock.calls.map((c) => c[0])).toEqual(['Table']);
   });
 
+  it('a document saved in this window is told to the canvases; a change that reaches only the disk is not', async () => {
+    const saved = vi.spyOn(provider, 'noteDocumentSaved').mockImplementation(() => {});
+    const refresh = vi.spyOn(provider, 'refreshAllOpenSubjectAreas').mockResolvedValue(undefined);
+    const rel = path.join(ws, '.erd-studio', 'gold', 'relationships', 'gold.dbml');
+    // git, another program or an assistant writing the file: the watcher redraws, and nothing is told a save happened.
+    await fire('gold/relationships/gold.dbml');
+    expect(refresh).toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+    // A save in this window (VS Code's onDidSaveTextDocument).
+    const doc = vscode.createMockTextDocument(rel, fs.readFileSync(rel, 'utf-8'), { persist: true });
+    await doc.save();
+    expect(saved.mock.calls.map((c) => (c[0] as unknown as { uri: { fsPath: string } }).uri.fsPath)).toEqual([rel]);
+  });
+
   it('ERD Studio: Reload Diagrams from Disk is contributed, has no legacy alias, reads again and writes nothing', async () => {
     expect(CONTRIBUTED).toContain('erdStudio.reloadFromDisk');
     expect(NO_LEGACY_ALIAS.has('erdStudio.reloadFromDisk')).toBe(true);

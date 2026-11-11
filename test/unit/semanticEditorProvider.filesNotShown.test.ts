@@ -183,12 +183,16 @@ describe('a relationships file the diagram does not import', () => {
     expect(posted(panel, 'error')).toEqual([]);
   });
 
-  it('a refresh never adds the import by itself', async () => {
+  it('a change that reaches only the disk never adds the import: the watcher\'s redraw, the focus check, Reload Diagrams from Disk', async () => {
     const provider = buildProvider(root);
-    await open(provider);
+    const { doc } = await open(provider);
     const before = _appliedEdits.length;
+    // The relationships file changed on disk (git, another program, an assistant): no save event in this window.
+    write('gold/relationships/customers.dbml', `${read('gold/relationships/customers.dbml')}\n`);
     await provider.refreshAllOpenSubjectAreas();
+    await provider.revalidateAgainstDisk(doc.uri.toString());
     await provider.reloadFromDisk();
+    await provider.importsSettled();
     await settle();
     expect(_appliedEdits.length).toBe(before);
     expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
@@ -489,5 +493,282 @@ describe('opening a file a note names', () => {
     } finally {
       registration.dispose();
     }
+  });
+});
+
+/**
+ * The import settle after a save in this window: the one exception to
+ * "a refresh never writes". A relationships file SAVED IN THIS WINDOW that an
+ * open logical canvas's diagram now needs to import gets the import added by
+ * itself, through Add the import's edit; a change that reaches only the disk
+ * keeps the strip's button.
+ */
+describe('a relationships file saved in this window', () => {
+  const CUSTOMERS = 'gold/relationships/customers.dbml';
+  const ADDED = 'Added gold/relationships/customers.dbml to this diagram so its relationships are drawn.';
+  let fullCustomers: string;
+  /** The customers file with no Ref yet: what is there before the first one is written. */
+  let emptyCustomers: string;
+
+  beforeEach(() => {
+    fullCustomers = read(CUSTOMERS);
+    emptyCustomers = fullCustomers.split('\n').filter((l) => !/^Ref\b/.test(l)).join('\n');
+    write(SALES, read(SALES).replace(CUSTOMERS_IMPORT, ''));
+    write(CUSTOMERS, emptyCustomers);
+  });
+
+  /** A provider with VS Code's save event wired to it, as `extension.ts` does. */
+  function wired(): SemanticEditorProvider {
+    const provider = buildProvider(root);
+    vscode.workspace.onDidSaveTextDocument((d) => provider.noteDocumentSaved(d));
+    return provider;
+  }
+
+  /** Type `text` into the open document of `rel` (opened if it is not) and save it in this window. */
+  async function typeAndSave(provider: SemanticEditorProvider, rel: string, text: string): Promise<void> {
+    const doc = createMockTextDocument(at(rel), fs.existsSync(at(rel)) ? read(rel) : '', { persist: true });
+    doc._setText(text);
+    fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
+    expect(await doc.save()).toBe(true);
+    // A later mtime, so the library sees the change even in the same millisecond.
+    const later = new Date(Date.now() + 5000 + Math.floor(Math.random() * 100000));
+    fs.utimesSync(at(rel), later, later);
+    await provider.importsSettled();
+    await settle();
+  }
+
+  const edgesOf = (panel: Panel): string[] => {
+    const loaded = posted(panel, 'domainLoaded');
+    return (loaded[loaded.length - 1].payload.relationships as Array<{ fromModel: string; toModel: string }>).map((r) => `${r.fromModel}>${r.toModel}`);
+  };
+  const noticesOf = (panel: Panel): string[] => posted(panel, 'canvasNotice').map((m) => m.payload.message);
+
+  it('the first Ref on the diagram: the import is added by itself in one edit, the line is drawn, and a short note names the file', async () => {
+    const provider = wired();
+    const { panel } = await open(provider);
+    expect(notes(panel)).toEqual([]);
+    expect(edgesOf(panel)).not.toContain('customer_profile>dim_region');
+    const before = _appliedEdits.length;
+
+    await typeAndSave(provider, CUSTOMERS, fullCustomers);
+
+    expect(_appliedEdits.length).toBe(before + 1);
+    expect(_appliedEdits[_appliedEdits.length - 1]._ops.every((op) => op.kind !== 'renameFile' && op.uri.fsPath === at(SALES))).toBe(true);
+    // Only the import changed: the diagram is the fixture's again, byte for byte.
+    expect(read(SALES)).toBe(fs.readFileSync(path.join(NATIVE, '.erd-studio', SALES), 'utf-8'));
+    expect(edgesOf(panel)).toContain('customer_profile>dim_region');
+    expect(notes(panel)).toEqual([]);
+    expect(noticesOf(panel)).toEqual([ADDED]);
+    expect(posted(panel, 'error')).toEqual([]);
+  });
+
+  it('a Ref in a brand-new relationships file: the same', async () => {
+    fs.rmSync(at(CUSTOMERS));
+    const provider = wired();
+    const { panel } = await open(provider);
+    await typeAndSave(provider, 'gold/relationships/stores.dbml', fullCustomers);
+    expect(read(SALES)).toContain("use * from '../relationships/stores.dbml'");
+    expect(edgesOf(panel)).toContain('customer_profile>dim_region');
+    expect(noticesOf(panel)).toEqual(['Added gold/relationships/stores.dbml to this diagram so its relationships are drawn.']);
+  });
+
+  it('Cmd+Z on the canvas undoes the import as one step, the strip offers the button again, and it is not added again', async () => {
+    const provider = wired();
+    const { doc, panel } = await open(provider);
+    const withoutImport = doc.getText();
+    await typeAndSave(provider, CUSTOMERS, fullCustomers);
+    expect(read(SALES)).toContain(CUSTOMERS_IMPORT);
+    const afterAdd = _appliedEdits.length;
+
+    // VS Code's own undo rewinds the diagram's document; the canvas saves it (that save is a diagram's, not a relationships file's).
+    doc._setText(withoutImport);
+    await _fireDidChangeTextDocument(doc, vscode.TextDocumentChangeReason.Undo);
+    await vi.waitFor(() => expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT), { timeout: 2000, interval: 10 });
+    await provider.importsSettled();
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await provider.importsSettled();
+    await settle();
+
+    expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
+    expect(_appliedEdits.length).toBe(afterAdd);
+    expect(edgesOf(panel)).not.toContain('customer_profile>dim_region');
+    expect(notes(panel).map((n) => [n.code, n.action])).toEqual([['relationshipsNotImported', 'addRelationshipsImports']]);
+    // The watcher's redraw of the same files writes nothing either.
+    await provider.refreshAllOpenSubjectAreas();
+    await settle();
+    expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
+    expect(_appliedEdits.length).toBe(afterAdd);
+  });
+
+  it('two open diagrams that need it each get their own edit; a closed one is not touched', async () => {
+    const OTHER = 'gold/diagrams/customers.dbml';
+    const CLOSED = 'gold/diagrams/profiles.dbml';
+    const diagram = (name: string): string => [
+      `Project ${name} {`,
+      "  erd_schema_version: '7'",
+      '}',
+      '',
+      "use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'",
+      "use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'",
+      "use { table gold.dim_region } from '../tables/gold/dim_region.dbml'",
+      '',
+    ].join('\n');
+    write(OTHER, diagram('customers'));
+    write(CLOSED, diagram('profiles'));
+    const provider = wired();
+    const sales = await open(provider);
+    const other = await open(provider, OTHER);
+    const before = _appliedEdits.length;
+
+    await typeAndSave(provider, CUSTOMERS, fullCustomers);
+
+    expect(_appliedEdits.length).toBe(before + 2);
+    expect(read(SALES)).toContain(CUSTOMERS_IMPORT);
+    expect(read(OTHER)).toContain(CUSTOMERS_IMPORT);
+    expect(read(CLOSED)).toBe(diagram('profiles'));
+    expect(noticesOf(sales.panel)).toEqual([ADDED]);
+    expect(noticesOf(other.panel)).toEqual([ADDED]);
+  });
+
+  it('Save All of several relationships files settles each canvas once', async () => {
+    const provider = wired();
+    const { panel } = await open(provider);
+    const before = _appliedEdits.length;
+    const first = createMockTextDocument(at(CUSTOMERS), read(CUSTOMERS), { persist: true });
+    const second = createMockTextDocument(at('gold/relationships/stores.dbml'), '', { persist: true });
+    first._setText(fullCustomers.split('\n').filter((l) => !l.startsWith('Ref region')).join('\n'));
+    second._setText([
+      "use { table gold.customer_profile } from '../tables/gold/customer_profile.dbml'",
+      "use { table gold.dim_region }       from '../tables/gold/dim_region.dbml'",
+      '',
+      'Ref region: gold.customer_profile.preferred_region_code <>? gold.dim_region.region_code',
+      '',
+    ].join('\n'));
+    await Promise.all([first.save(), second.save()]);
+    await provider.importsSettled();
+    await settle();
+    expect(_appliedEdits.length).toBe(before + 1);
+    expect(read(SALES)).toContain(CUSTOMERS_IMPORT);
+    expect(read(SALES)).toContain("use * from '../relationships/stores.dbml'");
+    expect(noticesOf(panel)).toEqual(['Added gold/relationships/customers.dbml and gold/relationships/stores.dbml to this diagram so their relationships are drawn.']);
+  });
+
+  describe('never', () => {
+    async function expectNoWrite(provider: SemanticEditorProvider, panel: Panel, text = fullCustomers): Promise<void> {
+      const before = _appliedEdits.length;
+      await typeAndSave(provider, CUSTOMERS, text);
+      expect(_appliedEdits.length).toBe(before);
+      expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
+      expect(noticesOf(panel)).toEqual([]);
+      // No error toast for a convenience that did not happen.
+      expect(posted(panel, 'error')).toEqual([]);
+    }
+
+    it('for a change that reaches only the disk: the strip offers the button', async () => {
+      const provider = wired();
+      const { panel } = await open(provider);
+      write(CUSTOMERS, fullCustomers);
+      await provider.refreshAllOpenSubjectAreas();
+      await provider.importsSettled();
+      await settle();
+      expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
+      expect(notes(panel).map((n) => n.action)).toEqual(['addRelationshipsImports']);
+    });
+
+    it('when the saved relationships file does not read', async () => {
+      const provider = wired();
+      const { panel } = await open(provider);
+      await expectNoWrite(provider, panel, `${fullCustomers}\nRef: gold.dim_customer.customer_key >`);
+    });
+
+    it('on the physical stage', async () => {
+      const provider = wired();
+      const { doc, panel } = await open(provider);
+      (provider as unknown as { openPanels: Map<string, { activeStage: string }> }).openPanels.get(doc.uri.toString())!.activeStage = 'physical';
+      await expectNoWrite(provider, panel);
+    });
+
+    it('while the diagram\'s document is unsaved or its save failed', async () => {
+      const provider = wired();
+      const { doc, panel } = await open(provider);
+      const entry = (provider as unknown as { openPanels: Map<string, { saveFailed?: boolean }> }).openPanels.get(doc.uri.toString())!;
+      entry.saveFailed = true;
+      await expectNoWrite(provider, panel);
+      entry.saveFailed = false;
+      doc.isDirty = true;
+      await expectNoWrite(provider, panel);
+    });
+
+    it('while the diagram\'s file does not read', async () => {
+      const provider = wired();
+      const { doc, panel } = await open(provider);
+      doc._setText(doc.getText().replace('Project sales {', 'Project sales {{'));
+      await _fireDidChangeTextDocument(doc);
+      await settle();
+      const errors = posted(panel, 'error').length;
+      const before = _appliedEdits.length;
+      await typeAndSave(provider, CUSTOMERS, fullCustomers);
+      expect(_appliedEdits.length).toBe(before);
+      expect(posted(panel, 'error')).toHaveLength(errors);
+      expect(noticesOf(panel)).toEqual([]);
+    });
+
+    it('when ERD Studio must not edit the diagram (a second Project, which the button refuses too)', async () => {
+      write(SALES, `${read(SALES)}\nProject again {\n  Note: 'x'\n}\n`);
+      const provider = wired();
+      const { panel } = await open(provider);
+      await expectNoWrite(provider, panel);
+    });
+
+    it('while an edit holds the canvas: never interleaved', async () => {
+      const provider = wired();
+      const { doc, panel } = await open(provider);
+      (provider as unknown as { pendingUpdates: Map<string, boolean> }).pendingUpdates.set(doc.uri.toString(), true);
+      await expectNoWrite(provider, panel);
+    });
+
+    it('for ERD Studio\'s own save of a relationships file', async () => {
+      const provider = wired();
+      const { panel } = await open(provider);
+      const tracker = (provider as unknown as { ownWriteTracker: OwnWriteTracker }).ownWriteTracker;
+      const expectation = tracker.expectWrite([at(CUSTOMERS)]);
+      try {
+        await expectNoWrite(provider, panel);
+      } finally {
+        tracker.settleWrites(expectation);
+      }
+    });
+
+    it('to remove an import: taking the Ref out and saving leaves the import (doctor reports it; the next edit of the diagram drops it)', async () => {
+      const provider = wired();
+      const { panel } = await open(provider);
+      await typeAndSave(provider, CUSTOMERS, fullCustomers);
+      expect(read(SALES)).toContain(CUSTOMERS_IMPORT);
+      const before = _appliedEdits.length;
+      await typeAndSave(provider, CUSTOMERS, emptyCustomers);
+      expect(_appliedEdits.length).toBe(before);
+      expect(read(SALES)).toContain(CUSTOMERS_IMPORT);
+      expect(noticesOf(panel)).toEqual([ADDED]);
+    });
+
+    it('when the edit is refused: silently, the strip keeps the button', async () => {
+      const provider = wired();
+      const { panel } = await open(provider);
+      vscode._mockWorkspaceState.applyEditResult = false;
+      try {
+        const before = _appliedEdits.length;
+        await typeAndSave(provider, CUSTOMERS, fullCustomers);
+        expect(_appliedEdits.length).toBe(before + 1);
+      } finally {
+        vscode._mockWorkspaceState.applyEditResult = true;
+      }
+      expect(read(SALES)).not.toContain(CUSTOMERS_IMPORT);
+      expect(posted(panel, 'error')).toEqual([]);
+      expect(noticesOf(panel)).toEqual([]);
+      await provider.refreshAllOpenSubjectAreas();
+      await settle();
+      expect(notes(panel).map((n) => n.action)).toEqual(['addRelationshipsImports']);
+    });
   });
 });
