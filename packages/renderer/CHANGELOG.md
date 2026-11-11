@@ -2,11 +2,17 @@
 
 All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bumps the minor version.
 
-## Unreleased
+## 0.5.0
+
+> Pins `@erd-studio/core` 0.5.0, whose `DisplayTable.name` can be `<schema>.<name>` for two tables of one name on one diagram (see its changelog). Bump the cache key with the pin.
 
 ### Added
 - **Two tables of one name from different schema folders on one diagram.** A newer core names them `bqs.addresse` and `ccc.addresse` (`DisplayTable.name`, unique on the diagram as before) with the table's own name in `DisplayTable.tableName`. Node ids, edge ends, positions, selection and expansion stay keyed by `name`, so the two are two nodes and a line between them is not a self-loop. Where a person reads a name the own name is used: `TableNodeData` gains the optional `tableName`, and the header prints its schema once (`ccc.addresse`, never `ccc.ccc.addresse`; new helper `headerName`, exported from `/editor`), sized for what it prints, unless two such tables would read alike (both files declare one schema), when each keeps its diagram name; a blank `tableName` counts as none; `computeTableLabels` (`LabelledTable.tableName`, optional) starts a label from `alias ?? tableName ?? name`; the Detail panel's title and rename box show the own name and post `renameModel` with the diagram's name as `oldName` (the duplicate-name check compares own names); `AliasEditor` takes an optional `tableName` and compares an alias with it. A `DisplaySubjectArea` from an older core (no `tableName`) renders exactly as before, and one listing a name twice (what an older core gives such a diagram) does not crash. No new `--vscode-*` variables, and the viewer still posts nothing.
 - The Detail panel's "+ Add" and "Add all related" post a table's file with its name when the host named it (`OffDiagramRelationship.otherTablePath`): `addExistingModel { modelName, sourcePath }`, `addExistingModels { modelNames, sourcePaths }` (`''` for a table with none). New helper `offDiagramTableRows` (each distinct table of the rows, by its file where it has one). A context without `otherTablePath` posts exactly what it did.
+
+### Changed (breaking)
+- Pins `@erd-studio/core` 0.5.0: `DisplayTable.name` (re-exported) can hold `<schema>.<name>` for two tables of one name on one diagram, with the own name in `tableName`.
+- The Detail panel's rename check allows a name that a table in another schema folder has: a DBML table is its schema folder and name, so it refuses only a name a table of its own schema folder has (on the diagram or in `existingModels`, by `ExistingTablePreview.schemaFolder`), and, where a folder is unknown (a YAML table, or a host that sends no table files), any table of that name, as before.
 
 ## 0.4.1
 
