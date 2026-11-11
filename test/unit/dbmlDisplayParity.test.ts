@@ -56,6 +56,13 @@ function diagramsOf(project: string): string[] {
     .sort();
 }
 
+/**
+ * The core twins whose host library tells tables apart by identity
+ * (`schemaScopedNames`, off by default until the rule flips): two tables of
+ * one name in different schema folders are two tables only then.
+ */
+const SCHEMA_SCOPED = new Set([path.join(TWINS, 'same-name-two-schemas')]);
+
 const CASES: Array<[string, string, string]> = [
   ...diagramsOf(NATIVE).map((d): [string, string, string] => ['dbml-native', NATIVE, d]),
   ...diagramsOf(DBT_DBML).map((d): [string, string, string] => ['dbt-project-dbml', DBT_DBML, d]),
@@ -91,10 +98,10 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function buildProvider(): { provider: SemanticEditorProvider; subjectAreaService: SubjectAreaService; tables: TableLibraryService } {
+function buildProvider(schemaScopedNames = false): { provider: SemanticEditorProvider; subjectAreaService: SubjectAreaService; tables: TableLibraryService } {
   const layerService = new LayerService(root, SEMANTIC_DIR);
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tables = new TableLibraryService(root, SEMANTIC_DIR);
+  const tables = new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker(), schemaScopedNames ? { schemaScopedNames: true } : {});
   subjectAreaService.setTableLibraryService(tables);
   const context = {
     extensionUri: vscode.Uri.file(path.join(root, 'no-extension')),
@@ -131,8 +138,8 @@ function drawn(display: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** The canvas: the diagram opened in the real editor, its posted logical payload. */
-async function canvasOf(diagram: string): Promise<Record<string, unknown>> {
-  const { provider } = buildProvider();
+async function canvasOf(diagram: string, schemaScopedNames = false): Promise<Record<string, unknown>> {
+  const { provider } = buildProvider(schemaScopedNames);
   const document = createMockTextDocument(at(diagram), fs.readFileSync(at(diagram), 'utf-8'), { persist: true });
   (vscode.workspace.textDocuments as unknown[]).push(document);
   const panel = createMockWebviewPanel();
@@ -167,7 +174,7 @@ describe('the canvas draws what core draws, for every DBML diagram', () => {
     fs.cpSync(source, root, { recursive: true });
     const core = drawn(await coreOf(diagram));
     // The ready load saves auto-placed positions into erd_layout (core places them the same way, in memory).
-    const canvas = drawn(await canvasOf(diagram));
+    const canvas = drawn(await canvasOf(diagram, SCHEMA_SCOPED.has(source)));
     expect(canvas).toEqual(core);
   });
 });
@@ -360,5 +367,33 @@ describe('an unlinked member whose .dbml table sits outside the folders the diag
     expect(canvas).toEqual(core);
     const dimX = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'dim_x');
     expect(dimX?.columns).toHaveLength(1);
+  });
+});
+
+describe('two tables of one name in different schema folders, a file gone (owner decision B)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  it('the diagram of both, bqs/addresse.dbml deleted: both sides draw bqs.addresse missing, never with ccc\'s columns', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    const core = drawn(await coreOf('bronze/diagrams/kunden.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/kunden.dbml', true));
+    expect(canvas).toEqual(core);
+    const bqs = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'bqs.addresse');
+    expect(bqs?.columns ?? []).toEqual([]);
+  });
+
+  it('a diagram of bqs.addresse and ccc.kunde, bqs/addresse.dbml deleted: both sides read the one other addresse, which no member\'s line names', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    fs.writeFileSync(at('bronze/diagrams/stale.dbml'), [
+      "Project stale {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const core = drawn(await coreOf('bronze/diagrams/stale.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/stale.dbml', true));
+    expect(canvas).toEqual(core);
   });
 });

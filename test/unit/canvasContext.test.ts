@@ -91,6 +91,28 @@ describe('buildCanvasContext', () => {
   });
 });
 
+describe('buildCanvasContext, the diagram naming its tables differently from the library', () => {
+  it('finds members by what the library calls them (memberOf), and gives each other table its file', () => {
+    // A diagram of ccc's tables alone calls them addresse and kunde; the library, where bqs has both names too, ccc.addresse and ccc.kunde.
+    const twins = [
+      table('ccc.kunde', ['id', 'addresse_id'], [{ fromColumn: 'addresse_id', toModel: 'ccc.addresse', toColumn: 'id', cardinality: 'many-to-one' }] as SemanticTable['relationships']),
+      table('ccc.addresse', ['id'], [{ fromColumn: 'id', toModel: 'bqs.addresse', toColumn: 'id', cardinality: 'many-to-one' }] as SemanticTable['relationships']),
+      table('bqs.addresse', ['id']),
+    ];
+    const onDiagram: Record<string, string> = { 'ccc.kunde': 'kunde', 'ccc.addresse': 'addresse' };
+    const context = buildCanvasContext({
+      members: ['addresse', 'kunde'],
+      libraryTables: twins,
+      fileOf: (name) => `.erd-studio/bronze/tables/ccc/${name}.dbml`,
+      memberOf: (name) => onDiagram[name],
+      otherTablePathOf: (name) => (name === 'bqs.addresse' ? '.erd-studio/bronze/tables/bqs/addresse.dbml' : undefined),
+    });
+    expect(context.offDiagram).toEqual({
+      addresse: [{ otherTable: 'bqs.addresse', columns: 'id', cardinality: 'many-to-one', direction: 'out', otherTablePath: '.erd-studio/bronze/tables/bqs/addresse.dbml' }],
+    });
+  });
+});
+
 describe('joinColumnsText', () => {
   it('names a column once when both ends share it, else both', () => {
     expect(joinColumnsText(['store_key'], ['store_key'])).toBe('store_key');

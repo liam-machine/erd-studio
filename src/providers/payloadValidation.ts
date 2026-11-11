@@ -750,11 +750,44 @@ export function validateAddModelsFromDbtPayload(value: unknown): string | null {
   return null;
 }
 
+/** The longest file path a canvas message may name (an Add Existing row's `sourcePath`). */
+export const SOURCE_PATH_MAX_LENGTH = 1024;
+
+/**
+ * A table file a canvas message names (`sourcePath` on `addExistingModel(s)`):
+ * a project-relative path as the host listed it, never absolute, never
+ * leaving the project (`..`), on one line. Only ever compared with the
+ * library's listed files, never opened as given.
+ */
+export function validateSourcePath(value: unknown): string | null {
+  if (typeof value !== 'string') return 'A table file must be named by text.';
+  if (value.length > SOURCE_PATH_MAX_LENGTH) return `A table file's path can be at most ${SOURCE_PATH_MAX_LENGTH} characters.`;
+  if (/[\0\r\n]/.test(value)) return 'A table file\'s path must be one line.';
+  if (/^([\\/]|[A-Za-z]:)/.test(value)) return 'A table file must be named relative to the project.';
+  if (value.split(/[\\/]/).includes('..')) return 'A table file must be inside the project.';
+  return null;
+}
+
+/**
+ * Validate an `addExistingModel` payload: `{ modelName }` held to the
+ * path-safety rule (dbt names may be uppercase or start with a digit), and
+ * `sourcePath`, when present, a project-relative path ({@link validateSourcePath}).
+ */
+export function validateAddExistingModelPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'Add table needs a table name.';
+  const { modelName, sourcePath } = value as { modelName?: unknown; sourcePath?: unknown };
+  const nameError = validateTableNameSafety(modelName);
+  if (nameError) return nameError;
+  return sourcePath === undefined ? null : validateSourcePath(sourcePath);
+}
+
 /**
  * Validate an `addExistingModels` payload (#160): `{ modelNames }`, a
  * non-empty list of at most {@link ADD_EXISTING_TABLES_LIMIT} names. Each is
  * held to the path-safety rule only — dbt allows uppercase and digit-leading
  * names, as `addExistingModel` does — because each may become a library file.
+ * `sourcePaths`, when present, has one entry per name: a project-relative
+ * path ({@link validateSourcePath}), or `''` for a row with no file.
  */
 export function validateAddExistingModelsPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -770,6 +803,14 @@ export function validateAddExistingModelsPayload(value: unknown): string | null 
   for (const name of modelNames) {
     const nameError = validateTableNameSafety(name);
     if (nameError) return nameError;
+  }
+  const { sourcePaths } = value as { sourcePaths?: unknown };
+  if (sourcePaths === undefined) return null;
+  if (!Array.isArray(sourcePaths) || sourcePaths.length !== modelNames.length) return 'Each table needs its file, or none.';
+  for (const sourcePath of sourcePaths) {
+    if (sourcePath === '') continue;
+    const pathError = validateSourcePath(sourcePath);
+    if (pathError) return pathError;
   }
   return null;
 }

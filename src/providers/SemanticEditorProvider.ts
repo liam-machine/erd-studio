@@ -244,7 +244,7 @@ import type { FileWrite } from '../services/fileWrites';
 import type { DbmlLibraryWritePlan } from '../services/dbmlLibraryWrites';
 import { applyFileWrites, writtenPaths } from './applyFileWrites';
 import { primeLayoutOnlyReading, readDbmlDiagram } from '../services/dbmlDiagramReadings';
-import { changedMemberPath, dbmlResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
+import { changedMemberPath, dbmlResolverOf, diagramResolverOf, problemOf, settleDbmlDiagramWrites, settleSignalsOf, settlesNothing, unsettledDiagramRefusal } from '../services/dbmlDiagramSettle';
 import { diagramSummaryForFile } from '../services/dbmlDiagramSummaries';
 import type { DbmlDraftTable, DbmlTableHome, NewRefFileChoice } from '../services/dbmlLibraryWrites';
 import type { AppliedFileWrites } from './applyFileWrites';
@@ -260,6 +260,10 @@ import {
   subjectAreaFileObject,
 } from './subjectAreaCodec';
 import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec';
+import type { TableId } from '../types/tableId';
+import type { TableFileEntry } from '../services/logicalModelService';
+import { tableIdKey, tableIdOfPath } from '../types/tableId';
+import { renameMemberRefs } from '../services/diagramMemberTable';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { withRelationshipHomes } from '../services/diagramRelationshipHomes';
 import { normaliseName } from '../services/nameUtils';
@@ -334,6 +338,24 @@ export function tableFolderForSubjectArea(domainFilePath: string): string {
   return diagramPathOf(domainFilePath)?.layer ?? path.basename(path.dirname(domainFilePath));
 }
 
+/** `rel` with its two ends renamed by `rename` (a diagram's names for its tables ↔ the library's); the same object when neither changes. */
+function relationshipEndsRenamed<T extends { fromModel: string; toModel: string }>(rel: T, rename: (name: string) => string): T {
+  const fromModel = rename(rel.fromModel);
+  const toModel = rename(rel.toModel);
+  return fromModel === rel.fromModel && toModel === rel.toModel ? rel : { ...rel, fromModel, toModel };
+}
+
+/** A relationship edit with every table it names renamed by `rename` (its ends, and the table whose key it marks). */
+function relationshipOpRenamed(op: RelationshipWriteOp, rename: (name: string) => string): RelationshipWriteOp {
+  const markKey = 'markKey' in op && op.markKey ? { markKey: { ...op.markKey, model: rename(op.markKey.model) } } : {};
+  switch (op.kind) {
+    case 'add': return { ...op, drawn: relationshipEndsRenamed(op.drawn, rename), ...markKey };
+    case 'edit': return { ...op, original: relationshipEndsRenamed(op.original, rename), drawn: relationshipEndsRenamed(op.drawn, rename), ...markKey };
+    case 'update': return { ...op, ends: relationshipEndsRenamed(op.ends, rename) };
+    case 'remove': return { ...op, keys: op.keys.map((k) => relationshipEndsRenamed(k, rename)) };
+  }
+}
+
 /** The last sentence of every "not a DBML diagram" page (§1.8): how to see the file as text. */
 export const REOPEN_AS_TEXT_SENTENCE = 'To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.';
 
@@ -344,8 +366,8 @@ export const REOPEN_AS_TEXT_SENTENCE = 'To edit it as text, right-click the tab 
 interface TableFileOps {
   /** Models whose yml should be written in full (created if missing). */
   save?: TableFileSave[];
-  /** Model names whose yml should be deleted (e.g. the old name on rename). */
-  delete?: string[];
+  /** Model names whose yml should be deleted (e.g. the old name on rename); a DBML table may be named by its identity. */
+  delete?: Array<string | TableId>;
   /**
    * DBML only: the relationships file the New Relationship dialog picked for
    * the relationship being added (`TableLibraryService.planTableWrites` →
@@ -374,6 +396,24 @@ interface TableFileSave {
   fromName?: string;
   /** A new DBML table (D-4): never an edit of a table of its name in another schema folder. A YAML write ignores it. */
   create?: boolean;
+  /** DBML only: the existing table this save edits or renames, by identity (D-4). A YAML write ignores it. */
+  from?: TableId;
+}
+
+/**
+ * A table a canvas message names, resolved at the diagram boundary
+ * ({@link SemanticEditorProvider.canvasTable}): `ref` is what the diagram
+ * calls it, `name` its bare name, `library` what the library's relationship
+ * lookups call it (its name, or `<schema>.<name>` where two schema folders
+ * share it), and `id` / `filePath` the table file its `use` line reads,
+ * where the library tells tables apart by identity.
+ */
+interface CanvasTable {
+  ref: string;
+  name: string;
+  library: string;
+  id?: TableId;
+  filePath?: string;
 }
 
 /** Why a chosen dbt model was left out of a batch add, in words. */
@@ -583,6 +623,7 @@ import {
   validateViewFilePayload,
   validateExtraPairs,
   validateMarkKey,
+  validateAddExistingModelPayload,
   validateNoRelationshipsFile,
   validateRelationshipEnds,
   validateRelationshipsFileChoice,
@@ -609,7 +650,7 @@ import {
 } from './payloadValidation';
 import { sameName } from '../types/naming';
 import { affectsLineStyle, readLineStyle, writeLineStyle } from './lineStyleSetting';
-import { dropGridPositions, tablesOfDroppedUris } from '../services/tableDrop';
+import { dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
 function stageRelationships(parsed: Record<string, unknown>): Array<Record<string, unknown>> {
@@ -1254,9 +1295,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
     const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
     const domain = this.subjectAreaService.getSubjectArea(document.uri.fsPath);
+    const memberFiles = this.memberFilesOf(document.uri.fsPath);
     const { existingModels, manifestModels } = this.buildWebviewPayload(
       { models: domain.logical.models }, manifest, ymlData, domain.modelFolder,
-      { readAllTables: true, catalog: await this.loadCatalog() },
+      { readAllTables: true, catalog: await this.loadCatalog(), ...(memberFiles ? { memberFiles } : {}) },
     );
     this.post(webview, { type: 'existingTables', payload: { existingModels, manifestModels } });
   }
@@ -1288,7 +1330,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * background warm-up reads them, on the next refresh). Writes nothing;
    * never throws.
    */
-  private async sendCanvasContext(webview: vscode.Webview, members: readonly string[], diagramLayer: string | undefined): Promise<void> {
+  private async sendCanvasContext(webview: vscode.Webview, members: readonly string[], diagramLayer: string | undefined, document?: vscode.TextDocument): Promise<void> {
     const run = (this.canvasContextRuns.get(webview) ?? 0) + 1;
     this.canvasContextRuns.set(webview, run);
     const current = (): boolean => this.canvasContextRuns.get(webview) === run && !this.disposedWebviews.has(webview);
@@ -1300,6 +1342,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const labelOf = (layer: string | undefined): string | undefined => (layer === undefined ? undefined : labels.get(layer) ?? layer);
       // One look at the library's listing for every lookup below, not one per table.
       const context = library.withIndexSnapshot(() => {
+        // Told apart by identity, a DBML diagram's members are found by their own files (the diagram boundary).
+        const scoped = document !== undefined && this.schemaScoped() && this.isDbmlDocument(document) ? this.scopedCanvasContext(document) : undefined;
+        if (scoped) {
+          return buildCanvasContext({
+            members,
+            libraryTables: library.dirExists() ? this.knownLibraryRelationships(true) : [],
+            ...scoped,
+            ...(diagramLayer !== undefined ? { diagramLayerLabel: labelOf(diagramLayer) } : {}),
+            layerLabelOf: (name) => labelOf(scoped.entryOf(name)?.layer),
+            ...(this.codeOwners ? {
+              ownersOf: (name: string) => {
+                const file = scoped.memberFile(name);
+                return file === undefined ? [] : this.codeOwners!.ownersOf(file);
+              },
+            } : {}),
+          });
+        }
         const tables = library.dirExists() ? this.knownLibraryRelationships() : [];
         const entries = library.listTableFiles();
         const homes = tableHomesOf(entries);
@@ -1792,7 +1851,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * relationships file (a Ref's pairs as one composite line), and each YAML
    * table's own list when its file is already read. For `buildCanvasContext`.
    */
-  private knownLibraryRelationships(): SemanticTable[] {
+  private knownLibraryRelationships(byIdentity = false): SemanticTable[] {
     const library = this.tableLibraryService;
     const entries = library.listTableFiles().filter((e) => !e.shadowedBy);
     const owned = new Map<string, TableRelationship[]>();
@@ -1802,6 +1861,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (list) list.push(rel);
       else owned.set(key, [rel]);
     };
+    if (byIdentity) {
+      // Told apart by identity: each Ref as the relationships index resolved its ends, by the
+      // tables' library references (`<schema>.<name>` where two schema folders share a name).
+      for (const ref of library.relationshipsIndex().refs) {
+        const { unit } = ref;
+        const composite = unit.fromColumns.length > 1 ? `ref:${ref.file}:${ref.line}` : undefined;
+        unit.fromColumns.forEach((fromColumn, i) => own(unit.from, {
+          fromColumn, toModel: unit.to, toColumn: unit.toColumns[i] ?? '', cardinality: unit.cardinality,
+          ...(unit.role !== undefined ? { role: unit.role } : {}),
+          ...(composite ? { compositeKey: composite } : {}),
+        }));
+      }
+      const unreadYaml = new Set(library.unreadTableFiles().map((e) => e.filePath));
+      return entries.map((e) => {
+        const name = (e.id ? library.libraryRef(e.id) : undefined) ?? e.name;
+        let relationships = owned.get(name.toLowerCase()) ?? [];
+        if (e.storage !== 'dbml' && !unreadYaml.has(e.filePath)) {
+          try {
+            relationships = [...relationships, ...(library.getTable(e.name)?.relationships ?? [])];
+          } catch {
+            // A YAML table that does not read owns nothing here.
+          }
+        }
+        return { name, columns: [], relationships } as unknown as SemanticTable;
+      });
+    }
     for (const file of library.listRelationshipsFiles()) {
       const reading = library.readRelationshipsFile(file);
       if (!reading?.readable) continue;
@@ -1827,6 +1912,70 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * What the canvas context of the DBML diagram `document` needs where the
+   * library tells tables apart by identity: each member's own file
+   * (`fileOf`, `memberFile`), the member a library table is (`memberOf`, by
+   * its file), and each library table's entry and file (`entryOf`,
+   * `otherTablePathOf`), all by the library's references.
+   */
+  private scopedCanvasContext(document: vscode.TextDocument): {
+    fileOf: (ref: string) => string | undefined;
+    memberFile: (ref: string) => string | undefined;
+    memberOf: (libraryName: string) => string | undefined;
+    otherTablePathOf: (libraryName: string) => string | undefined;
+    entryOf: (libraryName: string) => TableFileEntry | undefined;
+  } | undefined {
+    const refs = this.diagramLibraryRefs(document);
+    const members = this.parseSubjectAreaFile(document).members;
+    if (!refs || !members) return undefined;
+    const library = this.tableLibraryService;
+    const memberFile = (ref: string): string | undefined => {
+      const row = members.resolve(ref);
+      if (row?.path === undefined || row.path.startsWith('../')) return undefined;
+      return library.tableEntryAt(library.semanticAbsolute(row.path))?.filePath;
+    };
+    const entryOf = (libraryName: string): TableFileEntry | undefined => {
+      const found = library.resolveLibraryRef(libraryName);
+      return found.kind === 'found' ? found.entry : undefined;
+    };
+    return {
+      memberFile,
+      fileOf: (ref) => {
+        const file = memberFile(ref);
+        return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
+      },
+      memberOf: (libraryName) => {
+        const ref = refs.toDiagram(libraryName);
+        return members.resolve(ref)?.ref === ref ? ref : undefined;
+      },
+      otherTablePathOf: (libraryName) => {
+        const file = entryOf(libraryName)?.filePath;
+        return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
+      },
+      entryOf,
+    };
+  }
+
+  /**
+   * Where the library tells tables apart by identity: the table files the
+   * DBML diagram `diagramPath`'s `use` lines read (resolved, lower-case), as
+   * its open document or its file now says. Undefined anywhere else.
+   */
+  private memberFilesOf(diagramPath: string | undefined): ReadonlySet<string> | undefined {
+    if (diagramPath === undefined || !this.schemaScoped() || subjectAreaStorageOf(diagramPath) !== 'dbml') return undefined;
+    const text = this.openOrDiskText(diagramPath);
+    if (text === null) return undefined;
+    try {
+      const members = codecFor(diagramPath).parse(text, this.shownSubjectAreaPath(diagramPath)).members;
+      return new Set((members?.rows ?? []).flatMap((r) => (r.path !== undefined && !r.path.startsWith('../')
+        ? [path.resolve(this.tableLibraryService.semanticAbsolute(r.path)).toLowerCase()]
+        : [])));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Build supplementary payload data for webview messages.
    * Includes templates and list of available models from logical-models/, yml, and manifest.
    */
@@ -1835,7 +1984,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
     ymlData: YmlData,
     modelFolder?: string,
-    options: { readAllTables?: boolean; catalog?: CatalogData } = {},
+    options: {
+      readAllTables?: boolean;
+      catalog?: CatalogData;
+      /**
+       * Where the library tells tables apart by identity, the table files a DBML diagram's `use`
+       * lines read (resolved, lower-case): a library row is left out when it is one of them (not
+       * by name: another schema folder's table of a member's name can still be added), and each
+       * row names its own file with its layer and schema folder.
+       */
+      memberFiles?: ReadonlySet<string>;
+    } = {},
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -1860,12 +2019,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const library = this.tableLibraryService;
     const previews = library.withIndexSnapshot(() => library.tablePreviews({ readAtMost: options.readAllTables ? Infinity : EXISTING_TABLES_READ_AT_MOST }));
     library.withIndexSnapshot(() => {
+      const memberFiles = options.memberFiles;
       for (const model of previews) {
-        if (existingModelNames.has(model.name)) continue;
+        if (memberFiles ? memberFiles.has(path.resolve(model.filePath).toLowerCase()) : existingModelNames.has(model.name)) continue;
         // A yml whose internal `name:` is not path-safe cannot be added to a
         // domain — skip it rather than failing the whole payload.
-        const absPath = model.pending ? model.filePath : library.resolveTablePath(model.name);
+        const absPath = model.pending || memberFiles ? model.filePath : library.resolveTablePath(model.name);
         if (absPath === null) continue;
+        const entry = memberFiles ? library.tableEntryAt(absPath) : undefined;
         existingModels.push({
           name: model.name,
           schema: model.schema,
@@ -1874,6 +2035,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           source: 'logical',
           sourcePath: path.relative(this.workspaceRoot, absPath),
           ...(model.pending ? { detailsPending: true as const } : {}),
+          ...(entry?.storage === 'dbml' && entry.layer !== undefined ? { layer: entry.layer, schemaFolder: entry.folder } : {}),
         });
         addedNames.add(model.name);
       }
@@ -2612,7 +2774,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'addExistingModel': {
-            const payload = (message as { payload?: { modelName: string } }).payload;
+            const payload = (message as { payload?: { modelName: string; sourcePath?: string } }).payload;
+            // A bad name or file path, in the handler's words.
+            const payloadError = payload !== undefined ? validateAddExistingModelPayload(payload) : null;
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add table: ${payloadError}` } });
+              break;
+            }
             if (payload) {
               telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
@@ -2629,8 +2797,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             telemetry.feature('addModel');
+            const picked = payload as { modelNames: string[]; sourcePaths?: string[] };
             await this.queueEdit(panelKey, () =>
-              this.handleAddExistingModels(document, webviewPanel.webview, (payload as { modelNames: string[] }).modelNames));
+              this.handleAddExistingModels(document, webviewPanel.webview, picked.modelNames, picked.sourcePaths ? { sourcePaths: picked.sourcePaths } : {}));
             break;
           }
           case 'dropTables': {
@@ -2750,7 +2919,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to open table file: ${payloadError}` } });
               break;
             }
-            await this.handleOpenModelFile(payload.modelName, webviewPanel.webview);
+            await this.handleOpenModelFile(payload.modelName, webviewPanel.webview, document);
             break;
           }
           case 'goToTable': {
@@ -3352,13 +3521,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Open a model's `logical-models` file in a text editor, with the cursor on
    * its load error when it has one.
    */
-  private async handleOpenModelFile(modelName: string, webview: vscode.Webview): Promise<void> {
-    const filePath = this.tableLibraryService.findTableFile(modelName.trim());
+  private async handleOpenModelFile(modelName: string, webview: vscode.Webview, document: vscode.TextDocument): Promise<void> {
+    let table: CanvasTable;
+    try {
+      table = this.canvasTable(document, modelName.trim());
+    } catch (err) {
+      this.post(webview, { type: 'error', payload: { message: err instanceof Error ? err.message : String(err) } });
+      return;
+    }
+    // The member's own file (two schema folders may each hold a table of its name), else the table by name.
+    const filePath = table.filePath ?? this.tableLibraryService.findTableFile(table.name);
     if (!filePath) {
       this.post(webview, { type: 'error', payload: { message: `Table "${modelName}" not found in the Table Library.` } });
       return;
     }
-    const error = this.tableLibraryService.getTableFileError(modelName.trim());
+    const error = table.filePath !== undefined
+      ? this.tableLibraryService.getTableFileErrorAt(table.filePath, table.name)
+      : this.tableLibraryService.getTableFileError(table.name);
     await openTableFileAt(filePath, error?.line, error?.column);
   }
 
@@ -3378,7 +3557,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.commands.executeCommand('erdStudio.openInDiagram', { type: 'model', name: modelName }, { excludeDiagram: document.uri.fsPath });
       return;
     }
-    const filePath = this.tableLibraryService.findTableFile(modelName);
+    let table: CanvasTable;
+    try {
+      table = this.canvasTable(document, modelName);
+    } catch (err) {
+      this.post(webview, { type: 'error', payload: { message: err instanceof Error ? err.message : String(err) } });
+      return;
+    }
+    // The member's own file (two schema folders may each hold a table of its name), else the table by name.
+    const filePath = table.filePath ?? this.tableLibraryService.findTableFile(table.name);
     if (!filePath) {
       this.post(webview, { type: 'error', payload: { message: `Table "${modelName}" not found in the Table Library.` } });
       return;
@@ -3390,16 +3577,113 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.env.clipboard.writeText(shown);
       vscode.window.setStatusBarMessage(`ERD Studio: Copied ${shown}`, 4000);
     } else {
-      await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, modelName);
+      await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name);
     }
+  }
+
+  /**
+   * The one way a handler turns a canvas message's table name into a table
+   * (the diagram boundary). Where the library tells tables apart by identity
+   * (`schemaScopedNames`) and `document` is a DBML diagram, `text` is
+   * resolved among the diagram's own members (`DiagramMemberTable`: its
+   * reference, its `<schema>.<name>`, or a bare name one member has), and
+   * the table is the file that member's `use` line reads: `id` and
+   * `filePath`. Text that names no member is refused ("not on this
+   * diagram"). A member whose `use` line names no listed file is named by
+   * its bare name, and only while no other table has that name. Anywhere
+   * else the text is the table's name, as it always was.
+   */
+  private canvasTable(document: vscode.TextDocument, text: string): CanvasTable {
+    if (!this.schemaScoped() || !this.isDbmlDocument(document)) return { ref: text, name: text, library: text };
+    const row = this.parseSubjectAreaFile(document).members?.resolve(text);
+    if (!row) throw new EditRefused(`Table "${text}" is not on this diagram.`);
+    const filePath = row.path !== undefined && !row.path.startsWith('../') ? this.tableLibraryService.semanticAbsolute(row.path) : undefined;
+    const entry = filePath !== undefined ? this.tableLibraryService.tableEntryAt(filePath) : undefined;
+    if (entry?.id !== undefined && !entry.shadowedBy) {
+      return { ref: row.ref, name: row.name, id: entry.id, filePath: entry.filePath, library: this.tableLibraryService.libraryRef(entry.id) ?? row.name };
+    }
+    if (row.path !== undefined && this.tableLibraryService.isAmbiguousName(row.name)) {
+      throw new EditRefused(`Can't edit "${row.ref}": its file ${row.path} is not in the Table Library, and more than one table is named ${row.name}.`);
+    }
+    return { ref: row.ref, name: row.name, library: row.name };
+  }
+
+  /** Whether the library tells tables apart by identity (a library double without the flag does not). */
+  private schemaScoped(): boolean {
+    return (this.tableLibraryService as Partial<Pick<import('../services/logicalModelService').TableLibraryService, 'schemaScopedNames'>>).schemaScopedNames === true;
+  }
+
+  /** The library model of a canvas table: by its identity where it has one, else by its name. */
+  private canvasModel(table: CanvasTable): SemanticTable | null {
+    return this.tableLibraryService.getTable(table.id ?? table.name);
+  }
+
+  /**
+   * Every library table as the library's relationship lookups name it, for
+   * the one relationship planner (`planRelationshipWrite`) and the cascades
+   * that rewrite other tables' relationships: told apart by identity, each
+   * is named by its library reference (`<schema>.<name>` where two schema
+   * folders share its name), and `save` turns a model those change back
+   * into a save of its own file under its own name (by its identity).
+   * Otherwise the library's tables by name, saved by name, as always.
+   */
+  private libraryTables(): { models: SemanticTable[]; save: (model: SemanticTable) => TableFileSave } {
+    if (!this.schemaScoped()) return { models: this.tableLibraryService.listTables(), save: (model) => ({ model }) };
+    const ids = new Map<string, TableId>();
+    const models: SemanticTable[] = [];
+    for (const entry of this.tableLibraryService.listTableFiles()) {
+      if (entry.shadowedBy || entry.id === undefined) continue;
+      const model = this.tableLibraryService.getTable(entry.id);
+      if (!model) continue;
+      const ref = this.tableLibraryService.libraryRef(entry.id) ?? model.name;
+      ids.set(ref.toLowerCase(), entry.id);
+      models.push(ref === model.name ? model : { ...model, name: ref });
+    }
+    return {
+      models,
+      save: (model) => {
+        const id = ids.get(model.name.toLowerCase());
+        return id !== undefined ? { model: { ...model, name: id.name }, from: id } : { model };
+      },
+    };
+  }
+
+  /**
+   * The two names of the DBML diagram `document`'s tables, where the library
+   * tells tables apart by identity: `toLibrary` turns what the diagram calls a
+   * member into what the library's relationships call it, `toDiagram` back.
+   * A name that is not a member's passes as it is. Undefined anywhere else
+   * (the two names are one).
+   */
+  private diagramLibraryRefs(document: vscode.TextDocument): { toLibrary: (ref: string) => string; toDiagram: (ref: string) => string } | undefined {
+    if (!this.schemaScoped() || !this.isDbmlDocument(document)) return undefined;
+    const members = this.parseSubjectAreaFile(document).members;
+    if (!members) return undefined;
+    const toDiagram = new Map<string, string>();
+    const toLibrary = new Map<string, string>();
+    for (const row of members.rows) {
+      const entry = row.path !== undefined && !row.path.startsWith('../')
+        ? this.tableLibraryService.tableEntryAt(this.tableLibraryService.semanticAbsolute(row.path))
+        : undefined;
+      const library = entry?.id !== undefined && !entry.shadowedBy ? this.tableLibraryService.libraryRef(entry.id) : undefined;
+      if (library === undefined) continue;
+      if (!toDiagram.has(library.toLowerCase())) toDiagram.set(library.toLowerCase(), row.ref);
+      if (!toLibrary.has(row.ref.toLowerCase())) toLibrary.set(row.ref.toLowerCase(), library);
+    }
+    return {
+      toLibrary: (ref) => toLibrary.get(ref.toLowerCase()) ?? toLibrary.get(members.resolve(ref)?.ref.toLowerCase() ?? '') ?? ref,
+      toDiagram: (ref) => toDiagram.get(ref.toLowerCase()) ?? ref,
+    };
   }
 
   /**
    * Why a model cannot be edited: its file has a YAML error (the file exists
    * but is broken), else the old "not found" wording.
    */
-  private tableUnavailableMessage(modelName: string): string {
-    const error = this.tableLibraryService.getTableFileError(modelName);
+  private tableUnavailableMessage(modelName: string, table?: CanvasTable): string {
+    const error = table?.filePath !== undefined
+      ? this.tableLibraryService.getTableFileErrorAt(table.filePath, table.name)
+      : this.tableLibraryService.getTableFileError(modelName);
     if (error) {
       const where = error.line !== undefined ? ` on line ${error.line}` : '';
       if (error.kind === 'read') return `Can't edit "${modelName}": its file could not be read.`;
@@ -4045,20 +4329,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.tableLibraryService.listTables().filter((m) => !sameName(m.name, exclude));
   }
 
+  /**
+   * The saves of a cascade over every library table but `exclude` (the
+   * relationships of other tables that point at it): `change` is given the
+   * other tables named as the library's relationships name them
+   * ({@link libraryTables}) and returns the ones it changed, each saved as
+   * its own file.
+   */
+  private otherLibrarySaves(exclude: CanvasTable, change: (others: SemanticTable[]) => SemanticTable[]): TableFileSave[] {
+    const library = this.libraryTables();
+    return change(library.models.filter((m) => !sameName(m.name, exclude.library))).map(library.save);
+  }
+
   private async applyTableEdit(
     document: vscode.TextDocument,
     webview: vscode.Webview,
     modelName: string,
     modelMutator: (model: import('../types/semantic').SemanticTable) => void,
     domainMutator?: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
-    /** Other library models changed alongside (relationships pointing at this one). */
-    alsoSave: readonly SemanticTable[] = [],
+    /** Other library models changed alongside (relationships pointing at this one), each a model or its save. */
+    alsoSave: ReadonlyArray<SemanticTable | TableFileSave> = [],
     /** Other diagrams' own relationship copies to rewrite in the same edit (see applySubjectAreaEdit). */
     otherDomains?: (parsed: Record<string, unknown>) => boolean,
   ): Promise<boolean> {
-    const model = this.tableLibraryService.getTable(modelName);
+    // The member's own file (two schema folders may each hold a table of its name), saved by its identity.
+    const table = this.canvasTable(document, modelName);
+    const model = this.canvasModel(table);
     if (!model) {
-      throw new Error(this.tableUnavailableMessage(modelName));
+      throw new Error(this.tableUnavailableMessage(modelName, table));
     }
 
     modelMutator(model);
@@ -4074,7 +4372,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         refreshWebview: true,
         webview,
         stage: 'logical',
-        modelFiles: { save: [{ model }, ...alsoSave.map((other) => ({ model: other }))] },
+        modelFiles: { save: [{ model, ...(table.id ? { from: table.id } : {}) }, ...alsoSave.map((other) => ('model' in other ? other : { model: other }))] },
         ...(otherDomains ? { otherDomains } : {}),
       },
     );
@@ -4112,7 +4410,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const deleted: string[] = [];
     if (!ops) return { docs, created, deleted };
 
-    for (const name of ops.delete ?? []) {
+    // A YAML project's tables are named by name (a TableId names a DBML table, which never reaches here).
+    for (const name of (ops.delete ?? []).filter((d): d is string => typeof d === 'string')) {
       if (!this.tableLibraryService.tableExists(name)) continue;
       const deletePath = this.tableLibraryService.tablePath(name);
       edit.deleteFile(vscode.Uri.file(deletePath), { ignoreIfNotExists: true });
@@ -4148,7 +4447,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** The library path of a model file `ops` would rewrite or delete that is open with unsaved edits. */
   private dirtyTableFile(ops: TableFileOps | undefined): string | null {
     const names = [
-      ...(ops?.delete ?? []),
+      ...(ops?.delete ?? []).filter((d): d is string => typeof d === 'string'),
       ...(ops?.save ?? []).flatMap(({ model, fromName }) => (fromName ? [model.name, fromName] : [model.name])),
     ];
     for (const name of names) {
@@ -4374,6 +4673,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       onApplied?: () => void;
       /** Called when the edit went through as a layout-only write (positions or sticky-note boxes alone). */
       onLayoutOnly?: () => void;
+      /** DBML: members whose reference the mutator changed (old → new): a namesake joined or left. Each keeps its `use` line. */
+      renamedMembers?: ReadonlyMap<string, string>;
     },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
@@ -4515,7 +4816,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     const touchedModels = [
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
-      ...(modelFiles?.delete ?? []),
+      ...(modelFiles?.delete ?? []).map((d) => (typeof d === 'string' ? d : d.name)),
     ];
     for (const name of new Set(touchedModels)) this.tableLibraryService.invalidateCache(name);
     await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
@@ -4691,7 +4992,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
       const resolver = this.resolverOf(plan);
       // §2.6 step 1: the diagram being edited gets its imports recomputed on every edit but a layout-only one.
-      const [primary] = codecFor(fsPath).render(file, text, fsPath, { ...resolver, refreshRelationshipsUses: !layoutOnly });
+      // Told apart by identity, each of its members is the table its own `use` line reads, never the
+      // library's first of its name, and a member whose reference the edit changed keeps its line.
+      const own = plan.identities && file.members
+        ? diagramResolverOf(plan, { members: file.members.rows.map((r) => r.ref), memberPaths: file.members.rows.map((r) => r.path ?? '') }, resolver)
+        : resolver;
+      const [primary] = codecFor(fsPath).render(file, text, fsPath, {
+        ...own,
+        refreshRelationshipsUses: !layoutOnly,
+        ...(options.renamedMembers && options.renamedMembers.size > 0 ? { renamedMembers: options.renamedMembers } : {}),
+      });
       primaryText = primary.kind === 'delete' ? text : primary.text;
       const others = options.otherDomains ? this.rewriteOtherSubjectAreaWrites(fsPath, options.otherDomains, resolver, { plan }) : [];
       const rewritten = new Set(others.map((w) => path.resolve(w.path)));
@@ -4730,7 +5040,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     const touchedModels = [
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
-      ...(modelFiles?.delete ?? []),
+      ...(modelFiles?.delete ?? []).map((d) => (typeof d === 'string' ? d : d.name)),
     ];
     await this.refreshSubjectAreasReferencingTables(new Set(touchedModels), panelKey);
     this._onDidWriteSubjectArea.fire({
@@ -5159,7 +5469,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     /** The diagram's file: a DBML diagram's tables are badged with the layer each was read from. */
     diagramPath?: string,
   ): DisplaySubjectArea {
-    const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
+    const memberFiles = this.memberFilesOf(diagramPath);
+    const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder, memberFiles ? { memberFiles } : {});
     const readOnly = domain.stage === 'physical';
     const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
@@ -5222,7 +5533,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const names = (this.tableLibraryService.writesDbml()
         ? subjectAreaTableNames(document.getText(), document.uri.fsPath)
         : null) ?? [];
-      for (const [name, placed] of this.tableLibraryService.newRelationshipPlacements(names)) {
+      // Told apart by identity, each member is placed by the file its `use` line reads, and answered
+      // under what the diagram calls it (the dialog looks each table up by its name on the canvas).
+      const byRef = new Map<string, string>();
+      const asked: Array<string | TableId> = this.schemaScoped() && this.isDbmlDocument(document)
+        ? names.map((name) => {
+          try {
+            const table = this.canvasTable(document, name);
+            if (!table.id) return name;
+            byRef.set(tableIdKey(table.id), name.toLowerCase());
+            return table.id;
+          } catch {
+            return name;
+          }
+        })
+        : names;
+      for (const [key, placed] of this.tableLibraryService.newRelationshipPlacements(asked)) {
+        const name = byRef.get(key) ?? key;
         files[name] = projectRelative(this.workspaceRoot, placed.file);
         // The dialog's "Stored in" choice: the default first, then the layer's other readable files.
         choices[name] = placed.choices.map((rel) => ({
@@ -5492,7 +5819,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         step = 'other';
         // What the canvas knows beyond the diagram, once the diagram has gone out.
-        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
         // What the files hold that this picture does not show ("not shown" notes), worked out after it has gone out.
         this.noteDrawn(key, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, key, document, displayDomain.models.map((m) => m.name));
@@ -5661,7 +5988,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const format = detectSubjectAreaFormat(parsed);
       const section = this.getStageSection(format === 'v6' ? normaliseSubjectAreaDocument(parsed) : parsed, 'logical');
       const v5 = format === 'v6' || this.isSubjectAreaV5(parsed);
-      const models = v5 ? this.tableLibraryService.listTables() : ((section.models ?? []) as SemanticTable[]).filter((m) => !!m && typeof m === 'object');
+      // Named as the library's relationships name them (its library reference, where two schema folders share a name).
+      const models = v5 ? this.libraryTables().models : ((section.models ?? []) as SemanticTable[]).filter((m) => !!m && typeof m === 'object');
       const unreadableEntries = v5 && this.tableLibraryService.hasUnreadableRelationships() ? 1 : 0;
       telemetry.relationshipState(surveyLibrary(models, (section.relationships ?? []) as Relationship[], { unreadableEntries }));
     } catch (err) {
@@ -6091,6 +6419,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.
       const dragged = (this.takeLibraryDrag() ?? []).filter((name) => validateTableNameSafety(name) === null);
+      // Dropped table files whose name alone cannot say which table (another schema folder has a
+      // table of their name, or the diagram shows a namesake): added by their files.
+      const byFile = payload.fromLibrary === true && dragged.length > 0
+        ? undefined
+        : this.tableFilesToAddByFile(document, tableFilesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles()).map((f) => this.workspaceRelative(f.filePath)));
+      if (byFile) {
+        telemetry.feature('addModel');
+        await this.queueEdit(panelKey, async () => {
+          const added = await this.addTableFiles(document, webview, byFile, { dropAt: payload.position });
+          if (added.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: added[0] } } satisfies RevealTableMessage);
+        });
+        return;
+      }
       // A Table Library drag is what its controller collected: VS Code gives the
       // drop the files of the dragged table rows only, never a schema or layer
       // row's tables. Any other drop (an Explorer file) is its files, whatever
@@ -6561,6 +6902,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           );
         } : undefined;
 
+        // The relationships of the library name the table as the library does (its library reference).
+        const table = this.canvasTable(document, payload.modelName);
         const ok = await this.applyTableEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           const columnIndex = columns.findIndex((c) => c.name === payload.oldColumnName);
@@ -6585,12 +6928,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(existing.meta ? { meta: existing.meta } : {}),
           } as ColumnDef;
           if (columnRenamed) {
-            renameColumnInRelationships([model], payload.modelName, payload.oldColumnName, payload.column.name);
+            renameColumnInRelationships([model], table.library, payload.oldColumnName, payload.column.name);
           }
         }, domainMutator, columnRenamed
           // Library relationships in other models that point at the renamed column (#126).
-          ? renameColumnInRelationships(
-            this.otherLibraryTables(payload.modelName), payload.modelName, payload.oldColumnName, payload.column.name)
+          ? this.otherLibrarySaves(table, (others) => renameColumnInRelationships(others, table.library, payload.oldColumnName, payload.column.name))
           : [],
         // And the copies other diagrams keep of their own (#133 L5).
         columnRenamed ? (other) => renameColumnInSubjectAreaRelationships(
@@ -6679,8 +7021,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: write to central model file, cascade orphaned relationships in the domain.
       // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
       if (this.isSubjectAreaV5(parsed)) {
-        // The whole library, as read before the edit: where a composite the column is part of is found.
-        const library = this.tableLibraryService.listTables();
+        // The whole library, as read before the edit: where a composite the column is part of is found
+        // (named as the library's relationships name each table).
+        const table = this.canvasTable(document, payload.modelName);
+        const library = this.libraryTables().models;
         const ok = await this.applyTableEdit(
           document,
           webview,
@@ -6690,7 +7034,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const idx = columns.findIndex((c) => c.name === payload.columnName);
             if (idx === -1) return;
             columns.splice(idx, 1);
-            removeColumnRelationships([model], payload.modelName, payload.columnName, library);
+            removeColumnRelationships([model], table.library, payload.columnName, library);
           },
           (sec) => {
             // A composite key loses all its members with one column (#133 L2), the library's included.
@@ -6698,7 +7042,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.modelName, payload.columnName, library);
           },
           // Library relationships in other models that point at the removed column (#126).
-          removeColumnRelationships(this.otherLibraryTables(payload.modelName), payload.modelName, payload.columnName, library),
+          this.otherLibrarySaves(table, (others) => removeColumnRelationships(others, table.library, payload.columnName, library)),
         );
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to remove column.' } });
@@ -6893,10 +7237,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
         cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
       };
+      // What the library calls the two tables (the planner's names, which the dialog's pick is checked against).
+      const stored = this.libraryRelationship(document, drawn);
       // The dialog's "Stored in" pick (DBML): checked now, against the files as they are.
       let newRefFile: NewRefFileChoice | undefined;
       if (relationshipsFile !== undefined) {
-        const chosen = this.chosenRelationshipsFile(drawn, relationshipsFile);
+        const chosen = this.chosenRelationshipsFile(stored, relationshipsFile);
         if ('error' in chosen) {
           webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${chosen.error}` } });
           return;
@@ -6904,7 +7250,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const pairs = [{ fromColumn: drawn.fromColumn, toColumn: drawn.toColumn }, ...(extraPairs ?? [])];
         newRefFile = {
           file: chosen.path,
-          links: pairs.map((p) => linkKey({ fromModel: drawn.fromModel, fromColumn: p.fromColumn, toModel: drawn.toModel, toColumn: p.toColumn })),
+          links: pairs.map((p) => linkKey({ fromModel: stored.fromModel, fromColumn: p.fromColumn, toModel: stored.toModel, toColumn: p.toColumn })),
         };
       }
       const written = await this.commitRelationshipWrite(
@@ -6912,7 +7258,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         { kind: 'add', drawn, ...(markKey ? { markKey } : {}), ...(extraPairs?.length ? { extraPairs } : {}) },
         stage, 'Failed to add relationship.', undefined, newRefFile,
       );
-      if (written?.home === 'library') this.sayWhereRelationshipLanded(drawn);
+      if (written?.home === 'library') this.sayWhereRelationshipLanded(stored);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logHandlerFailure(`[SemanticEditorProvider] Add relationship failed: ${message}`, err);
@@ -6979,21 +7325,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     newRefFile?: NewRefFileChoice,
   ): Promise<{ home: 'library' | 'domain'; changed: SemanticTable[] } | null> {
     // Several ops (Turn round all, #163) are folded into one plan, so they are one edit and one undo step.
-    const ops: readonly RelationshipWriteOp[] = Array.isArray(op) ? op : [op as RelationshipWriteOp];
+    // Told apart by identity, the planner sees every table under its library reference, and the
+    // diagram's names for its members are turned into those on the way in and back on the way out.
+    const refs = this.diagramLibraryRefs(document);
+    const ops: readonly RelationshipWriteOp[] = (Array.isArray(op) ? op : [op as RelationshipWriteOp])
+      .map((o) => (refs ? relationshipOpRenamed(o, refs.toLibrary) : o));
     const parsed = this.parseSubjectAreaDocument(document);
     const v5 = this.isSubjectAreaV5(parsed);
-    const models = v5 ? this.tableLibraryService.listTables() : [];
+    const library = v5 ? this.libraryTables() : undefined;
+    const models = library?.models ?? [];
     // A DBML diagram always stores relationships in the library (D5).
     const home = v5 && this.relationshipsInLibrary(models, document) ? 'library' : 'domain';
     const dbt = await this.loadDbtKeyIndex();
     // Filled by the mutator, which applySubjectAreaEdit runs before it reads modelFiles.
-    const save: Array<{ model: SemanticTable }> = [];
+    const save: TableFileSave[] = [];
     let grouped: { count: number; compositeKey: string } | undefined;
     let audit: RelationshipAudit | undefined;
     const success = await this.applySubjectAreaEdit(
       document,
       (section) => {
-        const input: RelationshipWriteInput = { home, models, domainRelationships: (section.relationships ?? []) as Relationship[], dbt };
+        const held = (section.relationships ?? []) as Relationship[];
+        const input: RelationshipWriteInput = { home, models, domainRelationships: refs ? held.map((r) => relationshipEndsRenamed(r, refs.toLibrary)) : held, dbt };
         const { plan, steps } = ops.length === 1
           ? (() => {
             const single = planRelationshipWrite(ops[0], input);
@@ -7024,18 +7376,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           (section.models as SemanticTable[])[inline] = marked;
         }
         if (plan.domainRelationships) {
+          const planned = refs ? plan.domainRelationships.map((r) => relationshipEndsRenamed(r, refs.toDiagram)) : plan.domainRelationships;
           // A DBML diagram's object holds only its pending relationships (D27), which an edit may keep or
           // remove but never add or change; the writer refuses anything else.
           if (home === 'library' && this.isDbmlDocument(document)) {
             const identity = (r: Relationship): string => [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((p) => String(p ?? '').toLowerCase()).join('\u0000');
             const held = new Set(((section.relationships ?? []) as Relationship[]).map(identity));
-            if (plan.domainRelationships.some((r) => !held.has(identity(r)))) {
+            if (planned.some((r) => !held.has(identity(r)))) {
               throw new EditRefused('A DBML diagram holds no relationships; they live in the table library.');
             }
           }
-          section.relationships = plan.domainRelationships;
+          section.relationships = planned;
         }
-        save.push(...plan.changed.map((model) => ({ model })));
+        save.push(...plan.changed.map((model) => (library ? library.save(model) : { model })));
         grouped = plan.grouped;
       },
       { webview, stage, errorLabel, modelFiles: { save, ...(newRefFile ? { newRefFile } : {}) }, onUnsaved: () => telemetry.error('relWriteFailed'), onApplied },
@@ -7049,6 +7402,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
     }
     return success ? { home, changed: save.map((entry) => entry.model) } : null;
+  }
+
+  /**
+   * `drawn` with each end named as the library's relationships name it
+   * (its library reference where the library tells tables apart by
+   * identity), for the lookups that read the library after a write.
+   */
+  private libraryRelationship<T extends Pick<Relationship, 'fromModel' | 'toModel'>>(document: vscode.TextDocument, drawn: T): T {
+    const refs = this.diagramLibraryRefs(document);
+    return refs ? relationshipEndsRenamed(drawn, refs.toLibrary) : drawn;
   }
 
   private async handleRenameModel(
@@ -7106,18 +7469,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           });
           return;
         }
-        const existingModel = this.tableLibraryService.getTable(payload.oldName);
+        // The member's own file, renamed by its identity where the library tells tables apart by it.
+        const table = this.canvasTable(document, payload.oldName);
+        const existingModel = this.canvasModel(table);
         if (!existingModel) {
-          webview.postMessage({ type: 'error', payload: { message: this.tableUnavailableMessage(payload.oldName) } });
+          webview.postMessage({ type: 'error', payload: { message: this.tableUnavailableMessage(payload.oldName, table) } });
           return;
         }
         const dbmlDiagram = subjectAreaStorageOf(document.uri.fsPath) === 'dbml';
         const renamedModel: import('../types/semantic').SemanticTable = { ...existingModel, name: trimmedNew };
         // Library relationships that point at the model — its own self-references
-        // and every other model's — follow the rename (#126).
-        renameTableInRelationships([renamedModel], payload.oldName, trimmedNew);
-        const pointingAtIt = renameTableInRelationships(
-          this.otherLibraryTables(payload.oldName), payload.oldName, trimmedNew);
+        // and every other model's — follow the rename (#126). Told apart by identity
+        // (as the Explorer's rename does), they keep the table's old library reference,
+        // which the plan follows to the renamed file, so a new name another schema
+        // folder's table has can never be read as that table.
+        if (!table.id) renameTableInRelationships([renamedModel], payload.oldName, trimmedNew);
+        const pointingAtIt: TableFileSave[] = table.id
+          ? []
+          : renameTableInRelationships(this.otherLibraryTables(payload.oldName), payload.oldName, trimmedNew).map((model) => ({ model }));
+        // Told apart by identity, the other DBML diagrams follow the rename by the file their `use`
+        // lines read (the settle); a JSON diagram names tables by name alone, and follows it only
+        // when its name reads this table (the library's first file of the name).
+        const byName = this.tableLibraryService.findTableFile(table.name);
+        const followsByName = !table.filePath || (byName !== null && samePath(byName, table.filePath));
+        // The diagram's own name for the table after the rename: its new name, or `<schema>.<name>`
+        // while another member still shares it.
+        const members = dbmlDiagram && table.id ? this.parseSubjectAreaFile(document).members : undefined;
+        const renamed = members?.renaming(table.ref, trimmedNew);
+        const newRef = renamed?.ref ?? trimmedNew;
 
         // Update domain (model reference name, relationships, positions) and
         // create-new + delete-old yml in one WorkspaceEdit so the rename is atomic
@@ -7125,6 +7504,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const success = await this.applySubjectAreaEdit(
           document,
           (sec, p) => {
+            if (renamed) {
+              // Every reference the rename changes (its own, and a namesake's that no longer needs its schema).
+              renameMemberRefs(p, renamed.renames);
+              return;
+            }
             const names = (sec.models ?? []) as string[];
             const idx = names.indexOf(payload.oldName);
             if (idx !== -1) names[idx] = trimmedNew;
@@ -7150,19 +7534,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // TableLibraryService.serializeTable.
             modelFiles: {
               save: [
-                { model: renamedModel, fromName: payload.oldName },
-                ...pointingAtIt.map((model) => ({ model })),
+                { model: renamedModel, fromName: table.name, ...(table.id ? { from: table.id } : {}) },
+                ...pointingAtIt,
               ],
-              delete: [payload.oldName],
+              delete: [table.id ?? payload.oldName],
             },
+            ...(renamed && renamed.renames.size > 0 ? { renamedMembers: renamed.renames } : {}),
             // Every other diagram that names the model follows the rename —
             // its model list, position and own relationship copies (#133 L5).
-            otherDomains: (other, storage) => renameTableInSubjectArea(other, payload.oldName, trimmedNew, storage),
+            otherDomains: table.id
+              ? (other, storage) => storage === 'json' && followsByName && renameTableInSubjectArea(other, table.name, trimmedNew, storage)
+              : (other, storage) => renameTableInSubjectArea(other, payload.oldName, trimmedNew, storage),
           },
         );
 
         if (success) {
           this.selectorsService.scheduleRegenerate();
+          // The canvas selects the table by the name it gave it; one that keeps its schema is selected under it.
+          if (newRef !== trimmedNew) this.post(webview, { type: 'revealTable', payload: { modelName: newRef } });
         } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to rename table.' } });
         }
@@ -7256,6 +7645,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const parsed = this.parseSubjectAreaDocument(document, text);
 
       if (this.isSubjectAreaV5(parsed)) {
+        // Each removed member's own file, found while it is still on the diagram: the "delete its
+        // file too?" offer names that file (two schema folders may each hold a table of its name).
+        const removedTables = this.schemaScoped() && this.isDbmlDocument(document)
+          ? [...namesSet].flatMap((name) => {
+            try {
+              return [this.canvasTable(document, name)];
+            } catch {
+              return [];
+            }
+          })
+          : undefined;
         const success = await this.applySubjectAreaEdit(
           document,
           (sec, p) => {
@@ -7282,11 +7682,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // Single batched prompt for any underlying table files. A `.dbml`
         // table's file goes with its relationships and every use line that
         // names it, in diagrams and relationships files (D16).
-        const filesToOffer = [...namesSet].filter((name) => this.tableLibraryService.tableExists(name));
+        // Told apart by identity, each table is offered by its own file and deleted by its identity.
+        const offered: Array<string | TableId> = removedTables
+          ? removedTables.flatMap((t): Array<string | TableId> => (t.id ? [t.id] : this.tableLibraryService.tableExists(t.name) ? [t.name] : []))
+          : [...namesSet].filter((name) => this.tableLibraryService.tableExists(name));
+        const offeredFile = (t: string | TableId): string => (typeof t === 'string' ? this.tableLibraryService.tablePath(t) : this.tableLibraryService.findTableById(t)!.filePath);
+        const filesToOffer = offered.map((t) => (typeof t === 'string' ? t : t.name));
         if (filesToOffer.length > 0) {
           const fileIsSingle = filesToOffer.length === 1;
-          const dbmlNames = filesToOffer.filter((name) => this.tableLibraryService.tableStorage(name) === 'dbml');
-          const cascade = dbmlNames.length > 0 ? this.describeDbmlDeleteCascade(dbmlNames) : '';
+          const dbmlTables = offered.filter((t) => this.tableLibraryService.tableStorage(t) === 'dbml');
+          const cascade = dbmlTables.length > 0 ? this.describeDbmlDeleteCascade(dbmlTables) : '';
           const prompt = fileIsSingle
             ? `Removed "${filesToOffer[0]}" from this diagram. It stays in the Table Library for other diagrams. Delete its table file too?${cascade}`
             : `Removed ${filesToOffer.length} tables from this diagram. They stay in the Table Library for other diagrams. Delete their table files too?${cascade}`;
@@ -7298,17 +7703,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             .then(async (choice) => {
               if (choice !== deleteLabel) return;
               // Captured before the delete: afterwards the folder is unknowable.
-              const filePaths = filesToOffer.map((name) => this.tableLibraryService.tablePath(name));
-              const shownPaths = filesToOffer.map((name) => this.libraryRelativePath(name));
+              const filePaths = offered.map(offeredFile);
+              const shownPaths = offered.map((t) => (typeof t === 'string' ? this.libraryRelativePath(t) : this.tableLibraryService.libraryRelativePath(offeredFile(t))));
               const deleteFiles = async (): Promise<void> => {
                 // A DBML table: the D16 cascade, one WorkspaceEdit through applyFileWrites.
-                if (filesToOffer.some((name) => this.tableLibraryService.tableStorage(name) === 'dbml')) {
+                if (offered.some((t) => this.tableLibraryService.tableStorage(t) === 'dbml')) {
                   let result: { ok: boolean; unrestored: string[] };
                   try {
                     // In this canvas's queue, anchored on its diagram while it is open:
                     // Cmd+Z here then rewinds the delete before the remove (#274).
                     result = await this.runQueued(panelKey, () =>
-                      this.deleteTablesWithCascade(filesToOffer, this.deleteOriginOf(document)));
+                      this.deleteTablesWithCascade(offered, this.deleteOriginOf(document)));
                   } catch (err) {
                     void vscode.window.showErrorMessage(`Could not delete ${shownPaths.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
                     return;
@@ -7386,12 +7791,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagrams that list them. `other` words them for the canvas, whose own
    * diagram has just dropped them. A clause whose count is 0 is left out.
    */
-  describeDbmlDeleteCascade(names: readonly string[], other = true): string {
+  describeDbmlDeleteCascade(tables: ReadonlyArray<string | TableId>, other = true): string {
+    // A table named by its identity is counted by it (its namesake in another schema folder is another table).
+    const names = tables.filter((t): t is string => typeof t === 'string');
+    const ids = new Set(tables.filter((t): t is TableId => typeof t !== 'string').map(tableIdKey));
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     // Every Ref in the project's relationships files with an end among them: one per relationship, a composite once.
     let relationships = 0;
     for (const ref of this.tableLibraryService.relationshipsIndex().refs) {
-      if (!ref.pending && (lowerNames.has(ref.owner) || lowerNames.has(ref.target))) relationships++;
+      const end = (label: string, id: string | undefined): boolean => lowerNames.has(label) || (id !== undefined && ids.has(id));
+      if (!ref.pending && (end(ref.owner, ref.ownerId) || end(ref.target, ref.targetId))) relationships++;
     }
     // Every DBML diagram listing one, from its syntax-only summary (memoised).
     const semanticRoot = this.semanticRootDir();
@@ -7401,10 +7810,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const rel = path.relative(semanticRoot, summary.filePath).split(path.sep).join('/');
       const imports = diagramSummaryForFile(rel, summary.filePath, this.openDocumentText(summary.filePath));
       const members = imports === null || imports === 'unreadable' ? [] : [...imports.members, ...imports.unlinked];
-      if (members.some((m) => lowerNames.has(m.toLowerCase()))) diagrams++;
+      const memberIds = imports === null || imports === 'unreadable' ? [] : imports.memberPaths.map((p) => tableIdOfPath(p));
+      if (members.some((m) => lowerNames.has(m.toLowerCase())) || memberIds.some((id) => id !== undefined && ids.has(tableIdKey(id)))) diagrams++;
     }
     // A count of 0 is left out, never shown (#274: "its place in 0 other diagrams").
-    const single = names.length === 1;
+    const single = tables.length === 1;
     const parts = [single ? "the table's file" : 'their files'];
     if (relationships > 0) parts.push(`${single ? 'its' : 'their'} ${relationships} relationship${relationships === 1 ? '' : 's'}`);
     if (diagrams > 0) parts.push(`${single ? 'its place' : 'their places'} in ${diagrams} ${other ? 'other ' : ''}diagram${diagrams === 1 ? '' : 's'}`);
@@ -7431,12 +7841,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * it in that canvas's edit queue. The Table Library's Delete Table passes
    * none: no canvas asked, and the cascade is its own step in each file.
    */
-  async deleteTablesWithCascade(names: readonly string[], origin?: DeleteOrigin): Promise<{ ok: boolean; unrestored: string[] }> {
+  async deleteTablesWithCascade(tables: ReadonlyArray<string | TableId>, origin?: DeleteOrigin): Promise<{ ok: boolean; unrestored: string[] }> {
+    // Diagrams lose a table named by name wherever they list that name. One named by its identity
+    // whose name another schema folder's table shares is left to the settle, which finds each
+    // diagram's member by the file its `use` line reads, so the namesake stays where it is.
+    const names = tables.flatMap((t) => (typeof t === 'string' ? [t] : this.tableLibraryService.isAmbiguousName(t.name) ? [] : [t.name]));
     const lowerNames = new Set(names.map((n) => n.toLowerCase()));
     const readText = (filePath: string): string | null => this.openOrDiskText(filePath);
     let writes: FileWrite[];
     try {
-      const lib = this.tableLibraryService.planTableWrites(this.tableLibraryService.dbmlDeleteCascadeOps(names), undefined, { readText });
+      const lib = this.tableLibraryService.planTableWrites(this.tableLibraryService.dbmlDeleteCascadeOps(tables), undefined, { readText });
       const plan = lib.plan ?? this.tableLibraryService.planTableWrites(undefined, undefined, { dbml: true, readText }).plan!;
       const resolver = this.resolverOf(plan);
       const diagrams = this.rewriteOtherSubjectAreaWrites('', (parsed) => {
@@ -7911,13 +8325,104 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /** `filePath` (absolute) relative to the workspace, `/`-separated: how the Add Existing Table dialog names a row's file. */
+  private workspaceRelative(filePath: string): string {
+    return path.relative(this.workspaceRoot, filePath).split(path.sep).join('/');
+  }
+
+  /**
+   * The Table Library files to add to the DBML diagram `document` by file,
+   * for rows the dialog (or a drop) named by their files (`sourcePaths`,
+   * project-relative; undefined or `''` for a row with none): only where the
+   * library tells tables apart by identity, every row is a listed DBML table
+   * file, and a name alone cannot say which table one of them is (another
+   * schema folder has a table of its name, or the diagram shows a namesake).
+   * Undefined otherwise: the rows are added by name, as they always were.
+   */
+  private tableFilesToAddByFile(document: vscode.TextDocument, sourcePaths: ReadonlyArray<string | undefined>): TableFileEntry[] | undefined {
+    if (!this.schemaScoped() || !this.isDbmlDocument(document) || sourcePaths.length === 0) return undefined;
+    const files: TableFileEntry[] = [];
+    for (const sourcePath of sourcePaths) {
+      if (sourcePath === undefined || sourcePath === '') return undefined;
+      const entry = this.tableLibraryService.tableEntryAt(path.resolve(this.workspaceRoot, sourcePath));
+      if (!entry || entry.shadowedBy || entry.storage !== 'dbml' || entry.id === undefined) return undefined;
+      files.push(entry);
+    }
+    const members = this.parseSubjectAreaFile(document).members;
+    const shown = new Set((members?.rows ?? []).map((r) => r.name.toLowerCase()));
+    const needsFile = files.some((f) => this.tableLibraryService.isAmbiguousName(f.name) || shown.has(f.name.toLowerCase()));
+    return needsFile ? files : undefined;
+  }
+
+  /**
+   * Add Table Library files to the DBML diagram `document` by file (Add
+   * Existing Table, "+ Add", a drop), where the library tells tables apart
+   * by identity: each table is the file named, never the library's first
+   * file of its name. A table the diagram already shows (the same file) is
+   * named and left. A namesake from another schema folder joins as
+   * `<schema>.<name>`, and the member already there is renamed to its own
+   * `<schema>.<name>` in the same edit, its `use` line, position and links
+   * kept (one WorkspaceEdit, one undo step). Returns what the diagram calls
+   * each table added.
+   */
+  private async addTableFiles(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    files: readonly TableFileEntry[],
+    options: { dropAt?: NodePosition } = {},
+  ): Promise<string[]> {
+    const members = this.parseSubjectAreaFile(document).members;
+    if (!members) return [];
+    const fresh = files.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && files.findIndex((g) => samePath(g.filePath, f.filePath)) === i);
+    if (fresh.length === 0) {
+      const first = files[0];
+      const shown = first?.id ? members.memberOf(first.id)?.ref ?? first.name : first?.name ?? '';
+      this.post(webview, { type: 'error', payload: { message: `Table "${shown}" already exists in this diagram.` } });
+      return [];
+    }
+    const { refs, renames } = members.adding(fresh.map((f) => f.id!));
+    const success = await this.applySubjectAreaEdit(
+      document,
+      (sec, p) => {
+        // A namesake already on the diagram is now named by its schema too.
+        renameMemberRefs(p, renames);
+        sec.models = [...((sec.models ?? []) as string[]), ...refs];
+        const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+        const positions = { ...((vc.positions ?? {}) as Record<string, NodePosition>) };
+        if (options.dropAt) {
+          Object.assign(positions, dropGridPositions(refs, options.dropAt));
+        } else {
+          for (const ref of refs) positions[ref] = findOpenPosition(positions);
+        }
+        vc.positions = positions;
+        p.viewConfig = vc;
+      },
+      {
+        refreshWebview: true,
+        webview,
+        stage: 'logical',
+        errorLabel: 'Failed to add the table to this diagram.',
+        ...(renames.size > 0 ? { renamedMembers: renames } : {}),
+      },
+    );
+    if (!success) return [];
+    this.selectorsService.scheduleRegenerate();
+    return refs;
+  }
+
   private async handleAddExistingModel(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { modelName: string },
+    payload: { modelName: string; sourcePath?: string },
     stage: 'logical',
   ): Promise<void> {
     try {
+      // A Table Library row, added by its file where its name alone cannot say which table.
+      const byFile = this.tableFilesToAddByFile(document, [payload.sourcePath]);
+      if (byFile) {
+        await this.addTableFiles(document, webview, byFile);
+        return;
+      }
       // The name comes from the user's own dbt project (yml / manifest), where
       // uppercase and digit-leading names are legal, so only the path-safety
       // rule applies here — not the authoring convention. It may still be used
@@ -8003,7 +8508,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             refreshWebview: true,
             webview,
             stage,
-            ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => ({ model })) } } : {}),
+            // The seeded table is new (D-4: never an edit of a table of its name in another schema folder); others are edits.
+            ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => (model === seededModel ? { model, create: true } : { model })) } } : {}),
           },
         );
 
@@ -8197,10 +8703,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     modelNames: readonly string[],
-    /** A drop on the canvas: the new tables go here (`dropTables`), not beside their relations. */
-    options: { dropAt?: NodePosition } = {},
+    /**
+     * `dropAt`: a drop on the canvas: the new tables go here (`dropTables`), not beside their relations.
+     * `sourcePaths`: each picked row's file (the dialog's `sourcePath`), index for index.
+     */
+    options: { dropAt?: NodePosition; sourcePaths?: readonly string[] } = {},
   ): Promise<void> {
     try {
+      // Rows the dialog listed from Table Library files, added by their files where a name alone cannot say which table.
+      const byFile = this.tableFilesToAddByFile(document, modelNames.map((_n, i) => options.sourcePaths?.[i]));
+      if (byFile) {
+        await this.addTableFiles(document, webview, byFile, options.dropAt !== undefined ? { dropAt: options.dropAt } : {});
+        return;
+      }
       if (!this.isSubjectAreaV5(this.parseSubjectAreaDocument(document))) {
         this.post(webview, {
           type: 'error',
@@ -8327,7 +8842,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview,
           stage: 'logical',
           errorLabel: `Failed to add tables${from}.`,
-          ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => ({ model })) } } : {}),
+          // The tables seeded from dbt are new (D-4); a library table whose relationships changed is an edit.
+          ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => (newModels.includes(model) ? { model, create: true } : { model })) } } : {}),
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
@@ -8570,7 +9086,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           target = column;
         }
         const meta: Meta = { ...(target.meta ?? {}) };
-        const writesDbmlText = this.tableIsDbml(payload.modelName);
+        const writesDbmlText = this.tableIsDbml(document, payload.modelName);
         for (const key of payload.remove ?? []) delete meta[key];
         for (const [key, value] of Object.entries(payload.set ?? {})) {
           setMetaEntry(meta, key, this.metaValueToWrite(key, value, meta[key], scope, writesDbmlText));
@@ -8589,9 +9105,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Whether `modelName`'s file is a DBML table (it keeps its storage through an edit). */
-  private tableIsDbml(modelName: string): boolean {
+  private tableIsDbml(document: vscode.TextDocument, modelName: string): boolean {
     try {
-      return this.tableLibraryService.findTableFile(modelName)?.toLowerCase().endsWith('.dbml') ?? false;
+      const table = this.canvasTable(document, modelName);
+      return (table.filePath ?? this.tableLibraryService.findTableFile(table.name))?.toLowerCase().endsWith('.dbml') ?? false;
     } catch {
       return false;
     }
@@ -8738,7 +9255,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const domain = this.subjectAreaService.getSubjectAreaStage(document.uri.fsPath, { dbtKeyIndex });
         const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag(), ...this.logicalOnlyFlag() });
-        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer);
+        void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
         this.noteDrawn(panelKey, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, panelKey, document, displayDomain.models.map((m) => m.name));
       }

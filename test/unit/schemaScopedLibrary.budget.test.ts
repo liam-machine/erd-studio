@@ -19,6 +19,8 @@ import * as path from 'path';
 import { createRequire, syncBuiltinESMExports } from 'module';
 
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { SubjectAreaService } from '../../src/services/domainService';
+import { LayerService } from '../../src/services/layerService';
 import { relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
 import type { TableId } from '../../src/types/tableId';
 
@@ -143,6 +145,38 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
     expect(maxReadsOfOneFile).toBe(1);
     // Its members' names and the other ends of their Refs: most of the library here (most names are in most folders), never more.
     expect(tableReads).toBeLessThanOrEqual(TABLES);
+  });
+
+  it('a 300-table DBML diagram opened by the editor: each member read from its own file, every relationship drawn under the diagram\'s names', () => {
+    const members = ids.slice(0, 300);
+    const diagramPath = path.join(semantic, 'bronze', 'diagrams', 'big.dbml');
+    fs.mkdirSync(path.dirname(diagramPath), { recursive: true });
+    fs.writeFileSync(diagramPath, [
+      "Project big {\n  erd_schema_version: '8'\n}",
+      ...members.map((id) => `use { table ${id.schema}.${id.name} } from '../tables/${id.schema}/${id.name}.dbml'`),
+      ...Array.from({ length: SCHEMAS }, (_, k) => `use * from '../relationships/${schemaOf(k)}.dbml'`),
+      '',
+    ].join('\n'));
+    try {
+      const subjectAreas = new SubjectAreaService(new LayerService(root, '.erd-studio'));
+      subjectAreas.setTableLibraryService(library());
+      const { result, maxReadsOfOneFile } = measure('a 300-table diagram opened by the editor, told apart by identity', 1500, () => subjectAreas.getSubjectArea(diagramPath));
+      expect(maxReadsOfOneFile).toBe(1);
+      const names = new Set(result.logical.models.map((m) => m.name));
+      expect(names.size).toBe(300);
+      const ends = result.logical.models.flatMap((m) => (m.relationships ?? []).map((r) => r.toModel));
+      expect(ends.length).toBeGreaterThan(300);
+      // An end on the diagram is named as the diagram names it; an end off it keeps its library reference, never a member's name.
+      const shown = ends.filter((end) => names.has(end));
+      expect(shown.length).toBeGreaterThan(0);
+      for (const model of result.logical.models) {
+        for (const rel of model.relationships ?? []) {
+          if (!names.has(rel.toModel)) expect(rel.toModel).toMatch(/^s\d\d\.t\d{3}$|^t\d{3}$/);
+        }
+      }
+    } finally {
+      fs.rmSync(path.dirname(diagramPath), { recursive: true, force: true });
+    }
   });
 
   it('the relationships index by identity: build, a placement per table and imports for 50 diagrams', () => {

@@ -35,7 +35,7 @@ import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, 
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
-import { cardinalityLabel, offDiagramRows, offDiagramTables, ownValue } from '../../lib/canvasContext';
+import { cardinalityLabel, offDiagramRows, offDiagramTableRows, ownValue } from '../../lib/canvasContext';
 import './DetailPanel.css';
 
 /** A relationship row: a composite foreign key carries all its column pairs. */
@@ -393,12 +393,18 @@ export function DetailPanel() {
   }, [hasModelling]);
 
   const handleAddTables = useCallback(
-    (names: readonly string[]) => {
-      if (names.length === 0) return;
-      if (names.length === 1) {
-        host.postMessage({ type: 'addExistingModel', payload: { modelName: names[0] } });
+    (tables: ReadonlyArray<{ otherTable: string; otherTablePath?: string }>) => {
+      if (tables.length === 0) return;
+      // A table the host named by its file is added by it too (another schema folder may have its name).
+      const byFile = tables.some((t) => t.otherTablePath !== undefined);
+      if (tables.length === 1) {
+        host.postMessage({ type: 'addExistingModel', payload: { modelName: tables[0].otherTable, ...(byFile ? { sourcePath: tables[0].otherTablePath! } : {}) } });
       } else {
-        host.postMessage({ type: 'addExistingModels', payload: { modelNames: names.slice(0, ADD_ALL_RELATED_LIMIT) } });
+        const picked = tables.slice(0, ADD_ALL_RELATED_LIMIT);
+        host.postMessage({
+          type: 'addExistingModels',
+          payload: { modelNames: picked.map((t) => t.otherTable), ...(byFile ? { sourcePaths: picked.map((t) => t.otherTablePath ?? '') } : {}) },
+        });
       }
     },
     [host],
@@ -780,7 +786,7 @@ export function DetailPanel() {
                 <button
                   type="button"
                   className="detail-panel__off-add-all"
-                  onClick={() => handleAddTables(offDiagramTables(offRows))}
+                  onClick={() => handleAddTables(offDiagramTableRows(offRows))}
                   title="Add every table listed here to this diagram"
                 >
                   Add all related
@@ -804,7 +810,7 @@ export function DetailPanel() {
                       <button
                         type="button"
                         className="detail-panel__off-add"
-                        onClick={() => handleAddTables([row.otherTable])}
+                        onClick={() => handleAddTables([row])}
                         title={`Add ${row.otherTable} to this diagram`}
                         aria-label={`Add ${row.otherTable} to this diagram`}
                       >

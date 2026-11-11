@@ -4,9 +4,8 @@
  * case rules, the references of unique, twin, repeated, layer-twin,
  * schema-less and dotted-name tables, and the order and ambiguity of the
  * resolver. Then the same rules over the fixture project
- * test/fixtures/same-name-two-schemas (bqs.addresse and ccc.addresse, with a
- * kunde in each), which sits outside packages/core/test/fixtures/dbml/ until
- * the host and core draw it alike.
+ * packages/core/test/fixtures/dbml/same-name-two-schemas (bqs.addresse and
+ * ccc.addresse, with a kunde in each).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -323,7 +322,7 @@ describe('resolveTableRefs: qualified texts first, then the bare ones', () => {
 // The fixture project: two schemas, two tables of each name
 // ---------------------------------------------------------------------------
 
-const TWINS = path.resolve(__dirname, '../../../../test/fixtures/same-name-two-schemas/.erd-studio');
+const TWINS = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas/.erd-studio');
 
 function filesOf(dir: string): Record<string, string> {
   const out: Record<string, string> = {};

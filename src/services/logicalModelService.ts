@@ -2345,10 +2345,18 @@ export class TableLibraryService {
    */
   getTableFileError(table: TableId | string): TableFileError | null {
     const filePath = this.fileOfTable(table, (n) => this.resolveTablePath(n));
-    if (filePath === null || !fs.existsSync(filePath)) {
+    return filePath === null ? null : this.getTableFileErrorAt(filePath, this.nameOfTable(table));
+  }
+
+  /**
+   * {@link getTableFileError} for the table file `filePath` (absolute) a
+   * diagram's member was read from, whatever table the library would pick
+   * for its name `name` (two schema folders may each hold one).
+   */
+  getTableFileErrorAt(filePath: string, name: string): TableFileError | null {
+    if (!fs.existsSync(filePath)) {
       return null;
     }
-    const name = this.nameOfTable(table);
     // getTable's bookkeeping without its copy and relationships: only the
     // file's own reading decides whether it is broken.
     try {

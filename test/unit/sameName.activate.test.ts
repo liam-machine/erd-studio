@@ -1,7 +1,7 @@
 /**
  * The write commands on two tables of one name in different schema folders,
  * through `activate()` on a copy of the twin fixture
- * (`test/fixtures/same-name-two-schemas`: `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml`,
+ * (`packages/core/test/fixtures/dbml/same-name-two-schemas`: `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml`,
  * one relationships file with a Ref per schema and one between the two
  * `addresse` tables, and the diagrams ccc.dbml, kunden.dbml and
  * kunden-bare.dbml), plus a diagram of bqs's tables only.
@@ -42,7 +42,7 @@ vi.mock('../../src/services/logicalModelService', async (importOriginal) => {
 });
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const TWINS = path.join(REPO_ROOT, 'test', 'fixtures', 'same-name-two-schemas');
+const TWINS = path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'dbml', 'same-name-two-schemas');
 const packageJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as { version: string };
 
 type Context = import('vscode').ExtensionContext;

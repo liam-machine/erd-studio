@@ -48,6 +48,13 @@ export interface ExistingTablePreview extends ManifestModelPreview {
    * that was read, and on every row an older host sends.
    */
   detailsPending?: true;
+  /**
+   * A DBML table's layer and schema folder (`<layer>/tables/<schema>/`), where
+   * the host tells two tables of one name apart by them: the dialog shows
+   * them beside the name. Absent on every other row, and from an older host.
+   */
+  layer?: string;
+  schemaFolder?: string;
 }
 
 // ---------------------------------------------------------------------------

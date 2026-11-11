@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * The three exporters on a diagram that shows two tables of one name from
- * different schema folders (test/fixtures/same-name-two-schemas: bqs and ccc,
+ * different schema folders (packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc,
  * each with addresse and kunde). Core draws them as `bqs.addresse` and
  * `ccc.addresse` with `tableName: 'addresse'` beside; the exports write every
  * table (none is left out because its written name repeats): DBML as `Table
@@ -42,7 +42,7 @@ import {
 beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS);
 
 const UPDATE = process.env.UPDATE_GOLDEN === '1';
-const TWINS = path.resolve(__dirname, '../../../../test/fixtures/same-name-two-schemas');
+const TWINS = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas');
 const GOLDEN_DIR = path.resolve(__dirname, '../fixtures/golden');
 
 function load(diagram: string): Promise<DisplaySubjectArea> {

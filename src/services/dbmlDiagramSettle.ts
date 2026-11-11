@@ -61,6 +61,12 @@ export interface SubjectAreaResolver {
   refreshRelationshipsUses?: boolean;
   /** Leave a conflicted `erd_layout` as it is (§1.6): set when rendering a diagram that is not the one being edited. */
   keepLayoutIfConflicted?: boolean;
+  /**
+   * Members whose reference the edit changed itself (old reference → new):
+   * a namesake joined or left the diagram, so `bqs.addresse` was `addresse`.
+   * Each keeps its `use` line (core's `renamedMembers`).
+   */
+  renamedMembers?: ReadonlyMap<string, string>;
 }
 
 /** The posix path of `filePath` relative to `semanticRoot`. */
@@ -135,9 +141,11 @@ export function identitySummaryOf(summary: DiagramSummary): DiagramSummary {
  * exactly the members whose file the plan changes, by their references on
  * this diagram; the relationships files it imports are asked for by those
  * tables' identities. A member whose file is gone is answered by its name
- * only where the plan knows one table of that name (D-6).
+ * only where the plan knows one table of that name (D-6). `summary` is a
+ * diagram's members (references) and their `use` paths, index for index: a
+ * settled diagram's summary, or the edited diagram's own members (the editor).
  */
-function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: DiagramSummary, base: SubjectAreaResolver): SubjectAreaResolver {
+export function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: Pick<DiagramSummary, 'members' | 'memberPaths'>, base: SubjectAreaResolver): SubjectAreaResolver {
   const ids = plan.identities!;
   /** Each member by its file; null for one whose file the plan deletes (never answered by its name). */
   const byRef = new Map<string, DbmlDiagramTable | null>();
@@ -208,6 +216,7 @@ export function renderDbmlDiagram(
     ...(resolver.pathChanged ? { pathChanged: resolver.pathChanged } : {}),
     ...(resolver.refreshRelationshipsUses ? { refreshRelationshipsUses: true } : {}),
     ...(resolver.keepLayoutIfConflicted ? { keepLayoutIfConflicted: true } : {}),
+    ...(resolver.renamedMembers && resolver.renamedMembers.size > 0 ? { renamedMembers: resolver.renamedMembers } : {}),
   });
 }
 

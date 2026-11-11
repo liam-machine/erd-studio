@@ -1,6 +1,6 @@
 /**
  * The DBML writers on two tables of one name in different schema folders
- * (test/fixtures/same-name-two-schemas: bqs and ccc, each with addresse and
+ * (packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc, each with addresse and
  * kunde). A diagram member keeps its `use` line by identity, not by its bare
  * name: when a table of its name joins or leaves the diagram its reference
  * changes (`addresse` ↔ `bqs.addresse`) and its position, sticky links and
@@ -25,7 +25,7 @@ import { clone, identityLookups } from '../dbmlWriterSupport';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Obj = Record<string, any>;
 
-const TWINS = path.resolve(__dirname, '../../../../test/fixtures/same-name-two-schemas/.erd-studio');
+const TWINS = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas/.erd-studio');
 
 /** The fixture's `.dbml` files, keyed relative to its semantic dir. */
 function twinFiles(): Record<string, string> {

@@ -118,6 +118,21 @@ describe('DetailPanel — Not on this diagram', () => {
     expect(posted[1]).toEqual({ type: 'addExistingModels', payload: { modelNames: ['dim_store', 'fct_return'] } });
   });
 
+  it('a table the host named by its file is added by it (two schema folders may share its name)', () => {
+    const twins = (schema: string) => ({ otherTable: `${schema}.addresse`, columns: 'id', cardinality: 'many-to-one' as const, direction: 'out' as const, otherTablePath: `.erd-studio/bronze/tables/${schema}/addresse.dbml` });
+    const { posted } = renderPanel({ context: { ...CONTEXT, offDiagram: { fct_sale: [twins('bqs'), twins('ccc'), CONTEXT.offDiagram.fct_sale[1]] } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add ccc.addresse to this diagram' }));
+    expect(posted).toEqual([{ type: 'addExistingModel', payload: { modelName: 'ccc.addresse', sourcePath: '.erd-studio/bronze/tables/ccc/addresse.dbml' } }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Add all related' }));
+    expect(posted[1]).toEqual({
+      type: 'addExistingModels',
+      payload: {
+        modelNames: ['bqs.addresse', 'ccc.addresse', 'fct_return'],
+        sourcePaths: ['.erd-studio/bronze/tables/bqs/addresse.dbml', '.erd-studio/bronze/tables/ccc/addresse.dbml', ''],
+      },
+    });
+  });
+
   it('"Add all related" with one table names it once', () => {
     const { posted } = renderPanel({
       context: { ...CONTEXT, offDiagram: { fct_sale: [CONTEXT.offDiagram.fct_sale[0], { ...CONTEXT.offDiagram.fct_sale[0], columns: 'other_store_key' }] } },

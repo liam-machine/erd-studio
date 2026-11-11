@@ -281,6 +281,13 @@ const FIXTURE_ROOTS = [
   path.resolve(__dirname, '../../../../test/fixtures/dbml-native'),
 ];
 
+/**
+ * Projects the loop below leaves out: its lookups name each table by its
+ * bare name, which two tables of one name in different schema folders
+ * share. Its laws run with identity lookups further down (TWIN_FILES).
+ */
+const IDENTITY_PROJECTS = new Set([path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas')]);
+
 /** Whether a path relative to the semantic dir is a DBML diagram (`<layer>/diagrams/<name>.dbml`). */
 const isDiagramFile = (file: string): boolean => classifySemanticFile(file, { tablesDirIsLayer: false }).kind === 'diagram';
 
@@ -296,6 +303,7 @@ function fixtureProjects(): Array<{ name: string; files: Record<string, string> 
     const semanticDirs = walk(root).filter((f) => f.includes(`${path.sep}.erd-studio${path.sep}`))
       .map((f) => f.slice(0, f.indexOf(`${path.sep}.erd-studio${path.sep}`) + `${path.sep}.erd-studio`.length));
     for (const dir of [...new Set(semanticDirs)]) {
+      if (IDENTITY_PROJECTS.has(path.dirname(dir))) continue;
       const files: Record<string, string> = {};
       for (const f of walk(dir)) if (f.endsWith('.dbml')) files[path.relative(dir, f).split(path.sep).join('/')] = fs.readFileSync(f, 'utf8');
       projects.push({ name: path.relative(path.resolve(__dirname, '../../../..'), dir), files });
@@ -564,13 +572,13 @@ describe('Law 5 across a requalifying move (a table moved to another schema fold
 // ---------------------------------------------------------------------------
 
 /**
- * test/fixtures/same-name-two-schemas: bqs and ccc each hold addresse and
- * kunde. Outside FIXTURE_ROOTS, whose lookups name tables by their bare
- * name: here each table is named by its library reference
- * (`identityLookups`), as a host keyed by table identity names it.
+ * packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc each
+ * hold addresse and kunde. Left out of the FIXTURE_ROOTS loop, whose lookups
+ * name tables by their bare name: here each table is named by its library
+ * reference (`identityLookups`), as a host keyed by table identity names it.
  */
 const TWIN_FILES: Record<string, string> = (() => {
-  const dir = path.resolve(__dirname, '../../../../test/fixtures/same-name-two-schemas/.erd-studio');
+  const dir = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas/.erd-studio');
   const files: Record<string, string> = {};
   for (const f of walk(dir)) if (f.endsWith('.dbml')) files[path.relative(dir, f).split(path.sep).join('/')] = fs.readFileSync(f, 'utf8');
   return files;

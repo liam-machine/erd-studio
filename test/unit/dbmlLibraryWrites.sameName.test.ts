@@ -1,7 +1,7 @@
 /**
  * The write planner and its cascades by table identity (stage 6 of
  * schema-scoped table identity), over the twin fixture
- * (`test/fixtures/same-name-two-schemas`: `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml`,
+ * (`packages/core/test/fixtures/dbml/same-name-two-schemas`: `bronze/tables/{bqs,ccc}/{addresse,kunde}.dbml`,
  * one relationships file with a Ref per schema and one between the two
  * `addresse` tables, and the diagrams ccc.dbml (ccc only), kunden.dbml (all
  * four) and kunden-bare.dbml (the same, as 2.0.2 left it)).
@@ -34,7 +34,7 @@ import { LayerService } from '../../src/services/layerService';
 import * as vscode from 'vscode';
 import { vi } from 'vitest';
 
-const FIXTURE = path.resolve(__dirname, '../fixtures/same-name-two-schemas/.erd-studio');
+const FIXTURE = path.resolve(__dirname, '../../packages/core/test/fixtures/dbml/same-name-two-schemas/.erd-studio');
 
 let root: string;
 let semantic: string;

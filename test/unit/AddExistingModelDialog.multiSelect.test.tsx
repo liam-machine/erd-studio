@@ -177,3 +177,38 @@ describe('AddExistingTableDialog empty state', () => {
     expect(document.body.textContent).toContain('Table Library');
   });
 });
+
+describe('AddExistingTableDialog, two tables of one name in different schema folders', () => {
+  const twin = (schemaFolder: string) => ({
+    name: 'addresse', schema: schemaFolder, description: '', columnCount: 3, source: 'logical' as const,
+    sourcePath: `.erd-studio/bronze/tables/${schemaFolder}/addresse.dbml`, layer: 'bronze', schemaFolder,
+  });
+
+  it('lists both as rows of their own, picked by their files, and names each by its file', () => {
+    useEditorStore.getState().setExistingModels([twin('bqs'), twin('ccc'), table('other')]);
+    render(<AddExistingTableDialog />);
+    const rows = screen.getAllByText('addresse');
+    expect(rows).toHaveLength(2);
+    fireEvent.click(rows[1]);
+    expect(ticked()).toEqual(['addresse']);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Table' }));
+    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'addExistingModel', payload: { modelName: 'addresse', sourcePath: '.erd-studio/bronze/tables/ccc/addresse.dbml' } });
+  });
+
+  it('several picks carry one file per name, empty for a row listed by its name alone', () => {
+    useEditorStore.getState().setExistingModels([twin('bqs'), twin('ccc'), table('other')]);
+    render(<AddExistingTableDialog />);
+    const rows = screen.getAllByText('addresse');
+    fireEvent.click(rows[0]);
+    fireEvent.click(rows[1]);
+    fireEvent.click(screen.getByText('other'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add 3 Tables' }));
+    expect(mockPostMessage).toHaveBeenCalledWith({
+      type: 'addExistingModels',
+      payload: {
+        modelNames: ['addresse', 'addresse', 'other'],
+        sourcePaths: ['.erd-studio/bronze/tables/bqs/addresse.dbml', '.erd-studio/bronze/tables/ccc/addresse.dbml', ''],
+      },
+    });
+  });
+});

@@ -10,7 +10,8 @@
  * asks for the reveal right after its add, and the refreshed diagram may
  * arrive just after — and then a toast says so.
  *
- * The name is matched ignoring case, as table names are unique that way.
+ * The name is matched ignoring case, as table names are unique that way
+ * (`findRevealNode`: a diagram's name for the table first).
  */
 import { useEffect } from 'react';
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
@@ -21,10 +22,23 @@ import type { DisplaySubjectArea } from '../../src/types/display';
 /** How long a reveal waits for a settled diagram to show its table before saying it does not. */
 export const REVEAL_TABLE_WAIT_MS = 2500;
 
-/** The id of the table node named `name` (ignoring case), if the canvas draws one. */
-export function findRevealNode(nodes: readonly { id: string; type?: string }[] | undefined, name: string): string | undefined {
+/**
+ * The id of the table node named `name` (ignoring case), if the canvas draws
+ * one: the node whose id it is (what the diagram calls the table), else the
+ * one node whose own name (`tableName`: a table named `<schema>.<name>`
+ * because another of its name is on the diagram) it is. A name two nodes
+ * share names neither.
+ */
+export function findRevealNode(nodes: readonly { id: string; type?: string; data?: unknown }[] | undefined, name: string): string | undefined {
   const wanted = name.trim().toLowerCase();
-  return (nodes ?? []).find((n) => n.type === 'model' && n.id.toLowerCase() === wanted)?.id;
+  const tables = (nodes ?? []).filter((n) => n.type === 'model');
+  const byId = tables.find((n) => n.id.toLowerCase() === wanted);
+  if (byId) return byId.id;
+  const byOwnName = tables.filter((n) => {
+    const own = (n.data as { tableName?: unknown } | undefined)?.tableName;
+    return typeof own === 'string' && own.toLowerCase() === wanted;
+  });
+  return byOwnName.length === 1 ? byOwnName[0].id : undefined;
 }
 
 function hasNodeForEveryTable(domain: DisplaySubjectArea, nodes: readonly { id: string; type?: string }[] | undefined): boolean {

@@ -1,6 +1,6 @@
 /**
  * `loadDisplaySubjectArea` on two tables of one name in different schema
- * folders (test/fixtures/same-name-two-schemas: bqs and ccc, each with
+ * folders (packages/core/test/fixtures/dbml/same-name-two-schemas: bqs and ccc, each with
  * addresse and kunde). A table's identity is its schema folder and name:
  * each member is read from its own file, a diagram that shows both names
  * them `bqs.addresse` and `ccc.addresse` (with `tableName` beside), every
@@ -24,7 +24,7 @@ import type { DisplaySubjectArea } from '../../src/types/display';
 type Files = Record<string, string>;
 
 const UPDATE = process.env.UPDATE_GOLDEN === '1';
-const TWINS = path.resolve(__dirname, '../../../../test/fixtures/same-name-two-schemas');
+const TWINS = path.resolve(__dirname, '../fixtures/dbml/same-name-two-schemas');
 const GOLDEN_DIR = path.resolve(__dirname, '../fixtures/golden');
 const diagramPath = (name: string): string => `.erd-studio/bronze/diagrams/${name}.dbml`;
 
