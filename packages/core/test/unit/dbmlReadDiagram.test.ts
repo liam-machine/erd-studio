@@ -319,10 +319,19 @@ describe('parseSubjectAreaDbml: refusals', () => {
     expect((thrown(() => parseSubjectAreaDbml('Project p {\n', 'gold/sales.dbml')) as SubjectAreaFileError).reason).toBe('invalid-dbml');
   });
 
+  it('version 8 (a diagram holding two tables of one name) reads as 7 does, keeping its number', () => {
+    const seven = parseSubjectAreaDbml(SALES, PATH);
+    const eight = parseSubjectAreaDbml(SALES.replace("erd_schema_version: '7'", "erd_schema_version: '8'"), PATH);
+    expect(SALES).toContain("erd_schema_version: '7'");
+    expect(eight.schemaVersion).toBe(8);
+    expect({ ...eight, schemaVersion: 7 }).toEqual(seven);
+  });
+
   it('a newer erd_schema_version is refused; one that is not a whole number too', () => {
-    const future = thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: '8'\n}\n", PATH));
+    const future = thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: '9'\n}\n", PATH));
     expect(future).toBeInstanceOf(SubjectAreaValidationError);
-    expect((future as Error).message).toBe(`${PATH} has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension.`);
+    expect((future as SubjectAreaValidationError).kind).toBe('newerSchema');
+    expect((future as Error).message).toBe(`${PATH} has erd_schema_version 9 but this extension only supports up to version 8. Please update the extension.`);
     expect(thrown(() => parseSubjectAreaDbml("Project p {\n  erd_schema_version: 'seven'\n}\n", PATH))).toBeInstanceOf(SubjectAreaValidationError);
   });
 });

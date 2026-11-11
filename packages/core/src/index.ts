@@ -51,4 +51,5 @@ export * from './storage.js';
 // Named: the module's row-by-row helpers are internal (the twin-golden tests).
 export { normaliseForStorageEquivalence, storageNoteText, type StorageEquivalenceOptions } from './storageEquivalence.js';
 export * from './dbmlAttach.js';
+export * from './tableIdentity.js';
 export { findConflictMarkers } from './mergeConflict.js';

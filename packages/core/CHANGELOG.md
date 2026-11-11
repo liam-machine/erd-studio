@@ -2,6 +2,14 @@
 
 All notable changes to `@erd-studio/core`. While `0.x`, a breaking change bumps the minor version.
 
+## Unreleased
+
+### Added
+- **Table identity** (`tableIdentity.ts`, main entry, parser-free): a DBML table is identified by its schema folder and file stem (`TableId`, `TableFileId` with the layer beside it), compared without case; the layer is not part of it. `tableIdKey(id)` is the comparison key, `tableIdOfPath(rel)` reads it from a `<layer>/tables/<schema>/<name>.dbml` path, and `sameTableId` compares two. `assignTableRefs(tables)` names each table of a scope by its bare name unless another table there has that name (then `<schema>.<name>`, `qualifiedRef`); a project with no shared name gets only bare names. `matchTableRef` / `resolveTableRef` / `resolveTableRefs` turn text back into a table by comparison (reference, `<folder>.<name>`, another qualifier, then a bare name only one table has), never by splitting on a dot; types `TableRefCandidate`, `TableRefStep`, `TableRefMatch`, `ResolveTableRefOptions`. Nothing reads or writes through them yet: every result and golden is unchanged.
+
+### Changed
+- `CURRENT_SCHEMA_VERSION` is 8: a DBML diagram declaring `erd_schema_version: '8'` reads exactly as one declaring `'7'` (its `schemaVersion` is 8). Nothing writes 8 yet; it is reserved for a diagram that holds two tables with one name in different schema folders, so a core that cannot tell them apart refuses that diagram ("Please update the extension") instead of drawing the two as one. Above 8 is refused as before. `DBML_SCHEMA_VERSION` (written) stays 7, and the JSON ceiling stays 6.
+
 ## 0.4.0
 
 > **For hosts that render committed projects.** To draw a project stored as DBML (ERD Studio 2.0's default), a host needs this version and `dbml: dbmlStorageReader` (from `@erd-studio/core/dbml`) passed to `loadDisplaySubjectArea`, its bundler must include `@dbml/parse`, and its cache key needs a bump. A host on core 0.3.0 or older given a `.dbml` diagram path throws `SubjectAreaFileError('invalid-json')` with `transient: true`.

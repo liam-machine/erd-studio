@@ -1,0 +1,12 @@
+Project ccc {
+  Note: 'The CCC system only'
+  erd_schema_version: '7'
+  erd_layout: '''
+    addresse 40 40
+    kunde 400 40
+  '''
+}
+
+use { table ccc.addresse } from '../tables/ccc/addresse.dbml'
+use { table ccc.kunde }    from '../tables/ccc/kunde.dbml'
+use * from '../relationships/bronze.dbml'

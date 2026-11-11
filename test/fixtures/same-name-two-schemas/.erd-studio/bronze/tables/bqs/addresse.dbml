@@ -1,0 +1,6 @@
+Table bqs.addresse {
+  id INT [pk]
+  strasse VARCHAR
+  ort VARCHAR
+  Note: 'Addresses from the BQS system'
+}

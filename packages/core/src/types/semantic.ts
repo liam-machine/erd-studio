@@ -16,14 +16,18 @@ export type Layer = string;
 export type Stage = 'logical' | 'physical';
 
 /**
- * The newest schema version this version of core reads, in any format: 7, a
- * DBML diagram (native DBML storage, ERD Studio 2.0). A JSON subject area may
- * declare at most {@link CURRENT_JSON_SCHEMA_VERSION}; a DBML diagram whose
- * `erd_schema_version` is higher than this one is refused with "Please update
- * the extension" rather than read as an empty diagram. Writers use
- * {@link WRITTEN_SCHEMA_VERSION} (JSON) or {@link DBML_SCHEMA_VERSION} (DBML).
+ * The newest schema version this version of core reads, in any format: 8, a
+ * DBML diagram that holds two tables with one name in different schema
+ * folders. A DBML diagram is read the same at 7 and 8; 8 only tells an older
+ * reader, which would draw the two tables as one, to refuse the diagram. Core
+ * reads 8 before any writer writes it, so a published core is ready first.
+ * A JSON subject area may declare at most {@link CURRENT_JSON_SCHEMA_VERSION};
+ * a DBML diagram whose `erd_schema_version` is higher than this one is
+ * refused with "Please update the extension" rather than read as an empty
+ * diagram. Writers use {@link WRITTEN_SCHEMA_VERSION} (JSON) or
+ * {@link DBML_SCHEMA_VERSION} (DBML).
  */
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 /**
  * The newest schema version a JSON subject area file may declare. A JSON file

@@ -247,7 +247,7 @@ Edit in place and never reformat a file: ERD Studio keeps whatever it does not c
 3. Every table a relationships file's Refs name needs a `use` line in that file; every table a diagram shows needs a table `use` line there, except one with no table file, which `erd_unlinked_tables` names instead. A relationship to a table with no file is a pending line, never a live Ref.
 4. A table name is unique across the project, and each link is one Ref, in one file.
 5. Every table has at least one column (the placeholder for an empty one).
-6. `erd_schema_version` above 7 is refused: "Please update the extension".
+6. `erd_schema_version` above 8 is refused: "Please update the extension". ERD Studio writes `'7'`; `'8'` reads exactly as `'7'` does.
 
 **Unresolved git merge conflicts.** A `.dbml` file that still holds git's conflict markers is reported as a merge conflict with its line (`doctor`: `mergeConflict: true`, routed to `resolve-merge-conflicts`). In a relationships file **keep both sides' Ref lines and both sides' `use` lines**, then run `doctor`: a Ref that now appears twice is reported (`duplicateRef`). In a table file keep one side of each conflict. **When only a diagram's `erd_layout` conflicts** (`layoutMergeConflict`), only positions differ: keep either side whole, never a mix of lines. Until then the diagram opens with the first copy of each line, and ERD Studio saves no position change to it.
 
