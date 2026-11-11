@@ -64,7 +64,7 @@ export const IMPORT_PICK_FEATURES: Readonly<Record<ImportModelSource, TelemetryF
 /** What the picker shows for each source. */
 export const IMPORT_SOURCE_ITEMS: Readonly<Record<ImportModelSource, { label: string; detail: string }>> = {
   dbml: { label: '$(file-code) DBML file', detail: 'A .dbml file from dbdiagram.io or any DBML tool (an open format)' },
-  sqlDdl: { label: '$(database) SQL DDL scripts', detail: 'CREATE TABLE .sql files: PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite' },
+  sqlDdl: { label: '$(database) SQL DDL scripts', detail: 'CREATE TABLE .sql files (PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift, SQLite), or a catalog export (.csv)' },
   semanticModel: { label: '$(graph) Power BI or Fabric semantic model', detail: 'A <Name>.SemanticModel folder (TMDL or model.bim), or a Tabular Editor Save to Folder model' },
 };
 

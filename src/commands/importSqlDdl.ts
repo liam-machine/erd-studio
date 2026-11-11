@@ -27,6 +27,12 @@
  * the quick path does) or keep each as a table.
  * Cancelling any step writes nothing.
  *
+ * **A catalog export** (`.csv` / `.tsv` picked in the same dialog: a catalog
+ * query's result, one row per column; `catalogCsvImport.ts`) skips the
+ * dialect: it is converted on the host and goes to the same Import DBML flow
+ * with `source: 'sql'` (`importCatalogExport`). A folder's walk never takes a
+ * `.csv` (in a repository they are usually dbt seeds), nor does the quick path.
+ *
  * **The quick path** (`quickImportSqlDdl`: the start screen's **Import your
  * SQL scripts** and the start suggestion) asks nothing it can answer: the
  * files are every `.sql` with a CREATE TABLE that the bounded walk finds in
@@ -124,6 +130,15 @@ import {
 } from './importDbml';
 import { openTableFileAt } from './openModelFile';
 import { decodeText, fileSize, readTextStart } from '../services/readFileStart';
+import {
+  MAX_CATALOG_CHARS,
+  catalogCsvToDbml,
+  catalogFailureLedger,
+  catalogImportStem,
+  catalogOriginPhrase,
+  isCatalogCsvName,
+  type CatalogCsvResult,
+} from '../services/catalogCsvImport';
 
 export const IMPORT_SQL_DDL_COMMAND = 'erdStudio.importSqlDdl';
 
@@ -761,6 +776,9 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   }
   const { files, fullPaths } = read;
 
+  // 1b. A catalog query's export (.csv / .tsv, one row per column): no dialect, no SQL grammar.
+  if (isCatalogRead(read)) return importCatalogExport(deps, read, preset);
+
   // 2. The dialect: the one the user chose already (the import guide's card), else a pick
   //    with the one chosen before (Change Options…) first, then every dialect by how many
   //    tables it reads (the scripts are read as each first, when they are not too big).
@@ -1004,6 +1022,78 @@ function importConvertedSql(
   }, { filePath, ...resume });
 }
 
+/** Whether the files picked are catalog exports (`.csv` / `.tsv`): every one is, or none (`gatherSqlFiles` refuses a mix). */
+function isCatalogRead(read: Pick<SqlResume, 'files'>): boolean {
+  return read.files.length > 0 && read.files.every((f) => isCatalogCsvName(f.name));
+}
+
+/**
+ * Step 3 for a catalog export (a catalog query's result as CSV, one row per
+ * column; `catalogCsvImport.ts`): converted on the host (it needs no SQL
+ * grammar, so no worker and no dialect), then Import DBML's own flow, as
+ * converted SQL is (`source: 'sql'`). The conversion runs no DBML check of
+ * its own: Import DBML reads the result once, as it reads every converted
+ * model (a 100,000-row export reads in about 4 s; a second check would double
+ * it). A file that is not a catalog export, is cut short (`total_rows`) or is
+ * over the limits says so and imports nothing.
+ */
+async function importCatalogExport(deps: ImportSqlDdlDeps, read: SqlResume, preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
+  const ui = sqlUiOf(deps);
+  const quiet = deps.draft?.quiet === true;
+  const { showError, ours, failed } = sqlRun(ui, quiet, deps.draft);
+  let result: CatalogCsvResult;
+  try {
+    result = catalogCsvToDbml(read.files);
+  } catch (err) {
+    return ours('while reading the catalog export', err);
+  }
+  if (!result.ok) {
+    if (result.reason === 'unwritable') return ours('while converting the catalog export', new Error(result.problems[0]?.message ?? 'no table could be written'));
+    for (const p of result.problems) log.warn(`[ERD Studio] ${TITLE}: ${p.file}${p.line ? ` line ${p.line}` : ''}: ${p.message}`);
+    if (!quiet) telemetry.feature(result.reason === 'tooBig' ? IMPORT_LIMIT_FEATURES.tooMuchText : 'importSqlDdlInvalid');
+    const ledger = catalogFailureLedger(result);
+    failed(undefined, ledger);
+    const first = result.problems[0];
+    const actions: Record<string, () => unknown> = {};
+    if (first?.file && read.fullPaths.has(first.file)) actions[OPEN_FILE_BUTTON] = () => ui.openFileAt(read.fullPaths.get(first.file)!, first.line);
+    if (ui.showImportReport && !quiet) {
+      const reportId = recordImportReport({
+        source: 'sql', title: TITLE, from: catalogOriginPhrase(read.files.map((f) => f.name)), status: 'failed', ledger, files: Object.fromEntries(read.fullPaths),
+      });
+      actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!(reportId);
+    }
+    if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
+    const pointer = result.reason === 'notCatalog' ? ' The queries in ERD Studio: Bring In Your Data Model… write one.' : '';
+    showError(`${TITLE}: ${first?.message ?? 'the catalog export could not be read.'}${pointer}`, actions);
+    return undefined;
+  }
+  // Tables or columns left out (a name too long to be one): logged, listed in the draft's Not imported.
+  for (const p of result.problems) log.warn(`[ERD Studio] ${TITLE}: ${p.file}${p.line ? ` line ${p.line}` : ''}: ${p.message}`);
+  if (result.problems.length && !quiet) telemetry.feature('importSqlDdlInvalid');
+  for (const line of [...(result.notice ? [result.notice] : []), ...result.skipped, ...result.notes]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
+  for (const line of ledgerLogLinesWithoutProblems(result.ledger)) log.info(`[ERD Studio] ${line}`);
+  const filePath = path.join(deps.workspaceRoot, sqlImportFileName(catalogImportStem(read.fileName), result.dbml, deps.workspaceRoot));
+  const { extensionPath: _extensionPath, sqlUi: _sqlUi, loadSqlImport: _load, ui: importUi, ...rest } = deps;
+  return importDbml({
+    ...rest,
+    ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
+    source: 'sql',
+    origin: {
+      from: catalogOriginPhrase(read.files.map((f) => f.name)),
+      description: `Imported from ${read.sourceLabel}.`,
+      notes: result.notes,
+      skipped: result.skipped,
+      ledger: result.ledger,
+      ...(result.notice ? { notice: result.notice } : {}),
+      sourceFiles: Object.fromEntries(read.fullPaths),
+    },
+  }, {
+    filePath,
+    ...(preset.layer ? { preferredLayer: preset.layer } : {}),
+    ...(preset.name ? { name: preset.name } : {}),
+  });
+}
+
 /**
  * Every `.sql` file in the open folder that the quick import takes — whose
  * start holds a CREATE TABLE with a column list, and, when there is one,
@@ -1229,11 +1319,22 @@ export async function gatherSqlFiles(
   if (projectRoot && entries.length && entries.every((e) => isUnder(projectRoot, e.fullPath))) {
     entries = entries.map((e) => ({ ...e, name: path.relative(projectRoot, e.fullPath).split(path.sep).join('/') }));
   }
+  // Catalog exports (.csv / .tsv, picked by hand: a folder's walk lists .sql only) are read as they are.
+  const catalogs = entries.filter((e) => isCatalogCsvName(e.name)).length;
+  if (catalogs > 0 && catalogs < entries.length) {
+    return { message: `${TITLE}: pick SQL scripts or a catalog export (.csv), not both in one import.`, error: true, invalid: true };
+  }
+  if (catalogs > 0 && 'files' in sources && sources.root === undefined && entries.length > 1) {
+    sourceLabel = `${entries.length} catalog exports`;
+  }
   const files: SqlDdlFile[] = [];
   const fullPaths = new Map<string, string>();
   let chars = 0;
   for (const entry of entries) {
     const size = await ui.fileSize?.(entry.fullPath).catch(() => undefined);
+    if (catalogs > 0 && size !== undefined && size > MAX_CATALOG_CHARS) {
+      return { message: catalogTooBigMessage(entries.length), error: true, limit: 'fileTooBig' };
+    }
     if (size !== undefined && size > MAX_SQL_FILE_BYTES) {
       return { message: tooBigMessage(entry.name), error: true, limit: 'fileTooBig' };
     }
@@ -1244,8 +1345,17 @@ export async function gatherSqlFiles(
       log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
       return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true, limit: 'unreadable' };
     }
+    const unmarked = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    if (catalogs > 0) {
+      // A catalog export is rows, not SQL: nothing in it is a dump's data.
+      chars += unmarked.length;
+      if (chars > MAX_CATALOG_CHARS) return { message: catalogTooBigMessage(entries.length), error: true, limit: 'tooMuchText' };
+      files.push({ name: entry.name, text: unmarked });
+      fullPaths.set(entry.name, entry.fullPath);
+      continue;
+    }
     // A dump's data (COPY blocks, INSERT statements) is not SQL to import: it neither counts nor is read.
-    const { text, sqlChars } = withoutSqlData(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
+    const { text, sqlChars } = withoutSqlData(unmarked);
     chars += sqlChars;
     if (chars > MAX_SQL_CHARS) {
       return { message: `${TITLE}: the scripts hold more than ${Math.round(MAX_SQL_CHARS / 1024 / 1024)} MB of SQL, not counting data. Import the table definitions on their own.`, error: true, limit: 'tooMuchText' };
@@ -1259,6 +1369,12 @@ export async function gatherSqlFiles(
 function isUnder(root: string, file: string): boolean {
   const rel = path.relative(root, file);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** Catalog exports larger than the import reads. */
+function catalogTooBigMessage(count: number): string {
+  return `${TITLE}: the catalog ${count === 1 ? 'export holds' : 'exports hold'} more than ${Math.round(MAX_CATALOG_CHARS / 1024 / 1024)} MB. ` +
+    'Export one schema at a time (add a schema filter to the query\'s WHERE clause) and import each.';
 }
 
 /** A script larger than the import reads. */
@@ -1278,7 +1394,7 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
       if (process.platform !== 'darwin') {
         const kind = await vscode.window.showQuickPick(
           [
-            { label: '$(file) SQL files…', detail: 'Pick one or more .sql files', folders: false },
+            { label: '$(file) SQL files…', detail: 'Pick one or more .sql files, or a catalog export (.csv)', folders: false },
             { label: '$(folder) A folder of SQL files…', detail: 'Every .sql file under the folder is read', folders: true },
           ],
           { title: TITLE, placeHolder: 'Import from files or from a folder?' },
@@ -1295,7 +1411,7 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
         canSelectFiles: files,
         canSelectFolders: folders,
         canSelectMany: files,
-        ...(files ? { filters: { SQL: ['sql'] } } : {}),
+        ...(files ? { filters: { 'SQL scripts or a catalog export': ['sql', 'csv', 'tsv'] } } : {}),
         ...defaultUri,
       });
       if (!picked || picked.length === 0) return undefined;

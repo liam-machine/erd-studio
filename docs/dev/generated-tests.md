@@ -124,5 +124,6 @@ end, its cardinality, and whether its pairs are one composite link.
 | `sqlWriter.ts`, `sqlRun.ts` | SQL in each dialect; the SQL import up to the draft |
 | `semanticModelWriter.ts` | TMDL and TMSL |
 | `dbmlWriter.ts`, `dbmlRoundTrip.ts` | DBML; the round trip |
+| `catalogCsv.property.test.ts` | the catalog export reader: a schema written as a catalog CSV (either key shape, any delimiter, header case, quoting, CRLF, BOM, row order, NULL spelling); every table, column and foreign key imported or reported, the DBML reads with nothing left out by the check |
 | `*.property.test.ts` | the properties |
 | `regressions.test.ts` | counterexamples the properties found, fixed |
