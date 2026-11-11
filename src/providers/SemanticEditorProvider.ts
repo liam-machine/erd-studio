@@ -5153,6 +5153,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return file.members.rows.filter((r) => listed.has(r.ref.toLowerCase()) || listed.has((renamedMembers?.get(r.ref) ?? r.ref).toLowerCase()));
   }
 
+  /** The references the edited object of `file` lists that none of `kept` (its members as read, renamed) has: the members the edit adds. */
+  private membersAdded(file: ParsedSubjectArea, kept: DiagramMemberTable['rows'], renamedMembers: ReadonlyMap<string, string> | undefined): string[] {
+    const known = new Set(kept.flatMap((r) => [r.ref, renamedMembers?.get(r.ref) ?? r.ref]).map((r) => r.toLowerCase()));
+    const logical = (file.parsed.logical ?? {}) as { models?: unknown };
+    return (Array.isArray(logical.models) ? logical.models : []).filter((m): m is string => typeof m === 'string' && !known.has(m.toLowerCase()));
+  }
+
   private async applyStorageEdit(
     document: vscode.TextDocument,
     file: ParsedSubjectArea,
@@ -5184,7 +5191,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The members are those the edit leaves (a removed one must not keep its name shared with the one left).
       const kept = this.membersAfterEdit(file, options.renamedMembers);
       const own = plan.identities && kept
-        ? diagramResolverOf(plan, { members: kept.map((r) => r.ref), memberPaths: kept.map((r) => r.path ?? '') }, resolver)
+        ? diagramResolverOf(plan, { members: kept.map((r) => r.ref), memberPaths: kept.map((r) => r.path ?? '') }, resolver, this.membersAdded(file, kept, options.renamedMembers))
         : resolver;
       const [primary] = codecFor(fsPath).render(file, text, fsPath, {
         ...own,
@@ -6944,13 +6951,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: create central model file + add name reference to domain
       if (this.isSubjectAreaV5(parsed)) {
         const modelNames = (section.models ?? []) as string[];
-        // Each member by its own name: a diagram showing two tables of one name calls them `<schema>.<name>`.
-        const rows = this.schemaScoped() && this.isDbmlDocument(document) ? this.parseSubjectAreaFile(document).members?.rows : undefined;
-        const inDomain = rows ? rows.find((r) => sameName(r.name, model.name))?.ref : modelNames.find((n) => sameName(n, model.name));
-        if (inDomain !== undefined) {
-          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
-          return;
-        }
         // A new table's name follows the authoring rule (a letter first).
         // The model library is shared across domains — never overwrite a
         // logical-models/{name}.yml that another domain may depend on. Case is
@@ -6960,6 +6960,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // A JSON diagram names tables by name alone and reads the library's first of a
         // name (owner decision F), so there a name any table has is refused, as before.
         const home = this.schemaScoped() && this.isDbmlDocument(document) ? this.newDbmlTableSchema(document, schemaFolder) : undefined;
+        // Each member by its own name: a diagram showing two tables of one name calls them `<schema>.<name>`.
+        // On a DBML diagram a member of the name in another schema folder is another table: the new one
+        // joins it as the second of a pair (as Add Existing adds the second twin).
+        const members = this.schemaScoped() && this.isDbmlDocument(document) ? this.parseSubjectAreaFile(document).members : undefined;
+        const rows = members?.rows;
+        const inDomain = rows
+          ? rows.find((r) => sameName(r.name, model.name) && (home === undefined || r.id === undefined || sameName(r.id.schema, home)))?.ref
+          : modelNames.find((n) => sameName(n, model.name));
+        if (inDomain !== undefined) {
+          webview.postMessage({ type: 'error', payload: { message: `Table "${inDomain}" already exists in this diagram.` } });
+          return;
+        }
         const taking = home !== undefined ? this.tableLibraryService.tableTakingName(model.name, home) : undefined;
         if (taking?.storage === 'dbml') {
           webview.postMessage({
@@ -6997,33 +7009,49 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...(schemaFolder !== undefined ? { configuredSchema: schemaFolder } : {}),
         };
 
+        // The diagram's name for the new table: its name, or `<schema>.<name>` beside a member of its
+        // name, which is then named by its schema too (in the same edit).
+        const pair = members && home !== undefined && rows!.some((r) => sameName(r.name, model.name))
+          ? members.adding([{ schema: home, name: model.name }])
+          : undefined;
+        const ref = pair?.refs[0] ?? model.name;
+
         // Add name reference + position to domain file
         const success = await this.applySubjectAreaEdit(
           document,
           (sec, p) => {
+            if (pair) renameMemberRefs(p, pair.renames);
             const names = (sec.models ?? []) as string[];
-            names.push(model.name);
+            names.push(ref);
             sec.models = names;
 
             const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
             const positions = (vc.positions ?? {}) as Record<string, NodePosition>;
             const relationships = (sec.relationships ?? []) as Relationship[];
             const computed = computeNewTablePositions({
-              newModels: [model.name],
+              newModels: [ref],
               relationships,
               existingPositions: positions,
             });
-            if (computed[model.name]) {
+            if (computed[ref]) {
               vc.positions = { ...positions, ...computed };
               p.viewConfig = vc;
             }
           },
           // A new table (D-4): never an edit of a table of its name in another schema folder.
-          { refreshWebview: true, webview, stage, modelFiles: { save: [{ model: semanticModel, create: true }] } },
+          {
+            refreshWebview: true,
+            webview,
+            stage,
+            modelFiles: { save: [{ model: semanticModel, create: true }] },
+            ...(pair && pair.renames.size > 0 ? { renamedMembers: pair.renames } : {}),
+          },
         );
 
         if (success) {
           this.selectorsService.scheduleRegenerate();
+          // The canvas selects a new table by the name it gave it; one named by its schema is selected under that.
+          if (ref !== model.name) this.post(webview, { type: 'revealTable', payload: { modelName: ref } });
         } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to add the table to this diagram.' } });
         }

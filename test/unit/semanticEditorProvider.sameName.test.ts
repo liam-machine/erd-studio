@@ -576,6 +576,53 @@ describe('the second table of a name joins in one edit (one undo step)', () => {
   });
 });
 
+describe('New Table on a DBML diagram, in a schema folder another table of its name is not in', () => {
+  const ID = [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }];
+
+  it('a name only another schema folder has: the diagram reads the new file, and a later column edit changes only it', async () => {
+    fs.writeFileSync(at('bronze/tables/bqs/ort.dbml'), 'Table bqs.ort {\n  id INT [pk]\n  plz VARCHAR\n}\n');
+    const bqsOrt = read('bronze/tables/bqs/ort.dbml');
+    const canvas = await open('bronze/diagrams/ccc.dbml');
+    const r = await canvas.send({ type: 'addModel', payload: { name: 'ort', description: '', columns: ID, schemaFolder: 'ccc' } });
+    expect(r.errors).toEqual([]);
+    expect(r.changed).toEqual(['bronze/diagrams/ccc.dbml', 'bronze/tables/ccc/ort.dbml']);
+    const diagram = read('bronze/diagrams/ccc.dbml');
+    expect(diagram).toMatch(/^use \{ table ccc\.ort \} +from '\.\.\/tables\/ccc\/ort\.dbml'$/m);
+    expect(diagram).not.toContain('bqs/ort.dbml');
+    expect(canvas.posted().models.find((m) => m.name === 'ort')?.columns.map((c) => c.name)).toEqual(['id']);
+    const col = await canvas.send({ type: 'addColumn', payload: { modelName: 'ort', column: { name: 'stadt', dataType: 'VARCHAR', description: '' } } });
+    expect(col.errors).toEqual([]);
+    expect(col.changed).toEqual(['bronze/tables/ccc/ort.dbml']);
+    expect(read('bronze/tables/bqs/ort.dbml')).toBe(bqsOrt);
+  });
+
+  it('a name a member has in another schema folder forms the pair in one edit: version 8, both layout lines qualified', async () => {
+    const canvas = await open('bronze/diagrams/bqs.dbml');
+    const r = await canvas.send({ type: 'addModel', payload: { name: 'addresse', description: '', columns: ID, schemaFolder: 'ddd' } });
+    expect(r.errors).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(r.changed).toEqual(['bronze/diagrams/bqs.dbml', 'bronze/tables/ddd/addresse.dbml']);
+    expect(read('bronze/tables/ddd/addresse.dbml')).toContain('Table ddd.addresse');
+    const after = read('bronze/diagrams/bqs.dbml');
+    expect(after).toContain("erd_schema_version: '8'");
+    expect(after).toContain('bqs.addresse 10 20');
+    expect(after).toMatch(/ddd\.addresse -?\d+ -?\d+/);
+    expect(after).not.toMatch(/^\s+addresse \d/m);
+    expect(after).toMatch(/^use \{ table bqs\.addresse \} +from '\.\.\/tables\/bqs\/addresse\.dbml'$/m);
+    expect(after).toMatch(/^use \{ table ddd\.addresse \} +from '\.\.\/tables\/ddd\/addresse\.dbml'$/m);
+    expect(canvas.posted().models.map((m) => m.name).sort()).toEqual(['bqs.addresse', 'ddd.addresse', 'kunde']);
+    expect(canvas.posted().models.find((m) => m.name === 'ddd.addresse')?.columns.map((c) => c.name)).toEqual(['id']);
+  });
+
+  it('a name a member has in the same schema folder is still refused', async () => {
+    const canvas = await open('bronze/diagrams/bqs.dbml');
+    const before = snapshot();
+    const r = await canvas.send({ type: 'addModel', payload: { name: 'addresse', description: '', columns: ID, schemaFolder: 'bqs' } });
+    expect(r.errors).toEqual(['Table "addresse" already exists in this diagram.']);
+    expect(changed(before, snapshot())).toEqual([]);
+  });
+});
+
 describe('Delete Table File for one table of a pair', () => {
   it('Remove from the diagram showing both, then Delete Table File: only ccc\'s file, Refs and places go; bqs\'s stay byte for byte', async () => {
     const canvas = await open('bronze/diagrams/kunden.dbml');

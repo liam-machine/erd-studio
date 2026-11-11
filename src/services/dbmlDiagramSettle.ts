@@ -145,7 +145,17 @@ export function identitySummaryOf(summary: DiagramSummary): DiagramSummary {
  * diagram's members (references) and their `use` paths, index for index: a
  * settled diagram's summary, or the edited diagram's own members (the editor).
  */
-export function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: Pick<DiagramSummary, 'members' | 'memberPaths'>, base: SubjectAreaResolver): SubjectAreaResolver {
+export function diagramResolverOf(
+  plan: DbmlLibraryWritePlan,
+  summary: Pick<DiagramSummary, 'members' | 'memberPaths'>,
+  base: SubjectAreaResolver,
+  /**
+   * The editor's own diagram only: references of members the edit adds. One
+   * that names a table the plan creates (its name, or `<schema folder>.<name>`)
+   * is that table, never an existing table of its name in another schema folder.
+   */
+  addedMembers: readonly string[] = [],
+): SubjectAreaResolver {
   const ids = plan.identities!;
   /** Each member by its file; null for one whose file the plan deletes (never answered by its name). */
   const byRef = new Map<string, DbmlDiagramTable | null>();
@@ -173,6 +183,17 @@ export function diagramResolverOf(plan: DbmlLibraryWritePlan, summary: Pick<Diag
     }
     if (ids.changedPaths.has(usePath.toLowerCase())) changed.add(member.toLowerCase());
   });
+  const created = plan.createdTables.map((name, i) => {
+    const schema = dbmlTreePathOf(plan.createdTablePaths?.[i] ?? '')?.schema;
+    return { name, schema, refs: [name, ...(schema !== undefined ? [qualifiedRef(schema, name)] : [])].map((r) => r.toLowerCase()) };
+  });
+  for (const member of addedMembers) {
+    const key = member.toLowerCase();
+    if (byRef.has(key)) continue;
+    const named = created.filter((c) => c.refs.includes(key));
+    const table = named.length === 1 && named[0].schema !== undefined ? plan.resolveTable(qualifiedRef(named[0].schema, named[0].name)) : undefined;
+    if (table) byRef.set(key, table);
+  }
   const resolveTable = (name: string): DbmlDiagramTable | undefined => {
     const own = byRef.get(name.toLowerCase());
     if (own !== undefined) return own ?? undefined;
