@@ -239,7 +239,8 @@ function EditorCanvas() {
 
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
-  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
+  // A drop that adds nothing (the physical stage) says why, as a notice.
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop(setNotice);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -802,7 +803,7 @@ function EditorCanvas() {
       // area rather than an overlay on top of the nodes. With the notice
       // hidden this is a one-child flex container — i.e. unchanged.
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
-      // Undefined on the physical stage or a read-only diagram: nothing to drop on.
+      // On the physical stage or a read-only diagram a drop adds nothing and says why.
       {...dropHandlers}
     >
       {/* "dbt has not been compiled" strip. Renders nothing on the logical

@@ -56,7 +56,7 @@ import {
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
 import { TableLibraryDragController } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
-import { describeDuplicateFix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
+import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
 import { AUTO_DETECT_COLORS, RELATIONSHIPS_DIR, SubjectAreaFileError, dbmlTablePath, diagramFilePath, isDbmlLayerName, isReservedLayerName, normaliseSubjectAreaDocument, parseTableText, toTableNamingDocument } from '@erd-studio/core';
 import { parseTableDbml } from '@erd-studio/core/dbml';
@@ -68,7 +68,7 @@ import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
 import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, convertRowShows, type ConvertOfferState } from './services/convertOffer';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
-import { SUBJECT_AREA_EDITOR_VIEW_TYPE, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
+import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
 import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
@@ -216,6 +216,7 @@ import { exportSubjectAreaFile, exportSubjectAreaFiles } from './services/diagra
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { newDbmlSubjectAreaText, planDbmlDuplicateRename, planDbmlSubjectAreaRename, planDbmlTableMoves } from './commands/dbmlLifecycle';
 import { MOVE_DIAGRAM_COMMAND, MOVE_TABLE_COMMAND, moveDiagramCommand, moveTableCommand, type MoveDbmlDeps } from './commands/moveDbml';
+import { NEW_SCHEMA_COMMAND, NEW_TABLE_COMMAND, newSchemaCommand, newTableCommand, type NewTableDeps } from './commands/newTable';
 import { onDbmlFilesRenamed, type ExplorerMoveDeps } from './commands/explorerMoves';
 import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
@@ -814,6 +815,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showLogs',
   'erdStudio.moveTable',
   'erdStudio.moveDiagram',
+  'erdStudio.newTable',
+  'erdStudio.newSchema',
   'erdStudio.openRelationshipSource',
   'erdStudio.openInDiagram',
   'erdStudio.groupRelationshipsByFile',
@@ -2429,6 +2432,29 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     },
   };
 
+  // New Table… and New Schema… from the Table Library: the host's half (apply, refresh, show).
+  const newTableDeps: NewTableDeps = {
+    workspaceRoot,
+    semanticRoot: fullSemanticDirPath,
+    tableLibraryService,
+    storage: () => projectStorageOf(tableLibraryService),
+    layers: moveDbmlDeps.layers,
+    readText: openOrDiskText,
+    dirtyFiles,
+    applyWrites: moveDbmlDeps.applyWrites,
+    afterCreated: moveDbmlDeps.afterTablesMoved,
+    show: async (name, filePath) => {
+      try {
+        // Its row, when the view's filter shows it (the filter is the user's: never cleared here); then its file.
+        const node = tableLibraryProvider.findTableNode(name);
+        if (node && tableLibraryView?.visible) await tableLibraryView.reveal(node, { select: true, focus: false });
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+      } catch (err) {
+        log.warn('[ERD Studio] New Table: the new table could not be shown:', err);
+      }
+    },
+  };
+
   // A .dbml file (or a folder of them) moved or renamed in the Explorer: the
   // files that point at it follow, by `erdStudio.dbml.updateReferencesOnMove`.
   // ERD Studio's own edits are left alone (`ownFileOperations`).
@@ -3247,6 +3273,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
           await editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables);
         },
+        // The diagram in front of the user is offered first.
+        activeDiagramPath: activeSubjectAreaCanvasPath,
       };
       // A table's warehouse name and owner, from the cached reading of a file
       // already read (`read` reads it first, with no copy or relationships
@@ -3559,8 +3587,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     vscode.commands.registerCommand(MOVE_TABLE_COMMAND, (arg?: unknown, selection?: unknown) =>
       moveTableCommand(moveDbmlDeps, arg, selection)),
     vscode.commands.registerCommand(MOVE_DIAGRAM_COMMAND, (arg?: unknown) => moveDiagramCommand(moveDbmlDeps, arg)),
+    // A table file on no diagram yet, from the Table Library: in a layer row's
+    // layer, a schema row's schema, or one picked. New Schema… names the schema
+    // and carries on into its first table (a schema is the folder its tables sit in).
+    vscode.commands.registerCommand(NEW_TABLE_COMMAND, (arg?: unknown) => newTableCommand(newTableDeps, arg)),
+    vscode.commands.registerCommand(NEW_SCHEMA_COMMAND, (arg?: unknown) => newSchemaCommand(newTableDeps, arg)),
     // A second file with a name the library already has is ignored (names are
-    // identities). Give it its own name — `{layer}_{name}` — with an alias that
+    // identities). Give it its own name — `{layer}_{name}`, or `{schema}_{name}`
+    // when both DBML copies sit in one layer — with an alias that
     // keeps the table name, and repoint the domains of its layer at it.
     // Prompted, one WorkspaceEdit, one undo step.
     vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
@@ -3597,7 +3631,12 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         const newName = (await vscode.window.showInputBox({
           title: `Give ${libPath(dup.filePath)} its own name`,
           prompt: duplicateNamePrompt(copyReading.table.alias || copyName, hasDbt),
-          value: suggestDuplicateName(copyName, dup.layer ?? dup.folder, new Set(entries.map((e) => e.name))),
+          // Its layer, or (the file diagrams use being in the same layer) its schema: what tells the two apart.
+          value: suggestDuplicateName(
+            copyName,
+            duplicateNamePrefix(dup, entries.find((e) => dup.shadowedBy !== undefined && path.resolve(e.filePath) === path.resolve(dup.shadowedBy))),
+            new Set(entries.map((e) => e.name)),
+          ),
           ignoreFocusOut: true,
           validateInput: (value) => validateNewDbmlTableName(value) ?? validateTableName(value)
             ?? (taken.has(value.trim().toLowerCase()) ? `"${value.trim()}" already exists in the Table Library.` : null),

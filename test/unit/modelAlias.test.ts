@@ -19,6 +19,7 @@ import {
   planDuplicateFix,
   repointSubjectAreaTable,
   suggestDuplicateName,
+  duplicateNamePrefix,
   type SubjectAreaReference,
 } from '../../src/services/duplicateModelResolver';
 import { normaliseName } from '../../src/services/nameUtils';
@@ -316,6 +317,28 @@ describe('duplicate model files', () => {
     expect(suggestDuplicateName('date', 'gold', new Set(['gold_date']))).toBe('gold_date_2');
     expect(suggestDuplicateName('date', 'my-layer', new Set())).toBe('my_layer_date');
     expect(suggestDuplicateName('date', 'Gold', new Set())).toBe('gold_date');
+  });
+
+  it('prefixes with the schema when both DBML copies sit in one layer, and with the layer (or YAML folder) otherwise', () => {
+    // bronze/tables/bqs/addresse.dbml wins; bronze/tables/ccc/addresse.dbml is the ignored copy.
+    const prefix = duplicateNamePrefix({ layer: 'bronze', folder: 'ccc' }, { layer: 'bronze', folder: 'bqs' });
+    expect(prefix).toBe('ccc');
+    expect(suggestDuplicateName('addresse', prefix, new Set(['addresse']))).toBe('ccc_addresse');
+    // The uniqueness fallback is kept.
+    expect(suggestDuplicateName('addresse', prefix, new Set(['addresse', 'CCC_Addresse']))).toBe('ccc_addresse_2');
+    // The layer's case does not matter; the schema keeps the usual clean-up.
+    expect(suggestDuplicateName('addresse', duplicateNamePrefix({ layer: 'Bronze', folder: 'CCC-raw' }, { layer: 'bronze', folder: 'bqs' }), new Set()))
+      .toBe('ccc_raw_addresse');
+
+    // Different layers: the layer, as before.
+    expect(duplicateNamePrefix({ layer: 'silver', folder: 'sales' }, { layer: 'gold', folder: 'gold' })).toBe('silver');
+    expect(duplicateNamePrefix({ layer: 'silver', folder: 'sales' }, { layer: 'gold', folder: 'sales' })).toBe('silver');
+    // The winner unknown, or a YAML table (no layer): the layer, else the folder.
+    expect(duplicateNamePrefix({ layer: 'bronze', folder: 'ccc' })).toBe('bronze');
+    expect(duplicateNamePrefix({ folder: 'gold' }, { folder: '' })).toBe('gold');
+    expect(duplicateNamePrefix({ folder: '' }, { folder: 'gold' })).toBe('');
+    // A DBML copy shadowed by a YAML table (no layer on the winner): the layer.
+    expect(duplicateNamePrefix({ layer: 'bronze', folder: 'ccc' }, { folder: '' })).toBe('bronze');
   });
 
   it("repoints the domains of the copy's layer and keeps the rest", () => {

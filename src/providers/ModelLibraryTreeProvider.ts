@@ -35,7 +35,8 @@ import type { TableLibraryService, TableFileEntry, TableFileError, TableSearchFa
 import type { SubjectAreaService } from '../services/domainService';
 import { DiagramMembers } from '../services/diagramMembers';
 import type { CodeOwnersReader } from '../services/codeOwners';
-import { suggestDuplicateName } from '../services/duplicateModelResolver';
+import { duplicateNamePrefix, suggestDuplicateName } from '../services/duplicateModelResolver';
+import { tableFileErrorTip } from '../commands/openModelFile';
 import type { LayerConfig } from '../types/layer';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { layerSwatchIcon } from './layerSwatch';
@@ -85,8 +86,12 @@ export interface TableLibraryTableNode {
   readonly shadowedBy?: string;
   /** In v6's `tables/` library (#181): read, never changed here, so it offers no actions. */
   readonly library?: 'tables';
-  /** What is wrong in the file, so the problem stays visible after its one warning (#164). */
-  readonly fileError?: Pick<TableFileError, 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key'>;
+  /**
+   * What is wrong in the file, so the problem stays visible after its one
+   * warning (#164). `message` is the reader's own sentence (it may quote the
+   * file): shown in the row's tooltip, never sent anywhere.
+   */
+  readonly fileError?: Pick<TableFileError, 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key' | 'code'> & { readonly message?: string };
   /** How the file stores the table (native DBML storage); shown only while the project is `mixed`. */
   readonly storage?: 'yaml' | 'dbml';
   /** The project holds both YAML and DBML tables: each entry names its format. */
@@ -193,6 +198,9 @@ export const NO_DIAGRAM_TOOLTIP = 'On no diagram yet. **Add to Diagram…** puts
  * VS Code then remembers each row's state by its id.
  */
 export const COLLAPSE_LAYERS_OVER = 30;
+
+/** The longest reader's message a broken file's tooltip quotes; a longer one is cut. */
+const FILE_ERROR_REASON_MAX = 400;
 
 /** Layer ids that have their own contributed colour (`erdStudio.layer.{id}`). */
 const LAYER_COLOR_IDS = new Set(['bronze', 'silver', 'gold', 'platinum']);
@@ -601,6 +609,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
             ...(error.mergeConflict ? { mergeConflict: true as const } : {}),
             ...(error.readable ? { readable: true as const } : {}),
             ...(error.key ? { key: error.key } : {}),
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.message ? { message: error.message } : {}),
           },
         } : {}),
       };
@@ -721,7 +731,13 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     } else {
       item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('list.errorForeground'));
       item.description = error.mergeConflict ? `(merge conflict${at})` : error.kind === 'read' ? '(can\'t be read)' : `(${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${at})`;
-      item.tooltip = 'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.';
+      // Why, in the reader's own words (the description stays short): plain text, since it may quote the file.
+      const why = this.fileErrorReason(element, error);
+      item.tooltip = [
+        'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.',
+        ...(why ? ['', `${why}${error.line !== undefined ? ` (line ${error.line})` : ''}`] : []),
+        ...(error.kind !== 'read' || error.mergeConflict ? ['', tableFileErrorTip(error.kind, error.mergeConflict, error.code)] : []),
+      ].join('\n');
     }
     item.accessibilityInformation = { label: `${element.name}, ${String(item.description).replace(/^\(|\)$/g, '')}` };
     item.resourceUri = vscode.Uri.file(element.filePath);
@@ -731,12 +747,32 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /**
+   * The reader's message for a file that does not read, for the tooltip: one
+   * line, the file named as the tree shows it (never its absolute path), cut
+   * to a readable length. Undefined when the reader gave none.
+   */
+  private fileErrorReason(element: TableLibraryTableNode, error: NonNullable<TableLibraryTableNode['fileError']>): string | undefined {
+    const raw = error.message?.trim();
+    if (!raw) return undefined;
+    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
+    const shown = shownPath(semanticRoot, element.filePath);
+    const oneLine = raw.split(element.filePath).join(shown).split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ');
+    return oneLine.length > FILE_ERROR_REASON_MAX ? `${oneLine.slice(0, FILE_ERROR_REASON_MAX - 1)}…` : oneLine;
+  }
+
+  /**
    * The name Give Duplicate Table Its Own Name offers for this copy, from
-   * the same rule the command uses: its layer (a DBML table), else its folder.
+   * the same rule the command uses (`duplicateNamePrefix`): its layer (a DBML
+   * table), or its schema when the file diagrams use is in the same layer,
+   * else its folder.
    */
   private duplicateSuggestion(element: TableLibraryTableNode): string {
-    const taken = new Set(this.tableLibraryService.listTableFiles().map((e) => e.name));
-    return suggestDuplicateName(element.name, element.layer ?? element.folder ?? '', taken) || element.name;
+    const entries = this.tableLibraryService.listTableFiles();
+    const winner = element.shadowedBy !== undefined
+      ? entries.find((e) => path.resolve(e.filePath) === path.resolve(element.shadowedBy as string))
+      : undefined;
+    const taken = new Set(entries.map((e) => e.name));
+    return suggestDuplicateName(element.name, duplicateNamePrefix(element, winner), taken) || element.name;
   }
 
   /** A DBML layer's row: its colour, the word "Layer", and what it holds. */
@@ -855,7 +891,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const layerName = layer?.label ?? layerId;
     const item = new vscode.TreeItem(element.folder, vscode.TreeItemCollapsibleState.Expanded);
     item.id = `erdStudio.modelLibrary.folder:${layerId}/tables/${element.folder}`;
-    item.contextValue = 'logicalModelFolder';
+    // Its own value (not a YAML folder's `logicalModelFolder`): New Table… is offered on it.
+    item.contextValue = 'tableLibrarySchema';
     item.iconPath = new vscode.ThemeIcon('symbol-namespace');
     const count = element.children.length;
     // Compact: what the row is (the count is in the hover).

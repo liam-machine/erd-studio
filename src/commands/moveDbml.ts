@@ -76,7 +76,7 @@ function semanticRel(deps: Pick<MoveDbmlDeps, 'semanticRoot'>, filePath: string)
  * its order), then every other DBML layer folder on disk (sorted). A layer
  * `layers.json` does not list is offered only when its folder exists.
  */
-export function moveLayersOf(deps: Pick<MoveDbmlDeps, 'layers' | 'tableLibraryService'>): Array<{ layer: string; label: string; schemas: readonly string[]; listed: boolean }> {
+export function moveLayersOf(deps: Pick<MoveDbmlDeps, 'layers'> & { tableLibraryService: Pick<TableLibraryService, 'listDbmlLayerFolders'> }): Array<{ layer: string; label: string; schemas: readonly string[]; listed: boolean }> {
   const folders = deps.tableLibraryService.listDbmlLayerFolders();
   const listed = deps.layers().filter((l) => isDbmlLayerName(l.id));
   const out = listed.map((l) => {

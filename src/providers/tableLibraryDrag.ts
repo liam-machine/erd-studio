@@ -23,11 +23,10 @@
 import * as vscode from 'vscode';
 
 import type { TableLibraryNode } from './ModelLibraryTreeProvider';
-import { ADD_EXISTING_TABLES_LIMIT } from '../types/messages';
+import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME } from '../types/messages';
 import { normaliseName } from '../services/nameUtils';
 
-/** The Table Library's own drag mime type (`application/vnd.code.tree.<view id, lower case>`). */
-export const TABLE_LIBRARY_DRAG_MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
+export { TABLE_LIBRARY_DRAG_MIME };
 
 /** The tables a drag carries: names and their files, in the same order. */
 export interface DraggedTables {

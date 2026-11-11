@@ -35,6 +35,19 @@ export function hasOpenSubjectAreaCanvas(): boolean {
 }
 
 /**
+ * The file of the diagram canvas in the active editor tab, or undefined when
+ * that tab is anything else (a text editor, no tab). The active tab stays the
+ * diagram while the sidebar has focus, so a Table Library command can ask
+ * which diagram is in front of the user.
+ */
+export function activeSubjectAreaCanvasPath(): string | undefined {
+  const input = vscode.window.tabGroups.activeTabGroup?.activeTab?.input;
+  return input instanceof vscode.TabInputCustom && input.viewType === SUBJECT_AREA_EDITOR_VIEW_TYPE && input.uri.scheme === 'file'
+    ? input.uri.fsPath
+    : undefined;
+}
+
+/**
  * Save all dirty editors, then reload the window. saveAll runs first so no
  * work is lost; if it fails the user is prompted to handle it manually rather
  * than silently risking data loss.

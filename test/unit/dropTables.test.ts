@@ -143,6 +143,20 @@ describe('tablesOfDroppedUris', () => {
     expect(tablesOfDroppedUris([shouted], files, 'linux')).toEqual([]);
   });
 
+  it('reads a Windows file URI as VS Code writes it: an encoded, lower-case drive letter, or a share', () => {
+    const win = [
+      { name: 'fct_order', filePath: 'C:\\Users\\G\\proj\\.erd-studio\\gold\\tables\\dbo\\fct_order.dbml' },
+      { name: 'dim_customer', filePath: '\\\\server\\share\\proj\\.erd-studio\\gold\\tables\\dbo\\dim_customer.dbml' },
+    ];
+    expect(tablesOfDroppedUris([
+      'file:///c%3A/Users/G/proj/.erd-studio/gold/tables/dbo/fct_order.dbml',
+      'file://server/share/proj/.erd-studio/gold/tables/dbo/dim_customer.dbml',
+    ], win, 'win32')).toEqual(['fct_order', 'dim_customer']);
+    expect(tablesOfDroppedUris(['file:///C:/users/g/PROJ/.erd-studio/gold/tables/dbo/FCT_ORDER.dbml'], win, 'win32')).toEqual(['fct_order']);
+    // A URI list as VS Code joins it leaves a carriage return on a line read alone.
+    expect(tablesOfDroppedUris(['file:///c%3A/Users/G/proj/.erd-studio/gold/tables/dbo/fct_order.dbml\r'], win, 'win32')).toEqual(['fct_order']);
+  });
+
   it('decodes a percent-encoded path', () => {
     const spaced = [{ name: 'fct_order', filePath: '/my proj/.erd-studio/gold/tables/gold/fct_order.dbml' }];
     expect(tablesOfDroppedUris(['file:///my%20proj/.erd-studio/gold/tables/gold/fct_order.dbml'], spaced, 'linux')).toEqual(['fct_order']);
@@ -166,6 +180,8 @@ describe('dropGridPositions', () => {
 describe('validateDropTablesPayload', () => {
   it('accepts a finite point with a list of URIs, empty too', () => {
     expect(validateDropTablesPayload({ position: { x: 1, y: -2.5 }, uris: [] })).toBeNull();
+    expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: true })).toBeNull();
+    expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: false })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 0, y: 0 }, uris: ['file:///a.dbml'] })).toBeNull();
   });
 
@@ -180,6 +196,7 @@ describe('validateDropTablesPayload', () => {
     [{ position: { x: 0, y: 0 } }],
     [{ position: { x: 0, y: 0 }, uris: 'file:///a.dbml' }],
     [{ position: { x: 0, y: 0 }, uris: [42] }],
+    [{ position: { x: 0, y: 0 }, uris: [], fromLibrary: 'yes' }],
     [{ position: { x: 0, y: 0 }, uris: ['x'.repeat(DROP_TABLES_URI_MAX_LENGTH + 1)] }],
     [{ position: { x: 0, y: 0 }, uris: Array.from({ length: DROP_TABLES_URI_LIMIT + 1 }, () => 'file:///a.dbml') }],
   ])('refuses %j', (payload) => {
@@ -247,8 +264,8 @@ async function loaded(provider: SemanticEditorProvider, rel = STAGING) {
 type Panel = ReturnType<typeof createMockWebviewPanel>;
 const posted = (panel: Panel, type: string) => panel._postedMessages.filter((m) => (m as { type: string }).type === type);
 const errors = (panel: Panel): string[] => posted(panel, 'error').map((m) => (m as { payload: { message: string } }).payload.message);
-const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }) =>
-  panel._simulateMessage({ type: 'dropTables', payload: { position, uris } });
+const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }, fromLibrary?: boolean) =>
+  panel._simulateMessage({ type: 'dropTables', payload: { position, uris, ...(fromLibrary === undefined ? {} : { fromLibrary }) } });
 
 beforeEach(() => {
   _resetMockWorkspace();
@@ -303,6 +320,25 @@ describe('dropTables', () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await drop(panel, []);
     expect(info).toHaveBeenCalledWith(DROP_TABLES_NOTHING_MESSAGE);
+  });
+
+  it('a drop that says it is a Table Library drag adds the whole remembered drag, not only the rows whose files it carries', async () => {
+    // A schema row and a table row dragged together: VS Code gives the drop the table row's file only.
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_customer', 'dim_region']);
+    await drop(panel, [fileUri(DIM_CUSTOMER)], { x: 500, y: 300 }, true);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_customer }');
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+  });
+
+  it('a Table Library drop with no remembered drag left falls back on the files it carries', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    await drop(panel, [fileUri(DIM_REGION)], { x: 500, y: 300 }, true);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
   });
 
   it('a drag older than a minute is not used', async () => {

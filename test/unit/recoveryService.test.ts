@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 
 import {
   SUBJECT_AREA_EDITOR_VIEW_TYPE,
+  activeSubjectAreaCanvasPath,
   hasOpenSubjectAreaCanvas,
   saveAllAndReload,
 } from '../../src/services/recoveryService';
@@ -44,6 +45,28 @@ describe('recoveryService', () => {
       const tabInput = new vscode.TabInputCustom({ fsPath: '/img.png' }, 'imagePreview.previewEditor');
       setOpenTabs([{ input: tabInput }]);
       expect(hasOpenSubjectAreaCanvas()).toBe(false);
+    });
+  });
+
+  describe('activeSubjectAreaCanvasPath', () => {
+    const active = (vscode.window as unknown as { tabGroups: { activeTabGroup: { activeTab: { input: unknown } | undefined } } }).tabGroups.activeTabGroup;
+    beforeEach(() => {
+      active.activeTab = undefined;
+    });
+
+    it('is the file of the diagram in the active tab', () => {
+      active.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file('/p/.erd-studio/gold/diagrams/sales.dbml'), SUBJECT_AREA_EDITOR_VIEW_TYPE) };
+      expect(activeSubjectAreaCanvasPath()).toBe('/p/.erd-studio/gold/diagrams/sales.dbml');
+      active.activeTab = undefined;
+    });
+
+    it('is undefined with no tab, a text editor, or another custom editor in front', () => {
+      expect(activeSubjectAreaCanvasPath()).toBeUndefined();
+      active.activeTab = { input: { uri: vscode.Uri.file('/p/a.ts') } };
+      expect(activeSubjectAreaCanvasPath()).toBeUndefined();
+      active.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file('/p/a.png'), 'imagePreview.previewEditor') };
+      expect(activeSubjectAreaCanvasPath()).toBeUndefined();
+      active.activeTab = undefined;
     });
   });
 

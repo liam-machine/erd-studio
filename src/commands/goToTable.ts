@@ -24,6 +24,7 @@ import type { TableFileEntry } from '../services/logicalModelService';
 import type { SubjectAreaSummary } from '../types/semantic';
 import type { TableHome } from '../services/tableHomes';
 import { normaliseName } from '../services/nameUtils';
+import { pathKey } from '../services/pathKey';
 import {
   TABLE_LIBRARY_FILTER,
   isStructuredQuery,
@@ -386,9 +387,35 @@ export interface AddToDiagramDeps {
   layerLabel(layer: string): string;
   /** Open the diagram, add the tables in one edit and select the first (`SemanticEditorProvider.addTablesToDiagram`). */
   addTables(filePath: string, tables: readonly string[]): Promise<void>;
+  /** The file of the diagram in the active editor tab, if that tab is a diagram: it is offered first. */
+  activeDiagramPath?(): string | undefined;
 }
 
-/** Add to Diagram…: which diagram, then the add. */
+/** What the pick says beside the diagram in the active tab. */
+export const OPEN_DIAGRAM_NOTE = 'open now';
+
+/**
+ * `items` with the diagram of the active tab first, marked
+ * {@link OPEN_DIAGRAM_NOTE} (so Enter adds to the diagram in front of the
+ * user); unchanged when no diagram is active or it is not among them (it
+ * shows the tables already). Paths are compared as the file system does.
+ */
+export function withOpenDiagramFirst(items: readonly DiagramPickItem[], activePath: string | undefined): DiagramPickItem[] {
+  const index = activePath === undefined ? -1 : items.findIndex((item) => pathKey(item.summary.filePath) === pathKey(activePath));
+  if (index < 0) return [...items];
+  const open = items[index];
+  return [
+    { ...open, description: open.description ? `${open.description} · ${OPEN_DIAGRAM_NOTE}` : OPEN_DIAGRAM_NOTE },
+    ...items.slice(0, index),
+    ...items.slice(index + 1),
+  ];
+}
+
+/**
+ * Add to Diagram…: which diagram (the one in the active tab first), then the
+ * add. The route that needs no drag: it works from the Table Library's
+ * right-click menu on one table or a selection.
+ */
 export async function addToDiagramCommand(deps: AddToDiagramDeps, tables: readonly string[]): Promise<void> {
   if (tables.length === 0) {
     void vscode.window.showErrorMessage('Add to Diagram: No table selected. Right-click a table in the Table Library.');
@@ -400,7 +427,7 @@ export async function addToDiagramCommand(deps: AddToDiagramDeps, tables: readon
     void vscode.window.showInformationMessage('ERD Studio: This project has no diagram yet. Make one with New Diagram…, then add the tables to it.');
     return;
   }
-  const items = diagramPickItems(summaries, deps.memberNames, deps.layerLabel, tables);
+  const items = withOpenDiagramFirst(diagramPickItems(summaries, deps.memberNames, deps.layerLabel, tables), deps.activeDiagramPath?.());
   if (items.length === 0) {
     void vscode.window.showInformationMessage(`ERD Studio: Every diagram already shows ${subject}.`);
     return;

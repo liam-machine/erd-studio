@@ -672,6 +672,24 @@ describe('in a native DBML project', () => {
     compilesClean();
   });
 
+  it('Give Duplicate Its Own Name offers {schema}_{name} for a copy in another schema of the SAME layer, and renames it so', async () => {
+    // gold/tables/gold/dim_customer.dbml wins; a second one in gold/tables/sales/ is the copy.
+    const copy = erd('gold', 'tables', 'sales', 'dim_customer.dbml');
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.writeFileSync(copy, 'Table sales.dim_customer {\n  customer_key INT [pk]\n}\n');
+    await activate(context);
+    const input = vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (o: { value?: string }) => o.value) as never);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Rename') ? 'Rename' : undefined)) as never);
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', copy);
+    expect(errors).not.toHaveBeenCalled();
+    // Not `gold_dim_customer`: the layer names both copies alike.
+    expect((input.mock.calls[0][0] as { value?: string }).value).toBe('sales_dim_customer');
+    expect(fs.existsSync(copy)).toBe(false);
+    expect(fs.readFileSync(erd('gold', 'tables', 'sales', 'sales_dim_customer.dbml'), 'utf-8')).toMatch(/^Table sales\.sales_dim_customer \[alias: 'dim_customer'\]/m);
+    compilesClean();
+  });
+
   describe('a refused write shows a modal naming the file, with Open File at the line (§4.7)', () => {
     /** The one modal error shown, with its options and buttons. */
     function refusalModal(): { message: string; detail?: string; buttons: string[] } {

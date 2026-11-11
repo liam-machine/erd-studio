@@ -779,16 +779,18 @@ export function validateAddExistingModelsPayload(value: unknown): string | null 
  * uris }`, the point finite, `uris` a list of at most
  * {@link DROP_TABLES_URI_LIMIT} strings of at most
  * {@link DROP_TABLES_URI_MAX_LENGTH} characters (possibly empty: a drag from
- * the Table Library may bring none). The URIs are only compared with the
- * library's file paths, never opened.
+ * the Table Library may bring none), and `fromLibrary`, when present, a
+ * boolean. The URIs are only compared with the library's file paths, never
+ * opened.
  */
 export function validateDropTablesPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return 'A drop needs a position and a list of URIs.';
   }
-  const { position, uris } = value as { position?: unknown; uris?: unknown };
+  const { position, uris, fromLibrary } = value as { position?: unknown; uris?: unknown; fromLibrary?: unknown };
   const pointError = validatePoint(position);
   if (pointError) return pointError;
+  if (fromLibrary !== undefined && typeof fromLibrary !== 'boolean') return 'fromLibrary must be true or false.';
   if (!Array.isArray(uris)) return 'A drop needs a list of URIs.';
   if (uris.length > DROP_TABLES_URI_LIMIT) return `At most ${DROP_TABLES_URI_LIMIT} files can be dropped at once.`;
   for (const uri of uris) {

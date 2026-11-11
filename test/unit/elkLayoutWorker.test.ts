@@ -32,7 +32,7 @@ const fakes = vi.hoisted(() => {
 
 vi.mock('elkjs/lib/elk-api', () => ({ default: fakes.FakeELK }));
 
-import { runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow } from '../../webview/lib/elkLayout';
+import { runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow, stackSafeFallbacks } from '../../webview/lib/elkLayout';
 import type { TableFlowNode } from '@erd-studio/renderer/editor';
 
 const node: TableFlowNode = {
@@ -105,7 +105,7 @@ describe('runElkLayout worker guard', () => {
 
   // A 257-table import: NETWORK_SIMPLEX overflowed the worker's stack and the
   // canvas showed "Auto layout failed: Maximum call stack size exceeded".
-  it('retries once with Brandes–Köpf node placement when the layout overflows the stack', async () => {
+  it('lays out again with Brandes–Köpf node placement when the layout overflows the stack', async () => {
     const graphs: Array<{ layoutOptions: Record<string, string> }> = [];
     fakes.state.layoutImpl = (graph) => {
       graphs.push(graph as { layoutOptions: Record<string, string> });
@@ -121,11 +121,36 @@ describe('runElkLayout worker guard', () => {
     expect(second).toEqual(first);
   });
 
-  it('a second overflow, or another error, is not retried', async () => {
+  // A 130-table diagram with many relationships: Brandes–Köpf overflowed too,
+  // in the post-compaction's own network simplex, and Auto Layout still failed.
+  it('a second overflow is laid out again without post-compaction', async () => {
+    const graphs: Array<{ layoutOptions: Record<string, string> }> = [];
+    let told = 0;
+    fakes.state.layoutImpl = (graph) => {
+      graphs.push(graph as { layoutOptions: Record<string, string> });
+      return graphs.length < 3
+        ? Promise.reject(new RangeError('Maximum call stack size exceeded'))
+        : Promise.resolve({ id: 'root', children: [{ id: 'a', x: 3, y: 4 }] });
+    };
+    expect(await runElkLayout([node], [], undefined, 'auto', { onStackFallback: () => { told++; } })).toEqual({ a: { x: 3, y: 4 } });
+    expect(graphs.map((g) => g.layoutOptions['elk.layered.nodePlacement.strategy'])).toEqual(['NETWORK_SIMPLEX', STACK_SAFE_NODE_PLACEMENT, STACK_SAFE_NODE_PLACEMENT]);
+    expect(graphs.map((g) => g.layoutOptions['elk.layered.compaction.postCompaction.strategy'])).toEqual(['EDGE_LENGTH', 'EDGE_LENGTH', 'NONE']);
+    // The fallback is reported once, however many steps it takes.
+    expect(told).toBe(1);
+  });
+
+  it('the fallbacks skip a step the diagram\'s own options already take', () => {
+    expect(stackSafeFallbacks({ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH' }))
+      .toEqual([{ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'NONE' }]);
+    expect(stackSafeFallbacks({ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT })).toEqual([]);
+    expect(stackSafeFallbacks({ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'NONE' })).toEqual([]);
+  });
+
+  it('an overflow of every fallback, or another error, is not retried further', async () => {
     let calls = 0;
     fakes.state.layoutImpl = () => { calls++; return Promise.reject(new RangeError('Maximum call stack size exceeded')); };
     await expect(runElkLayout([node], [])).rejects.toThrow('Maximum call stack size exceeded');
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
     calls = 0;
     fakes.state.layoutImpl = () => { calls++; return Promise.reject(new Error('cycle detected')); };
     await expect(runElkLayout([node], [])).rejects.toThrow('cycle detected');

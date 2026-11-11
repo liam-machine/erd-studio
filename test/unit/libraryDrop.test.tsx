@@ -28,10 +28,12 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import {
+  DROP_REFUSED_READ_ONLY,
   LIBRARY_DRAG_HINT_MS,
   dropEffectFor,
   acceptsDrop,
   droppedUris,
+  isLibraryDrag,
   libraryDragHintText,
   useLibraryDrop,
 } from '../../webview/hooks/useLibraryDrop';
@@ -121,6 +123,13 @@ describe('acceptsDrop', () => {
     expect(acceptsDrop(null, true)).toBe(false);
   });
 
+  it('knows a Table Library drag by that view\'s own mime type, in any case', () => {
+    expect(isLibraryDrag(transfer({ 'application/vnd.code.tree.erdstudio.modellibrary': '' }))).toBe(true);
+    expect(isLibraryDrag(transfer({ 'Application/vnd.code.tree.erdStudio.modelLibrary': '' }))).toBe(true);
+    expect(isLibraryDrag(transfer({ 'application/vnd.code.tree.workbench.explorer.fileview': '', ResourceURLs: '[]' }))).toBe(false);
+    expect(isLibraryDrag(null)).toBe(false);
+  });
+
   it('words the hint for one table or several', () => {
     expect(libraryDragHintText(['dim_customer'])).toBe(HINT);
     expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Hold Shift and drop to add 3 tables to this diagram');
@@ -180,6 +189,26 @@ describe('the canvas as a drop target', () => {
     expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 10, y: 20 }, uris: [] } }]);
   });
 
+  it('marks a drop that carries the Table Library mime type, as VS Code hands a tree drag to a webview', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    // What VS Code 1.9x puts on a drag of one table row and one schema row: the
+    // declared types blank, the tree's item handles, and the table row's file.
+    const dataTransfer = transfer({
+      'text/uri-list': '',
+      resourceurls: '',
+      'application/vnd.code.tree.erdstudio.modellibrary': '{"id":"erdStudio.modelLibrary","itemHandles":["0/0:fct_order","0/1:sales"]}',
+      'application/vnd.code.uri-list': 'file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml',
+      codefiles: '["c:\\\\proj\\\\.erd-studio\\\\gold\\\\tables\\\\dbo\\\\fct_order.dbml"]',
+    });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(false);
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 10, clientY: 20 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 10, y: 20 }, uris: ['file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml'], fromLibrary: true },
+    }]);
+  });
+
   it('leaves a plain text drag alone, and drops the highlight when the drag leaves', () => {
     const { container } = render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
@@ -196,16 +225,28 @@ describe('the canvas as a drop target', () => {
     expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
   });
 
-  it('takes no drop and shows no hint on the physical stage', () => {
+  it('adds nothing and shows no hint on the physical stage, and says why when tables are dropped there', () => {
     const { container } = render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea('physical') });
     postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
     expect(screen.queryByText(HINT)).toBeNull();
     const dataTransfer = transfer({ 'text/uri-list': 'file:///p/a.dbml' });
-    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(true);
+    fireEvent.dragOver(canvas(container), { dataTransfer });
+    expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
+    expect(screen.queryByText(DROP_REFUSED_READ_ONLY)).toBeNull();
     fireEvent.drop(canvas(container), { dataTransfer, clientX: 1, clientY: 1 });
     expect(drops()).toEqual([]);
+    expect(screen.getByText(DROP_REFUSED_READ_ONLY)).toBeTruthy();
     expect(screen.queryByTestId('library-drop-highlight')).toBeNull();
+  });
+
+  it('says nothing about a drop that carries no table on the physical stage (plain text)', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('physical') });
+    const text = transfer({ 'text/plain': 'hello' });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer: text })).toBe(true);
+    fireEvent.drop(canvas(container), { dataTransfer: text, clientX: 1, clientY: 1 });
+    expect(screen.queryByText(DROP_REFUSED_READ_ONLY)).toBeNull();
   });
 });
 

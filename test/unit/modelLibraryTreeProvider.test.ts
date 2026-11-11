@@ -981,6 +981,69 @@ describe('TableLibraryTreeProvider: compact rows (the default)', () => {
     expect(dup.getTreeItem(dupRow).description).toBe('(duplicate — ignored)');
   });
 
+  it('a file that does not read says why in its hover (the reader\'s message, its line and a tip), the row staying short', () => {
+    const filePath = `${SEMANTIC}/bronze/tables/bqs/addresse.dbml`;
+    const broken = items(compact([dbmlEntry('fct_order'), dbmlEntry('addresse', 'bronze', 'bqs')], {}, 'dbml', {
+      addresse: {
+        kind: 'dbmlStructure', code: 'structure:nameMismatch', line: 1, filePath,
+        message: 'addresse.dbml declares Table address; name the Table as its file (or rename the file)',
+      },
+    }));
+    const row = broken.get('addresse')!;
+    expect(row.description).toBe('(DBML error — line 1)');
+    expect(row.tooltip).toBe([
+      'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.',
+      '',
+      'addresse.dbml declares Table address; name the Table as its file (or rename the file) (line 1)',
+      '',
+      "Tip: name the Table as its file, or rename the file to the Table's name.",
+    ].join('\n'));
+  });
+
+  it('the hover names the file as the tree does, never by its absolute path, keeps a long message short, and stays as it was with no message', () => {
+    const filePath = `${SEMANTIC}/gold/tables/gold/dim_x.dbml`;
+    const unreadable = items(compact([dbmlEntry('dim_x')], {}, 'dbml', {
+      dim_x: { kind: 'read', filePath, message: `EACCES: permission denied, open '${filePath}'\n    at readFileSync` },
+    })).get('dim_x')!;
+    expect(unreadable.description).toBe('(can\'t be read)');
+    expect(String(unreadable.tooltip)).toContain("EACCES: permission denied, open '.erd-studio/gold/tables/gold/dim_x.dbml' at readFileSync");
+    expect(String(unreadable.tooltip)).not.toContain('/project/');
+
+    const long = items(compact([dbmlEntry('dim_x')], {}, 'dbml', { dim_x: { kind: 'dbmlSyntax', line: 3, filePath, message: 'x'.repeat(900) } })).get('dim_x')!;
+    expect(String(long.tooltip).split('\n')[2]).toBe(`${'x'.repeat(399)}… (line 3)`);
+
+    const silent = items(compact([dbmlEntry('dim_x')], {}, 'dbml', { dim_x: { kind: 'dbmlSyntax', line: 3, filePath } })).get('dim_x')!;
+    expect(silent.tooltip).toBe([
+      'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.',
+      '',
+      'Tip: check the DBML syntax on that line (a missing bracket, quote or brace).',
+    ].join('\n'));
+  });
+
+  it('a duplicate in another schema of the SAME layer is offered {schema}_{name}; in another layer, {layer}_{name} as before', () => {
+    const winner = dbmlEntry('addresse', 'bronze', 'bqs');
+    const copy: TableFileEntry = { ...dbmlEntry('addresse', 'bronze', 'ccc'), shadowedBy: winner.filePath };
+    const sameLayer = compact([winner, copy]);
+    const sameRow = allTables(sameLayer.getChildren() as TableLibraryNode[]).find((n) => n.shadowedBy)!;
+    const sameItem = sameLayer.getTreeItem(sameRow);
+    expect(sameItem.description).toBe('(duplicate — ignored)');
+    expect(String(sameItem.tooltip)).toContain('to make this copy "ccc_addresse" with the warehouse name (alias) "addresse".');
+    expect(String(sameItem.tooltip)).not.toContain('bronze_addresse');
+
+    const other: TableFileEntry = { ...dbmlEntry('fct_order', 'silver', 'sales'), shadowedBy: `${SEMANTIC}/gold/tables/gold/fct_order.dbml` };
+    const crossLayer = compact([dbmlEntry('fct_order'), other]);
+    const crossRow = allTables(crossLayer.getChildren() as TableLibraryNode[]).find((n) => n.shadowedBy)!;
+    expect(String(crossLayer.getTreeItem(crossRow).tooltip)).toContain('to make this copy "silver_fct_order" with the warehouse name (alias) "fct_order".');
+  });
+
+  it('a layer row and a schema row have context values of their own, which New Table… and New Schema… are offered on', () => {
+    const provider = compact([dbmlEntry('fct_order'), dbmlEntry('dim_date', 'silver', 'calendar'), dbmlEntry('dim_time', 'silver', 'clock')]);
+    const [silver, gold] = provider.getChildren() as TableLibraryLayerNode[];
+    expect(provider.getTreeItem(silver).contextValue).toBe('tableLibraryLayer');
+    expect(provider.getTreeItem(gold).contextValue).toBe('tableLibraryLayer');
+    expect(provider.getTreeItem(silver.children[0]).contextValue).toBe('tableLibrarySchema');
+  });
+
   it('layer rows say "Layer" and schema rows "Schema"; their hovers have the counts', () => {
     const provider = compact([dbmlEntry('fct_order'), dbmlEntry('dim_customer'), dbmlEntry('dim_date', 'silver', 'calendar'), dbmlEntry('dim_time', 'silver', 'clock')]);
     const [silver, gold] = provider.getChildren() as TableLibraryLayerNode[];

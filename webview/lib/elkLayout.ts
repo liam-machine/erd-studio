@@ -314,6 +314,37 @@ function getElk(): IELK {
 /** The node placement a layout falls back to when the default one overflows the worker's stack. */
 export const STACK_SAFE_NODE_PLACEMENT = 'BRANDES_KOEPF';
 
+/** The post-compaction option, which the last fallback leaves out. */
+const POST_COMPACTION = 'elk.layered.compaction.postCompaction.strategy';
+
+/**
+ * The layouts tried, in order, after one overflows the worker's stack. Each
+ * drops one deeply recursive step of the layered algorithm:
+ *
+ * 1. NETWORK_SIMPLEX node placement (a large connected diagram) gives way to
+ *    Brandes–Köpf, which needs little stack.
+ * 2. EDGE_LENGTH post-compaction runs a network simplex of its own over every
+ *    line segment, so a diagram with many relationships (130 tables, 1,500
+ *    lines) still overflows with Brandes–Köpf: it is left out too. The
+ *    tables keep their columns; the result is only a little less tight.
+ *
+ * A step that would change nothing (the diagram's own options already ask for
+ * it) is skipped.
+ */
+export function stackSafeFallbacks(options: LayoutOptions): LayoutOptions[] {
+  const steps: LayoutOptions[] = [];
+  let current = options;
+  if (current['elk.layered.nodePlacement.strategy'] !== STACK_SAFE_NODE_PLACEMENT) {
+    current = { ...current, 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT };
+    steps.push(current);
+  }
+  if (current[POST_COMPACTION] !== undefined && current[POST_COMPACTION] !== 'NONE') {
+    current = { ...current, [POST_COMPACTION]: 'NONE' };
+    steps.push(current);
+  }
+  return steps;
+}
+
 /** A layout that failed because the worker ran out of stack (V8: RangeError, Firefox: InternalError). */
 export function isStackOverflow(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
@@ -450,7 +481,7 @@ export function detectStrategy(
 
 /** What a caller may hear about a layout as it runs (usage telemetry). */
 export interface LayoutHooks {
-  /** The layout overflowed the worker's stack and is being laid out again with {@link STACK_SAFE_NODE_PLACEMENT}. */
+  /** The layout overflowed the worker's stack and is being laid out again with the {@link stackSafeFallbacks} (told once). */
   onStackFallback?: () => void;
 }
 
@@ -513,23 +544,32 @@ export async function runElkLayout(
     edges: toElkEdges(edges),
   };
 
-  let layouted: ElkNode;
+  let layouted: ElkNode | undefined;
   try {
     layouted = await layoutWithGuard(elk, graph);
   } catch (err) {
-    // NETWORK_SIMPLEX node placement recurses deeply on a large connected
-    // component (a 257-table SQL import) and overflows the worker's stack.
-    // Brandes–Köpf needs little stack: retry once with it rather than fail.
-    if (!isStackOverflow(err) || mergedOptions['elk.layered.nodePlacement.strategy'] === STACK_SAFE_NODE_PLACEMENT) throw err;
+    // The layered algorithm recurses deeply on a large or densely related
+    // diagram and overflows the worker's stack: lay it out again with each
+    // stack-safe fallback in turn rather than fail.
+    if (!isStackOverflow(err)) throw err;
+    const fallbacks = stackSafeFallbacks(mergedOptions);
+    if (fallbacks.length === 0) throw err;
     try {
       hooks.onStackFallback?.();
     } catch {
       // Telemetry never stops a layout.
     }
-    layouted = await layoutWithGuard(getElk(), {
-      ...graph,
-      layoutOptions: { ...mergedOptions, 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT },
-    });
+    let lastError: unknown = err;
+    for (const fallbackOptions of fallbacks) {
+      try {
+        layouted = await layoutWithGuard(getElk(), { ...graph, layoutOptions: fallbackOptions });
+        break;
+      } catch (fallbackErr) {
+        if (!isStackOverflow(fallbackErr)) throw fallbackErr;
+        lastError = fallbackErr;
+      }
+    }
+    if (!layouted) throw lastError;
   }
 
   // Extract positions from the layouted graph

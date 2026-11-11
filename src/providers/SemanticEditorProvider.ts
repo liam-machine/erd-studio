@@ -6072,8 +6072,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * A drop on the canvas (`dropTables`): the table files among the dropped
-   * URIs, else the Table Library drag of the last minute. Tables already on
+   * A drop on the canvas (`dropTables`): the Table Library drag of the last
+   * minute when the drop says it is one (`fromLibrary`), else the table files
+   * among the dropped URIs, else that remembered drag. Tables already on
    * the diagram are selected and named; the rest are added through the Add
    * Existing Tables edit with their positions at the drop point (one edit,
    * one undo step), and the first of them is selected.
@@ -6088,7 +6089,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.
       const dragged = (this.takeLibraryDrag() ?? []).filter((name) => validateTableNameSafety(name) === null);
-      const names = dropped.length > 0 ? dropped : dragged;
+      // A Table Library drag is what its controller collected: VS Code gives the
+      // drop the files of the dragged table rows only, never a schema or layer
+      // row's tables. Any other drop (an Explorer file) is its files, whatever
+      // was dragged in the library before it.
+      const names = payload.fromLibrary === true && dragged.length > 0 ? dragged : dropped.length > 0 ? dropped : dragged;
       if (names.length === 0) {
         void vscode.window.showInformationMessage(DROP_TABLES_NOTHING_MESSAGE);
         return;

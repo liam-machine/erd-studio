@@ -12,6 +12,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Added
 
+- **New Table…** and **New Schema…** in the Table Library: right-click a layer (or use its `+`) to add a table or a schema to it, right-click a schema to add a table to it, or pick either from the view's `…` menu or the Command Palette. The table's file is created in `<layer>/tables/<schema>/` and is on no diagram until you add it. A schema is created with its first table. DBML projects only.
 - **Choose how much of every table a diagram shows: Names, Keys or All.** A new three-way switch on the canvas toolbar sets it for the whole diagram. **Names** shows each table's name only, so a diagram of hundreds of tables fits on the screen. **Keys** shows only the key columns (primary, foreign and natural keys). **All** shows every column. In Names a table is its name and a column count, and clicking the count opens just that table. In Keys a table says how many of its columns are shown, and its **Show all N columns** button opens it. **Show name only** (or **Show keys only**) closes an opened table again, and picking a level on the toolbar puts every table back at it. The choice is remembered for each diagram while it stays open in VS Code, and changes nothing in your files. It replaces the Expand All / Collapse All button.
 
 - **Import SQL DDL… reads a catalog export too:** pick a `.csv` (or `.tsv`) of your database's columns, one row per column, in the same Open dialog, and it becomes a draft like any import, with keys and relationships when the file has them. **Bring In Your Data Model…** gives the query for Databricks (Unity Catalog), SQL Server and Azure SQL, PostgreSQL and MySQL, beside each card's own export: one query and a download, no notebook (Databricks' catalog does not show column defaults or identity columns, so the notebook route still keeps those). The docs add DuckDB's and list the column names any other database's query can use. A file without key columns imports its tables and columns, and the draft says the file had no keys. A download that holds only the first rows (the query counts its rows) is refused, and so is a file of more than 100,000 columns: export one schema at a time.
@@ -25,6 +26,8 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Changed
 
+- **Add to Diagram… offers the diagram you have open first.** Right-click a table (or a selection of tables) in the Table Library and choose **Add to Diagram…**: the diagram in the active tab is at the top, marked *open now*, so pressing Enter adds the tables to it. This needs no dragging.
+- **Give Duplicate Table Its Own Name…** now suggests `<schema>_<name>` when the two files are in different schemas of the same layer (for example `ccc_addresse`), so the name says which copy it is. Two files in different layers still get `<layer>_<name>`.
 - **A diagram of 30 or more tables opens showing each table's key columns**, with a **Show all N columns** button on every table, instead of each table's first five columns. Smaller diagrams still open with every column shown. A diagram you already had open with tables collapsed comes back at Keys, with the tables you had expanded still open.
 - **The handles for dragging a table's columns into a new order show only when the table lists all of its columns.** On a table that shows only some of them (its keys, for example) a drag could move the wrong column.
 - **Bring In Your Data Model… is in the Diagrams view's + menu**, under the imports, so a project that already has diagrams has a visible way to the import guide besides the Command Palette.
@@ -38,6 +41,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Fixed
 
+- **Dropping tables on the Physical tab says why nothing was added**, instead of doing nothing: tables are added on the Logical tab.
+- **Dragging a schema or a layer together with tables from the Table Library adds all of them.** A Shift-drop of a mixed selection used to add only the table rows, fewer than the hint said.
+- **Auto Layout no longer fails with "Maximum call stack size exceeded" on a diagram with many relationships.** The layout already fell back to a lighter way of placing tables when a large diagram ran out of room to compute; a diagram of around 130 tables with many lines between them could run out again in the last tightening step. It now leaves that step out too and lays the diagram out, a little less tightly packed.
+- A table file with a "DBML error" (or YAML error) in the Table Library now says what is wrong when you hover it, for example that the Table's name differs from its file name, with the line and a tip.
 - **Send Feedback** no longer fails silently from the Command Palette: if the report can't be opened, ERD Studio says so, copies your title and description to the clipboard, and offers **Open GitHub Issues** and **Try Again**. The Send Feedback dialog shows the same plain sentence instead of a raw error.
 - When VS Code can't open your browser, Send Feedback offers **Copy Link** and **Copy Report** instead of printing a long link in the message. When commenting on an existing issue, it tells you the report is already on the clipboard and which issue to paste it on.
 - When the feedback API key can't be saved or cleared, the message explains that VS Code's secret storage isn't available on this machine, and **Learn More** opens VS Code's troubleshooting page.
