@@ -301,6 +301,31 @@ describe('the second table of a name joins a diagram', () => {
     expect(after).not.toContain('ccc/addresse.dbml');
     expect(canvas.posted().models.map((m) => m.name).sort()).toEqual(['addresse', 'kunde']);
   });
+
+  it('adding the second table and removing it again gives back the same bytes, the relationships import and its line kept', async () => {
+    const before = read('bronze/diagrams/bqs.dbml');
+    const canvas = await open('bronze/diagrams/bqs.dbml');
+    await canvas.send({ type: 'addExistingModel', payload: { modelName: 'addresse', sourcePath: '.erd-studio/bronze/tables/ccc/addresse.dbml' } });
+    expect(read('bronze/diagrams/bqs.dbml')).toContain("use * from '../relationships/bronze.dbml'");
+    const r = await canvas.send({ type: 'removeModel', payload: { modelName: 'ccc.addresse' } });
+    expect(r.errors).toEqual([]);
+    expect(read('bronze/diagrams/bqs.dbml')).toBe(before);
+    expect(canvas.posted().relationships.map((rel) => `${rel.fromModel}>${rel.toModel}`)).toEqual(['kunde>addresse']);
+  });
+
+  it('removing one table of a pair from the diagram showing both keeps its relationships import', async () => {
+    const canvas = await open('bronze/diagrams/kunden.dbml');
+    const r = await canvas.send({ type: 'removeModel', payload: { modelName: 'ccc.addresse' } });
+    expect(r.errors).toEqual([]);
+    expect(read('bronze/diagrams/kunden.dbml')).toContain("use * from '../relationships/bronze.dbml'");
+    expect(canvas.posted().relationships.map((rel) => `${rel.fromModel}>${rel.toModel}`)).toContain('bqs.kunde>addresse');
+    fs.copyFileSync(path.join(TWINS, '.erd-studio/bronze/diagrams/kunden.dbml'), at('bronze/diagrams/kunden.dbml'));
+    const again = await open('bronze/diagrams/kunden.dbml');
+    const both = await again.send({ type: 'removeModels', payload: { modelNames: ['bqs.addresse', 'bqs.kunde'] } });
+    expect(both.errors).toEqual([]);
+    expect(read('bronze/diagrams/kunden.dbml')).toContain("use * from '../relationships/bronze.dbml'");
+    expect(again.posted().relationships.map((rel) => `${rel.fromModel}>${rel.toModel}`)).toEqual(['kunde>addresse']);
+  });
 });
 
 describe('the diagram showing both', () => {

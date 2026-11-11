@@ -5139,6 +5139,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `applyFileWrites`, with the primary's replace first so the step undoes
    * as one.
    */
+  /**
+   * The rows of the DBML diagram `file`'s members as read that its edited
+   * object still lists, by their reference before the edit or the one
+   * `renamedMembers` gives it. Undefined for a file with no member table.
+   */
+  private membersAfterEdit(file: ParsedSubjectArea, renamedMembers: ReadonlyMap<string, string> | undefined): DiagramMemberTable['rows'] | undefined {
+    if (!file.members) return undefined;
+    const logical = (file.parsed.logical ?? {}) as { models?: unknown };
+    const listed = new Set((Array.isArray(logical.models) ? logical.models : [])
+      .filter((m): m is string => typeof m === 'string')
+      .map((m) => m.toLowerCase()));
+    return file.members.rows.filter((r) => listed.has(r.ref.toLowerCase()) || listed.has((renamedMembers?.get(r.ref) ?? r.ref).toLowerCase()));
+  }
+
   private async applyStorageEdit(
     document: vscode.TextDocument,
     file: ParsedSubjectArea,
@@ -5167,8 +5181,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // §2.6 step 1: the diagram being edited gets its imports recomputed on every edit but a layout-only one.
       // Told apart by identity, each of its members is the table its own `use` line reads, never the
       // library's first of its name, and a member whose reference the edit changed keeps its line.
-      const own = plan.identities && file.members
-        ? diagramResolverOf(plan, { members: file.members.rows.map((r) => r.ref), memberPaths: file.members.rows.map((r) => r.path ?? '') }, resolver)
+      // The members are those the edit leaves (a removed one must not keep its name shared with the one left).
+      const kept = this.membersAfterEdit(file, options.renamedMembers);
+      const own = plan.identities && kept
+        ? diagramResolverOf(plan, { members: kept.map((r) => r.ref), memberPaths: kept.map((r) => r.path ?? '') }, resolver)
         : resolver;
       const [primary] = codecFor(fsPath).render(file, text, fsPath, {
         ...own,
