@@ -1947,6 +1947,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (!refs || !members) return undefined;
     const library = this.tableLibraryService;
     const read = this.subjectAreaService.dbmlMemberFiles(document.uri.fsPath);
+    const memberRefs = new Set(members.rows.map((r) => r.ref));
     const memberFile = (ref: string): string | undefined => {
       const row = members.resolve(ref);
       if (row?.path?.startsWith('../')) return undefined;
@@ -1966,9 +1967,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const file = memberFile(ref);
         return file === undefined ? undefined : projectRelative(this.workspaceRoot, file);
       },
+      // A member exactly as the diagram names it: a set lookup, not a resolve against every member per end.
       memberOf: (libraryName) => {
         const ref = refs.toDiagram(libraryName);
-        return members.resolve(ref)?.ref === ref ? ref : undefined;
+        return memberRefs.has(ref) ? ref : undefined;
       },
       // Only for a table whose name another schema folder's table has: any other is added by its name.
       otherTablePathOf: (libraryName) => {

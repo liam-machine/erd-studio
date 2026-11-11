@@ -985,6 +985,20 @@ describe('a project where no two tables share a name is left as it was', () => {
     expect(read('tables/fct_visit.yml')).toContain('# Written by an AI helper set up before 2.0.');
   });
 
+  it('the canvas context answers whether a library table is a member without resolving it against every member', async () => {
+    useFixture('dbml-native');
+    const { DiagramMemberTable } = await import('../../src/services/diagramMemberTable');
+    const resolves = vi.spyOn(DiagramMemberTable.prototype, 'resolve');
+    const canvas = await open('gold/diagrams/sales.dbml');
+    resolves.mockClear();
+    canvas.panel._postedMessages.length = 0;
+    await canvas.panel._simulateMessage({ type: 'ready' });
+    const context = await contextOf(canvas);
+    expect(Object.keys(context.tableFiles)).toHaveLength(6);
+    // A couple per member over the whole refresh (its file, its read); never one per relationship end (44 before).
+    expect(resolves.mock.calls.length).toBeLessThanOrEqual(2 * 6);
+  });
+
   it('a mixed diagram\'s unlinked YAML member keeps its file and is not offered by Add Existing', async () => {
     useFixture('dbml-convert/mixed');
     const canvas = await open('gold/diagrams/sales.dbml');
