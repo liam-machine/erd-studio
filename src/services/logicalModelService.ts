@@ -548,6 +548,15 @@ function renameNamingKeys(root: YAMLMap, direction: 'toV5' | 'toV6', file: strin
   }
 }
 
+/**
+ * The relationships index kept between lookups that read one state of the
+ * library (one sync plan): filled by the first lookup that needs it. Never
+ * kept across an edit.
+ */
+export interface RelationshipsIndexMemo {
+  index?: RelationshipsIndex;
+}
+
 export class TableLibraryService {
   private readonly tablesDir: string;
   /** v6's library folder (`tables/`, #162): read after `tablesDir`, never written. */
@@ -1523,10 +1532,11 @@ export class TableLibraryService {
    * most of its Refs, else its schema's own file when one exists, else its
    * layer's `<L>/relationships/<L>.dbml`, which may not exist yet. Absolute;
    * undefined for a YAML table or no table. `table` is a name (the file the
-   * library picks for it) or a TableId.
+   * library picks for it) or a TableId. `memo` keeps the relationships
+   * index between calls that read the same library (one sync plan).
    */
-  relationshipsFileForNewRef(table: TableId | string): string | undefined {
-    return this.relationshipsFilesForNewRefs([table]).get(placementKey(table));
+  relationshipsFileForNewRef(table: TableId | string, memo?: RelationshipsIndexMemo): string | undefined {
+    return this.relationshipsFilesForNewRefs([table], memo).get(placementKey(table));
   }
 
   /**
@@ -1540,7 +1550,7 @@ export class TableLibraryService {
    * {@link relationshipsFileForNewRef}), the path is not a DBML table file,
    * or the files do not read.
    */
-  relationshipsFileForNewTable(tableName: string, newFilePath: string): string | undefined {
+  relationshipsFileForNewTable(tableName: string, newFilePath: string, memo?: RelationshipsIndexMemo): string | undefined {
     try {
       if (!isDbmlFile(newFilePath)) return undefined;
       const rel = path.isAbsolute(newFilePath) ? this.semanticRelative(newFilePath) : newFilePath.replace(/\\/g, '/');
@@ -1553,7 +1563,8 @@ export class TableLibraryService {
       // Its Refs are counted by its identity only where another table has its name (so that table's Refs
       // are not counted for it); otherwise by name, so Refs left naming it (its file gone) keep it with them.
       const table = kind.schema !== undefined && this.index.entriesNamed(tableName).length > 0 ? id : tableName;
-      const placed = placeNewRef({ table, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, this.relationshipsIndex()).file;
+      const index = memo ? (memo.index ??= this.relationshipsIndex()) : this.relationshipsIndex();
+      const placed = placeNewRef({ table, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, index).file;
       return this.semanticAbsolute(placed);
     } catch {
       return undefined;
@@ -1566,8 +1577,8 @@ export class TableLibraryService {
    * TableId's identity key, `placementKey`) → absolute file. A YAML table,
    * or a name with no table, is left out.
    */
-  relationshipsFilesForNewRefs(tables: Iterable<TableId | string>): Map<string, string> {
-    return new Map([...this.newRelationshipPlacements(tables)].map(([name, placed]) => [name, placed.file]));
+  relationshipsFilesForNewRefs(tables: Iterable<TableId | string>, memo?: RelationshipsIndexMemo): Map<string, string> {
+    return new Map([...this.newRelationshipPlacements(tables, memo)].map(([name, placed]) => [name, placed.file]));
   }
 
   /**
@@ -1584,9 +1595,8 @@ export class TableLibraryService {
    * and its Refs are counted by its identity where the library tells tables
    * apart by it.
    */
-  newRelationshipPlacements(tables: Iterable<TableId | string>): Map<string, { file: string; choices: string[] }> {
+  newRelationshipPlacements(tables: Iterable<TableId | string>, memo: RelationshipsIndexMemo = {}): Map<string, { file: string; choices: string[] }> {
     const out = new Map<string, { file: string; choices: string[] }>();
-    let index: RelationshipsIndex | undefined;
     for (const table of tables) {
       try {
         const filePath = this.fileOfTable(table, (name) => this.findTableFile(name));
@@ -1597,7 +1607,7 @@ export class TableLibraryService {
         // The listed entry of that file: its name as listed, and its identity (an index of names matches it by name).
         const entry = this.index.entryAt(filePath);
         const counted: TableId | string = entry !== undefined ? tableIdOfEntry(entry) : this.nameOfTable(table);
-        const refs = index ??= this.relationshipsIndex();
+        const refs = memo.index ??= this.relationshipsIndex();
         const placed = placeNewRef({ table: counted, layer, ...(kind.schema !== undefined ? { schema: kind.schema } : {}) }, refs).file;
         // The index's files are byte-sorted already.
         const layerFiles = refs.files.filter((f) => f !== placed && !refs.unreadable.has(f)

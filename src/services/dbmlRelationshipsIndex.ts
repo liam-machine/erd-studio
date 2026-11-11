@@ -51,9 +51,18 @@ export type IndexLookup = (name: string, hint?: DbmlRefEndHint) => DbmlAttachTab
  */
 function identityKeyOf(entry: DbmlAttachTable | undefined): string | undefined {
   if (entry?.path === undefined) return undefined;
-  const id = tableIdOfPath(normalisePosix(entry.path));
-  return tableIdKey(id ?? { schema: entry.schema ?? '', name: entry.table.name });
+  // Asked for both ends of every Ref: worked out once per table entry.
+  let key = identityKeys.get(entry);
+  if (key === undefined) {
+    const id = tableIdOfPath(normalisePosix(entry.path));
+    key = tableIdKey(id ?? { schema: entry.schema ?? '', name: entry.table.name });
+    identityKeys.set(entry, key);
+  }
+  return key;
 }
+
+/** {@link identityKeyOf}'s answers, by table entry. */
+const identityKeys = new WeakMap<DbmlAttachTable, string>();
 
 /** Code-unit order (`<`): the same on every machine and locale. */
 function byteOrder(a: string, b: string): number {

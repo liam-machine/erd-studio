@@ -300,10 +300,21 @@ function useTableFor(useTables: readonly DbmlUseTable[] | undefined, table: stri
   return bySpelling.get(useKey(table, qualifier));
 }
 
+/** Each selective `use` line's table file, resolved against the folder of the file that holds it: once per line, not per Ref end. */
+const resolvedUsePaths = new WeakMap<DbmlUseTable, { from: string; path: string }>();
+
+function resolvedUsePath(use: DbmlUseTable, semanticPath: string): string {
+  const known = resolvedUsePaths.get(use);
+  if (known !== undefined && known.from === semanticPath) return known.path;
+  const path = normalisePosix(resolvePosix(dirnamePosix(semanticPath), withDbmlExtension(use.path)));
+  resolvedUsePaths.set(use, { from: semanticPath, path });
+  return path;
+}
+
 function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint; target: EndHint } {
   const hintOf = (table: string, qualifier: string | undefined): EndHint => {
     const use = item.semanticPath !== undefined ? useTableFor(item.reading.useTables, table, qualifier) : undefined;
-    const usePath = use ? normalisePosix(resolvePosix(dirnamePosix(item.semanticPath!), withDbmlExtension(use.path))) : undefined;
+    const usePath = use ? resolvedUsePath(use, item.semanticPath!) : undefined;
     // An unqualified end with no use line of its own: which schema folders the file imports its name from.
     const used = qualifier === undefined && usePath === undefined ? useSchemasOf(item, table) : undefined;
     return {

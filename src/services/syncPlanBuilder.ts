@@ -40,7 +40,7 @@ import type { YmlData } from '../types/ymlData';
 import { subjectAreaStorageOf } from '@erd-studio/core';
 import { catalogColumnName, configuredSchemaOf } from './dbtDraft';
 import { normaliseName } from './nameUtils';
-import type { TableLibraryService } from './logicalModelService';
+import type { RelationshipsIndexMemo, TableLibraryService } from './logicalModelService';
 import type { TableId } from '../types/tableId';
 
 export interface SyncPlanContext {
@@ -136,6 +136,8 @@ export function syncPlanLibraryLookups(
   },
 ): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn' | 'tableUnreadable'> {
   const dbmlDiagram = subjectAreaStorageOf(where.diagramFile) === 'dbml';
+  // One relationships index for the whole plan, built by the first table that needs it, not once per table.
+  const memo: RelationshipsIndexMemo = {};
   // A table two schema folders share is asked for by its own file, never by a name or a reference.
   const table = (name: string): TableId | string => where.tableIdOf?.(name) ?? name;
   let home: ReturnType<SyncPlanLibrary['newTableHomeFor']> | null = null;
@@ -158,10 +160,10 @@ export function syncPlanLibraryLookups(
     // new Refs placed from the DBML file it will get, so the plan and diff
     // name a relationships file for it too, never the table file.
     relationshipsFile: (name) => {
-      const placed = library.relationshipsFileForNewRef(table(name));
+      const placed = library.relationshipsFileForNewRef(table(name), memo);
       if (placed !== undefined) return relative(placed);
       const future = library.tableLibraryFile(table(name)) === null ? newTableFile(name) : undefined;
-      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future));
+      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future, memo));
     },
     relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding({ ...rel, fromModel: table(rel.fromModel), toModel: table(rel.toModel) })),
     tableUnreadable: (name) => library.getTableFileError(table(name)) !== null,
