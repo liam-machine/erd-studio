@@ -15,7 +15,13 @@
  * Databricks, SQL Server, PostgreSQL and MySQL cards also give a catalog query whose CSV
  * Import SQL DDL… reads (`catalogCsvImport.ts`), in a section of its own with
  * its own button label that runs the card's action (one key per card still):
- * only the engines it was run on (`test/fixtures/catalog-csv/`). The folder's suggested
+ * only the engines it was run on (`test/fixtures/catalog-csv/`). The one
+ * exception is the Fabric card: a Warehouse or SQL analytics endpoint is read
+ * as SQL Server, so it offers SQL Server's query (the same constant, under
+ * its own snippet id and action, `fabricCatalog`) with a note that it has not
+ * been tried on every Fabric item; its two SQL buttons also pass
+ * `{ source: 'fabric' }`, so those imports are counted apart from SQL
+ * Server's (`importFabricOutcome*`). The folder's suggested
  * start (`startIntentFor`) leads: a "Found in this folder" card for a direct
  * import, the dbt card in a dbt project; then the sources in the order
  * telemetry sees them.
@@ -32,6 +38,7 @@
 
 import { escapeHtml } from './dbmlConversionReview';
 import { IMPORT_GUIDE_LOGOS } from './importGuideLogos';
+import type { ImportGuideSource } from './importOutcomeTelemetry';
 import type { SqlDialect } from './sqlDdlImport';
 import type { TelemetryFeature } from './telemetryPayload';
 import {
@@ -88,10 +95,81 @@ export type ImportGuideCardId =
 
 /** What a card's button does: one fixed command each. */
 export const IMPORT_GUIDE_ACTIONS = [
-  'found', 'dbt', 'databricks', 'snowflake', 'powerBi', 'fabric', 'fabricWarehouse',
+  'found', 'dbt', 'databricks', 'snowflake', 'powerBi', 'fabric', 'fabricWarehouse', 'fabricCatalog',
   'sqlServer', 'postgres', 'mysql', 'dbml', 'otherTools', 'feedback',
 ] as const;
 export type ImportGuideAction = (typeof IMPORT_GUIDE_ACTIONS)[number];
+
+/**
+ * SQL Server's catalog query, as it was run (`test/fixtures/catalog-csv/queries/sqlserver.sql`).
+ * One constant under two snippet ids: the SQL Server card's and the Fabric
+ * card's (a Warehouse or a SQL analytics endpoint is read as SQL Server).
+ */
+const SQL_SERVER_CATALOG_QUERY = [
+    '-- One row per column of every table and view, for ERD Studio (SQL Server 2017 or later, Azure SQL Database, Azure SQL Managed Instance).',
+    'SELECT s.name AS table_schema,',
+    '       o.name AS table_name,',
+    '       CASE o.type WHEN \'V\' THEN \'VIEW\' ELSE \'BASE TABLE\' END AS table_type,',
+    '       CAST(tp.value AS nvarchar(max)) AS table_comment,',
+    '       c.name AS column_name,',
+    '       c.column_id AS ordinal_position,',
+    '       CASE WHEN ty.is_user_defined = 1 THEN SCHEMA_NAME(ty.schema_id) + \'.\' + ty.name',
+    '            WHEN ty.name IN (\'varchar\', \'char\', \'varbinary\', \'binary\') THEN ty.name + \'(\' + CASE WHEN c.max_length = -1 THEN \'max\' ELSE CAST(c.max_length AS varchar(10)) END + \')\'',
+    '            WHEN ty.name IN (\'nvarchar\', \'nchar\') THEN ty.name + \'(\' + CASE WHEN c.max_length = -1 THEN \'max\' ELSE CAST(c.max_length / 2 AS varchar(10)) END + \')\'',
+    '            WHEN ty.name IN (\'decimal\', \'numeric\') THEN ty.name + \'(\' + CAST(c.precision AS varchar(5)) + \',\' + CAST(c.scale AS varchar(5)) + \')\'',
+    '            WHEN ty.name IN (\'datetime2\', \'time\', \'datetimeoffset\') THEN ty.name + \'(\' + CAST(c.scale AS varchar(5)) + \')\'',
+    '            WHEN ty.name = \'xml\' AND c.xml_collection_id <> 0 THEN \'xml(\' + CASE WHEN c.is_xml_document = 1 THEN \'DOCUMENT \' ELSE \'CONTENT \' END',
+    '                 + (SELECT SCHEMA_NAME(x.schema_id) + \'.\' + x.name FROM sys.xml_schema_collections x WHERE x.xml_collection_id = c.xml_collection_id) + \')\'',
+    '            ELSE ty.name END AS data_type,',
+    '       CASE WHEN c.is_nullable = 1 THEN \'YES\' ELSE \'NO\' END AS is_nullable,',
+    '       -- SQL Server keeps a default in parentheses, a number in two: (\'AU\'), ((0)), (getdate()).',
+    '       CASE WHEN dc.d LIKE \'(%)\' AND TRY_CONVERT(float, SUBSTRING(dc.d, 2, LEN(dc.d) - 2)) IS NOT NULL THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 2)',
+    '            WHEN dc.d LIKE \'N\'\'%\'\'\' THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 1)',
+    '            ELSE dc.d END AS column_default,',
+    '       CAST(cp.value AS nvarchar(max)) AS column_comment,',
+    '       CASE WHEN c.is_identity = 1 THEN \'YES\' ELSE \'NO\' END AS is_identity,',
+    '       CASE WHEN pk.key_ordinal IS NOT NULL THEN \'YES\' ELSE \'NO\' END AS is_primary_key,',
+    '       pk.key_ordinal AS pk_ordinal,',
+    '       uq.name AS unique_constraint_name,',
+    '       fk.name AS fk_constraint_name,',
+    '       fk.ord AS fk_ordinal,',
+    '       fk.ref_schema AS fk_table_schema,',
+    '       fk.ref_table AS fk_table,',
+    '       fk.ref_column AS fk_column,',
+    '       COUNT(*) OVER () AS total_rows',
+    'FROM sys.objects o',
+    'JOIN sys.schemas s ON s.schema_id = o.schema_id',
+    'JOIN sys.columns c ON c.object_id = o.object_id',
+    'JOIN sys.types ty ON ty.user_type_id = c.user_type_id',
+    'LEFT JOIN sys.extended_properties tp ON tp.class = 1 AND tp.major_id = o.object_id AND tp.minor_id = 0 AND tp.name = \'MS_Description\'',
+    'LEFT JOIN sys.extended_properties cp ON cp.class = 1 AND cp.major_id = o.object_id AND cp.minor_id = c.column_id AND cp.name = \'MS_Description\'',
+    'LEFT JOIN (',
+    '  SELECT parent_object_id, parent_column_id, SUBSTRING(definition, 2, LEN(definition) - 2) AS d FROM sys.default_constraints',
+    ') dc ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id',
+    'LEFT JOIN (',
+    '  SELECT ic.object_id, ic.column_id, ic.key_ordinal',
+    '  FROM sys.key_constraints kc',
+    '  JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id',
+    '  WHERE kc.type = \'PK\'',
+    ') pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id',
+    'LEFT JOIN (',
+    '  -- Each unique key (constraint or index) the column is a key column of: never a filtered or disabled index, never an included column.',
+    '  SELECT i.object_id, ic.column_id, i.name',
+    '  FROM sys.indexes i',
+    '  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0 AND ic.is_included_column = 0',
+    '  WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND i.has_filter = 0 AND i.is_disabled = 0 AND i.is_hypothetical = 0',
+    ') uq ON uq.object_id = c.object_id AND uq.column_id = c.column_id',
+    'LEFT JOIN (',
+    '  SELECT fkc.parent_object_id, fkc.parent_column_id, f.name, fkc.constraint_column_id AS ord,',
+    '         SCHEMA_NAME(r.schema_id) AS ref_schema, r.name AS ref_table, rc.name AS ref_column',
+    '  FROM sys.foreign_keys f',
+    '  JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = f.object_id',
+    '  JOIN sys.objects r ON r.object_id = fkc.referenced_object_id',
+    '  JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id',
+    ') fk ON fk.parent_object_id = c.object_id AND fk.parent_column_id = c.column_id',
+    'WHERE o.type IN (\'U\', \'V\') AND o.is_ms_shipped = 0 AND NOT (s.name = \'dbo\' AND o.name = \'sysdiagrams\')',
+    'ORDER BY table_schema, table_name, ordinal_position, unique_constraint_name, fk_constraint_name;',
+].join('\n');
 
 /** The text each Copy button copies, exactly. */
 export const IMPORT_GUIDE_SNIPPETS = {
@@ -248,71 +326,9 @@ export const IMPORT_GUIDE_SNIPPETS = {
     'WHERE c.TABLE_SCHEMA NOT IN (\'mysql\', \'sys\', \'information_schema\', \'performance_schema\')',
     'ORDER BY 1, 2, 6, 14, 15;',
   ].join('\n'),
-  sqlServerCatalog: [
-    '-- One row per column of every table and view, for ERD Studio (SQL Server 2017 or later, Azure SQL Database, Azure SQL Managed Instance).',
-    'SELECT s.name AS table_schema,',
-    '       o.name AS table_name,',
-    '       CASE o.type WHEN \'V\' THEN \'VIEW\' ELSE \'BASE TABLE\' END AS table_type,',
-    '       CAST(tp.value AS nvarchar(max)) AS table_comment,',
-    '       c.name AS column_name,',
-    '       c.column_id AS ordinal_position,',
-    '       CASE WHEN ty.is_user_defined = 1 THEN SCHEMA_NAME(ty.schema_id) + \'.\' + ty.name',
-    '            WHEN ty.name IN (\'varchar\', \'char\', \'varbinary\', \'binary\') THEN ty.name + \'(\' + CASE WHEN c.max_length = -1 THEN \'max\' ELSE CAST(c.max_length AS varchar(10)) END + \')\'',
-    '            WHEN ty.name IN (\'nvarchar\', \'nchar\') THEN ty.name + \'(\' + CASE WHEN c.max_length = -1 THEN \'max\' ELSE CAST(c.max_length / 2 AS varchar(10)) END + \')\'',
-    '            WHEN ty.name IN (\'decimal\', \'numeric\') THEN ty.name + \'(\' + CAST(c.precision AS varchar(5)) + \',\' + CAST(c.scale AS varchar(5)) + \')\'',
-    '            WHEN ty.name IN (\'datetime2\', \'time\', \'datetimeoffset\') THEN ty.name + \'(\' + CAST(c.scale AS varchar(5)) + \')\'',
-    '            WHEN ty.name = \'xml\' AND c.xml_collection_id <> 0 THEN \'xml(\' + CASE WHEN c.is_xml_document = 1 THEN \'DOCUMENT \' ELSE \'CONTENT \' END',
-    '                 + (SELECT SCHEMA_NAME(x.schema_id) + \'.\' + x.name FROM sys.xml_schema_collections x WHERE x.xml_collection_id = c.xml_collection_id) + \')\'',
-    '            ELSE ty.name END AS data_type,',
-    '       CASE WHEN c.is_nullable = 1 THEN \'YES\' ELSE \'NO\' END AS is_nullable,',
-    '       -- SQL Server keeps a default in parentheses, a number in two: (\'AU\'), ((0)), (getdate()).',
-    '       CASE WHEN dc.d LIKE \'(%)\' AND TRY_CONVERT(float, SUBSTRING(dc.d, 2, LEN(dc.d) - 2)) IS NOT NULL THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 2)',
-    '            WHEN dc.d LIKE \'N\'\'%\'\'\' THEN SUBSTRING(dc.d, 2, LEN(dc.d) - 1)',
-    '            ELSE dc.d END AS column_default,',
-    '       CAST(cp.value AS nvarchar(max)) AS column_comment,',
-    '       CASE WHEN c.is_identity = 1 THEN \'YES\' ELSE \'NO\' END AS is_identity,',
-    '       CASE WHEN pk.key_ordinal IS NOT NULL THEN \'YES\' ELSE \'NO\' END AS is_primary_key,',
-    '       pk.key_ordinal AS pk_ordinal,',
-    '       uq.name AS unique_constraint_name,',
-    '       fk.name AS fk_constraint_name,',
-    '       fk.ord AS fk_ordinal,',
-    '       fk.ref_schema AS fk_table_schema,',
-    '       fk.ref_table AS fk_table,',
-    '       fk.ref_column AS fk_column,',
-    '       COUNT(*) OVER () AS total_rows',
-    'FROM sys.objects o',
-    'JOIN sys.schemas s ON s.schema_id = o.schema_id',
-    'JOIN sys.columns c ON c.object_id = o.object_id',
-    'JOIN sys.types ty ON ty.user_type_id = c.user_type_id',
-    'LEFT JOIN sys.extended_properties tp ON tp.class = 1 AND tp.major_id = o.object_id AND tp.minor_id = 0 AND tp.name = \'MS_Description\'',
-    'LEFT JOIN sys.extended_properties cp ON cp.class = 1 AND cp.major_id = o.object_id AND cp.minor_id = c.column_id AND cp.name = \'MS_Description\'',
-    'LEFT JOIN (',
-    '  SELECT parent_object_id, parent_column_id, SUBSTRING(definition, 2, LEN(definition) - 2) AS d FROM sys.default_constraints',
-    ') dc ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id',
-    'LEFT JOIN (',
-    '  SELECT ic.object_id, ic.column_id, ic.key_ordinal',
-    '  FROM sys.key_constraints kc',
-    '  JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id',
-    '  WHERE kc.type = \'PK\'',
-    ') pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id',
-    'LEFT JOIN (',
-    '  -- Each unique key (constraint or index) the column is a key column of: never a filtered or disabled index, never an included column.',
-    '  SELECT i.object_id, ic.column_id, i.name',
-    '  FROM sys.indexes i',
-    '  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0 AND ic.is_included_column = 0',
-    '  WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND i.has_filter = 0 AND i.is_disabled = 0 AND i.is_hypothetical = 0',
-    ') uq ON uq.object_id = c.object_id AND uq.column_id = c.column_id',
-    'LEFT JOIN (',
-    '  SELECT fkc.parent_object_id, fkc.parent_column_id, f.name, fkc.constraint_column_id AS ord,',
-    '         SCHEMA_NAME(r.schema_id) AS ref_schema, r.name AS ref_table, rc.name AS ref_column',
-    '  FROM sys.foreign_keys f',
-    '  JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = f.object_id',
-    '  JOIN sys.objects r ON r.object_id = fkc.referenced_object_id',
-    '  JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id',
-    ') fk ON fk.parent_object_id = c.object_id AND fk.parent_column_id = c.column_id',
-    'WHERE o.type IN (\'U\', \'V\') AND o.is_ms_shipped = 0 AND NOT (s.name = \'dbo\' AND o.name = \'sysdiagrams\')',
-    'ORDER BY table_schema, table_name, ordinal_position, unique_constraint_name, fk_constraint_name;',
-  ].join('\n'),
+  sqlServerCatalog: SQL_SERVER_CATALOG_QUERY,
+  // The Fabric card's copy of the same query: its own id, so a copy from that card is told apart (the text is one constant).
+  fabricCatalog: SQL_SERVER_CATALOG_QUERY,
   postgresCatalogRun: 'psql -d <database> --csv -f catalog.sql -o catalog.csv',
   mysqlCatalogRun: 'mysql --batch --execute="source catalog.sql" > catalog.tsv',
 } as const satisfies Record<string, string>;
@@ -374,6 +390,7 @@ export const IMPORT_GUIDE_ACTION_LABELS: Readonly<Record<Exclude<ImportGuideActi
   powerBi: 'Import Semantic Model…',
   fabric: 'Import Semantic Model…',
   fabricWarehouse: 'Import SQL Server DDL…',
+  fabricCatalog: 'Import the CSV…',
   sqlServer: 'Import SQL Server DDL…',
   postgres: 'Import PostgreSQL DDL…',
   mysql: 'Import MySQL DDL…',
@@ -406,9 +423,21 @@ export const IMPORT_GUIDE_SQL_DIALECTS: Readonly<Partial<Record<ImportGuideActio
   databricks: 'databricks',
   snowflake: 'snowflake',
   fabricWarehouse: 'sqlserver',
+  fabricCatalog: 'sqlserver',
   sqlServer: 'sqlserver',
   postgres: 'postgres',
   mysql: 'mysql',
+};
+
+/**
+ * The SQL buttons whose import is also counted by the card it started from
+ * (`erdStudio.importSqlDdl` with `{ dialect, source }`): the Fabric card's
+ * two, which read as SQL Server and would otherwise count as SQL Server
+ * imports only (`importFabricOutcome*`, `importOutcomeTelemetry.ts`).
+ */
+export const IMPORT_GUIDE_SQL_SOURCES: Readonly<Partial<Record<ImportGuideAction, ImportGuideSource>>> = {
+  fabricWarehouse: 'fabric',
+  fabricCatalog: 'fabric',
 };
 
 /** The fixed Send Feedback prefill of the Not yet card (`erdStudio.reportBug`'s argument). */
@@ -425,7 +454,8 @@ export const IMPORT_GUIDE_FEEDBACK_PREFILL = {
  */
 export function importGuideActionCommand(action: ImportGuideAction, intent: StartIntent | undefined): { command: string; args: unknown[] } | undefined {
   const dialect = IMPORT_GUIDE_SQL_DIALECTS[action];
-  if (dialect) return { command: 'erdStudio.importSqlDdl', args: [{ dialect }] };
+  const source = IMPORT_GUIDE_SQL_SOURCES[action];
+  if (dialect) return { command: 'erdStudio.importSqlDdl', args: [source ? { dialect, source } : { dialect }] };
   switch (action) {
     case 'found':
       return isFoundIntent(intent) ? { command: START_ACTION_COMMANDS[intent], args: startActionArgs(intent) } : undefined;
@@ -538,7 +568,7 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   fabric: {
     id: 'fabric',
     title: 'Microsoft Fabric',
-    what: 'A semantic model comes in through Fabric\'s Git integration; a Warehouse or a Lakehouse\'s SQL analytics endpoint through its CREATE TABLE scripts.',
+    what: 'A semantic model comes in through Fabric\'s Git integration; a Warehouse or a Lakehouse\'s SQL analytics endpoint through one query saved as CSV, or its CREATE TABLE scripts.',
     sections: [
       {
         heading: 'Semantic model',
@@ -548,7 +578,16 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
         action: 'fabric',
       },
       {
-        heading: 'Warehouse or SQL analytics endpoint',
+        heading: 'Warehouse or SQL analytics endpoint: one query, saved as CSV',
+        steps: [
+          { text: 'Copy this query.', snippet: 'fabricCatalog' },
+          { text: 'Run it on the Warehouse or the SQL analytics endpoint and save the whole result as a CSV file in this folder. In VS Code, Microsoft\'s SQL Server (mssql) extension connects with its SQL connection string: Execute Query, then Save as CSV beside the result.' },
+        ],
+        notes: ['This is the SQL Server query, and it has not been tried on every Fabric item. In a Lakehouse, columns with complex types (struct, array, map) may not come in. Save the whole result: a part of it is refused.'],
+        action: 'fabricCatalog',
+      },
+      {
+        heading: 'Warehouse or SQL analytics endpoint: scripts from SQL Server Management Studio',
         steps: [
           { text: 'Connect to its SQL connection string in SQL Server Management Studio, select the tables in Object Explorer Details (F7), right-click → Script Table as → CREATE To → File…, and save the `.sql` file in this folder. ERD Studio reads it as SQL Server.' },
         ],
@@ -693,6 +732,16 @@ export function importGuideActionLabel(action: ImportGuideAction, intent?: Start
 export const IMPORT_GUIDE_OPENED_FEATURE = 'importGuideOpened' satisfies TelemetryFeature;
 export const IMPORT_GUIDE_COPIED_FEATURE = 'importGuideCopied' satisfies TelemetryFeature;
 
+/**
+ * Snippets whose copy is also counted by itself, beside `importGuideCopied`:
+ * the Fabric card's catalog query. A query that fails in Fabric's own editor
+ * never reaches ERD Studio, so "copied, and no Fabric import outcome after"
+ * is the only sign of it.
+ */
+export const IMPORT_GUIDE_SNIPPET_COPIED_FEATURES: Readonly<Partial<Record<ImportGuideSnippet, TelemetryFeature>>> = {
+  fabricCatalog: 'importGuideCopiedFabricCatalog',
+};
+
 /** Where it was opened from, beside `importGuideOpened` (the palette has none). */
 export const IMPORT_GUIDE_SURFACE_FEATURES: Readonly<Record<ImportGuideSurface, TelemetryFeature>> = {
   welcome: 'importGuideFromWelcome',
@@ -713,6 +762,7 @@ export const IMPORT_GUIDE_ACTION_FEATURES: Readonly<Record<ImportGuideAction, Te
   powerBi: 'importGuideActionPowerBi',
   fabric: 'importGuideActionFabric',
   fabricWarehouse: 'importGuideActionFabricWarehouse',
+  fabricCatalog: 'importGuideActionFabricCatalog',
   sqlServer: 'importGuideActionSqlServer',
   postgres: 'importGuideActionPostgres',
   mysql: 'importGuideActionMysql',

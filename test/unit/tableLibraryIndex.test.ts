@@ -17,7 +17,7 @@ import { createRequire, syncBuiltinESMExports } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
-import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, dbmlTableFinder, isDbmlLayerName } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, TABLES_DIR, classifySemanticFile, dbmlTableFinder, isDbmlLayerName, matchTableRef } from '@erd-studio/core';
 import { TableLibraryService, hasTablesLibrary, tablesDirIsLayer } from '../../src/services/logicalModelService';
 import { COARSE_RACY_MS, RACY_MS, TableLibraryIndex, isRacyBuild } from '../../src/services/tableLibraryIndex';
 
@@ -124,13 +124,16 @@ function referenceFind(name: string): string | null {
 /**
  * The library's table files as `rel[ (shadowed by rel)]`: YAML names match
  * exactly within a library, `tables/` is shadowed by `logical-models/` in
- * any case, and a DBML table by any file before it in any case.
+ * any case, and a DBML table only by a YAML file of its name (any case) or
+ * an earlier DBML file in a schema folder of the same name (any case, any
+ * layer): a table is its schema folder and name.
  */
 function referenceListing(): string[] {
   const out: string[] = [];
   const winners = new Map<string, string>();
   const v5Winners = new Map<string, string>();
-  const anyWinners = new Map<string, string>();
+  const yamlWinners = new Map<string, string>();
+  const dbmlWinners = new Map<string, string>();
   const add = (dir: string, phase: 'v5' | 'v6' | 'dbml'): void => {
     let files: Array<{ file: string; name: string }>;
     try {
@@ -144,11 +147,15 @@ function referenceListing(): string[] {
     for (const { file, name } of files) {
       const filePath = path.join(dir, file);
       const lower = name.toLowerCase();
-      const winner = winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : phase === 'dbml' ? anyWinners.get(lower) : undefined);
+      const identity = `${path.basename(dir).toLowerCase()}/${lower.trim()}`;
+      const winner = phase === 'dbml'
+        ? yamlWinners.get(lower) ?? dbmlWinners.get(identity)
+        : winners.get(name) ?? (phase === 'v6' ? v5Winners.get(lower) : undefined);
       if (winner === undefined) {
         winners.set(name, filePath);
         if (phase === 'v5') v5Winners.set(lower, filePath);
-        if (!anyWinners.has(lower)) anyWinners.set(lower, filePath);
+        if (phase !== 'dbml' && !yamlWinners.has(lower)) yamlWinners.set(lower, filePath);
+        if (phase === 'dbml' && !dbmlWinners.has(identity)) dbmlWinners.set(identity, filePath);
         out.push(relOf(filePath));
       } else {
         out.push(`${relOf(filePath)} (shadowed by ${relOf(winner)})`);
@@ -283,13 +290,15 @@ describe('the index answers exactly as the per-lookup reads did', () => {
     expect(lib.tablesDirIsLayer()).toBe(true);
   });
 
+  // The DBML duplicate within one library is one schema folder and name in two layers: a name in two
+  // schema folders is two tables, not a duplicate (it pinned the rule before schema-scoped identity).
   it('isCrossLibraryDuplicate: a DBML copy of a YAML table and a tables/ copy of a logical-models/ one are; a duplicate within one library is not', () => {
     write('logical-models/dim_a.yml', yamlTable('dim_a'));
     write('tables/dim_c.yml', yamlTable('dim_c'));
     write('logical-models/dim_c.yml', yamlTable('dim_c'));
     write('gold/tables/gold/dim_a.dbml', dbmlTable('dim_a'));
-    write('gold/tables/gold/dim_b.dbml', dbmlTable('dim_b'));
     write('gold/tables/sales/dim_b.dbml', dbmlTable('dim_b', undefined, 'sales'));
+    write('silver/tables/sales/dim_b.dbml', dbmlTable('dim_b', undefined, 'sales'));
     write('logical-models/gold/dim_d.yml', yamlTable('dim_d'));
     write('logical-models/dim_d.yml', yamlTable('dim_d'));
     const lib = service();
@@ -298,7 +307,7 @@ describe('the index answers exactly as the per-lookup reads did', () => {
       'logical-models/gold/dim_d.yml': false,
       'tables/dim_c.yml': true,
       'gold/tables/gold/dim_a.dbml': true,
-      'gold/tables/sales/dim_b.dbml': false,
+      'silver/tables/sales/dim_b.dbml': false,
     });
   });
 
@@ -319,6 +328,98 @@ describe('the index answers exactly as the per-lookup reads did', () => {
   it('an unsafe name still throws, before the index is asked', () => {
     write('logical-models/dim_date.yml', yamlTable('dim_date'));
     expect(() => service().findTableFile('../dim_date')).toThrow(/path separators/);
+  });
+});
+
+describe('the schema-scoped rule: a DBML table is shadowed only by its own identity, or a YAML table of its name', () => {
+  const scoped = (): TableLibraryService => service();
+  const NAMES = ['addresse', 'Addresse', 'kunde', 'x', 'X', 'orders', 'dim_date', 'fct_order', 'missing'];
+
+  /** Two layers, three schema folders, names shared across folders, a case-twin folder, a layer twin and a YAML table. */
+  function twins(): void {
+    write('bronze/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    write('bronze/tables/bqs/kunde.dbml', dbmlTable('kunde', undefined, 'bqs'));
+    write('bronze/tables/ccc/Addresse.dbml', dbmlTable('Addresse', undefined, 'ccc'));
+    write('bronze/tables/ccc/kunde.dbml', dbmlTable('kunde', undefined, 'ccc'));
+    // The same schema folder and name in another layer: one identity, a duplicate.
+    write('silver/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    // A schema folder spelled in another case: one identity, a duplicate.
+    write('silver/tables/CCC/kunde.dbml', dbmlTable('kunde', undefined, 'CCC'));
+    // A YAML table of a name still shadows every DBML table of it.
+    write('logical-models/fct_order.yml', yamlTable('fct_order'));
+    write('gold/tables/sales/fct_order.dbml', dbmlTable('fct_order', undefined, 'sales'));
+    write('gold/tables/finance/fct_order.dbml', dbmlTable('fct_order', undefined, 'finance'));
+    // Two layers, two schemas (medallion silver.orders / gold.orders): two tables.
+    write('silver/tables/silver/orders.dbml', dbmlTable('orders', undefined, 'silver'));
+    write('gold/tables/gold/orders.dbml', dbmlTable('orders'));
+  }
+
+  it('the rule matches its reference; the second schema folder\'s tables of a name are tables, a layer twin or case twin is not', () => {
+    twins();
+    expectSameAsReference(scoped(), NAMES);
+    const shadowed = (lib: TableLibraryService): string[] => lib.listTableFiles().filter((e) => e.shadowedBy).map((e) => relOf(e.filePath));
+    expect(shadowed(scoped()).sort()).toEqual([
+      'gold/tables/finance/fct_order.dbml', 'gold/tables/sales/fct_order.dbml',
+      'silver/tables/CCC/kunde.dbml', 'silver/tables/bqs/addresse.dbml',
+    ]);
+  });
+
+  it('every entry carries its identity from its path: a DBML table\'s schema folder as listed, a YAML table\'s name alone', () => {
+    twins();
+    for (const lib of [service(), scoped()]) {
+      for (const entry of lib.listTableFiles()) {
+        expect(entry.id, relOf(entry.filePath)).toEqual(entry.storage === 'dbml' ? { schema: entry.folder, name: entry.name } : { schema: '', name: entry.name });
+      }
+    }
+  });
+
+  it('lookups by identity, name and library reference, all from the listing', () => {
+    twins();
+    const lib = scoped();
+    expect(relOf(lib.findTableById({ schema: 'CCC', name: 'ADDRESSE' })!.filePath)).toBe('bronze/tables/ccc/Addresse.dbml');
+    expect(relOf(lib.findTableById({ schema: 'bqs', name: 'addresse' })!.filePath)).toBe('bronze/tables/bqs/addresse.dbml');
+    expect(lib.findTableById({ schema: 'ddd', name: 'addresse' })).toBeUndefined();
+    expect(lib.isAmbiguousName('addresse')).toBe(true);
+    expect(lib.isAmbiguousName('KUNDE')).toBe(true);
+    expect(lib.isAmbiguousName('orders')).toBe(true);
+    expect(lib.isAmbiguousName('fct_order')).toBe(false);
+    expect(lib.isAmbiguousName('missing')).toBe(false);
+    expect(lib.tablesNamed('addresse').map((e) => relOf(e.filePath))).toEqual(['bronze/tables/bqs/addresse.dbml', 'bronze/tables/ccc/Addresse.dbml']);
+    // A name one table has keeps its bare reference; a shared one is `<schema folder>.<name>`, the folder as listed.
+    expect(lib.libraryRef({ schema: 'bqs', name: 'addresse' })).toBe('bqs.addresse');
+    expect(lib.libraryRef({ schema: 'ccc', name: 'addresse' })).toBe('ccc.Addresse');
+    expect(lib.libraryRef({ schema: '', name: 'fct_order' })).toBe('fct_order');
+    expect(lib.libraryRef({ schema: 'silver', name: 'orders' })).toBe('silver.orders');
+    // A bare read still answers the first file in index order (today's answer).
+    expect(relOf(lib.findTableFile('addresse')!)).toBe('bronze/tables/bqs/addresse.dbml');
+    expect(lib.hasSharedNames()).toBe(true);
+  });
+
+  it('a library where no two schema folders share a name has no shared names, and every reference is bare', () => {
+    write('bronze/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    write('silver/tables/bqs/addresse.dbml', dbmlTable('addresse', undefined, 'bqs'));
+    write('bronze/tables/ccc/kunde.dbml', dbmlTable('kunde', undefined, 'ccc'));
+    const lib = scoped();
+    expect(lib.hasSharedNames()).toBe(false);
+    expect(lib.isAmbiguousName('addresse')).toBe(false);
+    expect(lib.libraryRef({ schema: 'bqs', name: 'addresse' })).toBe('addresse');
+  });
+
+  it('resolveLibraryRef answers as core\'s matchTableRef over the library\'s tables', () => {
+    twins();
+    const lib = scoped();
+    const tables = lib.listTableFiles().filter((e) => !e.shadowedBy);
+    const candidates = tables.map((e) => ({ ...e.id!, ref: lib.libraryRef(e.id!)! }));
+    const texts = ['addresse', 'bqs.addresse', 'BQS.Addresse', 'ccc.addresse', 'ddd.addresse', 'kunde', 'ccc.kunde', 'fct_order', 'sales.fct_order',
+      'orders', 'gold.orders', 'silver.orders', 'missing', ' bqs.addresse '];
+    for (const text of texts) {
+      const want = matchTableRef(text, candidates);
+      const got = lib.resolveLibraryRef(text);
+      const shown = got.kind === 'found' ? relOf(got.entry.filePath) : got.kind === 'ambiguous' ? got.entries.map((e) => relOf(e.filePath)) : null;
+      const expected = want.kind === 'found' ? relOf(tables[want.index].filePath)
+        : want.kind === 'ambiguous' ? [...new Set(want.candidates.map((i) => relOf(tables[i].filePath)))] : null;
+      expect(shown, text).toEqual(expected);
+    }
   });
 });
 

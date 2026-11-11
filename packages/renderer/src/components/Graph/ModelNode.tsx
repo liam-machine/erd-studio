@@ -35,6 +35,7 @@ import { tableFocusRole } from '../../lib/canvasFocus';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import { layerAbbreviation } from '../../lib/layerCues';
+import { headerName } from '../../lib/modelLabels';
 import { offDiagramChipTip, offDiagramRows } from '../../lib/canvasContext';
 import {
   SOURCE_LABEL,
@@ -571,7 +572,7 @@ function describeLoadWarning(warning: TableLoadWarning): string {
 }
 
 function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
-  const { modelName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   // Hover preview (useHoverFocus): the hovered table and its related tables
   // stay bright. A primitive, so a table outside the focus never re-renders.
@@ -664,8 +665,11 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   // name (alias) after it. The tip names the warehouse table in full.
   // A label without an alias or a schema prefix (older node data) keeps the
   // label-first header: the label, then the model name beside it.
+  // One of two same-named tables prints its own name after its schema
+  // (`ccc.addresse`), never the schema twice; see `headerName`.
   const labelFirst = !!label && !shownSchema && !alias;
-  const qualified = `${shownSchema ? `${shownSchema}.` : ''}${modelName}`;
+  const shownName = headerName({ modelName, tableName, shownSchema });
+  const qualified = `${shownSchema ? `${shownSchema}.` : ''}${shownName}`;
   const title = alias ? `${qualified} (warehouse table ${alias})` : labelFirst ? `${label} (table ${modelName})` : qualified;
   const modelMeta = useMemo(() => metaRows(meta), [meta]);
   const nameTip = useHoverTip<HTMLSpanElement>(
@@ -728,7 +732,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
           {!labelFirst ? (
             <>
               {shownSchema && <span className="model-node__schema">{shownSchema}.</span>}
-              {modelName}
+              {shownName}
               {alias && <span className="model-node__model-id">as {alias}</span>}
             </>
           ) : (

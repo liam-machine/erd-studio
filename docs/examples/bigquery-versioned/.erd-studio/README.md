@@ -11,8 +11,9 @@ Every file lives under a layer folder (bronze, silver, gold, …), and layers.js
                                            relationships files it needs, its sticky notes, and
                                            the table positions (erd_layout in its Project)
 
-- A table's name is unique across the whole project. Tables that share a warehouse name get
-  unique names (silver_customer, gold_customer), with the warehouse name in their alias.
+- A table is its schema and name: two schema folders may each hold a table of one name
+  (tables/crm/customer.dbml, tables/erp/customer.dbml), but a schema holds a name once, across
+  all layers.
 - Each relationship is one Ref, stored once, in any relationships file.
 - Other DBML tools read a diagram as a normal DBML project: open <layer>/diagrams/<name>.dbml.
 - fields.yml (optional, beside layers.json) lists the fields each table and column records, in

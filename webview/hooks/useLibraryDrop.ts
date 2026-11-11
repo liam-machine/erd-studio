@@ -15,8 +15,14 @@
  * canvas; the drop posts `dropTables` with the flow position and whatever
  * URIs the DataTransfer holds — possibly none, since what VS Code puts there
  * for a tree drag is not guaranteed: the host then uses the drag it
- * remembered. Never on the physical stage, a read-only diagram, or in the
- * viewer.
+ * remembered — and `fromLibrary` when the DataTransfer carries the Table
+ * Library's own mime type (the host then uses the remembered drag first: a
+ * tree drag's URIs are its table rows only, never a schema or layer row's
+ * tables).
+ *
+ * Nothing is added on the physical stage or a read-only diagram: a drop
+ * there is answered with {@link DROP_REFUSED_READ_ONLY} (the caller's toast)
+ * instead of silence. The viewer takes no drop at all.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,7 +32,7 @@ import { useIsViewer } from '@erd-studio/renderer/editor';
 
 import { useSend } from './useMessageBus';
 import { useEditorStore } from '../store/editorStore';
-import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
+import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, TABLE_LIBRARY_DRAG_MIME } from '../../src/types/messages';
 
 /** How long the "Hold Shift and drop" hint stays without a drop or a pointer move. */
 export const LIBRARY_DRAG_HINT_MS = 8000;
@@ -42,6 +48,10 @@ const URI_TYPES = ['text/uri-list', 'application/vnd.code.uri-list', 'resourceur
 
 /** A VS Code tree's drag mime type (`application/vnd.code.tree.<view id>`). */
 const TREE_TYPE_PREFIX = 'application/vnd.code.tree.';
+
+/** What a drop on the physical stage (or any read-only diagram) is told: nothing is added there. */
+export const DROP_REFUSED_READ_ONLY =
+  'Tables are added on the Logical tab. Switch to Logical and drop again, or right-click the table in the Table Library and choose Add to Diagram…';
 
 /** The hint for a Table Library drag of `tables`. */
 export function libraryDragHintText(tables: readonly string[]): string {
@@ -96,12 +106,21 @@ export function droppedUris(dataTransfer: DataTransferLike | null | undefined): 
   return uris.slice(0, DROP_TABLES_URI_LIMIT);
 }
 
+/** A DataTransfer's types, lower case (a browser lower-cases them; a test double may not). */
+function typesOf(dataTransfer: DataTransferLike): string[] {
+  return Array.from(dataTransfer.types ?? [], (t) => String(t).toLowerCase());
+}
+
 /** Whether a drag may be dropped on the canvas: it carries URIs, comes from a VS Code tree, or the host announced it. */
 export function acceptsDrop(dataTransfer: DataTransferLike | null | undefined, libraryDragInProgress: boolean): boolean {
   if (!dataTransfer) return false;
   if (libraryDragInProgress) return true;
-  const types = Array.from(dataTransfer.types ?? [], (t) => String(t).toLowerCase());
-  return types.some((t) => URI_TYPES.includes(t) || t.startsWith(TREE_TYPE_PREFIX));
+  return typesOf(dataTransfer).some((t) => URI_TYPES.includes(t) || t.startsWith(TREE_TYPE_PREFIX));
+}
+
+/** Whether a drop is a Table Library drag: its DataTransfer carries that view's own mime type. */
+export function isLibraryDrag(dataTransfer: DataTransferLike | null | undefined): boolean {
+  return !!dataTransfer && typesOf(dataTransfer).includes(TABLE_LIBRARY_DRAG_MIME);
 }
 
 export interface LibraryDropHandlers {
@@ -112,7 +131,11 @@ export interface LibraryDropHandlers {
 }
 
 export interface LibraryDrop {
-  /** Spread on the canvas wrapper; undefined where nothing may be dropped (physical, read-only, viewer). */
+  /**
+   * Spread on the canvas wrapper. On the physical stage or a read-only
+   * diagram they add nothing and a drop is refused with a reason; undefined
+   * in the viewer and before a diagram has loaded.
+   */
   dropHandlers: LibraryDropHandlers | undefined;
   /** An acceptable drag is over the canvas: draw the drop highlight. */
   dropActive: boolean;
@@ -135,10 +158,14 @@ export function dropEffectFor(effectAllowed: string | undefined): 'copy' | 'move
   return 'copy';
 }
 
-/** Drop handling for the canvas (inside `ReactFlowProvider`). */
-export function useLibraryDrop(): LibraryDrop {
+/**
+ * Drop handling for the canvas (inside `ReactFlowProvider`). `onRefused` is
+ * told why a drop added nothing (the canvas shows it as a toast).
+ */
+export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDrop {
   const viewer = useIsViewer();
   const domain = useEditorStore((s) => s.domain);
+  const loaded = !!domain;
   const editable = !!domain && domain.stage === 'logical' && !domain.readOnly;
   const { screenToFlowPosition } = useReactFlow();
   const send = useSend();
@@ -225,13 +252,34 @@ export function useLibraryDrop(): LibraryDrop {
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
       send({
         type: 'dropTables',
-        payload: { position: { x: Math.round(point.x), y: Math.round(point.y) }, uris: droppedUris(event.dataTransfer) },
+        payload: {
+          position: { x: Math.round(point.x), y: Math.round(point.y) },
+          uris: droppedUris(event.dataTransfer),
+          ...(isLibraryDrag(event.dataTransfer) ? { fromLibrary: true } : {}),
+        },
       });
     },
   };
 
+  // The physical stage, or a read-only diagram: the drop is taken so that it
+  // can be answered, and nothing is posted or highlighted.
+  const refusing: LibraryDropHandlers = {
+    onDragEnter: (event) => {
+      if (acceptsDrop(event.dataTransfer, false)) event.preventDefault();
+    },
+    onDragOver: (event) => {
+      if (acceptsDrop(event.dataTransfer, false)) event.preventDefault();
+    },
+    onDragLeave: () => undefined,
+    onDrop: (event) => {
+      if (!acceptsDrop(event.dataTransfer, false)) return;
+      event.preventDefault();
+      onRefused?.(DROP_REFUSED_READ_ONLY);
+    },
+  };
+
   return {
-    dropHandlers: viewer ? undefined : editable ? handlers : undefined,
+    dropHandlers: viewer ? undefined : editable ? handlers : loaded ? refusing : undefined,
     dropActive: viewer ? false : editable && dropActive,
     hintTables: viewer ? null : editable ? hintTables : null,
     libraryDragStarted,

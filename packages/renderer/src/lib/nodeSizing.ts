@@ -12,6 +12,7 @@
 
 import type { TableFlowNode, TableNodeData } from '../types/graph';
 import { resolveVisibleColumns } from './tableDetail';
+import { headerName } from './modelLabels';
 
 // ---------------------------------------------------------------------------
 // Node size estimation (matches TableNode CSS)
@@ -178,9 +179,11 @@ const MAX_NODE_WIDTH = 560;
  * measured; without one every column is, as before.
  */
 export function estimateNodeWidth(
-  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer' | 'isStub' | 'isExpanded' | 'tableDetail'>>,
+  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableName' | 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer' | 'isStub' | 'isExpanded' | 'tableDetail'>>,
 ): number {
   const { modelName, label, provenance, shownSchema, alias, singleLayer } = data;
+  // The name the header prints after its schema (the table's own name for one of two same-named tables).
+  const shownName = headerName(data);
   const columns = data.tableDetail == null ? data.columns : resolveVisibleColumns(data).columns;
 
   // Header: the name as drawn + layer badge (none in a single-layer project)
@@ -188,7 +191,7 @@ export function estimateNodeWidth(
   // alias it reads `schema.name  as alias`; otherwise the label, with the
   // model name beside it when they differ.
   const nameWidth = shownSchema || alias
-    ? ((shownSchema ? shownSchema.length + 1 : 0) + modelName.length) * CHAR_WIDTH_BODY
+    ? ((shownSchema ? shownSchema.length + 1 : 0) + shownName.length) * CHAR_WIDTH_BODY
       + (alias ? ID_GAP + (alias.length + 3) * CHAR_WIDTH_ID : 0)
     : label ? label.length * CHAR_WIDTH_BODY + ID_GAP + modelName.length * CHAR_WIDTH_ID : modelName.length * CHAR_WIDTH_BODY;
   const headerWidth =

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TreeItemCollapsibleState } from 'vscode';
-import { SubjectAreaTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
+import { SubjectAreaTreeProvider, draggedTableNames, type TreeElement } from '../../src/providers/DomainTreeProvider';
 import { dbmlFileIcon, type DbmlFileKind } from '../../src/providers/dbmlFileKinds';
 import type { SubjectAreaService } from '../../src/services/domainService';
 import { LayersFileUnreadableError, type LayerService } from '../../src/services/layerService';
@@ -520,6 +520,65 @@ describe('SubjectAreaTreeProvider', () => {
         'Open File',
       ]);
       errorSpy.mockRestore();
+    });
+
+    // Table Library rows dropped on a diagram's row: a drop inside VS Code's own
+    // trees, so it needs no Shift and no drag reaching the canvas webview.
+    describe('Table Library rows', () => {
+      const MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
+      const diagram = (): TreeElement => ({
+        type: 'domain',
+        summary: { domain: 'finance', layer: 'gold', filePath: '/p/.erd-studio/gold/diagrams/finance.dbml' } as never,
+        modelCount: 3,
+      });
+
+      it('dropped on a diagram are added to it, each name once', async () => {
+        const vscode = await import('vscode');
+        const added: Array<[string, string[]]> = [];
+        provider.setTablesDropHandler(async (filePath, tables) => { added.push([filePath, tables]); });
+        const transfer = new vscode.DataTransfer();
+        transfer.set(MIME, new vscode.DataTransferItem(['kunde', 'vertrag', 'kunde', 7, '']));
+        await provider.handleDrop(diagram(), transfer as never, {} as never);
+        expect(added).toEqual([['/p/.erd-studio/gold/diagrams/finance.dbml', ['kunde', 'vertrag']]]);
+      });
+
+      it('are read from the JSON text too, when VS Code hands the item over serialised', async () => {
+        const vscode = await import('vscode');
+        expect(await draggedTableNames(new vscode.DataTransferItem('["a","b"]'))).toEqual(['a', 'b']);
+        expect(await draggedTableNames(new vscode.DataTransferItem('not json'))).toEqual([]);
+        expect(await draggedTableNames(new vscode.DataTransferItem({ a: 1 }))).toEqual([]);
+      });
+
+      it('dropped on a layer or on empty space add nothing and say where to drop', async () => {
+        const vscode = await import('vscode');
+        const info = vi.spyOn(vscode.window, 'showInformationMessage');
+        const handler = vi.fn(async () => undefined);
+        provider.setTablesDropHandler(handler);
+        for (const target of [{ type: 'layer', layer: 'gold' } as TreeElement, undefined]) {
+          const transfer = new vscode.DataTransfer();
+          transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
+          await provider.handleDrop(target, transfer as never, {} as never);
+        }
+        expect(handler).not.toHaveBeenCalled();
+        expect(info).toHaveBeenCalledTimes(2);
+        expect(info.mock.calls[0][0]).toBe("ERD Studio: Drop tables on a diagram's name to add them to that diagram.");
+        info.mockRestore();
+      });
+
+      it('a failed add is said, never thrown', async () => {
+        const vscode = await import('vscode');
+        const error = vi.spyOn(vscode.window, 'showErrorMessage');
+        provider.setTablesDropHandler(async () => { throw new Error('The file is read-only.'); });
+        const transfer = new vscode.DataTransfer();
+        transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
+        await expect(provider.handleDrop(diagram(), transfer as never, {} as never)).resolves.toBeUndefined();
+        expect(error.mock.calls[0][0]).toBe("ERD Studio: The tables weren't added to finance. The file is read-only.");
+        error.mockRestore();
+      });
+
+      it('the view declares the Table Library drag as a drop type', () => {
+        expect(provider.dropMimeTypes).toContain(MIME);
+      });
     });
   });
 

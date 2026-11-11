@@ -1,0 +1,1434 @@
+{
+  "docs/examples/bigquery-versioned/.erd-studio/derived/diagrams/clients.dbml": {
+    "members": [
+      "clients_first_seen_v1",
+      "clients_daily_v6",
+      "clients_last_seen_v2"
+    ],
+    "models": [
+      "clients_first_seen_v1",
+      "clients_daily_v6",
+      "clients_last_seen_v2"
+    ],
+    "positions": [
+      "clients_daily_v6",
+      "clients_first_seen_v1",
+      "clients_last_seen_v2"
+    ],
+    "relationships": [
+      "clients_daily_v6.client_id > clients_first_seen_v1.client_id",
+      "clients_last_seen_v2.client_id > clients_first_seen_v1.client_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/bigquery-versioned/.erd-studio/stable/diagrams/pings.dbml": {
+    "members": [
+      "atlas_live__main_v1",
+      "atlas_stable__main_v1"
+    ],
+    "models": [
+      "atlas_live__main_v1",
+      "atlas_stable__main_v1"
+    ],
+    "positions": [
+      "atlas_live__main_v1",
+      "atlas_stable__main_v1"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/bigquery-versioned/.erd-studio/views/diagrams/clients.dbml": {
+    "members": [
+      "clients_first_seen",
+      "clients_daily",
+      "clients_last_seen"
+    ],
+    "models": [
+      "clients_first_seen",
+      "clients_daily",
+      "clients_last_seen"
+    ],
+    "positions": [
+      "clients_daily",
+      "clients_first_seen",
+      "clients_last_seen"
+    ],
+    "relationships": [
+      "clients_daily.client_id > clients_first_seen.client_id",
+      "clients_last_seen.client_id > clients_first_seen.client_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-mesh/.erd-studio/aggregate/diagrams/customer-360.dbml": {
+    "members": [
+      "customer_profile",
+      "account"
+    ],
+    "models": [
+      "customer_profile",
+      "account"
+    ],
+    "positions": [
+      "account",
+      "customer_profile"
+    ],
+    "relationships": [
+      "customer_profile.account_id > account.account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-mesh/.erd-studio/consumer_aligned/diagrams/delivery-performance.dbml": {
+    "members": [
+      "fct_shipment_delivery",
+      "customer_profile",
+      "carrier"
+    ],
+    "models": [
+      "fct_shipment_delivery",
+      "customer_profile",
+      "carrier"
+    ],
+    "positions": [
+      "carrier",
+      "customer_profile",
+      "fct_shipment_delivery"
+    ],
+    "relationships": [
+      "fct_shipment_delivery.carrier_code > carrier.carrier_code",
+      "fct_shipment_delivery.account_id > customer_profile.account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-mesh/.erd-studio/source_aligned/diagrams/orders.dbml": {
+    "members": [
+      "customer_order",
+      "account"
+    ],
+    "models": [
+      "customer_order",
+      "account"
+    ],
+    "positions": [
+      "account",
+      "customer_order"
+    ],
+    "relationships": [
+      "customer_order.account_id > account.account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-mesh/.erd-studio/source_aligned/diagrams/payments.dbml": {
+    "members": [
+      "payment",
+      "customer_order",
+      "shipment",
+      "tracking_event",
+      "fct_shipment_delivery",
+      "account"
+    ],
+    "models": [
+      "payment",
+      "customer_order",
+      "shipment",
+      "tracking_event",
+      "fct_shipment_delivery",
+      "account"
+    ],
+    "positions": [
+      "account",
+      "customer_order",
+      "fct_shipment_delivery",
+      "payment",
+      "shipment",
+      "tracking_event"
+    ],
+    "relationships": [
+      "payment.order_id > customer_order.order_id",
+      "customer_order.account_id > account.account_id",
+      "shipment.order_id > customer_order.order_id",
+      "tracking_event.shipment_id > shipment.shipment_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-mesh/.erd-studio/source_aligned/diagrams/shipping.dbml": {
+    "members": [
+      "shipment",
+      "tracking_event",
+      "carrier",
+      "customer_order",
+      "customer_profile"
+    ],
+    "models": [
+      "shipment",
+      "tracking_event",
+      "carrier",
+      "customer_order",
+      "customer_profile"
+    ],
+    "positions": [
+      "carrier",
+      "customer_order",
+      "customer_profile",
+      "shipment",
+      "tracking_event"
+    ],
+    "relationships": [
+      "shipment.carrier_code > carrier.carrier_code",
+      "shipment.order_id > customer_order.order_id",
+      "tracking_event.shipment_id > shipment.shipment_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-vault/.erd-studio/business_vault/diagrams/query-helpers.dbml": {
+    "members": [
+      "pit_customer",
+      "bridge_customer_policy",
+      "sat_customer_risk_score",
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "sat_customer_crm",
+      "sat_customer_policy_admin"
+    ],
+    "models": [
+      "pit_customer",
+      "bridge_customer_policy",
+      "sat_customer_risk_score",
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "sat_customer_crm",
+      "sat_customer_policy_admin"
+    ],
+    "positions": [
+      "bridge_customer_policy",
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "pit_customer",
+      "sat_customer_crm",
+      "sat_customer_policy_admin",
+      "sat_customer_risk_score"
+    ],
+    "relationships": [
+      "pit_customer.customer_hk > hub_customer.customer_hk",
+      "pit_customer.customer_hk > sat_customer_crm.customer_hk",
+      "pit_customer.sat_customer_crm_ldts > sat_customer_crm.load_datetime",
+      "pit_customer.customer_hk > sat_customer_policy_admin.customer_hk",
+      "pit_customer.sat_customer_policy_admin_ldts > sat_customer_policy_admin.load_datetime",
+      "pit_customer.customer_hk > sat_customer_risk_score.customer_hk",
+      "pit_customer.sat_customer_risk_score_ldts > sat_customer_risk_score.load_datetime",
+      "bridge_customer_policy.customer_hk > hub_customer.customer_hk",
+      "bridge_customer_policy.policy_hk > hub_policy.policy_hk",
+      "bridge_customer_policy.customer_policy_hk > link_customer_policy.customer_policy_hk",
+      "sat_customer_risk_score.customer_hk > hub_customer.customer_hk",
+      "link_customer_policy.customer_hk > hub_customer.customer_hk",
+      "link_customer_policy.policy_hk > hub_policy.policy_hk",
+      "sat_customer_crm.customer_hk > hub_customer.customer_hk",
+      "sat_customer_policy_admin.customer_hk > hub_customer.customer_hk"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-vault/.erd-studio/information_mart/diagrams/underwriting.dbml": {
+    "members": [
+      "fct_policy_month",
+      "dim_policy",
+      "dim_customer",
+      "dim_date"
+    ],
+    "models": [
+      "fct_policy_month",
+      "dim_policy",
+      "dim_customer",
+      "dim_date"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "dim_policy",
+      "fct_policy_month"
+    ],
+    "relationships": [
+      "fct_policy_month.customer_key > dim_customer.customer_key",
+      "fct_policy_month.month_date_key > dim_date.date_key",
+      "fct_policy_month.policy_key > dim_policy.policy_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/data-vault/.erd-studio/raw_vault/diagrams/customer-and-policy.dbml": {
+    "members": [
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "sat_customer_crm",
+      "sat_customer_policy_admin",
+      "sat_policy_policy_admin",
+      "sat_customer_policy_effectivity"
+    ],
+    "models": [
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "sat_customer_crm",
+      "sat_customer_policy_admin",
+      "sat_policy_policy_admin",
+      "sat_customer_policy_effectivity"
+    ],
+    "positions": [
+      "hub_customer",
+      "hub_policy",
+      "link_customer_policy",
+      "sat_customer_crm",
+      "sat_customer_policy_admin",
+      "sat_customer_policy_effectivity",
+      "sat_policy_policy_admin"
+    ],
+    "relationships": [
+      "link_customer_policy.customer_hk > hub_customer.customer_hk",
+      "link_customer_policy.policy_hk > hub_policy.policy_hk",
+      "sat_customer_crm.customer_hk > hub_customer.customer_hk",
+      "sat_customer_policy_admin.customer_hk > hub_customer.customer_hk",
+      "sat_policy_policy_admin.policy_hk > hub_policy.policy_hk",
+      "sat_customer_policy_effectivity.customer_policy_hk > link_customer_policy.customer_policy_hk"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/dbt-project-layers/.erd-studio/intermediate/diagrams/revenue.dbml": {
+    "members": [
+      "int_invoices_allocated_to_months",
+      "stg_stripe__invoices"
+    ],
+    "models": [
+      "int_invoices_allocated_to_months",
+      "stg_stripe__invoices"
+    ],
+    "positions": [
+      "int_invoices_allocated_to_months",
+      "stg_stripe__invoices"
+    ],
+    "relationships": [
+      "int_invoices_allocated_to_months.invoice_id > stg_stripe__invoices.invoice_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/dbt-project-layers/.erd-studio/marts/diagrams/finance.dbml": {
+    "members": [
+      "customers",
+      "invoices",
+      "monthly_revenue"
+    ],
+    "models": [
+      "customers",
+      "invoices",
+      "monthly_revenue"
+    ],
+    "positions": [
+      "customers",
+      "invoices",
+      "monthly_revenue"
+    ],
+    "relationships": [
+      "invoices.customer_id > customers.customer_id",
+      "monthly_revenue.customer_id > customers.customer_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/dbt-project-layers/.erd-studio/marts/diagrams/marketing.dbml": {
+    "members": [
+      "customers",
+      "users"
+    ],
+    "models": [
+      "customers",
+      "users"
+    ],
+    "positions": [
+      "customers",
+      "users"
+    ],
+    "relationships": [
+      "users.customer_id > customers.customer_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/dbt-project-layers/.erd-studio/staging/diagrams/app.dbml": {
+    "members": [
+      "stg_app__accounts",
+      "stg_app__users"
+    ],
+    "models": [
+      "stg_app__accounts",
+      "stg_app__users"
+    ],
+    "positions": [
+      "stg_app__accounts",
+      "stg_app__users"
+    ],
+    "relationships": [
+      "stg_app__users.account_id > stg_app__accounts.account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/dbt-project-layers/.erd-studio/staging/diagrams/stripe.dbml": {
+    "members": [
+      "stg_stripe__customers",
+      "stg_stripe__subscriptions",
+      "stg_stripe__invoices"
+    ],
+    "models": [
+      "stg_stripe__customers",
+      "stg_stripe__subscriptions",
+      "stg_stripe__invoices"
+    ],
+    "positions": [
+      "stg_stripe__customers",
+      "stg_stripe__invoices",
+      "stg_stripe__subscriptions"
+    ],
+    "relationships": [
+      "stg_stripe__subscriptions.customer_id > stg_stripe__customers.customer_id",
+      "stg_stripe__invoices.subscription_id > stg_stripe__subscriptions.subscription_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/edw/diagrams/events.dbml": {
+    "members": [
+      "transaction_event",
+      "interaction_event",
+      "account",
+      "party"
+    ],
+    "models": [
+      "transaction_event",
+      "interaction_event",
+      "account",
+      "party"
+    ],
+    "positions": [
+      "account",
+      "interaction_event",
+      "party",
+      "transaction_event"
+    ],
+    "relationships": [
+      "transaction_event.account_id > account.account_id",
+      "interaction_event.party_id > party.party_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/edw/diagrams/party-and-accounts.dbml": {
+    "members": [
+      "party",
+      "person",
+      "organisation",
+      "party_relationship",
+      "account",
+      "account_party_role",
+      "product",
+      "branch"
+    ],
+    "models": [
+      "party",
+      "person",
+      "organisation",
+      "party_relationship",
+      "account",
+      "account_party_role",
+      "product",
+      "branch"
+    ],
+    "positions": [
+      "account",
+      "account_party_role",
+      "branch",
+      "organisation",
+      "party",
+      "party_relationship",
+      "person",
+      "product"
+    ],
+    "relationships": [
+      "person.party_id > party.party_id",
+      "organisation.party_id > party.party_id",
+      "party_relationship.from_party_id > party.party_id",
+      "party_relationship.to_party_id > party.party_id",
+      "account.branch_id > branch.branch_id",
+      "account.product_id > product.product_id",
+      "account_party_role.account_id > account.account_id",
+      "account_party_role.party_id > party.party_id",
+      "product.parent_product_id > product.product_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/landing/diagrams/source-systems.dbml": {
+    "members": [
+      "core_customer",
+      "core_account",
+      "core_transaction",
+      "cards_account",
+      "cards_transaction",
+      "crm_contact",
+      "loans_application",
+      "branches_site",
+      "web_session",
+      "call_centre_call",
+      "fraud_alert",
+      "campaigns_send"
+    ],
+    "models": [
+      "core_customer",
+      "core_account",
+      "core_transaction",
+      "cards_account",
+      "cards_transaction",
+      "crm_contact",
+      "loans_application",
+      "branches_site",
+      "web_session",
+      "call_centre_call",
+      "fraud_alert",
+      "campaigns_send"
+    ],
+    "positions": [
+      "branches_site",
+      "call_centre_call",
+      "campaigns_send",
+      "cards_account",
+      "cards_transaction",
+      "core_account",
+      "core_customer",
+      "core_transaction",
+      "crm_contact",
+      "fraud_alert",
+      "loans_application",
+      "web_session"
+    ],
+    "relationships": [
+      "core_account.customer_no > core_customer.customer_no",
+      "core_transaction.account_no > core_account.account_no",
+      "cards_transaction.card_account_id > cards_account.card_account_id",
+      "fraud_alert.card_txn_id > cards_transaction.card_txn_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/marts/diagrams/finance.dbml": {
+    "members": [
+      "fct_account_balance_daily",
+      "fct_fee",
+      "dim_customer",
+      "dim_product",
+      "dim_branch",
+      "dim_date",
+      "account"
+    ],
+    "models": [
+      "fct_account_balance_daily",
+      "fct_fee",
+      "dim_customer",
+      "dim_product",
+      "dim_branch",
+      "dim_date",
+      "account"
+    ],
+    "positions": [
+      "account",
+      "dim_branch",
+      "dim_customer",
+      "dim_date",
+      "dim_product",
+      "fct_account_balance_daily",
+      "fct_fee"
+    ],
+    "relationships": [
+      "fct_account_balance_daily.account_id > account.account_id",
+      "fct_account_balance_daily.branch_key > dim_branch.branch_key",
+      "fct_account_balance_daily.customer_key > dim_customer.customer_key",
+      "fct_account_balance_daily.date_key > dim_date.date_key",
+      "fct_account_balance_daily.product_key > dim_product.product_key",
+      "fct_fee.customer_key > dim_customer.customer_key",
+      "fct_fee.date_key > dim_date.date_key",
+      "fct_fee.product_key > dim_product.product_key",
+      "dim_customer.home_branch_key > dim_branch.branch_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/marts/diagrams/marketing.dbml": {
+    "members": [
+      "fct_campaign_response",
+      "fct_campaign_cost",
+      "dim_campaign",
+      "dim_customer",
+      "dim_date"
+    ],
+    "models": [
+      "fct_campaign_response",
+      "fct_campaign_cost",
+      "dim_campaign",
+      "dim_customer",
+      "dim_date"
+    ],
+    "positions": [
+      "dim_campaign",
+      "dim_customer",
+      "dim_date",
+      "fct_campaign_cost",
+      "fct_campaign_response"
+    ],
+    "relationships": [
+      "fct_campaign_response.campaign_key > dim_campaign.campaign_key",
+      "fct_campaign_response.customer_key > dim_customer.customer_key",
+      "fct_campaign_response.date_key > dim_date.date_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/enterprise-warehouse/.erd-studio/reporting/diagrams/customer-360.dbml": {
+    "members": [
+      "obt_customer_360",
+      "customer_activity"
+    ],
+    "models": [
+      "obt_customer_360",
+      "customer_activity"
+    ],
+    "positions": [
+      "customer_activity",
+      "obt_customer_360"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/gitlab-style/.erd-studio/prep/diagrams/source-models.dbml": {
+    "members": [
+      "sfdc_account_source",
+      "zuora_account_source",
+      "zuora_subscription_source"
+    ],
+    "models": [
+      "sfdc_account_source",
+      "zuora_account_source",
+      "zuora_subscription_source"
+    ],
+    "positions": [
+      "sfdc_account_source",
+      "zuora_account_source",
+      "zuora_subscription_source"
+    ],
+    "relationships": [
+      "zuora_subscription_source.account_id > zuora_account_source.account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/gitlab-style/.erd-studio/prod/diagrams/arr-mart.dbml": {
+    "members": [
+      "mart_arr"
+    ],
+    "models": [
+      "mart_arr"
+    ],
+    "positions": [
+      "mart_arr"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/gitlab-style/.erd-studio/prod/diagrams/arr.dbml": {
+    "members": [
+      "fct_mrr",
+      "dim_date",
+      "dim_subscription",
+      "dim_billing_account",
+      "dim_crm_account",
+      "zuora_account_source",
+      "sfdc_account"
+    ],
+    "models": [
+      "fct_mrr",
+      "dim_date",
+      "dim_subscription",
+      "dim_billing_account",
+      "dim_crm_account",
+      "zuora_account_source",
+      "sfdc_account"
+    ],
+    "positions": [
+      "dim_billing_account",
+      "dim_crm_account",
+      "dim_date",
+      "dim_subscription",
+      "fct_mrr",
+      "sfdc_account",
+      "zuora_account_source"
+    ],
+    "relationships": [
+      "fct_mrr.dim_billing_account_id > dim_billing_account.dim_billing_account_id",
+      "fct_mrr.dim_crm_account_id > dim_crm_account.dim_crm_account_id",
+      "fct_mrr.dim_date_id > dim_date.date_id",
+      "fct_mrr.dim_subscription_id > dim_subscription.dim_subscription_id",
+      "dim_subscription.dim_billing_account_id > dim_billing_account.dim_billing_account_id",
+      "dim_billing_account.dim_crm_account_id > dim_crm_account.dim_crm_account_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/gitlab-style/.erd-studio/raw/diagrams/sources.dbml": {
+    "members": [
+      "sfdc_account",
+      "zuora_account",
+      "zuora_subscription"
+    ],
+    "models": [
+      "sfdc_account",
+      "zuora_account",
+      "zuora_subscription"
+    ],
+    "positions": [
+      "sfdc_account",
+      "zuora_account",
+      "zuora_subscription"
+    ],
+    "relationships": [
+      "zuora_subscription.accountid > zuora_account.id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/kimball-bus-matrix/.erd-studio/presentation/diagrams/conformed-dimensions.dbml": {
+    "members": [
+      "dim_date",
+      "dim_product",
+      "dim_store"
+    ],
+    "models": [
+      "dim_date",
+      "dim_product",
+      "dim_store"
+    ],
+    "positions": [
+      "dim_date",
+      "dim_product",
+      "dim_store"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/kimball-bus-matrix/.erd-studio/presentation/diagrams/inventory.dbml": {
+    "members": [
+      "fct_inventory_snapshot",
+      "dim_date",
+      "dim_product",
+      "dim_store"
+    ],
+    "models": [
+      "fct_inventory_snapshot",
+      "dim_date",
+      "dim_product",
+      "dim_store"
+    ],
+    "positions": [
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "fct_inventory_snapshot"
+    ],
+    "relationships": [
+      "fct_inventory_snapshot.date_key > dim_date.date_key",
+      "fct_inventory_snapshot.product_key > dim_product.product_key",
+      "fct_inventory_snapshot.store_key > dim_store.store_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/kimball-bus-matrix/.erd-studio/presentation/diagrams/procurement.dbml": {
+    "members": [
+      "fct_purchase_order_pipeline",
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "dim_supplier"
+    ],
+    "models": [
+      "fct_purchase_order_pipeline",
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "dim_supplier"
+    ],
+    "positions": [
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "dim_supplier",
+      "fct_purchase_order_pipeline"
+    ],
+    "relationships": [
+      "fct_purchase_order_pipeline.invoiced_date_key > dim_date.date_key",
+      "fct_purchase_order_pipeline.ordered_date_key > dim_date.date_key",
+      "fct_purchase_order_pipeline.received_date_key > dim_date.date_key",
+      "fct_purchase_order_pipeline.product_key > dim_product.product_key",
+      "fct_purchase_order_pipeline.store_key > dim_store.store_key",
+      "fct_purchase_order_pipeline.supplier_key > dim_supplier.supplier_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/kimball-bus-matrix/.erd-studio/presentation/diagrams/retail-sales.dbml": {
+    "members": [
+      "fct_retail_sales",
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "dim_promotion"
+    ],
+    "models": [
+      "fct_retail_sales",
+      "dim_date",
+      "dim_product",
+      "dim_store",
+      "dim_promotion"
+    ],
+    "positions": [
+      "dim_date",
+      "dim_product",
+      "dim_promotion",
+      "dim_store",
+      "fct_retail_sales"
+    ],
+    "relationships": [
+      "fct_retail_sales.date_key > dim_date.date_key",
+      "fct_retail_sales.product_key > dim_product.product_key",
+      "fct_retail_sales.promotion_key > dim_promotion.promotion_key",
+      "fct_retail_sales.store_key > dim_store.store_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/medallion/.erd-studio/bronze/diagrams/sources.dbml": {
+    "members": [
+      "shopify_customers",
+      "shopify_orders",
+      "shopify_order_line_items",
+      "shopify_products",
+      "stripe_customers",
+      "stripe_charges"
+    ],
+    "models": [
+      "shopify_customers",
+      "shopify_orders",
+      "shopify_order_line_items",
+      "shopify_products",
+      "stripe_customers",
+      "stripe_charges"
+    ],
+    "positions": [
+      "shopify_customers",
+      "shopify_order_line_items",
+      "shopify_orders",
+      "shopify_products",
+      "stripe_charges",
+      "stripe_customers"
+    ],
+    "relationships": [
+      "shopify_orders.customer_id > shopify_customers.id",
+      "shopify_order_line_items.order_id > shopify_orders.id",
+      "shopify_order_line_items.product_id > shopify_products.id",
+      "stripe_charges.customer > stripe_customers.id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/medallion/.erd-studio/gold/diagrams/finance.dbml": {
+    "members": [
+      "fct_payment",
+      "dim_date",
+      "dim_customer"
+    ],
+    "models": [
+      "fct_payment",
+      "dim_date",
+      "dim_customer"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "fct_payment"
+    ],
+    "relationships": [
+      "fct_payment.customer_key > dim_customer.customer_key",
+      "fct_payment.payment_date_key > dim_date.date_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/medallion/.erd-studio/gold/diagrams/orders-dashboard.dbml": {
+    "members": [
+      "gold_orders"
+    ],
+    "models": [
+      "gold_orders"
+    ],
+    "positions": [
+      "gold_orders"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/medallion/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_order_line",
+      "dim_date",
+      "dim_customer",
+      "dim_product"
+    ],
+    "models": [
+      "fct_order_line",
+      "dim_date",
+      "dim_customer",
+      "dim_product"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "dim_product",
+      "fct_order_line"
+    ],
+    "relationships": [
+      "fct_order_line.customer_key > dim_customer.customer_key",
+      "fct_order_line.order_date_key > dim_date.date_key",
+      "fct_order_line.product_key > dim_product.product_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "docs/examples/medallion/.erd-studio/silver/diagrams/core-entities.dbml": {
+    "members": [
+      "customers",
+      "silver_orders",
+      "order_lines",
+      "payments",
+      "products"
+    ],
+    "models": [
+      "customers",
+      "silver_orders",
+      "order_lines",
+      "payments",
+      "products"
+    ],
+    "positions": [
+      "customers",
+      "order_lines",
+      "payments",
+      "products",
+      "silver_orders"
+    ],
+    "relationships": [
+      "silver_orders.customer_id > customers.customer_id",
+      "order_lines.product_id > products.product_id",
+      "order_lines.order_id > silver_orders.order_id",
+      "payments.customer_id > customers.customer_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/alias-workaround/.erd-studio/bronze/diagrams/ccc.dbml": {
+    "members": [
+      "ccc_addresse",
+      "ccc_kunde"
+    ],
+    "models": [
+      "ccc_addresse",
+      "ccc_kunde"
+    ],
+    "positions": [
+      "ccc_addresse",
+      "ccc_kunde"
+    ],
+    "relationships": [
+      "ccc_kunde.addresse_id > ccc_addresse.id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/alias-workaround/.erd-studio/bronze/diagrams/kunden.dbml": {
+    "members": [
+      "addresse",
+      "kunde",
+      "ccc_addresse",
+      "ccc_kunde"
+    ],
+    "models": [
+      "addresse",
+      "kunde",
+      "ccc_addresse",
+      "ccc_kunde"
+    ],
+    "positions": [
+      "addresse",
+      "ccc_addresse",
+      "ccc_kunde",
+      "kunde"
+    ],
+    "relationships": [
+      "kunde.addresse_id > addresse.id",
+      "ccc_addresse.id > addresse.id",
+      "ccc_kunde.addresse_id > ccc_addresse.id"
+    ],
+    "linked": [
+      "ccc_addresse"
+    ],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/composite-and-self/.erd-studio/gold/diagrams/vault.dbml": {
+    "members": [
+      "pit_customer",
+      "sat_customer",
+      "employee"
+    ],
+    "models": [
+      "pit_customer",
+      "sat_customer",
+      "employee"
+    ],
+    "positions": [
+      "employee",
+      "pit_customer",
+      "sat_customer"
+    ],
+    "relationships": [
+      "pit_customer.customer_hk > sat_customer.customer_hk",
+      "pit_customer.as_of_date > sat_customer.load_date",
+      "pit_customer.snapshot_hk > sat_customer.customer_hk",
+      "employee.manager_id > employee.employee_id",
+      "employee.mentor_id > employee.employee_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/fields-new/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_sale",
+      "dim_store",
+      "fct_return"
+    ],
+    "models": [
+      "fct_sale",
+      "dim_store",
+      "fct_return"
+    ],
+    "positions": [
+      "dim_store",
+      "fct_return",
+      "fct_sale"
+    ],
+    "relationships": [
+      "fct_sale.store_key > dim_store.store_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/fields-old/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_sale",
+      "dim_store"
+    ],
+    "models": [
+      "fct_sale",
+      "dim_store"
+    ],
+    "positions": [
+      "dim_store",
+      "fct_sale"
+    ],
+    "relationships": [
+      "fct_sale.store_key > dim_store.store_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/import-settings-new/.erd-studio/gold/diagrams/crm.dbml": {
+    "members": [
+      "customers"
+    ],
+    "models": [
+      "customers"
+    ],
+    "positions": [
+      "customers"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/import-settings-old/.erd-studio/gold/diagrams/crm.dbml": {
+    "members": [
+      "customers"
+    ],
+    "models": [
+      "customers"
+    ],
+    "positions": [
+      "customers"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/library-relationships/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_order",
+      "dim_customer",
+      "dim_date",
+      "dim_product"
+    ],
+    "models": [
+      "fct_order",
+      "dim_customer",
+      "dim_date",
+      "dim_product"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "dim_product",
+      "fct_order"
+    ],
+    "relationships": [
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_order.order_date_key > dim_date.date_key",
+      "dim_product.product_key > fct_order.product_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/missing-model-converted/.erd-studio/silver/diagrams/partial.dbml": {
+    "members": [
+      "dim_customer",
+      "dim_missing",
+      "broken",
+      "nameless"
+    ],
+    "models": [
+      "dim_customer",
+      "dim_missing",
+      "broken",
+      "nameless"
+    ],
+    "positions": [
+      "broken",
+      "dim_customer",
+      "dim_missing",
+      "nameless"
+    ],
+    "relationships": [
+      "dim_missing.customer_key > dim_customer.customer_key",
+      "broken.customer_key > dim_customer.customer_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/missing-model/.erd-studio/silver/diagrams/partial.dbml": {
+    "members": [
+      "dim_customer",
+      "dim_missing",
+      "broken",
+      "nameless"
+    ],
+    "models": [
+      "dim_customer",
+      "dim_missing",
+      "broken",
+      "nameless"
+    ],
+    "positions": [
+      "broken",
+      "dim_customer",
+      "dim_missing",
+      "nameless"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/missing-positions/.erd-studio/silver/diagrams/showcase.dbml": {
+    "members": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "models": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_project",
+      "dim_task",
+      "fct_task_event",
+      "fct_order",
+      "dim_date"
+    ],
+    "relationships": [
+      "fct_task_event.customer_key > dim_customer.customer_key",
+      "fct_task_event.project_key > dim_project.project_key",
+      "fct_task_event.task_key > dim_task.task_key",
+      "dim_task.project_key > dim_project.project_key",
+      "dim_project.parent_project_key > dim_project.project_key",
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_order.project_key > dim_project.project_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "packages/core/test/fixtures/dbml/showcase/.erd-studio/silver/diagrams/showcase.dbml": {
+    "members": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "models": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "dim_project",
+      "dim_task",
+      "fct_order",
+      "fct_task_event"
+    ],
+    "relationships": [
+      "fct_task_event.customer_key > dim_customer.customer_key",
+      "fct_task_event.project_key > dim_project.project_key",
+      "fct_task_event.task_key > dim_task.task_key",
+      "dim_task.project_key > dim_project.project_key",
+      "dim_project.parent_project_key > dim_project.project_key",
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_order.project_key > dim_project.project_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbml-convert/mixed/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_order",
+      "dim_customer",
+      "dim_region",
+      "fct_refund"
+    ],
+    "models": [
+      "fct_order",
+      "dim_customer",
+      "dim_region",
+      "fct_refund"
+    ],
+    "positions": [
+      "fct_order",
+      "dim_customer",
+      "dim_region",
+      "fct_refund"
+    ],
+    "relationships": [
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_refund.order_line_id > fct_order.order_line_id"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbml-native/.erd-studio/gold/diagrams/sales.dbml": {
+    "members": [
+      "fct_order",
+      "dim_customer",
+      "dim_date",
+      "dim_region",
+      "customer_profile",
+      "bridge_empty"
+    ],
+    "models": [
+      "fct_order",
+      "dim_customer",
+      "dim_date",
+      "dim_region",
+      "customer_profile",
+      "bridge_empty"
+    ],
+    "positions": [
+      "bridge_empty",
+      "customer_profile",
+      "dim_customer",
+      "dim_date",
+      "dim_region",
+      "fct_order"
+    ],
+    "relationships": [
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_order.order_date_key > dim_date.date_key",
+      "fct_order.ship_date_key > dim_date.date_key",
+      "fct_order.region_code > dim_region.region_code",
+      "fct_order.country_code > dim_region.country_code",
+      "dim_customer.parent_customer_key > dim_customer.customer_key",
+      "dim_date.previous_date_key > dim_date.date_key",
+      "customer_profile.customer_key > dim_customer.customer_key",
+      "customer_profile.preferred_region_code > dim_region.region_code"
+    ],
+    "linked": [
+      "fct_order",
+      null
+    ],
+    "stubColumns": []
+  },
+  "test/fixtures/dbml-native/.erd-studio/silver/diagrams/staging.dbml": {
+    "members": [
+      "fct_order",
+      "dim_date"
+    ],
+    "models": [
+      "fct_order",
+      "dim_date"
+    ],
+    "positions": [
+      "fct_order",
+      "dim_date"
+    ],
+    "relationships": [
+      "fct_order.order_date_key > dim_date.date_key",
+      "fct_order.ship_date_key > dim_date.date_key",
+      "dim_date.previous_date_key > dim_date.date_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/gold/diagrams/finance.dbml": {
+    "members": [],
+    "models": [],
+    "positions": [
+      "fct_transactions"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/bob.dbml": {
+    "members": [],
+    "models": [],
+    "positions": [],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/ncr.dbml": {
+    "members": [],
+    "models": [],
+    "positions": [],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/scroll-test.dbml": {
+    "members": [
+      "fct_large_table"
+    ],
+    "models": [
+      "fct_large_table"
+    ],
+    "positions": [
+      "fct_large_table"
+    ],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/sdd.dbml": {
+    "members": [],
+    "models": [],
+    "positions": [],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/showcase.dbml": {
+    "members": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "models": [
+      "fct_task_event",
+      "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
+      "fct_order"
+    ],
+    "positions": [
+      "dim_customer",
+      "dim_date",
+      "dim_project",
+      "dim_task",
+      "fct_order",
+      "fct_task_event"
+    ],
+    "relationships": [
+      "fct_task_event.customer_key > dim_customer.customer_key",
+      "fct_task_event.project_key > dim_project.project_key",
+      "fct_task_event.task_key > dim_task.task_key",
+      "dim_task.project_key > dim_project.project_key",
+      "dim_project.parent_project_key > dim_project.project_key",
+      "fct_order.customer_key > dim_customer.customer_key",
+      "fct_order.project_key > dim_project.project_key"
+    ],
+    "linked": [],
+    "stubColumns": []
+  },
+  "test/fixtures/dbt-project-dbml/.erd-studio/silver/diagrams/ttt.dbml": {
+    "members": [],
+    "models": [],
+    "positions": [],
+    "relationships": [],
+    "linked": [],
+    "stubColumns": []
+  }
+}

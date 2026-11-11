@@ -308,6 +308,17 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.newTable",
+        "title": "New Table…",
+        "category": "ERD Studio",
+        "icon": "$(add)"
+      },
+      {
+        "command": "erdStudio.newSchema",
+        "title": "New Schema…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.openInDiagram",
         "title": "Open in Diagram…",
         "category": "ERD Studio",
@@ -959,6 +970,21 @@
           "group": "7_modification@2"
         },
         {
+          "command": "erdStudio.newTable",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^tableLibrary(Layer|Schema)$/ && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.newTable",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^tableLibrary(Layer|Schema)$/ && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "1_new@1"
+        },
+        {
+          "command": "erdStudio.newSchema",
+          "when": "view == erdStudio.modelLibrary && viewItem == tableLibraryLayer && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "1_new@2"
+        },
+        {
           "command": "erdStudio.openInDiagram",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "inline"
@@ -1068,6 +1094,16 @@
           "command": "erdStudio.goToTable",
           "when": "view == erdStudio.modelLibrary && erdStudio.hasProject",
           "group": "navigation@0"
+        },
+        {
+          "command": "erdStudio.newTable",
+          "when": "view == erdStudio.modelLibrary && erdStudio.hasProject && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "0_new@1"
+        },
+        {
+          "command": "erdStudio.newSchema",
+          "when": "view == erdStudio.modelLibrary && erdStudio.hasProject && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "group": "0_new@2"
         },
         {
           "command": "erdStudio.organizeModelLibrary",
@@ -1257,6 +1293,14 @@
         {
           "command": "erdStudio.moveDiagram",
           "when": "erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.newTable",
+          "when": "erdStudio.hasProject && erdStudio.storage =~ /^(dbml|mixed)$/"
+        },
+        {
+          "command": "erdStudio.newSchema",
+          "when": "erdStudio.hasProject && erdStudio.storage =~ /^(dbml|mixed)$/"
         },
         {
           "command": "erdStudio.openInDiagram",
@@ -1591,8 +1635,8 @@
   "dependencies": {
     "@dbml/core": "11.0.0",
     "@dbml/parse": "11.0.0",
-    "@erd-studio/core": "0.4.1",
-    "@erd-studio/renderer": "0.4.2",
+    "@erd-studio/core": "0.5.0",
+    "@erd-studio/renderer": "0.5.0",
     "@xyflow/react": "^12.5.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",

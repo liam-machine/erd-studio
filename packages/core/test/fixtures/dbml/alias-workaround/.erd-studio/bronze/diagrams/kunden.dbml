@@ -1,0 +1,21 @@
+Project kunden {
+  Note: 'Customers and addresses from both source systems'
+  erd_schema_version: '7'
+  erd_layout: '''
+    addresse 40 40
+    ccc_addresse 40 360
+    ccc_kunde 400 360
+    kunde 400 40
+    note/5d1c7e2a-3b4f-4a6e-9d8c-1f2e3a4b5c6d 760 360 220 120
+  '''
+}
+
+use { table bqs.addresse }     from '../tables/bqs/addresse.dbml'
+use { table bqs.kunde }        from '../tables/bqs/kunde.dbml'
+use { table ccc.ccc_addresse } from '../tables/ccc/ccc_addresse.dbml'
+use { table ccc.ccc_kunde }    from '../tables/ccc/ccc_kunde.dbml'
+use * from '../relationships/bronze.dbml'
+
+Note "5d1c7e2a-3b4f-4a6e-9d8c-1f2e3a4b5c6d" [color: #f59e0b, linked_table: 'ccc_addresse'] {
+  'ccc_addresse is the warehouse table ccc.addresse'
+}

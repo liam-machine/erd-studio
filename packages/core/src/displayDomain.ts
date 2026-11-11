@@ -6,7 +6,7 @@ import type { TableTemplate, NodePosition, Relationship, SemanticSubjectArea, Vi
 import type { DisplaySubjectArea, ExistingTablePreview, ManifestModelPreview } from './types/display.js';
 import type { LayerConfig } from './types/layer.js';
 import { computeNewTablePositions } from './positions.js';
-import { tableLoadErrorOf, tableLoadWarningOf } from './types/semantic.js';
+import { tableLoadErrorOf, tableLoadWarningOf, tableNameOf } from './types/semantic.js';
 import { foreignKeyEnd, keysContradictedRelationships } from './relationships.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
 import type { FieldList } from './fields.js';
@@ -105,6 +105,7 @@ export function toDisplaySubjectArea(domain: SemanticSubjectArea, options: ToDis
 
     return {
       name: model.name,
+      ...(tableNameOf(model) !== undefined && tableNameOf(model) !== model.name ? { tableName: tableNameOf(model) } : {}),
       schema: model.schema ?? '',
       ...(model.alias ? { alias: model.alias } : {}),
       description: model.description ?? '',

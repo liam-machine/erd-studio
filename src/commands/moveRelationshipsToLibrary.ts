@@ -78,7 +78,7 @@ export interface MoveRelationshipsDeps {
   semanticDir: string;
   subjectAreaService: Pick<SubjectAreaService, 'listSubjectAreas'>;
   tableLibraryService: Pick<TableLibraryService, 'getTable' | 'listTables' | 'tablePath' | 'invalidateCache' | 'getTablesDir'>
-    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile' | 'projectStorage'>>;
+    & Partial<Pick<TableLibraryService, 'findTableNameIgnoringCase' | 'hasTablesLibrary' | 'isTableNamingFile' | 'projectStorage' | 'isAmbiguousName' | 'tablesNamed'>>;
   /** Refresh the trees, open canvases and selectors once the files are written. */
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
@@ -162,6 +162,11 @@ export const OPEN_SOURCE_CONTROL_BUTTON = 'Open Source Control';
  * files (one changed while the dialog was open, or no longer reads as a
  * table). Its message is the user's sentence; `filePath` is the file to open.
  */
+/** The semantic dir, from the library's tables folder. */
+function libraryRootOf(tableLibraryService: Pick<TableLibraryService, 'getTablesDir'>): string {
+  return path.dirname(tableLibraryService.getTablesDir());
+}
+
 class MoveStopped extends Error {
   constructor(message: string, readonly filePath?: string) {
     super(message);
@@ -277,6 +282,16 @@ async function runMove(deps: MoveRelationshipsDeps, progress: { saved: boolean }
   tableLibraryService.invalidateCache();
   const domains = readSubjectAreaRelationships(subjectAreaService, workspaceRoot, semanticDir)
     .filter((d) => d.relationships.length > 0);
+  // Fail closed (D-5): a relationship naming a table by a name tables in two schema folders share
+  // does not say which table's file it moves into, and a YAML file names it by name alone. Nothing moves.
+  for (const domain of domains) {
+    for (const r of domain.relationships) {
+      const shared = [r.fromModel, r.toModel].find((end) => tableLibraryService.isAmbiguousName?.(end));
+      if (shared === undefined) continue;
+      const named = (tableLibraryService.tablesNamed?.(shared) ?? []).map((e) => path.relative(libraryRootOf(tableLibraryService), e.filePath).split(path.sep).join('/'));
+      throw new MoveStopped(`${path.basename(domain.filePath)} has a relationship to ${shared}, and more than one table has that name (${named.join(', ')}). Nothing was moved.`, domain.filePath);
+    }
+  }
 
   // One object per model, whatever the spelling an entry uses (#133 L4):
   // `Dim_Customer` reaches dim_customer.yml on a case-sensitive file system,

@@ -58,7 +58,10 @@
  * (`Order Items` → `Order_Items`), with the original kept as the warehouse
  * `alias` when it can be one, else in `meta.dbml.name`. Two tables whose
  * names differ only by schema or case become `{schema}_{name}` with
- * `alias: {name}`. A name the Table Library already has, in any case, is used
+ * `alias: {name}`, except for a DBML diagram (`schemaScopedNames`), where a
+ * table is its schema folder and name: two tables of one name in different
+ * schemas keep their names, each in its own schema folder, and the plan
+ * names them `<schema>.<name>` ({@link PlannedName.ref}). A name the Table Library already has, in any case, is used
  * as it is in the library (never overwritten, in the library's spelling)
  * only when the library's table has the same columns, by name; otherwise the
  * file's table is imported as its own, `{diagram}_{name}` with
@@ -154,6 +157,14 @@ export interface DbmlImportLibrary {
    * Absent: none is looked for.
    */
   earlierCopiesOf?(name: string): string[];
+  /**
+   * For a DBML diagram (`schemaScopedNames`): the library's tables called
+   * `name` (without case), each with its schema folder (`''` for a YAML
+   * table) and its library reference (`<schema>.<name>` where two schema
+   * folders share the name), which `getTable`, `layerOf` and the write
+   * planner answer to. Absent: a name is one table.
+   */
+  tablesNamed?(name: string): ReadonlyArray<{ schema: string; name: string; ref: string }>;
 }
 
 /**
@@ -196,6 +207,15 @@ export interface PlanDbmlImportInput {
   diagramHoldsNoRelationships?: boolean;
   /** A table whose name the Table Library already has (default `auto`, see {@link DbmlImportSameName}). */
   sameName?: DbmlImportSameName;
+  /**
+   * The new diagram is a DBML diagram, whose tables are their schema folders
+   * and names: two tables of one name in different schemas (the file's, or
+   * one the library has) are each themselves, never renamed `{schema}_{name}`,
+   * and a table is a library table (#269) only when the library has it in
+   * the same schema folder. A table with no schema goes to the layer's own
+   * schema folder.
+   */
+  schemaScopedNames?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +351,12 @@ export interface DbmlImportPlan {
   relationships: Relationship[];
   /** Existing library tables that gain relationships (library mode): save each after the subject area is written. */
   changedLibraryTables: SemanticTable[];
+  /**
+   * The library reference each of {@link changedLibraryTables} was read by,
+   * where it differs from its name (`<schema>.<name>`: another schema folder
+   * has the name): what to save it as (its own file, never its namesake's).
+   */
+  changedLibraryRefs?: ReadonlyMap<SemanticTable, string>;
   /** The subject area file's content. */
   document: DbmlImportSubjectAreaDocument;
   report: DbmlImportReport;
@@ -508,7 +534,11 @@ function dbmlTableLabel(table: Pick<DbmlTable, 'schema' | 'name'>): string {
 /** One DBML table as it will be imported. */
 interface PlannedTable {
   dbml: DbmlTable;
-  /** Its name in ERD Studio (the library's spelling when reused). */
+  /**
+   * Its name in the plan (the library's spelling when reused): its name, or,
+   * where another table of the plan or the library has its name in another
+   * schema folder, `<schema>.<name>` (its {@link PlannedName.ref}).
+   */
   name: string;
   /** The new table to create; undefined when the library has it. */
   table?: SemanticTable;
@@ -519,6 +549,8 @@ interface PlannedTable {
   columns: Map<string, string>;
   /** Lowercased imported column names that are the primary key. */
   primaryKey: Set<string>;
+  /** A new table named in the plan by its reference: its own name, which its file takes. */
+  ownName?: string;
 }
 
 interface Context {
@@ -579,6 +611,7 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
 
   // Relationships: to the library files of their FK tables, or the subject area file.
   let domainRelationships: Relationship[] = relationships;
+  const copyRefs = new Map<SemanticTable, string>();
   let changedLibraryTables: SemanticTable[] = [];
   if (input.libraryRelationships && relationships.length > 0) {
     const copies = new Map<string, SemanticTable | null>();
@@ -587,7 +620,10 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
       if (!copies.has(key)) {
         const found = planned.find((p) => p.reused && normaliseName(p.name) === key);
         const source = found ? found.library ?? null : input.library.getTable(name);
-        copies.set(key, source ? structuredClone(source) : null);
+        const copy = source ? structuredClone(source) : null;
+        copies.set(key, copy);
+        // Read by a reference that is not its name (another schema folder has it): saved by that reference.
+        if (copy && normaliseName(copy.name) !== key) copyRefs.set(copy, name);
       }
       return copies.get(key) ?? null;
     };
@@ -695,14 +731,19 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
     };
   });
 
+  // A new table named in the plan by its reference (`<schema>.<name>`) is written under its own name, in
+  // its own schema folder: its relationships keep naming the tables they point at by reference.
+  const ownNames = new Map(planned.filter((p) => p.table && p.ownName !== undefined).map((p) => [p.table!, p.ownName!]));
+  const changedRefs = new Map(changedLibraryTables.flatMap((t) => (copyRefs.has(t) ? [[t, copyRefs.get(t)!] as const] : [])));
   return {
     subjectAreaName: input.subjectAreaName,
     layer: input.layer,
     modelNames: planned.map((p) => p.name),
-    newTables,
+    newTables: ownNames.size === 0 ? newTables : newTables.map((t) => (ownNames.has(t) ? { ...t, name: ownNames.get(t)! } : t)),
     reusedTables: planned.filter((p) => p.reused).map((p) => p.name),
     relationships,
     changedLibraryTables,
+    ...(changedRefs.size > 0 ? { changedLibraryRefs: changedRefs } : {}),
     document,
     report,
   };
@@ -816,8 +857,15 @@ function hasDbmlMeta(meta: Meta | undefined): boolean {
 /** A table's imported name, and the library table it is when it reuses one. */
 interface PlannedName {
   name: string;
-  /** The library's table (its spelling) this file table is: referenced, never created. Null: a new table. */
+  /** The library's table (its spelling, or its library reference) this file table is: referenced, never created. Null: a new table. */
   reuse: string | null;
+  /**
+   * A new table's name in the plan where it differs from `name` (DBML
+   * diagrams only): `<schema>.<name>`, because another table of the file or
+   * the library has its name in another schema folder. Its relationships,
+   * position and diagram member name it so; its file is still `name`.
+   */
+  ref?: string;
 }
 
 /**
@@ -862,17 +910,42 @@ function hasSameColumns(table: SemanticTable, columns: ReadonlySet<string>): boo
  * reused; failing that, under `sameName: 'reuse'` the library's table is,
  * and by default the table is its own: `{diagram}_{name}`, steered clear of
  * the library like any made-up name.
+ *
+ * For a DBML diagram (`schemaScopedNames`) a table is its schema folder and
+ * name: tables of one name in different schemas keep it (only two of one
+ * schema, or one with no schema beside the layer's own, are told apart by
+ * `{schema}_{name}`), and the library's table of that name is the same table
+ * only in the same schema folder; one in another schema folder is another
+ * table, and the plan names both `<schema>.<name>` ({@link PlannedName.ref}).
  */
 function planTableNames(
   tables: readonly DbmlTable[],
-  input: Pick<PlanDbmlImportInput, 'library' | 'subjectAreaName' | 'sameName'>,
+  input: Pick<PlanDbmlImportInput, 'library' | 'subjectAreaName' | 'sameName' | 'schemaScopedNames' | 'layer'>,
   ctx: Context,
 ): PlannedName[] {
   const { library } = input;
   const policy = input.sameName ?? 'auto';
+  const scoped = input.schemaScopedNames === true;
+  /** The schema folder a table goes to: its own schema, else the layer's (lower case, for comparing). */
+  const folderOf = (t: DbmlTable): string => normaliseName(t.schema || input.layer);
   const groups = new Map<string, number>();
-  for (const t of tables) groups.set(normaliseName(t.name), (groups.get(normaliseName(t.name)) ?? 0) + 1);
-  const sameName = (t: DbmlTable): boolean => groups.get(normaliseName(t.name))! > 1;
+  const groupOf = (t: DbmlTable): string => (scoped ? `${folderOf(t)}\u0000${normaliseName(t.name)}` : normaliseName(t.name));
+  for (const t of tables) groups.set(groupOf(t), (groups.get(groupOf(t)) ?? 0) + 1);
+  const sameName = (t: DbmlTable): boolean => groups.get(groupOf(t))! > 1;
+  /**
+   * The library's table this one is, by its name as the library spells it (or its library reference
+   * where two schema folders share it): any of the name; for a DBML diagram, the one in the table's own
+   * schema folder, or a YAML table of the name (a YAML table's name is unique across the project). A
+   * table the file writes with no schema names none: like any bare name, it is the library's one table
+   * of that name when only one has it (#269 asks about it as before), and a table of its own otherwise.
+   */
+  const findInLibrary = (t: DbmlTable): string | null => {
+    if (!scoped || !library.tablesNamed) return library.findTableName(t.name);
+    const named = library.tablesNamed(t.name);
+    const same = named.find((n) => n.schema === '' || normaliseName(n.schema) === folderOf(t));
+    if (same) return same.ref;
+    return !t.schema && named.length === 1 ? named[0].ref : null;
+  };
   /** Per table: the library table it is (a name the file wrote), an earlier copy it reuses, or the library table it steers clear of. */
   const libraryHit: Array<string | null> = tables.map(() => null);
   const earlierCopy: Array<string | null> = tables.map(() => null);
@@ -881,8 +954,22 @@ function planTableNames(
   const candidates = tables.map((t, i) => {
     const base = sanitiseDbmlTableName(t.name);
     if (sameName(t) && t.schema) return sanitiseDbmlTableName(`${t.schema}_${base}`);
-    const hit = base === t.name ? library.findTableName(t.name) : null;
-    if (hit === null) return base;
+    const hit = base === t.name ? findInLibrary(t) : null;
+    if (hit === null) {
+      // A DBML diagram: an earlier import kept this table as its own copy (`ccc_addresse`, alias `addresse`)
+      // in the same schema, before two schemas could each have the name. Same columns: that copy, never a second.
+      if (scoped && base === t.name) {
+        const columns = fileColumnKeys(t);
+        const copy = (library.earlierCopiesOf?.(t.name) ?? [])
+          .sort((a, b) => a.localeCompare(b, 'en'))
+          .find((n) => {
+            const c = library.getTable(n);
+            return !!c && normaliseName(c.schema ?? '') === folderOf(t) && hasSameColumns(c, columns);
+          });
+        if (copy !== undefined) { earlierCopy[i] = copy; return copy; }
+      }
+      return base;
+    }
     const own = library.getTable(hit);
     if (!own) {
       // Nothing to compare: the library's table is taken on trust, as before (a file mid-merge is not a reason to copy it).
@@ -902,11 +989,19 @@ function planTableNames(
     clashesWith[i] = hit;
     return separateName(t);
   });
-  const used = new Set<string>();
+  // The names handed out: one set for the file, or (a DBML diagram) one per schema folder, where a name is unique.
+  const usedNames = new Map<string, Set<string>>();
+  const usedFor = (t: DbmlTable): Set<string> => {
+    const key = scoped ? folderOf(t) : '';
+    let set = usedNames.get(key);
+    if (!set) usedNames.set(key, (set = new Set<string>()));
+    return set;
+  };
   const names: string[] = new Array(tables.length);
   // Names as the file writes them (and earlier copies reused) first, then the changed ones, each in file order.
   for (const keptAsWritten of [true, false]) {
     candidates.forEach((_candidate, i) => {
+      const used = usedFor(tables[i]);
       const copy = earlierCopy[i];
       if (copy !== null && keptAsWritten) {
         if (!used.has(normaliseName(copy))) { names[i] = copy; used.add(normaliseName(copy)); return; }
@@ -922,11 +1017,26 @@ function planTableNames(
       if ((candidates[i] === tables[i].name) === keptAsWritten) names[i] = freeName(candidates[i], used, madeUp);
     });
   }
+  /**
+   * A new table's name in the plan (a DBML diagram): `<schema>.<name>` where another table of the
+   * file, or of the library, has its name in another schema folder; else its name.
+   */
+  const refOf = (i: number, name: string): string | undefined => {
+    if (!scoped) return undefined;
+    const t = tables[i];
+    const others = names.filter((n, j) => j !== i && libraryHit[j] === null && earlierCopy[j] === null
+      && normaliseName(n) === normaliseName(name) && folderOf(tables[j]) !== folderOf(t));
+    const inLibrary = (library.tablesNamed?.(name) ?? []).some((n) => n.schema !== '' && normaliseName(n.schema) !== folderOf(t));
+    return others.length > 0 || inLibrary ? `${t.schema || input.layer}.${name}` : undefined;
+  };
   return names.map((name, i) => {
     const copy = earlierCopy[i];
     if (copy !== null) return { name: copy, reuse: copy };
     const hit = libraryHit[i];
-    if (name === tables[i].name) return { name, reuse: hit };
+    if (name === tables[i].name) {
+      const ref = hit === null ? refOf(i, name) : undefined;
+      return { name, reuse: hit, ...(ref !== undefined ? { ref } : {}) };
+    }
     const clash = clashesWith[i] !== null && candidates[i] !== tables[i].name ? clashesWith[i] : null;
     const layer = clash !== null ? library.layerOf?.(clash) : undefined;
     ctx.report.renamed.push({
@@ -937,7 +1047,8 @@ function planTableNames(
       reason: clash !== null ? 'in-library' : sameName(tables[i]) ? 'same-name' : 'invalid-name',
       ...(clash !== null ? { inLibrary: { name: clash, ...(layer ? { layer } : {}) } } : {}),
     });
-    return { name, reuse: null };
+    const ref = refOf(i, name);
+    return { name, reuse: null, ...(ref !== undefined ? { ref } : {}) };
   });
 }
 
@@ -1145,6 +1256,11 @@ function planTable(dbml: DbmlTable, planned: PlannedName, library: DbmlImportLib
   if (ctx.erdStudioExport && Array.isArray(tableExtras.indexes)) tableExtras.indexes = withExportIndexes(meta, tableExtras.indexes);
   meta = withDbmlMeta(meta, tableExtras);
   if (Object.keys(meta).length > 0) table.meta = meta;
+  // Named in the plan by its reference where another schema folder has its name (its file is still `name`).
+  if (planned.ref !== undefined) {
+    table.name = planned.ref;
+    return { dbml, name: planned.ref, table, reused: false, columns, primaryKey, ownName: name };
+  }
   return { dbml, name, table, reused: false, columns, primaryKey };
 }
 
@@ -1525,8 +1641,12 @@ function planViewConfig(model: DbmlModel, planned: readonly PlannedTable[], layo
     return key === undefined ? undefined : placed[key];
   };
   for (const p of planned) {
-    // The name as the file writes it, then the name it is imported as, then either ignoring case.
-    const at = own(p.dbml.name) ?? own(p.name) ?? anyCase(p.dbml.name) ?? anyCase(p.name);
+    // The name as the file writes it, then the name it is imported as, then either ignoring case. A table
+    // named by its reference (another schema has its name) is placed by its `<schema>.<name>` line first,
+    // as a diagram holding both writes it.
+    const twin = p.table !== undefined && p.name !== p.dbml.name && p.name.includes('.');
+    const at = (twin ? own(p.name) ?? own(dbmlTableLabel(p.dbml)) ?? anyCase(p.name) ?? anyCase(dbmlTableLabel(p.dbml)) : undefined)
+      ?? own(p.dbml.name) ?? own(p.name) ?? anyCase(p.dbml.name) ?? anyCase(p.name);
     if (at && finite(at.x) && finite(at.y) && !Object.hasOwn(positions, p.name)) {
       positions[p.name] = { x: at.x, y: at.y };
       ctx.report.positioned++;

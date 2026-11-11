@@ -163,6 +163,24 @@ describe('editSubjectAreaDbml in the layer-first tree (§1.4)', () => {
   });
 });
 
+describe('editSubjectAreaDbml on a diagram at erd_schema_version 8', () => {
+  // Core reads 8 (a diagram holding two tables of one name) before anything
+  // writes it. An edit to such a diagram must never lower it to 7, or an older
+  // reader would draw the two tables as one instead of refusing the diagram.
+  it('keeps the version line as it is and splices the rest exactly as on a version-7 diagram', () => {
+    const change = (a: Record<string, any>): void => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      a.description = 'changed';
+      a.viewConfig.positions = { fct_order: { x: 10, y: 20 } };
+      a.logical.models.push('dim_date');
+    };
+    const eight = SALES.replace("erd_schema_version: '7'", "erd_schema_version: '8'");
+    const out = diagramEdit(eight, change);
+    expect(out).toContain("erd_schema_version: '8'");
+    expect(out).not.toContain("erd_schema_version: '7'");
+    expect(out.replace("erd_schema_version: '8'", "erd_schema_version: '7'")).toBe(diagramEdit(SALES, change));
+  });
+});
+
 describe('renderNewSubjectAreaDbml', () => {
   for (const c of NEW_DIAGRAM_CASES) it(c.name, () => c.check(c.run()));
 });

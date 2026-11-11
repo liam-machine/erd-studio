@@ -44,8 +44,19 @@ export interface ColumnDisplay {
 
 /** Data payload for a TableNode React Flow node. */
 export type TableNodeData = {
-  /** Model name (unique within a domain). */
+  /**
+   * Model name (unique within a domain): the node id, and what every edge
+   * end, position and message names. For one of two tables of one name from
+   * different schema folders it is `<schema>.<name>` (`DisplayTable.name`).
+   */
   modelName: string;
+  /**
+   * The table's own name when {@link modelName} is not it
+   * (`DisplayTable.tableName`): what the header prints after its schema, so
+   * `ccc.addresse` reads once. Absent from an older core: the header prints
+   * `modelName`. See `headerName`.
+   */
+  tableName?: string;
   /**
    * Header label when it differs from `modelName`: the model's table name
    * (`alias`), qualified by schema when another model on the canvas would read

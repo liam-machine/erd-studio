@@ -1,0 +1,52 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: kunden (layer bronze, logical stage)
+%% Description: Customers and addresses from both source systems
+
+  %% Table bqs.addresse
+  %%   schema: bqs
+  %%   description: Addresses from the BQS system
+  "bqs.addresse" {
+    INT id PK
+    VARCHAR strasse
+    VARCHAR ort
+  }
+
+  %% Table bqs.kunde
+  %%   schema: bqs
+  %%   description: Customers from the BQS system
+  "bqs.kunde" {
+    INT id PK
+    VARCHAR name
+    INT addresse_id FK
+  }
+
+  %% Table ccc.addresse
+  %%   schema: ccc
+  %%   description: Addresses from the CCC system
+  "ccc.addresse" {
+    INT id PK, FK
+    VARCHAR street
+    VARCHAR city
+    VARCHAR postcode
+  }
+
+  %% Table ccc.kunde
+  %%   schema: ccc
+  %%   description: Customers from the CCC system
+  "ccc.kunde" {
+    INT id PK
+    VARCHAR full_name
+    INT addresse_id FK
+  }
+
+  %% bqs.kunde.addresse_id -> bqs.addresse.id, many-to-one
+  "bqs.kunde" }o--|| "bqs.addresse" : "addresse_id"
+  %% ccc.addresse.id -> bqs.addresse.id, many-to-one
+  "ccc.addresse" }o--|| "bqs.addresse" : "id"
+  %% ccc.kunde.addresse_id -> ccc.addresse.id, many-to-one
+  "ccc.kunde" }o--|| "ccc.addresse" : "addresse_id"
+
+  %% Sticky note 1 (linked to ccc.addresse): The CCC addresses are matched to BQS by id

@@ -66,7 +66,8 @@ export function withDbtKeyHints(display: DisplaySubjectArea, index: DbtKeyIndex)
   if (index.columns.size === 0) return display;
   let touched = false;
   const models = display.models.map((model) => {
-    const hints = index.columns.get(model.name.toLowerCase());
+    // dbt names a table by its own name (`tableName` where two members share it), as core's key evidence does.
+    const hints = index.columns.get((model.tableName ?? model.name).toLowerCase());
     if (!hints) return model;
     let changed = false;
     const columns = model.columns.map((col) => {

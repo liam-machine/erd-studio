@@ -101,3 +101,18 @@ describe('the toolbar search\'s "Not on this diagram" hint', () => {
     expect(screen.queryByText(/Not on this diagram/)).toBeNull();
   });
 });
+
+describe('otherProjectMatches, two tables of one name in different schema folders', () => {
+  it('counts a row listed with its schema folder by its file: the namesake of a table on the diagram is another table', async () => {
+    const { otherProjectMatches } = await import('../../webview/components/Toolbar/searchElsewhere');
+    const row = (name: string, schemaFolder: string): import('../../src/types/display').ExistingTablePreview => ({
+      name, schema: schemaFolder, description: '', columnCount: 1, source: 'logical',
+      sourcePath: `.erd-studio/bronze/tables/${schemaFolder}/${name}.dbml`, layer: 'bronze', schemaFolder,
+    });
+    // The diagram shows ccc's addresse (the host already left its row out); bqs's is not on it.
+    expect(otherProjectMatches([row('addresse', 'bqs')], ['addresse', 'kunde'], 'addr')).toBe(1);
+    expect(otherProjectMatches([row('addresse', 'bqs'), row('addresse', 'ddd')], ['addresse'], 'addr')).toBe(2);
+    // A row with no schema folder goes by its name, as before.
+    expect(otherProjectMatches([{ ...row('addresse', 'bqs'), schemaFolder: undefined }], ['addresse'], 'addr')).toBe(0);
+  });
+});

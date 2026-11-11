@@ -1,0 +1,21 @@
+Project kunden {
+  Note: 'Customers and addresses from both source systems'
+  erd_schema_version: '8'
+  erd_layout: '''
+    bqs.addresse 40 40
+    bqs.kunde 400 40
+    ccc.addresse 40 360
+    ccc.kunde 400 360
+    note/5d1c7e2a-3b4f-4a6e-9d8c-1f2e3a4b5c6d 760 360 220 120
+  '''
+}
+
+use { table bqs.addresse } from '../tables/bqs/addresse.dbml'
+use { table bqs.kunde }    from '../tables/bqs/kunde.dbml'
+use { table ccc.addresse } from '../tables/ccc/addresse.dbml'
+use { table ccc.kunde }    from '../tables/ccc/kunde.dbml'
+use * from '../relationships/bronze.dbml'
+
+Note "5d1c7e2a-3b4f-4a6e-9d8c-1f2e3a4b5c6d" [color: #f59e0b, linked_table: 'ccc.addresse'] {
+  'The CCC addresses are matched to BQS by id'
+}

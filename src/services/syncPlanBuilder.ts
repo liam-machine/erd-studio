@@ -40,7 +40,8 @@ import type { YmlData } from '../types/ymlData';
 import { subjectAreaStorageOf } from '@erd-studio/core';
 import { catalogColumnName, configuredSchemaOf } from './dbtDraft';
 import { normaliseName } from './nameUtils';
-import type { TableLibraryService } from './logicalModelService';
+import type { RelationshipsIndexMemo, TableLibraryService } from './logicalModelService';
+import type { TableId } from '../types/tableId';
 
 export interface SyncPlanContext {
   manifest: ManifestData;
@@ -102,6 +103,13 @@ export interface SyncPlanContext {
    * `TableLibraryService.getTableFileError` ({@link syncPlanLibraryLookups}).
    */
   tableUnreadable?: (modelName: string) => boolean;
+  /**
+   * The dbt model a table of the report was found as, where that is not its
+   * name (a name two schema folders share, found by schema:
+   * `SubjectAreaService.dbtModelNamesOf`): null when it was found as none.
+   * Undefined, or omitted: the table's name is its dbt model's.
+   */
+  dbtModelOf?: (modelName: string) => string | null | undefined;
 }
 
 /** The table library calls {@link syncPlanLibraryLookups} makes. */
@@ -121,9 +129,17 @@ export type SyncPlanLibrary = Pick<TableLibraryService,
  */
 export function syncPlanLibraryLookups(
   library: SyncPlanLibrary,
-  where: { diagramFile: string; layerIds: ReadonlySet<string>; manifest?: ManifestData; ymlData?: YmlData },
+  where: {
+    diagramFile: string; layerIds: ReadonlySet<string>; manifest?: ManifestData; ymlData?: YmlData;
+    /** A table of the diagram by its identity, where the diagram's name for it is not enough (`SubjectAreaService.tableIdsOf`). */
+    tableIdOf?: (modelName: string) => TableId | undefined;
+  },
 ): Pick<SyncPlanContext, 'modelFolder' | 'tableLibraryFile' | 'newTableLibraryDir' | 'newTableFilePath' | 'relationshipsFile' | 'relationshipStoredIn' | 'tableUnreadable'> {
   const dbmlDiagram = subjectAreaStorageOf(where.diagramFile) === 'dbml';
+  // One relationships index for the whole plan, built by the first table that needs it, not once per table.
+  const memo: RelationshipsIndexMemo = {};
+  // A table two schema folders share is asked for by its own file, never by a name or a reference.
+  const table = (name: string): TableId | string => where.tableIdOf?.(name) ?? name;
   let home: ReturnType<SyncPlanLibrary['newTableHomeFor']> | null = null;
   const relative = (file: string | undefined): string | undefined => (file === undefined ? undefined : library.libraryRelativePath(file));
   const newTableFile = (name: string): string | undefined => {
@@ -136,21 +152,21 @@ export function syncPlanLibraryLookups(
     }
   };
   return {
-    modelFolder: (name) => library.tableFolder(name),
-    tableLibraryFile: (name) => library.tableLibraryFile(name),
+    modelFolder: (name) => library.tableFolder(table(name)),
+    tableLibraryFile: (name) => library.tableLibraryFile(table(name)),
     newTableLibraryDir: library.newTableLibraryDirName(),
     newTableFilePath: (name) => relative(newTableFile(name)),
     // A table with no file yet (a diagram member the library lacks) has its
     // new Refs placed from the DBML file it will get, so the plan and diff
     // name a relationships file for it too, never the table file.
     relationshipsFile: (name) => {
-      const placed = library.relationshipsFileForNewRef(name);
+      const placed = library.relationshipsFileForNewRef(table(name), memo);
       if (placed !== undefined) return relative(placed);
-      const future = library.tableLibraryFile(name) === null ? newTableFile(name) : undefined;
-      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future));
+      const future = library.tableLibraryFile(table(name)) === null ? newTableFile(name) : undefined;
+      return future === undefined ? undefined : relative(library.relationshipsFileForNewTable(name, future, memo));
     },
-    relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding(rel)),
-    tableUnreadable: (name) => library.getTableFileError(name) !== null,
+    relationshipStoredIn: (rel) => relative(library.relationshipsFileHolding({ ...rel, fromModel: table(rel.fromModel), toModel: table(rel.toModel) })),
+    tableUnreadable: (name) => library.getTableFileError(table(name)) !== null,
   };
 }
 
@@ -184,6 +200,35 @@ export function allSelections(report: DiscrepancyReport, truth: GroundTruth): Re
     }
   }
   return selections;
+}
+
+/**
+ * The item each selection key of `report` names: keys are matched by
+ * building each item's key (`tableKey`, `columnKey`), never by splitting
+ * one on ':', so a table name or a column name holding ':' (a schema
+ * folder may) is never cut in the wrong place. A key two items would share
+ * names neither: it is left out, never guessed.
+ */
+function selectionTargets(report: DiscrepancyReport): {
+  models: Map<string, DiscrepancyReport['models'][number]>;
+  columns: Map<string, { model: string; column: DiscrepancyReport['models'][number]['columns'][number] }>;
+} {
+  const models = new Map<string, DiscrepancyReport['models'][number]>();
+  const columns = new Map<string, { model: string; column: DiscrepancyReport['models'][number]['columns'][number] }>();
+  const shared = new Set<string>();
+  for (const m of report.models) {
+    // One name listed twice is one table: the first entry, as ever.
+    if (!models.has(tableKey(m.name))) models.set(tableKey(m.name), m);
+    for (const c of m.columns) {
+      const key = columnKey(m.name, c.name);
+      const known = columns.get(key);
+      if (shared.has(key) || (known && known.model === m.name)) continue;
+      // `col:a:b:c` is a's column b:c and a:b's column c: neither.
+      if (known) { columns.delete(key); shared.add(key); continue; }
+      columns.set(key, { model: m.name, column: c });
+    }
+  }
+  return { models, columns };
 }
 
 /** Number of resolutions in a plan — zero means nothing actionable was selected. */
@@ -221,23 +266,30 @@ export function buildSyncPlan(
     return known;
   };
 
+  // The dbt model a table is: its name, unless it was found as another (or as none).
+  const dbtModelOf = (modelName: string): string | null => {
+    const found = ctx.dbtModelOf?.(modelName);
+    return found === undefined ? modelName : found;
+  };
   // Whether the schema yml or the manifest declares a column (any case):
   // otherwise only catalog.json, i.e. the warehouse, reports it.
   const declaredInDbt = (modelName: string, columnName: string): boolean => {
     const key = normaliseName(columnName);
-    const yml = ctx.ymlData.models.get(modelName);
-    const man = ctx.manifest.models.get(modelName);
+    const dbtName = dbtModelOf(modelName);
+    if (dbtName === null) return false;
+    const yml = ctx.ymlData.models.get(dbtName);
+    const man = ctx.manifest.models.get(dbtName);
     return [...(yml?.columns ?? []), ...(man?.columns ?? [])].some((c) => normaliseName(c.name) === key);
   };
+  const targets = selectionTargets(report);
 
   for (const [key, groundTruth] of Object.entries(selections)) {
-    const parts = key.split(':');
-    const kind = parts[0];
+    const kind = key.slice(0, key.indexOf(':'));
 
     if (kind === 'model') {
-      const modelName = parts[1];
-      const disc = report.models.find((m) => m.name === modelName);
+      const disc = targets.models.get(key);
       if (!disc || disc.status === 'matched') continue;
+      const modelName = disc.name;
 
       const action = deriveTableAction(disc.status, groundTruth, report.sourceStage);
       if (!action) continue;
@@ -250,11 +302,11 @@ export function buildSyncPlan(
       });
       referencedModels.add(modelName);
     } else if (kind === 'col') {
-      const modelName = parts[1];
-      const columnName = parts.slice(2).join(':'); // column name may contain colons
-      const modelDisc = report.models.find((m) => m.name === modelName);
-      const colDisc = modelDisc?.columns.find((c) => c.name === columnName);
-      if (!colDisc || colDisc.status === 'matched') continue;
+      const target = targets.columns.get(key);
+      const colDisc = target?.column;
+      if (!target || !colDisc || colDisc.status === 'matched') continue;
+      const modelName = target.model;
+      const columnName = colDisc.name;
 
       const action = deriveColumnAction(colDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
@@ -332,8 +384,10 @@ export function buildSyncPlan(
   const listedSourceFiles = new Set([...(ctx.ymlData.sourceFiles?.values() ?? [])].map(toSlash));
   const modelContext: Record<string, TableContext> = {};
   for (const modelName of referencedModels) {
-    const manifestModel = ctx.manifest.models.get(modelName);
-    const ymlModel = ctx.ymlData.models.get(modelName);
+    // dbt's files are the ones of the dbt model the table was found as (none for one found as none).
+    const dbtName = dbtModelOf(modelName);
+    const manifestModel = dbtName === null ? undefined : ctx.manifest.models.get(dbtName);
+    const ymlModel = dbtName === null ? undefined : ctx.ymlData.models.get(dbtName);
     let dbtSchemaPath: string | null = null;
 
     if (ymlModel?.filePath) {
@@ -345,7 +399,7 @@ export function buildSyncPlan(
     const compiledFrom = manifestModel?.originalFilePath ? toSlash(manifestModel.originalFilePath) : undefined;
     const sourceFile = compiledFrom && listedSourceFiles.has(compiledFrom)
       ? compiledFrom
-      : ctx.ymlData.sourceFiles?.get(normaliseName(modelName));
+      : dbtName === null ? undefined : ctx.ymlData.sourceFiles?.get(normaliseName(dbtName));
     const dbtSqlPath = sourceFile && /\.sql$/i.test(sourceFile) ? toSlash(sourceFile) : null;
 
     const relationshipsFile = ctx.relationshipsFile?.(modelName);

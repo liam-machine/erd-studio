@@ -468,15 +468,17 @@ describe('Move Table…', () => {
     it('for a YAML table, and for an ignored duplicate', async () => {
       fs.mkdirSync(erd('logical-models'), { recursive: true });
       fs.writeFileSync(erd('logical-models', 'dim_yaml.yml'), 'name: dim_yaml\ncolumns: []\n');
-      fs.mkdirSync(erd('silver', 'tables', 'silver'), { recursive: true });
-      fs.writeFileSync(erd('silver', 'tables', 'silver', 'dim_customer.dbml'), 'Table silver.dim_customer {\n  customer_key INT [pk]\n}\n');
+      // The duplicate diagrams ignore is the same schema folder and name in another layer (a name in
+      // another schema folder is a table of its own, which this pinned before that rule).
+      fs.mkdirSync(erd('silver', 'tables', 'gold'), { recursive: true });
+      fs.writeFileSync(erd('silver', 'tables', 'gold', 'dim_customer.dbml'), 'Table gold.dim_customer {\n  customer_key INT [pk]\n}\n');
       const before = bytes();
       await activate(context);
       const pick = pickDestination('Silver › calendar');
       await vscode.commands.executeCommand('erdStudio.moveTable', { type: 'model', name: 'dim_yaml', filePath: erd('logical-models', 'dim_yaml.yml'), referencingDomains: [] });
       expect(errors).toHaveBeenLastCalledWith('Move Table: "dim_yaml" is a YAML table: Move Table moves DBML tables. Organise Table Library by Layer moves YAML table files. Nothing was moved.');
-      await vscode.commands.executeCommand('erdStudio.moveTable', vscode.Uri.file(erd('silver', 'tables', 'silver', 'dim_customer.dbml')));
-      expect(errors).toHaveBeenLastCalledWith(expect.stringMatching(/^Move Table: \.erd-studio\/silver\/tables\/silver\/dim_customer\.dbml is a duplicate of "dim_customer" that diagrams ignore\./));
+      await vscode.commands.executeCommand('erdStudio.moveTable', vscode.Uri.file(erd('silver', 'tables', 'gold', 'dim_customer.dbml')));
+      expect(errors).toHaveBeenLastCalledWith(expect.stringMatching(/^Move Table: \.erd-studio\/silver\/tables\/gold\/dim_customer\.dbml is a duplicate of "dim_customer" that diagrams ignore\./));
       expect(pick).not.toHaveBeenCalled();
       expect(bytes()).toEqual(before);
     });

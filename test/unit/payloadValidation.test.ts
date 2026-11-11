@@ -19,7 +19,9 @@ import {
   validatePositions,
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
+  validateAddExistingModelPayload,
   validateAddExistingModelsPayload,
+  validateSourcePath,
   validateExtraPairs,
   validateMarkKey,
   validateRelationshipEnds,
@@ -527,5 +529,28 @@ describe('context fields: updateModelRationale and openFieldsFile payloads', asy
 
   it('the table roles are core\'s one list (the Table role field\'s choices)', () => {
     expect(TABLE_ROLES).toEqual(TABLE_ROLE_VALUES);
+  });
+});
+
+describe('a table named by its file (sourcePath, sourcePaths)', () => {
+  it('accepts a project-relative path, alone or one per name (empty for a row with none)', () => {
+    expect(validateSourcePath('.erd-studio/bronze/tables/ccc/addresse.dbml')).toBeNull();
+    expect(validateAddExistingModelPayload({ modelName: 'addresse', sourcePath: '.erd-studio/bronze/tables/ccc/addresse.dbml' })).toBeNull();
+    expect(validateAddExistingModelPayload({ modelName: 'addresse' })).toBeNull();
+    expect(validateAddExistingModelsPayload({ modelNames: ['addresse', 'stg_x'], sourcePaths: ['.erd-studio/bronze/tables/ccc/addresse.dbml', ''] })).toBeNull();
+  });
+
+  it('refuses an absolute path, one that leaves the project, a second line, text that is not a string, and a list of the wrong length', () => {
+    expect(validateSourcePath('/etc/passwd')).toMatch(/relative to the project/);
+    expect(validateSourcePath('C:/x.dbml')).toMatch(/relative to the project/);
+    expect(validateSourcePath('\\\\server\\share\\x.dbml')).toMatch(/relative to the project/);
+    expect(validateSourcePath('.erd-studio/../../x.dbml')).toMatch(/inside the project/);
+    expect(validateSourcePath('a.dbml\nb')).toMatch(/one line/);
+    expect(validateSourcePath(42)).toMatch(/text/);
+    expect(validateSourcePath('x'.repeat(2000))).toMatch(/at most/);
+    expect(validateAddExistingModelPayload({ modelName: 'addresse', sourcePath: '/abs.dbml' })).toMatch(/relative/);
+    expect(validateAddExistingModelPayload({ modelName: '../x' })).not.toBeNull();
+    expect(validateAddExistingModelsPayload({ modelNames: ['a', 'b'], sourcePaths: ['a.dbml'] })).toMatch(/Each table/);
+    expect(validateAddExistingModelsPayload({ modelNames: ['a'], sourcePaths: ['../a.dbml'] })).toMatch(/inside/);
   });
 });

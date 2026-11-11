@@ -44,7 +44,9 @@ export interface DuplicateFixPlan {
 
 /**
  * The name the ignored copy is offered: `{folder}_{name}`, the convention dbt
- * projects use for a table that exists in more than one layer. Returns '' when
+ * projects use for a table that exists in more than one layer. `folder` is
+ * what tells the copy from the file that wins ({@link duplicateNamePrefix}:
+ * its layer, or its schema when both sit in one layer). Returns '' when
  * no valid, unused name can be made (the caller then asks the user).
  */
 export function suggestDuplicateName(name: string, folder: string, taken: ReadonlySet<string>): string {
@@ -53,6 +55,34 @@ export function suggestDuplicateName(name: string, folder: string, taken: Readon
   const candidates = [base, ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => `${base}_${n}`)];
   const isTaken = (c: string) => taken.has(c) || [...taken].some((t) => sameName(t, c));
   return candidates.find((c) => TABLE_NAME_PATTERN.test(c) && !isTaken(c)) ?? '';
+}
+
+/** Where a table file sits, as the library lists it: a DBML table's layer and schema folder, a YAML table's folder. */
+export interface DuplicateHome {
+  /** A DBML table's layer folder (`<layer>/tables/<schema>/`); absent for YAML. */
+  layer?: string;
+  /** A DBML table's schema folder; a YAML table's library folder (`''` at the top level). */
+  folder?: string;
+}
+
+/**
+ * What tells the ignored copy from the file that wins, the prefix of the
+ * name it is offered ({@link suggestDuplicateName}):
+ *
+ * - two DBML tables in the same layer but different schemas
+ *   (`bronze/tables/bqs/` and `bronze/tables/ccc/`): the copy's **schema**
+ *   (`ccc_addresse`). Its layer would name both copies alike. Since a DBML
+ *   table is its schema folder and name, such files are two tables, not a
+ *   duplicate, so the library no longer offers this for them.
+ * - otherwise the copy's layer (DBML), else its folder (YAML), as before.
+ *
+ * `winner` is the file diagrams use; unknown, the layer (or folder) stands.
+ */
+export function duplicateNamePrefix(copy: DuplicateHome, winner?: DuplicateHome): string {
+  const sameLayer = copy.layer !== undefined && winner?.layer !== undefined && sameName(copy.layer, winner.layer);
+  const otherSchema = !!copy.folder && winner?.folder !== undefined && !sameName(copy.folder, winner.folder);
+  if (sameLayer && otherSchema) return copy.folder as string;
+  return copy.layer ?? copy.folder ?? '';
 }
 
 /**
@@ -78,8 +108,8 @@ export function planDuplicateFix(
  */
 export function duplicateNamePrompt(warehouseName: string, hasDbt: boolean): string {
   return hasDbt
-    ? `Table names are unique, as dbt model names are. The warehouse table name stays "${warehouseName}" (set as the table's alias).`
-    : `Table names are unique across the library. The warehouse name stays "${warehouseName}" (set as the table's alias).`;
+    ? `ERD Studio reads one table of a name in a schema, as dbt builds one model of a name. The warehouse table name stays "${warehouseName}" (set as the table's alias).`
+    : `ERD Studio reads one table of a name in a schema. The warehouse name stays "${warehouseName}" (set as the table's alias).`;
 }
 
 /** Modal text for a plan. `hasDbt` false (a plain folder) leaves dbt out of it. */

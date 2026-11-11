@@ -20,6 +20,7 @@
  */
 
 import type { Cardinality, Relationship, TableRelationship } from '../types/semantic.js';
+import type { DbmlStoredRef } from '../types/dbmlStorage.js';
 import { DBML_RELATIONSHIPS_FILE_HEADER, pendingRefLine } from '../dbmlRichProperties.js';
 import { dbmlName } from '../dbmlText.js';
 import { canonicalRelationship } from '../relationships.js';
@@ -74,6 +75,24 @@ export interface DbmlResolvedTable {
   primaryKey?: readonly string[];
 }
 
+/**
+ * A table as a Ref end or a `use` specifier of a relationships file writes
+ * it, for {@link RelationshipsFileEdit.identify}.
+ */
+export interface DbmlTableText {
+  /** The table part as written (its schema qualifier removed). */
+  name: string;
+  /** The schema qualifier as written; absent for an unqualified one. */
+  qualifier?: string;
+  /**
+   * The table file the file's own `use` line for this spelling imports
+   * (the line whose specifier writes the same qualifier and name, without
+   * case; for a specifier, its own line), resolved, posix, relative to the
+   * semantic dir. Absent when no `use` line names it.
+   */
+  path?: string;
+}
+
 /** What {@link editRelationshipsDbml} changes in one relationships file. */
 export interface RelationshipsFileEdit {
   /** The file, posix, relative to the semantic dir (`use` paths are relative to it). */
@@ -111,6 +130,20 @@ export interface RelationshipsFileEdit {
   requalified?: ReadonlySet<string>;
   /** A table as it is AFTER this edit; undefined when it has no file. */
   resolve(name: string): DbmlResolvedTable | undefined;
+  /**
+   * Which table a Ref end or a `use` specifier in the file names, BEFORE
+   * this edit, as the key every other field of this edit uses for it: a
+   * library reference such as `ccc.addresse` while two tables share the
+   * name `addresse`. `renamedOwners` maps it to the key after the edit, and
+   * `owners`, `pathChanged`, `requalified`, `resolve` and the relationships'
+   * ends use the keys after it. Given the end's name, its qualifier and the
+   * file its own `use` line imports, so two tables of one name in different
+   * schema folders are told apart and an edit of one never re-spells, cuts
+   * or rewrites the other's Refs and `use` lines. Undefined: the name as
+   * written. Without `identify`, an end is named by its table part as
+   * written, as always.
+   */
+  identify?(table: DbmlTableText): string | undefined;
   /**
    * A new unit that cannot be a live Ref (an end with no `.dbml` table file,
    * a YAML end, or a column the table does not have) is written as a pending
@@ -341,9 +374,10 @@ interface UseLine {
   wildcard: boolean;
   /**
    * Selective specifiers: each table's unqualified name, lower-case, its source text, and its
-   * name parts as DBML writes a name (`reference`, the form of a table's declared reference).
+   * name parts as DBML writes a name (`reference`, the form of a table's declared reference);
+   * `table` and `qualifier` are its name and schema qualifier as written.
    */
-  tables: Array<{ name: string; text: string; reference: string }>;
+  tables: Array<{ name: string; text: string; reference: string; table: string; qualifier?: string }>;
   /** How many specifiers the line has (tables and other kinds). */
   specifierCount: number;
 }
@@ -372,6 +406,8 @@ export function useLinesOf(ast: AstNode, text: string, filePath: string): UseLin
             name: lower(parts[parts.length - 1]),
             text: text.slice(specifier.name.start, specifier.name.end),
             reference: parts.map(dbmlName).join('.'),
+            table: parts[parts.length - 1],
+            ...(parts.length > 1 ? { qualifier: parts[parts.length - 2] } : {}),
           });
         }
       }
@@ -426,14 +462,15 @@ function columnTokens(expr: AstNode | undefined): AstNode[] {
   return [last];
 }
 
-/** The table part (qualifier removed) and columns of a Ref end expression. */
-function endParts(expr: AstNode | undefined): { table: string; columns: string[] } | null {
+/** The table part (qualifier removed), its qualifier and the columns of a Ref end expression. */
+function endParts(expr: AstNode | undefined): { table: string; qualifier?: string; columns: string[] } | null {
   const fragments = nameFragments(expr);
   if (!fragments || fragments.length < 2) return null;
   const last = fragments[fragments.length - 1];
   const table = fragments[fragments.length - 2];
   if (typeof table !== 'string') return null;
-  return { table, columns: typeof last === 'string' ? [last] : last };
+  const qualifier = fragments.length > 2 ? fragments[fragments.length - 3] : undefined;
+  return { table, ...(typeof qualifier === 'string' ? { qualifier } : {}), columns: typeof last === 'string' ? [last] : last };
 }
 
 /**
@@ -453,10 +490,13 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const file = edit.filePath;
   const renamed = new Map<string, string>();
   for (const [from, to] of edit.renamedOwners ?? []) renamed.set(lower(from), to);
-  /** A name as it reads after the edit: renamed, then resolved (an alias or another case maps to the real name). */
+  /**
+   * A name as it reads after the edit: renamed, then resolved (an alias or another case maps to the
+   * real name). With `identify`, names are its keys, which are already what they read as.
+   */
   const canonical = (name: string): string => {
     const after = renamed.get(lower(name)) ?? name;
-    return edit.resolve(after)?.name ?? after;
+    return edit.identify ? after : edit.resolve(after)?.name ?? after;
   };
   const requalified = new Set([...(edit.requalified ?? [])].map(lower));
   /** Whether a table, as the file spells it, moves to another schema in this edit. */
@@ -510,10 +550,33 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const current: Array<{ ref: RefNode; line: number; unit: RefUnit; spelledNames: string[]; alt?: { unit: RefUnit; spelledNames: string[] } }> = [];
   /** The file's pending relationships (D27): each one's unit, as named after the edit, and its line's span. */
   const pendingLines: Array<{ unit: RefUnit; start: number; end: number; spelledNames: string[] }> = [];
+  /**
+   * The key of a table as the file writes it: what `identify` answers for its name, qualifier and
+   * the file its own `use` line imports; without `identify`, the name as written.
+   */
+  let keyOf: (table: string, qualifier?: string, path?: string) => string = (table) => table;
+  /** The file's stored Refs with each end named by its key ({@link keyOf}). */
+  const keyed = (stored: DbmlStoredRef): Relationship[] => (edit.identify ? stored.relationships.map((r) => ({
+    ...r,
+    fromModel: keyOf(r.fromModel, stored.ownerQualifier),
+    toModel: keyOf(r.toModel, stored.targetQualifier),
+  })) : stored.relationships);
   if (oldText !== null) {
     const reading = readRelationshipsDbml(text, parser);
+    if (edit.identify) {
+      const identify = edit.identify;
+      const folder = dirnamePosix(file);
+      keyOf = (table, qualifier, path) => {
+        const use = path === undefined
+          ? reading.useTables?.find((u) => lower(u.table) === lower(table)
+            && (u.qualifier === undefined ? qualifier === undefined : qualifier !== undefined && lower(u.qualifier) === lower(qualifier)))
+          : undefined;
+        const usePath = path ?? (use ? normalisePosix(resolvePosix(folder, withExtension(use.path))) : undefined);
+        return identify({ name: table, ...(qualifier !== undefined ? { qualifier } : {}), ...(usePath !== undefined ? { path: usePath } : {}) }) ?? table;
+      };
+    }
     for (const stored of reading.pending ?? []) {
-      const rels = stored.relationships;
+      const rels = keyed(stored);
       if (rels.length === 0) continue;
       pendingLines.push({
         start: stored.start,
@@ -541,7 +604,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     for (const stored of reading.refs) {
       const node = refNodes.get(stored.start);
       if (!node) continue;
-      let rels = stored.relationships;
+      let rels = keyed(stored);
       const reversed = rels.map((r) => ({ ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn }));
       let undecided = false;
       if (stored.oneToOneDirection === 'keys') {
@@ -568,6 +631,11 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
         ...(undecided ? { alt: { unit: unitOf(reversed), spelledNames: [reversed[0].fromModel, reversed[0].toModel] } } : {}),
       });
     }
+  }
+
+  if (oldText === null && edit.identify) {
+    const identify = edit.identify;
+    keyOf = (table, qualifier, path) => identify({ name: table, ...(qualifier !== undefined ? { qualifier } : {}), ...(path !== undefined ? { path } : {}) }) ?? table;
   }
 
   // --- Desired units -----------------------------------------------------------
@@ -861,9 +929,13 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
   const linesFor = (name: string): UseLine[] => {
     const names = new Set([lower(name), ...oldNamesOf(name).map(lower)]);
     const target = edit.resolve(name)?.path;
+    // With `identify`, a specifier names the table its key says (its own line's file tells twins apart).
+    const specifies = (u: UseLine): boolean => (edit.identify
+      ? u.tables.some((t) => names.has(lower(keyOf(t.table, t.qualifier, u.resolved))))
+        || (u.wildcard && names.has(lower(keyOf(u.stem, undefined, u.resolved))))
+      : u.tables.some((t) => names.has(t.name)) || (u.wildcard && names.has(lower(u.stem))));
     return uses.filter((u) => !handled.has(u.node) && !isRelationshipsPath(u.resolved) && (
-      u.tables.some((t) => names.has(t.name))
-      || (u.wildcard && names.has(lower(u.stem)))
+      specifies(u)
       || (target !== undefined && u.resolved === normalisePosix(target))
     ));
   };
@@ -1012,8 +1084,9 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const roles = sides.map((side) => {
       const parts = endParts(side);
       if (!parts) return undefined;
-      const table = lower(canonical(parts.table));
-      const columns = parts.columns.map((c) => lower(columnAfter(canonical(parts.table), c))).join(',');
+      const named = keyOf(parts.table, parts.qualifier);
+      const table = lower(canonical(named));
+      const columns = parts.columns.map((c) => lower(columnAfter(canonical(named), c))).join(',');
       const isFrom = table === lower(read.from) && columns === read.fromColumns.map(lower).join(',');
       const isTo = table === lower(read.to) && columns === read.toColumns.map(lower).join(',');
       return isFrom === isTo ? undefined : isFrom ? 'from' : 'to';
@@ -1050,9 +1123,10 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     for (const side of sides) {
       const parts = endParts(side);
       if (!parts || !side) continue;
-      const table = canonical(parts.table);
+      const named = keyOf(parts.table, parts.qualifier);
+      const table = canonical(named);
       const after = parts.columns.map((c) => columnAfter(table, c));
-      if (renamed.has(lower(parts.table)) || isRequalified(parts.table)) {
+      if (renamed.has(lower(named)) || isRequalified(named)) {
         spans.push({ start: side.start - base, end: side.end - base, text: endText(table, after) });
         continue;
       }

@@ -1,0 +1,7 @@
+Table ccc.addresse {
+  id INT [pk]
+  street VARCHAR
+  city VARCHAR
+  postcode VARCHAR
+  Note: 'Addresses from the CCC system'
+}

@@ -34,8 +34,12 @@ import * as path from 'path';
 import type { TableLibraryService, TableFileEntry, TableFileError, TableSearchFacts, TableSummary } from '../services/logicalModelService';
 import type { SubjectAreaService } from '../services/domainService';
 import { DiagramMembers } from '../services/diagramMembers';
+import { tableUsageOf, type TableUsageKeys } from '../services/sidebarTables';
+import { tableIdOfEntry } from '../services/tableLibraryIndex';
+import type { TableId } from '../types/tableId';
 import type { CodeOwnersReader } from '../services/codeOwners';
-import { suggestDuplicateName } from '../services/duplicateModelResolver';
+import { duplicateNamePrefix, suggestDuplicateName } from '../services/duplicateModelResolver';
+import { tableFileErrorTip } from '../commands/openModelFile';
 import type { LayerConfig } from '../types/layer';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { layerSwatchIcon } from './layerSwatch';
@@ -85,14 +89,24 @@ export interface TableLibraryTableNode {
   readonly shadowedBy?: string;
   /** In v6's `tables/` library (#181): read, never changed here, so it offers no actions. */
   readonly library?: 'tables';
-  /** What is wrong in the file, so the problem stays visible after its one warning (#164). */
-  readonly fileError?: Pick<TableFileError, 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key'>;
+  /**
+   * What is wrong in the file, so the problem stays visible after its one
+   * warning (#164). `message` is the reader's own sentence (it may quote the
+   * file): shown in the row's tooltip, never sent anywhere.
+   */
+  readonly fileError?: Pick<TableFileError, 'kind' | 'line' | 'mergeConflict' | 'readable' | 'key' | 'code'> & { readonly message?: string };
   /** How the file stores the table (native DBML storage); shown only while the project is `mixed`. */
   readonly storage?: 'yaml' | 'dbml';
   /** The project holds both YAML and DBML tables: each entry names its format. */
   readonly showStorage?: true;
   /** While filtered: what of the row matched (its label's highlights, and why when not its name). */
   readonly match?: TreeMatch;
+  /**
+   * The table's identity (its schema folder and name), set only where the
+   * library tells tables apart by it: the row's reads, counts and commands
+   * then name this table, never another schema folder's table of its name.
+   */
+  readonly id?: TableId;
 }
 
 /**
@@ -193,6 +207,9 @@ export const NO_DIAGRAM_TOOLTIP = 'On no diagram yet. **Add to Diagram…** puts
  * VS Code then remembers each row's state by its id.
  */
 export const COLLAPSE_LAYERS_OVER = 30;
+
+/** The longest reader's message a broken file's tooltip quotes; a longer one is cut. */
+const FILE_ERROR_REASON_MAX = 400;
 
 /** Layer ids that have their own contributed colour (`erdStudio.layer.{id}`). */
 const LAYER_COLOR_IDS = new Set(['bronze', 'silver', 'gold', 'platinum']);
@@ -374,7 +391,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(duplicate — ignored)';
       item.tooltip = `Another file already defines "${element.name}" and is the one diagrams use:\n${element.shadowedBy}\n\n` +
-        `Table names are unique across all folders${this.hasDbtProject ? ', as dbt model names are' : ''}. Use "Give Duplicate Table Its Own Name" ` +
+        `A schema holds one table of a name, and a YAML table's name is one in the project${this.hasDbtProject ? ', as dbt builds one model of a name' : ''}. Use "Give Duplicate Table Its Own Name" ` +
         `to make this copy "${this.duplicateSuggestion(element)}" with the warehouse name (alias) "${element.name}".`;
       item.accessibilityInformation = { label: `${element.name}, duplicate, ignored` };
       item.resourceUri = vscode.Uri.file(element.filePath);
@@ -488,7 +505,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
 
   /** A table row as the filter searches it: see `TABLE_LIBRARY_FILTER` and docs/glossary.md. */
   private tableSubject(node: TableLibraryTableNode): SearchSubject {
-    const facts = node.shadowedBy || node.fileError ? undefined : this.peekFacts(node.name);
+    const facts = node.shadowedBy || node.fileError ? undefined : this.peekFacts(node.id ?? node.name);
     // A DBML table's layer is its folder's; a YAML table's folder is (by convention) a layer id.
     const layerId = node.layer ?? (node.folder ? node.folder : undefined);
     const layerLabel = layerId !== undefined ? this.getLayers().find((l) => l.id === layerId)?.label : undefined;
@@ -508,7 +525,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /** What the filter searches in a table already read (no read); undefined while unread. */
-  private peekFacts(name: string): TableSearchFacts | undefined {
+  private peekFacts(name: TableId | string): TableSearchFacts | undefined {
     return typeof this.tableLibraryService.peekTableSearchFacts === 'function' ? this.tableLibraryService.peekTableSearchFacts(name) : undefined;
   }
 
@@ -539,53 +556,68 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   /**
    * The row of the table named `name` (ignoring case) in a fresh listing,
    * never a duplicate that is ignored; undefined when the library has no such table.
+   * Given the table's file (`filePath`), the row of that file: two schema
+   * folders may each hold a table of the name. When no row is that file (its
+   * path spelled another way, or a duplicate that is ignored), the row of the
+   * name, but only while one row has it: of two, neither is guessed.
    */
-  findTableNode(name: string): TableLibraryTableNode | undefined {
+  findTableNode(name: string, filePath?: string): TableLibraryTableNode | undefined {
     const wanted = name.trim().toLowerCase();
-    const search = (nodes: readonly TableLibraryNode[]): TableLibraryTableNode | undefined => {
+    const named: TableLibraryTableNode[] = [];
+    let atFile: TableLibraryTableNode | undefined;
+    const atPath = filePath !== undefined ? path.resolve(filePath) : undefined;
+    const search = (nodes: readonly TableLibraryNode[]): void => {
       for (const node of nodes) {
+        if (atFile) return;
         if (node.type === 'model') {
-          if (!node.shadowedBy && node.name.toLowerCase() === wanted) return node;
+          if (node.shadowedBy) continue;
+          if (atPath !== undefined && path.resolve(node.filePath) === atPath) atFile = node;
+          else if (node.name.toLowerCase() === wanted) named.push(node);
         } else {
-          const found = search(node.children);
-          if (found) return found;
+          search(node.children);
         }
       }
-      return undefined;
     };
-    return search(this.getChildren() ?? []);
+    search(this.getChildren() ?? []);
+    if (atFile) return atFile;
+    return atPath === undefined || named.length === 1 ? named[0] : undefined;
   }
 
   private rootChildren(): TableLibraryNode[] {
     if (!this.tableLibraryService.dirExists()) return [];
 
-    const usageMap = this.buildUsageMap();
+    // Which diagrams show each table: by its name, or (told apart by identity) by its file.
+    const usage = this.usageKeys();
+    const usageMap = this.buildUsageMap(usage);
     // Each entry names its format only while the project holds both (§5.5).
     const showStorage = typeof this.tableLibraryService.projectStorage === 'function' && this.tableLibraryService.projectStorage() === 'mixed';
     // A file read before (in its current version) answers from the service's
     // cache; one never read is read after the tree shows (checkUnreadFiles),
     // so a large library appears at once instead of after parsing every file.
     const peek = typeof this.tableLibraryService.peekTableFileError === 'function';
-    const unread: Array<{ name: string; dbml: boolean }> = [];
+    const unread: Array<{ name: TableId | string; dbml: boolean }> = [];
     const toNode = (entry: TableFileEntry): TableLibraryTableNode => {
-      let error = entry.shadowedBy ? null : peek ? this.tableLibraryService.peekTableFileError(entry.name) : this.tableLibraryService.getTableFileError(entry.name);
+      // Told apart by identity, each row reads its own file, never its namesake's in another schema folder.
+      const id = usage.byIdentity && !entry.shadowedBy ? tableIdOfEntry(entry) : undefined;
+      const table = id ?? entry.name;
+      let error = entry.shadowedBy ? null : peek ? this.tableLibraryService.peekTableFileError(table) : this.tableLibraryService.getTableFileError(table);
       if (error === undefined) {
-        unread.push({ name: entry.name, dbml: entry.layer !== undefined });
+        unread.push({ name: table, dbml: entry.layer !== undefined });
         error = null;
       }
       // The warehouse name (DBML) and owner (either format), from the cached
       // reading of a file already read: never a read, a copy or a
       // relationships attach here, so a large library shows at once.
-      const summary = !entry.shadowedBy && !error ? this.peekSummary(entry.name) : undefined;
+      const summary = !entry.shadowedBy && !error ? this.peekSummary(table) : undefined;
       const alias = entry.layer !== undefined ? summary?.alias : undefined;
       const owner = tableOwnerOf(summary);
-      const usage = entry.shadowedBy ? undefined : usageMap.get(entry.name);
+      const used = entry.shadowedBy ? undefined : usageMap.get(usage.byIdentity ? usage.keyOf({ name: entry.name, filePath: entry.filePath }) : entry.name);
       return {
         type: 'model',
         name: entry.name,
         filePath: entry.filePath,
-        referencingDomains: usage?.map((u) => u.domain) ?? [],
-        ...(usage && usage.length > 0 ? { referencingLabels: usage.map((u) => `${u.domain} (${u.layerLabel})`) } : {}),
+        referencingDomains: used?.map((u) => u.domain) ?? [],
+        ...(used && used.length > 0 ? { referencingLabels: used.map((u) => `${u.domain} (${u.layerLabel})`) } : {}),
         ...(alias ? { alias } : {}),
         ...(owner ? { owner } : {}),
         folder: entry.folder,
@@ -601,8 +633,11 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
             ...(error.mergeConflict ? { mergeConflict: true as const } : {}),
             ...(error.readable ? { readable: true as const } : {}),
             ...(error.key ? { key: error.key } : {}),
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.message ? { message: error.message } : {}),
           },
         } : {}),
+        ...(id ? { id } : {}),
       };
     };
     const byName = (a: TableLibraryTableNode, b: TableLibraryTableNode): number => a.name.localeCompare(b.name);
@@ -692,7 +727,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
 
   /** Run `fn` against one validated library index (when the service offers one). */
   /** A read table's alias and meta from the service's cache (no read); undefined while unread. */
-  private peekSummary(name: string): TableSummary | undefined {
+  private peekSummary(name: TableId | string): TableSummary | undefined {
     return typeof this.tableLibraryService.peekTableSummary === 'function' ? this.tableLibraryService.peekTableSummary(name) : undefined;
   }
 
@@ -721,7 +756,13 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     } else {
       item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('list.errorForeground'));
       item.description = error.mergeConflict ? `(merge conflict${at})` : error.kind === 'read' ? '(can\'t be read)' : `(${error.kind.startsWith('dbml') ? 'DBML' : 'YAML'} error${at})`;
-      item.tooltip = 'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.';
+      // Why, in the reader's own words (the description stays short): plain text, since it may quote the file.
+      const why = this.fileErrorReason(element, error);
+      item.tooltip = [
+        'This file can\'t be read, so the table is missing from every diagram. Open it to fix it.',
+        ...(why ? ['', `${why}${error.line !== undefined ? ` (line ${error.line})` : ''}`] : []),
+        ...(error.kind !== 'read' || error.mergeConflict ? ['', tableFileErrorTip(error.kind, error.mergeConflict, error.code)] : []),
+      ].join('\n');
     }
     item.accessibilityInformation = { label: `${element.name}, ${String(item.description).replace(/^\(|\)$/g, '')}` };
     item.resourceUri = vscode.Uri.file(element.filePath);
@@ -731,12 +772,32 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /**
+   * The reader's message for a file that does not read, for the tooltip: one
+   * line, the file named as the tree shows it (never its absolute path), cut
+   * to a readable length. Undefined when the reader gave none.
+   */
+  private fileErrorReason(element: TableLibraryTableNode, error: NonNullable<TableLibraryTableNode['fileError']>): string | undefined {
+    const raw = error.message?.trim();
+    if (!raw) return undefined;
+    const semanticRoot = path.dirname(this.tableLibraryService.getTablesDir());
+    const shown = shownPath(semanticRoot, element.filePath);
+    const oneLine = raw.split(element.filePath).join(shown).split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ');
+    return oneLine.length > FILE_ERROR_REASON_MAX ? `${oneLine.slice(0, FILE_ERROR_REASON_MAX - 1)}…` : oneLine;
+  }
+
+  /**
    * The name Give Duplicate Table Its Own Name offers for this copy, from
-   * the same rule the command uses: its layer (a DBML table), else its folder.
+   * the same rule the command uses (`duplicateNamePrefix`): its layer (a DBML
+   * table), or its schema when the file diagrams use is in the same layer,
+   * else its folder.
    */
   private duplicateSuggestion(element: TableLibraryTableNode): string {
-    const taken = new Set(this.tableLibraryService.listTableFiles().map((e) => e.name));
-    return suggestDuplicateName(element.name, element.layer ?? element.folder ?? '', taken) || element.name;
+    const entries = this.tableLibraryService.listTableFiles();
+    const winner = element.shadowedBy !== undefined
+      ? entries.find((e) => path.resolve(e.filePath) === path.resolve(element.shadowedBy as string))
+      : undefined;
+    const taken = new Set(entries.map((e) => e.name));
+    return suggestDuplicateName(element.name, duplicateNamePrefix(element, winner), taken) || element.name;
   }
 
   /** A DBML layer's row: its colour, the word "Layer", and what it holds. */
@@ -855,7 +916,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const layerName = layer?.label ?? layerId;
     const item = new vscode.TreeItem(element.folder, vscode.TreeItemCollapsibleState.Expanded);
     item.id = `erdStudio.modelLibrary.folder:${layerId}/tables/${element.folder}`;
-    item.contextValue = 'logicalModelFolder';
+    // Its own value (not a YAML folder's `logicalModelFolder`): New Table… is offered on it.
+    item.contextValue = 'tableLibrarySchema';
     item.iconPath = new vscode.ThemeIcon('symbol-namespace');
     const count = element.children.length;
     // Compact: what the row is (the count is in the hover).
@@ -879,7 +941,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
    * again only when one of them turns out to need fixing or has a warehouse
    * name (`alias`) or an owner to show. Any earlier check still running is replaced.
    */
-  private checkUnreadFiles(names: ReadonlyArray<{ name: string; dbml: boolean }>): void {
+  private checkUnreadFiles(names: ReadonlyArray<{ name: TableId | string; dbml: boolean }>): void {
     if (this.unreadCheck !== undefined) clearTimeout(this.unreadCheck);
     this.unreadCheck = undefined;
     if (names.length === 0) return;
@@ -920,7 +982,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
    * bar; then list again. Reads through the library's caches, never writes.
    * One read at a time: the one under way lists again when it is done.
    */
-  private readForFilter(names: readonly string[]): void {
+  private readForFilter(names: ReadonlyArray<TableId | string>): void {
     if (this.filterRead) return;
     const queue = [...names];
     const read = async (): Promise<void> => {
@@ -943,10 +1005,20 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
   }
 
   /**
-   * Scan all diagram files and build a map of model name → domain names.
+   * How tables and diagram members are matched: by name, or, where the
+   * library tells tables apart by their schema folders, by the file each
+   * member's `use` line reads (`sidebarTables.ts`).
+   */
+  private usageKeys(): TableUsageKeys {
+    return tableUsageOf(this.tableLibraryService, this.members);
+  }
+
+  /**
+   * Scan all diagram files and build a map of model name → domain names
+   * (told apart by identity: each table's key, `usage.keyOf`, → domain names).
    * Reads raw membership (`subjectAreaTableNames`) to avoid expensive model resolution.
    */
-  private buildUsageMap(): Map<string, Array<{ domain: string; layerLabel: string }>> {
+  private buildUsageMap(usage: TableUsageKeys): Map<string, Array<{ domain: string; layerLabel: string }>> {
     const map = new Map<string, Array<{ domain: string; layerLabel: string }>>();
     const layers = this.getLayers();
     const summaries = this.subjectAreaService.listSubjectAreas(this.projectPath, this.semanticDir);
@@ -958,7 +1030,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         // Format-agnostic: honours v4 inline objects, v5 name strings,
         // (for usage counting only) hybrid/legacy documents awaiting
         // migration, and a DBML diagram's `use` lines.
-        const modelNames = this.members.of(summary.filePath);
+        // By identity, each member is the table its `use` line reads (a diagram counted once per table).
+        const modelNames = usage.byIdentity ? usage.membersOf(summary.filePath) : this.members.of(summary.filePath);
         if (!modelNames) continue;
 
         const use = { domain: summary.domain, layerLabel: layers.find((l) => l.id === summary.layer)?.label ?? summary.layer };

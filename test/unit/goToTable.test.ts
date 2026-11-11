@@ -16,7 +16,9 @@ import {
   OPEN_FILE_BUTTON,
   OPEN_IN_DIAGRAM_BUTTON,
   SHOW_RELATIONSHIPS_BUTTON,
+  OPEN_DIAGRAM_NOTE,
   addToDiagramCommand,
+  withOpenDiagramFirst,
   buildGoToTableItems,
   diagramPickItems,
   diagramUsage,
@@ -343,6 +345,28 @@ describe('Add to Diagram…', () => {
     await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables }, ['dim_date']);
     expect((pick.mock.calls[0][1] as { placeHolder: string }).placeHolder).toBe('Add "dim_date" to which diagram?');
     expect(addTables).toHaveBeenCalledWith(`${SEM}/gold/diagrams/sales.dbml`, ['dim_date']);
+  });
+
+  it('offers the diagram in the active tab first, marked as open, so Enter adds to it', async () => {
+    const items = diagramPickItems(summaries, members, layerLabel, ['dim_region']);
+    expect(items.map((i) => i.label)).toEqual(['sales', 'staging', 'finance']);
+    const first = withOpenDiagramFirst(items, `${SEM}/silver/diagrams/staging.dbml`);
+    expect(first.map((i) => [i.label, i.description])).toEqual([
+      ['staging', `Silver · 1 table · ${OPEN_DIAGRAM_NOTE}`],
+      ['sales', 'Gold · 2 tables'],
+      ['finance', 'Gold · 1 table'],
+    ]);
+    // No diagram in front, or one that is not offered (it shows the tables already): the list as it was.
+    expect(withOpenDiagramFirst(items, undefined)).toEqual(items);
+    expect(withOpenDiagramFirst(items, '/elsewhere/other.dbml')).toEqual(items);
+
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (picks: Array<{ label: string }>) => picks[0]) as never);
+    const addTables = vi.fn(async () => undefined);
+    await addToDiagramCommand({
+      listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables,
+      activeDiagramPath: () => `${SEM}/silver/diagrams/staging.dbml`,
+    }, ['dim_region', 'dim_date']);
+    expect(addTables).toHaveBeenCalledWith(`${SEM}/silver/diagrams/staging.dbml`, ['dim_region', 'dim_date']);
   });
 
   it('says so when every diagram shows them, or there is no diagram', async () => {

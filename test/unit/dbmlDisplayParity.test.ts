@@ -94,7 +94,7 @@ afterEach(() => {
 function buildProvider(): { provider: SemanticEditorProvider; subjectAreaService: SubjectAreaService; tables: TableLibraryService } {
   const layerService = new LayerService(root, SEMANTIC_DIR);
   const subjectAreaService = new SubjectAreaService(layerService);
-  const tables = new TableLibraryService(root, SEMANTIC_DIR);
+  const tables = new TableLibraryService(root, SEMANTIC_DIR, new OwnWriteTracker());
   subjectAreaService.setTableLibraryService(tables);
   const context = {
     extensionUri: vscode.Uri.file(path.join(root, 'no-extension')),
@@ -360,5 +360,177 @@ describe('an unlinked member whose .dbml table sits outside the folders the diag
     expect(canvas).toEqual(core);
     const dimX = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'dim_x');
     expect(dimX?.columns).toHaveLength(1);
+  });
+});
+
+describe('two tables of one name in different schema folders, a file gone (owner decision B)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  it('the diagram of both, bqs/addresse.dbml deleted: both sides draw bqs.addresse missing, never with ccc\'s columns', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    const core = drawn(await coreOf('bronze/diagrams/kunden.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/kunden.dbml'));
+    expect(canvas).toEqual(core);
+    const bqs = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'bqs.addresse');
+    expect(bqs?.columns ?? []).toEqual([]);
+  });
+
+  it('a diagram of bqs.addresse and ccc.kunde, bqs/addresse.dbml deleted: both sides read the one other addresse, which no member\'s line names', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    fs.writeFileSync(at('bronze/diagrams/stale.dbml'), [
+      "Project stale {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const core = drawn(await coreOf('bronze/diagrams/stale.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/stale.dbml'));
+    expect(canvas).toEqual(core);
+  });
+
+  it('a diagram whose lines name three schema folders, bqs/addresse.dbml deleted, ccc and ddd each holding an addresse no member reads: both sides draw it missing', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    fs.mkdirSync(at('bronze/tables/ddd'), { recursive: true });
+    fs.writeFileSync(at('bronze/tables/ddd/addresse.dbml'), fs.readFileSync(at('bronze/tables/ccc/addresse.dbml'), 'utf-8').replace('ccc.addresse', 'ddd.addresse'));
+    fs.writeFileSync(at('bronze/tables/ddd/kunde.dbml'), fs.readFileSync(at('bronze/tables/ccc/kunde.dbml'), 'utf-8').replace('ccc.kunde', 'ddd.kunde'));
+    fs.writeFileSync(at('bronze/diagrams/three.dbml'), [
+      "Project three {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      "use { table ddd.kunde } from '../tables/ddd/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const core = drawn(await coreOf('bronze/diagrams/three.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/three.dbml'));
+    expect(canvas).toEqual(core);
+    const addresse = (canvas.models as Array<{ name: string; columns?: unknown[] }>).find((m) => m.name === 'addresse');
+    expect(addresse?.columns ?? []).toEqual([]);
+  });
+});
+
+describe('an unqualified Ref end two schema folders share (core rule 3 counts the file\'s own use lines)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  it('the ccc-only diagram: neither side draws `ccc.kunde.full_name > addresse.street`, whose file imports addresse from bqs and ccc', async () => {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.appendFileSync(at('bronze/relationships/bronze.dbml'), 'Ref: ccc.kunde.full_name > addresse.street\n');
+    const core = drawn(await coreOf('bronze/diagrams/ccc.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/ccc.dbml'));
+    expect(canvas).toEqual(core);
+    const lines = (canvas.relationships as Array<{ fromColumn: string; toColumn: string }>).map((r) => `${r.fromColumn}>${r.toColumn}`);
+    expect(lines).toContain('addresse_id>id');
+    expect(lines).not.toContain('full_name>street');
+  });
+});
+
+describe('a Ref end whose relationships file says it means another schema folder\'s table of its name (core sees only the diagram\'s)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  /** The ccc tables on a diagram importing only `relationships/r.dbml` (`lines`); the twins' own relationships file gone. */
+  function seed(lines: string[], options: { unqualifiedTables?: boolean } = {}): void {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/relationships/bronze.dbml'));
+    if (options.unqualifiedTables) {
+      for (const file of ['bqs/addresse', 'bqs/kunde', 'ccc/addresse', 'ccc/kunde']) {
+        const p = at(`bronze/tables/${file}.dbml`);
+        fs.writeFileSync(p, fs.readFileSync(p, 'utf-8').replace(/^Table \w+\./m, 'Table '));
+      }
+    }
+    const q = options.unqualifiedTables ? '' : 'ccc.';
+    fs.writeFileSync(at('bronze/diagrams/cc.dbml'), [
+      "Project cc {\n  erd_schema_version: '7'\n}",
+      `use { table ${q}addresse } from '../tables/ccc/addresse.dbml'`,
+      `use { table ${q}kunde } from '../tables/ccc/kunde.dbml'`,
+      "use * from '../relationships/r.dbml'",
+      '',
+    ].join('\n'));
+    fs.writeFileSync(at('bronze/relationships/r.dbml'), [...lines, ''].join('\n'));
+  }
+
+  async function bothDraw(): Promise<string[]> {
+    const core = drawn(await coreOf('bronze/diagrams/cc.dbml'));
+    const canvas = drawn(await canvasOf('bronze/diagrams/cc.dbml'));
+    // The lines each side draws (a table declaring no schema shows its folder in core, not on the canvas: another matter).
+    expect(canvas.relationships).toEqual(core.relationships);
+    return (canvas.relationships as Array<{ fromModel: string; toModel: string }>).map((r) => `${r.fromModel}>${r.toModel}`);
+  }
+
+  it('the file imports both names from bqs only, by qualified specifiers, and its Ref is unqualified: neither side draws it on ccc\'s tables', async () => {
+    seed([
+      "use { table bqs.addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('the same with unqualified specifiers from bqs: neither side draws it', async () => {
+    seed([
+      "use { table addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('tables that declare no schema, the file\'s own use lines naming bqs\'s files: neither side draws it', async () => {
+    seed([
+      "use { table addresse } from '../tables/bqs/addresse.dbml'",
+      "use { table kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: kunde.addresse_id > addresse.id',
+    ], { unqualifiedTables: true });
+    expect(await bothDraw()).toEqual([]);
+  });
+
+  it('control: the file imports ccc\'s tables, and both sides draw its Ref', async () => {
+    seed([
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      'Ref: ccc.kunde.addresse_id > ccc.addresse.id',
+    ]);
+    expect(await bothDraw()).toEqual(['kunde>addresse']);
+  });
+});
+
+describe('a qualified Ref end naming a schema folder that has no table of its name, on a diagram showing one of two such tables (never guessed)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  /** bqs.kunde and ccc.addresse on a diagram importing only `relationships/r.dbml`, whose Ref names `zzz.addresse`. */
+  function seed(): string {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/relationships/bronze.dbml'));
+    fs.writeFileSync(at('bronze/diagrams/mix.dbml'), [
+      "Project mix {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use * from '../relationships/r.dbml'",
+      '',
+    ].join('\n'));
+    fs.writeFileSync(at('bronze/relationships/r.dbml'), [
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: bqs.kunde.addresse_id > zzz.addresse.id',
+      '',
+    ].join('\n'));
+    return 'bronze/diagrams/mix.dbml';
+  }
+
+  it('neither side draws kunde > addresse: bqs has an addresse too, and zzz names neither', async () => {
+    const diagram = seed();
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    expect(canvas.relationships).toEqual([]);
+  });
+
+  it('control: with bqs\'s addresse gone, the one addresse is the Ref\'s, as it always drew (rule 4), on both sides', async () => {
+    const diagram = seed();
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    expect((canvas.relationships as Array<{ fromModel: string; toModel: string }>).map((r) => `${r.fromModel}>${r.toModel}`)).toEqual(['kunde>addresse']);
   });
 });

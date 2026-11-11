@@ -34,12 +34,19 @@ export interface DroppableTableFile {
   readonly shadowedBy?: string;
 }
 
-/** The local path a `file:` URI names, or undefined for any other URI (or one that does not parse). */
-function filePathOf(uri: string): string | undefined {
+/**
+ * The local path a `file:` URI names on `platform`, or undefined for any other
+ * URI (or one that does not parse). On Windows that is `file:///c%3A/proj/a.dbml`
+ * (as VS Code writes it) or `file:///C:/proj/a.dbml` → `c:\proj\a.dbml`, and
+ * `file://server/share/a.dbml` → `\\server\share\a.dbml`.
+ */
+function filePathOf(uri: string, platform: NodeJS.Platform): string | undefined {
   const text = uri.trim();
   if (!/^file:/i.test(text)) return undefined;
   try {
-    return fileURLToPath(text);
+    // `windows` is read by Node 20.13+ / 22.1+; an older runtime ignores it and
+    // uses its own platform, which in the extension host is the same thing.
+    return fileURLToPath(text, { windows: platform === 'win32' });
   } catch {
     return undefined;
   }
@@ -61,7 +68,7 @@ export function tablesOfDroppedUris(
   const names: string[] = [];
   const seen = new Set<string>();
   for (const uri of uris) {
-    const filePath = filePathOf(uri);
+    const filePath = filePathOf(uri, platform);
     if (filePath === undefined) continue;
     const file = candidates.find((f) => samePath(f.filePath, filePath, platform));
     if (!file) continue;
@@ -72,6 +79,30 @@ export function tablesOfDroppedUris(
     if (names.length >= ADD_EXISTING_TABLES_LIMIT) break;
   }
   return names;
+}
+
+/**
+ * The table files the dropped `uris` are, in drop order, each file once, at
+ * most {@link ADD_EXISTING_TABLES_LIMIT}: {@link tablesOfDroppedUris} by file
+ * rather than by name, so two tables of one name in different schema folders
+ * are two tables. Only `file:` URIs of listed, unshadowed table files count.
+ */
+export function tableFilesOfDroppedUris<T extends DroppableTableFile>(
+  uris: readonly string[],
+  files: readonly T[],
+  platform: NodeJS.Platform = process.platform,
+): T[] {
+  const candidates = files.filter((f) => !f.shadowedBy);
+  const out: T[] = [];
+  for (const uri of uris) {
+    const filePath = filePathOf(uri, platform);
+    if (filePath === undefined) continue;
+    const file = candidates.find((f) => samePath(f.filePath, filePath, platform));
+    if (!file || out.includes(file)) continue;
+    out.push(file);
+    if (out.length >= ADD_EXISTING_TABLES_LIMIT) break;
+  }
+  return out;
 }
 
 /**

@@ -73,7 +73,7 @@ export const GUIDE_STEP_FEATURES: Readonly<Record<GuideStepId, TelemetryFeature>
  * an empty window) still show: they lead to that canvas.
  */
 export const GUIDE_DEFERRED_PROMPTS: ReadonlySet<SessionPromptKind> = new Set<SessionPromptKind>([
-  'diagramsNudge', 'harnessUpdate', 'migrateToV5', 'upgradeNotice', 'harnessInstall', 'saveLayers',
+  'diagramsNudge', 'harnessUpdate', 'migrateToV5', 'majorUpdateNotice', 'upgradeNotice', 'harnessInstall', 'saveLayers',
 ]);
 
 /** Whether activation holds `kind` back for the guide (phase B is owed on this machine). */
@@ -94,6 +94,13 @@ export interface OnboardingGuideDeps {
   dbml(): boolean;
   /** Phase B is on screen: hold the window's one prompt (`SessionPromptGate.reserve('guide')`). */
   holdPrompts(): void;
+  /**
+   * The guide is about to show: a run began (by itself on a first draft, or
+   * Show Me Around by any route), or its canvas part carried on. The host
+   * spends the major update notice on it (`src/services/majorUpdateNotice.ts`):
+   * a notice that says the guide exists has nothing left to say.
+   */
+  onShown?(): void;
   /** A few seconds in the status bar (`window.setStatusBarMessage`): where to run the guide again, after a skip. */
   statusMessage?(text: string): void;
   log?(message: string): void;
@@ -159,8 +166,18 @@ export class OnboardingGuide {
   private started(fromCommand: boolean): void {
     this.stepsSeen = new Set();
     this.lastStep = undefined;
+    this.shown();
     this.deps.feature('guideStarted');
     if (fromCommand) this.deps.feature('guideStartedFromCommand');
+  }
+
+  /** Every run goes through here ({@link started}), and so does a canvas part that carries on ({@link beginCanvas}). */
+  private shown(): void {
+    try {
+      this.deps.onShown?.();
+    } catch (err) {
+      this.deps.warn?.('Could not note that the guide showed:', err);
+    }
   }
 
   /**
@@ -259,6 +276,7 @@ export class OnboardingGuide {
   private beginCanvas(): CanvasGuideStart {
     this.draftActive = false;
     this.canvasActive = true;
+    this.shown();
     this.setStatus('canvas');
     this.deps.feature('guideCanvasStarted');
     this.deps.holdPrompts();

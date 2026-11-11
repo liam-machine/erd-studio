@@ -7,7 +7,13 @@
  */
 import type { ExistingTablePreview } from '../../../src/types/display';
 
-/** Library tables, not on this diagram (`onCanvas`, node ids), whose name holds `query` (ignoring case). */
+/**
+ * Library tables, not on this diagram (`onCanvas`, node ids), whose name
+ * holds `query` (ignoring case). A row the host lists with its schema folder
+ * (two tables of one name in different schema folders) is a table of its
+ * own, by its file, and the host already left out the diagram's own tables:
+ * it is never compared with a node's name.
+ */
 export function otherProjectMatches(
   existing: readonly ExistingTablePreview[] | undefined,
   onCanvas: readonly string[],
@@ -16,14 +22,19 @@ export function otherProjectMatches(
   const q = query.trim().toLowerCase();
   if (!q) return 0;
   const here = new Set(onCanvas.map((id) => id.toLowerCase()));
-  const names = new Set<string>();
+  const tables = new Set<string>();
   for (const row of existing ?? []) {
     if (row.source !== 'logical') continue;
     const name = row.name.toLowerCase();
-    if (here.has(name) || !name.includes(q)) continue;
-    names.add(name);
+    if (!name.includes(q)) continue;
+    if (row.schemaFolder !== undefined) {
+      tables.add(`${name}\u0000${row.sourcePath.toLowerCase()}`);
+      continue;
+    }
+    if (here.has(name)) continue;
+    tables.add(name);
   }
-  return names.size;
+  return tables.size;
 }
 
 /** "Not on this diagram — 3 in the project". */

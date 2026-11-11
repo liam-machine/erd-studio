@@ -57,7 +57,7 @@ GitLab's data team publishes its whole warehouse layout in its [handbook](https:
 
 - **The database is the layer.** DBML names a table `schema.table` and has no database part, so the third part of the name is the layer folder. Several schemas sit in each layer.
 - **The same source schema in two layers.** `sfdc` and `zuora` are schemas in both RAW and PREP, so `raw/tables/zuora/` and `prep/tables/zuora/` both exist. That is fine: a schema folder belongs to its layer.
-- **The same warehouse name in two schemas.** RAW has `sfdc.account` and `zuora.account`. A table's name is unique across the whole project, so they are `sfdc_account` and `zuora_account`, each with `alias: 'account'`.
+- **The same warehouse name in two schemas.** RAW has `sfdc.account` and `zuora.account`. Two schemas may each hold a table of one name, so both could be `account`; this example names them `sfdc_account` and `zuora_account`, each with `alias: 'account'`, as earlier ERD Studio versions required.
 - **A model's name doesn't decide its layer; where it builds does.** `prep_subscription` builds into PROD's `common_prep` schema, so it is in `prod/tables/common_prep/`, not in the PREP layer.
 - **Marts are wide tables with no relationships**: `mart_arr` is `fct_mrr` already joined to its dimensions.
 - **A table needn't be on a diagram.** `prep_subscription` is a building block nobody needs to look at; it is in the Table Library and on no diagram.

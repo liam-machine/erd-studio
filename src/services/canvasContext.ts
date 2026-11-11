@@ -28,6 +28,16 @@ export interface CanvasContextInput {
   readonly diagramLayerLabel?: string;
   /** Who reviews a change to a table's file (CODEOWNERS), none when nobody does. */
   readonly ownersOf?: (name: string) => readonly string[];
+  /**
+   * Where the diagram names its tables differently from the library (two
+   * tables of one name in different schema folders: the library's
+   * `<schema>.<name>` for a member the diagram calls by its name alone): the
+   * member a library table is, by its file, or undefined for a table not on
+   * the diagram. Without it a library table is on the diagram under its name.
+   */
+  readonly memberOf?: (libraryName: string) => string | undefined;
+  /** A library table's file, project-relative with `/` separators: each "Not on this diagram" row's `otherTablePath`. */
+  readonly otherTablePathOf?: (libraryName: string) => string | undefined;
 }
 
 const lower = (s: string): string => s.trim().toLowerCase();
@@ -64,18 +74,21 @@ export function buildCanvasContext(input: CanvasContextInput): CanvasContext {
   const diagramLayer = input.diagramLayerLabel !== undefined ? lower(input.diagramLayerLabel) : undefined;
   for (const entry of overview.entries) {
     if (entry.problems.some((p) => p.kind === 'missingTable')) continue;
-    const fromOn = onDiagram.get(lower(entry.fromModel));
-    const toOn = onDiagram.get(lower(entry.toModel));
+    const memberOf = (name: string): string | undefined => (input.memberOf ? input.memberOf(name) : onDiagram.get(lower(name)));
+    const fromOn = memberOf(entry.fromModel);
+    const toOn = memberOf(entry.toModel);
     if ((fromOn === undefined) === (toOn === undefined)) continue;
     const member = (fromOn ?? toOn)!;
     const otherTable = fromOn !== undefined ? entry.toModel : entry.fromModel;
     const layer = input.layerLabelOf?.(otherTable);
+    const otherTablePath = input.otherTablePathOf?.(otherTable);
     const row: OffDiagramRelationship = {
       otherTable,
       ...(layer !== undefined && lower(layer) !== diagramLayer ? { otherLayer: layer } : {}),
       columns: joinColumnsText(entry.fromColumns, entry.toColumns),
       cardinality: entry.cardinality,
       direction: fromOn !== undefined ? 'out' : 'in',
+      ...(otherTablePath !== undefined ? { otherTablePath } : {}),
     };
     const rows = offDiagram.get(member);
     if (rows) rows.push(row);

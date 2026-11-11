@@ -32,7 +32,7 @@ A table *belongs* to one layer and one schema: its path says so. It *appears* on
 
 1. **Every table has one layer and one schema, and its path says both.** `gold/tables/sales/fct_order.dbml` holds `Table sales.fct_order`, in the gold layer. To change either, use **Move Table…**, and every diagram and relationships file that uses the table follows.
 2. **The schema folder is the warehouse's schema, spelled exactly.** Don't invent folders for grouping: grouping is what diagrams are for. If your warehouse has one schema per layer, each layer has one schema folder named after it (`gold/tables/gold/`), and that's fine.
-3. **Table names are unique across the whole project.** When the warehouse reuses a name in two places, give each table a unique name and put the warehouse's name in `alias`. Pick one prefix rule and use it everywhere: the source (`shopify_customers`), the layer (`silver_orders`, `gold_orders`) or the schema (`atlas_live__main_v1`).
+3. **A table is its schema and its name.** Two schemas may each have a table of one name (`bqs.addresse` and `ccc.addresse`): keep the warehouse's names. Within one schema a name is used once, across every layer: when the warehouse reuses a name in one schema in two layers, give each table its own name and put the warehouse's name in `alias`. Pick one prefix rule and use it everywhere, such as the layer (`raw_account`, `prep_account`). A project in YAML from before 2.0 keeps every name unique across the project.
 4. **A relationship is stored once, with its foreign-key table.** Any diagram that shows both tables draws it, even when the tables are in different layers. A Ref from the business vault to a raw vault hub lives in the business vault's relationships file.
 
 Everything else is your choice: how many layers, how many diagrams, and how you split relationships files.
@@ -66,7 +66,8 @@ Patterns combine. A medallion's gold layer, a dbt project's marts and a Data Vau
 | a business process, data product or dashboard | a **diagram** | A table can be on many diagrams, or none. |
 | a view over a table | its own table | Add a field of your own, `materialized: 'view'`, and say what it reads in its `decisions`. |
 | a versioned table (`clients_daily_v6`) | its own table, version in the name | The next version is a new file beside it. |
-| the same table name in two schemas or layers | two tables with unique names, the warehouse name in `alias` | See rule 3. |
+| the same table name in two schemas | two tables, one in each schema folder, under their own names | A diagram that shows both names each `<schema>.<name>`. See rule 3. |
+| the same table name in one schema, in two layers | two tables with their own names, the warehouse name in `alias` | See rule 3. |
 | a hub, link, satellite, PIT or bridge | a table with a `vault_type` field | ERD Studio's roles are Kimball's; vault types go in a field of your own. |
 
 ## Many teams, one model

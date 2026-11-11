@@ -79,7 +79,21 @@ export interface ExportColumn {
 }
 
 export interface ExportTable {
+  /**
+   * What the diagram calls the table (`DisplayTable.name`), unique within it:
+   * what relationship ends, positions and sticky-note links name. For two
+   * tables of one name from different schema folders this is
+   * `<schema>.<name>`, never the name a DBML `Table` line declares (see
+   * {@link declaredName}).
+   */
   name: string;
+  /**
+   * The table's own name: `DisplayTable.tableName`, else {@link name} (always
+   * from an older core). {@link name} again when another table on the diagram
+   * would be declared with the same schema and own name (see
+   * `prepareSubjectArea`).
+   */
+  tableName: string;
   /** Empty when the model names no schema. */
   schema: string;
   alias?: string;
@@ -181,8 +195,10 @@ function readColumn(raw: Record<string, unknown>, name: string): ExportColumn {
 }
 
 function readTable(raw: Record<string, unknown>, name: string): ExportTable {
+  const own = text(raw.tableName);
   const model: ExportTable = {
     name,
+    tableName: own.trim() ? own : name,
     schema: text(raw.schema).trim(),
     description: text(raw.description),
     rationale: [],
@@ -227,6 +243,38 @@ function readTable(raw: Record<string, unknown>, name: string): ExportTable {
     model.columns.push(readColumn(col, colName));
   });
   return model;
+}
+
+/**
+ * The name a DBML `Table` line declares for `model`, after its schema: the
+ * table's own name when it has a schema (`Table bqs.addresse` and `Table
+ * ccc.addresse` for two tables of one name from different schema folders),
+ * else what the diagram calls it, the only name that is unique without a
+ * schema. Equal to `model.name` for every table whose name no other table on
+ * the diagram shares, so no export of such a diagram changes.
+ */
+export function declaredName(model: ExportTable): string {
+  return model.schema ? model.tableName : model.name;
+}
+
+/**
+ * Two tables of one name from different schema folders whose files declare
+ * the same schema (a copied folder: `Table bqs.addresse` in both tables/bqs/
+ * and tables/bqs_backup/) would both be declared `Table bqs.addresse`, which
+ * DBML refuses. Each such table after the first is declared under its
+ * diagram name instead (`Table bqs."bqs_backup.addresse"`), so both are
+ * written and the file still parses. Only a table whose own name differs
+ * from its diagram name can change, so no other export does.
+ */
+function keepDeclaredNamesApart(models: ExportTable[]): void {
+  // How DBML tells tables apart: an unqualified table is in schema `public`.
+  const keyOf = (m: ExportTable): string => `${m.schema || 'public'}\u0000${declaredName(m)}`;
+  const declared = new Set(models.filter((m) => m.tableName === m.name).map(keyOf));
+  for (const model of models) {
+    if (model.tableName === model.name) continue;
+    if (declared.has(keyOf(model))) model.tableName = model.name;
+    declared.add(keyOf(model));
+  }
 }
 
 /** How a link reads in a comment: `a.x -> b.y`, or `a.(x, y) -> b.(u, v)` for a composite. */
@@ -407,6 +455,9 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
       modelItems.push({ kind: 'skipped', text: `table ${index + 1} has no name` });
       return;
     }
+    // A repeat is the same diagram name twice (what an older core gives a
+    // diagram with two same-named tables); two tables of one name from
+    // different schema folders have different diagram names.
     if (seen.has(lower(name))) {
       modelItems.push({ kind: 'skipped', text: `${oneLine(name)} is listed more than once; exported once` });
       return;
@@ -416,6 +467,7 @@ export function prepareSubjectArea(domain: DisplaySubjectArea): PreparedSubjectA
     models.push(model);
     modelItems.push({ kind: 'model', model });
   });
+  keepDeclaredNamesApart(models);
 
   const rawLinks = (Array.isArray(input.relationships) ? input.relationships : []).map(readRawLink);
 

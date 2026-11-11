@@ -1,0 +1,6 @@
+Table bqs.kunde {
+  id INT [pk]
+  name VARCHAR
+  addresse_id INT [foreign_key: 'true']
+  Note: 'Customers from the BQS system'
+}

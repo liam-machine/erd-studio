@@ -35,6 +35,7 @@ import type { SubjectAreaResolver } from '../services/dbmlDiagramSettle';
 import type { Annotation, NodePosition } from '@erd-studio/core';
 
 import { subjectAreaTableNames } from '../services/domainService';
+import { DiagramMemberTable } from '../services/diagramMemberTable';
 import type { FileWrite } from '../services/fileWrites';
 import { keepLineEndings } from '../services/lineEndings';
 
@@ -51,6 +52,13 @@ export interface ParsedSubjectArea {
   writable?: boolean;
   /** DBML only: the file declares Tables and has no table `use` line (a dropped-in single-file DBML). */
   holdsOwnTables?: boolean;
+  /**
+   * DBML only: the diagram's members as read (the diagram boundary): each
+   * reference with the table file its `use` line reads. What a canvas
+   * message's table name is resolved against, and what the writer's
+   * `resolveTable` answers a member's reference with.
+   */
+  members?: DiagramMemberTable;
 }
 
 /**
@@ -141,6 +149,7 @@ const dbmlCodec: SubjectAreaCodec = {
       dbmlSchemaVersion: reading.schemaVersion,
       writable: reading.writable,
       ...(reading.holdsOwnTables ? { holdsOwnTables: true } : {}),
+      members: DiagramMemberTable.fromUses(reading.uses ?? [], reading.unlinked ?? []),
     };
   },
   render(p, text, filePath, resolver) {

@@ -681,13 +681,23 @@ export const DROP_TABLES_URI_LIMIT = ADD_EXISTING_TABLES_LIMIT;
 export const DROP_TABLES_URI_MAX_LENGTH = 4096;
 
 /**
+ * The Table Library's own drag mime type (`application/vnd.code.tree.<view id,
+ * lower case>`): VS Code puts it on every drag that starts in that view, so a
+ * drop that carries it is a Table Library drag.
+ */
+export const TABLE_LIBRARY_DRAG_MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
+
+/**
  * Something was dropped on the canvas (a Shift-drag from the Table Library,
  * or a table file from the Explorer): `position` is the drop point in flow
  * coordinates, `uris` whatever URIs the drop's DataTransfer held (possibly
  * none). The host resolves each `file:` URI to a table file, else uses the
  * Table Library drag that started in the last minute, and adds the tables
  * not yet on the diagram through the Add Existing Tables edit with their
- * positions at the drop point: one edit, one undo step. Logical only — it is
+ * positions at the drop point: one edit, one undo step. A drop marked
+ * `fromLibrary` uses the remembered drag first: VS Code gives a tree drag the
+ * files of its table rows only, so the URIs of a drag that includes a schema
+ * or a layer row name fewer tables than the drag does. Logical only — it is
  * not on the physical allowlist.
  */
 export interface DropTablesMessage {
@@ -696,6 +706,8 @@ export interface DropTablesMessage {
     position: { x: number; y: number };
     /** At most {@link DROP_TABLES_URI_LIMIT}, each at most {@link DROP_TABLES_URI_MAX_LENGTH} characters. */
     uris: string[];
+    /** The drop's DataTransfer carried {@link TABLE_LIBRARY_DRAG_MIME}: a Table Library drag. Absent means false. */
+    fromLibrary?: boolean;
   };
 }
 

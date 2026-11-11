@@ -679,7 +679,14 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.indexOf('importOutcomeSqlDdlClean')).toBe(FEATURES.indexOf('crashFallbackFeedback') + 1);
     // The automatic draft's time-limit drop is appended after them.
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
-    expect(FEATURES.at(-1)).toBe('draftDropTimeLimit');
+    // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
+    // major update notice's), never put before it.
+    expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
+      'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
+      'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
+      'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
+      'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
+    ]);
     // #262's per-step load codes follow the logged-error ones.
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
       'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
@@ -695,11 +702,32 @@ describe('allowlists agree with the Worker', () => {
     expect(at).toBeGreaterThan(0);
     const next = readme.indexOf('\n## ', at + 1);
     const section = readme.slice(at, next === -1 ? undefined : next);
+    // The 2.0.0 list ends at draftDropTimeLimit; a key appended after it is listed under "Keys added after 2.0.0".
     const added = [
-      ...FEATURES.slice(FEATURES.indexOf('heartbeatProvisional')),
+      ...FEATURES.slice(FEATURES.indexOf('heartbeatProvisional'), FEATURES.indexOf('draftDropTimeLimit') + 1),
       ...ERROR_CODES.slice(ERROR_CODES.indexOf('activationFailed')),
     ];
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
+  });
+
+  it('the Worker README lists every key appended after the 2.0.0 list, one line each, under Keys added after 2.0.0, and says how to read Fabric', () => {
+    const readme = fs.readFileSync(path.join(__dirname, '../../telemetry/README.md'), 'utf8');
+    const at = readme.indexOf('## Keys added after 2.0.0');
+    expect(at).toBeGreaterThan(readme.indexOf('## Keys added in 2.0.0'));
+    const next = readme.indexOf('\n## ', at + 1);
+    const section = readme.slice(at, next === -1 ? undefined : next);
+    const added = FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1);
+    expect(added).toEqual([
+      'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
+      'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
+      'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
+      'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
+    ]);
+    for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
+    // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
+    const outcomes = readme.slice(readme.indexOf('### Import outcomes (2.0)'), readme.indexOf('### Onboarding funnel'));
+    expect(outcomes).toContain('importFabricOutcomeFail');
+    expect(outcomes).toContain('importGuideCopiedFabricCatalog');
   });
 
   it('every dbt parse failure category and placeholder adapter has its feature key', () => {

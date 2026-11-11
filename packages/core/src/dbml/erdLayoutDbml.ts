@@ -16,15 +16,18 @@ import {
   readErdLayout,
   renderErdLayoutValue,
   sameErdLayout,
+  withMemberRefs,
   withMemberSpelling,
   type ErdLayout,
   type ErdLayoutReading,
 } from '../erdLayout.js';
 import { DBML_DIAGRAM_PROPERTIES } from '../dbmlRichProperties.js';
 import type { Annotation, NodePosition } from '../types/semantic.js';
+import { DBML_TWIN_SCHEMA_VERSION } from '../types/semantic.js';
+import type { TableRefCandidate } from '../tableIdentity.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
-import { diagramMembersFromAst } from './readDiagram.js';
+import { diagramMemberTablesFromAst } from './readDiagram.js';
 import { PINNED_PARSER, elementType, lineAt, lineStartOf, parseSyntax, plainNames, stripBom, topLevel, type AstNode } from './parser.js';
 import { applyTextEdits, cutEdit, eolOf, indentAt, nextLineStart, startsItsLine, type TextEdit } from './splice.js';
 
@@ -191,10 +194,13 @@ function stemOf(file: string): string {
 /**
  * The one edit that makes the diagram's `erd_layout` say `desired`, or null
  * when it already does (canonical lines equal). `text` has no byte-order
- * mark; `ast` is its parse. Each member's line is spelled as the member is
- * and its case variants are dropped (`withMemberSpelling`); the members are
- * the diagram's own (`use` stems, then `erd_unlinked_tables`) unless
- * `members` gives the ones an edit leaves.
+ * mark; `ast` is its parse. Each member's line is written under its
+ * reference and every other line that names it is dropped
+ * (`withMemberRefs`); the members are `tables` when given (the ones an edit
+ * leaves, with their identities), else the diagram's own (`use` members by
+ * reference, then `erd_unlinked_tables`). `members` alone, names without
+ * identities, keeps the older rule: each line spelled as the member is, its
+ * case variants dropped (`withMemberSpelling`).
  *
  * The whole value is rewritten in canonical form. An empty layout cuts the
  * first entry, or empties it when the key is repeated (cutting it would make
@@ -214,10 +220,13 @@ export function erdLayoutTextEdit(
   eol: string,
   file: string,
   members?: readonly string[],
+  tables?: readonly TableRefCandidate[],
 ): TextEdit | null {
   const project = firstProject(ast);
   const current = readErdLayoutFromAst(ast, text);
-  const wanted = withMemberSpelling(desired, members ?? diagramMembersFromAst(ast, text, file));
+  const wanted = tables !== undefined ? withMemberRefs(desired, tables)
+    : members !== undefined ? withMemberSpelling(desired, members)
+      : withMemberRefs(desired, diagramMemberTablesFromAst(ast, text, file));
   if (sameErdLayout(current, wanted)) return null;
   if (current.conflictLine !== undefined) {
     throw new DbmlEditRefused(
@@ -265,7 +274,11 @@ export interface DiagramLayoutEdit {
   filePath: string;
   positions: Record<string, NodePosition>;
   annotations: readonly Annotation[];
-  /** The members whose lines are spelled as they are, their case variants dropped; the diagram's own when omitted. */
+  /**
+   * The members whose lines are spelled as they are, their case variants
+   * dropped. Omitted: the diagram's own, each line written under the
+   * member's reference and every other line naming it dropped (`withMemberRefs`).
+   */
   members?: readonly string[];
   parser?: DbmlParserModule;
 }
@@ -298,8 +311,35 @@ export function editDiagramLayoutDbml(oldText: string, edit: DiagramLayoutEdit):
     throw new DbmlEditRefused(file, `${file}: the diagram has a second Project (line ${line}); ERD Studio will not edit the file until there is one.`, line);
   }
   const desired = erdLayoutOf(edit.positions, edit.annotations);
-  const change = erdLayoutTextEdit(text, parsed.ast, desired, eolOf(text), file, edit.members);
+  const eol = eolOf(text);
+  const tables = edit.members === undefined ? diagramMemberTablesFromAst(parsed.ast, text, file) : undefined;
+  const change = erdLayoutTextEdit(text, parsed.ast, desired, eol, file, edit.members, tables);
   if (!change) return oldText;
-  const out = applyTextEdits(text, [change]);
+  // A diagram that holds two members of one name is written as version 8 (D-2): one an older version
+  // left at 7 is marked on the first drag that writes its lines under their references.
+  const pair = (tables ?? []).some((t) => t.ref.trim().toLowerCase() !== t.name.trim().toLowerCase());
+  const version = pair && change.text !== '' ? twinVersionEdit(text, firstProject(parsed.ast), eol) : null;
+  const out = applyTextEdits(text, version ? [version, change] : [change]);
   return hadBom ? `﻿${out}` : out;
+}
+
+/**
+ * The edit that makes the first Project's `erd_schema_version` (its last
+ * entry, any case, as the readers read a repeated key) say
+ * {@link DBML_TWIN_SCHEMA_VERSION}, or null when it already does or there is
+ * no Project. A missing key goes in as the line before `erd_layout`.
+ */
+function twinVersionEdit(text: string, project: AstNode | undefined, eol: string): TextEdit | null {
+  if (!project) return null;
+  const written = dbmlString(String(DBML_TWIN_SCHEMA_VERSION));
+  const key = DBML_DIAGRAM_PROPERTIES.schemaVersion;
+  const entry = projectBody(project).filter((n) => lower(String(n?.type?.value ?? '')) === key).pop();
+  const value = entry?.body as AstNode | undefined;
+  if (value && typeof value.start === 'number' && typeof value.end === 'number') {
+    return text.slice(value.start, value.end) === written ? null : { start: value.start, end: value.end, text: written };
+  }
+  const layout = layoutEntries(project)[0];
+  if (!layout || !startsItsLine(text, layout.start)) return null;
+  const at = lineStartOf(text, layout.start);
+  return { start: at, end: at, text: `${indentAt(text, layout.start)}${key}: ${written}${eol}` };
 }

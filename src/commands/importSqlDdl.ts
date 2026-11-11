@@ -115,7 +115,7 @@ import {
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import type { SqlImportModule } from '../services/sqlImportLoader';
 import { IMPORT_LIMIT_FEATURES, dropQuietly, sqlInvalidFeatures, type ImportInputLimit } from '../services/importTelemetry';
-import { recordImportOutcome } from '../services/importOutcomeTelemetry';
+import { recordImportOutcome, type ImportGuideSource } from '../services/importOutcomeTelemetry';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { telemetry } from '../services/telemetryService';
 import {
@@ -256,7 +256,7 @@ export interface SqlProgressReporter {
   restart?(): void;
 }
 
-export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect'> {
+export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' | 'origin' | 'sqlDialect' | 'guideSource'> {
   /** The extension's folder: the SQL importer is `<extensionPath>/dist/sqlImport.js`. */
   extensionPath: string;
   sqlUi?: ImportSqlDdlUi;
@@ -413,6 +413,13 @@ export interface SqlPreset {
   name?: string;
   /** How partitions were read (the quick path folds them): offered first at the partitions step. */
   partitions?: SqlPartitionMode;
+  /**
+   * The import guide card the import started from (the Fabric card's SQL
+   * buttons: `erdStudio.importSqlDdl` with `{ source: 'fabric' }`). Counted
+   * with the import's outcome, beside the importer's and the dialect's keys,
+   * and used for nothing else; Try Another Dialect keeps it.
+   */
+  guideSource?: ImportGuideSource;
 }
 
 /** The SQL UI of the automatic draft: it asks nothing and shows nothing (each message goes to the log). */
@@ -443,9 +450,10 @@ function sqlUiOf(deps: ImportSqlDdlDeps): ImportSqlDdlUi {
 /**
  * The run's shared reporting: a cancel, an error with its buttons, a failure
  * of ours. `quiet` (the automatic draft): an early end is neither the user's
- * cancel nor their file, so neither is counted.
+ * cancel nor their file, so neither is counted. `guideSource`: the import
+ * guide card the run started from, counted with a failure or a stop.
  */
-function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['draft']) {
+function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['draft'], guideSource?: ImportGuideSource) {
   const cancelled = (): undefined => {
     if (!quiet) telemetry.feature('importSqlDdlCancelled');
     return undefined;
@@ -461,6 +469,7 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
       importer: 'sql',
       outcome: 'failed',
       ...(dialect ? { dialect } : {}),
+      ...(guideSource ? { guideSource } : {}),
       ...(ledger ? { ledger } : {}),
     });
   };
@@ -528,6 +537,7 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
         importer: 'sql',
         outcome: status,
         ...(stop.dialect ? { dialect: stop.dialect } : {}),
+        ...(guideSource ? { guideSource } : {}),
         ledger,
       });
       reportId = recordImportReport({
@@ -763,7 +773,8 @@ function noDialectReason(readings: ReadonlyMap<SqlDialect, SqlDialectReading>, d
  */
 export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, preset: SqlPreset = {}): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
-  const { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable } = sqlRun(ui, deps.draft?.quiet === true, deps.draft);
+  const guideSource = preset.guideSource;
+  const { cancelled, showError, ours, gatherMessage, invalid, failed, stoppedBeforeATable } = sqlRun(ui, deps.draft?.quiet === true, deps.draft, guideSource);
 
   // 1. The scripts.
   let read = resume;
@@ -918,7 +929,8 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     if (better) {
       actions[TRY_ANOTHER_DIALECT_BUTTON] = () => {
         telemetry.feature('importSqlTryAnotherDialect');
-        return importSqlDdl(deps, { ...read, ...(readings ? { readings } : {}) });
+        // Another dialect is asked for, so the chosen one is not carried; where the import started from is.
+        return importSqlDdl(deps, { ...read, ...(readings ? { readings } : {}) }, guideSource ? { guideSource } : {});
       };
     }
     showError(describeImportProblems(TITLE, result.problems, `They were read as ${SQL_DIALECT_LABELS[dialect]}.${result.problems.length > PROBLEMS_SHOWN ? ' Show Logs lists every one.' : ''}`), actions);
@@ -956,7 +968,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
   return importConvertedSql(deps, read, dialect, result, {
     ...(preset.layer ? { preferredLayer: preset.layer } : {}),
     ...(preset.name ? { name: preset.name } : {}),
-  });
+  }, undefined, guideSource);
 }
 
 /** The partitions step: fold them into their parents (first unless the user kept them before) or keep each as a table. */
@@ -992,6 +1004,7 @@ function importConvertedSql(
   result: Extract<ReturnType<SqlImportModule['sqlDdlToDbml']>, { ok: true }>,
   resume: { quick?: boolean; preferredLayer?: string; name?: string },
   changeOptions?: (chosen: { layer: string; name: string }) => unknown,
+  guideSource?: ImportGuideSource,
 ): Promise<ImportDbmlResult | undefined> {
   for (const line of [...result.skipped, ...result.notes]) log.info(`[ERD Studio] ${TITLE}: ${line}`);
   // Every unit not brought across as written, with its file and line (`importLedger.ts`).
@@ -1008,6 +1021,7 @@ function importConvertedSql(
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
     source: 'sql',
     sqlDialect: dialect,
+    ...(guideSource ? { guideSource } : {}),
     origin: {
       from: sqlOriginPhrase(read.files.length, dialectLabel),
       description: `Imported from ${read.sourceLabel} (${dialectLabel}).`,
@@ -1040,7 +1054,8 @@ function isCatalogRead(read: Pick<SqlResume, 'files'>): boolean {
 async function importCatalogExport(deps: ImportSqlDdlDeps, read: SqlResume, preset: SqlPreset): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
   const quiet = deps.draft?.quiet === true;
-  const { showError, ours, failed } = sqlRun(ui, quiet, deps.draft);
+  const guideSource = preset.guideSource;
+  const { showError, ours, failed } = sqlRun(ui, quiet, deps.draft, guideSource);
   let result: CatalogCsvResult;
   try {
     result = catalogCsvToDbml(read.files);
@@ -1078,6 +1093,7 @@ async function importCatalogExport(deps: ImportSqlDdlDeps, read: SqlResume, pres
     ...rest,
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
     source: 'sql',
+    ...(guideSource ? { guideSource } : {}),
     origin: {
       from: catalogOriginPhrase(read.files.map((f) => f.name)),
       description: `Imported from ${read.sourceLabel}.`,
@@ -1242,7 +1258,7 @@ export async function changeSqlOptions(quickDeps: ImportSqlDdlDeps, found: reado
   // The step-by-step flow the user asked for: never quiet, ending in a draft (`changeOptions`).
   const deps: ImportSqlDdlDeps = { ...quickDeps, ...changeOptionsDraft(quickDeps.draft) };
   const ui = sqlUiOf(deps);
-  const { cancelled, gatherMessage } = sqlRun(ui);
+  const { cancelled, gatherMessage } = sqlRun(ui, false, undefined, preset.guideSource);
   if (!ui.pickFiles) return importSqlDdl(deps, undefined, preset);
   const rel = (file: string): string => path.relative(deps.workspaceRoot, file).split(path.sep).join('/');
   const picked = await ui.pickFiles(

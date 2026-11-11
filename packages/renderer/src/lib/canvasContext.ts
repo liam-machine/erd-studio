@@ -42,6 +42,23 @@ export function offDiagramRows(
   return off.length === rows.length ? rows : off;
 }
 
+/**
+ * The distinct tables of `rows`, in their order, each with its file where
+ * the host named it (`otherTablePath`): two tables of one name in different
+ * schema folders are two tables then.
+ */
+export function offDiagramTableRows(rows: readonly OffDiagramRelationship[]): Array<{ otherTable: string; otherTablePath?: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ otherTable: string; otherTablePath?: string }> = [];
+  for (const r of rows) {
+    const key = r.otherTablePath !== undefined ? `\u0000${r.otherTablePath}` : r.otherTable.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r.otherTablePath !== undefined ? { otherTable: r.otherTable, otherTablePath: r.otherTablePath } : { otherTable: r.otherTable });
+  }
+  return out;
+}
+
 /** The distinct tables of `rows`, in their order. */
 export function offDiagramTables(rows: readonly OffDiagramRelationship[]): string[] {
   const seen = new Set<string>();
@@ -64,4 +81,14 @@ export function offDiagramChipTip(count: number): string {
   return count === 1
     ? '1 relationship to a table not on this diagram'
     : `${count} relationships to tables not on this diagram`;
+}
+
+/**
+ * The schema folder of a DBML table file (`…/<layer>/tables/<schema>/<name>.dbml`,
+ * a `tableFiles` value), or undefined for any other file (a YAML table) or none.
+ */
+export function schemaFolderOfFile(file: string | undefined): string | undefined {
+  if (typeof file !== 'string') return undefined;
+  const match = /(?:^|\/)[^/]+\/tables\/([^/]+)\/[^/]+\.dbml$/i.exec(file);
+  return match ? match[1] : undefined;
 }
