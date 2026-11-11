@@ -21,7 +21,7 @@ import type {
 import type { DbtKeyIndex } from './keyEvidence.js';
 import { libraryCopyRank } from './domain.js';
 import { linkKey, nextCompositeKey, reverseRelationship } from './relationships.js';
-import { dirnamePosix, normalisePosix, resolvePosix } from './storage.js';
+import { dbmlTablePath, dirnamePosix, normalisePosix, resolvePosix } from './storage.js';
 import { tableIdKey, tableIdOfPath } from './tableIdentity.js';
 
 const lower = (s: string): string => s.toLowerCase();
@@ -66,8 +66,13 @@ function distinct(entries: readonly DbmlAttachTable[]): DbmlAttachTable[] {
  * Index `tables` and answer how one end resolves (the rule
  * {@link dbmlTableLookup} documents). `exists` answers whether a use path
  * names a file that exists; without it a contested end stays lenient.
+ * `tableDirs`: the table folders the scope's files name, given by a reader
+ * that sees only some of the library (rule 4).
  */
-function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: EndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
+function endResolver(
+  tables: Iterable<DbmlAttachTable>,
+  tableDirs?: readonly string[],
+): (name: string, hint: EndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
   const byName = new Map<string, DbmlAttachTable[]>();
   const byAlias = new Map<string, DbmlAttachTable>();
   const byPath = new Map<string, DbmlAttachTable>();
@@ -137,6 +142,12 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: En
       let contested: string[] | undefined;
       if (hint?.usePath !== undefined && differs(hint.usePath) && (qualifier !== undefined || otherIdentity(hint.usePath))) {
         contested = [hint.usePath];
+      } else if (hint?.qualifier !== undefined && hint.usePath === undefined && tableDirs !== undefined && only.path !== undefined) {
+        // A qualifier that names none of it, with no use line of its own, read where only some of the library
+        // is in scope (a diagram's members): a table of its name in a folder the scope's files name, or in
+        // the qualifier's own folder, is another table of the name, and then nothing says the end is this one.
+        const others = namesakePaths(only.path, hint.qualifier, [...tableDirs, ...(hint.useDirs ?? [])]).filter((p) => differs(p) && otherIdentity(p));
+        if (others.length > 0) contested = others;
       } else if (qualifier === undefined && hint?.usePath === undefined && only.schema !== undefined && hint?.useSchemaPaths !== undefined
         && !(hint.useSchemaNames ?? []).some((n) => lower(n) === lower(only.schema!))) {
         const others = hint.useSchemaPaths.filter((p) => differs(p) && otherIdentity(p));
@@ -172,7 +183,13 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: En
  *    so a diagram showing one of them never draws the other's Ref on it);
  * 4. a qualifier that names none of it included (a stale qualifier draws as
  *    it always did), unless the end's use path names another file and
- *    `options.exists` says that file exists;
+ *    `options.exists` says that file exists; or, for a lookup told
+ *    `options.tableDirs` (a reader that sees only some of the library: the
+ *    table folders its files' `use` lines name), unless the end has no use
+ *    line and `options.exists` says a file of its name exists in one of
+ *    those folders, or its relationships file's, or in the qualifier's own
+ *    schema folder: then another table has the name, and the qualifier says
+ *    neither is this one;
  * 5. else, for an unqualified end, the one table of the name in the default
  *    schema folder (`tables/public/`, where unqualified tables live);
  *    otherwise none: nothing is guessed.
@@ -183,9 +200,9 @@ function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: En
  */
 export function dbmlTableLookup(
   tables: Iterable<DbmlAttachTable>,
-  options: { exists?: (path: string) => boolean } = {},
+  options: { exists?: (path: string) => boolean; tableDirs?: readonly string[] } = {},
 ): DbmlTableLookup {
-  const resolve = endResolver(tables);
+  const resolve = endResolver(tables, options.tableDirs);
   const lookup: DbmlTableLookup = (name, hint) => resolve(name, hint, options.exists).entry;
   // So attachRelationships can say why an end found nothing; a caller's own lookup function has no such answer.
   Object.defineProperty(lookup, RESOLVE, { value: (name: string, hint?: DbmlRefEndHint) => resolve(name, hint, options.exists) });
@@ -253,6 +270,8 @@ type EndHint = DbmlRefEndHint & {
   readonly useSchemaNames?: readonly string[];
   /** Those `use` lines' table files, resolved against the semantic dir. */
   readonly useSchemaPaths?: readonly string[];
+  /** For a qualified end: the table folders the file's own `use` lines name. */
+  readonly useDirs?: readonly string[];
 };
 
 /** What a file's selective `use` lines import a table name from: its schema folders (lower case → as spelled) and table files. */
@@ -286,6 +305,53 @@ function useSchemasOf(item: DbmlAttachReading, table: string): UsedFrom | undefi
   return byName.get(lower(table));
 }
 
+/** Each file's selective `use` lines' table folders. */
+const useDirsByFile = new WeakMap<readonly DbmlUseTable[], string[]>();
+
+/** The table folders (`<layer>/tables/<schema>`) `item`'s `use` lines name, sorted, without repeats. */
+function useDirsOf(item: DbmlAttachReading): string[] | undefined {
+  const useTables = item.reading.useTables;
+  if (item.semanticPath === undefined || useTables === undefined || useTables.length === 0) return undefined;
+  let dirs = useDirsByFile.get(useTables);
+  if (dirs === undefined) {
+    const found = new Set<string>();
+    for (const use of useTables) {
+      const path = resolvedUsePath(use, item.semanticPath);
+      if (tableIdOfPath(path) !== undefined) found.add(dirnamePosix(path));
+    }
+    dirs = [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    useDirsByFile.set(useTables, dirs);
+  }
+  return dirs;
+}
+
+/**
+ * Where another table of the name of the table at `path` would be, for an
+ * end qualified `qualifier` (rule 4): the file of its name in each of `dirs`
+ * (table folders), and in the qualifier's own schema folder in each of their
+ * layers and the table's own. Normalised, in order, without repeats; never
+ * a path that is not a table file's.
+ */
+function namesakePaths(path: string, qualifier: string, dirs: readonly string[]): string[] {
+  const own = tableIdOfPath(normalisePosix(path));
+  if (own === undefined) return [];
+  const file = `${own.name}.dbml`;
+  const layers = new Set<string>([own.layer]);
+  const out = new Set<string>();
+  for (const dir of dirs) {
+    const candidate = normalisePosix(`${dir}/${file}`);
+    const id = tableIdOfPath(candidate);
+    if (id === undefined) continue;
+    out.add(candidate);
+    layers.add(id.layer);
+  }
+  for (const layer of layers) {
+    const candidate = normalisePosix(dbmlTablePath(layer, qualifier, own.name));
+    if (tableIdOfPath(candidate) !== undefined) out.add(candidate);
+  }
+  return [...out];
+}
+
 function useTableFor(useTables: readonly DbmlUseTable[] | undefined, table: string, qualifier: string | undefined): DbmlUseTable | undefined {
   if (useTables === undefined || useTables.length === 0) return undefined;
   let bySpelling = useTablesBySpelling.get(useTables);
@@ -317,9 +383,12 @@ function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint
     const usePath = use ? resolvedUsePath(use, item.semanticPath!) : undefined;
     // An unqualified end with no use line of its own: which schema folders the file imports its name from.
     const used = qualifier === undefined && usePath === undefined ? useSchemasOf(item, table) : undefined;
+    // A qualified one: which table folders the file's lines name (rule 4 looks there for namesakes).
+    const useDirs = qualifier !== undefined && usePath === undefined ? useDirsOf(item) : undefined;
     return {
       ...(qualifier !== undefined ? { qualifier } : {}),
       ...(usePath !== undefined ? { usePath } : {}),
+      ...(useDirs !== undefined && useDirs.length > 0 ? { useDirs } : {}),
       ...(used !== undefined && used.schemas.size > 1 ? { useSchemas: used.schemas.size } : {}),
       ...(used !== undefined ? { useSchemaNames: used.names, useSchemaPaths: used.paths } : {}),
     };
@@ -331,11 +400,17 @@ function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint
  * The use paths whose existence decides where a Ref end of `readings` lands
  * among `tables` (rule 4 of {@link dbmlTableLookup}): an end whose qualifier
  * names none of the one table of its name, while its own `use` line names
- * another file. Empty for a project whose Ref ends all name their tables by
- * a use line or a qualifier that matches. In path order, without repeats.
+ * another file (or, with `options.tableDirs`, while it has none: the
+ * namesake paths rule 4 names). Empty for a project whose Ref ends all name
+ * their tables by a use line or a qualifier that matches. In path order,
+ * without repeats.
  */
-export function contestedUsePaths(readings: readonly DbmlAttachReading[], tables: Iterable<DbmlAttachTable>): string[] {
-  const resolve = endResolver(tables);
+export function contestedUsePaths(
+  readings: readonly DbmlAttachReading[],
+  tables: Iterable<DbmlAttachTable>,
+  options: { tableDirs?: readonly string[] } = {},
+): string[] {
+  const resolve = endResolver(tables, options.tableDirs);
   const out = new Set<string>();
   for (const item of readings) {
     if (!item.reading?.readable) continue;

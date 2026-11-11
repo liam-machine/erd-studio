@@ -494,3 +494,43 @@ describe('a Ref end whose relationships file says it means another schema folder
     expect(await bothDraw()).toEqual(['kunde>addresse']);
   });
 });
+
+describe('a qualified Ref end naming a schema folder that has no table of its name, on a diagram showing one of two such tables (never guessed)', () => {
+  const TWIN = path.join(TWINS, 'same-name-two-schemas');
+
+  /** bqs.kunde and ccc.addresse on a diagram importing only `relationships/r.dbml`, whose Ref names `zzz.addresse`. */
+  function seed(): string {
+    fs.cpSync(TWIN, root, { recursive: true });
+    fs.rmSync(at('bronze/relationships/bronze.dbml'));
+    fs.writeFileSync(at('bronze/diagrams/mix.dbml'), [
+      "Project mix {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use * from '../relationships/r.dbml'",
+      '',
+    ].join('\n'));
+    fs.writeFileSync(at('bronze/relationships/r.dbml'), [
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      'Ref: bqs.kunde.addresse_id > zzz.addresse.id',
+      '',
+    ].join('\n'));
+    return 'bronze/diagrams/mix.dbml';
+  }
+
+  it('neither side draws kunde > addresse: bqs has an addresse too, and zzz names neither', async () => {
+    const diagram = seed();
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    expect(canvas.relationships).toEqual([]);
+  });
+
+  it('control: with bqs\'s addresse gone, the one addresse is the Ref\'s, as it always drew (rule 4), on both sides', async () => {
+    const diagram = seed();
+    fs.rmSync(at('bronze/tables/bqs/addresse.dbml'));
+    const core = drawn(await coreOf(diagram));
+    const canvas = drawn(await canvasOf(diagram));
+    expect(canvas).toEqual(core);
+    expect((canvas.relationships as Array<{ fromModel: string; toModel: string }>).map((r) => `${r.fromModel}>${r.toModel}`)).toEqual(['kunde>addresse']);
+  });
+});

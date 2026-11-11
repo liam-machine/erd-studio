@@ -260,6 +260,22 @@ describe('attachRelationships: resolving an end among tables of one name (rule 2
     expect(contestedUsePaths([reading('Ref: ccc.kunde.addresse_id > bqs.addresse.id\n')], only)).toEqual([]);
   });
 
+  it('(d\') with no use line for the end, a reader that sees only some of the library (tableDirs) asks whether another table has the name', () => {
+    const text = "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'\nRef: ccc.kunde.addresse_id > zzz.addresse.id\n";
+    const only = [kundeCcc, ccc];
+    const tableDirs = ['bronze/tables/bqs', 'bronze/tables/ccc'];
+    // Its name in each folder the scope's files name, and in the qualifier's own.
+    expect(contestedUsePaths([reading(text)], only, { tableDirs })).toEqual(['bronze/tables/bqs/addresse.dbml', 'bronze/tables/zzz/addresse.dbml']);
+    // Neither exists: one table has the name, and the stale qualifier still lands on it (rule 4).
+    expect(linksOf(attachRelationships([reading(text)], dbmlTableLookup(only, { tableDirs, exists: () => false })))).toEqual(['ccc.kunde.addresse_id>ccc.addresse.id']);
+    // bqs has an addresse too: zzz names neither, so nothing says this one is meant.
+    const shared = attachRelationships([reading(text)], dbmlTableLookup(only, { tableDirs, exists: (p) => p === 'bronze/tables/bqs/addresse.dbml' }));
+    expect(linksOf(shared)).toEqual(['ccc.kunde.addresse_id>zzz.addresse.id']);
+    // A lookup over the whole library (no tableDirs: the host's) is as it was.
+    expect(contestedUsePaths([reading(text)], only)).toEqual([]);
+    expect(linksOf(attachRelationships([reading(text)], dbmlTableLookup(only, { exists: () => true })))).toEqual(['ccc.kunde.addresse_id>ccc.addresse.id']);
+  });
+
   it('(e) several tables and nothing decides: not attached, reported, never the first', () => {
     const text = 'Ref: ccc.kunde.addresse_id > addresse.id\nRef: kunde.addresse_id > ccc.addresse.id\n';
     const result = attachRelationships([reading(text)], dbmlTableLookup(all));

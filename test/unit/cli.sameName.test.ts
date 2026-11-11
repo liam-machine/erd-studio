@@ -116,6 +116,23 @@ describe('doctor: two tables of one name in different schema folders', () => {
     expect(found.some((p) => /itself/.test(p.message))).toBe(false);
   });
 
+  it('a qualified end naming a schema folder that has no table of the name, on a diagram showing one of the two, is reported in plain words (what neither core nor the canvas draws)', async () => {
+    fs.rmSync(semantic(REL));
+    fs.writeFileSync(semantic('bronze/diagrams/mix.dbml'), [
+      "Project mix {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use * from '../relationships/r.dbml'", '',
+    ].join('\n'));
+    fs.writeFileSync(semantic('bronze/relationships/r.dbml'), "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'\nRef: bqs.kunde.addresse_id > zzz.addresse.id\n");
+    const found = (await problems()).filter((p) => p.file.endsWith('bronze/relationships/r.dbml') && p.code === 'ambiguousTableReference');
+    expect(found).toEqual([{
+      file: '.erd-studio/bronze/relationships/r.dbml', line: 2, code: 'ambiguousTableReference',
+      message: 'This Ref names addresse, which tables in more than one schema folder have (bqs, ccc), and nothing says which, so it is not drawn. '
+        + 'Write the end as <schema>.addresse, with a use line for that table.',
+    }]);
+  });
+
   it('an unqualified end goes to the table in tables/public/ when one is there (D-10)', async () => {
     fs.mkdirSync(semantic('bronze/tables/public'), { recursive: true });
     fs.writeFileSync(semantic('bronze/tables/public/ort.dbml'), 'Table ort {\n  id INT [pk]\n}\n');

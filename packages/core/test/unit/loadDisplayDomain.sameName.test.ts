@@ -362,6 +362,62 @@ describe('a project with no shared name reads as before, with the cost it had', 
   });
 });
 
+describe('a qualified Ref end naming a schema folder with no table of its name (never guessed: core agrees with the canvas)', () => {
+  /** bqs.kunde and ccc.addresse on a diagram importing only r.dbml, whose Ref names `<qualifier>.addresse`. */
+  function mix(qualifier = 'zzz'): Files {
+    const files = fixture();
+    delete files['.erd-studio/bronze/relationships/bronze.dbml'];
+    files[diagramPath('mix')] = [
+      "Project mix {\n  erd_schema_version: '7'\n}",
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+      "use * from '../relationships/r.dbml'", '',
+    ].join('\n');
+    files['.erd-studio/bronze/relationships/r.dbml'] = [
+      "use { table bqs.kunde } from '../tables/bqs/kunde.dbml'",
+      `Ref: bqs.kunde.addresse_id > ${qualifier}.addresse.id`, '',
+    ].join('\n');
+    return files;
+  }
+  const listingOf = (files: Files): string[] => Object.keys(files).filter((p) => p.startsWith('.erd-studio/')).map((p) => p.slice('.erd-studio/'.length));
+
+  it('bqs has an addresse too (a folder the files name): not drawn on ccc.addresse, with or without a finder', async () => {
+    const files = mix();
+    const { promise, reads } = load(files, diagramPath('mix'));
+    expect(links(await promise)).toEqual([]);
+    // One read in each folder the lines name, and in the qualifier's own: nothing else.
+    expect(reads.filter((p) => p.endsWith('/addresse.dbml') && !p.includes('/ccc/'))).toEqual([
+      '.erd-studio/bronze/tables/bqs/addresse.dbml',
+      '.erd-studio/bronze/tables/zzz/addresse.dbml',
+    ]);
+    expect(links(await load(files, diagramPath('mix'), { findDbmlTable: dbmlTableFinder(listingOf(files)) }).promise)).toEqual([]);
+  });
+
+  it('the other addresse in a folder no line names (ddd): the finder says the name is shared, so not drawn; without one core cannot know, and draws it as before', async () => {
+    const files = mix();
+    files['.erd-studio/bronze/tables/ddd/addresse.dbml'] = files['.erd-studio/bronze/tables/bqs/addresse.dbml'].replace('bqs.addresse', 'ddd.addresse');
+    delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+    expect(links(await load(files, diagramPath('mix'), { findDbmlTable: dbmlTableFinder(listingOf(files)) }).promise)).toEqual([]);
+    expect(links(await load(files, diagramPath('mix')).promise)).toEqual(['kunde.addresse_id>addresse.id']);
+  });
+
+  it('the qualifier\'s own folder has an addresse that is not on the diagram: the end is that table, not drawn on ccc\'s', async () => {
+    const files = mix();
+    delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+    files['.erd-studio/bronze/tables/zzz/addresse.dbml'] = files['.erd-studio/bronze/tables/ccc/addresse.dbml'].replace('ccc.addresse', 'zzz.addresse');
+    expect(links(await load(files, diagramPath('mix')).promise)).toEqual([]);
+  });
+
+  it('rule 4 holds where one table has the name: the stale qualifier still lands on it, with and without a finder', async () => {
+    const files = mix();
+    delete files['.erd-studio/bronze/tables/bqs/addresse.dbml'];
+    const { promise, warnings } = load(files, diagramPath('mix'));
+    expect(links(await promise)).toEqual(['kunde.addresse_id>addresse.id']);
+    expect(warnings).toEqual([]);
+    expect(links(await load(files, diagramPath('mix'), { findDbmlTable: dbmlTableFinder(listingOf(files)) }).promise)).toEqual(['kunde.addresse_id>addresse.id']);
+  });
+});
+
 describe('golden: what core draws for the twin fixture', () => {
   it.each(['kunden', 'ccc', 'kunden-bare'])('the %s diagram', async (name) => {
     const display = await load(fixture(), diagramPath(name)).promise;

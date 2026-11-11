@@ -71,6 +71,7 @@ import type { FieldList } from './fields.js';
 import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
 import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, normalisePosix, tableFileCandidates, type DbmlTableHint } from './storage.js';
 import { attachRelationships, contestedUsePaths, dbmlTableLookup, type DbmlAttachReading } from './dbmlAttach.js';
+import { tableIdKey, tableIdOfPath } from './tableIdentity.js';
 import { linkKey } from './relationships.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
@@ -686,10 +687,14 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
           });
         }
         // A Ref end whose qualifier names none of the one member of its name, while its own use line
-        // names another file: one read of that file says whether the end means a table elsewhere. Only
-        // such an end costs a read (none in a project whose qualifiers match); a read that fails says nothing.
+        // names another file: one read of that file says whether the end means a table elsewhere. One
+        // with no use line of its own: a read of its name in each table folder the diagram's and the
+        // relationships file's lines name, and in the qualifier's own folder, says whether another table
+        // has the name (then the qualifier says neither is the member's). Only such an end costs a read
+        // (none in a project whose qualifiers match); a read that fails says nothing.
         // A path a member was already looked for at is known (a stale use line's own path, say).
-        const probes = contestedUsePaths(readings, entries).filter((rel) => isInsideSemanticDir(rel) && !tableFileExists.has(rel));
+        const tableDirs = reading.useTableDirs;
+        const probes = contestedUsePaths(readings, entries, { tableDirs }).filter((rel) => isInsideSemanticDir(rel) && !tableFileExists.has(rel));
         await mapWithLimit(probes, maxParallelReads, async (rel) => {
           try {
             const text = await readFile(`${prefix}${rel}`);
@@ -721,12 +726,15 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
             if (found === undefined) return;
             const lowerName = tree.name.trim().toLowerCase();
             const own = entries.filter((e) => e.path !== undefined && e.table.name.toLowerCase() === lowerName).map((e) => normalisePosix(e.path!).toLowerCase());
-            if (found === null || !own.includes(normalisePosix(found).toLowerCase())) elsewhere.add(rel);
+            // The same schema folder and name in another layer is the same table (a duplicate), not another one.
+            const ownIds = own.map((p) => tableIdOfPath(p)).filter((id) => id !== undefined).map((id) => tableIdKey(id!));
+            const foundId = found === null ? undefined : tableIdOfPath(normalisePosix(found));
+            if (found === null || (!own.includes(normalisePosix(found).toLowerCase()) && (foundId === undefined || !ownIds.includes(tableIdKey(foundId))))) elsewhere.add(rel);
           });
         }
         // Only the members were read, so a Ref whose owner is off this
         // diagram (or did not read) is no orphan here (§2.4: `partial`).
-        const lookup = dbmlTableLookup(entries, { exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true || elsewhere.has(normalisePosix(rel)) });
+        const lookup = dbmlTableLookup(entries, { tableDirs, exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true || elsewhere.has(normalisePosix(rel)) });
         const attached = attachRelationships(readings, lookup, { partial: true });
         for (const message of attached.warnings) warn(message);
         // A Ref whose other end names a table that more than one schema folder has, with nothing to say which,
