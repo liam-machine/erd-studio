@@ -12,7 +12,7 @@ Real exports of the catalog queries the import guide ships (**Bring In Your Data
 
 The probe schemas are made up for these tests (two schemas, a composite key and a composite foreign key, a self-reference, a one-to-one, a view, comments with commas, quotes and line breaks, a reserved word and a mixed-case name). The engines ran on scratch data directories that were deleted afterwards.
 
-`queries/` holds the four guide queries exactly as the guide and the docs give them (and `sqlserver.sql`, below, which is in neither yet). PostgreSQL, MySQL and DuckDB were run as they are here. The Databricks export was made with the query in `databricks/query-as-run.sql`, which is `queries/databricks.sql` without its `total_rows` column (added afterwards, for the truncation check; the shipped query was parsed by Apache Spark 4.3's parser but not run on Databricks again).
+`queries/` holds the queries exactly as the guide and the docs give them (DuckDB's is in the docs only). SQL Server, PostgreSQL, MySQL and DuckDB were run as they are here. The Databricks export was made with the query in `databricks/query-as-run.sql`, which is `queries/databricks.sql` without its `total_rows` column (added afterwards, for the truncation check; the shipped query was parsed by Apache Spark 4.3's parser but not run on Databricks again).
 
 ## SQL Server
 
