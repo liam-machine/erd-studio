@@ -150,11 +150,13 @@ export function diagramResolverOf(
   summary: Pick<DiagramSummary, 'members' | 'memberPaths'>,
   base: SubjectAreaResolver,
   /**
-   * The editor's own diagram only: references of members the edit adds. One
-   * that names a table the plan creates (its name, or `<schema folder>.<name>`)
-   * is that table, never an existing table of its name in another schema folder.
+   * The editor's own diagram only: the members the edit adds. One added by
+   * its file (`files`: reference → semantic-relative path) is that file's
+   * table; any other (`refs`) that names a table the plan creates (its name,
+   * or `<schema folder>.<name>`) is that table. Never an existing table of
+   * its name in another schema folder.
    */
-  addedMembers: readonly string[] = [],
+  added: { refs?: readonly string[]; files?: ReadonlyMap<string, string> } = {},
 ): SubjectAreaResolver {
   const ids = plan.identities!;
   /** Each member by its file; null for one whose file the plan deletes (never answered by its name). */
@@ -187,7 +189,11 @@ export function diagramResolverOf(
     const schema = dbmlTreePathOf(plan.createdTablePaths?.[i] ?? '')?.schema;
     return { name, schema, refs: [name, ...(schema !== undefined ? [qualifiedRef(schema, name)] : [])].map((r) => r.toLowerCase()) };
   });
-  for (const member of addedMembers) {
+  for (const [member, file] of added.files ?? []) {
+    const table = plan.tableAtPath?.(file);
+    if (table && !byRef.has(member.toLowerCase())) byRef.set(member.toLowerCase(), table);
+  }
+  for (const member of added.refs ?? []) {
     const key = member.toLowerCase();
     if (byRef.has(key)) continue;
     const named = created.filter((c) => c.refs.includes(key));

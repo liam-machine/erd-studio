@@ -270,6 +270,38 @@ describe('the second table of a name joins a diagram', () => {
     expect(shown.models.find((m) => m.name === 'ccc.addresse')?.columns.map((c) => c.name)).toEqual(['id', 'street', 'city', 'postcode']);
   });
 
+  it('a table whose name other schema folders share, but no member has, is added by its file under its bare name', async () => {
+    fs.writeFileSync(at('bronze/diagrams/kun.dbml'), [
+      "Project kun {\n  erd_schema_version: '7'\n}",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const canvas = await open('bronze/diagrams/kun.dbml');
+    const r = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'addresse', sourcePath: '.erd-studio/bronze/tables/bqs/addresse.dbml' } });
+    expect(r.errors).toEqual([]);
+    const after = read('bronze/diagrams/kun.dbml');
+    expect(after).toMatch(/^use \{ table bqs\.addresse \} +from '\.\.\/tables\/bqs\/addresse\.dbml'$/m);
+    expect(after).toContain("erd_schema_version: '7'");
+    expect(canvas.posted().models.find((m) => m.name === 'addresse')?.columns.map((c) => c.name)).toEqual(['id', 'strasse', 'ort']);
+  });
+
+  it('the same, picked together with a dbt model the library does not have', async () => {
+    ymlModels = [{ name: 'stg_order', columns: ['id'] }];
+    fs.writeFileSync(at('bronze/diagrams/kun.dbml'), [
+      "Project kun {\n  erd_schema_version: '7'\n}",
+      "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+      '',
+    ].join('\n'));
+    const canvas = await open('bronze/diagrams/kun.dbml');
+    const r = await canvas.send({
+      type: 'addExistingModels',
+      payload: { modelNames: ['addresse', 'stg_order'], sourcePaths: ['.erd-studio/bronze/tables/bqs/addresse.dbml', ''] },
+    });
+    expect(r.errors).toEqual([]);
+    expect(read('bronze/diagrams/kun.dbml')).toMatch(/^use \{ table bqs\.addresse \} +from '\.\.\/tables\/bqs\/addresse\.dbml'$/m);
+    expect(canvas.posted().models.map((m) => m.name).sort()).toEqual(['addresse', 'kunde', 'stg_order']);
+  });
+
   it('by a drop of its file', async () => {
     const canvas = await open('bronze/diagrams/bqs.dbml');
     const r = await canvas.send({

@@ -4855,6 +4855,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       onLayoutOnly?: () => void;
       /** DBML: members whose reference the mutator changed (old → new): a namesake joined or left. Each keeps its `use` line. */
       renamedMembers?: ReadonlyMap<string, string>;
+      /** DBML: members the mutator adds by their files (reference → absolute table file): each is that file's table, never another of its name. */
+      addedMembers?: ReadonlyMap<string, string>;
     },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
@@ -5200,7 +5202,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The members are those the edit leaves (a removed one must not keep its name shared with the one left).
       const kept = this.membersAfterEdit(file, options.renamedMembers);
       const own = plan.identities && kept
-        ? diagramResolverOf(plan, { members: kept.map((r) => r.ref), memberPaths: kept.map((r) => r.path ?? '') }, resolver, this.membersAdded(file, kept, options.renamedMembers))
+        ? diagramResolverOf(plan, { members: kept.map((r) => r.ref), memberPaths: kept.map((r) => r.path ?? '') }, resolver, {
+          refs: this.membersAdded(file, kept, options.renamedMembers),
+          files: new Map([...(options.addedMembers ?? [])].map(([ref, file]) => [ref, this.tableLibraryService.libraryRelativePath(file)])),
+        })
         : resolver;
       const [primary] = codecFor(fsPath).render(file, text, fsPath, {
         ...own,
@@ -8875,6 +8880,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         stage: 'logical',
         errorLabel: 'Failed to add the table to this diagram.',
         ...(renames.size > 0 ? { renamedMembers: renames } : {}),
+        addedMembers: new Map(refs.map((ref, i) => [ref, fresh[i].filePath])),
         ...(dbt.saves.length > 0 ? { modelFiles: { save: dbt.saves } } : {}),
       },
     );
@@ -9353,6 +9359,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           errorLabel: `Failed to add tables${from}.`,
           ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves } } : {}),
           ...(byFileAdded.renames.size > 0 ? { renamedMembers: byFileAdded.renames } : {}),
+          ...(byFileAdded.refs.length > 0 ? { addedMembers: new Map(byFileAdded.refs.map((ref, i) => [ref, files[i].filePath])) } : {}),
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
