@@ -55,7 +55,7 @@ export function aliasTitle(modelName: string, alias: string | undefined, dbtWord
 
 export function AliasEditor({ modelName, tableName, alias, readOnly, dbtWording = true }: AliasEditorProps) {
   const host = useCanvasHost();
-  const ownName = tableName ?? modelName;
+  const ownName = tableName || modelName;
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(alias ?? '');
   // Enter saves and closes the input, and the input's blur can follow it:

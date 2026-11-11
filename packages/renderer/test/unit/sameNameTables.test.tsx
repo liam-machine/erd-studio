@@ -118,6 +118,22 @@ describe('transformSubjectArea', () => {
     expect(modelNodes(kunden([twin('bqs', 'addresse'), twin('ccc', 'addresse', { alias: 'adr' })]))[1].data.alias).toBe('adr');
   });
 
+  it('two same-named tables whose files declare one schema (a copied schema folder) keep headers that tell them apart', () => {
+    // tables/bqs/addresse.dbml and tables/bqs_backup/addresse.dbml both declare `Table bqs.addresse`.
+    const nodes = modelNodes(kunden([twin('bqs', 'addresse'), { ...twin('bqs_backup', 'addresse'), schema: 'bqs' }]));
+    const headers = nodes.map((n) => `${n.data.shownSchema}.${headerName(n.data)}`);
+    expect(headers).toEqual(['bqs.bqs.addresse', 'bqs.bqs_backup.addresse']);
+    expect(new Set(headers).size).toBe(2);
+    // Each still compares an alias with its own name.
+    expect(modelNodes(kunden([twin('bqs', 'addresse', { alias: 'addresse' }), { ...twin('bqs_backup', 'addresse'), schema: 'bqs' }]))[0].data).not.toHaveProperty('alias');
+  });
+
+  it('a blank tableName is no own name', () => {
+    const [node] = modelNodes(kunden([{ ...twin('bqs', 'addresse'), tableName: '', alias: 'addresse' }]));
+    expect(node.data).not.toHaveProperty('tableName');
+    expect(node.data.alias).toBe('addresse');
+  });
+
   it('an older core\'s payload (no tableName) gives exactly the node data it always did', () => {
     const plain = kunden([{ name: 'addresse', schema: 'ccc', layer: 'bronze', description: '', columns: [col('id', true)] }]);
     const [node] = modelNodes(plain);
@@ -208,6 +224,21 @@ describe('detail panel', () => {
     fireEvent.change(input, { target: { value: 'addresse' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(posted).toEqual([]);
+  });
+
+  it('a blank tableName titles the table with its name, and renames from it', () => {
+    const posted: CanvasEditMessage[] = [];
+    const domain = kunden([{ ...twin('bqs', 'addresse'), tableName: '' }]);
+    const { container } = render(
+      <CanvasStoreProvider store={createCanvasStore({ domain, selectedNode: 'bqs.addresse', detailPanelOpen: true })}>
+        <CanvasEnvironmentProvider host={{ postMessage: (m: CanvasEditMessage) => { posted.push(m); } }}>
+          <ReactFlowProvider><DetailPanel /></ReactFlowProvider>
+        </CanvasEnvironmentProvider>
+      </CanvasStoreProvider>,
+    );
+    expect(container.querySelector('.detail-panel__title')!.textContent).toBe('bqs.addresse');
+    fireEvent.click(container.querySelector('.detail-panel__title-edit-btn')!);
+    expect(container.querySelector<HTMLInputElement>('.detail-panel__title-input')!.value).toBe('bqs.addresse');
   });
 
   it('refuses the own name of another table on the diagram', () => {

@@ -211,7 +211,7 @@ export function DetailPanel() {
   const selectedTableName = useMemo(() => {
     if (!selectedNode) return null;
     const selected = domain?.models.find((m) => m.name === selectedNode);
-    return selected?.tableName ?? selectedNode;
+    return selected?.tableName || selectedNode;
   }, [domain, selectedNode]);
 
   const validateModelName = useCallback(
@@ -228,7 +228,7 @@ export function DetailPanel() {
         return 'Only the upper/lower case differs — rename to another name first';
       }
       // Each table's own name: two same-named tables are named `<schema>.<name>` on the diagram.
-      if (domain && trimmed !== selectedTableName && domain.models.some((m) => same(m.tableName ?? m.name))) {
+      if (domain && trimmed !== selectedTableName && domain.models.some((m) => same(m.tableName || m.name))) {
         return 'A table with this name already exists';
       }
       // logical-models/ is shared across domains — renaming onto an existing
@@ -671,10 +671,10 @@ export function DetailPanel() {
         ) : (
           <h3
             className={`detail-panel__title${!isReadOnly ? ' detail-panel__title--editable' : ''}`}
-            title={!isReadOnly ? 'Double-click to rename' : (model.tableName ?? model.name)}
+            title={!isReadOnly ? 'Double-click to rename' : (model.tableName || model.name)}
             onDoubleClick={!isReadOnly ? handleStartRename : undefined}
           >
-            {model.tableName ?? model.name}
+            {model.tableName || model.name}
           </h3>
         )}
         {!isReadOnly && !editingName && (

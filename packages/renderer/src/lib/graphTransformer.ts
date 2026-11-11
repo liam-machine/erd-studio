@@ -31,7 +31,7 @@ import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
 import type { TableDetail } from './tableDetail';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
-import { computeTableLabels } from './modelLabels';
+import { computeTableLabels, headerName } from './modelLabels';
 import { isSingleLayerProject } from './layerCues';
 // ---------------------------------------------------------------------------
 // Types
@@ -203,6 +203,25 @@ export function transformSubjectArea(
   const singleLayer = isSingleLayerProject(domain);
   const layerConfigOf = (id: string): LayerConfig | undefined =>
     domain.layerConfigs?.find((l) => l.id === id) ?? (id === layer ? layerConfig : undefined);
+  // The schema prefix, on every stage, whenever the schema is not the
+  // badge's layer (the table's own, else the diagram's).
+  const shownSchemaOf = (model: DisplayTable): string | undefined =>
+    model.schema && model.schema.toLowerCase() !== (model.layer ?? layer ?? '').toLowerCase() ? model.schema : undefined;
+  // One of two same-named tables (`bqs.addresse`) prints its own name after
+  // its schema prefix. Two whose files declare one schema (a copied schema
+  // folder) would then read alike, so those keep their diagram names.
+  const ownNameOf = (model: DisplayTable): string | undefined =>
+    model.tableName && model.tableName !== model.name ? model.tableName : undefined;
+  const headerKey = (model: DisplayTable): string => {
+    const shownSchema = shownSchemaOf(model);
+    return `${shownSchema ? `${shownSchema}.` : ''}${headerName({ modelName: model.name, tableName: ownNameOf(model), shownSchema })}`.toLowerCase();
+  };
+  const headerCounts = new Map<string, number>();
+  for (const model of models) {
+    if (ownNameOf(model)) headerCounts.set(headerKey(model), (headerCounts.get(headerKey(model)) ?? 0) + 1);
+  }
+  const headerOwnName = (model: DisplayTable): string | undefined =>
+    ownNameOf(model) && headerCounts.get(headerKey(model)) === 1 ? ownNameOf(model) : undefined;
   const nodes: (TableFlowNode | AnnotationFlowNode)[] = models.map((model) => {
     const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
@@ -215,7 +234,7 @@ export function transformSubjectArea(
       data: {
         modelName: model.name,
         // One of two same-named tables (`bqs.addresse`): its own name, for the header.
-        ...(model.tableName && model.tableName !== model.name ? { tableName: model.tableName } : {}),
+        ...(headerOwnName(model) ? { tableName: headerOwnName(model) } : {}),
         ...(labels.has(model.name) ? { label: labels.get(model.name) } : {}),
         stage,
         layer,
@@ -227,12 +246,10 @@ export function transformSubjectArea(
           ...(layerConfigOf(model.layer) ? { tableLayerConfig: layerConfigOf(model.layer) } : {}),
           ...(model.layer !== layer ? { otherLayer: true as const } : {}),
         } : {}),
-        // The schema prefix, on every stage, whenever the schema is not the
-        // badge's layer (the table's own, else the diagram's).
-        ...(model.schema && model.schema.toLowerCase() !== (model.layer ?? layer ?? '').toLowerCase() ? { shownSchema: model.schema } : {}),
+        ...(shownSchemaOf(model) ? { shownSchema: shownSchemaOf(model) } : {}),
         ...(singleLayer ? { singleLayer: true as const } : {}),
         // Compared with the table's own name: an alias equal to it says nothing new.
-        ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== (model.tableName ?? model.name).toLowerCase() ? { alias: model.alias.trim() } : {}),
+        ...(model.alias && model.alias.trim() && model.alias.trim().toLowerCase() !== (ownNameOf(model) ?? model.name).toLowerCase() ? { alias: model.alias.trim() } : {}),
         columns,
         isStub: domain.stubColumns?.includes(model.name) ?? false,
         ...(hasRationaleText(model.rationale) ? { hasRationale: true } : {}),

@@ -164,6 +164,27 @@ describe('payloads built by hand', () => {
     expect((await parseMermaid(toMermaid(area))).entities).toHaveLength(2);
   });
 
+  it('two tables of one name whose files declare one schema (a copied schema folder) are both written, and every parser reads them', async () => {
+    // tables/bqs/addresse.dbml and tables/bqs_backup/addresse.dbml both declare `Table bqs.addresse`.
+    const area = deepFreeze(subjectArea(
+      [
+        tableDef('bqs.addresse', [col('id', 'int', { isPrimaryKey: true })], { tableName: 'addresse', schema: 'bqs' }),
+        tableDef('bqs_backup.addresse', [col('id', 'int', { isPrimaryKey: true })], { tableName: 'addresse', schema: 'bqs' }),
+      ],
+      [link('bqs_backup.addresse', 'id', 'bqs.addresse', 'id')],
+    ));
+    const dbml = toDbml(area);
+    expect(dbml).toContain('Table bqs.addresse {');
+    expect(dbml).toContain('Table bqs."bqs_backup.addresse" {');
+    expect(dbml).not.toContain('is not exported');
+    expect(dbml).toContain('Ref: bqs."bqs_backup.addresse".id > bqs.addresse.id');
+    expect(tableNames(readDbmlEverywhere(dbml).tables)).toEqual(['bqs.addresse', 'bqs.bqs_backup.addresse']);
+    const rich = readDbmlRich(toDbmlRich(area));
+    expect(tableNames(rich.tables)).toEqual(['bqs.addresse', 'bqs.bqs_backup.addresse']);
+    expect(rich.refs).toHaveLength(1);
+    expect((await parseMermaid(toMermaid(area))).entities).toHaveLength(2);
+  });
+
   it('what an older core gives a diagram with both (two tables with one name, no tableName) is still a repeat, exported once', () => {
     const area = deepFreeze(subjectArea([
       tableDef('addresse', [col('id')], { schema: 'bqs' }),
