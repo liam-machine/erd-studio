@@ -299,6 +299,20 @@ describe('attachRelationships: resolving an end among tables of one name (rule 2
     expect(linksOf(result)).toEqual(['ccc.kunde.addresse_id>ccc.addresse.id']);
   });
 
+  it('two qualifiers that land on one table (a stale one) join a column set to itself: not drawn, as 2.0.2 dropped it', () => {
+    // The reader keeps the Ref (its qualifiers differ); the one addresse has no twin here, so both ends are it.
+    const text = 'Ref: crm.addresse.id > ccc.addresse.id\nRef: ccc.addresse.id >? bqs.addresse.id\n';
+    const alone = attachRelationships([reading(text)], dbmlTableLookup([ccc]));
+    expect(linksOf(alone)).toEqual([]);
+    expect(alone.warnings.filter((w) => w.includes('joins a column set to itself'))).toHaveLength(2);
+    // A host that matches by name alone (no schema folders) drops it the same way.
+    const byName: DbmlAttachTable = { table: ccc.table, storage: 'dbml' };
+    expect(linksOf(attachRelationships([reading(text)], dbmlTableLookup([byName])))).toEqual([]);
+    // With both twins the second Ref joins two tables and is drawn; the first still lands on ccc alone.
+    const twins = attachRelationships([reading(text)], dbmlTableLookup(all));
+    expect(linksOf(twins)).toEqual(['ccc.addresse.id>bqs.addresse.id']);
+  });
+
   it('tables that carry no schema folder keep the rule from before identities: the first of the name', () => {
     const first: DbmlAttachTable = { table: { name: 'dim', columns: [], schema: 'b' }, storage: 'dbml' };
     const second: DbmlAttachTable = { table: { name: 'dim', columns: [], schema: 'a' }, storage: 'dbml' };

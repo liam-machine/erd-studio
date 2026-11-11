@@ -372,6 +372,14 @@ export function attachRelationships(
         result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
       }
       if (!ownerEntry && options.partial) continue;
+      // The reader keeps a Ref whose ends' qualifiers differ (`ccc.addresse.id > bqs.addresse.id` joins two
+      // tables), but when both ends land on one table (a stale qualifier) it joins a column set to itself,
+      // which is never drawn: the reader drops it as such when the qualifiers agree.
+      if (ownerEntry && targetEntry && identityOf(ownerEntry) === identityOf(targetEntry)
+        && rels.every((r) => lower(r.fromColumn) === lower(r.toColumn))) {
+        result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} joins a column set to itself (both ends name ${location.owner}); it is not drawn`);
+        continue;
+      }
       if (!ownerEntry || ownerEntry.storage !== 'dbml') {
         result.orphaned.push(location);
         result.warnings.push(ownerEntry

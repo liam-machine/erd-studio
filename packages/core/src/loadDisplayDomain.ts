@@ -139,7 +139,11 @@ export interface LoadDisplaySubjectAreaOptions {
   domainPath: string;
   /**
    * Read a file's text. Resolve `null` or `undefined` when it does not exist;
-   * a rejection is passed through to the caller unchanged.
+   * a rejection is passed through to the caller unchanged, except for the
+   * one read that only asks whether a table file exists (a Ref end whose
+   * qualifier names none of the one table of its name, while its `use` line
+   * names another file): a rejection there says nothing, and the end is
+   * drawn as it always was.
    */
   readFile(path: string): Promise<string | null | undefined>;
   /** The DisplaySubjectArea's `readOnly` flag. */

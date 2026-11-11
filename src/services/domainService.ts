@@ -605,7 +605,14 @@ export class SubjectAreaService {
         return readFrom(file, library.getTableAt(file, name));
       }
     }
-    return readFrom(library.findTableFile(name), library.getTable(name));
+    // A file another member's `use` line points at is that member's: a member whose own file is gone is
+    // drawn missing, as core draws it, never as its namesake in another schema folder.
+    const byName = library.findTableFile(name);
+    if (byName !== null && [...view.memberPaths].some(([other, use]) => other !== ref.toLowerCase() && !use.startsWith('../')
+      && path.resolve(library.semanticAbsolute(use)).toLowerCase() === path.resolve(byName).toLowerCase())) {
+      return null;
+    }
+    return readFrom(byName, library.getTable(name));
   }
 
   /**
@@ -1376,12 +1383,12 @@ export function mergeCompositeGroups(
   return merged;
 }
 
-/** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */
 /** A DBML member's name from its reference (`<schema>.<name>` for a name two members share); any other name is its own. */
 function bareNameOf(ref: string, view: DbmlDiagramView | undefined): string {
   return view?.tableNames.get(ref.toLowerCase()) ?? ref;
 }
 
+/** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */
 function tableNamesOf(obj: Record<string, unknown>): string[] {
   const logical = obj.logical;
   if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return [];

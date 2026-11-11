@@ -57,6 +57,17 @@ describe('SubjectAreaService: members that share a name', () => {
     ]);
   });
 
+  it('a member whose file is gone is drawn missing, never read from the file its namesake\'s use line points at (as core draws it)', () => {
+    fs.rmSync(path.join(root, '.erd-studio', 'bronze', 'tables', 'bqs', 'addresse.dbml'));
+    const unified = service().getSubjectArea(diagram('kunden'));
+    const columnsOf = (name: string): string[] | undefined => {
+      const model = unified.logical.models.find((m) => m.name === name);
+      return model ? (model.columns ?? []).map((c) => c.name) : undefined;
+    };
+    expect(columnsOf('bqs.addresse') ?? []).toEqual([]);
+    expect(columnsOf('ccc.addresse')).toEqual(['id', 'street', 'city', 'postcode']);
+  });
+
   it('a diagram of the ccc tables alone reads ccc\'s files under their names, as before', () => {
     const unified = service().getSubjectArea(diagram('ccc'));
     expect(unified.logical.models.map((m) => [m.name, tableNameOf(m), (m.columns ?? []).map((c) => c.name)])).toEqual([
