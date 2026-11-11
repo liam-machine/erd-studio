@@ -389,8 +389,10 @@ describe('the same-name-two-schemas fixture', () => {
     const layout = readErdLayoutDbml(files[diagram('kunden-bare')])!;
     expect(Object.keys(layout.positions)).toEqual(['addresse', 'kunde']);
     expect(resolveTableRefs(Object.keys(layout.positions), candidates, { onAmbiguous: 'first' })).toEqual([0, 1]);
+    // The bare link names both twins: it places the first (the reader links it so), and means neither.
+    expect(resolveTableRef('addresse', candidates, { onAmbiguous: 'first' })).toBe(0);
+    expect(resolveTableRef('addresse', candidates)).toBeUndefined();
     const linked = (reading.obj.viewConfig as { annotations: Array<{ linkedModel?: string }> }).annotations[0].linkedModel!;
-    expect(resolveTableRef(linked, candidates, { onAmbiguous: 'first' })).toBe(0);
-    expect(resolveTableRef(linked, candidates)).toBeUndefined();
+    expect(linked).toBe('bqs.addresse');
   });
 });

@@ -51,8 +51,8 @@
 
 import type { DisplaySubjectArea } from './types/display.js';
 import type { SubjectAreaFormat, TableLoadError, NodePosition, SemanticTable, LoaderWarningCode } from './types/semantic.js';
-import { usesTableLibrary } from './types/semantic.js';
-import type { DbmlAttachTable, DbmlRelationshipsReading, DbmlStorageReader } from './types/dbmlStorage.js';
+import { tableNameOf, usesTableLibrary, type DiagramNamedTable } from './types/semantic.js';
+import type { DbmlAttachTable, DbmlMemberUse, DbmlRelationshipsReading, DbmlStorageReader } from './types/dbmlStorage.js';
 import type { LayerConfig } from './types/layer.js';
 import {
   SubjectAreaFileError,
@@ -69,8 +69,8 @@ import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
 import { FIELDS_FILE_NAME, parseFieldsText } from './fieldsFile.js';
 import type { FieldList } from './fields.js';
 import { YamlCharLimitError, YamlNodeLimitError, isSafeTableName, parseTableTextWithUsage } from './logicalModel.js';
-import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, normalisePosix, tableFileCandidates } from './storage.js';
-import { attachRelationships, dbmlTableLookup } from './dbmlAttach.js';
+import { dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, normalisePosix, tableFileCandidates, type DbmlTableHint } from './storage.js';
+import { attachRelationships, contestedUsePaths, dbmlTableLookup, type DbmlAttachReading } from './dbmlAttach.js';
 import { computeMissingPositions, toDisplaySubjectArea } from './displayDomain.js';
 import { checkLimit } from './limits.js';
 
@@ -228,8 +228,15 @@ export interface LoadDisplaySubjectAreaOptions {
    * listing of the tree, in the extension's lookup order. Called at most
    * once per member, within `maxParallelReads`. Default none: such a member
    * draws as missing.
+   *
+   * The second argument says what the stale line named: its schema folder
+   * (or its specifier's qualifier), its layer and its path. A finder should
+   * answer a file in another schema folder only when it is the one table of
+   * that name (`dbmlTableFinder` does): another is a different table that
+   * shares the name. A file another member of the diagram is read from is
+   * never taken.
    */
-  findDbmlTable?: (name: string) => string | null | undefined | Promise<string | null | undefined>;
+  findDbmlTable?: (name: string, hint?: DbmlTableHint) => string | null | undefined | Promise<string | null | undefined>;
   /**
    * Read `{semanticDir}/fields.yml` (the project's field list) and set it as
    * the result's `fields`; see the module header. Default false: the file is
@@ -440,13 +447,25 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     throw new TooManyTablesError(rawModels.length, maxModels);
   }
 
-  // 7. v5 model files: each unique, allowed name read and parsed once.
+  // 7. v5 model files: each unique, allowed name read and parsed once. A DBML
+  // diagram's member is named by its reference (`uses[].ref`): its name, or
+  // `<schema>.<name>` when two members share the name, each read from its own file.
   const parsed = new Map<string, ParsedTable>();
-  // A DBML diagram's members: the layer of the file each was read from, by lower-case name (§2.3).
+  // A DBML diagram's members: the layer of the file each was read from, by lower-case reference (§2.3).
   let tableLayers: Map<string, string> | undefined;
+  // A DBML diagram's members whose reference is not their name: reference -> name.
+  const tableNames = new Map<string, string>();
   if (usesTableLibrary(format) && rawModels) {
+    // Each member's use line (the first, for a member listed twice), by reference.
+    const memberUses = new Map<string, DbmlMemberUse>();
+    for (const use of reading?.uses ?? []) {
+      const ref = use.ref ?? use.name;
+      if (!memberUses.has(ref)) memberUses.set(ref, use);
+      if (ref !== use.name) tableNames.set(ref, use.name);
+    }
+    const bareName = (ref: string): string => tableNames.get(ref) ?? ref;
     const names = [...new Set(rawModels.filter((m): m is string => typeof m === 'string'))]
-      .filter((name) => modelNameFilter(name));
+      .filter((name) => modelNameFilter(bareName(name)));
     // Alphabetical, like the extension's TableLibraryService, so a name that
     // (wrongly) exists in two folders resolves to the same file in both hosts.
     // (`''`, the top of the library, is always probed first.)
@@ -455,60 +474,95 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       .sort((a, b) => a.localeCompare(b));
     // A DBML diagram's member: the path its `use` line resolves to, then the
     // same name in each table folder its lines name (a table moved within
-    // them), each relative to the semantic dir and never outside it.
-    const memberPaths = new Map<string, string>();
-    for (const use of reading?.uses ?? []) {
-      if (!memberPaths.has(use.name)) memberPaths.set(use.name, use.resolved);
+    // them), each relative to the semantic dir and never outside it. A file
+    // another member's line points at is that member's, never this one's:
+    // a table whose file is gone is drawn missing, not as its namesake.
+    const ownPaths = new Map<string, string>();
+    for (const [ref, use] of memberUses) {
+      const path = normalisePosix(use.resolved).toLowerCase();
+      if (!ownPaths.has(path)) ownPaths.set(path, ref);
     }
-    const dbmlCandidates = (name: string): string[] => {
+    const anotherMembers = (path: string, ref: string): boolean => {
+      const owner = ownPaths.get(normalisePosix(path).toLowerCase());
+      return owner !== undefined && owner !== ref;
+    };
+    const dbmlCandidates = (ref: string): string[] => {
       if (!reading) return [];
-      const resolved = memberPaths.get(name);
+      const resolved = memberUses.get(ref)?.resolved;
       const paths = [
         ...(resolved !== undefined ? [resolved] : []),
-        ...[...reading.useTableDirs].sort(byteOrder).map((dir) => `${dir}/${name}.dbml`),
+        ...[...reading.useTableDirs].sort(byteOrder).map((dir) => `${dir}/${bareName(ref)}.dbml`),
       ];
-      return [...new Set(paths)].filter(isInsideSemanticDir);
+      return [...new Set(paths)].filter((path) => isInsideSemanticDir(path) && (path === resolved || !anotherMembers(path, ref)));
     };
-    // A DBML member found as a `.dbml` file (its path relative to the semantic dir).
-    const dbmlFound = new Set<string>();
+    // The YAML probe is a lookup by name: of members that share a name, only the first is offered it.
+    const yamlProbed = new Set<string>();
+    const offeredYaml = new Set(names.filter((ref) => {
+      const key = bareName(ref).toLowerCase();
+      if (yamlProbed.has(key)) return false;
+      yamlProbed.add(key);
+      return true;
+    }));
+    // A DBML member found as a `.dbml` file: its path relative to the semantic dir, by reference.
+    const dbmlFound = new Map<string, string>();
+    // Whether each `.dbml` table path read so far exists (relative to the semantic dir).
+    const tableFileExists = new Map<string, boolean>();
     // Each such member's layer: the layer folder of the file it was read from.
     tableLayers = new Map<string, string>();
-    await mapWithLimit(names, maxParallelReads, async (name) => {
+    await mapWithLimit(names, maxParallelReads, async (ref) => {
+      const name = bareName(ref);
+      const use = memberUses.get(ref);
       // One lane probes one candidate at a time, so maxParallelReads holds.
-      const dbmlPaths = dbmlCandidates(name);
+      const dbmlPaths = dbmlCandidates(ref);
       // `logical-models/` then `tables/` (#162), each top level first: YAML only.
-      const candidates = [...dbmlPaths.map((rel) => `${prefix}${rel}`), ...tableFileCandidates(prefix, name, folders)];
+      const candidates = [
+        ...dbmlPaths.map((rel) => `${prefix}${rel}`),
+        ...(offeredYaml.has(ref) ? tableFileCandidates(prefix, name, folders) : []),
+      ];
       let text: string | null | undefined;
       let index = -1;
       while ((text === null || text === undefined) && ++index < candidates.length) {
         text = await readFile(candidates[index]);
+        if (index < dbmlPaths.length) tableFileExists.set(normalisePosix(dbmlPaths[index]), text !== null && text !== undefined);
       }
       let foundRel: string | undefined;
-      if ((text === null || text === undefined) && findDbmlTable && memberPaths.has(name)) {
-        // A member whose use line is stale: the file the host finds by name, if any.
-        const rel = await findDbmlTable(name);
+      if ((text === null || text === undefined) && findDbmlTable && use !== undefined) {
+        // A member whose use line is stale: the file the host finds by name, if any, told what the line said.
+        const schema = use.schema ?? use.qualifier;
+        const hint: DbmlTableHint = {
+          ...(schema !== undefined ? { schema } : {}),
+          ...(use.layer !== undefined ? { layer: use.layer } : {}),
+          stalePath: use.resolved,
+        };
+        const rel = await findDbmlTable(name, hint);
         const tree = typeof rel === 'string' ? dbmlTreePathOf(rel) : undefined;
         const normalised = tree?.kind === 'table' ? normalisePosix(rel as string) : undefined;
-        if (normalised !== undefined && tree!.name.trim().toLowerCase() === name.trim().toLowerCase() && !dbmlPaths.includes(normalised)) {
+        if (normalised !== undefined && tree!.name.trim().toLowerCase() === name.trim().toLowerCase()
+          && !dbmlPaths.includes(normalised) && !anotherMembers(normalised, ref)) {
           text = await readFile(`${prefix}${normalised}`);
           if (text !== null && text !== undefined) {
             foundRel = normalised;
-            warn(`Table "${name}" is not at its use line's path (${memberPaths.get(name)}); it was read from ${normalised}. The next ERD Studio edit fixes the line`);
+            warn(`Table "${name}" is not at its use line's path (${use.resolved}); it was read from ${normalised}. The next ERD Studio edit fixes the line`);
           }
         }
       }
       if (text === null || text === undefined) {
-        parsed.set(name, NO_TABLE);
+        parsed.set(ref, NO_TABLE);
         return;
       }
       const path = foundRel !== undefined ? `${prefix}${foundRel}` : candidates[index];
       if (dbml && (foundRel !== undefined || index < dbmlPaths.length)) {
-        dbmlFound.add(name);
+        const rel = foundRel ?? dbmlPaths[index];
+        if (foundRel === undefined && use !== undefined && rel !== use.resolved) {
+          // Found by name in another folder the lines name: say so, as for a file the host finds.
+          warn(`Table "${name}" is not at its use line's path (${use.resolved}); it was read from ${rel}. The next ERD Studio edit fixes the line`);
+        }
+        dbmlFound.set(ref, rel);
         // Its schema folder, the schema of an unqualified Table (§1.2), and its layer.
-        const tree = dbmlTreePathOf(foundRel ?? dbmlPaths[index]);
+        const tree = dbmlTreePathOf(rel);
         const schemaFolder = tree?.schema;
-        if (tree) tableLayers?.set(name.toLowerCase(), tree.layer);
-        parsed.set(name, parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder));
+        if (tree) tableLayers?.set(ref.toLowerCase(), tree.layer);
+        parsed.set(ref, named(parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder), ref, tableNames.has(ref)));
         return;
       }
       // The YAML table's own warnings (a parse error, say) follow the mixed-state one.
@@ -519,15 +573,30 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         warn(`Table "${name}" is a YAML table (${path}); the DBML diagram shows it, but run ERD Studio: Convert Project to DBML before editing its relationships (fix the file first if Convert leaves it as it is)`, 'yamlTableInDbml');
       }
       for (const [m, code] of parseWarnings) warn(m, code);
-      parsed.set(name, table);
+      parsed.set(ref, named(table, ref, tableNames.has(ref)));
     });
+
+    // 7a. An older version kept one bare `erd_layout` line for two members of
+    // one name, and the reader gave it to the first. When that one's file is
+    // gone and the other's was read, the place is the other's (the table the
+    // line was written for), unless that one has its own line.
+    const positions = (obj.viewConfig as { positions?: Record<string, NodePosition> } | undefined)?.positions;
+    for (const ref of reading?.layoutSharedBare ?? []) {
+      const place = positions?.[ref];
+      if (!positions || !place || parsed.get(ref)?.model || parsed.get(ref)?.loadError) continue;
+      const heir = names.find((other) => other !== ref && bareName(other).toLowerCase() === bareName(ref).toLowerCase()
+        && parsed.get(other)?.model && !Object.prototype.hasOwnProperty.call(positions, other));
+      if (heir === undefined) continue;
+      delete positions[ref];
+      Object.defineProperty(positions, heir, { value: place, enumerable: true, writable: true, configurable: true });
+    }
 
     // 7b. A DBML diagram's relationships: the relationships files it imports,
     // and no other (another DBML tool draws no more), attached to the members
     // read (§1.4, §2.3).
     if (dbml && reading) {
       const relPaths = reading.relationshipsUses.filter(isInsideSemanticDir).sort(byteOrder);
-      const readings = (await mapWithLimit(relPaths, maxParallelReads, async (rel) => {
+      const readings = (await mapWithLimit(relPaths, maxParallelReads, async (rel): Promise<DbmlAttachReading | undefined> => {
         const path = `${prefix}${rel}`;
         const text = await readFile(path);
         if (text === null || text === undefined) {
@@ -540,25 +609,47 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         }
         const relReading: DbmlRelationshipsReading = dbml.readRelationships(text);
         for (const problem of relReading.problems) warn(`${path}: ${problem.message}`);
-        return { path, reading: relReading };
-      })).filter((r): r is NonNullable<typeof r> => r !== undefined);
+        return { path, reading: relReading, semanticPath: rel };
+      })).filter((r): r is DbmlAttachReading => r !== undefined);
       if (readings.length > 0) {
         const entries: DbmlAttachTable[] = [];
-        for (const [name, entry] of parsed) {
+        for (const [ref, entry] of parsed) {
           if (!entry.model) continue;
+          const rel = dbmlFound.get(ref);
+          const schema = rel !== undefined ? dbmlTreePathOf(rel)?.schema : undefined;
+          const tableName = tableNameOf(entry.model);
           entries.push({
-            table: entry.model,
-            storage: dbmlFound.has(name) ? 'dbml' : 'yaml',
+            // Matched by its own name; ends name it by its reference.
+            table: tableName !== undefined ? { ...entry.model, name: tableName } : entry.model,
+            storage: rel !== undefined ? 'dbml' : 'yaml',
             ...(entry.dbmlAlias !== undefined ? { dbmlAlias: entry.dbmlAlias } : {}),
+            ...(tableName !== undefined ? { ref } : {}),
+            ...(rel !== undefined ? { path: rel } : {}),
+            ...(schema !== undefined ? { schema } : {}),
           });
         }
+        // A Ref end whose qualifier names none of the one member of its name, while its own use line
+        // names another file: one read of that file says whether the end means a table elsewhere. Only
+        // such an end costs a read (none in a project whose qualifiers match); a read that fails says nothing.
+        // A path a member was already looked for at is known (a stale use line's own path, say).
+        const probes = contestedUsePaths(readings, entries).filter((rel) => isInsideSemanticDir(rel) && !tableFileExists.has(rel));
+        await mapWithLimit(probes, maxParallelReads, async (rel) => {
+          try {
+            const text = await readFile(`${prefix}${rel}`);
+            tableFileExists.set(rel, text !== null && text !== undefined);
+          } catch {
+            // Unknown: the end stays on the one table of its name, as it always drew.
+          }
+        });
         // Only the members were read, so a Ref whose owner is off this
         // diagram (or did not read) is no orphan here (§2.4: `partial`).
-        const attached = attachRelationships(readings, dbmlTableLookup(entries), { partial: true });
+        const lookup = dbmlTableLookup(entries, { exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true });
+        const attached = attachRelationships(readings, lookup, { partial: true });
         for (const message of attached.warnings) warn(message);
-        for (const [name, entry] of parsed) {
-          if (!entry.model || !dbmlFound.has(name)) continue;
-          const relationships = attached.byOwner.get(entry.model.name.toLowerCase());
+        for (const [ref, entry] of parsed) {
+          if (!entry.model || !dbmlFound.has(ref)) continue;
+          // A member's relationships are keyed by what ends call it: its reference, or (as before identities) its name.
+          const relationships = attached.byOwner.get((tableNameOf(entry.model) !== undefined ? ref : entry.model.name).toLowerCase());
           if (relationships && relationships.length > 0) entry.model.relationships = relationships;
         }
       }
@@ -594,6 +685,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
       warn: callerWarn,
       ...(reading ? { schemaVersion: reading.schemaVersion, domainNameFallback: fileName.slice(0, -'.dbml'.length) } : {}),
       ...(tableLayers && tableLayers.size > 0 ? { tableLayers } : {}),
+      ...(tableNames.size > 0 ? { tableNames } : {}),
       ...(fields ? { fields } : {}),
     });
   } catch (err) {
@@ -625,8 +717,10 @@ function buildDisplaySubjectArea(
     schemaVersion?: number;
     /** The name when the file names none (a DBML diagram's stem). */
     domainNameFallback?: string;
-    /** A DBML diagram's members: the layer of the file each was read from, by lower-case name. */
+    /** A DBML diagram's members: the layer of the file each was read from, by lower-case reference. */
     tableLayers?: ReadonlyMap<string, string>;
+    /** A DBML diagram's members whose reference is not their name (`<schema>.<name>`): reference -> name. */
+    tableNames?: ReadonlyMap<string, string>;
     /** The project's field list (`readFieldsFile`), when its fields.yml was read. */
     fields?: FieldList;
   },
@@ -684,11 +778,19 @@ function buildDisplaySubjectArea(
     ...(ctx.fields ? { fields: ctx.fields } : {}),
   });
   const layerOf = (name: string): string | undefined => ctx.tableLayers?.get(name.toLowerCase());
-  if (!display.models.some((m) => layerOf(m.name) !== undefined)) return display;
+  // A member named `<schema>.<name>` keeps its own name beside it, a placeholder for a missing one too.
+  const withName = (m: DisplaySubjectArea['models'][number]): DisplaySubjectArea['models'][number] => {
+    const tableName = ctx.tableNames?.get(m.name);
+    if (tableName === undefined || m.tableName !== undefined) return m;
+    const { name, ...rest } = m;
+    return { name, tableName, ...rest };
+  };
+  const named = ctx.tableNames ? { ...display, models: display.models.map(withName) } : display;
+  if (!named.models.some((m) => layerOf(m.name) !== undefined)) return named;
   return {
-    ...display,
+    ...named,
     layerConfigs: ctx.layers.map((l) => ({ ...l })),
-    models: display.models.map((m) => {
+    models: named.models.map((m) => {
       const layer = layerOf(m.name);
       return layer !== undefined ? { ...m, layer } : m;
     }),
@@ -747,6 +849,18 @@ interface ParsedTable {
 }
 
 const NO_TABLE: ParsedTable = { model: null, copies: 0 };
+
+/**
+ * `table` as the diagram names it: unchanged when `ref` is the name it was
+ * read under; else (a member named `<schema>.<name>` because another member
+ * shares its name) named `ref`, with its own name kept as `tableName`, which
+ * the canvas labels it by and dbt knows it by.
+ */
+function named(table: ParsedTable, ref: string, sharesName: boolean): ParsedTable {
+  if (!table.model || !sharesName) return table;
+  const model: DiagramNamedTable = { ...table.model, name: ref, tableName: table.model.name };
+  return { ...table, model };
+}
 
 /** Parse one model file's text, charging it to the budgets. */
 function parseTable(

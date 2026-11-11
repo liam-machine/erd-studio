@@ -29,12 +29,13 @@ import {
   linkKey,
   parseSubjectAreaJson,
   subjectAreaStorageOf,
+  tableNameOf,
   toLogicalStage,
   validateSubjectAreaDocument,
 } from '@erd-studio/core';
 import { subjectAreaMembersDbml } from '@erd-studio/core/dbml';
 import { readDbmlDiagram, rememberedDbmlMembers } from './dbmlDiagramReadings';
-import type { DbmlSubjectAreaReading, DbtKeyIndex, LoaderWarningCode, SubjectAreaFormat } from '@erd-studio/core';
+import type { DbmlSubjectAreaReading, DbtKeyIndex, DiagramNamedTable, LoaderWarningCode, SubjectAreaFormat } from '@erd-studio/core';
 import type { SubjectAreaSummary, SemanticSubjectArea, SemanticTable, UnifiedSubjectArea } from '../types/semantic';
 import type { DisplaySubjectArea, DisplayTable, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { CompositeForeignKey, ManifestData } from '../types/manifest';
@@ -161,7 +162,10 @@ export function renameSubjectAreaInRaw(rawText: string, newSlug: string): string
  * relationships files it imports. The canvas draws only these, as core does.
  */
 interface DbmlDiagramView {
+  /** Each member's `use` path, by lower-case reference (core's `uses[].ref`: its name, or `<schema>.<name>` for a shared name). */
   memberPaths: ReadonlyMap<string, string>;
+  /** The members whose reference is not their name (two members share it): lower-case reference -> name. */
+  tableNames: ReadonlyMap<string, string>;
   /** The table folders its `use` lines name, relative to the semantic dir, byte-sorted (core's `useTableDirs`). */
   useTableDirs: readonly string[];
   imports: ReadonlySet<string>;
@@ -172,7 +176,7 @@ interface DbmlDiagramView {
   unlinked: ReadonlySet<string>;
   /** Filled while reading: the files holding a relationship between two members that the diagram does not import. */
   drift: Set<string>;
-  /** Filled while reading: each DBML member's layer, from the file it was read from (by lower-case name). */
+  /** Filled while reading: each DBML member's layer, from the file it was read from (by lower-case reference). */
   memberLayers?: Map<string, string>;
   /** The library's table files by resolved path (and lower-cased), listed once per diagram read on first use. */
   listing?: { byPath: Map<string, TableFileEntry>; byLowerPath: Map<string, TableFileEntry> };
@@ -377,7 +381,8 @@ export class SubjectAreaService {
       reading.warnings.forEach((_w, i) => codes.add(reading.warningCodes?.[i] ?? 'other'));
       const { obj, format } = validateSubjectAreaDocument(reading.obj, filePath);
       const view: DbmlDiagramView = {
-        memberPaths: new Map((reading.uses ?? []).map((u) => [u.name.toLowerCase(), u.resolved])),
+        memberPaths: new Map((reading.uses ?? []).map((u) => [(u.ref ?? u.name).toLowerCase(), u.resolved])),
+        tableNames: new Map((reading.uses ?? []).filter((u) => u.ref !== undefined && u.ref !== u.name).map((u) => [u.ref!.toLowerCase(), u.name])),
         useTableDirs: reading.useTableDirs ?? [],
         imports: new Set(reading.relationshipsUses),
         unlinked: new Set((reading.unlinked ?? [])
@@ -451,9 +456,10 @@ export class SubjectAreaService {
     const raw = text ?? fs.readFileSync(filePath, 'utf-8');
     const reading = readDbmlDiagram(raw, filePath);
     for (const warning of reading.warnings) log.warn(`[DomainService] ${filePath}: ${warning}`);
-    // Only a library that holds a YAML table can resolve a member to one.
+    // Only a library that holds a YAML table can resolve a member to one (by its name, never `<schema>.<name>`).
     if (this.tableLibraryService?.hasYamlTableFiles()) {
-      for (const name of new Set(reading.members)) {
+      const names = reading.uses ? [...reading.uses.map((u) => u.name), ...(reading.unlinked ?? [])] : reading.members;
+      for (const name of new Set(names)) {
         if (this.tableLibraryService.tableStorage(name) === 'yaml') {
           log.warn(
             `[DomainService] Table "${name}" is a YAML table (${this.tableLibraryService.tableLibraryFile(name)}); the DBML diagram shows it, ` +
@@ -496,8 +502,9 @@ export class SubjectAreaService {
     // The diagram's own tables are read with only the relationships they own
     // worked out (`readingTables`), not an attach over the whole library.
     const library = this.tableLibraryService;
+    const names = tableNamesOf(obj).map((ref) => bareNameOf(ref, options.dbml));
     return library
-      ? library.readingTables(tableNamesOf(obj), () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
+      ? library.readingTables(names, () => this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options))
       : this.buildUnifiedNow(obj, format, filePath, domainNameFallback, options);
   }
 
@@ -521,12 +528,17 @@ export class SubjectAreaService {
         ? (name) => {
           if (!view) return library.getTable(name);
           const model = this.dbmlMember(library, name, view);
-          return model ? this.importedRelationshipsOnly(library, model, view, members) : null;
+          const tableName = model ? tableNameOf(model) : undefined;
+          if (!model || tableName === undefined) return model ? this.importedRelationshipsOnly(library, model, view, members) : null;
+          // The library knows the table by its name: its relationships are worked out under that name.
+          const { tableName: _ref, ...own } = model as DiagramNamedTable;
+          const named: DiagramNamedTable = { ...this.importedRelationshipsOnly(library, { ...own, name: tableName }, view, members), name: model.name, tableName };
+          return named;
         }
         : undefined,
       getModelError: this.tableLibraryService
         ? (name) => {
-          const error = this.tableLibraryService!.getTableFileError(name);
+          const error = this.tableLibraryService!.getTableFileError(bareNameOf(name, view));
           return error
             ? {
               kind: error.kind,
@@ -558,17 +570,22 @@ export class SubjectAreaService {
    * anywhere else is drawn missing, as core draws it, until the next edit
    * gives it a `use` line.
    */
-  private dbmlMember(library: TableLibraryService, name: string, view: DbmlDiagramView): SemanticTable | null {
+  private dbmlMember(library: TableLibraryService, ref: string, view: DbmlDiagramView): SemanticTable | null {
+    // Two members of one name are named `<schema>.<name>` (core's reference): each is read by its
+    // name from its own `use` path, and handed on under its reference with its name beside it.
+    const name = bareNameOf(ref, view);
     // The layer of the file the member is read from, for the canvas's badge (core reads it the
     // same way): a file that cannot be read is still in its layer, and drawn there with its error.
     const readFrom = (file: string | null, table: SemanticTable | null): SemanticTable | null => {
       if (file !== null && view.memberLayers) {
         const entry = listingOf(library, view).byPath.get(path.resolve(file));
-        if (entry?.layer !== undefined) view.memberLayers.set(name.toLowerCase(), entry.layer);
+        if (entry?.layer !== undefined) view.memberLayers.set(ref.toLowerCase(), entry.layer);
       }
-      return table;
+      if (!table || name === ref) return table;
+      const named: DiagramNamedTable = { ...table, name: ref, tableName: table.name };
+      return named;
     };
-    const usePath = view.memberPaths.get(name.toLowerCase());
+    const usePath = view.memberPaths.get(ref.toLowerCase());
     if (usePath === undefined) {
       const listed = listingOf(library, view).byLowerPath;
       for (const dir of view.useTableDirs) {
@@ -1360,6 +1377,11 @@ export function mergeCompositeGroups(
 }
 
 /** The table names a validated diagram object's logical stage lists (v5 / v6 name strings; none for v4's inline tables). */
+/** A DBML member's name from its reference (`<schema>.<name>` for a name two members share); any other name is its own. */
+function bareNameOf(ref: string, view: DbmlDiagramView | undefined): string {
+  return view?.tableNames.get(ref.toLowerCase()) ?? ref;
+}
+
 function tableNamesOf(obj: Record<string, unknown>): string[] {
   const logical = obj.logical;
   if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return [];

@@ -27,6 +27,7 @@
 
 import { findConflictMarkers } from './mergeConflict.js';
 import type { Annotation, NodePosition } from './types/semantic.js';
+import { resolveTableRefs, tableIdKey, type TableRefCandidate } from './tableIdentity.js';
 
 /** A note line's prefix: `note/<id> x y` or `note/<id> x y w h`. A table name never starts with it. */
 export const ERD_LAYOUT_NOTE_PREFIX = 'note/';
@@ -377,36 +378,75 @@ export interface ErdLayoutView {
   positions: Record<string, NodePosition>;
   /** A box for each Note id: its sticky line, else a place beside everything laid out. */
   boxes: Record<string, ErdLayoutSticky>;
+  /**
+   * The members placed by a line that names them by a bare name another
+   * member shares (an older version's one line for two tables), in line
+   * order. Absent when there is none.
+   */
+  sharedBare?: string[];
 }
 
 /**
  * A layout as the diagram reader maps it onto the diagram: each table line
- * is matched to a member exactly first, then case-insensitively (a member is
- * a file stem, which may differ in case from the declared name, D2), and
- * re-keyed to the member's spelling. An exact line wins over a case variant,
- * which then stays a stray under its own name, as does a line that matches
- * no member (strays are kept: the next write keeps them too). Each Note in
+ * is matched to a member and re-keyed to the member's reference (its entry in
+ * `members`). A line names a member by its reference, without case (a member
+ * is a file stem, which may differ in case from the declared name, D2), by
+ * `<schema>.<name>` or by its bare name when only one member has it
+ * (`resolveTableRefs`, which lets a qualified line claim its table first, so
+ * a bare line beside it places only the other table of that name, or
+ * nothing). A bare name two members share places the first of them, in use
+ * order, that no qualified line placed: an old diagram's single line lands
+ * somewhere deterministic, and the next write spells both lines.
+ *
+ * When several lines name one member, the one spelled exactly as its
+ * reference wins, else the first; the others stay strays under their own
+ * names (strays are kept: the next write keeps them too), except one spelled
+ * like a member's reference, which would take its place. Each Note in
  * `noteIds` (file order) gets its sticky line's box, else a place from
- * {@link placeUnlaidStickies}. Pure and parser-free.
+ * {@link placeUnlaidStickies}. `tables` (index for index with `members`) says
+ * which schema folder each member's file is in and what other qualifiers name
+ * it; without it every member is matched by its reference alone. Pure and
+ * parser-free.
  */
-export function erdLayoutView(layout: ErdLayout, members: readonly string[], noteIds: readonly string[]): ErdLayoutView {
-  const memberOf = new Map<string, string>();
-  for (const member of members) {
-    if (typeof member === 'string' && !memberOf.has(member.toLowerCase())) memberOf.set(member.toLowerCase(), member);
-  }
+export function erdLayoutView(
+  layout: ErdLayout,
+  members: readonly string[],
+  noteIds: readonly string[],
+  tables?: readonly TableRefCandidate[],
+): ErdLayoutView {
+  const candidates: TableRefCandidate[] = [];
+  members.forEach((member, i) => {
+    if (typeof member !== 'string') return;
+    const table = tables?.[i];
+    candidates.push(table !== undefined && table.ref === member ? table : { schema: '', name: member, ref: member });
+  });
   const names = Object.keys(layout.positions);
-  const taken = new Set(names.filter((name) => memberOf.get(name.toLowerCase()) === name).map((name) => name.toLowerCase()));
-  const positions: Record<string, NodePosition> = {};
-  for (const name of names) {
-    const key = name.toLowerCase();
-    const member = memberOf.get(key);
-    if (member !== undefined && member !== name && !taken.has(key)) {
-      taken.add(key);
-      setEntry(positions, member, layout.positions[name]);
-    } else {
-      setEntry(positions, name, layout.positions[name]);
-    }
+  const resolved = resolveTableRefs(names, candidates, { onAmbiguous: 'first' });
+  // The line that places each member (by its reference): its exact spelling, else the first.
+  const winner = new Map<string, number>();
+  resolved.forEach((index, line) => {
+    if (index === undefined) return;
+    const ref = candidates[index].ref;
+    const held = winner.get(ref);
+    if (held === undefined || (names[held] !== ref && names[line] === ref)) winner.set(ref, line);
+  });
+  const placedRefs = new Set(winner.keys());
+  // How many members (distinct tables) each bare name names, for the lines that name one only that way.
+  const tablesNamed = new Map<string, Set<string>>();
+  for (const c of candidates) {
+    const key = c.name.trim().toLowerCase();
+    tablesNamed.set(key, (tablesNamed.get(key) ?? new Set()).add(tableIdKey(c)));
   }
+  const sharedBare: string[] = [];
+  const positions: Record<string, NodePosition> = {};
+  names.forEach((name, line) => {
+    const index = resolved[line];
+    const ref = index !== undefined ? candidates[index].ref : undefined;
+    if (ref !== undefined && winner.get(ref) === line) {
+      setEntry(positions, ref, layout.positions[name]);
+      if (name.trim().toLowerCase() !== ref.trim().toLowerCase() && (tablesNamed.get(name.trim().toLowerCase())?.size ?? 0) > 1) sharedBare.push(ref);
+    } else if (!placedRefs.has(name)) setEntry(positions, name, layout.positions[name]);
+  });
   const laid = new Map(layout.stickies.map((s) => [s.id, s] as const));
   const placed = placeUnlaidStickies(noteIds, positions, layout.stickies);
   const boxes: Record<string, ErdLayoutSticky> = {};
@@ -422,5 +462,5 @@ export function erdLayoutView(layout: ErdLayout, members: readonly string[], not
       ...(sticky?.height !== undefined ? { height: sticky.height } : {}),
     });
   }
-  return { positions, boxes };
+  return { positions, boxes, ...(sharedBare.length > 0 ? { sharedBare } : {}) };
 }

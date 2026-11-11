@@ -101,7 +101,7 @@ export interface DbmlStoredRef {
   owner: string;
   /** The other end's table part, spelled the same way. */
   target: string;
-  /** The owner end's schema qualifier as written (`gold` in `gold.x.id`); absent for an unqualified end. Ends are matched by table name alone. */
+  /** The owner end's schema qualifier as written (`gold` in `gold.x.id`); absent for an unqualified end. It tells two tables of one name apart (`attachRelationships`). */
   ownerQualifier?: string;
   /** The other end's schema qualifier as written; absent for an unqualified end. */
   targetQualifier?: string;
@@ -150,11 +150,30 @@ export interface DbmlRelationshipsReading {
    * there is none, and from a reader older than 2.0's.
    */
   uses?: string[];
+  /**
+   * Each table a selective `use { table … }` line imports, in file order:
+   * the specifier's table name and schema qualifier as written (unquoted),
+   * and the line's path as written. Resolved against the file's folder, the
+   * path names the table file a Ref end spelled like the specifier means
+   * (`attachRelationships`, rule 1). Optional: absent when there is none,
+   * and from a reader older than schema-scoped identity.
+   */
+  useTables?: DbmlUseTable[];
+}
+
+/** A table a relationships file's selective `use` line imports ({@link DbmlRelationshipsReading.useTables}). */
+export interface DbmlUseTable {
+  /** The specifier's table name, as written. */
+  table: string;
+  /** The specifier's schema qualifier, as written; absent for an unqualified one. */
+  qualifier?: string;
+  /** The line's path, as written. */
+  path: string;
 }
 
 /** A table `use` line of a diagram: the member it names and where its path points. */
 export interface DbmlMemberUse {
-  /** The member: the path's stem. */
+  /** The member's table name: the path's stem. */
   name: string;
   /** The path as written. */
   path: string;
@@ -162,6 +181,25 @@ export interface DbmlMemberUse {
   resolved: string;
   /** 1-based. */
   line: number;
+  /**
+   * What the diagram calls the member: its `name`, unless another member of
+   * the diagram (another schema folder) has the same name, then
+   * `<schema>.<name>` (core's `assignTableRefs`). It is the member's entry in
+   * `members`, `logical.models`, positions and relationship ends. Optional:
+   * absent from a reader older than schema-scoped identity, which means
+   * `name`. Set, with the three below, by `parseSubjectAreaDbml`; the lighter
+   * `diagramSummaryDbml` leaves them unset (its `members` holds each reference).
+   */
+  ref?: string;
+  /**
+   * The schema folder of the table file the path names (`<layer>/tables/<schema>/`),
+   * spelled as the path spells it; absent when the path is not a table file's.
+   */
+  schema?: string;
+  /** The layer folder of the table file the path names; absent when the path is not a table file's. */
+  layer?: string;
+  /** The schema qualifier the line's table specifier writes (`ccc` in `use { table ccc.addresse }`); absent when it writes none. */
+  qualifier?: string;
 }
 
 /** A `.dbml` diagram, read into the v5 shape the rest of core reads (`parseSubjectAreaDbml`). */
@@ -222,6 +260,14 @@ export interface DbmlSubjectAreaReading {
   layoutProblems?: DbmlProblem[];
   /** 1-based file line of the first git conflict marker inside `erd_layout`: positions are not saved until it is resolved. */
   layoutConflictLine?: number;
+  /**
+   * Members placed by an `erd_layout` line that names them by a bare name
+   * another member shares (one line kept for two tables by an older
+   * version): the first of them in use order took it. A loader that finds
+   * that one missing gives the place to the other. Optional: absent when
+   * there is none, and from a reader older than schema-scoped identity.
+   */
+  layoutSharedBare?: string[];
 }
 
 /** The DBML readers `loadDisplaySubjectArea` needs; `dbmlStorageReader` from `@erd-studio/core/dbml` is one. */
@@ -290,11 +336,36 @@ export interface DbmlDiagnostic {
 
 /** A table `attachRelationships` may attach a Ref to, or resolve a Ref's other end against. */
 export interface DbmlAttachTable {
-  /** The table as read: its `name` is the real spelling, its columns give the real column spellings and the key. */
-  table: Pick<SemanticTable, 'name' | 'columns'>;
+  /**
+   * The table as read: its `name` is the real spelling, its columns give the
+   * real column spellings and the key, and its `schema` (when set) is the
+   * qualifier its file declares, which a Ref end may write.
+   */
+  table: Pick<SemanticTable, 'name' | 'columns'> & Partial<Pick<SemanticTable, 'schema'>>;
   storage: 'yaml' | 'dbml';
   /** A DBML alias (`Table fct_order as FO`) Ref ends may use. */
   dbmlAlias?: string;
+  /**
+   * What relationship ends name the table by, in the caller's scope: its
+   * name, or `<schema>.<name>` where another table of the scope has the same
+   * name (`assignTableRefs`). Absent: `table.name`.
+   */
+  ref?: string;
+  /** The table file's path, posix and relative to the semantic dir, which a relationships file's `use` line can name. */
+  path?: string;
+  /** The table file's schema folder (`<layer>/tables/<schema>/`), which a Ref end's qualifier can name. */
+  schema?: string;
+}
+
+/**
+ * What one Ref end says about its table, beside its name, for a
+ * `dbmlTableLookup` to tell same-named tables apart: the schema qualifier the
+ * end writes, and the table file the relationships file's own `use` line for
+ * that spelling names (resolved, relative to the semantic dir).
+ */
+export interface DbmlRefEndHint {
+  qualifier?: string;
+  usePath?: string;
 }
 
 /** Where one Ref is, for the attach step's reports. */
@@ -302,14 +373,22 @@ export interface DbmlRefLocation {
   /** The relationships file, as the caller named it. */
   path: string;
   line: number;
-  /** The owner as resolved (real spelling), or as spelled when no table has that name. */
+  /** The owner as resolved (its reference), or as spelled when no table has that name. */
   owner: string;
   target: string;
+  /** The owner's table file, when it resolved to a table whose path the caller gave. Optional. */
+  ownerPath?: string;
+  /** The other end's table file, when it resolved to a table whose path the caller gave. Optional. */
+  targetPath?: string;
 }
 
 /** What {@link DbmlAttachTable}s gained from the relationships files read. */
 export interface DbmlAttachResult {
-  /** Each DBML owner's relationships (lower-case name → list), in file order, with `compositeKey`s derived. */
+  /**
+   * Each DBML owner's relationships (its lower-case reference → list: its
+   * name, unless the scope holds another table of that name), in file order,
+   * with `compositeKey`s derived.
+   */
   byOwner: Map<string, TableRelationship[]>;
   /** Refs owned by a YAML table or by no table: not attached, never touched. */
   orphaned: DbmlRefLocation[];

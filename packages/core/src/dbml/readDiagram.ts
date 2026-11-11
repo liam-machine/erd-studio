@@ -30,7 +30,8 @@ import { erdLayoutView } from '../erdLayout.js';
 import { erdLayoutSpanInAst, readErdLayoutFromAst } from './erdLayoutDbml.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { isSafeTableName } from '../logicalModel.js';
-import { classifySemanticFile, dbmlNotADiagramMessage, diagramPathOf, dirnamePosix, resolvePosix } from '../storage.js';
+import { classifySemanticFile, dbmlNotADiagramMessage, dbmlTreePathOf, diagramPathOf, dirnamePosix, resolvePosix } from '../storage.js';
+import { assignTableRefs, matchTableRef, resolveTableRef, resolveTableRefs, type TableRefCandidate } from '../tableIdentity.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -90,6 +91,10 @@ export interface DiagramUseRole {
   role: 'member' | 'mismatch' | 'relationships' | 'other' | 'ignored';
   /** A member's name: the table file's stem. */
   name?: string;
+  /** A `member`'s schema folder (`<layer>/tables/<schema>/`), spelled as the path spells it: with `name`, the table's identity. */
+  schema?: string;
+  /** A `member`'s layer folder (not part of its identity). */
+  layer?: string;
 }
 
 /**
@@ -102,23 +107,74 @@ export interface DiagramUseRole {
 export function diagramUseRole(resolved: string, wildcard: boolean, importsTables: boolean, stem: string): DiagramUseRole {
   const shape = classifySemanticFile(resolved, { tablesDirIsLayer: false });
   if (shape.kind === 'table' && shape.storage === 'dbml' && (wildcard || importsTables) && isSafeTableName(shape.name!)) {
-    return { role: 'member', name: shape.name! };
+    const tree = dbmlTreePathOf(resolved);
+    return { role: 'member', name: shape.name!, ...(tree?.schema !== undefined ? { schema: tree.schema, layer: tree.layer } : {}) };
   }
   if (wildcard) return { role: shape.kind === 'relationships' ? 'relationships' : 'other' };
   return importsTables && isSafeTableName(stem) ? { role: 'mismatch', name: stem } : { role: 'ignored' };
 }
 
-/** The table names a selective `use { table x }` line names (unqualified), or [] for `use *`. */
-function specifiedTables(node: AstNode): string[] {
+/** A table a selective `use` line names: its name and its schema qualifier, as written. */
+interface SpecifiedTable {
+  name: string;
+  qualifier?: string;
+}
+
+/** The tables a selective `use { table x }` line names, or [] for `use *`. */
+function specifiedTables(node: AstNode): SpecifiedTable[] {
   const list = node.specifiers;
   if (!list || list.kind === '<wildcard>' || !Array.isArray(list.specifiers)) return [];
-  const names: string[] = [];
+  const tables: SpecifiedTable[] = [];
   for (const specifier of list.specifiers as AstNode[]) {
     if (String(specifier?.importKind?.value ?? '').toLowerCase() !== 'table') continue;
     const parts = plainNames(specifier.name);
-    if (parts && parts.length > 0) names.push(parts[parts.length - 1]);
+    if (parts && parts.length > 0) {
+      const name = parts[parts.length - 1];
+      tables.push(parts.length > 1 ? { name, qualifier: parts[parts.length - 2] } : { name });
+    }
   }
-  return names;
+  return tables;
+}
+
+/** The qualifier a member's `use` line writes for it: the specifier of its name, else the first. */
+function qualifierFor(name: string, specified: readonly SpecifiedTable[]): string | undefined {
+  return (specified.find((t) => t.name.toLowerCase() === name.toLowerCase()) ?? specified[0])?.qualifier;
+}
+
+/**
+ * Each `use` member's reference on the diagram (`assignTableRefs`): its name,
+ * or `<schema>.<name>` when another member's file, in another schema folder,
+ * has the same name. Sets each use's `ref` and returns the references in order.
+ */
+function assignMemberRefs(uses: DbmlMemberUse[]): string[] {
+  const refs = assignTableRefs(uses.map((u) => ({ schema: u.schema ?? '', name: u.name })));
+  uses.forEach((u, i) => { u.ref = refs[i]; });
+  return refs;
+}
+
+/**
+ * The diagram's members as text names them (`resolveTableRef`): each `use`
+ * member by its reference, its schema folder and the qualifier its line
+ * writes; then each `erd_unlinked_tables` member by its name.
+ */
+function memberCandidates(uses: readonly DbmlMemberUse[], unlinked: readonly string[]): TableRefCandidate[] {
+  return [
+    ...uses.map((u) => ({ schema: u.schema ?? '', name: u.name, ref: u.ref ?? u.name, ...(u.qualifier !== undefined ? { qualifiers: [u.qualifier] } : {}) })),
+    ...unlinked.map((name) => ({ schema: '', name, ref: name })),
+  ];
+}
+
+/**
+ * What diagram text that only places or links a table (an `erd_stub_columns`
+ * entry, a sticky note's `linked_table`) names: the member's reference when
+ * the text names a member by another spelling (`ccc.addresse` for a member the
+ * diagram calls `addresse`, or the reverse), else the text as written. A bare
+ * name two members share goes to the first of them.
+ */
+function placedRef(text: string, candidates: readonly TableRefCandidate[], index: number | undefined): string {
+  if (index === undefined) return text;
+  const ref = candidates[index].ref;
+  return ref.trim().toLowerCase() === text.trim().toLowerCase() ? text : ref;
 }
 
 function invalidDbml(filePath: string, d: ParserDiagnostic): SubjectAreaFileError {
@@ -231,7 +287,6 @@ export function parseSubjectAreaDbml(
     if (warningCodes.length < warnings.length) warningCodes.push(code);
   };
   const blanks: Array<{ start: number; end: number }> = [];
-  const members: string[] = [];
   const uses: DbmlMemberUse[] = [];
   const tableDirs = new Set<string>();
   const relationshipsUses: string[] = [];
@@ -269,7 +324,7 @@ export function parseSubjectAreaDbml(
         // in another case than its stem (D2), and the specifier spells the
         // declared name: only a different name is a mismatch. A path whose case
         // differs from the file on disk needs a listing (host, doctor; §3.4).
-        const misnamed = specified.find((n) => n.toLowerCase() !== name.toLowerCase());
+        const misnamed = specified.find((t) => t.name.toLowerCase() !== name.toLowerCase())?.name;
         if (misnamed !== undefined) {
           warnings.push(`Line ${line}: the use line imports table ${misnamed} from '${importPath}', whose file is named ${name} (usePathMismatch); the table is read by its file name`);
           coded('usePathMismatch');
@@ -278,8 +333,12 @@ export function parseSubjectAreaDbml(
         warnings.push(`Line ${line}: the use line for ${name} points at '${importPath}', not at a table file in <layer>/tables/<schema>/ (usePathMismatch); the table is still read by name`);
         coded('usePathMismatch');
       }
-      members.push(name);
-      uses.push({ name, path: importPath, resolved, line });
+      const qualifier = qualifierFor(name, specified);
+      uses.push({
+        name, path: importPath, resolved, line,
+        ...(use.schema !== undefined ? { schema: use.schema, layer: use.layer } : {}),
+        ...(qualifier !== undefined ? { qualifier } : {}),
+      });
       continue;
     }
     const type = elementType(node);
@@ -367,8 +426,12 @@ export function parseSubjectAreaDbml(
   }
   const layoutOptions = jsonValue(projectText(DBML_DIAGRAM_PROPERTIES.layoutOptions), DBML_DIAGRAM_PROPERTIES.layoutOptions, isStringRecord, warnings);
   if (layoutOptions) viewConfig.layoutOptions = layoutOptions;
-  const stubColumns = jsonValue(projectText(DBML_DIAGRAM_PROPERTIES.stubColumns), DBML_DIAGRAM_PROPERTIES.stubColumns, isStringArray, warnings);
+  const rawStubColumns = jsonValue(projectText(DBML_DIAGRAM_PROPERTIES.stubColumns), DBML_DIAGRAM_PROPERTIES.stubColumns, isStringArray, warnings);
   const modelFolder = projectText(DBML_DIAGRAM_PROPERTIES.modelFolder);
+
+  // Each `use` member is named by its reference: its name, unless another
+  // member (a file in another schema folder) has the same name.
+  const members = assignMemberRefs(uses);
 
   // Members with no table file to `use` (D26): read by name, after the `use` members. Read from the AST,
   // as subjectAreaMembersDbml reads it (trees, commands, the CLI), so every reader lists the same members.
@@ -376,14 +439,25 @@ export function parseSubjectAreaDbml(
   if (unlinkedEntry.count > 1) {
     warnings.push(`The Project names ${DBML_DIAGRAM_PROPERTIES.unlinkedTables} ${unlinkedEntry.count} times; only the last is read. Keep one`);
   }
-  const unlinked = unlinkedMembers(unlinkedEntry.value, members, warnings);
+  const unlinked = unlinkedMembers(unlinkedEntry.value, uses.map((u) => u.name), warnings);
   members.push(...unlinked);
+  const candidates = memberCandidates(uses, unlinked);
+  const stubColumns = rawStubColumns && resolveTableRefs(rawStubColumns, candidates, { onAmbiguous: 'first' })
+    .map((index, i) => placedRef(rawStubColumns[i], candidates, index));
 
-  // Pending relationships (D27): the diagram's own, owned by a table with no table file.
+  // Pending relationships (D27): the diagram's own, owned by a table with no table file. Each end names a member
+  // by its qualifier and name as a relationship end does (`pendingEnd`).
   const pendingProblems: DbmlProblem[] = [];
   const pendingRefs = readPendingRefs(text, parser, pendingProblems, topLevel(first.ast));
   for (const problem of pendingProblems) warnings.push(problem.message);
-  const pending = pendingRefs.map((ref) => ({ line: ref.line, relationships: ref.relationships }));
+  const pending = pendingRefs.map((ref) => ({
+    line: ref.line,
+    relationships: ref.relationships.map((rel) => ({
+      ...rel,
+      fromModel: pendingEnd(rel.fromModel, ref.ownerQualifier, candidates),
+      toModel: pendingEnd(rel.toModel, ref.targetQualifier, candidates),
+    })),
+  }));
   const ownRelationships = pendingRelationships(pending.map((p) => p.relationships));
 
   // erd_layout (§1.6): table positions and sticky-note boxes, from the first Project.
@@ -402,7 +476,7 @@ export function parseSubjectAreaDbml(
     warnings.push(problem.line !== undefined ? `Line ${problem.line}: ${problem.message}` : problem.message);
     coded(problem.code === 'layoutMergeConflict' ? 'layoutMergeConflict' : 'layoutProblem');
   }
-  const view = erdLayoutView(layout, members, noteIds);
+  const view = erdLayoutView(layout, members, noteIds, candidates);
   viewConfig.positions = view.positions;
 
   // Notes: sticky notes, in file order.
@@ -425,7 +499,9 @@ export function parseSubjectAreaDbml(
       if (box.width !== undefined) annotation.width = box.width;
       if (box.height !== undefined) annotation.height = box.height;
       const linked = textOf(note.metadata?.[DBML_RICH_NOTE_PROPERTIES.linkedTable], text);
-      if (linked !== undefined && linked !== '') annotation.linkedModel = linked;
+      if (linked !== undefined && linked !== '') {
+        annotation.linkedModel = placedRef(linked, candidates, resolveTableRef(linked, candidates, { onAmbiguous: 'first' }));
+      }
       annotations.push(annotation);
     }
     if (annotations.length > 0) viewConfig.annotations = annotations;
@@ -464,6 +540,7 @@ export function parseSubjectAreaDbml(
     ...(pending.length > 0 ? { pending } : {}),
     ...(layoutProblems.length > 0 ? { layoutProblems } : {}),
     ...(layout.conflictLine !== undefined ? { layoutConflictLine: layout.conflictLine } : {}),
+    ...(view.sharedBare ? { layoutSharedBare: view.sharedBare } : {}),
   };
 }
 
@@ -489,6 +566,20 @@ function unlinkedMembers(value: string | undefined, members: readonly string[], 
     out.push(name);
   }
   return out;
+}
+
+/**
+ * The member a pending relationship's end names (its table part and the
+ * qualifier it writes), as a relationship end is resolved: by its
+ * `<qualifier>.<name>`, else by its name when one member has it (a
+ * qualifier that names no member is no reason to drop a line 2.0 drew).
+ * The member's reference when it is spelled otherwise than the end; else
+ * the end's table part as written (it names nothing, or several members).
+ */
+function pendingEnd(table: string, qualifier: string | undefined, candidates: readonly TableRefCandidate[]): string {
+  let match = matchTableRef(qualifier !== undefined ? `${qualifier}.${table}` : table, candidates);
+  if (match.kind === 'missing' && qualifier !== undefined) match = matchTableRef(table, candidates);
+  return match.kind === 'found' ? placedRef(table, candidates, match.index) : table;
 }
 
 /** Pending Refs as a diagram's own relationships: a Ref of several column pairs is one composite (`nextCompositeKey`, per owner, in file order). */
@@ -534,17 +625,25 @@ export function subjectAreaMembersDbml(rawText: string, filePath: string, parser
  */
 export function diagramMembersFromAst(ast: AstNode, text: string, filePath?: string): string[] {
   const dir = filePath !== undefined ? diagramPathOf(filePath)?.dir : undefined;
-  const members = usesOf(ast, text, dir).members;
+  const { members, memberUses } = usesOf(ast, text, dir);
   const unlinked = projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
-  members.push(...unlinkedMembers(unlinked, members, []));
+  members.push(...unlinkedMembers(unlinked, memberUses.map((u) => u.name), []));
   return members;
 }
 
 /** What {@link diagramSummaryDbml} reads from a diagram of the layer-first tree. */
 export interface DbmlDiagramSummary {
-  /** The `use` members, in file order: each named by its file stem. */
+  /**
+   * The `use` members, in file order: each named by its reference, its file
+   * stem unless another member's file in another schema folder has the same
+   * stem (then `<schema>.<stem>`, `assignTableRefs`).
+   */
   members: string[];
-  /** The `use` line of each member, in the same order. */
+  /**
+   * The `use` line of each member, in the same order: its `name`, `path`,
+   * `resolved` and `line` (the reference is `members[i]`; the schema folder
+   * and layer are the resolved path's, `tableIdOfPath`).
+   */
   memberUses: DbmlMemberUse[];
   /** The relationships files the diagram imports (`use *`), resolved, without repeats, in file order. */
   relationshipsUses: string[];
@@ -560,25 +659,27 @@ export interface DbmlDiagramSummary {
  * selective table imports are members.
  */
 function usesOf(ast: AstNode, text: string, dir: string | undefined): Omit<DbmlDiagramSummary, 'unlinked'> {
-  const members: string[] = [];
   const memberUses: DbmlMemberUse[] = [];
+  // Each member's identity (its schema folder and name), for its reference; the uses keep the shape they always had.
+  const identities: Array<{ schema: string; name: string }> = [];
   const relationshipsUses: string[] = [];
   const otherUses: string[] = [];
   for (const node of topLevel(ast)) {
     if (!isUseDeclaration(node)) continue;
     const importPath = typeof node.importPath?.value === 'string' ? node.importPath.value as string : '';
     const resolved = dir !== undefined ? resolvePosix(dir, withExtension(importPath)) : '';
-    const use = diagramUseRole(resolved, isWildcardUse(node), specifiedTables(node).length > 0, useStem(importPath));
+    const specified = specifiedTables(node);
+    const use = diagramUseRole(resolved, isWildcardUse(node), specified.length > 0, useStem(importPath));
     if (use.role === 'member' || use.role === 'mismatch') {
-      members.push(use.name!);
       memberUses.push({ name: use.name!, path: importPath, resolved, line: lineAt(text, node.start) });
+      identities.push({ schema: use.schema ?? '', name: use.name! });
     } else if (use.role === 'relationships') {
       if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
     } else if (use.role === 'other' && dir !== undefined) {
       otherUses.push(resolved);
     }
   }
-  return { members, memberUses, relationshipsUses, otherUses };
+  return { members: assignTableRefs(identities), memberUses, relationshipsUses, otherUses };
 }
 
 /**
@@ -614,7 +715,7 @@ export function diagramSummaryDbml(rawText: string, filePath: string, parser: Db
     return null;
   }
   const uses = usesOf(ast, text, where.dir);
-  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, uses.members, []);
+  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, uses.memberUses.map((u) => u.name), []);
   return { ...uses, unlinked };
 }
 

@@ -114,6 +114,11 @@ export interface KeyColumn {
 /** The parts of a model key evidence reads. `name` is needed only to look dbt evidence up in an index. */
 export interface KeyedTable {
   name?: string;
+  /**
+   * The table's own name when `name` is not it (`<schema>.<name>` on a
+   * diagram showing two tables of one name): dbt knows the table by this one.
+   */
+  tableName?: string;
   columns?: ReadonlyArray<KeyColumn>;
 }
 
@@ -147,7 +152,9 @@ export function keyEvidenceDetail(
   }
 
   // 2. dbt's tests: the column's own hint first, else the index.
-  const modelName = model?.name !== undefined ? lower(model.name) : undefined;
+  // dbt knows a table by its own name, never by the `<schema>.<name>` a diagram may call it.
+  const dbtName = model?.tableName ?? model?.name;
+  const modelName = dbtName !== undefined ? lower(dbtName) : undefined;
   const hintOf = (column: string): DbtKeyHint | undefined =>
     cols.find((c) => lower(c.name) === column)?.dbtKey
     ?? (modelName !== undefined ? dbt?.columns.get(modelName)?.get(column) : undefined);

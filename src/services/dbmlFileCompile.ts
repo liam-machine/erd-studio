@@ -389,8 +389,10 @@ function* compileSteps(
     for (const [index, ref] of facts.refs.entries()) {
       const members = ref.relationships;
       if (members.length === 0) continue;
-      const from = members[0].fromModel;
-      const to = members[0].toModel;
+      // Each end's table as the compiler keys it: with the schema it writes (`ccc.addresse` and
+      // `bqs.addresse` are two tables), the reader's canonical owner being the `from` end.
+      const from = ref.ownerQualifier !== undefined ? `${ref.ownerQualifier}.${members[0].fromModel}` : members[0].fromModel;
+      const to = ref.targetQualifier !== undefined ? `${ref.targetQualifier}.${members[0].toModel}` : members[0].toModel;
       if (!visible.has(lastPart(from)) || !visible.has(lastPart(to))) continue;
       const a = sideKey(from, members.map((m) => m.fromColumn));
       const b = sideKey(to, members.map((m) => m.toColumn));

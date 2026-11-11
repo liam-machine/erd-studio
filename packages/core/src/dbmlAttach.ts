@@ -12,32 +12,221 @@ import type { Relationship, TableRelationship } from './types/semantic.js';
 import type {
   DbmlAttachResult,
   DbmlAttachTable,
+  DbmlRefEndHint,
   DbmlRefLocation,
   DbmlRelationshipsReading,
+  DbmlStoredRef,
 } from './types/dbmlStorage.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
 import { libraryCopyRank } from './domain.js';
 import { linkKey, nextCompositeKey, reverseRelationship } from './relationships.js';
+import { dirnamePosix, normalisePosix, resolvePosix } from './storage.js';
+import { tableIdKey } from './tableIdentity.js';
 
 const lower = (s: string): string => s.toLowerCase();
+
+/** The schema folder that holds a project's unqualified tables: what DBML means by a name with no schema. */
+const DEFAULT_SCHEMA_FOLDER = 'public';
+
+/** Where a {@link dbmlTableLookup} keeps its full answer for {@link attachRelationships}. */
+const RESOLVE = Symbol('dbmlTableLookup.resolve');
+
+/** A lookup {@link attachRelationships} resolves Ref ends with: a table part, and what the end says beside it. */
+export type DbmlTableLookup = (name: string, hint?: DbmlRefEndHint) => DbmlAttachTable | undefined;
+
+/** How one end resolved: the table, or why none (`ambiguous`: several tables and nothing decides). */
+interface EndResolution {
+  entry?: DbmlAttachTable;
+  ambiguous?: DbmlAttachTable[];
+  /** A use path whose existence would turn a lenient match into none (rule 4); set only when it decides. */
+  contested?: string;
+}
+
+/** The text a table is named by in its scope: its reference, else its name. */
+const refOf = (entry: DbmlAttachTable): string => entry.ref ?? entry.table.name;
+
+/** An entry's identity key: its schema folder and name (a table of no known folder: its name alone). */
+const identityOf = (entry: DbmlAttachTable): string => tableIdKey({ schema: entry.schema ?? '', name: entry.table.name });
+
+/** The entries of distinct identities, each the first listed. */
+function distinct(entries: readonly DbmlAttachTable[]): DbmlAttachTable[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const key = identityOf(e);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Index `tables` and answer how one end resolves (the rule
+ * {@link dbmlTableLookup} documents). `exists` answers whether a use path
+ * names a file that exists; without it a contested end stays lenient.
+ */
+function endResolver(tables: Iterable<DbmlAttachTable>): (name: string, hint: DbmlRefEndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
+  const byName = new Map<string, DbmlAttachTable[]>();
+  const byAlias = new Map<string, DbmlAttachTable>();
+  const byPath = new Map<string, DbmlAttachTable>();
+  for (const entry of tables) {
+    const name = lower(entry.table.name);
+    const list = byName.get(name);
+    if (list) list.push(entry);
+    else byName.set(name, [entry]);
+    if (entry.dbmlAlias) {
+      const alias = lower(entry.dbmlAlias);
+      if (!byAlias.has(alias)) byAlias.set(alias, entry);
+    }
+    if (entry.path !== undefined) {
+      const path = lower(normalisePosix(entry.path));
+      if (!byPath.has(path)) byPath.set(path, entry);
+    }
+  }
+  return (name, hint, exists) => {
+    const wanted = lower(name);
+    const named = byName.get(wanted);
+    // 1. The relationships file's own `use` line for this spelling names the table's file.
+    if (hint?.usePath !== undefined) {
+      const atPath = byPath.get(lower(normalisePosix(hint.usePath)));
+      if (atPath && (lower(atPath.table.name) === wanted || (atPath.dbmlAlias !== undefined && lower(atPath.dbmlAlias) === wanted))) {
+        return { entry: atPath };
+      }
+    }
+    if (!named) {
+      const aliased = byAlias.get(wanted);
+      return aliased ? { entry: aliased } : {};
+    }
+    // Tables that carry no schema folder are matched by name alone, the first listed (as before identities).
+    if (named.every((e) => e.schema === undefined)) return { entry: named[0] };
+    const identities = distinct(named);
+    const qualifier = hint?.qualifier !== undefined ? lower(hint.qualifier) : undefined;
+    if (qualifier !== undefined) {
+      // 2. The tables whose schema folder, then whose declared schema, the qualifier names.
+      for (const schemaOf of [(e: DbmlAttachTable) => e.schema, (e: DbmlAttachTable) => e.table.schema]) {
+        const matching = identities.filter((e) => schemaOf(e) !== undefined && lower(schemaOf(e)!) === qualifier);
+        if (matching.length === 1) return { entry: matching[0] };
+        if (matching.length > 1) return { ambiguous: matching };
+      }
+    }
+    if (identities.length === 1) {
+      // 3. The one table of that name. 4. A qualifier that names none of it still lands on it (2.0 drew
+      // that line), unless the end's own use line names another file that exists: that table is elsewhere.
+      const only = identities[0];
+      const contested = qualifier !== undefined && hint?.usePath !== undefined
+        && (only.path === undefined || lower(normalisePosix(only.path)) !== lower(normalisePosix(hint.usePath)))
+        ? hint.usePath
+        : undefined;
+      if (contested !== undefined && only.path !== undefined && exists?.(contested)) return { contested };
+      return { entry: only, ...(contested !== undefined && only.path !== undefined ? { contested } : {}) };
+    }
+    // 5. Several tables of the name and nothing decides: an unqualified name means the default schema's table.
+    if (qualifier === undefined) {
+      const inPublic = identities.filter((e) => e.schema !== undefined && lower(e.schema) === DEFAULT_SCHEMA_FOLDER);
+      if (inPublic.length === 1) return { entry: inPublic[0] };
+    }
+    return { ambiguous: identities };
+  };
+}
 
 /**
  * A lookup over `tables` for {@link attachRelationships}: a Ref end's table
  * part matched by name, without case, and then by a DBML alias declared in
  * a table file (`Table fct_order as FO`). A name always beats an alias.
+ *
+ * Tables that carry their schema folder (`schema`) can share a name; what
+ * the end says beside its name (`hint`) then tells them apart, in order:
+ *
+ * 1. the relationships file's own `use` line for the end's spelling names
+ *    the table's file (`path`): exact, and what ERD Studio always writes;
+ * 2. else the one table whose schema folder, then whose declared schema
+ *    (`table.schema`), the end's qualifier names, without case;
+ * 3. else, when one table has the name, that table;
+ * 4. a qualifier that names none of it included (a stale qualifier draws as
+ *    it always did), unless the end's use path names another file and
+ *    `options.exists` says that file exists;
+ * 5. else, for an unqualified end, the one table of the name in the default
+ *    schema folder (`tables/public/`, where unqualified tables live);
+ *    otherwise none: nothing is guessed.
+ *
+ * Tables of one schema folder and name in two layers are one table (the
+ * first listed), as are tables that carry no schema folder (YAML), which
+ * keep the rule that held before identities: the first of the name.
  */
-export function dbmlTableLookup(tables: Iterable<DbmlAttachTable>): (name: string) => DbmlAttachTable | undefined {
-  const byName = new Map<string, DbmlAttachTable>();
-  const byAlias = new Map<string, DbmlAttachTable>();
-  for (const entry of tables) {
-    const name = lower(entry.table.name);
-    if (!byName.has(name)) byName.set(name, entry);
-    if (entry.dbmlAlias) {
-      const alias = lower(entry.dbmlAlias);
-      if (!byAlias.has(alias)) byAlias.set(alias, entry);
+export function dbmlTableLookup(
+  tables: Iterable<DbmlAttachTable>,
+  options: { exists?: (path: string) => boolean } = {},
+): DbmlTableLookup {
+  const resolve = endResolver(tables);
+  const lookup: DbmlTableLookup = (name, hint) => resolve(name, hint, options.exists).entry;
+  // So attachRelationships can say why an end found nothing; a caller's own lookup function has no such answer.
+  Object.defineProperty(lookup, RESOLVE, { value: (name: string, hint?: DbmlRefEndHint) => resolve(name, hint, options.exists) });
+  return lookup;
+}
+
+/** How `tables` resolves an end: in full for a {@link dbmlTableLookup}, else by its answer alone. */
+function resolverOf(tables: DbmlTableLookup): (name: string, hint: DbmlRefEndHint) => EndResolution {
+  const full = (tables as { [RESOLVE]?: (name: string, hint?: DbmlRefEndHint) => EndResolution })[RESOLVE];
+  if (full) return full;
+  return (name, hint) => {
+    const entry = tables(name, hint);
+    return entry ? { entry } : {};
+  };
+}
+
+/** A relationships file as {@link attachRelationships} reads it. */
+export interface DbmlAttachReading {
+  /** The file, as the caller names it in reports. */
+  path: string;
+  reading: DbmlRelationshipsReading;
+  /**
+   * The file's path relative to the semantic dir (posix), so its `use` lines
+   * resolve to table files (rule 1 of {@link dbmlTableLookup}). Without it a
+   * Ref end is told apart by its qualifier and name only.
+   */
+  semanticPath?: string;
+}
+
+/** `path` with `.dbml` added when a `use` line left it out. */
+const withDbmlExtension = (path: string): string => (lower(path).endsWith('.dbml') ? path : `${path}.dbml`);
+
+/**
+ * What each end of `ref` says beside its table part: its qualifier, and the
+ * table file the file's `use` line for that exact spelling (qualifier and
+ * name, without case) names, resolved against the file's folder.
+ */
+function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: DbmlRefEndHint; target: DbmlRefEndHint } {
+  const hintOf = (table: string, qualifier: string | undefined): DbmlRefEndHint => {
+    const use = item.semanticPath !== undefined
+      ? item.reading.useTables?.find((u) => lower(u.table) === lower(table)
+        && (u.qualifier === undefined ? qualifier === undefined : qualifier !== undefined && lower(u.qualifier) === lower(qualifier)))
+      : undefined;
+    const usePath = use ? normalisePosix(resolvePosix(dirnamePosix(item.semanticPath!), withDbmlExtension(use.path))) : undefined;
+    return { ...(qualifier !== undefined ? { qualifier } : {}), ...(usePath !== undefined ? { usePath } : {}) };
+  };
+  return { owner: hintOf(ref.owner, ref.ownerQualifier), target: hintOf(ref.target, ref.targetQualifier) };
+}
+
+/**
+ * The use paths whose existence decides where a Ref end of `readings` lands
+ * among `tables` (rule 4 of {@link dbmlTableLookup}): an end whose qualifier
+ * names none of the one table of its name, while its own `use` line names
+ * another file. Empty for a project whose Ref ends all name their tables by
+ * a use line or a qualifier that matches. In path order, without repeats.
+ */
+export function contestedUsePaths(readings: readonly DbmlAttachReading[], tables: Iterable<DbmlAttachTable>): string[] {
+  const resolve = endResolver(tables);
+  const out = new Set<string>();
+  for (const item of readings) {
+    if (!item.reading?.readable) continue;
+    for (const ref of [...item.reading.refs, ...(item.reading.pending ?? [])]) {
+      const hints = endHints(item, ref);
+      for (const [name, hint] of [[ref.owner, hints.owner], [ref.target, hints.target]] as const) {
+        const contested = resolve(name, hint).contested;
+        if (contested !== undefined) out.add(contested);
+      }
     }
   }
-  return (name) => byName.get(lower(name)) ?? byAlias.get(lower(name));
+  return [...out].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** Whether `columns` are exactly the key `key` (without case); an empty key is no key. */
@@ -85,13 +274,27 @@ function at(location: DbmlRefLocation): string {
 }
 
 /**
+ * How an end that resolved to no table is spelled: as written, with its
+ * qualifier when it names a table that is elsewhere or that several share,
+ * so it is never what the scope calls one of them.
+ */
+function unresolvedEnd(name: string, hint: DbmlRefEndHint, end: EndResolution): string {
+  return hint.qualifier !== undefined && (end.contested !== undefined || end.ambiguous !== undefined) ? `${hint.qualifier}.${name}` : name;
+}
+
+/**
  * Attach every Ref of `readings` (in path byte order, whatever order they
  * are given in, each file in file order) to its owner, when the owner is a
  * DBML table:
  *
  * - ends are matched by `tables` (a table part, qualifier already removed;
- *   a DBML alias resolves through {@link dbmlTableLookup}) and respelled to
- *   the real table and column spellings;
+ *   a DBML alias resolves through {@link dbmlTableLookup}), each told its
+ *   qualifier and the table file the reading's own `use` line for that
+ *   spelling names (resolved against `semanticPath`), so two tables of one
+ *   name in different schema folders are told apart; an end several tables
+ *   could be and nothing decides is not attached, with a warning. Ends are
+ *   respelled to the table's reference (`ref`, else its real name) and the
+ *   real column spellings;
  * - a one-to-one the reader left to the keys (`oneToOneDirection: 'keys'`)
  *   reads its first end as the foreign key only when the second end alone is
  *   its table's whole primary key; with a table missing it stays as read
@@ -119,42 +322,55 @@ function at(location: DbmlRefLocation): string {
  * The host, which passes the whole library, leaves it unset.
  */
 export function attachRelationships(
-  readings: ReadonlyArray<{ path: string; reading: DbmlRelationshipsReading }>,
-  tables: (name: string) => DbmlAttachTable | undefined,
+  readings: ReadonlyArray<DbmlAttachReading>,
+  tables: DbmlTableLookup,
   options: { dbt?: DbtKeyIndex; partial?: boolean } = {},
 ): DbmlAttachResult {
   const result: DbmlAttachResult = { byOwner: new Map(), orphaned: [], duplicates: [], warnings: [], locations: new Map() };
   interface Candidate { rel: Relationship; unit: number; at: DbmlRefLocation; rank: string; owner: string }
   const candidates: Candidate[] = [];
+  const resolve = resolverOf(tables);
   let unit = 0;
   let index = 0;
 
   // Path byte order, so the copy a tie keeps and the order of each owner's list
   // never depend on the order a host happened to list the files in.
   const ordered = [...readings].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  for (const { path, reading } of ordered) {
+  for (const item of ordered) {
+    const { path, reading } = item;
     if (!reading || !reading.readable) continue;
     // Pending relationships (D27) belong to their owner exactly like live Refs: drawn when both ends are shown.
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
       if (ref.relationships.length === 0) continue;
       let rels = ref.relationships;
+      let { owner: ownerHint, target: targetHint } = endHints(item, ref);
       if (ref.oneToOneDirection === 'keys') {
         // Read with the second end as the foreign key; the first is, only when the second alone is a whole key.
         if (reverseBareOneToOne(
-          primaryKeyOf(tables(rels[0].fromModel)), rels.map((r) => r.fromColumn),
-          primaryKeyOf(tables(rels[0].toModel)), rels.map((r) => r.toColumn),
+          primaryKeyOf(tables(rels[0].fromModel, ownerHint)), rels.map((r) => r.fromColumn),
+          primaryKeyOf(tables(rels[0].toModel, targetHint)), rels.map((r) => r.toColumn),
         )) {
           rels = rels.map((r) => reverseRelationship(r));
+          [ownerHint, targetHint] = [targetHint, ownerHint];
         }
       }
-      const ownerEntry = tables(rels[0].fromModel);
-      const targetEntry = tables(rels[0].toModel);
+      const owner = resolve(rels[0].fromModel, ownerHint);
+      const target = resolve(rels[0].toModel, targetHint);
+      const ownerEntry = owner.entry;
+      const targetEntry = target.entry;
       const location: DbmlRefLocation = {
         path,
         line: ref.line,
-        owner: ownerEntry?.table.name ?? rels[0].fromModel,
-        target: targetEntry?.table.name ?? rels[0].toModel,
+        owner: ownerEntry ? refOf(ownerEntry) : unresolvedEnd(rels[0].fromModel, ownerHint, owner),
+        target: targetEntry ? refOf(targetEntry) : unresolvedEnd(rels[0].toModel, targetHint, target),
+        ...(ownerEntry?.path !== undefined ? { ownerPath: ownerEntry.path } : {}),
+        ...(targetEntry?.path !== undefined ? { targetPath: targetEntry.path } : {}),
       };
+      for (const [name, end] of [[rels[0].fromModel, owner], [rels[0].toModel, target]] as const) {
+        if (!end.ambiguous) continue;
+        const schemas = end.ambiguous.map((e) => e.schema ?? '').join(', ');
+        result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
+      }
       if (!ownerEntry && options.partial) continue;
       if (!ownerEntry || ownerEntry.storage !== 'dbml') {
         result.orphaned.push(location);
@@ -167,12 +383,12 @@ export function attachRelationships(
       for (const raw of rels) {
         const rel: Relationship = {
           ...raw,
-          fromModel: ownerEntry.table.name,
+          fromModel: refOf(ownerEntry),
           fromColumn: realColumn(ownerEntry, raw.fromColumn),
-          toModel: targetEntry?.table.name ?? raw.toModel,
+          toModel: location.target,
           toColumn: realColumn(targetEntry, raw.toColumn),
         };
-        candidates.push({ rel, unit, at: location, rank: libraryCopyRank(rel, ownerEntry.table, index++, options.dbt), owner: ownerEntry.table.name });
+        candidates.push({ rel, unit, at: location, rank: libraryCopyRank(rel, ownerEntry.table, index++, options.dbt), owner: refOf(ownerEntry) });
       }
     }
   }

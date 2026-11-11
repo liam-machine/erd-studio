@@ -227,6 +227,23 @@ export interface UnreadableTablePlaceholder extends SemanticTable {
   loadError: TableLoadError;
 }
 
+/**
+ * A table as a DBML diagram that shows two tables of one name from different
+ * schema folders names it: `<schema>.<name>` (core's `assignTableRefs`),
+ * with its own name kept as `tableName`, for its label and for dbt.
+ * Runtime-only, like `loadError`: never written to a file (the on-disk shape
+ * is {@link SemanticTable}), and a table handed to a writer has none.
+ */
+export interface DiagramNamedTable extends SemanticTable {
+  tableName: string;
+}
+
+/** The own name of a {@link DiagramNamedTable}, if `model` is one: undefined when `name` is the table's own. */
+export function tableNameOf(model: SemanticTable): string | undefined {
+  const candidate = (model as Partial<DiagramNamedTable>).tableName;
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
 /** The load error carried by an {@link UnreadableTablePlaceholder}, if `model` is one. */
 export function tableLoadErrorOf(model: SemanticTable): TableLoadError | undefined {
   const candidate = (model as Partial<UnreadableTablePlaceholder>).loadError;

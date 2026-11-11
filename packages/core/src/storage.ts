@@ -292,6 +292,18 @@ export function dbmlTablePath(layer: string, schema: string, name: string): stri
 const compareListedNames = new Intl.Collator().compare;
 
 /**
+ * What a diagram's `use` line said about a member whose file is not where
+ * it points (`findDbmlTable`'s second argument): the schema folder it names
+ * (or, for a path that names none, the qualifier its specifier writes), the
+ * layer folder, and the stale path itself (relative to the semantic dir).
+ */
+export interface DbmlTableHint {
+  schema?: string;
+  layer?: string;
+  stalePath?: string;
+}
+
+/**
  * A `findDbmlTable` for `loadDisplaySubjectArea`, from one listing of the
  * project's DBML tables: `paths` are files relative to the semantic dir, and
  * any that is not `{layer}/tables/{schema}/{name}.dbml` is ignored. It
@@ -300,8 +312,15 @@ const compareListedNames = new Intl.Collator().compare;
  * folders, sorted by `Intl.Collator`; in the first folder that holds the
  * name, `{name}.dbml` spelled exactly, else the first (in that order) of
  * any case, the name trimmed. Null when no listed file does.
+ *
+ * With a `hint` naming a schema (a member whose use line is stale), a table
+ * is the same table only in that schema folder (without case), the hinted
+ * layer's first: a file of the name in another schema folder is answered
+ * only when it is the one table of that name in the listing (a table moved
+ * to another schema), never when it is one of several (it would be another
+ * table that happens to share the name).
  */
-export function dbmlTableFinder(paths: Iterable<string>): (name: string) => string | null {
+export function dbmlTableFinder(paths: Iterable<string>): (name: string, hint?: DbmlTableHint) => string | null {
   type Listed = { layer: string; schema: string; file: string; rel: string };
   const byKey = new Map<string, Listed[]>();
   for (const path of paths) {
@@ -318,13 +337,25 @@ export function dbmlTableFinder(paths: Iterable<string>): (name: string) => stri
   for (const list of byKey.values()) {
     list.sort((a, b) => compareListedNames(a.layer, b.layer) || compareListedNames(a.schema, b.schema) || compareListedNames(a.file, b.file));
   }
-  return (name: string): string | null => {
-    if (typeof name !== 'string') return null;
-    const list = byKey.get(name.trim().toLowerCase());
-    if (!list) return null;
+  /** The first of `list` in the index order: in its folder, `{name}.dbml` spelled exactly, else the first of any case. */
+  const firstOf = (list: readonly Listed[], name: string): string => {
     const first = list[0];
     const exact = list.find((l) => l.layer === first.layer && l.schema === first.schema && l.file === `${name}${DBML_EXTENSION}`);
     return (exact ?? first).rel;
+  };
+  return (name: string, hint?: DbmlTableHint): string | null => {
+    if (typeof name !== 'string') return null;
+    const list = byKey.get(name.trim().toLowerCase());
+    if (!list) return null;
+    const schema = typeof hint?.schema === 'string' && hint.schema !== '' ? hint.schema.toLowerCase() : undefined;
+    if (schema === undefined) return firstOf(list, name);
+    const sameSchema = list.filter((l) => l.schema.toLowerCase() === schema);
+    if (sameSchema.length > 0) {
+      const sameLayer = sameSchema.filter((l) => l.layer === hint?.layer);
+      return firstOf(sameLayer.length > 0 ? sameLayer : sameSchema, name);
+    }
+    const schemas = new Set(list.map((l) => l.schema.toLowerCase()));
+    return schemas.size === 1 ? firstOf(list, name) : null;
   };
 }
 

@@ -139,6 +139,11 @@ const EXPECTED_FILES = [
   'alias-workaround.kunden.dbml',
   'alias-workaround.kunden.mmd',
   'alias-workaround.kunden.rich.dbml',
+  // Two tables of one name in two schema folders (test/fixtures/same-name-two-schemas), as core's
+  // loader draws them; owned by packages/core/test/unit/loadDisplayDomain.sameName.test.ts.
+  'same-name-two-schemas.ccc.display.json',
+  'same-name-two-schemas.kunden.display.json',
+  'same-name-two-schemas.kunden-bare.display.json',
 ].sort();
 
 /**

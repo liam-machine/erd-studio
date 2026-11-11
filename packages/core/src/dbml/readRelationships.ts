@@ -8,13 +8,13 @@
  *
  * The Refs come back canonical (the foreign-key end is `fromModel`) with
  * their table parts as spelled in the file and each end's schema qualifier
- * as written (ends are matched by table name alone); `attachRelationships`
+ * as written, beside the tables the file's `use` lines import; `attachRelationships`
  * (main entry) maps them onto tables, orients the one-to-ones that need keys,
  * respells and dedupes.
  */
 
 import type { Cardinality, Relationship } from '../types/semantic.js';
-import type { DbmlOneToOneDirection, DbmlProblem, DbmlRelationshipsReading, DbmlStoredRef } from '../types/dbmlStorage.js';
+import type { DbmlOneToOneDirection, DbmlProblem, DbmlRelationshipsReading, DbmlStoredRef, DbmlUseTable } from '../types/dbmlStorage.js';
 import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_PENDING_REF_PATTERN } from '../dbmlRichProperties.js';
 import { normaliseRelationshipRole } from '../relationships.js';
@@ -159,6 +159,7 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
   const pending = readPendingRefs(text, parser, problems, topLevel(compiled.ast));
   const otherElements = otherElementsOf(text, compiled);
   const uses = useImportsOf(compiled);
+  const useTables = useTablesOf(compiled);
   return {
     readable: true,
     refs,
@@ -166,7 +167,27 @@ export function readRelationshipsDbml(rawText: string, parser: DbmlParserModule 
     ...(pending.length > 0 ? { pending } : {}),
     ...(otherElements.length > 0 ? { otherElements } : {}),
     ...(uses.length > 0 ? { uses } : {}),
+    ...(useTables.length > 0 ? { useTables } : {}),
   };
+}
+
+/** Each table a selective `use` line imports: the specifier's name and qualifier as written, and the line's path. */
+function useTablesOf(compiled: CompiledFile): DbmlUseTable[] {
+  const out: DbmlUseTable[] = [];
+  for (const node of topLevel(compiled.ast)) {
+    if (!isUseDeclaration(node)) continue;
+    const path = node.importPath?.value;
+    const list = node.specifiers;
+    if (typeof path !== 'string' || !list || list.kind === '<wildcard>' || !Array.isArray(list.specifiers)) continue;
+    for (const specifier of list.specifiers as AstNode[]) {
+      if (String(specifier?.importKind?.value ?? '').toLowerCase() !== 'table') continue;
+      const parts = plainNames(specifier.name);
+      if (!parts || parts.length === 0) continue;
+      const table = parts[parts.length - 1];
+      out.push(parts.length > 1 ? { table, qualifier: parts[parts.length - 2], path } : { table, path });
+    }
+  }
+  return out;
 }
 
 /** Each `use` line's path as written, in file order (an index resolves them against the file's folder). */
@@ -226,7 +247,12 @@ function refsOf(text: string, compiled: CompiledFile, problems: DbmlProblem[], l
       skip(`uses the operator \`${op}\`, which is not a relationship`);
       continue;
     }
-    const sameColumns = left.table.toLowerCase() === right.table.toLowerCase()
+    // `ccc.addresse.id > bqs.addresse.id` joins two tables of one name in two
+    // schemas: two qualifiers that differ name two tables. An end with no
+    // qualifier could be either, so it is compared by name alone, as always.
+    const otherSchema = left.qualifier !== undefined && right.qualifier !== undefined
+      && left.qualifier.toLowerCase() !== right.qualifier.toLowerCase();
+    const sameColumns = !otherSchema && left.table.toLowerCase() === right.table.toLowerCase()
       && left.columns.every((c, i) => c.toLowerCase() === right.columns[i].toLowerCase());
     if (sameColumns) {
       skip('joins a column set to itself');
