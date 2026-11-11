@@ -31,6 +31,7 @@
  */
 
 import { escapeHtml } from './dbmlConversionReview';
+import { IMPORT_GUIDE_LOGOS } from './importGuideLogos';
 import type { SqlDialect } from './sqlDdlImport';
 import type { TelemetryFeature } from './telemetryPayload';
 import {
@@ -668,7 +669,8 @@ export const IMPORT_GUIDE_INTRO_DRY_RUN = 'Each import shows you a draft first: 
 export const IMPORT_GUIDE_NO_FOLDER = 'Open the folder you keep your data model in first: each import saves into it.';
 
 export function buildImportGuideCsp(nonce: string): string {
-  return ["default-src 'none'", `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
+  // img-src data: is for the sources' marks alone (importGuideLogos.ts): images built into the page, never fetched.
+  return ["default-src 'none'", 'img-src data:', `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
 }
 
 /** `code` in backticks becomes `<code>`; everything else is escaped text. */
@@ -706,6 +708,7 @@ body {
 .ig-card--lead { border-color: var(--vscode-focusBorder); }
 /* Every source is one line until it is opened, so the whole list is in view at once; only the folder's own suggestion starts open. */
 .ig-card__summary { cursor: pointer; }
+.ig-card__logo { display: inline-block; width: 18px; height: 18px; margin: 0 8px 0 4px; vertical-align: -3px; object-fit: contain; }
 .ig-card__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .ig-card__fold[open] > .ig-card__summary { margin-bottom: 6px; }
 .ig-card__title { display: inline; margin: 0; font-size: 1.1em; font-weight: 600; }
@@ -802,6 +805,17 @@ function renderSteps(section: ImportGuideSection): string {
   return steps + notes;
 }
 
+/**
+ * The source's own mark beside its name, so a reader finds what they use at a
+ * glance. An image (never inline SVG), so the page's styles cannot restyle a
+ * mark; decorative, since the name is right beside it. A card with no mark
+ * (DBML, other tools, Not yet) keeps the same slot, so the names line up.
+ */
+function renderLogo(id: ImportGuideCardId): string {
+  const src = IMPORT_GUIDE_LOGOS[id];
+  return src ? `<img class="ig-card__logo" alt="" src="${src}">` : '<span class="ig-card__logo"></span>';
+}
+
 function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | undefined): string {
   // A card with two ways to one import names the one to use: only that way's button is the card's main one.
   const hasRecommended = card.sections.some((section) => section.recommended);
@@ -816,7 +830,7 @@ function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | 
   return `
     <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
       <details class="ig-card__fold"${lead ? ' open' : ''}>
-        <summary class="ig-card__summary"><h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>
+        <summary class="ig-card__summary">${renderLogo(card.id)}<h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>
         <p class="ig-card__what">${inline(card.what)}</p>${sections}
       </details>
     </li>`;

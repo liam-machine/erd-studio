@@ -257,13 +257,15 @@ describe('the Copy buttons', () => {
 describe('the page', () => {
   it('has a nonce-only CSP, no inline style or handler, no remote resource, no form', () => {
     const html = buildImportGuideHtml(DBT, 'NONCE123');
-    expect(buildImportGuideCsp('NONCE123')).toBe("default-src 'none'; style-src 'nonce-NONCE123'; script-src 'nonce-NONCE123';");
+    expect(buildImportGuideCsp('NONCE123')).toBe("default-src 'none'; img-src data:; style-src 'nonce-NONCE123'; script-src 'nonce-NONCE123';");
     expect(html).toContain(`content="${buildImportGuideCsp('NONCE123').replace(/'/g, '&#39;')}"`);
     expect(html).not.toMatch(/\sstyle=/i);
     expect(html).not.toMatch(/\son[a-z]+=/i);
     expect(html).not.toMatch(/unsafe-inline|unsafe-eval/);
     expect(html).not.toMatch(/https?:\/\//);
-    expect(html).not.toMatch(/<(form|iframe|img|link|a)\b/i);
+    expect(html).not.toMatch(/<(form|iframe|link|a)\b/i);
+    // The only images are the sources' marks, built into the page: none is fetched (img-src data:).
+    for (const img of html.match(/<img\b[^>]*>/gi) ?? []) expect(img).toMatch(/\ssrc="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+"/);
     for (const tag of html.match(/<(script|style)\b[^>]*>/g) ?? []) expect(tag).toContain('nonce="NONCE123"');
     // Colours only from VS Code's theme variables.
     expect(html).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
@@ -568,6 +570,26 @@ describe('the catalog queries (one query, a download): Databricks, PostgreSQL an
       expect(badges.indexOf(true), card.getAttribute('data-card') ?? '').toBeLessThanOrEqual(0);
     }
     expect(p.doc.querySelector('[data-card="fabric"] .ig-badge')).toBeNull();
+  });
+
+  it('each source that has a mark shows it beside its name, as a built-in image: the file unchanged, never fetched, never inline SVG', async () => {
+    const { LOGO_FILES, render } = await import('../../scripts/gen-import-guide-logos.mjs');
+    // The generated module is what the script writes from the .svg files: change a file, re-run the script.
+    expect(fs.readFileSync(path.join(__dirname, '../../src/services/importGuideLogos.ts'), 'utf-8')).toBe(render());
+    const p = page(DBT);
+    const logos = Object.fromEntries([...p.doc.querySelectorAll('.ig-card')].map((c) => [c.getAttribute('data-card'), c.querySelector(':scope > details > summary > .ig-card__logo')]));
+    for (const [id, file] of Object.entries(LOGO_FILES as Record<string, string>)) {
+      const img = logos[id];
+      expect(img?.tagName, id).toBe('IMG');
+      expect(img!.getAttribute('alt'), id).toBe('');
+      const src = img!.getAttribute('src')!;
+      expect(src.startsWith('data:image/svg+xml;base64,'), id).toBe(true);
+      expect(Buffer.from(src.slice(src.indexOf(',') + 1), 'base64').equals(fs.readFileSync(path.join(__dirname, '../../src/services/importGuideLogos', file))), id).toBe(true);
+    }
+    // No mark of their own: the slot stays, so the names line up.
+    for (const id of ['dbml', 'otherTools', 'notYet']) expect(logos[id]?.tagName, id).toBe('SPAN');
+    expect(p.doc.querySelector('svg')).toBeNull();
+    for (const img of p.doc.querySelectorAll('img')) expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
 
   it('every source is one line until it is opened, so the whole list is in view; only the folder\'s own suggestion starts open', () => {

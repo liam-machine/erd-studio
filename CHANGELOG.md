@@ -20,6 +20,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 - **Bring In Your Data Model… is in the Diagrams view's + menu**, under the imports, so a project that already has diagrams has a visible way to the import guide besides the Command Palette.
 - **The import guide shows every source at once.** Each source (Databricks, Snowflake, Power BI, Fabric, SQL Server, PostgreSQL, MySQL, DBML and the rest) is one line until you open it, so the whole list fits in view without scrolling; a source ERD Studio found in your folder starts open.
+- **Each source in the import guide shows its logo** beside its name, so you can spot the one you use.
 - **The import guide says which way to use.** Where a source has two ways in, the one to use is listed first and marked **Recommended**, with the reason, and the other says when to use it instead: on Databricks the one-query CSV download (use the notebook cell if you need column defaults or identity columns); on PostgreSQL and MySQL the dump (use the catalog query if you cannot run it).
 - **Bring In Your Data Model… is also a row in Help & Feedback.**
 - **The import guide folds its long queries.** A query or notebook cell longer than six lines shows as one line ("Show all 48 lines") with **Copy** beside it, so the Databricks, PostgreSQL and MySQL cards no longer push the other sources off the page.
