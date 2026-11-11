@@ -116,6 +116,13 @@ export interface SnapshotRelationshipsFile {
    * cardinality), so a Ref whose cardinality changed is a changed Ref.
    */
   refs: Map<string, string>;
+  /**
+   * The same Refs by identity (each end's schema folder and name), for a Ref
+   * whose ends all resolve to a table: its `refs` key → that identity and what
+   * it says under it. `changes` pairs a Ref whose references changed (a
+   * second table of a name appeared or left) by it.
+   */
+  ids?: Map<string, { id: string; says: string }>;
   unreadable?: true;
 }
 
@@ -386,21 +393,26 @@ export function readModelSnapshot(
     const entry = lookup(spelled, hint);
     return entry ? entry.ref ?? entry.table.name : spelled;
   };
+  const identityOfPairs = (pairs: readonly Relationship[]): string => pairs.map((r) => linkKey(r)).sort(byteOrder).join('\u0001');
+  const saysOfPairs = (pairs: readonly Relationship[]): string => pairs
+    .map((r) => lower(`${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}:${r.cardinality}`))
+    .sort(byteOrder)
+    .join('\u0001');
   for (const item of readings) {
     const { path, reading } = item;
     const refs = new Map<string, string>();
+    const ids = new Map<string, { id: string; says: string }>();
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
       const hints = dbmlRefEndHints(item, ref);
       const hintOf = (end: string): DbmlRefEndHint | undefined => (!hints ? undefined : lower(end) === lower(ref.owner) ? hints.owner : lower(end) === lower(ref.target) ? hints.target : undefined);
       const pairs = ref.relationships.map((r) => ({ ...r, fromModel: realName(r.fromModel, hintOf(r.fromModel)), toModel: realName(r.toModel, hintOf(r.toModel)) }));
-      const identity = pairs.map((r) => linkKey(r)).sort(byteOrder).join('\u0001');
-      const says = pairs
-        .map((r) => lower(`${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}:${r.cardinality}`))
-        .sort(byteOrder)
-        .join('\u0001');
-      if (!refs.has(identity)) refs.set(identity, says);
+      const identity = identityOfPairs(pairs);
+      if (refs.has(identity)) continue;
+      refs.set(identity, saysOfPairs(pairs));
+      const byId = pairs.map((r) => ({ ...r, fromModel: idOf(r.fromModel) ?? '', toModel: idOf(r.toModel) ?? '' }));
+      if (byId.every((r) => r.fromModel !== '' && r.toModel !== '')) ids.set(identity, { id: identityOfPairs(byId), says: saysOfPairs(byId) });
     }
-    snapshot.relationshipsFiles.set(path, { file: path, refs });
+    snapshot.relationshipsFiles.set(path, { file: path, refs, ...(ids.size > 0 ? { ids } : {}) });
   }
   const attached = attachRelationships(readings, lookup);
   const locations = attached.locations ?? new Map();

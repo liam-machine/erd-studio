@@ -356,9 +356,25 @@ export function diffModelSnapshots(base: ModelSnapshot, head: ModelSnapshot): Mo
     if ((was?.unreadable && now) || (now?.unreadable && was)) continue;
     const before = was?.refs ?? new Map<string, string>();
     const after = now?.refs ?? new Map<string, string>();
-    const refsAdded = [...after.keys()].filter((r) => !before.has(r)).length;
-    const refsRemoved = [...before.keys()].filter((r) => !after.has(r)).length;
-    const refsChanged = [...after].filter(([r, says]) => before.has(r) && before.get(r) !== says).length;
+    const added = [...after.keys()].filter((r) => !before.has(r));
+    const removed = [...before.keys()].filter((r) => !after.has(r));
+    // A Ref whose tables' references changed (a second table of a name appeared or left) is the same Ref by identity.
+    const removedById = new Map(removed.flatMap((r) => {
+      const at = was?.ids?.get(r);
+      return at ? [[at.id, at.says] as const] : [];
+    }));
+    let paired = 0;
+    let pairedChanged = 0;
+    for (const r of added) {
+      const at = now?.ids?.get(r);
+      if (!at || !removedById.has(at.id)) continue;
+      if (removedById.get(at.id) !== at.says) pairedChanged++;
+      removedById.delete(at.id);
+      paired++;
+    }
+    const refsAdded = added.length - paired;
+    const refsRemoved = removed.length - paired;
+    const refsChanged = [...after].filter(([r, says]) => before.has(r) && before.get(r) !== says).length + pairedChanged;
     const status: RelationshipsFileChange['status'] = !was ? 'added' : !now ? 'removed' : 'changed';
     if (status === 'changed' && refsAdded + refsRemoved + refsChanged === 0) continue;
     relationshipsFiles.push({ file, status, refsAdded, refsRemoved, refsChanged });

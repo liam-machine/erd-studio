@@ -255,6 +255,24 @@ describe('changes: two tables of one name in different schema folders', () => {
       .toEqual(['ccc.addresse.id>bqs.addresse.id', 'ccc.kunde.addresse_id>ccc.addresse.id']);
   });
 
+  it('a table of a name appearing in another schema leaves an untouched relationships file unchanged', () => {
+    const files = (extra: Record<string, string>): Record<string, string> => ({
+      'bronze/tables/ccc/kunde.dbml': 'Table ccc.kunde {\n  id INT [pk]\n  addresse_id INT\n}\n',
+      'bronze/tables/ccc/addresse.dbml': 'Table ccc.addresse {\n  id INT [pk]\n}\n',
+      'bronze/relationships/ccc.dbml': [
+        "use { table ccc.kunde } from '../tables/ccc/kunde.dbml'",
+        "use { table ccc.addresse } from '../tables/ccc/addresse.dbml'",
+        'Ref: ccc.kunde.addresse_id > ccc.addresse.id', '',
+      ].join('\n'),
+      ...extra,
+    });
+    const snap = (f: Record<string, string>) => readModelSnapshot(Object.keys(f), (rel) => f[rel] ?? null);
+    const changes = diffModelSnapshots(snap(files({})), snap(files({ 'bronze/tables/bqs/addresse.dbml': 'Table bqs.addresse {\n  id INT [pk]\n}\n' })));
+    expect(changes.tables.added.map((t) => t.file)).toEqual(['bronze/tables/bqs/addresse.dbml']);
+    expect(changes.relationships).toEqual({ added: [], removed: [], changed: [] });
+    expect(changes.relationshipsFiles).toEqual([]);
+  });
+
   it('deleting one of the two is one removed table and no change to the other', () => {
     const base = snapshotNow();
     fs.rmSync(semantic('bronze/tables/bqs/addresse.dbml'));
