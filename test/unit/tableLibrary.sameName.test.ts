@@ -23,6 +23,7 @@ import { TableLibraryService } from '../../src/services/logicalModelService';
 import { AmbiguousTableName } from '../../src/services/ambiguousTableName';
 import { tableHomesById, tableHomesOf } from '../../src/services/tableHomes';
 import { diagramMemberIds, diagramSummaryOf } from '../../src/services/dbmlDiagramSummaries';
+import { DiagramMembers } from '../../src/services/diagramMembers';
 import { clearDbmlDiagramReadings, primeLayoutOnlyReading, readDbmlDiagram } from '../../src/services/dbmlDiagramReadings';
 import { relationshipsImportsFor } from '../../src/services/dbmlRelationshipsIndex';
 import { healthLinkKey, surveyLibrary } from '../../src/services/relationshipHealth';
@@ -233,6 +234,25 @@ describe('with schemaScopedNames, two tables of one name in two schema folders a
     expect([...tableHomesOf(entries).entries()]).toEqual([['only_bqs', { layer: 'bronze', schema: 'bqs' }]]);
     // Under the old rule every name has its one home, as before.
     expect([...tableHomesOf(byName().listTableFiles()).keys()]).toEqual(['addresse', 'kunde', 'only_bqs']);
+  });
+
+  it('a diagram\'s members with their identities (the Table Library\'s usage counts), by absolute path, cached', () => {
+    const members = new DiagramMembers();
+    const kunden = path.join(semantic, 'bronze/diagrams/kunden.dbml');
+    expect(members.idsOf(kunden)).toEqual([
+      { ref: 'bqs.addresse', id: { layer: 'bronze', ...BQS_ADDRESSE } },
+      { ref: 'bqs.kunde', id: { layer: 'bronze', ...BQS_KUNDE } },
+      { ref: 'ccc.addresse', id: { layer: 'bronze', ...CCC_ADDRESSE } },
+      { ref: 'ccc.kunde', id: { layer: 'bronze', ...CCC_KUNDE } },
+    ]);
+    expect(members.idsOf(path.join(semantic, 'bronze/diagrams/ccc.dbml'))).toEqual([
+      { ref: 'addresse', id: { layer: 'bronze', ...CCC_ADDRESSE } },
+      { ref: 'kunde', id: { layer: 'bronze', ...CCC_KUNDE } },
+    ]);
+    expect(members.of(kunden)).toEqual(['bqs.addresse', 'bqs.kunde', 'ccc.addresse', 'ccc.kunde']);
+    // A JSON diagram names its members by name alone.
+    write('bronze/old.json', JSON.stringify({ schemaVersion: 5, domain: 'old', layer: 'bronze', logical: { models: ['addresse'] } }));
+    expect(members.idsOf(path.join(semantic, 'bronze/old.json'))).toEqual([{ ref: 'addresse' }]);
   });
 
   it('a diagram summary gives each member\'s identity from its use path', () => {
