@@ -8,7 +8,9 @@
  * Copy copies, the fixed command each button runs, and the evidence behind
  * the cards: the Databricks notebook snippet's output and a Fabric Warehouse
  * script convert, and so does realistic BigQuery DDL, read as BigQuery (no
- * longer "Not yet").
+ * longer "Not yet"); each catalog query (Databricks, PostgreSQL, MySQL) is
+ * the query that was run on that engine (`test/fixtures/catalog-csv/`), and
+ * its real export imports.
  */
 
 import * as fs from 'fs';
@@ -40,12 +42,16 @@ import {
   type ImportGuideContext,
 } from '../../src/services/importGuide';
 import { SQL_DIALECTS, convertSqlDdl, detectSqlDialect, type SqlDdlFile } from '../../src/services/sqlDdlImport';
-import { dbmlCoreSqlEngine } from '../../src/services/sqlImportEngine';
+import { dbmlCoreSqlEngine, readsAsDbml } from '../../src/services/sqlImportEngine';
+import { catalogCsvToDbml } from '../../src/services/catalogCsvImport';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { START_INTENTS, type StartIntent } from '../../src/types/startActions';
 import packageJson from '../../package.json';
 
 const FIXTURES = path.join(__dirname, '../fixtures/sql-ddl');
+const CATALOG = path.join(__dirname, '../fixtures/catalog-csv');
+/** A catalog query exactly as it was run on its engine (test/fixtures/catalog-csv/queries/). */
+const catalogQuery = (file: string): string => fs.readFileSync(path.join(CATALOG, 'queries', file), 'utf-8').replace(/\n$/, '');
 const pkg = packageJson as unknown as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
 
 const NOFOLDER: ImportGuideContext = { hasProject: false, hasDbt: false };
@@ -150,7 +156,11 @@ describe('the cards', () => {
     expect(
       [...p.doc.querySelectorAll('[data-card="databricks"] [data-action="run"], [data-card="snowflake"] [data-action="run"], [data-card="sqlServer"] [data-action="run"], [data-card="postgres"] [data-action="run"], [data-card="mysql"] [data-action="run"]')]
         .map((b) => b.textContent),
-    ).toEqual(['Import Databricks DDL…', 'Import Snowflake DDL…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import MySQL DDL…']);
+    ).toEqual(['Import Databricks DDL…', 'Import the CSV…', 'Import Snowflake DDL…', 'Import SQL Server DDL…', 'Import PostgreSQL DDL…', 'Import the CSV…', 'Import MySQL DDL…', 'Import the TSV…']);
+    // A catalog query's button runs its card's own action (the same import, the same telemetry key): no new key.
+    for (const id of ['databricks', 'postgres', 'mysql']) {
+      expect([...p.doc.querySelectorAll(`[data-card="${id}"] [data-action="run"]`)].map((b) => b.getAttribute('data-guide-action'))).toEqual([id, id]);
+    }
     expect([...p.doc.querySelectorAll('[data-card="fabric"] [data-action="run"]')].map((b) => b.textContent))
       .toEqual(['Import Semantic Model…', 'Import SQL Server DDL…']);
   });
@@ -175,10 +185,11 @@ describe('getting the DDL out', () => {
   it('is one step per source, shown on its own (never "1."), with no numbered list of alternatives', () => {
     const p = page(BLANK);
     for (const id of SOURCES) {
-      const card = p.doc.querySelector(`[data-card="${id}"]`)!;
-      expect(card.querySelectorAll('.ig-step'), id).toHaveLength(1);
-      expect(card.querySelector('.ig-step--only'), id).not.toBeNull();
-      expect(card.querySelector('ol, li'), id).toBeNull();
+      // The DDL (or model) section; a catalog query is a section of its own after it.
+      const section = p.doc.querySelector(`[data-card="${id}"] .ig-section`)!;
+      expect(section.querySelectorAll('.ig-step'), id).toHaveLength(1);
+      expect(section.querySelector('.ig-step--only'), id).not.toBeNull();
+      expect(section.querySelector('ol, li'), id).toBeNull();
     }
     // No card in any window numbers a lone step, and none lists alternatives as steps.
     for (const ctx of [NOFOLDER, BLANK, DBT]) {
@@ -222,6 +233,11 @@ describe('the Copy buttons', () => {
       snowflakeSchema: "SELECT GET_DDL('SCHEMA', '<database>.<schema>');",
       postgres: 'pg_dump --schema-only --no-owner --no-privileges -d <database> -f schema.sql',
       mysql: 'mysqldump --no-data --result-file=schema.sql <database>',
+      databricksCatalog: catalogQuery('databricks.sql'),
+      postgresCatalog: catalogQuery('postgres.sql'),
+      mysqlCatalog: catalogQuery('mysql.sql'),
+      postgresCatalogRun: 'psql -d <database> --csv -f catalog.sql -o catalog.csv',
+      mysqlCatalogRun: 'mysql --batch --execute="source catalog.sql" > catalog.tsv',
     });
   });
 
@@ -448,5 +464,64 @@ describe('the evidence behind the cards (the SQL importer on what each source ex
       const other = convertSqlDdl({ dialect, files }, dbmlCoreSqlEngine);
       expect(!other.ok || other.problems.length > 0 || (other.readWith?.grammar ?? 0) < 4, dialect).toBe(true);
     }
+  });
+});
+
+describe('the catalog queries (one query, a download): Databricks, PostgreSQL and MySQL only, each as it was run', () => {
+  const docs = fs.readFileSync(path.join(__dirname, '../../docs/import-existing-models.md'), 'utf-8');
+  /** The docs' code blocks under a heading (the text between `## heading` and the next `## `). */
+  const blocks = (heading: string): string[] => {
+    const at = docs.indexOf(`\n## ${heading}\n`);
+    const section = docs.slice(at + 1, docs.indexOf('\n## ', at + 1));
+    return [...section.matchAll(/```\w*\n([\s\S]*?)\n```/g)].map((m) => m[1]);
+  };
+
+  it('the guide, the docs and the committed query are one text, for each platform the query ran on', () => {
+    expect(IMPORT_GUIDE_SNIPPETS.databricksCatalog).toBe(catalogQuery('databricks.sql'));
+    expect(IMPORT_GUIDE_SNIPPETS.postgresCatalog).toBe(catalogQuery('postgres.sql'));
+    expect(IMPORT_GUIDE_SNIPPETS.mysqlCatalog).toBe(catalogQuery('mysql.sql'));
+    expect(blocks('Databricks (Unity Catalog)')).toContain(catalogQuery('databricks.sql'));
+    expect(blocks('PostgreSQL')).toEqual(expect.arrayContaining([catalogQuery('postgres.sql'), IMPORT_GUIDE_SNIPPETS.postgresCatalogRun]));
+    expect(blocks('MySQL and MariaDB')).toEqual(expect.arrayContaining([catalogQuery('mysql.sql'), IMPORT_GUIDE_SNIPPETS.mysqlCatalogRun]));
+    // DuckDB is in the docs only (no card): the query wrapped in the COPY that writes the file.
+    expect(blocks('DuckDB')).toEqual([`COPY (\n${catalogQuery('duckdb.sql').replace(/;$/, '')}\n) TO 'catalog.csv' (HEADER);`]);
+    // Every query counts its rows, so a cut-short download is refused.
+    for (const file of ['databricks.sql', 'postgres.sql', 'mysql.sql', 'duckdb.sql']) expect(catalogQuery(file)).toMatch(/count\(\*\) OVER \(\) AS total_rows/i);
+  });
+
+  it('sits beside each card\'s own export, in a section of its own; the other cards are as they were', () => {
+    const p = page(BLANK);
+    const sections = (id: string) => [...p.doc.querySelectorAll(`[data-card="${id}"] .ig-section`)].map((s) => s.querySelector('.ig-section__heading')?.textContent ?? '');
+    expect(sections('databricks')).toEqual(['CREATE TABLE statements, from a notebook', 'One query, downloaded as CSV']);
+    expect(sections('postgres')).toEqual(['pg_dump', 'One query, saved as CSV']);
+    expect(sections('mysql')).toEqual(['mysqldump', 'One query, saved as TSV']);
+    for (const id of ['snowflake', 'sqlServer', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
+    expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
+    expect(p.text).not.toMatch(/DuckDB/);
+  });
+
+  it('says honestly what each Databricks route lacks', () => {
+    const notes = [...page(BLANK).doc.querySelectorAll('[data-card="databricks"] .ig-note')].map((n) => n.textContent);
+    expect(notes).toEqual([
+      'Keeps column defaults and identity columns. A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.',
+      'No notebook and nothing to copy by hand. Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.',
+    ]);
+  });
+
+  it('the evidence: each query\'s real export imports, with its keys and relationships', () => {
+    const convert = (rel: string) => {
+      const r = catalogCsvToDbml([{ name: path.basename(rel), text: fs.readFileSync(path.join(CATALOG, rel), 'utf-8') }], readsAsDbml);
+      if (!r.ok) throw new Error(r.problems.map((x) => x.message).join(' | '));
+      return r;
+    };
+    const databricks = convert('databricks/probe.csv');
+    expect([databricks.tableCount, databricks.refCount]).toEqual([12, 9]);
+    expect(databricks.dbml).toContain('Ref: "probe_sales"."orders"."customer_id" > "probe_ref"."customer"."customer_id"');
+    const pagila = convert('postgres/pagila.csv');
+    expect([pagila.tableCount, pagila.refCount]).toEqual([16, 22]);
+    expect(pagila.dbml).not.toMatch(/payment_p20/);
+    const sakila = convert('mysql/sakila.tsv');
+    expect([sakila.tableCount, sakila.refCount]).toEqual([16, 22]);
+    expect(convert('duckdb/probe.csv').tableCount).toBe(12);
   });
 });

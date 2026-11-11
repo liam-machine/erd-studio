@@ -1,0 +1,133 @@
+table_schema	table_name	table_type	table_comment	column_name	ordinal_position	data_type	is_nullable	column_default	extra	column_comment	is_primary_key	pk_ordinal	unique_constraint_name	fk_constraint_name	fk_ordinal	fk_table_schema	fk_table	fk_column	total_rows
+sakila	actor	BASE TABLE		actor_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor	BASE TABLE		first_name	2	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor	BASE TABLE		last_name	3	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor	BASE TABLE		last_update	4	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor_info	VIEW	VIEW	actor_id	1	smallint unsigned	NO	0			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor_info	VIEW	VIEW	first_name	2	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor_info	VIEW	VIEW	last_name	3	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	actor_info	VIEW	VIEW	film_info	4	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		address_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		address	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		address2	3	varchar(50)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		district	4	varchar(20)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		city_id	5	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_address_city	1	sakila	city	city_id	132
+sakila	address	BASE TABLE		postal_code	6	varchar(10)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		phone	7	varchar(20)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		location	8	geometry	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	address	BASE TABLE		last_update	9	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	category	BASE TABLE		category_id	1	tinyint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	category	BASE TABLE		name	2	varchar(25)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	category	BASE TABLE		last_update	3	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	city	BASE TABLE		city_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	city	BASE TABLE		city	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	city	BASE TABLE		country_id	3	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_city_country	1	sakila	country	country_id	132
+sakila	city	BASE TABLE		last_update	4	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	country	BASE TABLE		country_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	country	BASE TABLE		country	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	country	BASE TABLE		last_update	3	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		customer_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		store_id	2	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_customer_store	1	sakila	store	store_id	132
+sakila	customer	BASE TABLE		first_name	3	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		last_name	4	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		email	5	varchar(50)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		address_id	6	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_customer_address	1	sakila	address	address_id	132
+sakila	customer	BASE TABLE		active	7	tinyint(1)	NO	1			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		create_date	8	datetime	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer	BASE TABLE		last_update	9	timestamp	YES	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	ID	1	smallint unsigned	NO	0			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	name	2	varchar(91)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	address	3	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	zip code	4	varchar(10)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	phone	5	varchar(20)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	city	6	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	country	7	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	notes	8	varchar(6)	NO				NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	customer_list	VIEW	VIEW	SID	9	tinyint unsigned	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		film_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		title	2	varchar(128)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		description	3	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		release_year	4	year	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		language_id	5	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_film_language	1	sakila	language	language_id	132
+sakila	film	BASE TABLE		original_language_id	6	tinyint unsigned	YES	NULL			NO	NULL	NULL	fk_film_language_original	1	sakila	language	language_id	132
+sakila	film	BASE TABLE		rental_duration	7	tinyint unsigned	NO	3			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		rental_rate	8	decimal(4,2)	NO	4.99			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		length	9	smallint unsigned	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		replacement_cost	10	decimal(5,2)	NO	19.99			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		rating	11	enum('G','PG','PG-13','R','NC-17')	YES	G			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		special_features	12	set('Trailers','Commentaries','Deleted Scenes','Behind the Scenes')	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film	BASE TABLE		last_update	13	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_actor	BASE TABLE		actor_id	1	smallint unsigned	NO	NULL			YES	1	NULL	fk_film_actor_actor	1	sakila	actor	actor_id	132
+sakila	film_actor	BASE TABLE		film_id	2	smallint unsigned	NO	NULL			YES	2	NULL	fk_film_actor_film	1	sakila	film	film_id	132
+sakila	film_actor	BASE TABLE		last_update	3	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_category	BASE TABLE		film_id	1	smallint unsigned	NO	NULL			YES	1	NULL	fk_film_category_film	1	sakila	film	film_id	132
+sakila	film_category	BASE TABLE		category_id	2	tinyint unsigned	NO	NULL			YES	2	NULL	fk_film_category_category	1	sakila	category	category_id	132
+sakila	film_category	BASE TABLE		last_update	3	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	FID	1	smallint unsigned	NO	0			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	title	2	varchar(128)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	description	3	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	category	4	varchar(25)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	price	5	decimal(4,2)	NO	4.99			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	length	6	smallint unsigned	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	rating	7	enum('G','PG','PG-13','R','NC-17')	YES	G			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_list	VIEW	VIEW	actors	8	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_text	BASE TABLE		film_id	1	smallint unsigned	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_text	BASE TABLE		title	2	varchar(255)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	film_text	BASE TABLE		description	3	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	inventory	BASE TABLE		inventory_id	1	mediumint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	inventory	BASE TABLE		film_id	2	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_inventory_film	1	sakila	film	film_id	132
+sakila	inventory	BASE TABLE		store_id	3	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_inventory_store	1	sakila	store	store_id	132
+sakila	inventory	BASE TABLE		last_update	4	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	language	BASE TABLE		language_id	1	tinyint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	language	BASE TABLE		name	2	char(20)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	language	BASE TABLE		last_update	3	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	FID	1	smallint unsigned	NO	0			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	title	2	varchar(128)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	description	3	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	category	4	varchar(25)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	price	5	decimal(4,2)	NO	4.99			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	length	6	smallint unsigned	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	rating	7	enum('G','PG','PG-13','R','NC-17')	YES	G			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	nicer_but_slower_film_list	VIEW	VIEW	actors	8	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	payment	BASE TABLE		payment_id	1	smallint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	payment	BASE TABLE		customer_id	2	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_payment_customer	1	sakila	customer	customer_id	132
+sakila	payment	BASE TABLE		staff_id	3	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_payment_staff	1	sakila	staff	staff_id	132
+sakila	payment	BASE TABLE		rental_id	4	int	YES	NULL			NO	NULL	NULL	fk_payment_rental	1	sakila	rental	rental_id	132
+sakila	payment	BASE TABLE		amount	5	decimal(5,2)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	payment	BASE TABLE		payment_date	6	datetime	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	payment	BASE TABLE		last_update	7	timestamp	YES	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	rental	BASE TABLE		rental_id	1	int	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	rental	BASE TABLE		rental_date	2	datetime	NO	NULL			NO	NULL	rental_date	NULL	NULL	NULL	NULL	NULL	132
+sakila	rental	BASE TABLE		inventory_id	3	mediumint unsigned	NO	NULL			NO	NULL	rental_date	fk_rental_inventory	1	sakila	inventory	inventory_id	132
+sakila	rental	BASE TABLE		customer_id	4	smallint unsigned	NO	NULL			NO	NULL	rental_date	fk_rental_customer	1	sakila	customer	customer_id	132
+sakila	rental	BASE TABLE		return_date	5	datetime	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	rental	BASE TABLE		staff_id	6	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_rental_staff	1	sakila	staff	staff_id	132
+sakila	rental	BASE TABLE		last_update	7	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	sales_by_film_category	VIEW	VIEW	category	1	varchar(25)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	sales_by_film_category	VIEW	VIEW	total_sales	2	decimal(27,2)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	sales_by_store	VIEW	VIEW	store	1	varchar(101)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	sales_by_store	VIEW	VIEW	manager	2	varchar(91)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	sales_by_store	VIEW	VIEW	total_sales	3	decimal(27,2)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		staff_id	1	tinyint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		first_name	2	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		last_name	3	varchar(45)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		address_id	4	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_staff_address	1	sakila	address	address_id	132
+sakila	staff	BASE TABLE		picture	5	blob	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		email	6	varchar(50)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		store_id	7	tinyint unsigned	NO	NULL			NO	NULL	NULL	fk_staff_store	1	sakila	store	store_id	132
+sakila	staff	BASE TABLE		active	8	tinyint(1)	NO	1			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		username	9	varchar(16)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		password	10	varchar(40)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff	BASE TABLE		last_update	11	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	ID	1	tinyint unsigned	NO	0			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	name	2	varchar(91)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	address	3	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	zip code	4	varchar(10)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	phone	5	varchar(20)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	city	6	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	country	7	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	staff_list	VIEW	VIEW	SID	8	tinyint unsigned	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	store	BASE TABLE		store_id	1	tinyint unsigned	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	132
+sakila	store	BASE TABLE		manager_staff_id	2	tinyint unsigned	NO	NULL			NO	NULL	idx_unique_manager	fk_store_staff	1	sakila	staff	staff_id	132
+sakila	store	BASE TABLE		address_id	3	smallint unsigned	NO	NULL			NO	NULL	NULL	fk_store_address	1	sakila	address	address_id	132
+sakila	store	BASE TABLE		last_update	4	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED on update CURRENT_TIMESTAMP		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	132

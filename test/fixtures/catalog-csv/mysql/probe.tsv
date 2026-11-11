@@ -1,0 +1,52 @@
+table_schema	table_name	table_type	table_comment	column_name	ordinal_position	data_type	is_nullable	column_default	extra	column_comment	is_primary_key	pk_ordinal	unique_constraint_name	fk_constraint_name	fk_ordinal	fk_table_schema	fk_table	fk_column	total_rows
+ref	country	BASE TABLE		country_code	1	char(2)	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	country	BASE TABLE		name	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	currency	BASE TABLE		currency_code	1	char(3)	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	currency	BASE TABLE		name	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	currency	BASE TABLE		minor_units	3	smallint	NO	2			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	exchange_rate	BASE TABLE		from_currency	1	char(3)	NO	NULL			YES	1	NULL	exchange_rate_from_fk	1	ref	currency	currency_code	51
+ref	exchange_rate	BASE TABLE		to_currency	2	char(3)	NO	NULL			YES	2	NULL	exchange_rate_to_fk	1	ref	currency	currency_code	51
+ref	exchange_rate	BASE TABLE		rate_date	3	date	NO	NULL			YES	3	NULL	NULL	NULL	NULL	NULL	NULL	51
+ref	exchange_rate	BASE TABLE		rate	4	decimal(18,4)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	audit_log	BASE TABLE	No keys, append-only	logged_at	1	timestamp	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	audit_log	BASE TABLE	No keys, append-only	actor	2	varchar(50)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	audit_log	BASE TABLE	No keys, append-only	payload	3	json	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	customer_id	1	int	NO	NULL	auto_increment		YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	email	2	varchar(255)	YES	NULL		Login email, lower-cased	NO	NULL	email	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	full_name	3	varchar(50)	NO	NULL		Name, as entered; "quoted", and\na second line	NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	country_code	4	char(2)	NO	AU			NO	NULL	NULL	customer_country_fk	1	ref	country	country_code	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	segment	5	varchar(20)	YES	retail, small			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	credit_limit	6	decimal(18,4)	YES	0.0000			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	created_at	7	timestamp	NO	CURRENT_TIMESTAMP	DEFAULT_GENERATED		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	tags	8	json	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	customer	BASE TABLE	Customers, the "golden" record.\nOne row per person; it's deduplicated	profile	9	json	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	employee	BASE TABLE		employee_id	1	int	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	employee	BASE TABLE		full_name	2	varchar(50)	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	employee	BASE TABLE		manager_id	3	int	YES	NULL			NO	NULL	NULL	employee_manager_fk	1	sales	employee	employee_id	51
+sales	loyalty_card	BASE TABLE		card_id	1	bigint	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	loyalty_card	BASE TABLE		customer_id	2	int	NO	NULL			NO	NULL	loyalty_card_customer_uq	loyalty_card_customer_fk	1	sales	customer	customer_id	51
+sales	loyalty_card	BASE TABLE		issued_on	3	date	YES	curdate()	DEFAULT_GENERATED		NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	order_header	BASE TABLE		order_id	1	bigint	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	order_header	BASE TABLE		customer_id	2	int	NO	NULL			NO	NULL	NULL	order_header_customer_fk	1	sales	customer	customer_id	51
+sales	order_header	BASE TABLE		currency_code	3	char(3)	NO	NULL			NO	NULL	NULL	order_header_currency_fk	1	ref	currency	currency_code	51
+sales	order_header	BASE TABLE		sold_by	4	int	YES	NULL			NO	NULL	NULL	order_header_employee_fk	1	sales	employee	employee_id	51
+sales	order_header	BASE TABLE		order_ts	5	timestamp	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	order_line	BASE TABLE		order_id	1	bigint	NO	NULL			YES	1	NULL	order_line_order_fk	1	sales	order_header	order_id	51
+sales	order_line	BASE TABLE		line_no	2	smallint	NO	NULL			YES	2	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	order_line	BASE TABLE		product_id	3	int	NO	NULL			NO	NULL	NULL	order_line_product_fk	1	sales	product	product_id	51
+sales	order_line	BASE TABLE		quantity	4	int	NO	1			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	order_line	BASE TABLE		amount	5	decimal(18,4)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	OrderNote	BASE TABLE		NoteId	1	int	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	OrderNote	BASE TABLE		order_id	2	bigint	NO	NULL			NO	NULL	NULL	OrderNote_order_fk	1	sales	order_header	order_id	51
+sales	OrderNote	BASE TABLE		Note Text	3	text	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	product	BASE TABLE		product_id	1	int	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	product	BASE TABLE		sku	2	varchar(32)	NO	NULL			NO	NULL	sku	NULL	NULL	NULL	NULL	NULL	51
+sales	product	BASE TABLE		order	3	int	YES	NULL		Sort order (reserved word)	NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	product	BASE TABLE		Display Name	4	varchar(50)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	product	BASE TABLE		unit_price	5	decimal(18,4)	NO	0.0000			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	shipment_line	BASE TABLE		shipment_id	1	bigint	NO	NULL			YES	1	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	shipment_line	BASE TABLE		ln_no	2	smallint	NO	NULL			NO	NULL	NULL	shipment_line_order_line_fk	2	sales	order_line	line_no	51
+sales	shipment_line	BASE TABLE		ord_id	3	bigint	NO	NULL			NO	NULL	NULL	shipment_line_order_line_fk	1	sales	order_line	order_id	51
+sales	shipment_line	BASE TABLE		shipped_at	4	timestamp	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	v_order_totals	VIEW	VIEW	order_id	1	bigint	NO	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51
+sales	v_order_totals	VIEW	VIEW	total	2	decimal(40,4)	YES	NULL			NO	NULL	NULL	NULL	NULL	NULL	NULL	NULL	51

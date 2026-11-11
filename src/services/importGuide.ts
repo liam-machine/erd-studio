@@ -11,7 +11,11 @@
  * project) — and a **Not yet** card (live connections) whose Send Feedback
  * lets people ask for theirs. Oracle, BigQuery, Redshift and SQLite scripts
  * are read by Import SQL DDL… (the other-tools card's Import…); they have no
- * card of their own yet, as each card's button is a telemetry key. The folder's suggested
+ * card of their own yet, as each card's button is a telemetry key. The
+ * Databricks, PostgreSQL and MySQL cards also give a catalog query whose CSV
+ * Import SQL DDL… reads (`catalogCsvImport.ts`), in a section of its own with
+ * its own button label that runs the card's action (one key per card still):
+ * only the engines it was run on (`test/fixtures/catalog-csv/`). The folder's suggested
  * start (`startIntentFor`) leads: a "Found in this folder" card for a direct
  * import, the dbt card in a dbt project; then the sources in the order
  * telemetry sees them.
@@ -103,6 +107,148 @@ export const IMPORT_GUIDE_SNIPPETS = {
   snowflakeSchema: "SELECT GET_DDL('SCHEMA', '<database>.<schema>');",
   postgres: 'pg_dump --schema-only --no-owner --no-privileges -d <database> -f schema.sql',
   mysql: 'mysqldump --no-data --result-file=schema.sql <database>',
+  // The catalog queries: test/fixtures/catalog-csv/queries/ holds each as it was run (importGuide.test.ts keeps them equal).
+  databricksCatalog: [
+    '-- One row per column of every table and view in a catalog, for ERD Studio. Put your catalog on the WHERE line.',
+    'SELECT c.table_schema,',
+    '       c.table_name,',
+    '       t.table_type,',
+    '       coalesce(t.comment, \'\') AS table_comment,',
+    '       c.column_name,',
+    '       c.ordinal_position,',
+    '       c.full_data_type AS data_type,',
+    '       c.is_nullable,',
+    '       coalesce(c.column_default, \'\') AS column_default,',
+    '       coalesce(c.comment, \'\') AS column_comment,',
+    '       CASE WHEN pk.column_name IS NOT NULL THEN \'YES\' ELSE \'NO\' END AS is_primary_key,',
+    '       coalesce(cast(pk.ordinal_position AS STRING), \'\') AS pk_ordinal,',
+    '       coalesce(fk.constraint_name, \'\') AS fk_constraint_name,',
+    '       coalesce(cast(fk.fk_ordinal AS STRING), \'\') AS fk_ordinal,',
+    '       coalesce(fk.fk_table_catalog, \'\') AS fk_table_catalog,',
+    '       coalesce(fk.fk_table_schema, \'\') AS fk_table_schema,',
+    '       coalesce(fk.fk_table, \'\') AS fk_table,',
+    '       coalesce(fk.fk_column, \'\') AS fk_column,',
+    '       count(*) OVER () AS total_rows',
+    'FROM system.information_schema.columns c',
+    'JOIN system.information_schema.tables t',
+    '  ON t.table_catalog = c.table_catalog AND t.table_schema = c.table_schema AND t.table_name = c.table_name',
+    'LEFT JOIN (',
+    '  SELECT k.table_catalog, k.table_schema, k.table_name, k.column_name, k.ordinal_position',
+    '  FROM system.information_schema.table_constraints tc',
+    '  JOIN system.information_schema.key_column_usage k',
+    '    ON k.constraint_catalog = tc.constraint_catalog AND k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name',
+    '   AND k.table_schema = tc.table_schema AND k.table_name = tc.table_name',
+    '  WHERE tc.constraint_type = \'PRIMARY KEY\'',
+    ') pk ON pk.table_catalog = c.table_catalog AND pk.table_schema = c.table_schema AND pk.table_name = c.table_name AND pk.column_name = c.column_name',
+    'LEFT JOIN (',
+    '  SELECT k.table_catalog, k.table_schema, k.table_name, k.column_name, k.constraint_name, k.ordinal_position AS fk_ordinal,',
+    '         r.table_catalog AS fk_table_catalog, r.table_schema AS fk_table_schema, r.table_name AS fk_table, r.column_name AS fk_column',
+    '  FROM system.information_schema.table_constraints tc',
+    '  JOIN system.information_schema.key_column_usage k',
+    '    ON k.constraint_catalog = tc.constraint_catalog AND k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name',
+    '   AND k.table_schema = tc.table_schema AND k.table_name = tc.table_name',
+    '  JOIN system.information_schema.referential_constraints rc',
+    '    ON rc.constraint_catalog = k.constraint_catalog AND rc.constraint_schema = k.constraint_schema AND rc.constraint_name = k.constraint_name',
+    '  JOIN system.information_schema.key_column_usage r',
+    '    ON r.constraint_catalog = rc.unique_constraint_catalog AND r.constraint_schema = rc.unique_constraint_schema AND r.constraint_name = rc.unique_constraint_name',
+    '   AND r.ordinal_position = k.position_in_unique_constraint',
+    '  WHERE tc.constraint_type = \'FOREIGN KEY\'',
+    ') fk ON fk.table_catalog = c.table_catalog AND fk.table_schema = c.table_schema AND fk.table_name = c.table_name AND fk.column_name = c.column_name',
+    'WHERE c.table_catalog = \'my_catalog\'',
+    '  AND c.table_schema <> \'information_schema\'',
+    'ORDER BY c.table_schema, c.table_name, c.ordinal_position, fk.constraint_name;',
+  ].join('\n'),
+  postgresCatalog: [
+    '-- One row per column of every table and view, for ERD Studio (PostgreSQL 12 or later). System schemas and partitions are left out.',
+    'SELECT n.nspname AS table_schema,',
+    '       c.relname AS table_name,',
+    '       CASE c.relkind WHEN \'v\' THEN \'VIEW\' WHEN \'m\' THEN \'MATERIALIZED VIEW\' WHEN \'f\' THEN \'FOREIGN TABLE\' ELSE \'BASE TABLE\' END AS table_type,',
+    '       obj_description(c.oid, \'pg_class\') AS table_comment,',
+    '       a.attname AS column_name,',
+    '       a.attnum AS ordinal_position,',
+    '       format_type(a.atttypid, a.atttypmod) AS data_type,',
+    '       CASE WHEN a.attnotnull THEN \'NO\' ELSE \'YES\' END AS is_nullable,',
+    '       pg_get_expr(d.adbin, d.adrelid) AS column_default,',
+    '       col_description(c.oid, a.attnum) AS column_comment,',
+    '       CASE WHEN pk.ord IS NOT NULL THEN \'YES\' ELSE \'NO\' END AS is_primary_key,',
+    '       pk.ord AS pk_ordinal,',
+    '       uq.unique_name AS unique_constraint_name,',
+    '       fk.conname AS fk_constraint_name,',
+    '       fk.ord AS fk_ordinal,',
+    '       fk.ref_schema AS fk_table_schema,',
+    '       fk.ref_table AS fk_table,',
+    '       fk.ref_column AS fk_column,',
+    '       count(*) OVER () AS total_rows',
+    'FROM pg_class c',
+    'JOIN pg_namespace n ON n.oid = c.relnamespace',
+    'JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped',
+    'LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum',
+    'LEFT JOIN LATERAL (',
+    '  SELECT k.ord FROM pg_constraint p, unnest(p.conkey) WITH ORDINALITY AS k(attnum, ord)',
+    '  WHERE p.conrelid = c.oid AND p.contype = \'p\' AND k.attnum = a.attnum',
+    ') pk ON true',
+    'LEFT JOIN LATERAL (',
+    '  -- Each unique key (constraint or index) the column is in, over columns only: never partial or on an expression.',
+    '  SELECT ic.relname AS unique_name FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid',
+    '  WHERE i.indrelid = c.oid AND i.indisunique AND NOT i.indisprimary AND i.indpred IS NULL AND i.indexprs IS NULL',
+    '    AND a.attnum = ANY ((i.indkey::int2[])[0:i.indnkeyatts - 1])',
+    ') uq ON true',
+    'LEFT JOIN LATERAL (',
+    '  -- A partitioned table\'s foreign keys include those declared on its partitions, pointing at the referenced table\'s root.',
+    '  SELECT f.conname, k.ord, rn.nspname AS ref_schema, rc.relname AS ref_table, ra.attname AS ref_column',
+    '  FROM pg_constraint f',
+    '  CROSS JOIN LATERAL unnest(f.conkey, f.confkey) WITH ORDINALITY AS k(attnum, refattnum, ord)',
+    '  JOIN pg_attribute fa ON fa.attrelid = f.conrelid AND fa.attnum = k.attnum',
+    '  JOIN pg_attribute ra ON ra.attrelid = f.confrelid AND ra.attnum = k.refattnum',
+    '  JOIN pg_class rc ON rc.oid = coalesce(pg_partition_root(f.confrelid), f.confrelid)',
+    '  JOIN pg_namespace rn ON rn.oid = rc.relnamespace',
+    '  WHERE f.contype = \'f\' AND f.conparentid = 0 AND fa.attname = a.attname',
+    '    AND (f.conrelid = c.oid OR f.conrelid IN (SELECT relid FROM pg_partition_tree(c.oid)))',
+    ') fk ON true',
+    'WHERE c.relkind IN (\'r\', \'p\', \'v\', \'m\', \'f\') AND NOT c.relispartition',
+    '  AND n.nspname NOT IN (\'pg_catalog\', \'information_schema\') AND n.nspname NOT LIKE \'pg\\_%\'',
+    'ORDER BY 1, 2, 6, 13, 14;',
+  ].join('\n'),
+  mysqlCatalog: [
+    '-- One row per column of every table and view, for ERD Studio (MySQL 8 or MariaDB 10.2 or later). System schemas are left out.',
+    'SELECT c.TABLE_SCHEMA AS table_schema,',
+    '       c.TABLE_NAME AS table_name,',
+    '       t.TABLE_TYPE AS table_type,',
+    '       t.TABLE_COMMENT AS table_comment,',
+    '       c.COLUMN_NAME AS column_name,',
+    '       c.ORDINAL_POSITION AS ordinal_position,',
+    '       c.COLUMN_TYPE AS data_type,',
+    '       c.IS_NULLABLE AS is_nullable,',
+    '       c.COLUMN_DEFAULT AS column_default,',
+    '       c.EXTRA AS extra,',
+    '       c.COLUMN_COMMENT AS column_comment,',
+    '       CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN \'YES\' ELSE \'NO\' END AS is_primary_key,',
+    '       pk.ORDINAL_POSITION AS pk_ordinal,',
+    '       uq.INDEX_NAME AS unique_constraint_name,',
+    '       fk.CONSTRAINT_NAME AS fk_constraint_name,',
+    '       fk.ORDINAL_POSITION AS fk_ordinal,',
+    '       fk.REFERENCED_TABLE_SCHEMA AS fk_table_schema,',
+    '       fk.REFERENCED_TABLE_NAME AS fk_table,',
+    '       fk.REFERENCED_COLUMN_NAME AS fk_column,',
+    '       COUNT(*) OVER () AS total_rows',
+    'FROM information_schema.COLUMNS c',
+    'JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME',
+    'LEFT JOIN information_schema.KEY_COLUMN_USAGE pk',
+    '       ON pk.TABLE_SCHEMA = c.TABLE_SCHEMA AND pk.TABLE_NAME = c.TABLE_NAME AND pk.COLUMN_NAME = c.COLUMN_NAME AND pk.CONSTRAINT_NAME = \'PRIMARY\'',
+    'LEFT JOIN information_schema.STATISTICS uq',
+    '       ON uq.TABLE_SCHEMA = c.TABLE_SCHEMA AND uq.TABLE_NAME = c.TABLE_NAME AND uq.COLUMN_NAME = c.COLUMN_NAME',
+    '      AND uq.NON_UNIQUE = 0 AND uq.INDEX_NAME <> \'PRIMARY\'',
+    '      -- Unique on whole columns only: never on an expression or a prefix of a column.',
+    '      AND NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS e',
+    '                      WHERE e.TABLE_SCHEMA = uq.TABLE_SCHEMA AND e.TABLE_NAME = uq.TABLE_NAME AND e.INDEX_NAME = uq.INDEX_NAME',
+    '                        AND (e.COLUMN_NAME IS NULL OR e.SUB_PART IS NOT NULL))',
+    'LEFT JOIN information_schema.KEY_COLUMN_USAGE fk',
+    '       ON fk.TABLE_SCHEMA = c.TABLE_SCHEMA AND fk.TABLE_NAME = c.TABLE_NAME AND fk.COLUMN_NAME = c.COLUMN_NAME AND fk.REFERENCED_TABLE_NAME IS NOT NULL',
+    'WHERE c.TABLE_SCHEMA NOT IN (\'mysql\', \'sys\', \'information_schema\', \'performance_schema\')',
+    'ORDER BY 1, 2, 6, 14, 15;',
+  ].join('\n'),
+  postgresCatalogRun: 'psql -d <database> --csv -f catalog.sql -o catalog.csv',
+  mysqlCatalogRun: 'mysql --batch --execute="source catalog.sql" > catalog.tsv',
 } as const satisfies Record<string, string>;
 export type ImportGuideSnippet = keyof typeof IMPORT_GUIDE_SNIPPETS;
 
@@ -125,6 +271,11 @@ export interface ImportGuideSection {
   steps: readonly ImportGuideStep[];
   notes?: readonly string[];
   action: ImportGuideAction;
+  /**
+   * The button's label when it is not the action's own: a second way into
+   * the same import (a catalog query's CSV), counted under the same action.
+   */
+  label?: string;
 }
 
 export interface ImportGuideCard {
@@ -254,13 +405,26 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   databricks: {
     id: 'databricks',
     title: 'Databricks (Unity Catalog)',
-    what: 'Export the CREATE TABLE statements of a whole schema in one notebook cell. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships.',
-    sections: [{
-      steps: [
-        { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
-      ],
-      action: 'databricks',
-    }],
+    what: 'Export the CREATE TABLE statements of a whole schema in one notebook cell, or run one query and download its result. Declared PRIMARY KEY and FOREIGN KEY constraints become keys and relationships either way.',
+    sections: [
+      {
+        heading: 'CREATE TABLE statements, from a notebook',
+        steps: [
+          { text: 'Run this in a Python notebook cell, with your catalog and schema, then copy what it prints into `schema.sql` in this folder.', snippet: 'databricksSchema' },
+        ],
+        notes: ['Keeps column defaults and identity columns. A comment with a backslash in it can come in changed: SHOW CREATE TABLE writes the backslash as it is.'],
+        action: 'databricks',
+      },
+      {
+        heading: 'One query, downloaded as CSV',
+        steps: [
+          { text: 'Run this in the SQL editor with your catalog on its `WHERE` line, then download the whole result as CSV into this folder.', snippet: 'databricksCatalog' },
+        ],
+        notes: ['No notebook and nothing to copy by hand. Unity Catalog\'s information_schema does not show column defaults or identity columns, so they do not come in. A download of only the first rows is refused: the query counts its rows.'],
+        action: 'databricks',
+        label: 'Import the CSV…',
+      },
+    ],
   },
   snowflake: {
     id: 'snowflake',
@@ -321,20 +485,46 @@ const SOURCE_CARDS: Readonly<Record<Exclude<ImportGuideCardId, 'found'>, ImportG
   postgres: {
     id: 'postgres',
     title: 'PostgreSQL',
-    what: 'pg_dump writes the schema without the data. Add `-n <schema>` for one schema.',
-    sections: [{
-      steps: [{ text: 'Run this in a terminal in this folder:', snippet: 'postgres' }],
-      action: 'postgres',
-    }],
+    what: 'pg_dump writes the schema without the data, or one query reads every table\'s columns and keys from the catalog.',
+    sections: [
+      {
+        heading: 'pg_dump',
+        steps: [{ text: 'Run this in a terminal in this folder (add `-n <schema>` for one schema):', snippet: 'postgres' }],
+        action: 'postgres',
+      },
+      {
+        heading: 'One query, saved as CSV',
+        steps: [
+          { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'postgresCatalog' },
+          { text: 'Run it with psql (PostgreSQL 12 or later), which writes the CSV:', snippet: 'postgresCatalogRun' },
+        ],
+        notes: ['Partitions come in as their parent table. CHECK constraints and identity columns do not come in; pg_dump keeps them.'],
+        action: 'postgres',
+        label: 'Import the CSV…',
+      },
+    ],
   },
   mysql: {
     id: 'mysql',
     title: 'MySQL and MariaDB',
-    what: 'mysqldump writes the tables without the data (MariaDB also calls it mariadb-dump). Add `-h`, `-u` and `-p` as you connect.',
-    sections: [{
-      steps: [{ text: 'Run this in a terminal in this folder:', snippet: 'mysql' }],
-      action: 'mysql',
-    }],
+    what: 'mysqldump writes the tables without the data (MariaDB also calls it mariadb-dump), or one query reads every table\'s columns and keys from the catalog. Add `-h`, `-u` and `-p` as you connect.',
+    sections: [
+      {
+        heading: 'mysqldump',
+        steps: [{ text: 'Run this in a terminal in this folder:', snippet: 'mysql' }],
+        action: 'mysql',
+      },
+      {
+        heading: 'One query, saved as TSV',
+        steps: [
+          { text: 'Save this query as `catalog.sql` in this folder:', snippet: 'mysqlCatalog' },
+          { text: 'Run it with the mysql client (MySQL 8, or MariaDB 10.2 or later), which writes the result tab-separated:', snippet: 'mysqlCatalogRun' },
+        ],
+        notes: ['CHECK constraints do not come in; mysqldump keeps them.'],
+        action: 'mysql',
+        label: 'Import the TSV…',
+      },
+    ],
   },
   dbml: {
     id: 'dbml',
@@ -570,7 +760,7 @@ function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | 
       <div class="ig-section">${section.heading ? `
         <h3 class="ig-section__heading">${escapeHtml(section.heading)}</h3>` : ''}
         ${renderSteps(section)}
-        <button class="ig-btn${lead ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(importGuideActionLabel(section.action, intent))}</button>
+        <button class="ig-btn${lead ? '' : ' ig-btn--secondary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>
       </div>`).join('');
   return `
     <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">

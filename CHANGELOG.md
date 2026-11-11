@@ -10,6 +10,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+
+- **Import SQL DDL… reads a catalog export too:** pick a `.csv` (or `.tsv`) of your database's columns, one row per column, in the same Open dialog, and it becomes a draft like any import, with keys and relationships when the file has them. **Bring In Your Data Model…** gives the query for Databricks (Unity Catalog), PostgreSQL and MySQL, beside each card's own export: one query and a download, no notebook (Databricks' catalog does not show column defaults or identity columns, so the notebook route still keeps those). The docs add DuckDB's and list the column names any other database's query can use. A file without key columns imports its tables and columns, and the draft says the file had no keys. A download that holds only the first rows (the query counts its rows) is refused, and so is a file of more than 100,000 columns: export one schema at a time.
+
 ### Fixed
 
 - **New Relationship:** on a short window the **Stored in** picker no longer runs into the Role field's hint. It sits in a band of its own above the buttons, with a divider where the fields above scroll away (#275).

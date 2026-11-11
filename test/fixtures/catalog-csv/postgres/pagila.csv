@@ -1,0 +1,154 @@
+table_schema,table_name,table_type,table_comment,column_name,ordinal_position,data_type,is_nullable,column_default,column_comment,is_primary_key,pk_ordinal,unique_constraint_name,fk_constraint_name,fk_ordinal,fk_table_schema,fk_table,fk_column,total_rows
+public,actor,BASE TABLE,,actor_id,1,integer,NO,nextval('actor_actor_id_seq'::regclass),,YES,1,,,,,,,153
+public,actor,BASE TABLE,,first_name,2,text,NO,,,NO,,,,,,,,153
+public,actor,BASE TABLE,,last_name,3,text,NO,,,NO,,,,,,,,153
+public,actor,BASE TABLE,,last_update,4,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,actor_info,VIEW,,actor_id,1,integer,YES,,,NO,,,,,,,,153
+public,actor_info,VIEW,,first_name,2,text,YES,,,NO,,,,,,,,153
+public,actor_info,VIEW,,last_name,3,text,YES,,,NO,,,,,,,,153
+public,actor_info,VIEW,,film_info,4,jsonb,YES,,,NO,,,,,,,,153
+public,address,BASE TABLE,,address_id,1,integer,NO,nextval('address_address_id_seq'::regclass),,YES,1,,,,,,,153
+public,address,BASE TABLE,,address,2,text,NO,,,NO,,,,,,,,153
+public,address,BASE TABLE,,address2,3,text,YES,,,NO,,,,,,,,153
+public,address,BASE TABLE,,district,4,text,NO,,,NO,,,,,,,,153
+public,address,BASE TABLE,,city_id,5,integer,NO,,,NO,,,address_city_id_fkey,1,public,city,city_id,153
+public,address,BASE TABLE,,postal_code,6,text,YES,,,NO,,,,,,,,153
+public,address,BASE TABLE,,phone,7,text,NO,,,NO,,,,,,,,153
+public,address,BASE TABLE,,last_update,8,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,category,BASE TABLE,,category_id,1,integer,NO,nextval('category_category_id_seq'::regclass),,YES,1,,,,,,,153
+public,category,BASE TABLE,,name,2,text,NO,,,NO,,,,,,,,153
+public,category,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,city,BASE TABLE,,city_id,1,integer,NO,nextval('city_city_id_seq'::regclass),,YES,1,,,,,,,153
+public,city,BASE TABLE,,city,2,text,NO,,,NO,,,,,,,,153
+public,city,BASE TABLE,,country_id,3,integer,NO,,,NO,,,city_country_id_fkey,1,public,country,country_id,153
+public,city,BASE TABLE,,last_update,4,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,country,BASE TABLE,,country_id,1,integer,NO,nextval('country_country_id_seq'::regclass),,YES,1,,,,,,,153
+public,country,BASE TABLE,,country,2,text,NO,,,NO,,,,,,,,153
+public,country,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,customer,BASE TABLE,,customer_id,1,integer,NO,nextval('customer_customer_id_seq'::regclass),,YES,1,,,,,,,153
+public,customer,BASE TABLE,,store_id,2,integer,NO,,,NO,,,customer_store_id_fkey,1,public,store,store_id,153
+public,customer,BASE TABLE,,first_name,3,text,NO,,,NO,,,,,,,,153
+public,customer,BASE TABLE,,last_name,4,text,NO,,,NO,,,,,,,,153
+public,customer,BASE TABLE,,email,5,text,YES,,,NO,,,,,,,,153
+public,customer,BASE TABLE,,address_id,6,integer,NO,,,NO,,,customer_address_id_fkey,1,public,address,address_id,153
+public,customer,BASE TABLE,,activebool,7,boolean,NO,true,,NO,,,,,,,,153
+public,customer,BASE TABLE,,create_date,8,date,NO,CURRENT_DATE,,NO,,,,,,,,153
+public,customer,BASE TABLE,,last_update,9,timestamp with time zone,YES,now(),,NO,,,,,,,,153
+public,customer,BASE TABLE,,active,10,integer,YES,,,NO,,,,,,,,153
+public,customer,BASE TABLE,,uuid,11,uuid,NO,uuidv7(),,NO,,customer_uuid_key,,,,,,153
+public,customer_list,VIEW,,id,1,integer,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,name,2,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,address,3,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,zip code,4,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,phone,5,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,city,6,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,country,7,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,notes,8,text,YES,,,NO,,,,,,,,153
+public,customer_list,VIEW,,sid,9,integer,YES,,,NO,,,,,,,,153
+public,film,BASE TABLE,,film_id,1,integer,NO,nextval('film_film_id_seq'::regclass),,YES,1,,,,,,,153
+public,film,BASE TABLE,,title,2,text,NO,,,NO,,,,,,,,153
+public,film,BASE TABLE,,description,3,text,YES,,,NO,,,,,,,,153
+public,film,BASE TABLE,,release_year,4,year,YES,,,NO,,,,,,,,153
+public,film,BASE TABLE,,language_id,5,integer,NO,,,NO,,,film_language_id_fkey,1,public,language,language_id,153
+public,film,BASE TABLE,,original_language_id,6,integer,YES,,,NO,,,film_original_language_id_fkey,1,public,language,language_id,153
+public,film,BASE TABLE,,rental_duration,7,smallint,NO,3,,NO,,,,,,,,153
+public,film,BASE TABLE,,rental_rate,8,"numeric(4,2)",NO,4.99,,NO,,,,,,,,153
+public,film,BASE TABLE,,length,9,smallint,YES,,,NO,,,,,,,,153
+public,film,BASE TABLE,,replacement_cost,10,"numeric(5,2)",NO,19.99,,NO,,,,,,,,153
+public,film,BASE TABLE,,rating,11,mpaa_rating,YES,'G'::mpaa_rating,,NO,,,,,,,,153
+public,film,BASE TABLE,,last_update,12,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,film,BASE TABLE,,special_features,13,text[],YES,,,NO,,,,,,,,153
+public,film,BASE TABLE,,fulltext,14,tsvector,NO,,,NO,,,,,,,,153
+public,film,BASE TABLE,,length_hours,15,"numeric(4,2)",YES,"round(((length)::numeric / 60.0), 2)",,NO,,,,,,,,153
+public,film_actor,BASE TABLE,,actor_id,1,integer,NO,,,YES,1,,film_actor_actor_id_fkey,1,public,actor,actor_id,153
+public,film_actor,BASE TABLE,,film_id,2,integer,NO,,,YES,2,,film_actor_film_id_fkey,1,public,film,film_id,153
+public,film_actor,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,film_category,BASE TABLE,,film_id,1,integer,NO,,,YES,1,,film_category_film_id_fkey,1,public,film,film_id,153
+public,film_category,BASE TABLE,,category_id,2,integer,NO,,,YES,2,,film_category_category_id_fkey,1,public,category,category_id,153
+public,film_category,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,film_embedding,BASE TABLE,,film_id,1,integer,NO,,,YES,1,,film_embedding_film_id_fkey,1,public,film,film_id,153
+public,film_embedding,BASE TABLE,,embedding,2,vector(20),NO,,,NO,,,,,,,,153
+public,film_embedding,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,film_list,VIEW,,fid,1,integer,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,title,2,text,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,description,3,text,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,category,4,text,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,price,5,"numeric(4,2)",YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,length,6,smallint,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,rating,7,mpaa_rating,YES,,,NO,,,,,,,,153
+public,film_list,VIEW,,actors,8,text,YES,,,NO,,,,,,,,153
+public,inventory,BASE TABLE,,inventory_id,1,integer,NO,nextval('inventory_inventory_id_seq'::regclass),,YES,1,,,,,,,153
+public,inventory,BASE TABLE,,film_id,2,integer,NO,,,NO,,,inventory_film_id_fkey,1,public,film,film_id,153
+public,inventory,BASE TABLE,,store_id,3,integer,NO,,,NO,,,inventory_store_id_fkey,1,public,store,store_id,153
+public,inventory,BASE TABLE,,last_update,4,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,language,BASE TABLE,,language_id,1,integer,NO,nextval('language_language_id_seq'::regclass),,YES,1,,,,,,,153
+public,language,BASE TABLE,,name,2,text,NO,,,NO,,,,,,,,153
+public,language,BASE TABLE,,last_update,3,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,fid,1,integer,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,title,2,text,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,description,3,text,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,category,4,text,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,price,5,"numeric(4,2)",YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,length,6,smallint,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,rating,7,mpaa_rating,YES,,,NO,,,,,,,,153
+public,nicer_but_slower_film_list,VIEW,,actors,8,text,YES,,,NO,,,,,,,,153
+public,payment,BASE TABLE,,payment_id,1,integer,NO,nextval('payment_payment_id_seq'::regclass),,YES,2,,,,,,,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_01_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_02_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_03_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_04_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_05_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,customer_id,2,integer,NO,,,NO,,,payment_p2022_06_customer_id_fkey,1,public,customer,customer_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_01_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_02_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_03_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_04_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_05_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,staff_id,3,integer,NO,,,NO,,,payment_p2022_06_staff_id_fkey,1,public,staff,staff_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_01_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_02_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_03_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_04_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_05_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,rental_id,4,integer,NO,,,NO,,,payment_p2022_06_rental_id_fkey,1,public,rental,rental_id,153
+public,payment,BASE TABLE,,amount,5,"numeric(5,2)",NO,,,NO,,,,,,,,153
+public,payment,BASE TABLE,,payment_date,6,timestamp with time zone,NO,,,YES,1,payment_uuid_key,,,,,,153
+public,payment,BASE TABLE,,uuid,7,uuid,NO,uuidv7(),,NO,,payment_uuid_key,,,,,,153
+public,rental,BASE TABLE,,rental_id,1,integer,NO,nextval('rental_rental_id_seq'::regclass),,YES,1,,,,,,,153
+public,rental,BASE TABLE,,rental_date,2,timestamp with time zone,NO,,,NO,,idx_unq_rental_rental_date_inventory_id_customer_id,,,,,,153
+public,rental,BASE TABLE,,inventory_id,3,integer,NO,,,NO,,idx_unq_rental_rental_date_inventory_id_customer_id,rental_inventory_id_fkey,1,public,inventory,inventory_id,153
+public,rental,BASE TABLE,,customer_id,4,integer,NO,,,NO,,idx_unq_rental_rental_date_inventory_id_customer_id,rental_customer_id_fkey,1,public,customer,customer_id,153
+public,rental,BASE TABLE,,return_date,5,timestamp with time zone,YES,,,NO,,,,,,,,153
+public,rental,BASE TABLE,,staff_id,6,integer,NO,,,NO,,,rental_staff_id_fkey,1,public,staff,staff_id,153
+public,rental,BASE TABLE,,last_update,7,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,rental,BASE TABLE,,uuid,8,uuid,NO,uuidv7(),,NO,,rental_uuid_key,,,,,,153
+public,rental_by_category,MATERIALIZED VIEW,,category,1,text,YES,,,NO,,rental_category,,,,,,153
+public,rental_by_category,MATERIALIZED VIEW,,total_sales,2,numeric,YES,,,NO,,,,,,,,153
+public,sales_by_film_category,VIEW,,category,1,text,YES,,,NO,,,,,,,,153
+public,sales_by_film_category,VIEW,,total_sales,2,numeric,YES,,,NO,,,,,,,,153
+public,sales_by_store,VIEW,,store,1,text,YES,,,NO,,,,,,,,153
+public,sales_by_store,VIEW,,manager,2,text,YES,,,NO,,,,,,,,153
+public,sales_by_store,VIEW,,total_sales,3,numeric,YES,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,staff_id,1,integer,NO,nextval('staff_staff_id_seq'::regclass),,YES,1,,,,,,,153
+public,staff,BASE TABLE,,first_name,2,text,NO,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,last_name,3,text,NO,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,address_id,4,integer,NO,,,NO,,,staff_address_id_fkey,1,public,address,address_id,153
+public,staff,BASE TABLE,,email,5,text,YES,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,store_id,6,integer,NO,,,NO,,,staff_store_id_fkey,1,public,store,store_id,153
+public,staff,BASE TABLE,,active,7,boolean,NO,true,,NO,,,,,,,,153
+public,staff,BASE TABLE,,username,8,text,NO,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,password,9,text,YES,,,NO,,,,,,,,153
+public,staff,BASE TABLE,,last_update,10,timestamp with time zone,NO,now(),,NO,,,,,,,,153
+public,staff,BASE TABLE,,picture,11,bytea,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,id,1,integer,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,name,2,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,address,3,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,zip code,4,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,phone,5,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,city,6,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,country,7,text,YES,,,NO,,,,,,,,153
+public,staff_list,VIEW,,sid,8,integer,YES,,,NO,,,,,,,,153
+public,store,BASE TABLE,,store_id,1,integer,NO,nextval('store_store_id_seq'::regclass),,YES,1,,,,,,,153
+public,store,BASE TABLE,,manager_staff_id,2,integer,NO,,,NO,,idx_unq_manager_staff_id,,,,,,153
+public,store,BASE TABLE,,address_id,3,integer,NO,,,NO,,,store_address_id_fkey,1,public,address,address_id,153
+public,store,BASE TABLE,,last_update,4,timestamp with time zone,NO,now(),,NO,,,,,,,,153

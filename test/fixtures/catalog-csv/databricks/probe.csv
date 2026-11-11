@@ -1,0 +1,51 @@
+table_schema,table_name,table_type,table_comment,column_name,ordinal_position,data_type,is_nullable,column_default,column_comment,is_primary_key,pk_ordinal,fk_constraint_name,fk_ordinal,fk_table_catalog,fk_table_schema,fk_table,fk_column
+probe_ref,currency,MANAGED,,currency_code,0,varchar(3),NO,,,YES,1,,,,,,
+probe_ref,currency,MANAGED,,currency_name,1,string,YES,,,NO,,,,,,,
+probe_ref,customer,MANAGED,"Customer, ""master"" table - it's got a back\slash
+and a newline",customer_id,0,bigint,NO,,"Surrogate key, plain comment",YES,1,,,,,,
+probe_ref,customer,MANAGED,"Customer, ""master"" table - it's got a back\slash
+and a newline",CustomerKey,1,varchar(50),YES,,"Comma, ""double"" it's back\slash
+second line",NO,,,,,,,
+probe_ref,customer,MANAGED,"Customer, ""master"" table - it's got a back\slash
+and a newline",customer_name,2,string,YES,,"Name, ""quoted"" - O'Brien \ C:\temp
+line two",NO,,,,,,,
+probe_ref,dup_a,MANAGED,,k,0,int,NO,,,YES,1,,,,,,
+probe_ref,dup_c,MANAGED,,k,0,int,NO,,,YES,1,,,,,,
+probe_ref,dup_c,MANAGED,,parent_k,1,int,YES,,,NO,,dup_fk,1,my_catalog,probe_ref,dup_a,k
+probe_ref,employee,MANAGED,,employee_id,0,int,NO,,,YES,1,,,,,,
+probe_ref,employee,MANAGED,,manager_id,1,int,YES,,,NO,,employee_manager_fk,1,my_catalog,probe_ref,employee,employee_id
+probe_ref,employee,MANAGED,,full_name,2,string,YES,,,NO,,,,,,,
+probe_sales,dup_b,MANAGED,,k,0,int,NO,,,YES,1,,,,,,
+probe_sales,dup_b,MANAGED,,parent_k,1,int,YES,,,NO,,dup_fk,1,my_catalog,probe_ref,dup_a,k
+probe_sales,event_log,MANAGED,,logged_at,0,timestamp,YES,,,NO,,,,,,,
+probe_sales,event_log,MANAGED,,message,1,string,YES,,,NO,,,,,,,
+probe_sales,fx_transfer,MANAGED,,transfer_id,0,bigint,NO,,,YES,1,,,,,,
+probe_sales,fx_transfer,MANAGED,,from_currency,1,varchar(3),YES,,,NO,,fx_from_fk,1,my_catalog,probe_ref,currency,currency_code
+probe_sales,fx_transfer,MANAGED,,to_currency,2,varchar(3),YES,,,NO,,fx_to_fk,1,my_catalog,probe_ref,currency,currency_code
+probe_sales,order_line,MANAGED,,order_id,0,bigint,NO,,,YES,1,order_line_order_fk,1,my_catalog,probe_sales,orders,order_id
+probe_sales,order_line,MANAGED,,line_no,1,int,NO,,,YES,2,,,,,,
+probe_sales,order_line,MANAGED,,amount,2,"decimal(18,4)",YES,,,NO,,,,,,,
+probe_sales,order_line_note,MANAGED,,ln_no,0,int,NO,,,NO,,oln_line_fk,2,my_catalog,probe_sales,order_line,line_no
+probe_sales,order_line_note,MANAGED,,ord_id,1,bigint,NO,,,NO,,oln_line_fk,1,my_catalog,probe_sales,order_line,order_id
+probe_sales,order_line_note,MANAGED,,ord_id,1,bigint,NO,,,NO,,oln_order_fk,1,my_catalog,probe_sales,orders,order_id
+probe_sales,order_line_note,MANAGED,,note,2,string,YES,,,NO,,,,,,,
+probe_sales,orders,MANAGED,,order_id,0,bigint,NO,,,YES,1,,,,,,
+probe_sales,orders,MANAGED,,customer_id,1,bigint,YES,,,NO,,orders_customer_fk,1,my_catalog,probe_ref,customer,customer_id
+probe_sales,orders,MANAGED,,order,2,int,YES,,reserved-word column name,NO,,,,,,,
+probe_sales,orders,MANAGED,,order_date,3,date,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,id,0,bigint,NO,,,YES,1,,,,,,
+probe_sales,type_zoo,MANAGED,,c_decimal,1,"decimal(18,4)",YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_varchar,2,varchar(50),YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_string,3,string,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_bigint,4,bigint,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_int,5,int,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_boolean,6,boolean,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_date,7,date,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_timestamp,8,timestamp,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_timestamp_ntz,9,timestamp_ntz,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_array,10,array<string>,YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_map,11,"map<string,int>",YES,,,NO,,,,,,,
+probe_sales,type_zoo,MANAGED,,c_struct,12,"struct<a:int,b:array<string>>",YES,,,NO,,,,,,,
+probe_sales,v_order_totals,VIEW,view over order_line,order_id,0,bigint,NO,,,NO,,,,,,,
+probe_sales,v_order_totals,VIEW,view over order_line,line_count,1,bigint,NO,,,NO,,,,,,,
+probe_sales,v_order_totals,VIEW,view over order_line,total_amount,2,"decimal(28,4)",YES,,,NO,,,,,,,
