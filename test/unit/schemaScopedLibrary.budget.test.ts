@@ -279,6 +279,13 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
       await new Promise((resolve) => setTimeout(resolve, 0));
       panel._postedMessages.length = 0;
       const perFile = new Map<string, number>();
+      // Tables turned into models: cached reads hide a walk over the whole library, so count the builds too.
+      let tablesBuilt = 0;
+      const realGetTable = lib.getTable.bind(lib);
+      (lib as { getTable: unknown }).getTable = (...args: Parameters<typeof lib.getTable>) => {
+        tablesBuilt++;
+        return realGetTable(...args);
+      };
       const started = performance.now();
       (cjsFs as { readFileSync: unknown }).readFileSync = function (this: unknown, ...args: unknown[]) {
         const p = String(args[0]).split(path.sep).join('/');
@@ -291,6 +298,7 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
       } finally {
         (cjsFs as { readFileSync: unknown }).readFileSync = realReadFileSync;
         syncBuiltinESMExports();
+        (lib as { getTable: unknown }).getTable = realGetTable;
       }
       const elapsed = performance.now() - started;
       const tableReads = [...perFile.values()].reduce((a, b) => a + b, 0);
@@ -302,6 +310,8 @@ describe(`${TABLES} tables in ${SCHEMAS} schema folders, names repeated across t
       expect(rels).toMatch(new RegExp(`^Ref: ${added.schema}\\.${added.name}\\.b_id >\\?? ?${member.schema}\\.${member.name}\\.id$`, 'm'));
       // The two tables (and the files the edit wrote), never every table file.
       expect(tableReads).toBeLessThan(TABLES / 4);
+      // Nor every table built as a model to look up the relationship's two ends (it built all 869).
+      expect(tablesBuilt).toBeLessThan(TABLES / 4);
     } finally {
       for (const [f, text] of before) fs.writeFileSync(f, text);
       fs.rmSync(path.dirname(diagramPath), { recursive: true, force: true });
