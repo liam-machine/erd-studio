@@ -132,7 +132,8 @@ describe('the cards', () => {
       for (const section of card.querySelectorAll('.ig-section')) {
         const main = [...section.querySelectorAll('.ig-btn:not(.ig-btn--secondary)')];
         // The way an open card shows has exactly one main button, its import; the folded other way has none.
-        expect(main.length, id).toBe(section.classList.contains('ig-alt') ? 0 : 1);
+        // "Not yet" is a closing note, always in view: its Send Feedback is a quiet button too.
+        expect(main.length, id).toBe(section.classList.contains('ig-alt') || id === 'notYet' ? 0 : 1);
         for (const b of main) expect(b.getAttribute('data-action'), id).toBe('run');
       }
       for (const copy of card.querySelectorAll('[data-action="copy"]')) expect(copy.classList.contains('ig-btn--secondary'), id).toBe(true);
@@ -636,16 +637,22 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
       expect(Buffer.from(src.slice(src.indexOf(',') + 1), 'base64').equals(fs.readFileSync(path.join(__dirname, '../../src/services/importGuideLogos', file))), id).toBe(true);
     }
     // No mark of their own: the slot stays, so the names line up.
-    for (const id of ['dbml', 'otherTools', 'notYet']) expect(logos[id]?.tagName, id).toBe('SPAN');
+    for (const id of ['dbml', 'otherTools']) expect(logos[id]?.tagName, id).toBe('SPAN');
     expect(p.doc.querySelector('svg')).toBeNull();
     for (const img of p.doc.querySelectorAll('img')) expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
 
   it('every source is one line until it is opened, so the whole list is in view; only the folder\'s own suggestion starts open', () => {
-    const open = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-card')].map((c) => c.querySelector(':scope > details.ig-card__fold')!.hasAttribute('open'));
+    const sources = (ctx: ImportGuideContext) => [...page(ctx).doc.querySelectorAll('.ig-card:not([data-card="notYet"])')];
+    const open = (ctx: ImportGuideContext) => sources(ctx).map((c) => c.querySelector(':scope > details.ig-card__fold')!.hasAttribute('open'));
     for (const ctx of [NOFOLDER, BLANK, DBT]) {
-      const p = page(ctx);
-      for (const card of p.doc.querySelectorAll('.ig-card')) {
+      // "Not yet" is not a source to open: a short closing note, always in view, with no fold.
+      const notYet = page(ctx).doc.querySelector('[data-card="notYet"]')!;
+      expect(notYet.querySelector('details')).toBeNull();
+      expect(notYet.querySelector(':scope > .ig-card__title')?.textContent).toBe('Not yet');
+      expect(notYet.querySelector(':scope > .ig-card__what')?.textContent?.length).toBeGreaterThan(10);
+      expect(notYet.querySelector('[data-action="run"]')?.textContent).toBe('Send Feedback');
+      for (const card of sources(ctx)) {
         const fold = card.querySelector(':scope > details.ig-card__fold');
         expect(fold, card.getAttribute('data-card') ?? '').not.toBeNull();
         // The summary is the title alone; everything else is inside the fold.

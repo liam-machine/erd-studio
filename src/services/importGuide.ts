@@ -801,6 +801,7 @@ body {
 .ig-card__logo { display: inline-block; width: 18px; height: 18px; margin: 0 8px 0 4px; vertical-align: -3px; object-fit: contain; }
 .ig-card__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .ig-card__fold[open] > .ig-card__summary { margin-bottom: 6px; }
+.ig-card--plain > .ig-card__title { display: block; margin-bottom: 6px; }
 .ig-card__title { display: inline; margin: 0; font-size: 1.1em; font-weight: 600; }
 .ig-card__what { margin: 0 0 10px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
 .ig-section { margin: 0 0 10px; }
@@ -926,8 +927,10 @@ function renderLogo(id: ImportGuideCardId): string {
  */
 function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | undefined): string {
   const hasRecommended = card.sections.some((section) => section.recommended);
+  // "Not yet" is not a source to open: it is a short closing note, always in view, and its button is a quiet one.
+  const folds = card.id !== 'notYet';
   const sections = card.sections.map((section) => {
-    const button = `<button class="ig-btn${section.useWhen ? ' ig-btn--secondary' : ''}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>`;
+    const button = `<button class="ig-btn${section.useWhen || !folds ? ' ig-btn--secondary' : ''}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>`;
     const body = renderSteps(section, button);
     if (section.useWhen) {
       return `
@@ -942,6 +945,13 @@ function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | 
         ${body}
       </div>`;
   }).join('');
+  if (!folds) {
+    return `
+    <li class="ig-card ig-card--plain" data-card="${card.id}">
+      <h2 class="ig-card__title">${escapeHtml(card.title)}</h2>
+      <p class="ig-card__what">${inline(card.what)}</p>${sections}
+    </li>`;
+  }
   return `
     <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
       <details class="ig-card__fold"${lead ? ' open' : ''}>
