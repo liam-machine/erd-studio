@@ -3861,6 +3861,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private dbmlMemberProblem(document: vscode.TextDocument, name: string): string | null {
     if (!this.isDbmlDocument(document)) return null;
+    // A name two schema folders share names neither table (owner decision H): only its file says which.
+    if (this.schemaScoped() && this.tableLibraryService.isAmbiguousName(name)) {
+      return `"${name}" cannot be added by its name: the schema folders ${this.foldersNamed(name)} each have a table called ${name}. ` +
+        'Add the one you mean with Add Existing Tables, which lists each by its file.';
+    }
     const storage = this.tableLibraryService.tableStorage(name);
     if (storage === 'yaml') return `"${name}" is a YAML table, and a DBML diagram can only show DBML tables. ${DBML_CONVERT_FIRST_MESSAGE}.`;
     return storage === undefined ? validateNewDbmlTableName(name) : null;

@@ -853,6 +853,24 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     expect(JSON.parse(read('bronze/empty.json')).logical.models).toEqual(['addresse']);
   });
 
+  it('Add Tables from dbt with a model whose name two schema folders share says so, naming both, and writes nothing', async () => {
+    ymlModels = [{ name: 'addresse', configSchema: 'ddd' }];
+    fs.writeFileSync(at('bronze/diagrams/empty.dbml'), "Project empty {\n  erd_schema_version: '7'\n}\n");
+    const canvas = await open('bronze/diagrams/empty.dbml');
+    const before = snapshot();
+    canvas.panel._postedMessages.length = 0;
+    const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
+    await (canvas.provider as unknown as { applyDbtModels(...args: unknown[]): Promise<void> })
+      .applyDbtModels(canvas.document, canvas.panel.webview, ['addresse'], ymlData(), empty);
+    const errors = canvas.panel._postedMessages
+      .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
+      .map((m) => m.payload.message);
+    expect(errors).toEqual([
+      'No tables were added from dbt. "addresse" cannot be added by its name: the schema folders bqs and ccc each have a table called addresse. Add the one you mean with Add Existing Tables, which lists each by its file.',
+    ]);
+    expect(changed(before, snapshot())).toEqual([]);
+  });
+
   it('Reveal in Table Library and Show on Other Diagrams… from a canvas name the member\'s own file', async () => {
     const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
     const canvas = await open('bronze/diagrams/kunden.dbml');
