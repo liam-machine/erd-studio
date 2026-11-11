@@ -8,13 +8,15 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## 2.0.2 — 2026-11-10
+## Unreleased
 
 ### Added
 
 - **Import SQL DDL… reads a catalog export too:** pick a `.csv` (or `.tsv`) of your database's columns, one row per column, in the same Open dialog, and it becomes a draft like any import, with keys and relationships when the file has them. **Bring In Your Data Model…** gives the query for Databricks (Unity Catalog), PostgreSQL and MySQL, beside each card's own export: one query and a download, no notebook (Databricks' catalog does not show column defaults or identity columns, so the notebook route still keeps those). The docs add DuckDB's and list the column names any other database's query can use. A file without key columns imports its tables and columns, and the draft says the file had no keys. A download that holds only the first rows (the query counts its rows) is refused, and so is a file of more than 100,000 columns: export one schema at a time.
 
-- **ERD Studio: Suggest Relationships…** proposes the relationships a diagram's column names and keys point at, for you to accept or leave: a list in four parts (**Strong**, **Likely**, **Possible**, **Direction unknown**), each with the reasons in plain words. Only the strong ones (a declared key backs them) are ticked; with no key declared, nothing is ticked and the list says why. For one whose direction nothing settles, it asks "Which way does this relationship point?", as the New Relationship dialog does, or you skip it. Everything you accept is added in one change, stored as a relationship you drew yourself, and **Edit > Undo** takes them all back; nothing is kept about the ones you leave. Run it from the Command Palette or the canvas tab's **⋯** menu. After an import whose diagram has no relationships, a notification offers **Review Suggestions** once.
+- **ERD Studio: Suggest Relationships…** proposes the relationships a diagram's column names and keys point at, for you to accept or leave: a list in four parts (**Strong**, **Likely**, **Possible**, **Direction unknown**), each with the reasons in plain words. Only the strong ones (a declared key backs them) are ticked; with no key declared, nothing is ticked and the list says why. For one whose direction nothing settles, it asks "Which way does this relationship point?", as the New Relationship dialog does, or you skip it. Everything you accept is added in one change, stored as a relationship you drew yourself, and **Edit > Undo** takes them all back; nothing is kept about the ones you leave. Run it from the Command Palette or the canvas tab's **⋯** menu. After an import whose diagram has no relationships, a notification offers **Review Suggestions** once, when ERD Studio found at least one likely relationship (its number counts only those).
+
+## 2.0.2 — 2026-11-10
 
 ### Fixed
 
