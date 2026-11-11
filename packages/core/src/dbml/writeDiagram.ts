@@ -17,7 +17,8 @@
  */
 
 import type { Annotation, AnnotationColor, Relationship } from '../types/semantic.js';
-import { DBML_SCHEMA_VERSION } from '../types/semantic.js';
+import { DBML_SCHEMA_VERSION, DBML_TWIN_SCHEMA_VERSION } from '../types/semantic.js';
+import type { DbmlSubjectAreaReading } from '../types/dbmlStorage.js';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../domain.js';
 import {
   DBML_DIAGRAM_PROPERTIES,
@@ -28,7 +29,9 @@ import {
 } from '../dbmlRichProperties.js';
 import { readPendingRefs } from './readRelationships.js';
 import { dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
-import { erdLayoutOf, renderErdLayoutValue, sameErdLayout, withMemberSpelling, type ErdLayout } from '../erdLayout.js';
+import { erdLayoutOf, renderErdLayoutValue, sameErdLayout, withMemberRefs, type ErdLayout } from '../erdLayout.js';
+import { rekeySubjectArea } from '../rekeySubjectArea.js';
+import { assignTableRefs, qualifiedRef, tableIdOfPath, type TableId, type TableRefCandidate } from '../tableIdentity.js';
 import type { NodePosition } from '../types/semantic.js';
 import { normalisePosix } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
@@ -79,11 +82,25 @@ export interface SubjectAreaDbmlEdit {
   filePath: string;
   /** The v5 object as parsed (`schemaVersion` 5, D8). */
   before: Record<string, unknown>;
-  /** The v5 object after the handler's change. */
+  /**
+   * The v5 object after the handler's change. A member is named by its
+   * reference on the diagram (its name, or `<schema>.<name>` while another
+   * member has the same name), or by any text `resolveTable` resolves to its
+   * table: a member whose reference this edit changes (a table of its name
+   * joins or leaves the diagram) is written under its new reference, and so
+   * are its position, sticky links and stub entries (`rekeySubjectArea`).
+   */
   after: Record<string, unknown>;
-  /** A table AFTER this edit; undefined when there is none. */
+  /** A table AFTER this edit, by the text `after` names it with; undefined when there is none. */
   resolveTable(name: string): DbmlDiagramTable | undefined;
-  /** Tables whose file moved, was renamed or was deleted in this edit (lower-case). */
+  /**
+   * Members whose reference this edit changes, by their reference before it
+   * (any case) → the one `after` names them by, so each keeps its `use` line.
+   * Optional: a member named by its table's name or `<schema>.<name>` keeps
+   * the line that imports its table's file without it.
+   */
+  renamedMembers?: ReadonlyMap<string, string>;
+  /** Tables whose file moved, was renamed or was deleted in this edit: their references on the diagram (lower-case). */
   pathChanged?: ReadonlySet<string>;
   /**
    * The relationships files (paths after this edit, relative to the semantic
@@ -190,12 +207,12 @@ function layoutLine(layout: ErdLayout, eol: string, indent: string): string | un
  * written with; undefined = not written. `unlinked` is the members with no
  * table file to `use` (D26), which the object alone cannot tell apart.
  */
-function projectValues(obj: Json, unlinked: readonly string[] = []): Record<string, string | undefined> {
+function projectValues(obj: Json, unlinked: readonly string[] = [], version = String(DBML_SCHEMA_VERSION)): Record<string, string | undefined> {
   const view = isObject(obj.viewConfig) ? obj.viewConfig : {};
   const description = typeof obj.description === 'string' ? dbmlNoteText(obj.description) : '';
   return {
     note: description === '' ? undefined : description,
-    [DBML_DIAGRAM_PROPERTIES.schemaVersion]: String(DBML_SCHEMA_VERSION),
+    [DBML_DIAGRAM_PROPERTIES.schemaVersion]: version,
     [DBML_DIAGRAM_PROPERTIES.modelFolder]: typeof obj.modelFolder === 'string' ? obj.modelFolder : undefined,
     [DBML_DIAGRAM_PROPERTIES.showFkEdges]: typeof view.showFkEdges === 'boolean' ? String(view.showFkEdges) : undefined,
     [DBML_DIAGRAM_PROPERTIES.layoutOptions]: isObject(view.layoutOptions) ? JSON.stringify(view.layoutOptions) : undefined,
@@ -267,12 +284,19 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
   const view: Json = {};
   if (input.showFkEdges !== undefined) view.showFkEdges = input.showFkEdges;
   if (input.layoutOptions !== undefined) view.layoutOptions = input.layoutOptions;
+  // Two members of one name in different schema folders: version 8, and each layout line under its reference.
+  const identities: TableId[] = input.members.map((m) => {
+    const id = tableIdOfPath(normalisePosix(m.path));
+    return id ? { schema: id.schema, name: id.name } : { schema: '', name: m.name };
+  });
+  const refs = assignTableRefs(identities);
+  const pair = refs.some((ref, i) => lower(ref) !== lower(identities[i].name));
   const values = projectValues({
     description: input.description ?? '',
     ...(input.modelFolder !== undefined ? { modelFolder: input.modelFolder } : {}),
     ...(input.stubColumns !== undefined ? { stubColumns: input.stubColumns } : {}),
     viewConfig: view,
-  }, input.unlinked ?? []);
+  }, input.unlinked ?? [], String(pair ? DBML_TWIN_SCHEMA_VERSION : DBML_SCHEMA_VERSION));
   const blocks: string[][] = [];
   const uses = input.members.map((m) => tableUseLine(m.reference ?? dbmlName(m.name), input.filePath, m.path));
   const relationships = [...new Set(input.relationshipsFiles.map(normalisePosix))]
@@ -283,7 +307,12 @@ export function renderNewSubjectAreaDbml(input: NewSubjectAreaDbml): string {
   const pending = (input.pendingRefs ?? []).map((line) => pendingRefLine(line));
   if (pending.length > 0) blocks.push(pending);
   for (const annotation of input.annotations ?? []) blocks.push([noteBlock(annotation, '\n')]);
-  const layout = layoutLine(erdLayoutOf(input.positions, input.annotations), '\n', '  ');
+  const placed = erdLayoutOf(input.positions, input.annotations);
+  const tables: TableRefCandidate[] = [
+    ...identities.map((id, i) => ({ ...id, ref: refs[i] })),
+    ...(input.unlinked ?? []).map((name) => ({ schema: '', name, ref: name })),
+  ];
+  const layout = layoutLine(pair ? withMemberRefs(placed, tables) : placed, '\n', '  ');
   blocks.push(projectLines(input.domain, values, layout));
   return `${blocks.map((lines) => lines.join('\n')).join('\n\n')}\n`;
 }
@@ -326,6 +355,195 @@ export function editSubjectAreaDbml(oldText: string, edit: SubjectAreaDbmlEdit):
   return refuseOverlaps(edit.filePath, () => editSubjectArea(oldText, edit));
 }
 
+/** How the members of a diagram after an edit line up with its `use` lines before it ({@link planMembers}). */
+interface MemberPlan {
+  /** The `use` members after the edit, each named by its reference after the edit. */
+  newMembers: string[];
+  /** The members with no table file to `use` after the edit (D26), in order. */
+  newUnlinked: string[];
+  /** For each of `newMembers`, the old member `use` line it keeps (its index), or undefined for a new line. */
+  oldIndexOf: Array<number | undefined>;
+  /** For each of `newMembers`, its table after the edit. */
+  tables: Array<DbmlDiagramTable | undefined>;
+  /** What each kept old `use` line is written as: its own bytes, a rewritten line, or null when it is cut. */
+  lineOf: Map<number, string | null>;
+  /** For each of `newMembers`, whether its reference is `<schema>.<name>` (another member has its name). */
+  qualified: boolean[];
+  /** The caller's names for members whose reference after the edit is spelled otherwise → that reference. */
+  renames: Map<string, string>;
+  /** The members after the edit as text names them: the `use` members with their identities, then the unlinked ones. */
+  candidates: TableRefCandidate[];
+  /** Whether two members share a name (in different schema folders) before the edit, and after it. */
+  pairBefore: boolean;
+  pairAfter: boolean;
+}
+
+/**
+ * Pair the members a diagram lists after an edit with its member `use` lines
+ * (`memberUses`, which `reading` read as `allOldMembers`), and name each by
+ * its reference after the edit.
+ *
+ * A member keeps the first unused line whose member had its name; else the
+ * line of the member `renamedMembers` says it was; else the line that already
+ * imports its table's file, when the member is named by that table's bare
+ * name or `<schema>.<name>`. So a member whose reference changes (a table of
+ * its name joins or leaves the diagram) keeps its line, byte for byte.
+ *
+ * Each member's reference is its bare name unless another member, in another
+ * schema folder, has the same name (`assignTableRefs`): the identity of a
+ * line kept as it is comes from that line, as the reader will read it, and
+ * of a new or rewritten line from its table's file. On an edit that changes
+ * nothing no member is renamed (Law 1). A bare reference keeps the caller's
+ * spelling, so a diagram where no two members share a name is named exactly
+ * as the caller named it.
+ */
+function planMembers(
+  text: string,
+  file: string,
+  reading: DbmlSubjectAreaReading,
+  memberUses: ReturnType<typeof useLinesOf>,
+  allOldMembers: readonly string[],
+  edit: SubjectAreaDbmlEdit,
+  changing: boolean,
+): MemberPlan {
+  const oldMembers = allOldMembers.slice(0, memberUses.length);
+  const oldUnlinked = allOldMembers.slice(memberUses.length);
+  // The reader's member uses, index for index with `memberUses` (the same rule reads both).
+  const readUses = reading.uses ?? [];
+  const allNewMembers = modelsOf(edit.after);
+  // Each member after the edit is a use line or stays unlinked: a use member keeps its line; an
+  // unlinked one whose table now has a .dbml file gains a line on any edit that changes something
+  // (a no-op stays one, Law 1); one that still has none stays in erd_unlinked_tables.
+  const named: string[] = [];
+  const newUnlinked: string[] = [];
+  {
+    const useLeft = oldMembers.map(lower);
+    const unlinkedLeft = oldUnlinked.map(lower);
+    for (const name of allNewMembers) {
+      const atUse = useLeft.indexOf(lower(name));
+      if (atUse >= 0) {
+        useLeft[atUse] = '';
+        named.push(name);
+        continue;
+      }
+      const atUnlinked = unlinkedLeft.indexOf(lower(name));
+      if (atUnlinked >= 0) {
+        unlinkedLeft[atUnlinked] = '';
+        const table = changing ? edit.resolveTable(name) : undefined;
+        if (table && table.storage === 'dbml') named.push(name);
+        else newUnlinked.push(name);
+        continue;
+      }
+      named.push(name);
+    }
+    // A new member with no .dbml file that takes the place of an unlinked member this edit removed (that
+    // member renamed: a YAML table Convert left, say) stays unlinked under its new name, in its place.
+    const removedUnlinked = unlinkedLeft.filter((n) => n !== '').length;
+    if (removedUnlinked > 0) {
+      let slots = removedUnlinked;
+      const unlinkedNow = new Set(newUnlinked.map(lower));
+      const renamedUnlinked = new Set<string>();
+      for (const name of named) {
+        if (slots === 0) break;
+        if (oldMembers.some((m) => lower(m) === lower(name)) || edit.resolveTable(name)?.storage === 'dbml') continue;
+        renamedUnlinked.add(lower(name));
+        slots--;
+      }
+      if (renamedUnlinked.size > 0) {
+        named.splice(0, named.length, ...named.filter((n) => !renamedUnlinked.has(lower(n))));
+        const ordered = allNewMembers.filter((n) => unlinkedNow.has(lower(n)) || renamedUnlinked.has(lower(n)));
+        newUnlinked.splice(0, newUnlinked.length, ...ordered);
+      }
+    }
+  }
+  const tables = named.map((name) => edit.resolveTable(name));
+
+  // --- Each member's line ------------------------------------------------------
+  const taken = new Set<number>();
+  const oldIndexOf: Array<number | undefined> = named.map(() => undefined);
+  const take = (k: number, test: (oldName: string, i: number) => boolean): void => {
+    if (oldIndexOf[k] !== undefined) return;
+    const at = oldMembers.findIndex((m, i) => !taken.has(i) && test(m, i));
+    if (at < 0) return;
+    taken.add(at);
+    oldIndexOf[k] = at;
+  };
+  // By name first: each entry takes the first unused line whose member had its name.
+  named.forEach((name, k) => take(k, (m) => lower(m) === lower(name)));
+  // Then a member the caller says was renamed.
+  if (edit.renamedMembers && edit.renamedMembers.size > 0) {
+    const renamedTo = new Map([...edit.renamedMembers].map(([from, to]) => [lower(from), lower(to)] as const));
+    named.forEach((name, k) => take(k, (m) => renamedTo.get(lower(m)) === lower(name)));
+  }
+  // Then the line that already imports the member's table, when the member is named as that table.
+  named.forEach((name, k) => {
+    if (oldIndexOf[k] !== undefined) return;
+    const table = tables[k];
+    const id = table && table.storage === 'dbml' ? tableIdOfPath(normalisePosix(table.path)) : undefined;
+    if (!table || !id || (lower(name) !== lower(id.name) && lower(name) !== lower(qualifiedRef(id.schema, id.name)))) return;
+    const path = lower(normalisePosix(table.path));
+    take(k, (_, i) => lower(memberUses[i].resolved) === path && lower(readUses[i]?.name ?? '') === lower(id.name));
+  });
+
+  // A kept line, rewritten when its table's path changed or its target is gone; else its own bytes.
+  // Null when its table was deleted in this edit (in `pathChanged` with no file now): the line is
+  // cut, so no other DBML tool meets an import of a file that is gone (D16).
+  const pathChanged = new Set([...(edit.pathChanged ?? [])].map(lower));
+  const lineOf = new Map<number, string | null>();
+  oldIndexOf.forEach((i, k) => {
+    if (i === undefined) return;
+    const use = memberUses[i];
+    const own = text.slice(use.node.start, use.node.end);
+    const table = tables[k];
+    // A member named by its bare name is also found by its file's stem; a qualified one only by its reference.
+    const bare = lower(oldMembers[i]) === lower(readUses[i]?.name ?? oldMembers[i]);
+    const names = [oldMembers[i], named[k], ...(bare ? [use.stem] : [])];
+    if (names.some((n) => pathChanged.has(lower(n)))) {
+      if (!table && !edit.fileExists(use.resolved)) lineOf.set(i, null);
+      else lineOf.set(i, table && table.storage === 'dbml' ? tableUseLine(table.reference, file, table.path) : own);
+      return;
+    }
+    // A stale path (its file is gone) is repointed by any edit that changes something; a no-op stays one (Law 1).
+    if (changing && !edit.fileExists(use.resolved) && table && table.storage === 'dbml') lineOf.set(i, tableUseLine(table.reference, file, table.path));
+    else lineOf.set(i, own);
+  });
+
+  // --- Each member's reference ----------------------------------------------------
+  // A line kept as it is is read back from its own path; a new or rewritten one from its table's file.
+  const identities: TableId[] = named.map((name, k) => {
+    const i = oldIndexOf[k];
+    if (i !== undefined) {
+      const use = memberUses[i];
+      const out = lineOf.get(i);
+      if (out === null || out === text.slice(use.node.start, use.node.end)) {
+        return { schema: readUses[i]?.schema ?? '', name: readUses[i]?.name ?? name };
+      }
+    }
+    const table = tables[k];
+    const id = table && table.storage === 'dbml' ? tableIdOfPath(normalisePosix(table.path)) : undefined;
+    return id ? { schema: id.schema, name: id.name } : { schema: '', name: table?.name ?? name };
+  });
+  const refs = assignTableRefs(identities);
+  const qualified = refs.map((ref, k) => lower(ref) !== lower(identities[k].name));
+  const newMembers = named.map((name, k) => {
+    if (!changing) return name;
+    if (qualified[k]) return refs[k];
+    return lower(name) === lower(identities[k].name) ? name : refs[k];
+  });
+  const renames = new Map<string, string>();
+  named.forEach((name, k) => { if (newMembers[k] !== name && !renames.has(name)) renames.set(name, newMembers[k]); });
+  const candidates: TableRefCandidate[] = [
+    ...newMembers.map((ref, k) => {
+      const i = oldIndexOf[k];
+      const qualifier = i !== undefined ? readUses[i]?.qualifier : undefined;
+      return { schema: identities[k].schema, name: identities[k].name, ref, ...(qualifier !== undefined ? { qualifiers: [qualifier] } : {}) };
+    }),
+    ...newUnlinked.map((name) => ({ schema: '', name, ref: name })),
+  ];
+  const pairBefore = readUses.some((u) => u.ref !== undefined && lower(u.ref) !== lower(u.name));
+  return { newMembers, newUnlinked, oldIndexOf, tables, lineOf, qualified, renames, candidates, pairBefore, pairAfter: qualified.some((q) => q) };
+}
+
 function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   const parser = edit.parser ?? PINNED_PARSER;
   const file = edit.filePath;
@@ -347,15 +565,40 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     refuse(file, `${file}: ${why}.`);
   }
   const before = edit.before;
-  const after = edit.after;
+
+  // --- Members: use lines and erd_unlinked_tables (D26) -----------------------------------
+  // Each use line by the reader's rule (§1.4): members, relationships imports, and the rest (kept as written).
+  const ast = compileOne(text, parser, undefined, { diagram: true }).ast;
+  const nodes = topLevel(ast);
+  const uses = useLinesOf(ast, text, file);
+  const roleOf = (u: (typeof uses)[number]): string => diagramUseRole(u.resolved, u.wildcard, u.tables.length > 0, u.stem).role;
+  const memberUses = uses.filter((u) => roleOf(u) === 'member' || roleOf(u) === 'mismatch');
+  const relUses = uses.filter((u) => roleOf(u) === 'relationships');
+  const allOldMembers = modelsOf(before);
+  // `before` must be what the text reads as: members are paired with their use lines by position,
+  // and the members with no table file to use (D26) come after them.
+  const linedUp = memberUses.length + (reading.unlinked ?? []).length === allOldMembers.length
+    && reading.members.length === allOldMembers.length
+    && reading.members.every((m, i) => lower(m) === lower(allOldMembers[i]));
+  const changing = !deepEqual(before, edit.after) || edit.refreshRelationshipsUses === true || (edit.pathChanged?.size ?? 0) > 0;
+  const plan = linedUp ? planMembers(text, file, reading, memberUses, allOldMembers, edit, changing) : undefined;
+  // The object as it reads after the edit: every place that names a member under its reference.
+  const after = plan && plan.renames.size > 0 ? rekeySubjectArea(edit.after, plan.renames) : edit.after;
+  /** A member's table after the edit, by any name the caller or the plan gives it. */
+  const tableOf = (name: string): DbmlDiagramTable | undefined => {
+    const k = plan ? plan.newMembers.findIndex((m) => lower(m) === lower(name)) : -1;
+    return k >= 0 ? plan!.tables[k] : edit.resolveTable(name);
+  };
 
   // --- Refusals ----------------------------------------------------------------
   const afterLogical = isObject(after.logical) ? after.logical : {};
   // A DBML diagram's only relationships are its pending ones (D27): kept, or removed (their line cut); never added or changed.
-  const pendingRefs = readPendingRefs(text, parser, [], topLevel(compileOne(text, parser, undefined, { diagram: true }).ast));
+  // Each is read as the reader names its ends (by the members' references), index for index with its line.
+  const pendingRefs = readPendingRefs(text, parser, [], nodes);
+  const pendingRead = pendingRefs.map((ref, i) => reading.pending?.[i]?.relationships ?? ref.relationships);
   const relationshipIdentity = (r: Relationship): string =>
     [r.fromModel, r.fromColumn, r.toModel, r.toColumn, r.cardinality, r.role ?? ''].map((part) => lower(String(part ?? ''))).join('\u0000');
-  const pendingIds = new Set(pendingRefs.flatMap((ref) => ref.relationships.map(relationshipIdentity)));
+  const pendingIds = new Set(pendingRead.flatMap((relationships) => relationships.map(relationshipIdentity)));
   const afterOwn = Array.isArray(afterLogical.relationships) ? (afterLogical.relationships as Relationship[]) : [];
   const beforeLogical = isObject(before.logical) ? before.logical : {};
   const beforeOwn = Array.isArray(beforeLogical.relationships) ? (beforeLogical.relationships as Relationship[]) : [];
@@ -373,24 +616,25 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       && was.cardinality === r.cardinality && lower(was.role ?? '') === lower(r.role ?? '')
       && !respelledTo.has(relationshipIdentity(was));
     // Its foreign-key table still has no .dbml file: once it has one, the relationship belongs in the library.
-    if (!same || (edit.resolveTable(r.fromModel)?.storage === 'dbml' && lower(r.fromModel) !== lower(was!.fromModel))) notOwn();
+    if (!same || (tableOf(r.fromModel)?.storage === 'dbml' && lower(r.fromModel) !== lower(was!.fromModel))) notOwn();
     respelledTo.set(relationshipIdentity(was!), r);
   });
   const pendingCuts: TextEdit[] = [];
   const pendingEdits: TextEdit[] = [];
-  for (const ref of pendingRefs) {
-    const now = ref.relationships.map((r) => (afterOwnIds.has(relationshipIdentity(r)) ? r : respelledTo.get(relationshipIdentity(r))));
+  pendingRefs.forEach((ref, index) => {
+    const read = pendingRead[index];
+    const now = read.map((r) => (afterOwnIds.has(relationshipIdentity(r)) ? r : respelledTo.get(relationshipIdentity(r))));
     const kept = now.filter((r) => r !== undefined).length;
-    if (kept === ref.relationships.length) {
-      if (now.every((r, i) => r === ref.relationships[i])) continue;
+    if (kept === read.length) {
+      if (now.every((r, i) => r === read[i])) return;
       const raw = text.slice(ref.start, ref.fullEnd).replace(/\r?\n$/, '');
       const m = /^([ \t]*\/\/[ \t]*erd-studio pending:[ \t]*)(\S.*?)[ \t]*$/i.exec(raw);
-      if (m) pendingEdits.push({ start: ref.start + m[1].length, end: ref.start + m[1].length + m[2].length, text: pendingRelationshipRef(now as Relationship[], (t) => edit.resolveTable(t)?.reference) });
-      continue;
+      if (m) pendingEdits.push({ start: ref.start + m[1].length, end: ref.start + m[1].length + m[2].length, text: pendingRelationshipRef(now as Relationship[], (t) => tableOf(t)?.reference) });
+      return;
     }
     if (kept > 0) refuse(file, `${file}: line ${ref.line} is one pending relationship of several column pairs; remove all of it or none.`, ref.line);
     pendingCuts.push({ start: ref.start, end: ref.fullEnd, text: '' });
-  }
+  });
   if (before.layer !== after.layer) refuse(file, `${file}: a DBML diagram's layer is its folder; move the file to change it.`);
   if (before.schemaVersion !== after.schemaVersion) refuse(file, `${file}: the schema version of a DBML diagram is not changed by an edit.`);
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
@@ -404,103 +648,62 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
     }
   }
 
-  const ast = compileOne(text, parser, undefined, { diagram: true }).ast;
-  const nodes = topLevel(ast);
   const edits: TextEdit[] = [];
   const lateEdits: TextEdit[] = [];
   const plans: ListPlan[] = [];
   const firstUses: string[] = [];
 
-  // --- Members: use lines and erd_unlinked_tables (D26) -----------------------------------
-  // Each use line by the reader's rule (§1.4): members, relationships imports, and the rest (kept as written).
-  const uses = useLinesOf(ast, text, file);
-  const roleOf = (u: (typeof uses)[number]): string => diagramUseRole(u.resolved, u.wildcard, u.tables.length > 0, u.stem).role;
-  const memberUses = uses.filter((u) => roleOf(u) === 'member' || roleOf(u) === 'mismatch');
-  const relUses = uses.filter((u) => roleOf(u) === 'relationships');
-  const allOldMembers = modelsOf(before);
-  const allNewMembers = modelsOf(after);
-  // `before` must be what the text reads as: members are paired with their use lines by position,
-  // and the members with no table file to use (D26) come after them.
-  if (memberUses.length + (reading.unlinked ?? []).length !== allOldMembers.length
-    || reading.members.length !== allOldMembers.length
-    || reading.members.some((m, i) => lower(m) !== lower(allOldMembers[i]))) {
+  if (!plan) {
     refuse(file, `ERD Studio could not line up the use lines of ${file} with its members (the diagram changed since it was read); reload it and try again.`);
   }
-  const changing = !deepEqual(before, after) || edit.refreshRelationshipsUses === true || (edit.pathChanged?.size ?? 0) > 0;
+  const planned: MemberPlan = plan;
+  const { newMembers, newUnlinked, oldIndexOf } = planned;
   const oldMembers = allOldMembers.slice(0, memberUses.length);
   const oldUnlinked = allOldMembers.slice(memberUses.length);
-  // Each member after the edit is a use line or stays unlinked: a use member keeps its line; an
-  // unlinked one whose table now has a .dbml file gains a line on any edit that changes something
-  // (a no-op stays one, Law 1); one that still has none stays in erd_unlinked_tables.
-  const newMembers: string[] = [];
-  const newUnlinked: string[] = [];
-  {
-    const useLeft = oldMembers.map(lower);
-    const unlinkedLeft = oldUnlinked.map(lower);
-    for (const name of allNewMembers) {
-      const atUse = useLeft.indexOf(lower(name));
-      if (atUse >= 0) {
-        useLeft[atUse] = '';
-        newMembers.push(name);
-        continue;
-      }
-      const atUnlinked = unlinkedLeft.indexOf(lower(name));
-      if (atUnlinked >= 0) {
-        unlinkedLeft[atUnlinked] = '';
-        const table = changing ? edit.resolveTable(name) : undefined;
-        if (table && table.storage === 'dbml') newMembers.push(name);
-        else newUnlinked.push(name);
-        continue;
-      }
-      newMembers.push(name);
-    }
-    // A new member with no .dbml file that takes the place of an unlinked member this edit removed (that
-    // member renamed: a YAML table Convert left, say) stays unlinked under its new name, in its place.
-    const removedUnlinked = unlinkedLeft.filter((n) => n !== '').length;
-    if (removedUnlinked > 0) {
-      let slots = removedUnlinked;
-      const unlinkedNow = new Set(newUnlinked.map(lower));
-      const renamedUnlinked = new Set<string>();
-      for (const name of newMembers) {
-        if (slots === 0) break;
-        if (oldMembers.some((m) => lower(m) === lower(name)) || edit.resolveTable(name)?.storage === 'dbml') continue;
-        renamedUnlinked.add(lower(name));
-        slots--;
-      }
-      if (renamedUnlinked.size > 0) {
-        newMembers.splice(0, newMembers.length, ...newMembers.filter((n) => !renamedUnlinked.has(lower(n))));
-        const ordered = allNewMembers.filter((n) => unlinkedNow.has(lower(n)) || renamedUnlinked.has(lower(n)));
-        newUnlinked.splice(0, newUnlinked.length, ...ordered);
-      }
-    }
-  }
+  // On an edit of a diagram that holds two members of one name (before or after it), every sticky link and
+  // stub entry is written as the object names it: a bare name an older version wrote for two tables, or one
+  // that would now name another table (its namesake left), never stays to be read as another member.
+  const twinTexts = changing && (planned.pairBefore || planned.pairAfter);
 
   // --- Project ---------------------------------------------------------------------
   const project = nodes.find((n) => lower(elementType(n) ?? '') === 'project');
   const domainBefore = typeof before.domain === 'string' ? before.domain : '';
   const domainAfter = typeof after.domain === 'string' ? after.domain : domainBefore;
-  const valuesBefore = projectValues(before, oldUnlinked);
-  const valuesAfter = projectValues(after, newUnlinked);
-  const projectChanged = domainBefore !== domainAfter || Object.keys(valuesAfter).some((k) => valuesAfter[k] !== valuesBefore[k]);
+  // erd_schema_version (D-2): 8 while the diagram holds two members of one name, back to 7 on the edit
+  // that leaves it none; a diagram with no such pair keeps the version it has (or none).
+  const versionBefore = String(reading.schemaVersion);
+  const versionAfter = changing && planned.pairAfter ? String(DBML_TWIN_SCHEMA_VERSION)
+    : changing && planned.pairBefore ? String(DBML_SCHEMA_VERSION)
+      : versionBefore;
+  const valuesBefore = projectValues(before, oldUnlinked, versionBefore);
+  const valuesAfter = projectValues(after, newUnlinked, versionAfter);
+  const projectBody: AstNode[] = Array.isArray(project?.body?.body) ? project!.body.body : [];
+  // A repeated key is read from its last entry (as the readers read it), so that is the one edited.
+  const entryOf = (key: string): AstNode | undefined => [...projectBody].reverse().find((n) => lower(String(n?.type?.value ?? '')) === key);
+  const stubKey = DBML_DIAGRAM_PROPERTIES.stubColumns;
+  const stubWritten = valuesAfter[stubKey];
+  const stubRespelled = twinTexts && stubWritten !== undefined
+    && (() => {
+      const value = entryOf(stubKey)?.body;
+      return !value || text.slice(value.start, value.end) !== dbmlString(stubWritten);
+    })();
+  const projectChanged = stubRespelled || domainBefore !== domainAfter || Object.keys(valuesAfter).some((k) => valuesAfter[k] !== valuesBefore[k]);
   // The first erd_layout entry (any case): a key added before `}` goes above it, so erd_layout stays last.
-  const layoutEntry = (Array.isArray(project?.body?.body) ? project!.body.body as AstNode[] : [])
-    .find((n) => lower(String(n?.type?.value ?? '')) === DBML_DIAGRAM_PROPERTIES.layout);
+  const layoutEntry = projectBody.find((n) => lower(String(n?.type?.value ?? '')) === DBML_DIAGRAM_PROPERTIES.layout);
   // With no Project, one is added at the end, after everything else (below, with erd_layout in it).
   if (projectChanged && project) {
     if (domainBefore !== domainAfter) {
       if (project.name) edits.push({ start: project.name.start, end: project.name.end, text: dbmlName(domainAfter) });
       else edits.push({ start: project.type.end, end: project.type.end, text: ` ${dbmlName(domainAfter)}` });
     }
-    const body: AstNode[] = Array.isArray(project.body?.body) ? project.body.body : [];
-    // A repeated key is read from its last entry (as the readers read it), so that is the one edited.
-    const entryOf = (key: string): AstNode | undefined => [...body].reverse().find((n) => lower(String(n?.type?.value ?? '')) === key);
+    const body = projectBody;
     const close = project.body.blockCloseBrace as AstNode;
     const indent = body.length > 0 ? text.slice(text.lastIndexOf('\n', body[0].start - 1) + 1, body[0].start) : '  ';
     const order = ['note', ...PROJECT_KEYS];
     const closeAt = text.lastIndexOf('\n', close.start - 1) + 1;
     const closeAlone = /^[ \t]*$/.test(text.slice(closeAt, close.start));
     for (const key of order) {
-      if (valuesAfter[key] === valuesBefore[key]) continue;
+      if (valuesAfter[key] === valuesBefore[key] && !(key === stubKey && stubRespelled)) continue;
       const entry = entryOf(key);
       const value = valuesAfter[key];
       if (value === undefined) {
@@ -535,45 +738,24 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   }
 
   // --- Table use lines -----------------------------------------------------------------
-  // Retained members: each new entry takes the first unused old one with its name.
-  const taken = new Set<number>();
-  const oldIndexOf: Array<number | undefined> = newMembers.map((name) => {
-    const at = oldMembers.findIndex((m, i) => !taken.has(i) && lower(m) === lower(name));
-    if (at < 0) return undefined;
-    taken.add(at);
-    return at;
-  });
+  // Retained members keep the line the plan paired them with (planMembers).
+  const taken = new Set(oldIndexOf.filter((i): i is number => i !== undefined));
+  // A table whose reference changed (another member of its name joined or left) is the same member.
+  const pairedNames = newMembers.map((name, k) => (oldIndexOf[k] !== undefined ? oldMembers[oldIndexOf[k]!] : name));
   const membershipChanged = oldMembers.length !== newMembers.length
-    || [...new Set(oldMembers.map(lower))].sort().join('\u0000') !== [...new Set(newMembers.map(lower))].sort().join('\u0000')
+    || [...new Set(oldMembers.map(lower))].sort().join('\u0000') !== [...new Set(pairedNames.map(lower))].sort().join('\u0000')
     || oldIndexOf.some((i) => i === undefined);
   const retained = oldIndexOf.filter((i): i is number => i !== undefined);
   const reordered = retained.some((i, k) => k > 0 && i < retained[k - 1]);
-  const pathChanged = new Set([...(edit.pathChanged ?? [])].map(lower));
-  const newLineFor = (name: string): string => {
-    const table = edit.resolveTable(name);
+  const newLineFor = (k: number): string => {
+    const name = newMembers[k];
+    const table = planned.tables[k];
     if (!table || table.storage !== 'dbml') {
       refuse(file, `${name} cannot be added to a DBML diagram: ${table ? `it is a YAML table. ${DBML_CONVERT_FIRST_MESSAGE}.` : 'there is no table file with that name.'}`);
     }
     return tableUseLine(table.reference, file, table.path);
   };
-  /**
-   * A retained line, rewritten when its table's path changed or its target is gone; else its own
-   * bytes. Null when its table was deleted in this edit (in `pathChanged` with no file now): the
-   * line is cut, so no other DBML tool meets an import of a file that is gone (D16).
-   */
-  const retainedText = (oldIndex: number): string | null => {
-    const use = memberUses[oldIndex];
-    const own = text.slice(use.node.start, use.node.end);
-    const name = oldMembers[oldIndex];
-    const table = edit.resolveTable(name);
-    if (pathChanged.has(lower(name)) || pathChanged.has(lower(use.stem))) {
-      if (!table && !edit.fileExists(use.resolved)) return null;
-      return table && table.storage === 'dbml' ? tableUseLine(table.reference, file, table.path) : own;
-    }
-    // A stale path (its file is gone) is repointed by any edit that changes something; a no-op stays one (Law 1).
-    if (changing && !edit.fileExists(use.resolved) && table && table.storage === 'dbml') return tableUseLine(table.reference, file, table.path);
-    return own;
-  };
+  const retainedText = (oldIndex: number): string | null => planned.lineOf.get(oldIndex) ?? null;
   const lastTableUse = memberUses[memberUses.length - 1];
   const afterUses = (): number => {
     const last = uses[uses.length - 1];
@@ -587,9 +769,9 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       return /^[ \t]*(\/\/|\/\*)/.test(tail) ? tail : '';
     };
     const aboveOf = (node: AstNode): string => text.slice(attachedStart(text, node), lineStartOf(text, node.start));
-    const lines = newMembers.flatMap((name, k) => {
+    const lines = newMembers.flatMap((_, k) => {
       const i = oldIndexOf[k];
-      if (i === undefined) return [newLineFor(name)];
+      if (i === undefined) return [newLineFor(k)];
       const node = memberUses[i].node;
       const out = retainedText(i);
       // A deleted member's line goes; the comment lines above it stay (the cut rule).
@@ -614,9 +796,9 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       if (out === null) edits.push(cutEdit(text, use.node));
       else if (out !== text.slice(use.node.start, use.node.end)) edits.push({ start: use.node.start, end: use.node.end, text: out });
     });
-    newMembers.forEach((name, k) => {
+    newMembers.forEach((_, k) => {
       if (oldIndexOf[k] !== undefined) return;
-      const line = newLineFor(name);
+      const line = newLineFor(k);
       const next = oldIndexOf.slice(k + 1).find((i) => i !== undefined);
       if (next !== undefined) {
         const at = attachedStart(text, memberUses[next].node);
@@ -632,7 +814,6 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       if (first) lateEdits.push(first);
     });
   }
-
   // --- Relationships use lines (only on a membership change or the settle pass) -------
   // The unlinked members count: a pending line to one of them brings its file's import (§2.4).
   const unlinkedChanged = [...new Set(oldUnlinked.map(lower))].sort().join('\u0000') !== [...new Set(newUnlinked.map(lower))].sort().join('\u0000');
@@ -709,10 +890,14 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
       else if (body?.blockCloseBrace) edits.push({ start: body.blockCloseBrace.start, end: body.blockCloseBrace.start, text: `  ${dbmlString(dbmlNoteText(annotation.text ?? ''))}${eol}` });
     }
     const colourChanged = (old.color as AnnotationColor | undefined) !== annotation.color;
-    const linkChanged = (old.linkedModel ?? undefined) !== (annotation.linkedModel ?? undefined);
+    const list: AstNode | undefined = node.attributeList;
+    const elements: AstNode[] = Array.isArray(list?.elementList) ? list!.elementList : [];
+    const linkChanged = (old.linkedModel ?? undefined) !== (annotation.linkedModel ?? undefined)
+      || (twinTexts && annotation.linkedModel !== undefined && (() => {
+        const written = elements.filter((e) => attributeName(e) === DBML_RICH_NOTE_PROPERTIES.linkedTable).pop()?.value;
+        return !written || text.slice(written.start, written.end) !== dbmlString(annotation.linkedModel!);
+      })());
     if (colourChanged || linkChanged) {
-      const list: AstNode | undefined = node.attributeList;
-      const elements: AstNode[] = Array.isArray(list?.elementList) ? list!.elementList : [];
       const plan: ListPlan = { list: list ?? null, anchor: node.body.start, elements: new Array(elements.length).fill(undefined), added: [], multiLineWhenNew: false };
       const set = (name: string, order: number, value: string | undefined): void => {
         const at = elements.map((e, i) => [e, i] as const).filter(([e]) => attributeName(e) === name);
@@ -750,19 +935,22 @@ function editSubjectArea(oldText: string, edit: SubjectAreaDbmlEdit): string {
   // --- erd_layout (§1.6): positions and sticky-note boxes ------------------------------
   // Written only when the canvas's positions or boxes changed, so an edit that moved nothing
   // leaves the value's bytes as they are (even where the reader placed a note the file does not).
+  // A diagram where an older version kept one bare line for two members of one name
+  // (`layoutSharedBare`) gets each member's own line on the next edit that changes something.
   const layoutAfter = layoutOfObject(after);
-  const layoutChanged = !sameErdLayout(layoutOfObject(before), layoutAfter);
+  const sharedBareLines = changing && (reading.layoutSharedBare?.length ?? 0) > 0;
+  const layoutChanged = sharedBareLines || !sameErdLayout(layoutOfObject(before), layoutAfter);
   const keepLayout = edit.keepLayoutIfConflicted === true && reading.layoutConflictLine !== undefined;
   if (!project) {
     // No Project: one goes at the end (Project last), holding whatever this edit sets.
-    const layout = layoutChanged ? layoutLine(withMemberSpelling(layoutAfter, allNewMembers), eol, '  ') : undefined;
+    const layout = layoutChanged ? layoutLine(withMemberRefs(layoutAfter, planned.candidates), eol, '  ') : undefined;
     if (projectChanged || layout !== undefined) {
       const block = projectLines(domainAfter, projectChanged ? valuesAfter : {}, layout).join(eol);
       const lead = text.trim() === '' && !appendsAtEnd() ? '' : text.endsWith('\n') || appendsAtEnd() ? eol : `${eol}${eol}`;
       lateEdits.push({ start: text.length, end: text.length, text: `${lead}${block}${eol}` });
     }
   } else if (layoutChanged && !keepLayout) {
-    const change = erdLayoutTextEdit(text, ast, layoutAfter, eol, file, allNewMembers);
+    const change = erdLayoutTextEdit(text, ast, layoutAfter, eol, file, undefined, planned.candidates);
     if (change) lateEdits.push(change);
   }
 

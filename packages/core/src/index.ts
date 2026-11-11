@@ -52,4 +52,5 @@ export * from './storage.js';
 export { normaliseForStorageEquivalence, storageNoteText, type StorageEquivalenceOptions } from './storageEquivalence.js';
 export * from './dbmlAttach.js';
 export * from './tableIdentity.js';
+export * from './rekeySubjectArea.js';
 export { findConflictMarkers } from './mergeConflict.js';

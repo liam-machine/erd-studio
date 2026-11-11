@@ -27,7 +27,7 @@
 
 import { findConflictMarkers } from './mergeConflict.js';
 import type { Annotation, NodePosition } from './types/semantic.js';
-import { resolveTableRefs, tableIdKey, type TableRefCandidate } from './tableIdentity.js';
+import { matchTableRef, resolveTableRefs, tableIdKey, type TableRefCandidate } from './tableIdentity.js';
 
 /** A note line's prefix: `note/<id> x y` or `note/<id> x y w h`. A table name never starts with it. */
 export const ERD_LAYOUT_NOTE_PREFIX = 'note/';
@@ -227,6 +227,57 @@ export function withMemberSpelling(layout: ErdLayout, members: readonly string[]
     setEntry(positions, member, layout.positions[name]);
     placed.add(key);
   }
+  return { positions, stickies: layout.stickies };
+}
+
+/**
+ * `layout` with each table line written under the reference of the member it
+ * names, for a write: {@link withMemberSpelling} for a diagram whose members
+ * carry their identity (`tables`, as {@link erdLayoutView} takes them). A
+ * line names a member by its reference, without case, by `<schema>.<name>`
+ * (its folder, or another qualifier), or by a bare name (`matchTableRef`; a
+ * bare name two members share names the first of them).
+ *
+ * Each member keeps one line, written under its reference: the line spelled
+ * exactly as its reference, else the first in code-unit order. Every other
+ * line that names it is dropped (a case variant, a `<folder>.<name>` line
+ * beside the member's own, a bare line two members shared once both have
+ * their own), so it can never take the member's place when the diagram is
+ * read again. Lines that name no member (strays) and the notes are kept as
+ * they are. With bare references and no schema folders this is exactly
+ * {@link withMemberSpelling}.
+ */
+export function withMemberRefs(layout: ErdLayout, tables: readonly TableRefCandidate[]): ErdLayout {
+  const names = Object.keys(layout.positions).sort(byCodeUnits);
+  const groupOf = (index: number): string => tables[index].ref.trim().toLowerCase();
+  const named = names.map((name) => {
+    const match = matchTableRef(name, tables, { onAmbiguous: 'first' });
+    return match.kind === 'found' ? groupOf(match.index) : undefined;
+  });
+  // A member listed twice (in two spellings) is one group: the first spelling that has a line of its own wins.
+  const groupOfLine = new Map(names.map((name, i) => [name, named[i]] as const));
+  const exact = new Map<string, string>();
+  tables.forEach((t, index) => {
+    const group = groupOf(index);
+    if (!exact.has(group) && groupOfLine.get(t.ref) === group) exact.set(group, t.ref);
+  });
+  const positions: Record<string, NodePosition> = {};
+  const placed = new Set<string>();
+  for (const [group, name] of exact) {
+    setEntry(positions, name, layout.positions[name]);
+    placed.add(group);
+  }
+  names.forEach((name, i) => {
+    const group = named[i];
+    if (group === undefined) {
+      setEntry(positions, name, layout.positions[name]);
+      return;
+    }
+    if (placed.has(group)) return;
+    const first = tables.find((t) => t.ref.trim().toLowerCase() === group)!;
+    setEntry(positions, first.ref, layout.positions[name]);
+    placed.add(group);
+  });
   return { positions, stickies: layout.stickies };
 }
 

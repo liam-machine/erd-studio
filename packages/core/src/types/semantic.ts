@@ -19,8 +19,9 @@ export type Stage = 'logical' | 'physical';
  * The newest schema version this version of core reads, in any format: 8, a
  * DBML diagram that holds two tables with one name in different schema
  * folders. A DBML diagram is read the same at 7 and 8; 8 only tells an older
- * reader, which would draw the two tables as one, to refuse the diagram. Core
- * reads 8 before any writer writes it, so a published core is ready first.
+ * reader, which would draw the two tables as one, to refuse the diagram. The
+ * diagram writer writes it ({@link DBML_TWIN_SCHEMA_VERSION}) only while a
+ * diagram holds such a pair.
  * A JSON subject area may declare at most {@link CURRENT_JSON_SCHEMA_VERSION};
  * a DBML diagram whose `erd_schema_version` is higher than this one is
  * refused with "Please update the extension" rather than read as an empty
@@ -44,6 +45,17 @@ export const CURRENT_JSON_SCHEMA_VERSION = 6;
  * and reaches only the Unified and Display `schemaVersion`.
  */
 export const DBML_SCHEMA_VERSION = 7;
+
+/**
+ * The version a DBML diagram declares while it holds two tables with one
+ * name in different schema folders (`bronze/tables/bqs/addresse.dbml` and
+ * `bronze/tables/ccc/addresse.dbml`), so a reader that cannot tell them apart
+ * refuses that one diagram instead of drawing the two as one. The diagram
+ * writer sets it on the edit that gives a diagram such a pair and sets
+ * {@link DBML_SCHEMA_VERSION} again on the edit that leaves it none; a
+ * diagram with no pair keeps whatever version line (or none) it has.
+ */
+export const DBML_TWIN_SCHEMA_VERSION = 8;
 
 /**
  * Schema v6 (#162): the table naming. `tables/` for the library,

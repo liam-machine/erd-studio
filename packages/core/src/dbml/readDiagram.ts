@@ -625,10 +625,23 @@ export function subjectAreaMembersDbml(rawText: string, filePath: string, parser
  */
 export function diagramMembersFromAst(ast: AstNode, text: string, filePath?: string): string[] {
   const dir = filePath !== undefined ? diagramPathOf(filePath)?.dir : undefined;
-  const { members, memberUses } = usesOf(ast, text, dir);
+  const { members, memberUses } = usesOf(ast, text, dir).summary;
   const unlinked = projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value;
   members.push(...unlinkedMembers(unlinked, memberUses.map((u) => u.name), []));
   return members;
+}
+
+/**
+ * The members of a parsed diagram as text names them ({@link diagramMembersFromAst}'s
+ * members, in the same order), each with its schema folder and the qualifier its
+ * `use` line writes: what the `erd_layout` writer matches lines with
+ * (`withMemberRefs`), as the reader does.
+ */
+export function diagramMemberTablesFromAst(ast: AstNode, text: string, filePath?: string): TableRefCandidate[] {
+  const dir = filePath !== undefined ? diagramPathOf(filePath)?.dir : undefined;
+  const { summary, tables } = usesOf(ast, text, dir);
+  const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, summary.memberUses.map((u) => u.name), []);
+  return [...tables, ...unlinked.map((name) => ({ schema: '', name, ref: name }))];
 }
 
 /** What {@link diagramSummaryDbml} reads from a diagram of the layer-first tree. */
@@ -658,10 +671,10 @@ export interface DbmlDiagramSummary {
  * against `dir` (`L/diagrams`); with no `dir`, no path is resolved and only
  * selective table imports are members.
  */
-function usesOf(ast: AstNode, text: string, dir: string | undefined): Omit<DbmlDiagramSummary, 'unlinked'> {
+function usesOf(ast: AstNode, text: string, dir: string | undefined): { summary: Omit<DbmlDiagramSummary, 'unlinked'>; tables: TableRefCandidate[] } {
   const memberUses: DbmlMemberUse[] = [];
   // Each member's identity (its schema folder and name), for its reference; the uses keep the shape they always had.
-  const identities: Array<{ schema: string; name: string }> = [];
+  const identities: Array<{ schema: string; name: string; qualifier?: string }> = [];
   const relationshipsUses: string[] = [];
   const otherUses: string[] = [];
   for (const node of topLevel(ast)) {
@@ -672,14 +685,17 @@ function usesOf(ast: AstNode, text: string, dir: string | undefined): Omit<DbmlD
     const use = diagramUseRole(resolved, isWildcardUse(node), specified.length > 0, useStem(importPath));
     if (use.role === 'member' || use.role === 'mismatch') {
       memberUses.push({ name: use.name!, path: importPath, resolved, line: lineAt(text, node.start) });
-      identities.push({ schema: use.schema ?? '', name: use.name! });
+      const qualifier = qualifierFor(use.name!, specified);
+      identities.push({ schema: use.schema ?? '', name: use.name!, ...(qualifier !== undefined ? { qualifier } : {}) });
     } else if (use.role === 'relationships') {
       if (!relationshipsUses.includes(resolved)) relationshipsUses.push(resolved);
     } else if (use.role === 'other' && dir !== undefined) {
       otherUses.push(resolved);
     }
   }
-  return { members: assignTableRefs(identities), memberUses, relationshipsUses, otherUses };
+  const members = assignTableRefs(identities);
+  const tables = identities.map(({ schema, name, qualifier }, i) => ({ schema, name, ref: members[i], ...(qualifier !== undefined ? { qualifiers: [qualifier] } : {}) }));
+  return { summary: { members, memberUses, relationshipsUses, otherUses }, tables };
 }
 
 /**
@@ -714,7 +730,7 @@ export function diagramSummaryDbml(rawText: string, filePath: string, parser: Db
   } catch {
     return null;
   }
-  const uses = usesOf(ast, text, where.dir);
+  const uses = usesOf(ast, text, where.dir).summary;
   const unlinked = unlinkedMembers(projectEntry(ast, text, DBML_DIAGRAM_PROPERTIES.unlinkedTables).value, uses.memberUses.map((u) => u.name), []);
   return { ...uses, unlinked };
 }
