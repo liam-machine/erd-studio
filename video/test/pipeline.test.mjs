@@ -151,6 +151,8 @@ const START_LABELS = Object.fromEntries([...read('src', 'types', 'startActions.t
 
 // editor.js reads the listing's description from package.json at runtime (main.js sets it).
 globalThis.PACKAGE_DESCRIPTION = pkg.description;
+/** The real run the README GIF's dbt and AI beats are drawn from (record/heroRun.mjs). */
+const heroRun = JSON.parse(readFileSync(join(HERE, '..', 'record', 'hero-run.json'), 'utf8'));
 const editor = await import('../player/editor.js');
 const lib = await import('../player/lib.js');
 /** The layers a new folder without dbt starts with (src/services/layerService.ts NEW_PROJECT_LAYERS_WITHOUT_DBT): one, Main. */
@@ -416,20 +418,29 @@ test('the files the recording\'s import wrote are the 2.0 layer-first DBML a new
   for (const f of ['layers.json', 'README.md', `${L}/diagrams/${DIAGRAM}.dbml`]) assert.ok(DBT_ERD[f], f);
 });
 
-test('the README GIF is drawn from the same pieces: a plain folder, no dbt, the layer-first tree', async () => {
-  const hero = readFileSync(join(HERE, '..', 'player', 'hero.js'), 'utf8');
-  for (const l of hero.split('\n')) assert.doesNotMatch(l, NO_DBT, `hero.js: ${l}`);
-  const { HERO_TREE } = await import('../player/hero.js');
-  const paths = [];
-  const stack = [];
-  for (const [d, kind, label] of HERO_TREE) {
-    stack[d] = label;
-    if (kind !== 'folder') paths.push(stack.slice(0, d + 1).join('/'));
-  }
+test('the README GIF is drawn from the same pieces: a dbt project, the layer-first tree beside models/', async () => {
+  const { HERO_TREE, heroTree, FCT_DBML } = await import('../player/hero.js');
+  const pathsOf = (rows) => {
+    const paths = [], stack = [];
+    for (const [d, kind, label] of rows) { stack[d] = label; if (kind !== 'folder') paths.push(stack.slice(0, d + 1).join('/')); }
+    return paths;
+  };
+  const paths = pathsOf(HERO_TREE);
   assert.ok(paths.includes(`.erd-studio/${NEW_LAYER.id}/diagrams/orders.dbml`));
   assert.ok(paths.filter((p) => p.startsWith(`.erd-studio/${NEW_LAYER.id}/tables/${NEW_LAYER.id}/`) && p.endsWith('.dbml')).length >= 3);
-  assert.ok(hero.includes(`'Table ${NEW_LAYER.id}.fct_order {'`));
-  assert.ok(!paths.some((p) => /dbt_project/.test(p)));
+  // the design sits beside the dbt project's SQL, in one folder
+  assert.ok(paths.includes('dbt_project.yml') && paths.includes('models/fct_order.sql'));
+  // the Explorer lists the folder the real run made (record/heroRun.mjs): every file it wrote, at each stage
+  const { DESIGN, DBT, SQL_CHANGE } = await import('../record/heroRun.mjs');
+  const folder = (design, dbt) => [...Object.keys(design).map((f) => `.erd-studio/${f}`), ...Object.keys(dbt)].sort();
+  assert.deepEqual(paths.slice().sort(), folder(DESIGN, DBT));
+  assert.deepEqual(pathsOf(heroTree({ sql: true })).sort(), folder(DESIGN, { ...DBT, ...SQL_CHANGE }));
+  assert.deepEqual(pathsOf(heroTree({ sql: true, store: true })).sort(), folder(heroRun.design.after, { ...DBT, ...SQL_CHANGE }));
+  // .claude holds what Set Up My AI Helper wrote; logs and target are dbt's (closed folders)
+  assert.ok(heroRun.helper.includes('.claude/skills/erd-studio/SKILL.md'));
+  for (const f of ['.claude', 'logs', 'target']) assert.ok(HERO_TREE.some(([d, k, l, closed]) => d === 0 && k === 'folder' && l === f && closed), f);
+  // the text shown is the design's fct_order.dbml before the change
+  assert.equal(`${FCT_DBML.join('\n')}\n`, DESIGN[`${NEW_LAYER.id}/tables/${NEW_LAYER.id}/fct_order.dbml`]);
 });
 
 test('nothing calls ERD Studio open source (the licence is PolyForm Shield: source-available)', () => {
@@ -447,7 +458,9 @@ test('the DBML text the README GIF shows is already formatted, as ERD Studio wri
   const tsx = join(REPO, 'node_modules', '.bin', 'tsx');
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
   const { FCT_DBML } = await import('../player/hero.js');
-  const texts = [FCT_DBML].map((lines) => `${lines.join('\n')}\n`);
+  // ...and so is every DBML file of the project the real run starts from (record/heroRun.mjs DESIGN)
+  const { DESIGN } = await import('../record/heroRun.mjs');
+  const texts = [`${FCT_DBML.join('\n')}\n`, ...Object.entries(DESIGN).filter(([f]) => f.endsWith('.dbml')).map(([, text]) => text)];
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
     const texts = JSON.parse(process.argv[1]);
@@ -465,8 +478,8 @@ test('a folder without dbt draws no stage colours (the renderer\'s neutral canva
   assert.ok(theme.includes(`--canvas-neutral-line:   var(--vscode-descriptionForeground, ${lib.COLORS.neutralLine});`));
   assert.ok(theme.includes('--canvas-neutral-border: color-mix(in srgb, var(--canvas-neutral-line) 55%, transparent);'));
   assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.css').includes('.editor-canvas--neutral .model-node--logical {\n  border-color: var(--canvas-neutral-border);'));
-  // nothing outside the dbt beat asks for a stage colour on a table or a line
-  for (const f of ['editor.js', 'hero.js', ...modulesIn('tour').map((m) => `scenes/${m}.js`)]) {
+  // the tours' HTML scenes are a folder without dbt: nothing there asks for a stage colour on a table or a line
+  for (const f of ['editor.js', ...modulesIn('tour').map((m) => `scenes/${m}.js`)]) {
     const code = readFileSync(join(HERE, '..', 'player', f), 'utf8');
     assert.doesNotMatch(code, /stage: '(logical|physical)'|color: COLORS\.logical/, f);
   }
@@ -484,9 +497,14 @@ test('the README GIF\'s draft matches what the product draws: Show details, no r
   assert.ok(sales.importReport, 'an imported DBML file\'s draft offers its report');
   assert.ok(banner.indexOf('{SHOW_DETAILS}') < banner.indexOf('{SHOW_IMPORT_REPORT}'));
   // a name already in the library would be reused (dbmlImport.ts) and the detail would say so
-  const { HERO_TREE } = await import('../player/hero.js');
-  const library = new Set(HERO_TREE.filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, '')));
+  const { heroTree } = await import('../player/hero.js');
+  const library = new Set(heroTree({ sql: true, store: true }).filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, '')));
+  assert.ok(library.has('dim_store'));
   for (const tb of sales.tables) assert.ok(!library.has(tb.name), `${tb.name} is already in the library`);
+  // the file it reads is in the folder, with the draft's tables and relationships
+  const { DBT } = await import('../record/heroRun.mjs');
+  for (const tb of sales.tables) assert.ok(DBT[sales.file].includes(`Table ${tb.name} {`), tb.name);
+  assert.equal(DBT[sales.file].split('[ref: >').length - 1, sales.rels.length);
 });
 
 test('an import in a new folder without dbt asks only the name: one layer', () => {
@@ -513,105 +531,176 @@ test('the README GIF uses the layer a new folder without dbt really gets (Main),
   }
 });
 
-test('the README GIF never shows dbt in any frame', async () => {
-  const { render, HERO } = await import('../player/hero.js');
+test('the README GIF is a dbt project on screen: the stage tabs, the Compare button and the stage colour are the product\'s', async () => {
+  const { render, HERO, comparingAt, phaseAt, CAPTIONS } = await import('../player/hero.js');
+  const tabs = read('webview', 'components', 'Toolbar', 'StageTabs.tsx');
+  for (const [stage, label, hint] of lib.STAGE_TABS) assert.ok(tabs.includes(`{ stage: '${stage}', label: '${label}', hint: '${hint}',`), label);
+  const toolbar = read('webview', 'components', 'Toolbar', 'Toolbar.tsx');
+  assert.ok(toolbar.includes(`label: '${lib.COMPARE_WORDS.logical}'`) && toolbar.includes(`label: '${lib.COMPARE_WORDS.stop}'`));
+  // the toolbar's order: the line style switch, then Compare, then + Add
+  const cmp = toolbar.indexOf('{compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}');
+  assert.ok(toolbar.indexOf('<LineStyleSwitch />') < cmp && cmp < toolbar.indexOf('+ Add\n'));
+  // a dbt project's Logical stage draws its tables in the stage colour (no neutral canvas)
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.css').includes('.model-node--logical {\n  border-color: var(--stage-logical);'));
+  assert.ok(read('packages', 'renderer', 'src', 'styles', 'theme.css').includes(`--stage-logical:       ${lib.COLORS.logical};`));
+  assert.ok(read('webview', 'App.tsx').includes("${logicalOnly ? ' editor-canvas--neutral' : ''}"));
   const strip = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  const conf = CAPTIONS.find((c) => c.em === 'Confluence').at, seam = CAPTIONS.at(-1).at;
+  let compared = 0;
   for (let t = 0; t < HERO.loop; t += 0.25) {
-    const html = render(t);
-    assert.doesNotMatch(strip(html), NO_DBT_ON_SCREEN, `GIF +${t}s`);
-    assert.doesNotMatch(html, /class="node" style="[^"]*border-color:#60a5fa/i, `GIF +${t}s: a blue table border`);
+    const html = render(t), text = strip(html);
+    assert.match(html, new RegExp(`class="node" style="[^"]*border-color:${lib.COLORS.logical}`, 'i'), `GIF +${t}s: the tables are in the Logical colour`);
+    assert.ok(text.includes('Logical · your design') && text.includes('Physical · read from dbt'), `GIF +${t}s: the stage tabs`);
+    // the button says what a click does: Compare with dbt, or Stop comparing while the overlay is on
+    assert.ok(text.includes(comparingAt(t) ? lib.COMPARE_WORDS.stop : lib.COMPARE_WORDS.logical), `GIF +${t}s`);
+    assert.ok(!text.includes(comparingAt(t) ? lib.COMPARE_WORDS.logical : lib.COMPARE_WORDS.stop), `GIF +${t}s`);
+    assert.equal(text.includes('(current)'), comparingAt(t), `GIF +${t}s: the comparison panel shows only while comparing`);
+    if (comparingAt(t)) compared++;
+    assert.doesNotMatch(text, /\bDiff\b|sample project/, `GIF +${t}s`);
+    assert.ok(['inStep', 'sqlChanged', 'afterAi'].includes(phaseAt(t)));
+    // the Confluence page covers the window for its beat, and only then
+    assert.equal(html.includes('logos/confluence.svg'), t >= conf && t < seam, `GIF +${t}s`);
   }
+  assert.ok(compared >= 12, 'the comparison is on screen for 3 s or more');
 });
 
-// The README GIF's hover beat draws what packages/renderer draws when the pointer rests on a table in a
-// folder without dbt. When the renderer's arrows, timings, fades or colours change, these fail so the
-// mock is updated (and the GIF re-rendered) with it.
-const numConst = (src, name) => Number(src.match(new RegExp(`export const ${name} = ([\\d.]+);`))?.[1]);
-test('the README GIF\'s hover preview uses the product\'s numbers: arrows, delays, fades and colours', async () => {
-  const { HOVER, FLOW, CHEVRON_D } = await import('../player/hero.js');
-  const flow = read('packages', 'renderer', 'src', 'lib', 'edgeFlow.ts');
-  assert.equal(FLOW.speed, numConst(flow, 'FLOW_SPEED_PX_S'));
-  assert.equal(FLOW.spacing, numConst(flow, 'FLOW_SPACING_PX'));
-  assert.equal(FLOW.minGlyphs, numConst(flow, 'FLOW_MIN_GLYPHS'));
-  assert.equal(FLOW.maxGlyphs, numConst(flow, 'FLOW_MAX_GLYPHS'));
-  assert.equal(FLOW.minDur, numConst(flow, 'FLOW_MIN_DUR_S'));
-  assert.equal(FLOW.maxDur, numConst(flow, 'FLOW_MAX_DUR_S'));
-  assert.equal(FLOW.durBucket, numConst(flow, 'FLOW_DUR_BUCKET_S'));
-  // the rule: many-to-one runs against the path (fromModel → toModel), so from the 1 end to the * end
-  assert.ok(flow.includes("case 'many-to-one':\n    default:\n      return 'reverse';"));
-  assert.ok(flow.includes("const STREAM_OPACITY = { opacityValues: '0;1;1;0', opacityKeyTimes: '0;0.1;0.9;1' };"));
-  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'EdgeFlow.tsx').includes(`export const CHEVRON_D = '${CHEVRON_D}';`));
-  const intent = read('packages', 'renderer', 'src', 'lib', 'hoverIntent.ts');
-  assert.equal(HOVER.enterDelay * 1000, numConst(intent, 'HOVER_ENTER_DELAY_MS'));
-  assert.equal(HOVER.switchDelay * 1000, numConst(intent, 'HOVER_SWITCH_DELAY_MS'));
-  assert.equal(HOVER.leaveGrace * 1000, numConst(intent, 'HOVER_LEAVE_GRACE_MS'));
-  const edgeCss = read('packages', 'renderer', 'src', 'components', 'Graph', 'FkEdge.css');
+// The README GIF's dbt and AI beats are staged from one real run (record/heroRun.mjs →
+// record/hero-run.json): the project, the SQL change, the comparison before and after, the prompt,
+// and what Claude Code wrote. When the record changes (a new run), these fail so the mock follows.
+test('the README GIF\'s SQL change and its comparison are the real run\'s', async () => {
+  const { SQL_CARD, COMPARED, heroTree } = await import('../player/hero.js');
+  const { SQL_CHANGE, DBT, DESIGN } = await import('../record/heroRun.mjs');
+  // the record was made from the project heroRun.mjs writes today
+  assert.deepEqual(heroRun.design.before, DESIGN);
+  assert.deepEqual(heroRun.sqlChange, Object.keys(SQL_CHANGE));
+  // the diff shown is the changed model, whole, and its one new line
+  assert.equal(`${SQL_CARD.lines.join('\n')}\n`, SQL_CHANGE[SQL_CARD.path]);
+  const before = DBT[SQL_CARD.path].split('\n');
+  assert.deepEqual(SQL_CARD.lines.filter((l) => !before.includes(l)), [SQL_CARD.lines[SQL_CARD.added]]);
+  // the files the Explorer marks changed are the ones the change touched: one new, the rest modified
+  assert.ok(SQL_CHANGE['models/dim_store.sql'] && !DBT['models/dim_store.sql']);
+  assert.ok(heroTree({ sql: true }).some(([, , l]) => l === 'dim_store.sql') && !heroTree().some(([, , l]) => l === 'dim_store.sql'));
+  // the design starts in step; the SQL change leaves the one difference the canvas marks; after the AI's edit, none
+  const { inStep, sqlChanged, afterAi } = heroRun.compare;
+  assert.ok(inStep.clean && afterAi.clean && !sqlChanged.clean);
+  assert.deepEqual(sqlChanged.differences, [{ table: COMPARED.sqlChanged.table, column: COMPARED.sqlChanged.column, status: 'missing', type: COMPARED.sqlChanged.type }]);
+  assert.equal(sqlChanged.summary.matchedModels, COMPARED.sqlChanged.matched);
+  assert.equal(sqlChanged.summary.missingColumns + sqlChanged.summary.extraColumns, COMPARED.sqlChanged.colDiffs);
+  assert.equal(sqlChanged.relationships.other, 0);
+  assert.equal(afterAi.summary.matchedModels, COMPARED.afterAi.matched);
+  assert.equal(afterAi.summary.matchedColumns, afterAi.summary.totalColumns);
+  assert.equal(afterAi.relationships.other, 0);
+  assert.ok(afterAi.text[0].endsWith('matches dbt'));
+  // dbt was real dbt Core, pinned as the tour's
+  const { DBT_UVX_ARGS } = await import('../record/vscode.mjs');
+  assert.deepEqual(heroRun.dbt, DBT_UVX_ARGS.filter((a) => a.includes('==')));
+});
+
+test('the README GIF\'s AI beat is the real run\'s: the prompt, the skill, the files written, the table and where it landed', async () => {
+  const { AI_PROMPT, AI_STEPS, AI_TABLE, AI_COLUMN, LINES_AFTER, render, AI } = await import('../player/hero.js');
+  const { PROMPT } = await import('../record/heroRun.mjs');
+  const { CLAUDE_FLAGS } = await import('../record/vscode.mjs');
+  assert.equal(AI_PROMPT, PROMPT);
+  assert.equal(heroRun.prompt, PROMPT);
+  assert.deepEqual(heroRun.claudeFlags, CLAUDE_FLAGS, 'run with the tour\'s flags');
+  assert.equal(heroRun.claude.subtype, 'success');
+  // the steps shown: the skill first, then every file the run changed, once each, in the order it first changed them
+  const calls = heroRun.claude.calls;
+  assert.deepEqual(calls[0], { tool: 'Skill', target: 'erd-studio', ok: true });
+  const wrote = [];
+  for (const c of calls) if (c.ok && (c.tool === 'Edit' || c.tool === 'Write') && !wrote.some(([, t]) => t === c.target)) wrote.push([c.tool === 'Edit' ? 'Update' : 'Write', c.target]);
+  assert.deepEqual(AI_STEPS, [['Skill', 'erd-studio'], ...wrote]);
+  // nothing else was written: the design's files are the only ones that differ
+  const changed = Object.keys(heroRun.design.after).filter((f) => heroRun.design.before[f] !== heroRun.design.after[f]).map((f) => `.erd-studio/${f}`).sort();
+  assert.deepEqual(changed, wrote.map(([, t]) => t).sort());
+  // the table drawn is the file it wrote, and it sits where its diagram edit put it
+  const L = NEW_LAYER.id;
+  const cols = (dbml) => [...dbml.matchAll(/^ {2}(\w+)\s+(?:"([^"]+)"|(\w+))(?:\s+\[(.*)\])?$/gm)].map(([, n, q, ty, settings]) => [/\bpk\b/.test(settings ?? '') ? 'PK' : /foreign_key/.test(settings ?? '') ? 'FK' : null, n, q ?? ty]);
+  assert.deepEqual(cols(heroRun.design.after[`${L}/tables/${L}/${AI_TABLE.name}.dbml`]), AI_TABLE.cols);
+  assert.ok(heroRun.design.after[`${L}/diagrams/orders.dbml`].includes(`\n    ${AI_TABLE.name} ${AI_TABLE.x} ${AI_TABLE.y}\n`));
+  const fct = cols(heroRun.design.after[`${L}/tables/${L}/${AI_COLUMN.table}.dbml`]);
+  const at = fct.findIndex(([, n]) => n === AI_COLUMN.col[1]);
+  assert.deepEqual(fct[at], AI_COLUMN.col);
+  assert.equal(fct[at - 1][1], AI_COLUMN.after);
+  // and its relationship is the Ref it added
+  assert.ok(heroRun.design.after[`${L}/relationships/${L}.dbml`].includes(`Ref: ${L}.${AI_COLUMN.table}.${AI_COLUMN.col[1]} >? ${L}.${AI_TABLE.name}.${AI_TABLE.cols[0][1]}`));
+  assert.ok(LINES_AFTER.some((l) => l.from === AI_COLUMN.table && l.to === AI_TABLE.name));
+  // on screen: the prompt whole before the first step, each step's line, and the table only once the last has landed
+  const strip = (html) => html.replace(/<[^>]+>/g, '').replace(/&#39;|&apos;/g, "'").replace(/&gt;/g, '>');
+  assert.ok(strip(render(AI.steps[0] - 0.05)).includes(AI_PROMPT));
+  const end = strip(render(AI.done - 0.02));
+  for (const [verb, target] of AI_STEPS) assert.ok(end.includes(`${verb}(${target})`), target);
+  assert.ok(!render(AI.done - 0.02).includes(`<span class="node__name">${AI_TABLE.name}</span>`));
+  assert.ok(render(AI.done + 0.5).includes(`<span class="node__name">${AI_TABLE.name}</span>`));
+  assert.ok(AI.steps.every((x, i) => i === 0 || x > AI.steps[i - 1]) && AI.done > AI.steps.at(-1));
+  // nothing private in the record
+  assert.doesNotMatch(JSON.stringify(heroRun), /\/Users\/|\/home\/|@[\w-]+\.\w+|\/private\/|sk-ant|Max plan|Pro plan/);
+});
+
+test('the README GIF\'s comparison is drawn as the canvas draws it: the ghost row, the panel, the clicks', async () => {
+  const { COMPARE, COMPARED, COMPARE_AT, COMPARE_CLICKS, POINTER, comparingAt, phaseAt, render, AI } = await import('../player/hero.js');
+  const nodeTsx = read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.tsx');
   const nodeCss = read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.css');
-  assert.ok(edgeCss.includes(`.erd-flow--hover-focus .fk-edge {\n  opacity: ${HOVER.lineOpacity};`));
-  assert.ok(edgeCss.includes(`.erd-flow--hover-focus .fk-edge__adornment {\n  opacity: ${HOVER.labelOpacity};`));
-  assert.ok(nodeCss.includes(`.erd-flow--hover-focus .model-node {\n  opacity: ${HOVER.tableOpacity};`));
-  for (const css of [edgeCss, nodeCss]) assert.ok(css.includes(`transition: opacity ${HOVER.fade}s ease`));
-  assert.ok(edgeCss.includes('.fk-edge--flowing {\n  stroke-width: 2.5;') && edgeCss.includes('.fk-edge {\n  stroke-width: 2;'));
-  // the hovered table's ring: 3px of the neutral ring colour (the line colour at 30%), not blue
-  assert.ok(nodeCss.includes('box-shadow: 0 0 0 3px var(--stage-logical-ring);'));
-  assert.ok(read('packages', 'renderer', 'src', 'styles', 'theme.css').includes('--canvas-neutral-ring:   color-mix(in srgb, var(--canvas-neutral-line) 30%, transparent);'));
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(lib.COLORS.neutralLine.slice(i, i + 2), 16));
-  assert.equal(HOVER.ring, `rgba(${r},${g},${b},0.3)`);
-  // colour on hover: the focused lines, labels and arrows take the diagram's layer colour; a new
-  // folder without dbt has one layer, Main
-  const routing = read('packages', 'renderer', 'src', 'canvas', 'EdgeRouting.css');
-  assert.ok(routing.includes('.editor-canvas--neutral .fk-edge--logical.fk-edge--lit,') && routing.includes('--stage-logical: var(--diagram-layer-color, var(--canvas-neutral-line));'));
-  assert.ok(read('src', 'services', 'layerService.ts').includes(`{ id: 'main', label: 'Main', abbreviation: 'MAIN', color: '${HOVER.layerColour}'`));
+  // "only in physical" over the ghost row, "physical only" on it: the compared stage's name, upper-cased by the CSS
+  assert.ok(nodeTsx.includes("only in {discrepancyTargetStage ?? 'comparison'}") && nodeTsx.includes("{discrepancyTargetStage ?? 'target'} only"));
+  assert.equal(COMPARE.separator, 'only in physical');
+  assert.equal(COMPARE.badge, 'physical only');
+  assert.ok(nodeCss.includes(`.model-node__column--disc-missing {\n  opacity: ${COMPARE.ghostOpacity};`) && nodeCss.includes('.model-node__column--disc-missing .model-node__col-name {\n  text-decoration: line-through;'));
+  assert.match(nodeCss, /\.model-node__separator-label \{[^}]*text-transform: uppercase;/);
+  assert.match(nodeCss, /\.model-node__col-disc-badge \{[^}]*text-transform: uppercase;/);
+  assert.ok(read('packages', 'renderer', 'src', 'styles', 'theme.css').includes(`--stage-ghost:    ${COMPARE.ghost};`));
+  // the panel's words
+  const panel = read('webview', 'components', 'DiscrepancyPanel', 'DiscrepancyPanel.tsx');
+  for (const w of ['>(current)<', '>vs<', '>(target)<', `⊕ ${COMPARE.sync}`, `>${COMPARE.allMatched}<`, `>${COMPARE.matched}<`, `>${COMPARE.colDiff}{`, "case 'missing': return `Only in ${stageName(targetStage)}`;"]) assert.ok(panel.includes(w), w);
+  assert.equal(COMPARE.onlyIn, 'Only in Physical');
+  assert.ok(read('webview', 'lib', 'stageUtils.ts').includes("case 'physical': return 'Physical';"));
+  // three clicks on the one button, the pointer on it each time: on, off (before the terminal), on again (after the AI is done)
+  const { path } = lib;
+  assert.equal(COMPARE_CLICKS.length, 3);
+  for (const c of COMPARE_CLICKS) {
+    const visit = POINTER.find((v) => c >= v[0].t && c <= v.at(-1).t);
+    const p = path(c, visit);
+    assert.ok(Math.abs(p.x - COMPARE_AT.x) <= 90 && Math.abs(p.y - COMPARE_AT.y) <= 18, `+${c}s: the pointer is on the Compare button`);
+  }
+  assert.ok(!comparingAt(COMPARE_CLICKS[0]) && comparingAt(COMPARE_CLICKS[0] + 0.3) && !comparingAt(COMPARE_CLICKS[1] + 0.3) && comparingAt(COMPARE_CLICKS[2] + 0.3));
+  assert.ok(COMPARE_CLICKS[1] < AI.open && COMPARE_CLICKS[2] > AI.close, 'not comparing while the terminal is open');
+  assert.ok(COMPARE_CLICKS[1] - COMPARE_CLICKS[0] >= 2, 'the difference is held long enough to read');
+  // the first comparison: the ghost row and the counts; the second: All matched, no ghost row
+  const strip = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const first = strip(render(COMPARE_CLICKS[0] + 1.5));
+  assert.equal(phaseAt(COMPARE_CLICKS[0] + 1.5), 'sqlChanged');
+  for (const w of ['ONLY IN PHYSICAL', 'PHYSICAL ONLY', `${COMPARED.sqlChanged.matched} matched`, `${COMPARED.sqlChanged.colDiffs} col diff`, 'Only in Physical', COMPARE.sync]) assert.ok(first.includes(w), w);
+  assert.ok(!first.includes(COMPARE.allMatched));
+  const second = strip(render(COMPARE_CLICKS[2] + 1));
+  assert.equal(phaseAt(COMPARE_CLICKS[2] + 1), 'afterAi');
+  assert.ok(second.includes(COMPARE.allMatched) && second.includes(`${COMPARED.afterAi.matched} matched`));
+  for (const w of ['ONLY IN PHYSICAL', 'col diff', COMPARE.sync]) assert.ok(!second.includes(w), w);
+  // the pointer is on screen only on its two visits
+  for (const t of [0, 2, 5, 8, 15, 17, 22, 25.5]) assert.ok(!render(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
 });
 
-test('the README GIF\'s hover beat: arrows run from the 1 end to the * end, only on the hovered table\'s lines, and the loop is seamless', async () => {
-  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, DRAWN, flowGlyphs, CHEVRON_D } = await import('../player/hero.js');
-  // the pointer rests on fct_order, then dim_customer, then leaves
-  assert.deepEqual(FOCUS_CHANGES.map((c) => c.id), ['fct_order', 'dim_customer', null]);
-  const [onFact, onCustomer, off] = FOCUS_CHANGES.map((c) => c.t);
-  assert.ok(onCustomer - onFact >= 1.5 && off - onCustomer >= 1.5, 'each hover held long enough to read');
-  for (const [i, line] of LINES.entries()) {
-    // each path starts at the FK's table (`*` end) and ends at the key's table (`1` end)
-    assert.equal(line.cardinality, 'many-to-one');
-    assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12, `${line.id}: * at the path's start`);
-    assert.ok(Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, `${line.id}: 1 at the path's end`);
-    // so every chevron moves towards the path's start (the `*` end), and points that way
-    const drawn = DRAWN.curved[i];
-    const a = flowGlyphs(drawn, line, 12), b = flowGlyphs(drawn, line, 12.05);
-    assert.ok(a.length >= 2 && a.length <= 4);
-    for (const [k, g] of a.entries()) {
-      assert.ok(g.reverse);
-      if (g.at <= 0.05) continue;   // just wrapped round
-      assert.ok(b[k].at < g.at, `${line.id}: glyph ${k} moves from the 1 end to the * end`);
-    }
-  }
-  const html = (t) => render(t);
-  const chevrons = (h) => h.split(CHEVRON_D).length - 1;
-  const faded = (h) => (h.match(new RegExp(`opacity:${HOVER.tableOpacity.toFixed(3)};`, 'g')) ?? []).length;
-  // fct_order: its four lines flow in the layer colour; every table is one line away, so none fades
-  const factLines = LINES.filter((l) => l.from === 'fct_order' || l.to === 'fct_order').length;
-  assert.equal(factLines, 4);
-  const fact = html((onFact + onCustomer) / 2);
-  assert.ok(chevrons(fact) >= 2 * factLines && fact.includes(HOVER.layerColour));
-  assert.equal(faded(fact), 0);
-  // dim_customer: one line flows; the three tables it does not touch fade
-  const cust = html(onCustomer + 0.6);
-  assert.ok(chevrons(cust) >= 2 && chevrons(cust) <= 4);
-  assert.equal(faded(cust), 3);
-  // no arrows, no layer colour and no pointer outside the hover; the first and last frames match
-  for (const t of [0, 2, 5, 8, off + HOVER.fade + 0.01, 17.5]) {
-    const h = html(t);
-    assert.equal(chevrons(h), 0, `+${t}s`);
-    assert.ok(!h.includes(HOVER.layerColour), `+${t}s`);
-  }
-  for (const t of [0, 2, 5, 8, HOVER_PATH.at(-1).t + 0.01]) assert.ok(!html(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
-  assert.equal(html(HERO.loop - 1 / HERO.fps), html(0));
+test('the README GIF\'s Confluence beat: a real render of the run\'s files, described only as the app works', async () => {
+  const { CONFLUENCE, render, CAPTIONS } = await import('../player/hero.js');
+  const png = readFileSync(join(HERE, '..', 'player', 'assets', CONFLUENCE.shot.file));
+  // the picture confluence-shot.mjs --hero writes: its viewport at 2x
+  assert.equal(png.readUInt32BE(16), CONFLUENCE.shot.w * 2);
+  assert.equal(png.readUInt32BE(20), CONFLUENCE.shot.h * 2);
+  const shot = readFileSync(join(HERE, '..', 'confluence-shot.mjs'), 'utf8');
+  assert.ok(shot.includes(`'${CONFLUENCE.shot.file}'`) && shot.includes(`width: HERO ? ${CONFLUENCE.shot.w} : 1200, height: ${CONFLUENCE.shot.h}`));
+  assert.ok(shot.includes('design.after') && shot.includes('<ErdCanvas domain={domain} viewer'));
+  assert.ok(heroRun.design.after[CONFLUENCE.file.replace('.erd-studio/', '')], 'the diagram file it names is the run\'s');
+  const at = CAPTIONS.find((c) => c.em === 'Confluence').at;
+  const page = render(at + 2).slice(render(at + 2).indexOf('logos/confluence.svg')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  for (const w of [CONFLUENCE.app, CONFLUENCE.readOnly, 'Drawn from GitHub', CONFLUENCE.file]) assert.ok(page.includes(w), w);
+  // never free, no price, no editing or sync back
+  assert.doesNotMatch(page, /\bfree\b|\$|price|per user|\bedit|\bsync/i);
+  assert.ok(render(at + 2).includes('/video/player/assets/logos/github.svg'));
 });
 
 // The README GIF's line styles are drawn as packages/renderer draws them. When the router's corners,
 // crossings, the switch or its glyphs change, these fail so the mock follows.
 test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, halo, the switch', async () => {
-  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, styleAt, HERO } = await import('../player/hero.js');
+  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, LINE_STYLE, HERO } = await import('../player/hero.js');
   const routing = (...p) => read('packages', 'renderer', 'src', 'lib', 'edgeRouting', ...p);
   const corners = routing('render', 'corners.ts');
   const paths = routing('render', 'pathRender.ts');
@@ -633,14 +722,11 @@ test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, 
   const zoom = 0.5;
   assert.equal(ROUTE.hopRadius, Math.min(constIn(paths, 'HOP_MAX_RADIUS'), Math.max(constIn(paths, 'HOP_RADIUS'), constIn(paths, 'HOP_SCREEN_RADIUS') / zoom)));
   assert.ok(paths.includes('return Math.min(HOP_MAX_RADIUS, Math.max(HOP_RADIUS, HOP_SCREEN_RADIUS / z));'));
-  // ...and the arrows as glyphScaleForZoom(0.5)
-  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'EdgeFlow.tsx').includes('const scale = Math.ceil((1 / zoom) * 4 - 1e-9) / 4;'));
-  assert.match(readFileSync(join(HERE, '..', 'player', 'hero.js'), 'utf8'), new RegExp(`const GLYPH_SCALE = ${Math.ceil((1 / zoom) * 4 - 1e-9) / 4};`));
   assert.ok(read('packages', 'renderer', 'src', 'canvas', 'EdgeRouting.css').includes(`.fk-edge__halo {\n  fill: none;\n  stroke: var(--editor-bg);\n  stroke-width: ${ROUTE.haloWidth};`));
   // the two styles, in the toolbar's order, the default first
   const style = routing('lineStyle.ts');
   assert.ok(style.includes(`export const LINE_STYLES: readonly LineStyle[] = [${LINE_STYLES.map((x) => `'${x}'`).join(', ')}];`));
-  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${styleAt(0)}';`));
+  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${LINE_STYLE}';`));
   for (const [name, o] of Object.entries(LINE_STYLE_OPTIONS)) assert.ok(style.includes(`${name}: { crossings: '${o.crossings}', underTables: `) && style.includes(`corners: '${o.corners}' }`), name);
   // the switch's glyphs are the product's own paths
   const sw = read('webview', 'components', 'Toolbar', 'LineStyleSwitch.tsx');
@@ -649,35 +735,25 @@ test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, 
   assert.ok(HERO.loop > 0);
 });
 
-test('the README GIF\'s line style beat: the pointer clicks Hops, the lines hop, then Curved again', async () => {
-  const { render, DRAWN, LINES, styleAt, HOVER_PATH, SWITCH_AT, FOCUS_CHANGES, HERO } = await import('../player/hero.js');
-  // Curved at the seam, Hops for a while after the hover, then Curved again before the pointer leaves
-  const hops = [];
-  for (let t = 0; t < HERO.loop; t += 0.05) if (styleAt(t) === 'hops') hops.push(t);
-  assert.ok(hops.length, 'Hops is shown');
-  assert.ok(hops[0] > FOCUS_CHANGES.at(-1).t, 'after the hover');
-  assert.ok(hops.at(-1) - hops[0] >= 2.4, 'Hops held long enough to see');
-  assert.ok(hops.at(-1) < HOVER_PATH.at(-1).t && styleAt(HERO.loop - 0.01) === 'curved');
-  // each switch happens with the pointer on that option (its click)
-  const { path } = lib;
-  for (const t of [hops[0], hops.at(-1) + 0.05]) {
-    const p = path(t, HOVER_PATH), want = styleAt(t);
-    assert.ok(Math.abs(p.x - SWITCH_AT[want].x) <= 20 && Math.abs(p.y - SWITCH_AT[want].y) <= 17, `+${t}s: the pointer is on ${want}`);
-  }
-  // the switch shows the style in use
+test('the README GIF draws the default line style throughout: Curved, chosen on the toolbar\'s switch', async () => {
+  const { render, DRAWN, DRAWN_AFTER, LINES, LINES_AFTER, LINE_STYLE, HERO } = await import('../player/hero.js');
   const chosen = (h) => h.match(/data-line-style="(\w+)" style="[^"]*background:#0e639c/)?.[1];
-  assert.equal(chosen(render(0)), 'curved');
-  assert.equal(chosen(render(hops[1])), 'hops');
-  // Curved: cubic corners and a halo casing; the line passing under another is cut there
-  const curved = DRAWN.curved, hopsDrawn = DRAWN.hops;
-  assert.ok(curved.some((l) => l.strokeD), 'a cut under a crossing');
-  assert.ok(curved.filter((l, i) => LINES[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
+  for (let t = 0; t < HERO.loop; t += 1) assert.equal(chosen(render(t)), LINE_STYLE, `+${t}s`);
+  // Curved: cubic corners and a halo casing on every line
+  for (const [drawn, lines] of [[DRAWN, LINES], [DRAWN_AFTER, LINES_AFTER]]) {
+    assert.equal(drawn.length, lines.length);
+    assert.ok(drawn.filter((l, i) => lines[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
+    for (const line of lines) {
+      // each path starts at the FK's table (`*`) and ends at the key's table (`1`), square all the way
+      assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12 && Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, line.id);
+      for (let i = 1; i < line.pts.length; i++) assert.ok(Math.abs(line.pts[i].x - line.pts[i - 1].x) < 0.01 || Math.abs(line.pts[i].y - line.pts[i - 1].y) < 0.01, `${line.id}: an orthogonal segment`);
+    }
+  }
   assert.match(render(0), /stroke="var\(--card\)" stroke-width="8.75"/);
-  // Hops: quadratic (rounded) corners, a hop (two cubic quarters) on the more horizontal line, no casing
-  assert.ok(hopsDrawn.filter((l, i) => LINES[i].pts.length > 2).every((l) => / Q /.test(l.d)));
-  const hopped = hopsDrawn.filter((l) => / C /.test(l.d));
-  assert.ok(hopped.length >= 2, 'at least two hops');
-  assert.doesNotMatch(render(hops[1]), /stroke-width="8.75"/);
+  // one line per relationship the run's relationships file holds, before and after
+  const refs = (dbml) => dbml.split('\n').filter((l) => l.startsWith('Ref:')).length;
+  assert.equal(LINES.length, refs(heroRun.design.before['main/relationships/main.dbml']));
+  assert.equal(LINES_AFTER.length, refs(heroRun.design.after['main/relationships/main.dbml']));
 });
 
 test('the README GIF\'s draft page draws Curved lines too: the product\'s draft canvas is the same renderer', async () => {
@@ -690,42 +766,48 @@ test('the README GIF\'s draft page draws Curved lines too: the product\'s draft 
     assert.match(DRAFT_DRAWN[i].d, / C /, 'curved corners');
     assert.doesNotMatch(DRAFT_DRAWN[i].d, / Q /);
   }
-  const draft = render(8.2);
+  const draft = render(6);
   for (const l of DRAFT_DRAWN) assert.ok(draft.includes(`d="${l.d}"`), 'drawn on the draft page');
 });
 
 test('the README GIF\'s captions: one per beat, five words at most, big, in a band above the window', async () => {
-  const { CAPTIONS, render, HERO, HOVER_PATH, FOCUS_CHANGES } = await import('../player/hero.js');
+  const { CAPTIONS, render, HERO, COMPARE_CLICKS, AI, SQL_AT } = await import('../player/hero.js');
   for (const c of CAPTIONS) {
     assert.ok(c.text.split(/\s+/).length <= 5, c.text);
     assert.ok(c.text.includes(c.em), c.text);
-    assert.doesNotMatch(c.text, NO_DBT_ON_SCREEN);
+    // README and Marketplace wording: never "No AI needed", "open source", "open standard", or "free" for the Confluence app
+    assert.doesNotMatch(c.text, /no ai|open[ -]source|\bfree\b|standard/i, c.text);
   }
   // the loop opens and closes on the same caption
   assert.equal(CAPTIONS[0].text, CAPTIONS.at(-1).text);
-  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at > CAPTIONS[i - 1].at));
+  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at - CAPTIONS[i - 1].at >= 1.5), 'each caption is up long enough to read');
   const shown = (t) => { let i = 0; while (i + 1 < CAPTIONS.length && CAPTIONS[i + 1].at <= t) i++; return CAPTIONS[i].text; };
   assert.equal(shown(2), 'Your model, as DBML files');
-  assert.equal(shown(8), 'Import what you have');
-  assert.equal(shown((FOCUS_CHANGES[0].t + FOCUS_CHANGES[1].t) / 2), 'Hover to trace relationships');
-  assert.equal(shown(17), 'Lines: Curved or Hops');
+  assert.equal(shown(6), 'Import what you have');
+  assert.equal(shown(SQL_AT + 1), 'The SQL changes');
+  assert.equal(shown(COMPARE_CLICKS[0] + 1), 'Compare it with dbt');
+  assert.equal(shown(AI.done), 'Your AI updates the model');
+  assert.equal(shown(COMPARE_CLICKS[2] + 1), 'Design and SQL, in sync');
+  assert.equal(shown(23), 'Business reads it in Confluence');
   // 58 px at 1440 is 32 px at the README's 800; the band sits above the window, never over the canvas
   const h = render(2);
   assert.match(h, /font-size:58px;font-weight:800/);
   const band = Number(h.match(/^<div class="abs" style="left:0;top:0;width:\d+px;height:(\d+)px">/)[1]);
   const winTop = Number(h.match(/<div class="card" style="left:\d+px;top:(\d+)px/)[1]);
   assert.ok(winTop >= band, 'the window starts below the caption band');
-  assert.ok(HERO.w === 1440 && HOVER_PATH.length > 0);
+  assert.equal(HERO.w, 1440);
 });
 
 // The loop and its beats, in order (re-time the README GIF section of video/README.md with these).
-test('the README GIF\'s loop: 22 s at 12 fps, files → text → draft → hover → line styles', async () => {
-  const { HERO, CAPTIONS, FOCUS_CHANGES, styleAt } = await import('../player/hero.js');
-  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [22, 12, 1440, 1010]);
-  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 6.2, 10.4, 14.9, 21.2]);
-  assert.ok(FOCUS_CHANGES[0].t > 10.4 && FOCUS_CHANGES.at(-1).t < 15.5);
-  assert.equal(styleAt(16.5), 'hops');
-  assert.equal(styleAt(19.5), 'curved');
+test('the README GIF\'s loop: 26 s at 12 fps, files → draft → SQL change → compare → AI → compare → Confluence, seamless', async () => {
+  const { HERO, CAPTIONS, COMPARE_CLICKS, AI, SQL_AT, phaseAt, render } = await import('../player/hero.js');
+  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [26, 12, 1440, 1010]);
+  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 4.2, 7.9, 10.3, 13.6, 19.3, 21, 25.2]);
+  assert.deepEqual(COMPARE_CLICKS, [10.6, 13.1, 19.3]);
+  assert.ok(SQL_AT < COMPARE_CLICKS[0] && AI.open > COMPARE_CLICKS[1] && AI.done < COMPARE_CLICKS[2]);
+  assert.deepEqual([0, 9, 12, 18.5, 20.5, 22, 25.9].map(phaseAt), ['inStep', 'sqlChanged', 'sqlChanged', 'afterAi', 'afterAi', 'inStep', 'inStep']);
+  // the first and last frames match
+  assert.equal(render(HERO.loop - 1 / HERO.fps), render(0));
 });
 
 // ---- the default cut is a recording of the real VS Code (record/) ----------------------------
