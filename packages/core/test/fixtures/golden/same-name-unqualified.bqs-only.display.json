@@ -23,7 +23,7 @@
           "dataType": "INT",
           "description": "",
           "isPrimaryKey": false,
-          "isForeignKey": false,
+          "isForeignKey": true,
           "isNaturalKey": false
         },
         {
@@ -70,7 +70,15 @@
       "layer": "bronze"
     }
   ],
-  "relationships": [],
+  "relationships": [
+    {
+      "fromModel": "bqs__v_sap_prod_unit2",
+      "fromColumn": "bqs_adresse_id",
+      "toModel": "adresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    }
+  ],
   "viewConfig": {
     "positions": {
       "adresse": {

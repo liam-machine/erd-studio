@@ -695,10 +695,13 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         // A path a member was already looked for at is known (a stale use line's own path, say).
         const tableDirs = reading.useTableDirs;
         const probes = contestedUsePaths(readings, entries, { tableDirs }).filter((rel) => isInsideSemanticDir(rel) && !tableFileExists.has(rel));
+        // A probed file's text, so a Ref end two use lines spell alike can be told apart by its columns.
+        const probedText = new Map<string, string>();
         await mapWithLimit(probes, maxParallelReads, async (rel) => {
           try {
             const text = await readFile(`${prefix}${rel}`);
             tableFileExists.set(rel, text !== null && text !== undefined);
+            if (typeof text === 'string') probedText.set(rel, text);
           } catch {
             // Unknown: the end stays on the one table of its name, as it always drew.
           }
@@ -734,7 +737,27 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         }
         // Only the members were read, so a Ref whose owner is off this
         // diagram (or did not read) is no orphan here (§2.4: `partial`).
-        const lookup = dbmlTableLookup(entries, { tableDirs, exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true || elsewhere.has(normalisePosix(rel)) });
+        // A probed table's columns (rule 0 of the lookup): read once, only when an end asks.
+        const probedColumns = new Map<string, readonly string[] | undefined>();
+        const columnsAt = (rel: string): readonly string[] | undefined => {
+          const key = normalisePosix(rel);
+          if (probedColumns.has(key)) return probedColumns.get(key);
+          const text = probedText.get(key);
+          let columns: readonly string[] | undefined;
+          if (text !== undefined && dbml && text.length <= maxYamlChars) {
+            try {
+              const tree = dbmlTreePathOf(key);
+              const stem = tree?.name ?? key.slice(key.lastIndexOf('/') + 1).replace(/\.dbml$/i, '');
+              const read = dbml.parseTable(text, stem, tree?.schema !== undefined ? { schemaFolder: tree.schema } : undefined);
+              columns = read.ok ? (read.table.columns ?? []).map((c) => c.name) : undefined;
+            } catch {
+              columns = undefined;
+            }
+          }
+          probedColumns.set(key, columns);
+          return columns;
+        };
+        const lookup = dbmlTableLookup(entries, { tableDirs, exists: (rel) => tableFileExists.get(normalisePosix(rel)) === true || elsewhere.has(normalisePosix(rel)), columnsAt });
         const attached = attachRelationships(readings, lookup, { partial: true });
         for (const message of attached.warnings) warn(message);
         // A Ref whose other end names a table that more than one schema folder has, with nothing to say which,

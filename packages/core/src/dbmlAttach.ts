@@ -45,6 +45,8 @@ interface EndResolution {
   schemas?: string[];
   /** For `ambiguous`: rule 0 decided it (the file's `use` lines give the end's spelling to several files). */
   spelledTwice?: true;
+  /** Rule 0 decided the end is the table of this file, which is off the scope (`<schema>.<name>` names it). */
+  elsewhere?: string;
 }
 
 /** The text a table is named by in its scope: its reference, else its name. */
@@ -74,7 +76,7 @@ function distinct(entries: readonly DbmlAttachTable[]): DbmlAttachTable[] {
 function endResolver(
   tables: Iterable<DbmlAttachTable>,
   tableDirs?: readonly string[],
-): (name: string, hint: EndHint | undefined, exists?: (path: string) => boolean) => EndResolution {
+): (name: string, hint: EndHint | undefined, exists?: (path: string) => boolean, columnsAt?: (path: string) => readonly string[] | undefined) => EndResolution {
   const byName = new Map<string, DbmlAttachTable[]>();
   const byAlias = new Map<string, DbmlAttachTable>();
   const byPath = new Map<string, DbmlAttachTable>();
@@ -93,7 +95,13 @@ function endResolver(
     }
   }
   /** Rule 0: an end spelled as several of its file's `use` lines import, each from another table file. */
-  const bySpelledFiles = (wanted: string, usePaths: readonly string[], columns: readonly string[], exists?: (path: string) => boolean): EndResolution => {
+  const bySpelledFiles = (
+    wanted: string,
+    usePaths: readonly string[],
+    columns: readonly string[],
+    exists?: (path: string) => boolean,
+    columnsAt?: (path: string) => readonly string[] | undefined,
+  ): EndResolution => {
     const named = (e: DbmlAttachTable | undefined): e is DbmlAttachTable =>
       e !== undefined && (lower(e.table.name) === wanted || (e.dbmlAlias !== undefined && lower(e.dbmlAlias) === wanted));
     const paths = usePaths.map((p) => normalisePosix(p));
@@ -107,13 +115,21 @@ function endResolver(
       const id = tableIdOfPath(p);
       return !(id !== undefined && inScope.has(tableIdKey(id)));
     });
-    const unseen = outOfScope.filter((p) => exists?.(p) !== false);
     const contested = outOfScope.length > 0 ? { contested: outOfScope } : {};
-    const fit = columns.length === 0 ? [] : candidates.filter((e) => {
-      const has = new Set((e.table.columns ?? []).map((c) => (typeof c?.name === 'string' ? lower(c.name) : '')));
+    const hasAll = (names: readonly string[]): boolean => {
+      const has = new Set(names.map(lower));
       return columns.every((c) => has.has(lower(c)));
-    });
-    if (unseen.length === 0 && fit.length === 1) return { entry: fit[0], ...contested };
+    };
+    const fit = columns.length === 0 ? [] : candidates.filter((e) => hasAll((e.table.columns ?? []).map((c) => (typeof c?.name === 'string' ? c.name : ''))));
+    // An existing file off this scope counts by its columns when the reader read them (`columnsAt`), so a
+    // diagram showing one of the tables decides the end as the library, which sees both, does.
+    const offScope = outOfScope.filter((p) => exists?.(p) !== false).map((p) => ({ p, columns: columnsAt?.(p) }));
+    const unseen = offScope.some((o) => o.columns === undefined);
+    const fitOff = columns.length === 0 ? [] : offScope.filter((o) => o.columns !== undefined && hasAll(o.columns));
+    if (!unseen && fit.length + fitOff.length === 1) {
+      // The one table with the columns is off this scope: the end means it, so it is not drawn here.
+      return fit.length === 1 ? { entry: fit[0], ...contested } : { elsewhere: fitOff[0].p, ...contested };
+    }
     const schemas = new Map<string, string>();
     for (const p of paths) {
       const id = tableIdOfPath(p);
@@ -121,13 +137,13 @@ function endResolver(
     }
     return { ambiguous: candidates, schemas: [...schemas.values()].sort((a, b) => (lower(a) < lower(b) ? -1 : lower(a) > lower(b) ? 1 : 0)), spelledTwice: true, ...contested };
   };
-  return (name, hint, exists) => {
+  return (name, hint, exists, columnsAt) => {
     const wanted = lower(name);
     const named = byName.get(wanted);
     // 0. The file's `use` lines give this spelling to several tables (`use { table adresse }` from two schema
     // folders, which every DBML parser refuses with [3003]): no line is the end's own, so the end is the one
     // of those tables that has every column it names, decided only when all of them are in scope.
-    if (hint?.usePaths !== undefined && hint.usePaths.length > 1) return bySpelledFiles(wanted, hint.usePaths, hint.columns ?? [], exists);
+    if (hint?.usePaths !== undefined && hint.usePaths.length > 1) return bySpelledFiles(wanted, hint.usePaths, hint.columns ?? [], exists, columnsAt);
     // 1. The relationships file's own `use` line for this spelling names the table's file.
     if (hint?.usePath !== undefined) {
       const atPath = byPath.get(lower(normalisePosix(hint.usePath)));
@@ -212,9 +228,11 @@ function endResolver(
  *    two or more different table files (`hint.usePaths`: two unqualified
  *    `Table adresse` files imported side by side, which every DBML parser
  *    refuses with [3003]), the one of those tables that has every column the
- *    end names (`hint.columns`), when all of them are in scope (or
- *    `options.exists` says the others do not exist); otherwise none, reported
- *    as ambiguous. The first such line is never taken for the end's own;
+ *    end names (`hint.columns`), when every other one of them either does not
+ *    exist (`options.exists`) or has its columns known (`options.columnsAt`,
+ *    for a file off the scope) and they do not fit; when the one that fits is
+ *    off the scope, the end means it and is not drawn here. Otherwise none,
+ *    reported as ambiguous. The first such line is never taken for the end's own;
  * 1. the relationships file's own `use` line for the end's spelling names
  *    the table's file (`path`): exact, and what ERD Studio always writes;
  * 2. else the one table whose schema folder, then whose declared schema
@@ -242,12 +260,12 @@ function endResolver(
  */
 export function dbmlTableLookup(
   tables: Iterable<DbmlAttachTable>,
-  options: { exists?: (path: string) => boolean; tableDirs?: readonly string[] } = {},
+  options: { exists?: (path: string) => boolean; tableDirs?: readonly string[]; columnsAt?: (path: string) => readonly string[] | undefined } = {},
 ): DbmlTableLookup {
   const resolve = endResolver(tables, options.tableDirs);
-  const lookup: DbmlTableLookup = (name, hint) => resolve(name, hint, options.exists).entry;
+  const lookup: DbmlTableLookup = (name, hint) => resolve(name, hint, options.exists, options.columnsAt).entry;
   // So attachRelationships can say why an end found nothing; a caller's own lookup function has no such answer.
-  Object.defineProperty(lookup, RESOLVE, { value: (name: string, hint?: DbmlRefEndHint) => resolve(name, hint, options.exists) });
+  Object.defineProperty(lookup, RESOLVE, { value: (name: string, hint?: DbmlRefEndHint) => resolve(name, hint, options.exists, options.columnsAt) });
   return lookup;
 }
 
@@ -556,6 +574,9 @@ function at(location: DbmlRefLocation): string {
  * so it is never what the scope calls one of them.
  */
 function unresolvedEnd(name: string, hint: DbmlRefEndHint, end: EndResolution): string {
+  // Rule 0 found the table off the scope: named by its identity, never by the spelling a table here shares.
+  const elsewhere = end.elsewhere !== undefined ? tableIdOfPath(normalisePosix(end.elsewhere)) : undefined;
+  if (elsewhere !== undefined) return `${elsewhere.schema}.${elsewhere.name}`;
   return hint.qualifier !== undefined && (end.contested !== undefined || end.ambiguous !== undefined) ? `${hint.qualifier}.${name}` : name;
 }
 

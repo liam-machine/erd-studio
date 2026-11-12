@@ -38,7 +38,7 @@ import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { sameName } from '../types/naming';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { relationshipsIndexOf } from '../services/dbmlLibraryWrites';
-import { sharedUseSpellingMessage, sharedUseSpellings } from '../services/sharedUseSpelling';
+import { refLinesNamingSpelling, sharedUseSpellingMessage, sharedUseSpellings } from '../services/sharedUseSpelling';
 import { relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
 import type { RelationshipsIndex } from '../services/dbmlRelationshipsIndex';
 import { unimportedRelationshipsMessage } from '../services/domainService';
@@ -312,9 +312,12 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   // Use lines that import two table files under one spelling (two `Table adresse` with no schema): said
   // with the fix on the later line, in place of the parser's bare [3003] there.
   const sharedAt = new Set<string>();
+  const sharedRefAt = new Set<string>();
   for (const f of files) {
     if ((f.kind !== 'diagram' && f.kind !== 'relationships') || conflicted.has(f.rel)) continue;
     for (const group of sharedUseSpellings(f.text, f.rel)) {
+      // The parser binds the spelling to one of the files, so a Ref end meaning the other gets its own [4000]: the same cause.
+      for (const line of refLinesNamingSpelling(f.text, group.spelling)) sharedRefAt.add(`${f.rel}\u0000${line}`);
       const first = group.uses[0];
       const firstId = first.id !== undefined ? tableIdKey(first.id) : first.resolved.toLowerCase();
       for (const use of group.uses) {
@@ -333,6 +336,7 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     const kind = kindOf.get(rel);
     for (const d of list) {
       if (d.code === 3003 && sharedAt.has(`${rel}\u0000${d.line}`)) continue;
+      if (d.code === 4000 && sharedRefAt.has(`${rel}\u0000${d.line}`) && /does not exist in Table/i.test(d.message)) continue;
       const hint = (kind === 'table' && DBML_TABLE_QUOTE_HINT_CODES.has(String(d.code)))
         || (kind === 'diagram' && DBML_DIAGRAM_QUOTE_HINT_CODES.has(String(d.code)))
         ? ` ${DBML_QUOTE_HINT}` : '';

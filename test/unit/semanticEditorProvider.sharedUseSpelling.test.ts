@@ -361,3 +361,162 @@ describe('control: the same project with qualified headers (what ERD Studio writ
     expect(canvas.posted().models.map((m) => m.name).sort()).toEqual(['bqs.adresse', 'bqs__v_sap_prod_unit2', 'ccc.adresse']);
   });
 });
+
+/*
+ * The usual case (found by the Breaker): both address tables have `id`, so a
+ * Ref end `adresse.id` is not decided by its columns. Before the repair,
+ * Qualify Tables left the relationships file with `use { table adresse }`
+ * twice and the ends bare ([4000] + [3003]), dropped the diagram's `use *`,
+ * offered the same useless fix again on reopen, and a relationship drawn
+ * after declining was written ambiguously with no prompt.
+ */
+describe('Gerhard photo-2: both adresse tables have the Ref column', () => {
+  /** Two source systems' address tables that BOTH have `id`, with a Ref to each as 2.0.4 wrote them. */
+  function bothHaveId(refs = ['Ref: unit.bqs_adresse_id >? adresse.id', 'Ref: unit.ccc_adresse_id >? adresse.id']): void {
+    write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', color: '#cd7f32', creatable: true, order: 1 }] }, null, 2));
+    write('bronze/tables/bqs/adresse.dbml', 'Table adresse {\n  id INT [pk]\n  strasse VARCHAR\n}\n');
+    write('bronze/tables/ccc/adresse.dbml', 'Table adresse {\n  id INT [pk]\n  street VARCHAR\n}\n');
+    write('bronze/tables/bqs/unit.dbml', 'Table unit {\n  unit_id INT [pk]\n  bqs_adresse_id INT\n  ccc_adresse_id INT\n}\n');
+    write('bronze/diagrams/sap.dbml', [
+      'Project sap {',
+      "  erd_schema_version: '8'",
+      "  erd_layout: '''",
+      '    unit 40 40',
+      '    bqs.adresse 400 40',
+      '    ccc.adresse 400 300',
+      "  '''",
+      '}',
+      '',
+      "use { table unit } from '../tables/bqs/unit.dbml'",
+      "use { table adresse } from '../tables/bqs/adresse.dbml'",
+      "use { table adresse } from '../tables/ccc/adresse.dbml'",
+      "use * from '../relationships/bronze.dbml'",
+      '',
+    ].join('\n'));
+    write('bronze/relationships/bronze.dbml', [
+      "use { table adresse } from '../tables/bqs/adresse.dbml'",
+      "use { table unit } from '../tables/bqs/unit.dbml'",
+      "use { table adresse } from '../tables/ccc/adresse.dbml'",
+      '',
+      ...refs,
+      '',
+    ].join('\n'));
+  }
+
+  /** Answer each "Which adresse does this relationship mean?" with `pick(placeHolder)`'s schema; the questions asked. */
+  function answerWhichTable(pick: (placeHolder: string) => string | undefined): Array<{ title?: string; placeHolder?: string; labels: string[] }> {
+    const asked: Array<{ title?: string; placeHolder?: string; labels: string[] }> = [];
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string; description?: string }>, options: { title?: string; placeHolder?: string }) => {
+      asked.push({ title: options.title, placeHolder: options.placeHolder, labels: items.map((i) => `${i.label} (${i.description})`) });
+      const schema = pick(options.placeHolder ?? '');
+      return schema === undefined ? undefined : items.find((i) => i.label === `${schema}.adresse`);
+    }) as never);
+    return asked;
+  }
+  /** The schema a Ref's foreign-key column names: `unit.ccc_adresse_id` → ccc. */
+  const bySourceColumn = (placeHolder: string): string | undefined => /Ref: unit\.(\w+?)_adresse_id/.exec(placeHolder)?.[1];
+
+  it('opening it says how many relationships are not drawn and why; none is drawn on the wrong table', async () => {
+    bothHaveId();
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    // Fail closed: before the fix both were drawn on bqs.adresse (the first use line's).
+    expect(edgesOf(canvas)).toEqual([]);
+    const said = warnings.find((w) => w.includes('imports adresse'));
+    expect(said).toContain('2 Ref ends spelled adresse could mean either table, so those relationships are not drawn; Qualify Tables asks you which table each means.');
+    expect(buttonsOf('imports adresse')).toEqual(['Qualify Tables']);
+  });
+
+  it('Qualify Tables asks which table each Ref end means, writes the answers, and leaves every file valid DBML in one edit', async () => {
+    bothHaveId();
+    answer = 'Qualify Tables';
+    const asked = answerWhichTable(bySourceColumn);
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    await vi.waitFor(() => expect(read('bronze/tables/ccc/adresse.dbml')).toMatch(/^Table ccc\.adresse \{/m));
+    expect(asked).toEqual([
+      {
+        title: 'Which adresse does this relationship mean? (1 of 2)',
+        placeHolder: 'bronze/relationships/bronze.dbml line 5: Ref: unit.bqs_adresse_id >? adresse.id. Every adresse has id, so only you can say which adresse.id means.',
+        labels: ['bqs.adresse (bronze/tables/bqs/adresse.dbml)', 'ccc.adresse (bronze/tables/ccc/adresse.dbml)'],
+      },
+      {
+        title: 'Which adresse does this relationship mean? (2 of 2)',
+        placeHolder: 'bronze/relationships/bronze.dbml line 6: Ref: unit.ccc_adresse_id >? adresse.id. Every adresse has id, so only you can say which adresse.id means.',
+        labels: ['bqs.adresse (bronze/tables/bqs/adresse.dbml)', 'ccc.adresse (bronze/tables/ccc/adresse.dbml)'],
+      },
+    ]);
+    expect(_appliedEdits.length).toBe(1);
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).toContain('Ref: unit.bqs_adresse_id >? bqs.adresse.id');
+    expect(rels).toContain('Ref: unit.ccc_adresse_id >? ccc.adresse.id');
+    expect(rels).not.toMatch(/use \{ table adresse \}/);
+    expect(read('bronze/diagrams/sap.dbml')).toContain("use * from '../relationships/bronze.dbml'");
+    expect(everyFileParses()).toEqual([]);
+    await vi.waitFor(() => expect(edgesOf(canvas)).toEqual(['unit>bqs.adresse', 'unit>ccc.adresse']));
+  });
+
+  it('Cancel on a "which table" question writes nothing', async () => {
+    bothHaveId();
+    const before = dbmlFiles();
+    answer = 'Qualify Tables';
+    const asked = answerWhichTable(() => undefined);
+    await open('bronze/diagrams/sap.dbml');
+    await vi.waitFor(() => expect(asked.length).toBe(1));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(_appliedEdits.length).toBe(0);
+    expect(dbmlFiles()).toEqual(before);
+  });
+
+  it('a relationship drawn to ccc.adresse after declining Qualify asks first; with Qualify both Refs are written qualified and drawn', async () => {
+    bothHaveId(['Ref: unit.bqs_adresse_id >? adresse.id']);
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    // Declined on open (answer undefined). Now the user draws unit.ccc_adresse_id → ccc.adresse.id.
+    warnings = [];
+    answer = 'Qualify Tables';
+    const asked = answerWhichTable(bySourceColumn);
+    const errors = await canvas.send({ type: 'addRelationship', payload: { fromModel: 'unit', fromColumn: 'ccc_adresse_id', toModel: 'ccc.adresse', toColumn: 'id', cardinality: 'many-to-one' } });
+    expect(errors).toEqual([]);
+    expect(warnings.some((w) => w.includes('both declare Table adresse with no schema'))).toBe(true);
+    // Only the existing Ref is asked about: the new one names its table.
+    expect(asked.map((a) => a.placeHolder)).toEqual([expect.stringContaining('line 5: Ref: unit.bqs_adresse_id >? adresse.id')]);
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).toContain('Ref: unit.bqs_adresse_id >? bqs.adresse.id');
+    expect(rels).toMatch(/Ref: unit\.ccc_adresse_id >\?? ccc\.adresse\.id/);
+    expect(everyFileParses()).toEqual([]);
+    await vi.waitFor(() => expect(edgesOf(canvas)).toEqual(['unit>bqs.adresse', 'unit>ccc.adresse']));
+  });
+
+  it('declining that prompt writes nothing: no ambiguous Ref is written', async () => {
+    bothHaveId(['Ref: unit.bqs_adresse_id >? adresse.id']);
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    const before = dbmlFiles();
+    const errors = await canvas.send({ type: 'addRelationship', payload: { fromModel: 'unit', fromColumn: 'ccc_adresse_id', toModel: 'ccc.adresse', toColumn: 'id', cardinality: 'many-to-one' } });
+    expect(errors).toEqual([]);
+    expect(warnings.some((w) => w.includes('both declare Table adresse with no schema'))).toBe(true);
+    expect(dbmlFiles()).toEqual(before);
+  });
+
+  it('declined: an unrelated edit of the diagram keeps its use * of the relationships file whose Refs it cannot place yet', async () => {
+    bothHaveId();
+    write('bronze/tables/bqs/other.dbml', 'Table other {\n  id INT [pk]\n}\n');
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    const errors = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'other', sourcePath: '.erd-studio/bronze/tables/bqs/other.dbml' } });
+    expect(errors).toEqual([]);
+    const diagram = read('bronze/diagrams/sap.dbml');
+    expect(diagram).toContain("use { table other } from '../tables/bqs/other.dbml'");
+    // Before: dropped, as if bronze.dbml held no relationship between the diagram's tables.
+    expect(diagram).toContain("use * from '../relationships/bronze.dbml'");
+  });
+
+  it('headers already qualified but use lines left bare (by hand): Qualify re-spells the lines and ends, so the fix it offers is one it makes', async () => {
+    bothHaveId();
+    write('bronze/tables/bqs/adresse.dbml', read('bronze/tables/bqs/adresse.dbml').replace('Table adresse', 'Table bqs.adresse'));
+    write('bronze/tables/ccc/adresse.dbml', read('bronze/tables/ccc/adresse.dbml').replace('Table adresse', 'Table ccc.adresse'));
+    answer = 'Qualify Tables';
+    answerWhichTable(bySourceColumn);
+    await open('bronze/diagrams/sap.dbml');
+    await vi.waitFor(() => expect(read('bronze/relationships/bronze.dbml')).not.toMatch(/use \{ table adresse \}/));
+    expect(read('bronze/relationships/bronze.dbml')).toContain('Ref: unit.ccc_adresse_id >? ccc.adresse.id');
+    expect(read('bronze/diagrams/sap.dbml')).not.toMatch(/use \{ table adresse \}/);
+    expect(everyFileParses()).toEqual([]);
+  });
+});

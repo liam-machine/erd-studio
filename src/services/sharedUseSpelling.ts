@@ -123,3 +123,51 @@ export function sharedUseSpellingMessage(group: SharedUseSpelling, at: SharedUse
     + (at.id !== undefined ? ` (use { table ${qualified(at)} } from '${at.path}')` : '')
     + (where === 'canvas' ? '. Qualify Tables does all of it in one edit.' : ': opening the diagram in ERD Studio offers Qualify Tables, which does all of it in one edit.');
 }
+
+/** `spelling` as a regular expression over DBML text: each name part bare or double-quoted, any case. */
+function spellingPattern(spelling: string): string {
+  return nameParts(spelling)
+    .map((part) => {
+      const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return `(?:${escaped}|"${escaped}")`;
+    })
+    .join('\\s*\\.\\s*');
+}
+
+/**
+ * Whether `after` has a line naming `spelling` that `before` does not have
+ * as many times: a Ref end (`adresse.id`) or a `use { table adresse }`
+ * specifier. Lines compared trimmed, so an edit that only moves a line or
+ * re-indents it adds nothing; a line the edit leaves as it was never counts.
+ */
+/** The 1-based lines of `text` whose Ref (a line with a Ref operator) has an end spelled `spelling`. */
+export function refLinesNamingSpelling(text: string, spelling: string): Set<number> {
+  const name = spellingPattern(spelling);
+  const out = new Set<number>();
+  if (name === '') return out;
+  const asEnd = new RegExp(`(^|[\\s:<>\\-,(])${name}\\s*\\.`, 'i');
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line.startsWith('//') && !/^use\b/i.test(line) && /[<>-]/.test(line) && asEnd.test(line)) out.add(i + 1);
+  });
+  return out;
+}
+
+export function addsLineNamingSpelling(before: string, after: string, spelling: string): boolean {
+  const name = spellingPattern(spelling);
+  if (name === '') return false;
+  const asEnd = new RegExp(`(^|[\\s:<>\\-,(])${name}\\s*\\.`, 'i');
+  const asUse = new RegExp(`^\\s*use\\s*\\{[^}]*\\btable\\s+${name}(\\s|,|\\})`, 'i');
+  const naming = (text: string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (line.startsWith('//') || !(asUse.test(line) || (/^Ref\b/i.test(line) || /[<>-]/.test(line)) && asEnd.test(line))) continue;
+      counts.set(line, (counts.get(line) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const was = naming(before);
+  for (const [line, count] of naming(after)) if (count > (was.get(line) ?? 0)) return true;
+  return false;
+}

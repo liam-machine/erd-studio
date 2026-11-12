@@ -267,7 +267,8 @@ import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec'
 import type { TableId } from '../types/tableId';
 import type { TableFileEntry } from '../services/logicalModelService';
 import { tableIdKey, tableIdOfPath } from '../types/tableId';
-import { listInWords, sharedUseSpellingKey, sharedUseSpellingMessage, sharedUseSpellings, type SharedUseSpelling } from '../services/sharedUseSpelling';
+import { addsLineNamingSpelling, listInWords, sharedUseSpellingKey, sharedUseSpellingMessage, sharedUseSpellings, type SharedUseSpelling } from '../services/sharedUseSpelling';
+import type { SharedSpellingEndChoice } from '../services/dbmlLibraryWrites';
 import { tableIdOfEntry } from '../services/tableLibraryIndex';
 import { renameMemberRefs, type DiagramMemberTable } from '../services/diagramMemberTable';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
@@ -382,6 +383,8 @@ interface TableFileOps {
   newRefFile?: NewRefFileChoice;
   /** DBML only: tables declared with no schema to declare in their schema folder's (Qualify Tables), by identity. */
   qualify?: TableId[];
+  /** With `qualify`: the table each Ref end means whose columns do not say, as the user picked it. */
+  qualifyEnds?: SharedSpellingEndChoice[];
 }
 
 /** The open canvas a table file delete anchors on (see deleteTablesWithCascade, #274). */
@@ -5282,7 +5285,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const ids = this.qualifiableTablesOf(shared);
       if (modelFiles?.qualify === undefined && ids.length > 0) {
         if (await this.askToQualifyTables(shared, ids)) {
-          return this.applyStorageEdit(document, file, text, { ...options, modelFiles: { ...(modelFiles ?? {}), qualify: ids } }, layoutOnly);
+          const qualifyEnds = await this.chooseSharedSpellingEnds(ids);
+          if (qualifyEnds !== undefined) {
+            return this.applyStorageEdit(document, file, text, { ...options, modelFiles: { ...(modelFiles ?? {}), qualify: ids, qualifyEnds } }, layoutOnly);
+          }
         }
         // Nothing written: the canvas goes back to what the files say.
         if (refreshWebview && webview && !this.disposedWebviews.has(webview)) await this.sendSubjectAreaData(document, webview);
@@ -5696,7 +5702,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * The `use` spellings the DBML diagram and relationships files of an edit
    * would import from two different table files (`sharedUseSpellings`) that
-   * they do not already: what the edit adds, never what a file held before.
+   * they do not already, or that a file already shares and the edit writes
+   * a new line naming (a Ref end or `use` line spelled so, which no table
+   * would be drawn for): what the edit adds, never a file's lines left as
+   * they were.
    */
   private sharedSpellingsAdded(document: vscode.TextDocument, primaryText: string, writes: readonly FileWrite[]): Array<SharedUseSpelling & { file: string }> {
     const root = this.semanticRootDir();
@@ -5716,7 +5725,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const after = sharedUseSpellings(f.after, rel);
       if (after.length === 0) continue;
       const before = new Set(f.before === null ? [] : sharedUseSpellings(f.before, rel).map(sharedUseSpellingKey));
-      for (const group of after) if (!before.has(sharedUseSpellingKey(group))) out.push({ ...group, file: rel });
+      for (const group of after) {
+        if (!before.has(sharedUseSpellingKey(group)) || addsLineNamingSpelling(f.before ?? '', f.after, group.spelling)) out.push({ ...group, file: rel });
+      }
     }
     return out;
   }
@@ -5750,6 +5761,55 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Whether a relationships file (relative to the semantic dir) may import
+   * two table files under one spelling, by the library's cached reading of
+   * it (no read when it is current); true when there is no reading to ask.
+   */
+  private mayShareUseSpelling(file: string): boolean {
+    const abs = this.semanticAbsoluteOf(file);
+    const open = vscode.workspace.textDocuments.some((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, abs) && d.isDirty);
+    const reading = open ? undefined : this.tableLibraryService.readRelationshipsFile?.(abs);
+    if (!reading) return true;
+    const folder = path.posix.dirname(file);
+    const paths = new Map<string, Set<string>>();
+    for (const u of reading.useTables ?? []) {
+      const key = `${(u.qualifier ?? '').toLowerCase()}\0${u.table.toLowerCase()}`;
+      const resolved = path.posix.normalize(path.posix.join(folder, u.path.toLowerCase().endsWith('.dbml') ? u.path : `${u.path}.dbml`)).toLowerCase();
+      const set = paths.get(key) ?? new Set<string>();
+      set.add(resolved);
+      paths.set(key, set);
+      if (set.size > 1) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Before Qualify Tables: ask which table each Ref end means whose spelling
+   * two `use` lines of its file give to different tables and whose columns
+   * both tables have (`TableLibraryService.sharedSpellingEndsToDecide`), one
+   * question per end. Undefined when the user cancels one: nothing is written.
+   */
+  private async chooseSharedSpellingEnds(ids: readonly TableId[]): Promise<SharedSpellingEndChoice[] | undefined> {
+    const ends = this.tableLibraryService.sharedSpellingEndsToDecide?.(ids, (filePath) => this.openOrDiskText(filePath)) ?? [];
+    const choices: SharedSpellingEndChoice[] = [];
+    for (const [i, end] of ends.entries()) {
+      const picked = await vscode.window.showQuickPick(
+        end.candidates.map((id, j) => ({ label: `${id.schema}.${id.name}`, description: end.paths[j], id })),
+        {
+          title: `Which ${end.spelling} does this relationship mean?${ends.length > 1 ? ` (${i + 1} of ${ends.length})` : ''}`,
+          placeHolder: `${end.file} line ${end.line}: ${end.refText}. ${end.fitting === 0
+            ? `No ${end.spelling} has ${end.endText.slice(end.spelling.length + 1)}: pick the table it was meant for.`
+            : `Every ${end.spelling} has ${end.endText.slice(end.spelling.length + 1)}, so only you can say which ${end.endText} means.`}`,
+          ignoreFocusOut: true,
+        },
+      );
+      if (picked === undefined) return undefined;
+      choices.push({ file: end.file, line: end.line, side: end.side, table: picked.id });
+    }
+    return choices;
+  }
+
+  /**
    * Say so, once per session per file, when an opened DBML diagram (or a
    * relationships file it imports) already imports two tables under one
    * spelling: written by hand, by another tool, or by ERD Studio 2.0.4 or
@@ -5769,6 +5829,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const groups: Array<SharedUseSpelling & { file: string }> = [];
     for (const file of files) {
+      // A relationships file is looked at through the library's cached reading first: its text is read
+      // (for the lines to name) only when two of its `use` lines spell a table alike.
+      if (file !== rel && !this.mayShareUseSpelling(file)) continue;
       const text = file === rel ? diagramText : this.openOrDiskText(this.semanticAbsoluteOf(file));
       if (text === null) continue;
       for (const group of sharedUseSpellings(text, file)) groups.push({ ...group, file });
@@ -5779,16 +5842,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.duplicateWarningsShown.add(key);
     const first = groups[0];
     const ids = this.qualifiableTablesOf(groups);
+    // The Refs nothing decides are not drawn until each says which table it means: say how many.
+    let undecided = 0;
+    try {
+      undecided = ids.length > 0 ? this.tableLibraryService.sharedSpellingEndsToDecide?.(ids, (filePath) => this.openOrDiskText(filePath)).length ?? 0 : 0;
+    } catch {
+      undecided = 0;
+    }
+    const notDrawn = undecided === 0 ? ''
+      : ` ${undecided} Ref end${undecided === 1 ? '' : 's'} spelled ${first.spelling} could mean either table, so ${undecided === 1 ? 'that relationship is' : 'those relationships are'} not drawn; Qualify Tables asks you which table each means.`;
     void vscode.window.showWarningMessage(
-      `${first.file}: ${sharedUseSpellingMessage(first, first.uses[first.uses.length - 1], 'canvas')}`,
+      `${first.file}: ${sharedUseSpellingMessage(first, first.uses[first.uses.length - 1], 'canvas')}${notDrawn}`,
       ...(ids.length > 0 ? [QUALIFY_TABLES_BUTTON] : []),
     ).then(async (choice) => {
       if (choice !== QUALIFY_TABLES_BUTTON || this.disposedWebviews.has(webview)) return;
       try {
+        const qualifyEnds = await this.chooseSharedSpellingEnds(ids);
+        if (qualifyEnds === undefined || this.disposedWebviews.has(webview)) return;
         await this.applySubjectAreaEdit(document, () => { /* the tables' headers, use lines and Refs only */ }, {
           stage: 'logical',
           webview,
-          modelFiles: { qualify: ids },
+          modelFiles: { qualify: ids, qualifyEnds },
           errorLabel: 'Failed to qualify the tables.',
         });
       } catch (err) {

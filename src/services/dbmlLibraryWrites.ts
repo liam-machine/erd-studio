@@ -39,7 +39,10 @@ import type { DbmlAttachTable, DbmlRelationshipsReading, TableId } from '@erd-st
 import {
   DBML_CONVERT_FIRST_MESSAGE,
   DbmlEditRefused,
+  applyTextEdits,
   parseTableDbml,
+  readRelationshipsDbml,
+  refEndsDbml,
   relationshipUnits,
   relationshipUnitsWithMembers,
   renamedColumnsOf,
@@ -159,6 +162,13 @@ export interface DbmlLibraryOps {
    * not read is left as it is. By identity.
    */
   qualify?: TableId[];
+  /**
+   * With `qualify`: the table each Ref end means whose spelling two of its
+   * file's `use` lines give to different tables of `qualify` and whose
+   * columns do not decide it ({@link decideSharedSpellingEnds}), as the user
+   * chose it. An end neither decides refuses the plan.
+   */
+  qualifyEnds?: SharedSpellingEndChoice[];
   /** Where new tables go (the diagram's layer, its name as the schema); default: the first layer listed, else `main`. */
   newTableHome?: DbmlTableHome;
   /**
@@ -437,6 +447,26 @@ export function relationshipsIndexOf(
  * (D20), a relationship added while a relationships file does not read.
  */
 export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLibraryOps): DbmlLibraryWritePlan {
+  // --- Qualify: every Ref end two use lines spell alike is told its table first (its columns, else the user's pick) ---
+  const decidedText = new Map<string, string>();
+  if ((ops.qualify?.length ?? 0) > 0) {
+    const decided = decideSharedSpellingEnds(snapshot, ops.qualify!, ops.qualifyEnds ?? []);
+    if (decided.undecided.length > 0) {
+      const first = decided.undecided[0];
+      const tables = listNames(first.candidates.map((c) => `${c.schema}.${c.name}`));
+      refuse(first.file, `${first.file} line ${first.line}: ${first.refText} names ${first.spelling}, which more than one table is imported as, and its columns do not say which (${first.fitting === 0 ? `neither ${tables} has ${first.endText}` : `${tables} both have them`}). Write the end as <schema>.${first.spelling}; nothing was changed.`, first.line);
+    }
+    for (const [file, reading] of decided.snapshot.relationshipsFiles) {
+      if (reading !== snapshot.relationshipsFiles.get(file)) decidedText.set(file, decided.snapshot.readText(file)!);
+    }
+    // An edit's table whose relationships still name the shared spelling names the table its Ref was told.
+    if (ops.save && decided.decidedRefs.length > 0) {
+      const told = decided.decidedRefs;
+      const before = snapshot;
+      ops = { ...ops, save: ops.save.map((save) => withToldEnds(save, told, before)) };
+    }
+    snapshot = decided.snapshot;
+  }
   // --- Layers and schema folders as the disk spells them -------------------------------------
   const listedLayers = new Map<string, string>();
   const listedSchemas = new Map<string, Map<string, string>>();
@@ -790,7 +820,13 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     const pending = writes.findIndex((w) => w.path === current.path && w.kind !== 'delete');
     const text = pending >= 0 ? (writes[pending] as { text: string }).text : tableText(current.path);
     const reading = parseTableDbml(text, stem, { schemaFolder: from.schema });
-    if (!reading.ok || reading.schemaQualified) continue;
+    if (!reading.ok) continue;
+    if (reading.schemaQualified) {
+      // Declared in its folder's schema already (by hand, or by an earlier Qualify): only the `use` lines
+      // and Ref ends that still spell it bare are re-spelled, so Qualify never offers a fix it cannot make.
+      if (lower(reading.declaredReference) === lower(`${dbmlName(from.schema)}.${dbmlName(reading.declaredName)}`)) requalified.add(key);
+      continue;
+    }
     // Read without its folder, so the header's missing qualifier is what the edit changes.
     const qualified = editTableDbml(text, { ...reading.table, schema: from.schema }, { requalify: true, file: current.path, fileStem: stem });
     if (qualified === text) continue;
@@ -1113,6 +1149,11 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     const before = snapshot.tables.get(oldKey);
     if (before) for (const file of index.filesUsing(before.path)) editFor(file);
   }
+  // A use line naming a table Qualify declares in its schema, even with no Ref naming it: never left bare.
+  for (const key of requalified) {
+    const before = snapshot.tables.get(key);
+    if (before) for (const file of index.filesUsing(before.path)) editFor(file);
+  }
   // Convert: every file with a pending line that can be a live Ref now (both ends have .dbml files with those columns).
   if (ops.writePending) {
     for (const ref of index.refs) if (ref.pending && liveable(storedAfter(ref))) editFor(ref.file);
@@ -1246,6 +1287,8 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     }
   }
 
+  // A relationships file whose ends Qualify told their tables, that the plan wrote nothing else to.
+  for (const [file, text] of decidedText) if (!writes.some((w) => w.path === file)) writes.push({ kind: 'replace', path: file, text });
   const merged = mergeFileWrites(writes);
   const fileExists = (p: string): boolean => created.has(p) || (snapshot.files.has(p) && !deleted.has(p));
   /** Each table's key by its file before the plan (lower-case path). */
@@ -1308,3 +1351,172 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   }
 }
 
+
+/**
+ * A Ref end in a relationships file whose spelling two of the file's `use`
+ * lines give to different table files (`use { table adresse }` from
+ * tables/bqs/ and from tables/ccc/, as ERD Studio 2.0.4 wrote them), which
+ * the end's columns do not decide (both tables have `id`): only the person
+ * who drew it knows which table it means. See {@link decideSharedSpellingEnds}.
+ */
+export interface SharedSpellingEnd {
+  /** The relationships file, relative to the semantic dir. */
+  file: string;
+  /** 1-based line of the Ref. */
+  line: number;
+  /** Which end of the Ref as written: before or after its operator. */
+  side: 'left' | 'right';
+  /** The end's table spelling as written (`adresse`). */
+  spelling: string;
+  /** The Ref as written, on one line. */
+  refText: string;
+  /** The end as written (`adresse.id`). */
+  endText: string;
+  /** The tables the spelling's `use` lines import, in line order. */
+  candidates: TableId[];
+  /** Each candidate's file, relative to the semantic dir. */
+  paths: string[];
+  /** How many candidates have every column the end names: 0 (none: a broken Ref) or 2 and more. */
+  fitting: number;
+}
+
+/** The table a {@link SharedSpellingEnd} means, as the person chose it. */
+export interface SharedSpellingEndChoice {
+  file: string;
+  line: number;
+  side: 'left' | 'right';
+  table: TableId;
+}
+
+/** The key a choice is matched by. */
+const endChoiceKey = (e: { file: string; line: number; side: string }): string => `${lower(e.file)}\u0000${e.line}\u0000${e.side}`;
+
+/**
+ * Before Qualify (`DbmlLibraryOps.qualify`) re-spells the tables in
+ * `qualify`, say which table every Ref end means whose spelling its
+ * relationships file's `use` lines give to two or more of them: the one
+ * whose columns the end names when exactly one has them (the lookup's rule
+ * 0, the same answer the canvas draws), else the table `choices` names for
+ * that end. Each such end is written `<schema>.<name>` in the snapshot the
+ * planner then reads (a table under `public/` keeps its bare name), so the
+ * plan re-spells it with its table. Ends neither decides are returned in
+ * `undecided`, in file and line order: the caller asks, or refuses. Pure.
+ */
+export function decideSharedSpellingEnds(
+  snapshot: DbmlLibrarySnapshot,
+  qualify: readonly TableId[],
+  choices: readonly SharedSpellingEndChoice[] = [],
+): { snapshot: DbmlLibrarySnapshot; undecided: SharedSpellingEnd[]; decidedRefs: DecidedRefEnds[] } {
+  const decidedRefs: DecidedRefEnds[] = [];
+  const qualifying = new Set(qualify.map(tableIdKey));
+  const chosen = new Map(choices.map((c) => [endChoiceKey(c), c.table]));
+  const lookup = lookupOf(snapshot);
+  const byPath = new Map([...snapshot.tables.values()].map((t) => [lower(t.path), t]));
+  const undecided: SharedSpellingEnd[] = [];
+  const decidedText = new Map<string, string>();
+  for (const file of [...snapshot.relationshipsFiles.keys()].sort(byteOrder)) {
+    const reading = snapshot.relationshipsFiles.get(file)!;
+    if (!reading.readable || (reading.useTables?.length ?? 0) < 2) continue;
+    // Each spelling's table files, in line order, once per identity.
+    const folder = dirnamePosix(file);
+    const groups = new Map<string, { paths: string[]; ids: TableId[] }>();
+    for (const u of reading.useTables ?? []) {
+      const resolved = normalisePosix(resolvePosix(folder, withExtension(u.path)));
+      const id = tableIdOfPath(resolved);
+      if (id === undefined) continue;
+      const key = `${u.qualifier === undefined ? '\u0001' : lower(u.qualifier)}\u0000${lower(u.table)}`;
+      const group = groups.get(key) ?? { paths: [], ids: [] };
+      groups.set(key, group);
+      if (group.ids.some((g) => tableIdKey(g) === tableIdKey(id))) continue;
+      group.paths.push(resolved);
+      group.ids.push(id);
+    }
+    for (const [key, group] of groups) if (group.ids.length < 2 || !group.ids.some((id) => qualifying.has(tableIdKey(id)))) groups.delete(key);
+    if (groups.size === 0) continue;
+    const text = snapshot.readText(file);
+    if (text === null) continue;
+    const edits: Array<{ start: number; end: number; text: string }> = [];
+    for (const ref of refEndsDbml(text)) {
+      const told: DecidedRefEnds = ref.ends.map((end) => ({ table: end.table, ...(end.qualifier !== undefined ? { qualifier: end.qualifier } : {}), columns: end.columns }));
+      ref.ends.forEach((end, i) => {
+        const group = groups.get(`${end.qualifier === undefined ? '\u0001' : lower(end.qualifier)}\u0000${lower(end.table)}`);
+        if (!group) return;
+        const side = i === 0 ? 'left' : 'right';
+        const entry = lookup(end.table, { ...(end.qualifier !== undefined ? { qualifier: end.qualifier } : {}), usePaths: group.paths, columns: end.columns });
+        const byColumns = entry?.path !== undefined ? tableIdOfPath(normalisePosix(entry.path)) : undefined;
+        const id = byColumns ?? chosen.get(endChoiceKey({ file, line: ref.line, side }));
+        if (id === undefined || !group.ids.some((g) => tableIdKey(g) === tableIdKey(id))) {
+          const refText = text.slice(ref.start, text.indexOf('\n', ref.start) < 0 ? text.length : text.indexOf('\n', ref.start)).trim();
+          const spelling = end.qualifier !== undefined ? `${end.qualifier}.${end.table}` : end.table;
+          const columns = end.columns.length === 1 ? end.columns[0] : `(${end.columns.join(', ')})`;
+          const fitting = group.paths.filter((p) => {
+            const has = new Set((byPath.get(lower(p))?.columns ?? []).map(lower));
+            return end.columns.every((c) => has.has(lower(c)));
+          }).length;
+          undecided.push({ file, line: ref.line, side, spelling, endText: `${spelling}.${columns}`, refText, candidates: group.ids.map((g) => ({ ...g })), paths: [...group.paths], fitting });
+          return;
+        }
+        told[i].id = id;
+        // A table under public/ is what a bare name means once its namesakes are qualified.
+        if (lower(id.schema) === 'public') return;
+        const table = byPath.get(lower(group.paths[group.ids.findIndex((g) => tableIdKey(g) === tableIdKey(id))]));
+        edits.push({ start: end.tableStart, end: end.tableEnd, text: `${dbmlName(id.schema)}.${dbmlName(table?.name ?? id.name)}` });
+      });
+      if (told.some((e) => e.id !== undefined)) decidedRefs.push(told);
+    }
+    if (edits.length > 0) decidedText.set(file, applyTextEdits(text, edits));
+  }
+  if (decidedText.size === 0) return { snapshot, undecided, decidedRefs };
+  const relationshipsFiles = new Map(snapshot.relationshipsFiles);
+  for (const [file, text] of decidedText) relationshipsFiles.set(file, readRelationshipsDbml(text));
+  return {
+    snapshot: { ...snapshot, relationshipsFiles, readText: (p) => decidedText.get(p) ?? snapshot.readText(p) },
+    undecided,
+    decidedRefs,
+  };
+}
+
+/** A Ref's two ends as written, each shared-spelling end with the table it was told it means (`id`). */
+type DecidedRefEnds = Array<{ table: string; qualifier?: string; columns: string[]; id?: TableId }>;
+
+/**
+ * A table's relationships as the editor hands them to the plan, with each
+ * other end that names a spelling two tables share (`adresse`, which the
+ * library could not resolve) named by the table {@link decideSharedSpellingEnds}
+ * told its Ref it means, so the plan matches it with that Ref, now spelled
+ * `ccc.adresse`. A relationship no told Ref holds is kept as it is.
+ */
+function withToldEnds(save: DbmlLibrarySave, refs: readonly DecidedRefEnds[], snapshot: DbmlLibrarySnapshot): DbmlLibrarySave {
+  const list = save.model.relationships;
+  if (!list || list.length === 0 || refs.length === 0) return save;
+  const byId = new Map([...snapshot.tables.values()].flatMap((t) => {
+    const id = t.storage === 'dbml' ? tableIdOfPath(t.path) : undefined;
+    return id ? [[tableIdKey(id), t] as const] : [];
+  }));
+  const owner = snapshot.tables.get(lower(save.fromName ?? save.model.name));
+  const ownerBare = lower(owner?.name ?? save.model.name);
+  const ownerId = owner?.storage === 'dbml' ? tableIdOfPath(owner.path) : undefined;
+  let changed = false;
+  const relationships = list.map((r) => {
+    if (snapshot.tables.has(lower(r.toModel))) return r;
+    for (const ends of refs) {
+      for (const [o, t] of [[ends[0], ends[1]], [ends[1], ends[0]]] as const) {
+        if (!o || !t || t.id === undefined || lower(t.table) !== lower(r.toModel) || lower(o.table) !== ownerBare) continue;
+        if (o.id !== undefined && (ownerId === undefined || tableIdKey(o.id) !== tableIdKey(ownerId))) continue;
+        const i = o.columns.findIndex((c) => lower(c) === lower(r.fromColumn));
+        if (i < 0 || lower(t.columns[i] ?? '') !== lower(r.toColumn)) continue;
+        const table = byId.get(tableIdKey(t.id));
+        if (!table) continue;
+        changed = true;
+        return { ...r, toModel: table.ref ?? table.name };
+      }
+    }
+    return r;
+  });
+  return changed ? { ...save, model: { ...save.model, relationships } } : save;
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listNames(names: readonly string[]): string {
+  return names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join(' and ');
+}

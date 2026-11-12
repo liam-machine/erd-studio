@@ -9,9 +9,10 @@
  *
  * Every DBML parser refuses the second line ([3003]). A Ref end `adresse`
  * in a file that imports both names neither line's table alone: it is the
- * one of them that has every column the end names, decided only when both
- * are in scope (or the other's file is gone); otherwise it is not drawn,
- * with a warning. Before, it was always the first line's table, so a Ref
+ * one of them that has every column the end names, decided only when the
+ * columns of every one of them are known (a diagram showing one reads the
+ * other's file, as the extension, which sees the whole library, does) or
+ * the other's file is gone; otherwise it is not drawn, with a warning. Before, it was always the first line's table, so a Ref
  * to ccc.adresse was drawn on bqs.adresse and one between them was a
  * self-loop.
  *
@@ -91,11 +92,20 @@ describe('a diagram showing both unqualified adresse tables (sap)', () => {
 });
 
 describe('a diagram showing one of them (bqs-only)', () => {
-  it('reads the other adresse file to learn it exists, and then draws no Ref whose spelling both share: never guessed', async () => {
+  it('reads the other adresse file and draws the Ref only the shown table has the columns for, as the canvas does', async () => {
     const { display, reads } = await load(fixture(), diagramPath('bqs-only'));
     expect(display.models.map((m) => m.name).sort()).toEqual(['adresse', 'bqs__v_sap_prod_unit2']);
     expect(reads).toContain('.erd-studio/bronze/tables/ccc/adresse.dbml');
+    // ccc.adresse has no `id`: the end is bqs's. The Refs to ccc.adresse.adr_id mean the table off this diagram.
+    expect(links(display)).toEqual(['bqs__v_sap_prod_unit2.bqs_adresse_id>adresse.id']);
+  });
+
+  it('draws nothing when the table off the diagram has the columns too: never guessed', async () => {
+    const files = fixture();
+    files['.erd-studio/bronze/tables/ccc/adresse.dbml'] = 'Table adresse {\n  id INT [pk]\n  adr_id INT\n}\n';
+    const { display, warnings } = await load(files, diagramPath('bqs-only'));
     expect(links(display)).toEqual([]);
+    expect(warnings.some((w) => w.includes('bqs_adresse_id') && w.includes('under that one spelling'))).toBe(true);
   });
 
   it('when the other file is gone, the Refs whose columns the shown table has are drawn on it', async () => {

@@ -483,6 +483,52 @@ function endParts(expr: AstNode | undefined): { table: string; qualifier?: strin
   return { table, ...(typeof qualifier === 'string' ? { qualifier } : {}), columns: typeof last === 'string' ? [last] : last };
 }
 
+/** One end of a Ref as written (see {@link refEndsDbml}). */
+export interface DbmlWrittenRefEnd {
+  /** The table part as written, unquoted, without its qualifier. */
+  table: string;
+  /** The qualifier as written (`gold` in `gold.x.id`), unquoted. */
+  qualifier?: string;
+  /** The end's columns, unquoted. */
+  columns: string[];
+  /** The span of the table part (qualifier included), offsets into the text. */
+  tableStart: number;
+  tableEnd: number;
+}
+
+/**
+ * Each live Ref of a DBML file with its two ends as written, left then
+ * right, and the span of each end's table part, so a tool can re-spell one
+ * end's table (`adresse` → `ccc.adresse`) and keep everything else. A Ref
+ * whose ends do not read is listed with no ends; a file with a syntax error
+ * lists nothing. `start` is the Ref's offset (as `readRelationshipsDbml`
+ * reports it) and `line` its 1-based line. Pure.
+ */
+export function refEndsDbml(text: string, parser: DbmlParserModule = PINNED_PARSER): Array<{ start: number; line: number; ends: DbmlWrittenRefEnd[] }> {
+  let ast: AstNode | undefined;
+  try {
+    ast = compileOne(text, parser).ast;
+  } catch {
+    return [];
+  }
+  const out: Array<{ start: number; line: number; ends: DbmlWrittenRefEnd[] }> = [];
+  for (const node of topLevel(ast)) {
+    if (lower(elementType(node) ?? '') !== 'ref') continue;
+    const ref = refNodeOf(node);
+    const ends: DbmlWrittenRefEnd[] = [];
+    for (const side of [ref.left, ref.right]) {
+      const parts = endParts(side);
+      const tablePart = side?.kind === '<infix-expression>' && side.op?.value === '.' ? side.leftExpression as AstNode | undefined : undefined;
+      if (!parts || !tablePart) break;
+      ends.push({ ...parts, tableStart: tablePart.start as number, tableEnd: tablePart.end as number });
+    }
+    let line = 1;
+    for (let i = 0; i < (node.start as number); i++) if (text.charCodeAt(i) === 10) line++;
+    out.push({ start: node.start as number, line, ends: ends.length === 2 ? ends : [] });
+  }
+  return out;
+}
+
 /**
  * Edit (or, from `null`, create) a relationships file so each listed owner
  * holds exactly its relationships here. Pure; throws

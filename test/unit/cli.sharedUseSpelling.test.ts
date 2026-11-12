@@ -80,6 +80,8 @@ describe('doctor on photo-2\'s shape', () => {
     expect(shared[0].message).toContain("use { table ccc.adresse } from '../tables/ccc/adresse.dbml'");
     expect(shared[0].message).toContain('Qualify Tables');
     expect(all.some((p) => p.code === 3003)).toBe(false);
+    // Nor the parser's [4000] "Column … does not exist in Table 'public.adresse'" on the Refs it bound to the first file.
+    expect(all.filter((p) => p.code === 4000)).toEqual([]);
   });
 
   it('no danglingRef for the Refs read by their columns; the Ref whose columns neither table has is ambiguousTableReference', async () => {
@@ -116,7 +118,9 @@ describe('inventory and export on photo-2\'s shape', () => {
     expect(r.content).toMatch(/^Table ccc\.adresse \{/m);
     expect(r.content).not.toContain('"bqs.adresse"');
     expect(r.content).not.toContain('Not exported: bqs__v_sap_prod_unit2');
-    expect(r.content).toMatch(/^Ref: bqs__v_sap_prod_unit2\.ccc_adresse_id >\?? ccc\.adresse\.adr_id$/m);
+    // Every table is declared in its schema folder's schema, as core's loader reads an unqualified Table (§1.2).
+    expect(r.content).toMatch(/^Table bqs\.bqs__v_sap_prod_unit2 \{/m);
+    expect(r.content).toMatch(/^Ref: bqs\.bqs__v_sap_prod_unit2\.ccc_adresse_id >\?? ccc\.adresse\.adr_id$/m);
     expect(r.content).toMatch(/^Ref: ccc\.adresse\.adr_id >\?? bqs\.adresse\.id$/m);
     expect(compileDbmlProject({ 'x.dbml': r.content }, ['x.dbml'])).toEqual({ 'x.dbml': [] });
   });

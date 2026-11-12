@@ -1,0 +1,141 @@
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > a diagram showing both unqualified adresse tables (sap) > draws both, each from its own file, and each Ref on the adresse whose columns it names: no collapse, no self-loop
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > a diagram showing both unqualified adresse tables (sap) > a Ref end whose columns neither table has is not drawn, and the warning says how to write it
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > a diagram showing one of them (bqs-only) > reads the other adresse file and draws the Ref only the shown table has the columns for, as the canvas does
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > a diagram showing one of them (bqs-only) > draws nothing when the table off the diagram has the columns too: never guessed
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > a diagram showing one of them (bqs-only) > when the other file is gone, the Refs whose columns the shown table has are drawn on it
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > golden: what core draws for the unqualified twin fixture > the sap diagram
+ ✓ packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts > golden: what core draws for the unqualified twin fixture > the bqs-only diagram
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify > declares both adresse tables in their folders' schemas in place and re-spells the relationships file's use lines and Ref ends by their columns
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify > the files it writes compile in the pinned parser, but for the column nothing has
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify > with no pick for an end the columns do not decide, it refuses: never guessed, nothing written
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify > a table already qualified keeps its file; its bare use lines and Ref ends are re-spelled
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify > a table under public/ is left as it is (DBML reads it as public already)
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify when both tables have the Ref's column > lists each such end with its line, side, Ref and both tables
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify when both tables have the Ref's column > writes each end as picked, re-spells both use lines, and the relationships file compiles
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify when both tables have the Ref's column > refuses with no pick, naming the line
+ ✓ test/unit/dbmlLibraryWrites.qualify.test.ts > qualify when both tables have the Ref's column > a relationships file that only imports both (no Ref) gets its use lines re-spelled too
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > sharedUseSpellings > finds a spelling two lines import from different table files, by line, and nothing else
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > sharedUseSpellings > one table imported twice (the same file) is no shared spelling
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > doctor on photo-2's shape > reports sharedUseSpelling (error) on each later line, with the line to write, in place of the parser's bare [3003]
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > doctor on photo-2's shape > no danglingRef for the Refs read by their columns; the Ref whose columns neither table has is ambiguousTableReference
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > doctor on photo-2's shape > a project with qualified headers and use lines reports no sharedUseSpelling
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > inventory and export on photo-2's shape > inventory's text tells the two adresse rows apart by their schema folders
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > inventory and export on photo-2's shape > export --format dbml declares Table bqs.adresse / ccc.adresse, keeps every Ref, and the pinned parser reads it
+ ✓ test/unit/cli.sharedUseSpelling.test.ts > inventory and export on photo-2's shape > export --format dbml-rich declares Table bqs.adresse / ccc.adresse, keeps every Ref, and the pinned parser reads it
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: the shape itself > the pinned DBML parser refuses photo-2 as written ([3003] on the second use line): why "the official diagram view only shows one"
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: reading a project 2.0.4 wrote > draws each Ref on the adresse whose columns it names, never on the first use line's (no collapse, no self-loop)
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: reading a project 2.0.4 wrote > a Ref end whose columns neither adresse has is drawn on neither
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: reading a project 2.0.4 wrote > opening the diagram says which line imports adresse twice and how to write it, and offers Qualify Tables
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > showcase > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > showcase > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > v4-inline > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > v4-inline > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > missing-model > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > missing-model > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > no-layers > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > no-layers > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > missing-positions > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > missing-positions > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > library-relationships > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > library-relationships > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > v4-nameless-column > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > v4-nameless-column > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > composite-and-self > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > composite-and-self > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > data-type-alias > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > data-type-alias > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > domain-one-to-many > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > domain-one-to-many > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > duplicate-key > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > duplicate-key > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > rationale-and-meta > posts the logical DisplaySubjectArea from sendSubjectAreaData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > rationale-and-meta > reads the UnifiedSubjectArea with getSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > missing-positions with persistPositions > posts the domain and writes the computed positions through one WorkspaceEdit
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > stage switching > replies to a switch to the logical stage with stageData
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > stage switching > replies to a switch to the physical stage with stageData (real dbt project)
+ ✓ test/unit/breaker.sharedUseSpelling.test.ts > breaker: shared spelling where both tables have the Ref column > Qualify Tables leaves every diagram and relationships file valid for the pinned DBML parser
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > stage switching > posts the physical domain from sendSubjectAreaData on a panel showing physical
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/legacy > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/hybrid > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/future > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/noversion > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/array > posts an error message
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: reading a project 2.0.4 wrote > Qualify Tables re-spells every header, use line and Ref in one edit; every file then compiles in the pinned parser, and the canvas draws the same
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: an edit that would write the shape > Add Existing of the second adresse asks first; Cancel writes nothing
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: an edit that would write the shape > Add Existing with Qualify Tables writes headers and use lines the pinned parser accepts, in one edit, and shows both tables
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: an edit that would write the shape > a drop of the second adresse asks the same, and with Qualify Tables writes a diagram the pinned parser accepts
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: an edit that would write the shape > relationships to each adresse and between them, once qualified: written qualified, drawn on the right tables, every file compiles
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > control: the same project with qualified headers (what ERD Studio writes itself) > Add Existing writes qualified use lines the official parser accepts, and asks nothing
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > opening it says how many relationships are not drawn and why; none is drawn on the wrong table
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > Qualify Tables asks which table each Ref end means, writes the answers, and leaves every file valid DBML in one edit
+ ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/packages/core/test/fixtures/dbml/same-name-unqualified
+ ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/packages/core/test/fixtures/dbml/same-name-unqualified
+ ✓ test/unit/breaker.sharedUseSpelling.test.ts > breaker: shared spelling where both tables have the Ref column > after Qualify, reopening the diagram does not offer Qualify Tables again for a fix it cannot make
+ ✓ test/unit/breaker.sharedUseSpelling.test.ts > breaker: shared spelling where both tables have the Ref column > a relationship the user draws to ccc.adresse (Qualify declined) is drawn, or the edit asks first
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > Cancel on a "which table" question writes nothing
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > a relationship drawn to ccc.adresse after declining Qualify asks first; with Qualify both Refs are written qualified and drawn
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > declining that prompt writes nothing: no ambiguous Ref is written
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > declined: an unrelated edit of the diagram keeps its use * of the relationships file whose Refs it cannot place yet
+ ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > headers already qualified but use lines left bare (by hand): Qualify re-spells the lines and ends, so the fix it offers is one it makes
+ ✓ test/unit/largeLibraryScaling.test.ts > table lookups in a 1100-table library > DBML: finding every table lists the library once, not once per lookup
+ ✓ test/unit/largeLibraryScaling.test.ts > table lookups in a 1100-table library > YAML: finding every table lists the library once, not once per lookup
+ ✓ test/unit/largeLibraryScaling.test.ts > table lookups in a 1100-table library > a file added outside ERD Studio is found without any invalidate call (the index checks itself)
+ ✓ test/unit/largeLibraryScaling.test.ts > rendering both sidebar trees > DBML: lists folders a fixed number of times and reads no table file while rendering
+ ✓ test/unit/largeLibraryScaling.test.ts > rendering both sidebar trees > YAML: lists folders a fixed number of times and reads no table file while rendering
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/empty > posts an error message
+ ✓ test/unit/dbmlDisplayParity.test.ts > drift: a Ref between two of the diagram's tables in a file it does not import > is drawn by neither side, and the canvas says so in a note on every load (never a toast)
+ ✓ test/unit/dbmlDisplayParity.test.ts > drift: a Ref between two of the diagram's tables in a file it does not import > the filter is display-only: the library (what an edit plans against) still holds the hidden Refs
+ ✓ test/unit/dbmlDisplayParity.test.ts > a table name in two layers > a member resolves by the diagram's use path first, as core does, not by the library's choice by name
+ ✓ test/unit/dbmlDisplayParity.test.ts > a relationship stored twice, once in a file the diagram imports and once in one it does not > is drawn on both sides, whichever copy the library keeps, and raises no drift warning
+ ✓ test/unit/dbmlDisplayParity.test.ts > a pending line between two of the diagram's tables in a file it does not import > is drawn by neither side, and raises the drift warning: the next edit imports its file (§2.4, pending lines count)
+ ✓ test/unit/dbmlDisplayParity.test.ts > a pending line between two of the diagram's tables in a file it does not import > once the diagram imports the file, both sides draw it and nothing drifts
+ ✓ test/unit/dbmlDisplayParity.test.ts > an unlinked member whose table has a .dbml file now > counts as a member for its live Refs: a file holding one it does not import drifts, as the next edit imports it (D26, §2.4)
+ ✓ test/unit/dbmlDisplayParity.test.ts > an unlinked member whose .dbml table sits outside the folders the diagram's use lines name > is drawn missing by both sides (core cannot list folders), until an edit gives it a use line
+ ✓ test/unit/dbmlDisplayParity.test.ts > an unlinked member whose .dbml table sits outside the folders the diagram's use lines name > one in a folder a use line names is drawn with its columns by both sides
+ ✓ test/unit/dbmlDisplayParity.test.ts > two tables of one name in different schema folders, a file gone (owner decision B) > the diagram of both, bqs/addresse.dbml deleted: both sides draw bqs.addresse missing, never with ccc's columns
+ ✓ test/unit/dbmlDisplayParity.test.ts > two tables of one name in different schema folders, a file gone (owner decision B) > a diagram of bqs.addresse and ccc.kunde, bqs/addresse.dbml deleted: both sides read the one other addresse, which no member's line names
+ ✓ test/unit/dbmlDisplayParity.test.ts > two tables of one name in different schema folders, a file gone (owner decision B) > a diagram whose lines name three schema folders, bqs/addresse.dbml deleted, ccc and ddd each holding an addresse no member reads: both sides draw it missing
+ ✓ test/unit/dbmlDisplayParity.test.ts > an unqualified Ref end two schema folders share (core rule 3 counts the file's own use lines) > the ccc-only diagram: neither side draws `ccc.kunde.full_name > addresse.street`, whose file imports addresse from bqs and ccc
+ ✓ test/unit/dbmlDisplayParity.test.ts > a Ref end whose relationships file says it means another schema folder's table of its name (core sees only the diagram's) > the file imports both names from bqs only, by qualified specifiers, and its Ref is unqualified: neither side draws it on ccc's tables
+ ✓ test/unit/dbmlDisplayParity.test.ts > a Ref end whose relationships file says it means another schema folder's table of its name (core sees only the diagram's) > the same with unqualified specifiers from bqs: neither side draws it
+ ✓ test/unit/dbmlDisplayParity.test.ts > a Ref end whose relationships file says it means another schema folder's table of its name (core sees only the diagram's) > tables that declare no schema, the file's own use lines naming bqs's files: neither side draws it
+ ✓ test/unit/dbmlDisplayParity.test.ts > a Ref end whose relationships file says it means another schema folder's table of its name (core sees only the diagram's) > control: the file imports ccc's tables, and both sides draw its Ref
+ ✓ test/unit/dbmlDisplayParity.test.ts > a qualified Ref end naming a schema folder that has no table of its name, on a diagram showing one of two such tables (never guessed) > neither side draws kunde > addresse: bqs has an addresse too, and zzz names neither
+ ✓ test/unit/dbmlDisplayParity.test.ts > a qualified Ref end naming a schema folder that has no table of its name, on a diagram showing one of two such tables (never guessed) > control: with bqs's addresse gone, the one addresse is the Ref's, as it always drew (rule 4), on both sides
+ ✓ test/unit/largeLibraryScaling.test.ts > opening a 500-table DBML diagram in a 1100-table library, then moving a table > cold: reads only the diagram's tables (and the other ends of their Refs), each once; compiles the diagram once
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/invalid > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/badlayer > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/conflict-positions > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/conflict-models > posts an error message
+ ✓ test/unit/largeLibraryScaling.test.ts > opening a 500-table DBML diagram in a 1100-table library, then moving a table > a column-description edit reads no other diagram and lists nothing; one relationship add fully compiles only the diagrams it settles, and its relationships file at most twice, and the next snapshot reads none
+ ✓ test/unit/largeLibraryScaling.test.ts > opening a 500-table DBML diagram in a 1100-table library, then moving a table > an edit to one table re-reads that table only, not the library
+ ✓ test/unit/largeLibraryScaling.test.ts > opening a 500-table JSON diagram in a 1100-table YAML library, then moving a table > reads each member once, lists the library a fixed number of times; a drag reads nothing and is layout-only
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/dbml-syntax > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/dbml-future > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/dbml-conflict > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/dbml-not-a-diagram > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > errors/dbml-legacy > posts an error message
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-v6/showcase silver/showcase.json draws the showcase golden > posts the v5 DisplaySubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-v6/showcase silver/showcase.json draws the showcase golden > reads the v5 UnifiedSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-v6/library-relationships gold/sales.json draws the library-relationships golden > posts the v5 DisplaySubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-v6/library-relationships gold/sales.json draws the library-relationships golden > reads the v5 UnifiedSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-mixed/library-relationships gold/sales.json draws the library-relationships golden > posts the v5 DisplaySubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-mixed/library-relationships gold/sales.json draws the library-relationships golden > reads the v5 UnifiedSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-mixed/library-relationships gold/sales_v5.json draws the library-relationships golden > posts the v5 DisplaySubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > naming-mixed/library-relationships gold/sales_v5.json draws the library-relationships golden > reads the v5 UnifiedSubjectArea
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > a v6 subject area is written in v6 (#182) > opens with a model missing its position, and saves it into the v6 file under the v6 keys
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of showcase (silver/diagrams/showcase.dbml), read by the host > posts what the YAML golden draws through its listed §2.8 rows (relationshipOrder, emptyAnnotations, schemaVersion, tableLayers, convertSchemaFallback)
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of showcase (silver/diagrams/showcase.dbml), read by the host > reads the Unified shape
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of composite-and-self (gold/diagrams/vault.dbml), read by the host > posts what the YAML golden draws through its listed §2.8 rows (schemaVersion, tableLayers, convertSchemaFallback)
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of composite-and-self (gold/diagrams/vault.dbml), read by the host > reads the Unified shape
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of missing-positions (silver/diagrams/showcase.dbml), read by the host > posts what the YAML golden draws through its listed §2.8 rows (relationshipOrder, emptyAnnotations, schemaVersion, tableLayers, convertSchemaFallback)
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of missing-positions (silver/diagrams/showcase.dbml), read by the host > reads the Unified shape
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of missing-model (silver/diagrams/partial.dbml), read by the host > posts what the YAML golden draws through its listed §2.8 rows (schemaVersion, tableLayers)
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of missing-model (silver/diagrams/partial.dbml), read by the host > reads the Unified shape
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of library-relationships (gold/diagrams/sales.dbml), read by the host > posts what the YAML golden draws through its listed §2.8 rows (oneToMany, schemaVersion, tableLayers)
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of library-relationships (gold/diagrams/sales.dbml), read by the host > reads the Unified shape
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of dbt-project (test/fixtures/dbt-project-dbml), physical stage > replies to a switch to the physical stage with the stageData dbt-project.stage-physical.json pins
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the DBML twin of dbt-project (test/fixtures/dbt-project-dbml), physical stage > posts the physical domain from sendSubjectAreaData as dbt-project.physical.host.json pins
+ ✓ test/unit/displayDomainGolden.test.ts > DisplaySubjectArea golden output (extension host) > the golden directory holds exactly the expected files
+ Test Files  8 passed (8)
+      Tests  198 passed (198)

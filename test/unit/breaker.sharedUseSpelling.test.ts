@@ -227,6 +227,21 @@ function overlapProject(schemaA = 'bqs', schemaB = 'ccc'): void {
   ].join('\n'));
 }
 
+/**
+ * Answer each "Which adresse does this relationship mean?" question the way
+ * the person who drew the Ref would: the table whose schema its foreign-key
+ * column names (`unit.ccc_adresse_id` → ccc.adresse). Returns the questions asked.
+ */
+function answerWhichTable(): string[] {
+  const asked: string[] = [];
+  vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>, options: { placeHolder?: string }) => {
+    asked.push(options.placeHolder ?? '');
+    const from = /:\s*Ref:\s*\S+?\.(\w+?)_/.exec(options.placeHolder ?? '')?.[1] ?? '';
+    return items.find((i) => i.label.startsWith(`${from}.`));
+  }) as never);
+  return asked;
+}
+
 /*
  * Breaker for ba2770aa (Gerhard photo-2). The fix decides a Ref end spelled
  * `adresse` by columns. When BOTH address tables have the column the Ref
@@ -236,8 +251,14 @@ describe('breaker: shared spelling where both tables have the Ref column', () =>
   it('Qualify Tables leaves every diagram and relationships file valid for the pinned DBML parser', async () => {
     overlapProject();
     answer = 'Qualify Tables';
+    // Repair: both tables have `id`, so Qualify asks which table each Ref end means (one question per end).
+    const asked = answerWhichTable();
     await open('bronze/diagrams/sap.dbml');
     await vi.waitFor(() => expect(read('bronze/tables/ccc/adresse.dbml')).toMatch(/^Table ccc\.adresse/m));
+    expect(asked).toHaveLength(2);
+    expect(read('bronze/relationships/bronze.dbml')).toContain('Ref: unit.bqs_adresse_id >? bqs.adresse.id');
+    expect(read('bronze/relationships/bronze.dbml')).toContain('Ref: unit.ccc_adresse_id >? ccc.adresse.id');
+    expect(read('bronze/diagrams/sap.dbml')).toContain("use * from '../relationships/bronze.dbml'");
     // Today: the headers are qualified but the relationships file keeps `use { table adresse }` twice,
     // so it now fails with [4000] "Table 'adresse' does not exist" (plus [3003]) and the diagram's
     // `use * from '../relationships/bronze.dbml'` line is dropped.
@@ -248,6 +269,7 @@ describe('breaker: shared spelling where both tables have the Ref column', () =>
   it('after Qualify, reopening the diagram does not offer Qualify Tables again for a fix it cannot make', async () => {
     overlapProject();
     answer = 'Qualify Tables';
+    answerWhichTable();
     await open('bronze/diagrams/sap.dbml');
     await vi.waitFor(() => expect(read('bronze/tables/ccc/adresse.dbml')).toMatch(/^Table ccc\.adresse/m));
     const relsAfterFirst = read('bronze/relationships/bronze.dbml');
