@@ -151,6 +151,8 @@ const START_LABELS = Object.fromEntries([...read('src', 'types', 'startActions.t
 
 // editor.js reads the listing's description from package.json at runtime (main.js sets it).
 globalThis.PACKAGE_DESCRIPTION = pkg.description;
+/** The real run the README GIF is drawn from (record/heroRun.mjs). */
+const heroRun = JSON.parse(readFileSync(join(HERE, '..', 'record', 'hero-run.json'), 'utf8'));
 const editor = await import('../player/editor.js');
 const lib = await import('../player/lib.js');
 /** The layers a new folder without dbt starts with (src/services/layerService.ts NEW_PROJECT_LAYERS_WITHOUT_DBT): one, Main. */
@@ -318,24 +320,6 @@ test('the Help & Feedback rows are HelpTreeProvider\'s', () => {
   assert.equal(editor.HELP_ROWS[0], cmdTitle('erdStudio.setupAiHelper'));
 });
 
-test('the README GIF\'s draft page uses draftModel\'s words: an imported DBML file', () => {
-  const dm = read('src', 'services', 'draftModel.ts');
-  const wording = read('webview-draft', 'lib', 'wording.ts');
-  const { SALES_DRAFT: sales } = editor;
-  assert.ok(dm.includes('return `${draftWhat(input)} · ${counts} · not saved`;'));
-  assert.ok(dm.includes('parts.push(`Keep saves it as ${name} in the ${layerLabel} layer (${diagramFile}).`);'));
-  // Import DBML…'s draft of sales.dbml: Keep as Diagram primary, the rest in the menu
-  assert.ok(dm.includes("case 'dbml': return input.origin ? `Draft ${input.origin}` : `Draft from ${input.fileName ?? 'your DBML file'}`;"));
-  assert.equal(sales.headline, `Draft from ${sales.file} · ${sales.tables.length} tables, ${sales.rels.length} relationships · not saved`);
-  assert.equal(sales.tab, `Draft: ${sales.file.replace(/\.dbml$/, '')}`);
-  assert.equal(sales.detail, `Keep saves it as ${sales.file.replace(/\.dbml$/, '')} in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/${sales.file.replace(/\.dbml$/, '')}.dbml).`);
-  assert.ok(dm.includes('keepLabel: KEEP_AS_DIAGRAM,\n        primary: \'keep\' as const,'));
-  assert.ok(dm.includes('shownStarts: [],'));
-  assert.deepEqual(sales.buttons.map(([l]) => l), [tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM'), tsConst('webview-draft/lib/wording.ts', 'OTHER_WAYS_TO_START'), tsConst('webview-draft/lib/wording.ts', 'DISCARD')]);
-  assert.ok(wording.includes("export const DISCARD = 'Discard';"));
-  assert.equal(cmdTitle('erdStudio.importDbml'), 'Import DBML…');
-});
-
 test('the watch steps and the Help row call it "Watch the Tour", with no length in its name', () => {
   const tour = tsConst('src/types/startActions.ts', 'TOUR_LABEL');
   assert.equal(tour, 'Watch the Tour');
@@ -416,20 +400,32 @@ test('the files the recording\'s import wrote are the 2.0 layer-first DBML a new
   for (const f of ['layers.json', 'README.md', `${L}/diagrams/${DIAGRAM}.dbml`]) assert.ok(DBT_ERD[f], f);
 });
 
-test('the README GIF is drawn from the same pieces: a plain folder, no dbt, the layer-first tree', async () => {
+test('the README GIF is drawn from the same pieces: a plain folder, no dbt, the layer-first tree beside the code', async () => {
   const hero = readFileSync(join(HERE, '..', 'player', 'hero.js'), 'utf8');
   for (const l of hero.split('\n')) assert.doesNotMatch(l, NO_DBT, `hero.js: ${l}`);
-  const { HERO_TREE } = await import('../player/hero.js');
-  const paths = [];
-  const stack = [];
-  for (const [d, kind, label] of HERO_TREE) {
-    stack[d] = label;
-    if (kind !== 'folder') paths.push(stack.slice(0, d + 1).join('/'));
-  }
+  const { HERO_TREE, heroTree, FCT_DBML } = await import('../player/hero.js');
+  const pathsOf = (rows) => {
+    const paths = [], stack = [];
+    for (const [d, kind, label] of rows) { stack[d] = label; if (kind !== 'folder') paths.push(stack.slice(0, d + 1).join('/')); }
+    return paths;
+  };
+  const paths = pathsOf(HERO_TREE);
   assert.ok(paths.includes(`.erd-studio/${NEW_LAYER.id}/diagrams/orders.dbml`));
   assert.ok(paths.filter((p) => p.startsWith(`.erd-studio/${NEW_LAYER.id}/tables/${NEW_LAYER.id}/`) && p.endsWith('.dbml')).length >= 3);
   assert.ok(hero.includes(`'Table ${NEW_LAYER.id}.fct_order {'`));
-  assert.ok(!paths.some((p) => /dbt_project/.test(p)));
+  assert.ok(!paths.some((p) => /dbt_project|models\//.test(p)));
+  // the Explorer lists the folder the real run made (record/heroRun.mjs): every file in it, before and after the AI's edit
+  const { DESIGN, CODE } = await import('../record/heroRun.mjs');
+  for (const text of Object.values(CODE)) assert.doesNotMatch(text, NO_DBT);
+  const folder = (design) => [...Object.keys(design).map((f) => `.erd-studio/${f}`), ...Object.keys(CODE)].sort();
+  assert.deepEqual(paths.slice().sort(), folder(DESIGN));
+  assert.deepEqual(pathsOf(heroTree({ store: true })).sort(), folder(heroRun.design.after));
+  // the design sits beside the code that loads the warehouse; .claude holds what Set Up My AI Helper wrote (a closed folder)
+  assert.ok(paths.includes('pipelines/orders.sql'));
+  assert.ok(heroRun.helper.includes('.claude/skills/erd-studio/SKILL.md'));
+  assert.ok(HERO_TREE.some(([d, k, l, closed]) => d === 0 && k === 'folder' && l === '.claude' && closed));
+  // the text shown is the design's fct_order.dbml at the start
+  assert.equal(`${FCT_DBML.join('\n')}\n`, DESIGN[`${NEW_LAYER.id}/tables/${NEW_LAYER.id}/fct_order.dbml`]);
 });
 
 test('nothing calls ERD Studio open source (the licence is PolyForm Shield: source-available)', () => {
@@ -447,7 +443,10 @@ test('the DBML text the README GIF shows is already formatted, as ERD Studio wri
   const tsx = join(REPO, 'node_modules', '.bin', 'tsx');
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
   const { FCT_DBML } = await import('../player/hero.js');
-  const texts = [FCT_DBML].map((lines) => `${lines.join('\n')}\n`);
+  // ...and so is every DBML file of the project the real run starts from, with the relationship drawn
+  // by hand added and the column typed (record/heroRun.mjs): both are in the form ERD Studio writes
+  const { DESIGN, afterDrag, afterTyping } = await import('../record/heroRun.mjs');
+  const texts = [`${FCT_DBML.join('\n')}\n`, ...Object.entries(afterTyping(afterDrag(DESIGN))).filter(([f]) => f.endsWith('.dbml')).map(([, text]) => text)];
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
     const texts = JSON.parse(process.argv[1]);
@@ -470,23 +469,6 @@ test('a folder without dbt draws no stage colours (the renderer\'s neutral canva
     const code = readFileSync(join(HERE, '..', 'player', f), 'utf8');
     assert.doesNotMatch(code, /stage: '(logical|physical)'|color: COLORS\.logical/, f);
   }
-});
-
-test('the README GIF\'s draft matches what the product draws: Show details, no reused table', async () => {
-  const { SALES_DRAFT: sales, SHOW_DETAILS, SHOW_IMPORT_REPORT } = editor;
-  assert.equal(SHOW_DETAILS, tsConst('webview-draft/lib/wording.ts', 'SHOW_DETAILS'));
-  assert.equal(SHOW_IMPORT_REPORT, tsConst('webview-draft/lib/wording.ts', 'SHOW_IMPORT_REPORT'));
-  const banner = read('webview-draft', 'components', 'DraftBanner.tsx');
-  assert.ok(banner.includes('const showSecondLine = banner.changeOptions || counts !== \'\' || hasDetails || importReport;'));
-  assert.ok(sales.details, 'an import draft always has details');
-  // a DBML file's import records a report, and its draft links to it after Show details
-  assert.match(read('src', 'commands', 'importDbml.ts'), /IMPORT_REPORT_SOURCES[^=]*= \{\n  file: 'dbml',/);
-  assert.ok(sales.importReport, 'an imported DBML file\'s draft offers its report');
-  assert.ok(banner.indexOf('{SHOW_DETAILS}') < banner.indexOf('{SHOW_IMPORT_REPORT}'));
-  // a name already in the library would be reused (dbmlImport.ts) and the detail would say so
-  const { HERO_TREE } = await import('../player/hero.js');
-  const library = new Set(HERO_TREE.filter(([d, k]) => d === 4 && k === 'dbml').map(([, , l]) => l.replace(/\.dbml$/, '')));
-  for (const tb of sales.tables) assert.ok(!library.has(tb.name), `${tb.name} is already in the library`);
 });
 
 test('an import in a new folder without dbt asks only the name: one layer', () => {
@@ -565,18 +547,20 @@ test('the README GIF\'s hover preview uses the product\'s numbers: arrows, delay
 });
 
 test('the README GIF\'s hover beat: arrows run from the 1 end to the * end, only on the hovered table\'s lines, and the loop is seamless', async () => {
-  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, DRAWN, flowGlyphs, CHEVRON_D } = await import('../player/hero.js');
-  // the pointer rests on fct_order, then dim_customer, then leaves
-  assert.deepEqual(FOCUS_CHANGES.map((c) => c.id), ['fct_order', 'dim_customer', null]);
-  const [onFact, onCustomer, off] = FOCUS_CHANGES.map((c) => c.t);
-  assert.ok(onCustomer - onFact >= 1.5 && off - onCustomer >= 1.5, 'each hover held long enough to read');
-  for (const [i, line] of LINES.entries()) {
+  const { render, HERO, HOVER, HOVER_PATH, FOCUS_CHANGES, LINES, DRAWN, flowGlyphs, CHEVRON_D, PRESS_AT } = await import('../player/hero.js');
+  // the pointer rests on fct_order; the preview may switch to fct_return as the pointer arrives there, and the press ends it
+  assert.equal(FOCUS_CHANGES[0].id, 'fct_order');
+  assert.deepEqual(FOCUS_CHANGES.at(-1), { t: PRESS_AT, id: null });
+  assert.ok(FOCUS_CHANGES.slice(1, -1).every((c) => c.id === 'fct_return' || c.id === null));
+  const onFact = FOCUS_CHANGES[0].t, off = FOCUS_CHANGES[1].t;
+  assert.ok(onFact < 1 && off - onFact >= 1.5, 'the hover starts within the first second and is held long enough to read');
+  for (const [i, line] of LINES.start.entries()) {
     // each path starts at the FK's table (`*` end) and ends at the key's table (`1` end)
     assert.equal(line.cardinality, 'many-to-one');
     assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12, `${line.id}: * at the path's start`);
     assert.ok(Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, `${line.id}: 1 at the path's end`);
     // so every chevron moves towards the path's start (the `*` end), and points that way
-    const drawn = DRAWN.curved[i];
+    const drawn = DRAWN.start[i];
     const a = flowGlyphs(drawn, line, 12), b = flowGlyphs(drawn, line, 12.05);
     assert.ok(a.length >= 2 && a.length <= 4);
     for (const [k, g] of a.entries()) {
@@ -589,29 +573,173 @@ test('the README GIF\'s hover beat: arrows run from the 1 end to the * end, only
   const chevrons = (h) => h.split(CHEVRON_D).length - 1;
   const faded = (h) => (h.match(new RegExp(`opacity:${HOVER.tableOpacity.toFixed(3)};`, 'g')) ?? []).length;
   // fct_order: its four lines flow in the layer colour; every table is one line away, so none fades
-  const factLines = LINES.filter((l) => l.from === 'fct_order' || l.to === 'fct_order').length;
+  const factLines = LINES.start.filter((l) => l.from === 'fct_order' || l.to === 'fct_order').length;
   assert.equal(factLines, 4);
-  const fact = html((onFact + onCustomer) / 2);
+  const fact = html((onFact + off) / 2);
   assert.ok(chevrons(fact) >= 2 * factLines && fact.includes(HOVER.layerColour));
   assert.equal(faded(fact), 0);
-  // dim_customer: one line flows; the three tables it does not touch fade
-  const cust = html(onCustomer + 0.6);
-  assert.ok(chevrons(cust) >= 2 && chevrons(cust) <= 4);
-  assert.equal(faded(cust), 3);
-  // no arrows, no layer colour and no pointer outside the hover; the first and last frames match
-  for (const t of [0, 2, 5, 8, off + HOVER.fade + 0.01, 17.5]) {
+  // no arrows and no layer colour once the column is pressed, nor in any later beat; the first and last frames match
+  for (const t of [0, PRESS_AT + HOVER.fade + 0.01, 5, 8, 12, 16, 19, 22]) {
     const h = html(t);
     assert.equal(chevrons(h), 0, `+${t}s`);
     assert.ok(!h.includes(HOVER.layerColour), `+${t}s`);
   }
-  for (const t of [0, 2, 5, 8, HOVER_PATH.at(-1).t + 0.01]) assert.ok(!html(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
+  for (const t of [0, 0.2, HOVER_PATH.at(-1).t + 0.01, 9, 14, 19, 22.2]) assert.ok(!html(t).includes('M1.5 1.5v17.2'), `+${t}s: the pointer`);
   assert.equal(html(HERO.loop - 1 / HERO.fps), html(0));
+});
+
+// Beats 2 to 5 of the README GIF are staged from one real run (record/heroRun.mjs →
+// record/hero-run.json): the drag in the real canvas and its dialog, the typed line read back by
+// @erd-studio/core, the prompt and what Claude Code wrote. When the record changes (a new run),
+// these fail so the mock follows.
+test('the README GIF\'s drag by hand is the real canvas\'s: the long press, the dashed line, the dialog and what its button adds', async () => {
+  const { DRAG, DIALOG, DRAG_LINE, PRESS_AT, LONG_PRESS, DROP_AT, CREATE_CLICK, CREATE_ON, CREATE_AT, HOVER_PATH, LINES, phaseAt, render } = await import('../player/hero.js');
+  const run = await import('../record/heroRun.mjs');
+  assert.deepEqual(DRAG, run.DRAG);
+  // the real canvas, handed the start's diagram, opened New Relationship filled in with the drag's two columns...
+  const { dialog, posted } = heroRun.drag;
+  assert.deepEqual(dialog.chosen.slice(0, 4), [...DRAG.from, ...DRAG.to]);
+  assert.ok(dialog.words.includes('New Relationship') && dialog.words.includes(DIALOG.button));
+  // ...and its Create Relationship sent the host exactly that relationship, many-to-one
+  assert.deepEqual(posted, [{ type: 'addRelationship', payload: { fromModel: DRAG.from[0], fromColumn: DRAG.from[1], toModel: DRAG.to[0], toColumn: DRAG.to[1], cardinality: 'many-to-one' } }]);
+  // the Ref the GIF's files gain for it reads back as that relationship, and nothing else changes
+  const rel = `${DRAG.from.join('.')} > ${DRAG.to.join('.')}`;
+  assert.ok(!heroRun.drawn.start.relationships.includes(rel));
+  assert.deepEqual(heroRun.drawn.dragged.relationships, [...heroRun.drawn.start.relationships, rel].sort());
+  assert.deepEqual(heroRun.drawn.dragged.tables, heroRun.drawn.start.tables);
+  assert.ok(run.BY_HAND_REF.includes(`${DRAG.from.join('.')} >? ${NEW_LAYER.id}.${DRAG.to.join('.')}`));
+  // the dialog shown is the picture the run took of it, at 2x, and the click lands on its button
+  const png = readFileSync(join(HERE, '..', 'player', 'assets', DIALOG.file));
+  assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [dialog.width * 2, dialog.height * 2]);
+  assert.deepEqual([DIALOG.w, DIALOG.h, DIALOG.buttonAt], [dialog.width, dialog.height, dialog.createButton]);
+  const { path } = lib;
+  const click = path(CREATE_CLICK, HOVER_PATH);
+  assert.ok(Math.abs(click.x - CREATE_AT.x) <= 60 && Math.abs(click.y - CREATE_AT.y) <= 14, 'the pointer is on Create Relationship at its click');
+  // what the canvas draws while dragging (ModelNode.tsx, DragLine.css, theme.css)
+  const node = read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.tsx');
+  assert.ok(node.includes(`delay: ${LONG_PRESS * 1000},`) && node.includes("new CustomEvent('column-relationship-drop'"));
+  const css = read('webview', 'components', 'Graph', 'DragLine.css');
+  assert.ok(css.includes('stroke: var(--edge-design);') && css.includes(`stroke-width: ${DRAG_LINE.width};`) && css.includes(`stroke-dasharray: ${DRAG_LINE.dash.replace(' ', ', ')};`));
+  const theme = read('packages', 'renderer', 'src', 'styles', 'theme.css');
+  assert.ok(theme.includes('--edge-design:         var(--stage-logical);') && theme.includes(`--stage-logical:       ${DRAG_LINE.colour};`));
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.css').includes('.model-node__column--dragging {\n  cursor: grabbing;\n  opacity: 0.6;\n  box-shadow: inset 0 0 0 2px var(--focus-border);'));
+  // on screen: no dashed line before the long press is over, one while dragging, the dialog from the drop to the click, the line after
+  const dashed = (t) => render(t).includes('stroke-dasharray="12.8 6.4"');
+  const shown = (t) => render(t).includes(DIALOG.file);
+  assert.ok(!dashed(PRESS_AT + 0.1) && dashed((PRESS_AT + LONG_PRESS + DROP_AT) / 2) && !dashed(DROP_AT + 0.05));
+  assert.ok(!shown(DROP_AT - 0.05) && shown(DROP_AT + 0.5) && shown(CREATE_CLICK + 0.1) && !shown(CREATE_ON + 0.05));
+  assert.ok(CREATE_CLICK - DROP_AT >= 1, 'the dialog is up for a second or more');
+  assert.equal(phaseAt(CREATE_ON - 0.01), 'start');
+  assert.equal(phaseAt(CREATE_ON + 0.01), 'dragged');
+  assert.equal(LINES.dragged.length, LINES.start.length + 1);
+  assert.ok(LINES.dragged.some((l) => l.from === DRAG.from[0] && l.to === DRAG.to[0]));
+});
+
+test('the README GIF\'s typed column is real DBML: the line as typed, and the column the canvas reads from it', async () => {
+  const { TYPED_LINE, TYPED_COLUMN, TYPED_AT, FCT_DBML, phaseAt, render } = await import('../player/hero.js');
+  const run = await import('../record/heroRun.mjs');
+  assert.equal(TYPED_LINE, run.TYPED_LINE);
+  // the card's text once typed is the file the run wrote, byte for byte
+  const at = FCT_DBML.findIndex((l) => l.includes(` ${TYPED_COLUMN.after} `)) + 1;
+  const typedFile = `${[...FCT_DBML.slice(0, at), TYPED_LINE, ...FCT_DBML.slice(at)].join('\n')}\n`;
+  const L = NEW_LAYER.id;
+  assert.equal(typedFile, run.afterTyping(run.afterDrag(run.DESIGN))[`${L}/tables/${L}/${TYPED_COLUMN.table}.dbml`]);
+  // read back by @erd-studio/core, the table has that column there, and nothing else changed
+  const before = heroRun.drawn.dragged.tables[TYPED_COLUMN.table], after = heroRun.drawn.typed.tables[TYPED_COLUMN.table];
+  const i = after.findIndex(([, n]) => n === TYPED_COLUMN.col[1]);
+  assert.deepEqual(after[i], TYPED_COLUMN.col);
+  assert.equal(after[i - 1][1], TYPED_COLUMN.after);
+  assert.deepEqual(after.filter((_, k) => k !== i), before);
+  assert.deepEqual(heroRun.drawn.typed.relationships, heroRun.drawn.dragged.relationships);
+  // on screen: the whole line is typed before the canvas follows, and the column is on the table only then
+  const strip = (html) => html.replace(/<[^>]+>/g, '');
+  assert.ok(strip(render(TYPED_AT - 0.05)).includes(TYPED_LINE));
+  const row = `<span class="node__col">${TYPED_COLUMN.col[1]}</span>`;
+  assert.ok(!render(TYPED_AT - 0.05).includes(row) && render(TYPED_AT + 0.1).includes(row));
+  assert.equal(phaseAt(TYPED_AT + 0.1), 'typed');
+});
+
+test('the README GIF\'s AI beat is the real run\'s: the prompt, the skill, the files written, the table and where it landed', async () => {
+  const { AI_PROMPT, AI_STEPS, AI_TABLE, AI_COLUMN, LINES, render, AI } = await import('../player/hero.js');
+  const { PROMPT } = await import('../record/heroRun.mjs');
+  const { CLAUDE_FLAGS } = await import('../record/vscode.mjs');
+  assert.equal(AI_PROMPT, PROMPT);
+  assert.equal(heroRun.prompt, PROMPT);
+  assert.doesNotMatch(PROMPT, NO_DBT);
+  assert.deepEqual(heroRun.claudeFlags, CLAUDE_FLAGS, 'run with the tour\'s flags');
+  assert.equal(heroRun.claude.subtype, 'success');
+  // the steps shown: the skill first, then every file the run changed, once each, in the order it first changed them
+  const calls = heroRun.claude.calls;
+  assert.deepEqual(calls[0], { tool: 'Skill', target: 'erd-studio', ok: true });
+  const wrote = [];
+  for (const c of calls) if (c.ok && (c.tool === 'Edit' || c.tool === 'Write') && !wrote.some(([, t]) => t === c.target)) wrote.push([c.tool === 'Edit' ? 'Update' : 'Write', c.target]);
+  assert.deepEqual(AI_STEPS, [['Skill', 'erd-studio'], ...wrote]);
+  // nothing else was written: against the files as the typed column left them, only those differ
+  const run = await import('../record/heroRun.mjs');
+  const typed = run.afterTyping(run.afterDrag(run.DESIGN));
+  const changed = Object.keys(heroRun.design.after).filter((f) => typed[f] !== heroRun.design.after[f]).map((f) => `.erd-studio/${f}`).sort();
+  assert.deepEqual(changed, wrote.map(([, t]) => t).sort());
+  // the table drawn is the one @erd-studio/core reads from the file it wrote, where its diagram edit put it
+  const drawn = heroRun.drawn.after;
+  assert.deepEqual(drawn.tables[AI_TABLE.name], AI_TABLE.cols);
+  assert.equal(drawn.grains[AI_TABLE.name], AI_TABLE.grain);
+  assert.deepEqual(drawn.positions[AI_TABLE.name], [AI_TABLE.x, AI_TABLE.y]);
+  const fct = drawn.tables[AI_COLUMN.table];
+  const at = fct.findIndex(([, n]) => n === AI_COLUMN.col[1]);
+  assert.deepEqual(fct[at], AI_COLUMN.col);
+  assert.equal(fct[at - 1][1], AI_COLUMN.after);
+  // and its relationship is the one it added, the only new one
+  const rel = `${AI_COLUMN.table}.${AI_COLUMN.col[1]} > ${AI_TABLE.name}.${AI_TABLE.cols[0][1]}`;
+  assert.deepEqual(drawn.relationships, [...heroRun.drawn.typed.relationships, rel].sort());
+  assert.ok(LINES.after.some((l) => l.from === AI_COLUMN.table && l.to === AI_TABLE.name));
+  assert.equal(LINES.after.length, drawn.relationships.length);
+  // every phase draws the tables and columns the record's files give
+  const { phaseAt, HERO } = await import('../player/hero.js');
+  const names = (html) => [...html.matchAll(/<span class="node__name">(\w+)<\/span>/g)].map((m) => m[1]).sort();
+  for (let t = 0; t < HERO.loop; t += 0.5) {
+    const phase = phaseAt(t);
+    assert.deepEqual(names(render(t)), Object.keys(heroRun.drawn[phase].tables).sort(), `+${t}s (${phase})`);
+  }
+  // the natural-key badge is the product's (ModelNode's NK)
+  assert.ok(read('packages', 'renderer', 'src', 'components', 'Graph', 'ModelNode.tsx').includes('NK'));
+  // on screen: the prompt whole before the first step, each step's line, and the table only once the last has landed
+  const strip = (html) => html.replace(/<[^>]+>/g, '').replace(/&#39;|&apos;/g, "'").replace(/&gt;/g, '>');
+  assert.ok(strip(render(AI.steps[0] - 0.05)).includes(AI_PROMPT));
+  const end = strip(render(AI.done - 0.02));
+  for (const [verb, target] of AI_STEPS) assert.ok(end.includes(`${verb}(${target})`), target);
+  assert.ok(AI.steps.every((x, i) => i === 0 || x > AI.steps[i - 1]) && AI.done > AI.steps.at(-1));
+  assert.equal(phaseAt(AI.done - 0.02), 'typed');
+  assert.equal(phaseAt(AI.done + 0.02), 'after');
+  // nothing private in the record
+  assert.doesNotMatch(JSON.stringify(heroRun), /\/Users\/|\/home\/|@[\w-]+\.\w+|\/private\/|sk-ant|Max plan|Pro plan/);
+});
+
+test('the README GIF\'s Confluence beat: a real render of the run\'s files, described only as the app works', async () => {
+  const { CONFLUENCE, render, CAPTIONS } = await import('../player/hero.js');
+  const png = readFileSync(join(HERE, '..', 'player', 'assets', CONFLUENCE.shot.file));
+  // the picture confluence-shot.mjs --hero writes: its viewport at 2x
+  assert.equal(png.readUInt32BE(16), CONFLUENCE.shot.w * 2);
+  assert.equal(png.readUInt32BE(20), CONFLUENCE.shot.h * 2);
+  const shot = readFileSync(join(HERE, '..', 'confluence-shot.mjs'), 'utf8');
+  assert.ok(shot.includes(`'${CONFLUENCE.shot.file}'`) && shot.includes(`width: HERO ? ${CONFLUENCE.shot.w} : 1200, height: ${CONFLUENCE.shot.h}`));
+  assert.ok(shot.includes('design.after') && shot.includes('<ErdCanvas domain={domain} viewer'));
+  assert.ok(heroRun.design.after[CONFLUENCE.file.replace('.erd-studio/', '')], 'the diagram file it names is the run\'s');
+  const at = CAPTIONS.find((c) => c.em === 'Confluence').at, end = CAPTIONS.at(-1).at;
+  const html = render(at + 2);
+  const page = html.slice(html.indexOf('logos/confluence.svg')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  for (const w of [CONFLUENCE.app, CONFLUENCE.readOnly, 'Drawn from GitHub', CONFLUENCE.file]) assert.ok(page.includes(w), w);
+  // never free, no price, no editing or sync back
+  assert.doesNotMatch(page, /\bfree\b|\$|price|per user|\bedit|\bsync/i);
+  assert.ok(html.includes('/video/player/assets/logos/github.svg'));
+  // the page covers the window for its beat, and only then
+  const { HERO } = await import('../player/hero.js');
+  for (let t = 0; t < HERO.loop; t += 0.25) assert.equal(render(t).includes('logos/confluence.svg'), t >= at && t < end, `GIF +${t}s`);
 });
 
 // The README GIF's line styles are drawn as packages/renderer draws them. When the router's corners,
 // crossings, the switch or its glyphs change, these fail so the mock follows.
 test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, halo, the switch', async () => {
-  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, styleAt, HERO } = await import('../player/hero.js');
+  const { ROUTE, LINE_STYLE_OPTIONS, LINE_STYLES, LINE_STYLE, HERO } = await import('../player/hero.js');
   const routing = (...p) => read('packages', 'renderer', 'src', 'lib', 'edgeRouting', ...p);
   const corners = routing('render', 'corners.ts');
   const paths = routing('render', 'pathRender.ts');
@@ -640,7 +768,7 @@ test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, 
   // the two styles, in the toolbar's order, the default first
   const style = routing('lineStyle.ts');
   assert.ok(style.includes(`export const LINE_STYLES: readonly LineStyle[] = [${LINE_STYLES.map((x) => `'${x}'`).join(', ')}];`));
-  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${styleAt(0)}';`));
+  assert.ok(style.includes(`export const DEFAULT_LINE_STYLE: LineStyle = '${LINE_STYLE}';`));
   for (const [name, o] of Object.entries(LINE_STYLE_OPTIONS)) assert.ok(style.includes(`${name}: { crossings: '${o.crossings}', underTables: `) && style.includes(`corners: '${o.corners}' }`), name);
   // the switch's glyphs are the product's own paths
   const sw = read('webview', 'components', 'Toolbar', 'LineStyleSwitch.tsx');
@@ -649,83 +777,64 @@ test('the README GIF\'s line styles use the renderer\'s numbers: corners, hops, 
   assert.ok(HERO.loop > 0);
 });
 
-test('the README GIF\'s line style beat: the pointer clicks Hops, the lines hop, then Curved again', async () => {
-  const { render, DRAWN, LINES, styleAt, HOVER_PATH, SWITCH_AT, FOCUS_CHANGES, HERO } = await import('../player/hero.js');
-  // Curved at the seam, Hops for a while after the hover, then Curved again before the pointer leaves
-  const hops = [];
-  for (let t = 0; t < HERO.loop; t += 0.05) if (styleAt(t) === 'hops') hops.push(t);
-  assert.ok(hops.length, 'Hops is shown');
-  assert.ok(hops[0] > FOCUS_CHANGES.at(-1).t, 'after the hover');
-  assert.ok(hops.at(-1) - hops[0] >= 2.4, 'Hops held long enough to see');
-  assert.ok(hops.at(-1) < HOVER_PATH.at(-1).t && styleAt(HERO.loop - 0.01) === 'curved');
-  // each switch happens with the pointer on that option (its click)
-  const { path } = lib;
-  for (const t of [hops[0], hops.at(-1) + 0.05]) {
-    const p = path(t, HOVER_PATH), want = styleAt(t);
-    assert.ok(Math.abs(p.x - SWITCH_AT[want].x) <= 20 && Math.abs(p.y - SWITCH_AT[want].y) <= 17, `+${t}s: the pointer is on ${want}`);
-  }
-  // the switch shows the style in use
+test('the README GIF draws the default line style throughout: Curved, chosen on the toolbar\'s switch', async () => {
+  const { render, DRAWN, LINES, LINE_STYLE, HERO } = await import('../player/hero.js');
   const chosen = (h) => h.match(/data-line-style="(\w+)" style="[^"]*background:#0e639c/)?.[1];
-  assert.equal(chosen(render(0)), 'curved');
-  assert.equal(chosen(render(hops[1])), 'hops');
-  // Curved: cubic corners and a halo casing; the line passing under another is cut there
-  const curved = DRAWN.curved, hopsDrawn = DRAWN.hops;
-  assert.ok(curved.some((l) => l.strokeD), 'a cut under a crossing');
-  assert.ok(curved.filter((l, i) => LINES[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
-  assert.match(render(0), /stroke="var\(--card\)" stroke-width="8.75"/);
-  // Hops: quadratic (rounded) corners, a hop (two cubic quarters) on the more horizontal line, no casing
-  assert.ok(hopsDrawn.filter((l, i) => LINES[i].pts.length > 2).every((l) => / Q /.test(l.d)));
-  const hopped = hopsDrawn.filter((l) => / C /.test(l.d));
-  assert.ok(hopped.length >= 2, 'at least two hops');
-  assert.doesNotMatch(render(hops[1]), /stroke-width="8.75"/);
-});
-
-test('the README GIF\'s draft page draws Curved lines too: the product\'s draft canvas is the same renderer', async () => {
-  const { DRAFT_LINES, DRAFT_DRAWN, render } = await import('../player/hero.js');
-  const { SALES_DRAFT: sales } = editor;
-  assert.equal(DRAFT_LINES.length, sales.rels.length, 'one line per relationship the headline counts');
-  for (const [i, [a, , b]] of sales.rels.entries()) {
-    assert.equal(DRAFT_LINES[i].from, sales.tables[a].name);
-    assert.equal(DRAFT_LINES[i].to, sales.tables[b].name);
-    assert.match(DRAFT_DRAWN[i].d, / C /, 'curved corners');
-    assert.doesNotMatch(DRAFT_DRAWN[i].d, / Q /);
+  for (let t = 0; t < HERO.loop; t += 1) assert.equal(chosen(render(t)), LINE_STYLE, `+${t}s`);
+  for (const phase of ['start', 'dragged', 'typed', 'after']) {
+    const drawn = DRAWN[phase], lines = LINES[phase];
+    // one line per relationship @erd-studio/core reads from that phase's files
+    assert.equal(lines.length, heroRun.drawn[phase].relationships.length, phase);
+    assert.deepEqual(lines.map((l) => `${l.from}>${l.to}`).sort(), heroRun.drawn[phase].relationships.map((r) => r.replace(/\.\w+ > (\w+)\.\w+$/, '>$1')).sort(), phase);
+    // Curved: cubic corners, square segments, from the FK's table (`*`) to the key's table (`1`)
+    assert.ok(drawn.filter((l, i) => lines[i].pts.length > 2).every((l) => / C /.test(l.d) && !/ Q /.test(l.d)));
+    for (const line of lines) {
+      assert.ok(Math.hypot(line.many.x - line.pts[0].x, line.many.y - line.pts[0].y) <= 12 && Math.hypot(line.one.x - line.pts.at(-1).x, line.one.y - line.pts.at(-1).y) <= 12, line.id);
+      for (let i = 1; i < line.pts.length; i++) assert.ok(Math.abs(line.pts[i].x - line.pts[i - 1].x) < 0.01 || Math.abs(line.pts[i].y - line.pts[i - 1].y) < 0.01, `${phase} ${line.id}: an orthogonal segment`);
+    }
   }
-  const draft = render(8.2);
-  for (const l of DRAFT_DRAWN) assert.ok(draft.includes(`d="${l.d}"`), 'drawn on the draft page');
+  // a halo casing on every line
+  assert.match(render(0), /stroke="var\(--card\)" stroke-width="8.75"/);
 });
 
 test('the README GIF\'s captions: one per beat, five words at most, big, in a band above the window', async () => {
-  const { CAPTIONS, render, HERO, HOVER_PATH, FOCUS_CHANGES } = await import('../player/hero.js');
+  const { CAPTIONS, render, HERO, PRESS_AT, TYPED_AT, AI } = await import('../player/hero.js');
   for (const c of CAPTIONS) {
     assert.ok(c.text.split(/\s+/).length <= 5, c.text);
     assert.ok(c.text.includes(c.em), c.text);
     assert.doesNotMatch(c.text, NO_DBT_ON_SCREEN);
+    // README and Marketplace wording: never "No AI needed", "open source", "open standard", or "free"
+    assert.doesNotMatch(c.text, /no ai|open[ -]source|\bfree\b|standard/i, c.text);
   }
   // the loop opens and closes on the same caption
   assert.equal(CAPTIONS[0].text, CAPTIONS.at(-1).text);
-  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at > CAPTIONS[i - 1].at));
+  assert.ok(CAPTIONS.every((c, i) => i === 0 || c.at - CAPTIONS[i - 1].at >= 3), 'each caption is up for 3 s or more');
   const shown = (t) => { let i = 0; while (i + 1 < CAPTIONS.length && CAPTIONS[i + 1].at <= t) i++; return CAPTIONS[i].text; };
-  assert.equal(shown(2), 'Your model, as DBML files');
-  assert.equal(shown(8), 'Import what you have');
-  assert.equal(shown((FOCUS_CHANGES[0].t + FOCUS_CHANGES[1].t) / 2), 'Hover to trace relationships');
-  assert.equal(shown(17), 'Lines: Curved or Hops');
+  assert.equal(shown(2), 'Data modelling in VS Code');
+  assert.equal(shown(PRESS_AT), 'Draw a relationship');
+  assert.equal(shown(TYPED_AT), 'Type it: plain DBML files');
+  assert.equal(shown(AI.done), 'Or ask your AI');
+  assert.equal(shown(20), 'Business reads it in Confluence');
   // 58 px at 1440 is 32 px at the README's 800; the band sits above the window, never over the canvas
   const h = render(2);
   assert.match(h, /font-size:58px;font-weight:800/);
   const band = Number(h.match(/^<div class="abs" style="left:0;top:0;width:\d+px;height:(\d+)px">/)[1]);
   const winTop = Number(h.match(/<div class="card" style="left:\d+px;top:(\d+)px/)[1]);
   assert.ok(winTop >= band, 'the window starts below the caption band');
-  assert.ok(HERO.w === 1440 && HOVER_PATH.length > 0);
+  assert.equal(HERO.w, 1440);
 });
 
 // The loop and its beats, in order (re-time the README GIF section of video/README.md with these).
-test('the README GIF\'s loop: 22 s at 12 fps, files → text → draft → hover → line styles', async () => {
-  const { HERO, CAPTIONS, FOCUS_CHANGES, styleAt } = await import('../player/hero.js');
-  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [22, 12, 1440, 1010]);
-  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 6.2, 10.4, 14.9, 21.2]);
-  assert.ok(FOCUS_CHANGES[0].t > 10.4 && FOCUS_CHANGES.at(-1).t < 15.5);
-  assert.equal(styleAt(16.5), 'hops');
-  assert.equal(styleAt(19.5), 'curved');
+test('the README GIF\'s loop: 22.5 s at 12 fps, hover → drag → typed → AI → Confluence, seamless', async () => {
+  const { HERO, CAPTIONS, FOCUS_CHANGES, PRESS_AT, DROP_AT, CREATE_CLICK, TYPED_AT, AI, phaseAt, render } = await import('../player/hero.js');
+  assert.deepEqual([HERO.loop, HERO.fps, HERO.w, HERO.h], [22.5, 12, 1440, 1010]);
+  assert.deepEqual(CAPTIONS.map((c) => c.at), [0, 3.3, 7.6, 11.6, 17.7, 21.8]);
+  assert.deepEqual([PRESS_AT, DROP_AT, CREATE_CLICK, TYPED_AT, AI.open, AI.done, AI.close], [3.5, 5.05, 6.2, 10, 11.7, 15.5, 16.25]);
+  // the diagram is moving inside the first second
+  assert.ok(FOCUS_CHANGES[0].t < 1);
+  assert.deepEqual([0, 6, 7, 9.9, 10.1, 15.4, 15.6, 17.6, 18, 22.4].map(phaseAt), ['start', 'start', 'dragged', 'dragged', 'typed', 'typed', 'after', 'after', 'start', 'start']);
+  // the first and last frames match
+  assert.equal(render(HERO.loop - 1 / HERO.fps), render(0));
 });
 
 // ---- the default cut is a recording of the real VS Code (record/) ----------------------------

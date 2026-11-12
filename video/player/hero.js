@@ -1,97 +1,63 @@
 // The README's hero GIF (media/demo.gif), drawn by ../hero-gif.mjs from player/hero.html with the
 // video's own pieces (editor.js, lib.js): ERD Studio in a plain folder (no stage tabs, nothing to
-// compare), the Explorer showing the layer-first .erd-studio tree beside the orders diagram, drawn
-// neutral (a plain folder has no stage colours), under a caption band that says one short thing per
-// beat (CAPTIONS):
-//   1. "Your model, as DBML files": the table files light one by one with their tables, then
-//      fct_order.dbml's text shows.
-//   2. "Import what you have": sales.dbml (in the folder's top level) lights and the editor switches
-//      to the draft an Import DBML… of it opens (its summary, before anything is written; none of
-//      its tables is in the library), and back.
-//   3. "Hover to trace relationships": the pointer rests on fct_order, then on dim_customer, and the
-//      canvas does what the product's hover preview does (HOVER): the table's own lines light in the
-//      diagram's layer colour and carry the moving arrows, from the `1` end to the `*` end, and every
-//      table and line it does not touch fades.
-//   4. "Lines: Curved or Hops": the pointer clicks the toolbar's line style switch: Hops (square
-//      lines with a hop where two cross), then back to Curved (soft corners, a halo where two cross),
-//      the lines drawn the way packages/renderer draws each style (ROUTE). The pointer leaves.
+// compare, neutral tables and lines), the orders diagram beside its .erd-studio files, under a
+// caption band that says one short thing per beat (CAPTIONS). An ad that loops: the diagram moving
+// first, then the three ways to change it, then who reads it.
+//   1. "Data modelling in VS Code": the pointer rests on fct_order and the canvas does what the
+//      product's hover preview does (HOVER): its lines light in the layer colour and carry the moving
+//      arrows.
+//   2. "Draw a relationship": the pointer presses fct_return's date_key, drags the dashed line to
+//      dim_date's date_key and lets go; the New Relationship dialog opens filled in (a picture of the
+//      real one), Create Relationship, and the line is there.
+//   3. "Type it: plain DBML files": fct_order.dbml's text, one column typed into it, and the column
+//      lands on the table.
+//   4. "Or ask your AI": Claude Code in the terminal is asked for a table in plain words; it loads
+//      the erd-studio skill and edits the DBML files; the table and its relationship land.
+//   5. "Business reads it in Confluence": a Confluence page carrying a real render of the same
+//      files, as ERD Studio for Confluence draws them from GitHub.
+// Beats 2 to 5 are staged from a real run (record/heroRun.mjs → record/hero-run.json): the drag was
+// made in the real canvas and the dialog is its picture, the typed line is read back by
+// @erd-studio/core, and the prompt, the files Claude Code wrote, the table and where it put it are
+// that run's. `npm test` checks every constant here against the record.
 // A seamless loop. render(t) is pure, like the video's.
-import { card, clamp, COLORS, easeInOut, easeOut, ICON, node, nodeHeight, path, pointer, seg, toolbar } from './lib.js';
-import { DRAFT_NODE_W, SALES_DRAFT, activityBar, dbmlLine, draftPage, fileTree } from './editor.js';
+import { appIcon, card, caret, clamp, COLORS, easeInOut, easeOut, esc, ICON, node, nodeHeight, path, pointer, seg, toolbar, typed } from './lib.js';
+import { activityBar, dbmlLine, fileTree } from './editor.js';
 
 /** The frame: a caption band (CAP_H) over the VS Code window. */
-export const HERO = { w: 1440, h: 1010, fps: 12, loop: 22 };
+export const HERO = { w: 1440, h: 1010, fps: 12, loop: 22.5 };
 const CAP_H = 130;
 const WIN = { x: 20, y: CAP_H, w: HERO.w - 40, h: HERO.h - CAP_H - 20 };
 const ACTW = 72, SIDEW = 420;
 const EDX = ACTW + SIDEW;                       // editor area left, in body px
-const BODYW = WIN.w - 2;
-
-/** The Explorer rows, in VS Code's order (folders first, then names without regard to case):
- * [depth, kind, label]; depth 0 is the folder's top level. sales.dbml is the file the draft reads. */
-export const HERO_TREE = [
-  [0, 'folder', '.erd-studio'],
-  [1, 'folder', 'main'],
-  [2, 'folder', 'diagrams'],
-  [3, 'dbml', 'orders.dbml'],
-  [2, 'folder', 'relationships'],
-  [3, 'dbml', 'main.dbml'],
-  [2, 'folder', 'tables'],
-  [3, 'folder', 'main'],
-  [4, 'dbml', 'dim_customer.dbml'],
-  [4, 'dbml', 'dim_date.dbml'],
-  [4, 'dbml', 'dim_product.dbml'],
-  [4, 'dbml', 'fct_order.dbml'],
-  [4, 'dbml', 'fct_return.dbml'],
-  [1, 'json', 'layers.json'],
-  [1, 'md', 'README.md'],
-  [0, 'folder', 'docs', true],   // collapsed
-  [0, 'md', 'README.md'],
-  [0, 'dbml', 'sales.dbml'],
-];
-
-// The orders diagram (full node scale, local coordinates; drawn scaled by CS). Laid out like an
-// auto layout leaves it: dimensions left and right, the facts between, with room for the lines.
-const T = [
-  { name: 'dim_customer', x: 0, y: 0, cols: [['PK', 'customer_key', 'INTEGER'], [null, 'customer_id', 'VARCHAR'], [null, 'name', 'VARCHAR']] },
-  { name: 'dim_date', x: 0, y: 640, cols: [['PK', 'date_key', 'INTEGER'], [null, 'date_day', 'DATE'], [null, 'month_name', 'VARCHAR']] },
-  { name: 'fct_order', x: 520, y: 170, cols: [['PK', 'order_id', 'INTEGER'], ['FK', 'customer_key', 'INTEGER'], ['FK', 'date_key', 'INTEGER'], ['FK', 'product_key', 'INTEGER'], [null, 'amount', 'DECIMAL(18,2)']] },
-  { name: 'dim_product', x: 1040, y: 0, cols: [['PK', 'product_key', 'INTEGER'], [null, 'product_name', 'VARCHAR'], [null, 'price', 'DECIMAL(10,2)']] },
-  { name: 'fct_return', x: 1040, y: 540, cols: [['PK', 'return_id', 'INTEGER'], ['FK', 'order_id', 'INTEGER'], ['FK', 'date_key', 'INTEGER'], [null, 'refunded', 'DECIMAL(18,2)']] },
-];
-const NW = 350;
-const tableOf = (name) => T.find((tb) => tb.name === name);
-/** The canvas: local coordinates drawn at CS from (CX, CY) in body px. One body px is one flow px. */
-const CX = EDX + 24, CY = 104, CS = 0.62;
-/** Which tree row is which table (the files light in this order: fct_order last, its text shows). */
-const FILE_ROW = { dim_customer: 8, dim_date: 9, dim_product: 10, fct_return: 12, fct_order: 11 };
-
-const SALES_ROW = 17;
-/** fct_order.dbml as ERD Studio writes it (formatDbml aligns the types; `npm test` checks it). */
-export const FCT_DBML = [
-  'Table main.fct_order {',
-  '  order_id     INTEGER [pk]',
-  "  customer_key INTEGER [foreign_key: 'true']",
-  "  date_key     INTEGER [foreign_key: 'true']",
-  "  product_key  INTEGER [foreign_key: 'true']",
-  '  amount       "DECIMAL(18,2)"',
-  '}',
-];
+const BODYW = WIN.w - 2, BODYH = WIN.h - 66;    // the window's body (card border, 64 px head)
 
 // ---- The loop -----------------------------------------------------------------------------------
-// files light 0.5–3.2 s, fct_order.dbml's text 3.2–6.0 s, the draft 6.4–10.2 s, the hover
-// 10.6–14.8 s, the line styles 14.8–20.4 s, then the plain Curved canvas into the seam.
-const LIGHT0 = 0.5, LIGHT_STEP = 0.55;
-const CODE_IN = 3.2, CODE_OUT = 6.0;
-const DRAFT_IN = 6.4, DRAFT_OUT = 10.2;
+const CLICK = 0.22;
+/** By hand: the press on the FK column, the long press that starts the drag (ModelNode.tsx: 220 ms), the drop, and the click on Create Relationship. */
+export const PRESS_AT = 3.5, LONG_PRESS = 0.22, DROP_AT = 5.05, CREATE_CLICK = 6.2;
+const DRAG_FROM = PRESS_AT + LONG_PRESS;
+/** The relationship is on the canvas from the click's mouse-up. */
+export const CREATE_ON = CREATE_CLICK + CLICK;
+/** As text: fct_order.dbml's card, the line typed into it, and the moment it is saved and the canvas follows. */
+const TEXT_IN = 7.8, TYPE_FROM = 8.4, TYPE_CPS = 16, TEXT_OUT = 11.3;
+export const TYPED_AT = 10;
+/** With AI: the terminal opens, the prompt is typed, each step lands, the canvas follows the last. */
+export const AI = { open: 11.7, type: 12.05, cps: 40, steps: [13.5, 13.9, 14.3, 14.7, 15.1], done: 15.5, close: 16.25 };
+/**
+ * The Confluence page covers the window from CONF_IN to CONF_OUT; behind it the project goes back
+ * to its start. Both are cuts: a cross-fade of the whole window costs the GIF more bytes than a
+ * beat does.
+ */
+const CONF_IN = 17.7, CONF_OUT = 21.8;
 
 /** One caption per beat, ≤ 5 words, from `at` (the first also runs into the seam); `em` is lit in blue. */
 export const CAPTIONS = [
-  { at: 0, text: 'Your model, as DBML files', em: 'DBML files' },
-  { at: 6.2, text: 'Import what you have', em: 'Import' },
-  { at: 10.4, text: 'Hover to trace relationships', em: 'Hover' },
-  { at: 14.9, text: 'Lines: Curved or Hops', em: 'Curved or Hops' },
-  { at: 21.2, text: 'Your model, as DBML files', em: 'DBML files' },
+  { at: 0, text: 'Data modelling in VS Code', em: 'VS Code' },
+  { at: 3.3, text: 'Draw a relationship', em: 'Draw' },
+  { at: 7.6, text: 'Type it: plain DBML files', em: 'DBML files' },
+  { at: 11.6, text: 'Or ask your AI', em: 'AI' },
+  { at: 17.7, text: 'Business reads it in Confluence', em: 'Confluence' },
+  { at: 21.8, text: 'Data modelling in VS Code', em: 'VS Code' },
 ];
 const CAP_FADE = 0.3;
 
@@ -109,23 +75,132 @@ function captionBand(t) {
   return h;
 }
 
+// ---- The real run (record/hero-run.json; `npm test` checks every constant here against it) ------
+/** By hand: the column dragged and the one it was dropped on (record/heroRun.mjs DRAG), [table, column]. */
+export const DRAG = { from: ['fct_return', 'date_key'], to: ['dim_date', 'date_key'] };
+/** The dialog the real canvas opened on the drop, as it drew it (record/heroRun.mjs DIALOG_SHOT, at 2x), and its primary button. */
+export const DIALOG = { file: 'hero-new-relationship.png', w: 420, h: 660, button: 'Create Relationship', buttonAt: { x: 333, y: 633 } };
+/** As text: the line typed into fct_order.dbml (record/heroRun.mjs TYPED_LINE), and the column the canvas reads from it. */
+export const TYPED_LINE = '  quantity     INTEGER';
+export const TYPED_COLUMN = { table: 'fct_order', after: 'product_key', col: [null, 'quantity', 'INTEGER'] };
+/** What Claude Code was asked, word for word (record/heroRun.mjs PROMPT). */
+export const AI_PROMPT = 'Add a dim_store table and link fct_order to it.';
+/**
+ * What it did, as Claude Code lists it: the skill it loaded, then each file it changed, in the
+ * run's order. Left out: the files it only read, a second edit to a file already listed, and its
+ * first try at dim_store.dbml, which the helper's hook paused once before letting it through.
+ */
+export const AI_STEPS = [
+  ['Skill', 'erd-studio'],
+  ['Update', '.erd-studio/main/tables/main/fct_order.dbml'],
+  ['Update', '.erd-studio/main/relationships/main.dbml'],
+  ['Update', '.erd-studio/main/diagrams/orders.dbml'],
+  ['Write', '.erd-studio/main/tables/main/dim_store.dbml'],
+];
+/** The table it added (its dim_store.dbml: the grain and the natural key are its own) and where its diagram edit put it (erd_layout), and the key it added to fct_order, after product_key. */
+export const AI_TABLE = { name: 'dim_store', x: 0, y: 320, grain: 'One row per store', cols: [['PK', 'store_key', 'INTEGER'], ['NK', 'store_id', 'VARCHAR'], [null, 'name', 'VARCHAR']] };
+export const AI_COLUMN = { table: 'fct_order', after: 'product_key', col: ['FK', 'store_key', 'INTEGER'] };
+
+/** Where the project is at t: as it started, with the relationship drawn by hand, with the typed column, or with the AI's table. */
+export const phaseAt = (t) => (t < CREATE_ON || t >= CONF_IN ? 'start' : t < TYPED_AT ? 'dragged' : t < AI.done ? 'typed' : 'after');
+
+// ---- The Explorer ---------------------------------------------------------------------------------
+/**
+ * The folder's rows, in VS Code's order (folders first, then names without regard to case):
+ * [depth, kind, label, closed?, id]; depth 0 is the folder's top level. `store`: Claude Code has
+ * written dim_store.dbml. The folder is the one record/heroRun.mjs makes: the design beside the
+ * code that loads the warehouse; .claude holds the helper's skill.
+ */
+export function heroTree({ store = false } = {}) {
+  const f = (d, kind, label, id) => [d, kind, label, false, id ?? label];
+  return [
+    [0, 'folder', '.claude', true, '.claude'],
+    f(0, 'folder', '.erd-studio'),
+    f(1, 'folder', 'main'),
+    f(2, 'folder', 'diagrams'),
+    f(3, 'dbml', 'orders.dbml', 'diagram'),
+    f(2, 'folder', 'relationships'),
+    f(3, 'dbml', 'main.dbml', 'rels'),
+    f(2, 'folder', 'tables'),
+    f(3, 'folder', 'main', 'tables/main'),
+    f(4, 'dbml', 'dim_customer.dbml', 't:dim_customer'),
+    f(4, 'dbml', 'dim_date.dbml', 't:dim_date'),
+    f(4, 'dbml', 'dim_product.dbml', 't:dim_product'),
+    ...(store ? [f(4, 'dbml', 'dim_store.dbml', 't:dim_store')] : []),
+    f(4, 'dbml', 'fct_order.dbml', 't:fct_order'),
+    f(4, 'dbml', 'fct_return.dbml', 't:fct_return'),
+    f(1, 'json', 'layers.json'),
+    f(1, 'md', 'README.md', 'erd-readme'),
+    f(0, 'folder', 'pipelines'),
+    f(1, 'other', 'load_orders.py'),
+    f(1, 'sql', 'orders.sql'),
+    f(0, 'other', '.gitignore'),
+    f(0, 'md', 'README.md'),
+  ];
+}
+/** The folder at the loop's start. */
+export const HERO_TREE = heroTree();
+const ROW_H = 32, TREE_TOP = 84;
+/** When Claude Code's Write of dim_store.dbml lands (its row appears). */
+const STORE_FILE_AT = AI.steps[4] + 0.25;
+/** Source Control's letters: what each edit left uncommitted ([id, letter, from]). */
+const GIT = [
+  ['rels', 'M', CREATE_ON], ['t:fct_order', 'M', TYPED_AT],
+  ['diagram', 'M', AI.steps[3] + 0.25], ['t:dim_store', 'U', STORE_FILE_AT],
+];
+const GIT_COLOUR = { U: '#73c991', M: '#e2c08d' };
+
+// ---- The orders diagram -----------------------------------------------------------------------------
+// Full node scale, local coordinates (the diagram file's erd_layout), drawn scaled by CS.
+const T = [
+  { name: 'dim_customer', x: 0, y: 0, cols: [['PK', 'customer_key', 'INTEGER'], [null, 'customer_id', 'VARCHAR'], [null, 'name', 'VARCHAR']] },
+  { name: 'dim_date', x: 0, y: 640, cols: [['PK', 'date_key', 'INTEGER'], [null, 'date_day', 'DATE'], [null, 'month_name', 'VARCHAR']] },
+  { name: 'fct_order', x: 520, y: 170, cols: [['PK', 'order_id', 'INTEGER'], ['FK', 'customer_key', 'INTEGER'], ['FK', 'date_key', 'INTEGER'], ['FK', 'product_key', 'INTEGER'], [null, 'amount', 'DECIMAL(18,2)']] },
+  { name: 'dim_product', x: 1040, y: 0, cols: [['PK', 'product_key', 'INTEGER'], [null, 'product_name', 'VARCHAR'], [null, 'price', 'DECIMAL(10,2)']] },
+  { name: 'fct_return', x: 1040, y: 540, cols: [['PK', 'return_id', 'INTEGER'], ['FK', 'order_id', 'INTEGER'], ['FK', 'date_key', 'INTEGER'], [null, 'refunded', 'DECIMAL(18,2)']] },
+];
+const withColumn = (tables, { table, after, col }) => tables.map((tb) => {
+  if (tb.name !== table) return tb;
+  const at = tb.cols.findIndex(([, n]) => n === after) + 1;
+  return { ...tb, cols: [...tb.cols.slice(0, at), col, ...tb.cols.slice(at)] };
+});
+/** The tables in each phase: the typed column, then the AI's key (which it put before it) and table. */
+const T_TYPED = withColumn(T, TYPED_COLUMN);
+const TABLES = { start: T, dragged: T, typed: T_TYPED, after: [...withColumn(T_TYPED, AI_COLUMN), AI_TABLE] };
+const NW = 350;
+/** The canvas: local coordinates drawn at CS from (CX, CY) in body px. One body px is one flow px. */
+const CX = EDX + 24, CY = 104, CS = 0.62;
+
+/** fct_order.dbml as ERD Studio writes it, at the start (formatDbml aligns the types; `npm test` checks it). */
+export const FCT_DBML = [
+  'Table main.fct_order {',
+  '  order_id     INTEGER [pk]',
+  "  customer_key INTEGER [foreign_key: 'true']",
+  "  date_key     INTEGER [foreign_key: 'true']",
+  "  product_key  INTEGER [foreign_key: 'true']",
+  '  amount       "DECIMAL(18,2)"',
+  '}',
+];
+/** The line of FCT_DBML the typed line goes under (product_key's). */
+const TYPED_UNDER = 4;
+
 // ---- The lines, routed and drawn as packages/renderer draws them --------------------------------
 // (`npm test` checks every number here against the renderer's source.)
 //   - The router (EdgeRouting) takes every line around the tables, orthogonally; a line meets a table
 //     at a side slot (not a column row), stops PATH_GAP px short of it, and its `*` / `1` sits
-//     LABEL_OFFSET px from the card. The polylines below are what it leaves for this layout.
-//   - lineStyle.ts LINE_STYLE_OPTIONS: Curved = curved corners + a halo where lines cross; Hops =
-//     rounded corners + a hop where lines cross. Neither line here passes under a table.
+//     LABEL_OFFSET px from the card. The polylines here (RELS) are laid by hand that way.
+//   - lineStyle.ts LINE_STYLE_OPTIONS: Curved (the default, the style drawn throughout) = curved
+//     corners + a halo where lines cross; Hops = rounded corners + a hop where lines cross.
 //   - corners.ts: rounded corners up to 8 px (a quadratic); curved up to 40 px each way (a cubic
 //     quarter, KAPPA), the stub segments given wholly to their corner (less 4 px), at most 2:1, and
 //     shrunk to keep 6 px from a card.
-//   - pathRender.ts: at a crossing the more horizontal line is "over". Hops: the over line jumps the
-//     under one with a semicircle (two cubics); Curved: every line has a casing (7 px, the canvas
-//     colour) and the under line is cut 4.5 px either side. A treatment keeps 3 px from a corner and
-//     4 px from the line's ends, and goes to the other line when it has no room.
-//   - FkEdge.css: lines 2 px, 2.5 px while their table is hovered. Drawn here 1.25× (as the
-//     rest of this frame), and the hops and arrows sized as the product sizes them at 50 % zoom
-//     (hopRadiusFor(0.5), glyphScaleForZoom(0.5)), so they read at the README's 800 px.
+//   - pathRender.ts: at a crossing the more horizontal line is "over". Curved: every line has a
+//     casing (7 px, the canvas colour) and the under line is cut 4.5 px either side. A treatment
+//     keeps 3 px from a corner and 4 px from the line's ends, and goes to the other line when it has
+//     no room.
+//   - FkEdge.css: lines 2 px, 2.5 px while their table is hovered, in the neutral line colour (a
+//     plain folder has no stage colours). Drawn here 1.25×, as the rest of this frame, and the
+//     hover's arrows sized as the product sizes them at 50 % zoom (glyphScaleForZoom(0.5)).
 export const ROUTE = {
   pathGap: 20, labelOffset: 8,
   roundedRadius: 8, curveRadius: 40, curveRatio: 2, curveEndKeep: 4, curveClearance: 6, kappa: 0.5523,
@@ -137,38 +212,52 @@ export const LINE_STYLE_OPTIONS = {
 };
 const STROKE_K = 1.25;
 
-/** Flow px of a table's box. */
-const RECTS = T.map((tb) => ({ id: tb.name, x: tb.x * CS, y: tb.y * CS, w: NW * CS, h: nodeHeight(tb.cols.length, false) * CS }));
-/** A point on a table's side: `at` 0..1 along it. */
+/** Flow px of each table's box. */
+const rectsOf = (tables) => tables.map((tb) => ({ id: tb.name, x: tb.x * CS, y: tb.y * CS, w: NW * CS, h: nodeHeight(tb.cols.length, !!tb.grain) * CS }));
+const RECTS = Object.fromEntries(Object.entries(TABLES).map(([k, tables]) => [k, rectsOf(tables)]));
+/** A point on a table's side, `at` flow px along it from its top or left end. */
 function anchor(rects, name, side, at) {
   const r = rects.find((x) => x.id === name);
-  if (side === 'left' || side === 'right') return { x: side === 'left' ? r.x : r.x + r.w, y: r.y + r.h * at, side };
-  return { x: r.x + r.w * at, y: side === 'top' ? r.y : r.y + r.h, side };
+  if (side === 'left' || side === 'right') return { x: side === 'left' ? r.x : r.x + r.w, y: r.y + at, side };
+  return { x: r.x + at, y: side === 'top' ? r.y : r.y + r.h, side };
 }
 const OUT = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
 const push = (a, d) => ({ x: a.x + OUT[a.side][0] * d, y: a.y + OUT[a.side][1] * d });
 
 /**
- * The relationships: each from the FK table (`*`, the path's start) to the key's table (`1`), with
- * the router's channel x for the line's vertical run. Many-to-one: the arrows run against the path.
+ * The relationships: each from the FK's table (`*`, the path's start) to the key's table (`1`), by
+ * the sides the product's router takes for this layout in each phase (seen in the real canvas with
+ * the run's files: fct_order's side to dim_customer's bottom, its top to dim_product's side, its
+ * bottom to dim_date; fct_return's side to fct_order's bottom, and to its side from fct_return's
+ * top once dim_store is there; the two straight lines). One corner each, where the two ends'
+ * directions meet; none when they face each other on one level.
  */
-const RELS = [
-  { from: ['fct_order', 'left', 0.37], to: ['dim_customer', 'right', 0.5], via: 270 },
-  { from: ['fct_order', 'left', 0.78], to: ['dim_date', 'right', 0.62], via: 270 },
-  { from: ['fct_order', 'right', 0.78], to: ['dim_product', 'left', 0.5], via: 584 },
-  { from: ['fct_return', 'left', 0.28], to: ['fct_order', 'right', 0.3], via: 614 },
-  { from: ['fct_return', 'left', 0.58], to: ['dim_date', 'right', 0], via: null },   // straight across, level with its start
-];
+const MID = NW * CS / 2;
+const R_CUSTOMER = { from: ['fct_order', 'left', 70], to: ['dim_customer', 'bottom', MID] };
+const R_PRODUCT = { from: ['fct_order', 'top', MID], to: ['dim_product', 'left', 64] };
+const R_DATE = { from: ['fct_order', 'bottom', 88], to: ['dim_date', 'right', 85] };
+const R_RETURN = { from: ['fct_return', 'left', 50], to: ['fct_order', 'bottom', 128] };
+/** The one drawn by hand: straight across, fct_return's side to dim_date's. */
+const R_DRAWN = { from: ['fct_return', 'left', 105], to: ['dim_date', 'right', 43] };
+/** The AI's: straight across, fct_order's side to dim_store's. */
+const R_STORE = { from: ['fct_order', 'left', 170], to: ['dim_store', 'right', 77] };
+const RELS = {
+  start: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN],
+  dragged: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN, R_DRAWN],
+  typed: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN, R_DRAWN],
+  after: [R_CUSTOMER, R_PRODUCT, R_DATE, { from: ['fct_return', 'top', MID], to: ['fct_order', 'right', 150] }, R_DRAWN, R_STORE],
+};
 const buildLines = (rels, rects) => rels.map((r) => {
   const [fn, fs, fa] = r.from;
   const [tn, ts, ta] = r.to;
   const sa = anchor(rects, fn, fs, fa), ea = anchor(rects, tn, ts, ta);
-  if (r.via === null) ea.y = sa.y;
   const s = push(sa, ROUTE.pathGap), e = push(ea, ROUTE.pathGap);
-  const pts = r.via === null ? [s, e] : [s, { x: r.via, y: s.y }, { x: r.via, y: e.y }, e];
+  const horizontal = (side) => side === 'left' || side === 'right';
+  const pts = horizontal(fs) !== horizontal(ts) ? [s, horizontal(fs) ? { x: e.x, y: s.y } : { x: s.x, y: e.y }, e] : [s, e];
   return { id: `${fn}-${tn}`, from: fn, to: tn, cardinality: 'many-to-one', pts, many: push(sa, ROUTE.labelOffset), one: push(ea, ROUTE.labelOffset) };
 });
-export const LINES = buildLines(RELS, RECTS);
+/** Each phase's lines, and how they are drawn. */
+export const LINES = Object.fromEntries(Object.keys(RELS).map((k) => [k, buildLines(RELS[k], RECTS[k])]));
 
 /** corners.ts cornerRadii: how much of each segment each corner takes. */
 function cornerRadii(pts, mode, rects) {
@@ -327,30 +416,10 @@ function renderOne(pts, corners, radii, treatment, segEvents, half) {
   for (let i = 1; i < flat.length; i++) length += Math.hypot(flat[i].x - flat[i - 1].x, flat[i].y - flat[i - 1].y);
   return { d, strokeD: sd, flat, length };
 }
-/** Each style's drawn lines, worked out once. */
-export const DRAWN = { curved: renderLines('curved'), hops: renderLines('hops') };
-
-/**
- * The draft page's diagram (Import DBML…'s draft of sales.dbml) is the same renderer in a read-only
- * canvas, so it draws Curved lines too: SALES_DRAFT's tables (editor.js, DRAFT_NODE_W wide, drawn at
- * DRAFT_SCALE), routed around its cards. Its relationships are SALES_DRAFT.rels, in that order.
- */
-const DRAFT_SCALE = 0.6;
-const DRAFT_RECTS = SALES_DRAFT.tables.map((tb) => ({ id: tb.name, x: tb.x * DRAFT_SCALE, y: tb.y * DRAFT_SCALE, w: DRAFT_NODE_W * DRAFT_SCALE, h: nodeHeight(tb.cols.length, false) * DRAFT_SCALE }));
-const DRAFT_RELS = [
-  { from: ['fct_sale', 'left', 0.3], to: ['dim_store', 'right', 0.5], via: 270 },
-  { from: ['fct_sale', 'left', 0.75], to: ['dim_staff', 'right', 0.5], via: 270 },
-  { from: ['fct_sale', 'right', 0.3], to: ['dim_calendar', 'left', 0.5], via: 594 },
-  { from: ['fct_refund', 'left', 0.5], to: ['fct_sale', 'right', 0.75], via: 594 },
-];
-export const DRAFT_LINES = buildLines(DRAFT_RELS, DRAFT_RECTS);
-export const DRAFT_DRAWN = renderLines('curved', DRAFT_LINES, DRAFT_RECTS);
-/** The draft's lines, for draftPage: in its scaled diagram, so drawn at 1 / DRAFT_SCALE in flow px. */
-const DRAFT_EDGES = (() => {
-  let h = '';
-  for (const [i, line] of DRAFT_LINES.entries()) h += drawLine(line, DRAFT_DRAWN[i], { halo: true, colour: COLORS.neutralLine, width: 2, lineOp: 1, labelOp: 1, glyphs: [] });
-  return `<svg class="abs" style="left:0;top:0;overflow:visible" width="1" height="1"><g transform="scale(${(1 / DRAFT_SCALE).toFixed(4)})">${h}</g></svg>`;
-})();
+/** The line style in use throughout: the default (the toolbar's switch shows it chosen). */
+export const LINE_STYLE = 'curved';
+export const LINE_STYLES = ['curved', 'hops'];
+export const DRAWN = Object.fromEntries(Object.keys(LINES).map((k) => [k, renderLines(LINE_STYLE, LINES[k], RECTS[k])]));
 
 // ---- The hover preview, as packages/renderer draws it in a plain folder -----------------------
 //   - hoverIntent.ts: a table becomes the focus 120 ms after the pointer comes to rest on it, 60 ms
@@ -378,33 +447,43 @@ export const FLOW = { speed: 56, spacing: 90, minGlyphs: 2, maxGlyphs: 4, minDur
 export const CHEVRON_D = 'M -4,-4.5 L 4,0 L -4,4.5 L -1.75,0 Z';
 const GLYPH_SCALE = 2;
 
-// ---- The line style switch (webview/components/Toolbar/LineStyleSwitch.tsx) ---------------------
-// Curved (the default) then Hops, each a 16 px glyph: a line turning a soft corner, a line hopping
-// another. The chosen one takes the button colours; the other is at 0.7 until hovered.
-export const LINE_STYLES = ['curved', 'hops'];
-/** Body px of each option's centre, as the toolbar lays them out (measured from a still). */
-export const SWITCH_AT = { curved: { x: 790, y: 49 }, hops: { x: 832, y: 49 } };
-const HOPS_CLICK = 15.95, CURVED_CLICK = 18.85, CLICK = 0.22;
-/** The line style at t: Hops from the first click (mouse up) to the second. */
-export const styleAt = (t) => (t >= HOPS_CLICK + CLICK && t < CURVED_CLICK + CLICK ? 'hops' : 'curved');
 
-/** The pointer (body px): in from below the window, rests on fct_order's header, then on
- * dim_customer's, up to the toolbar's switch (Hops, then Curved), and out past the right edge. */
+// ---- The pointer ------------------------------------------------------------------------------------
+/** A column row's centre in body px. */
+const rowAt = (tables, [table, column]) => {
+  const tb = tables.find((x) => x.name === table), i = tb.cols.findIndex(([, n]) => n === column);
+  return { x: CX + tb.x * CS + NW * CS / 2, y: CY + (tb.y + 62 + (tb.grain ? 42 : 0) + 46 * i + 23) * CS };
+};
+const SRC = rowAt(T, DRAG.from), DST = rowAt(T, DRAG.to);
+/** The dialog: the real one's picture, drawn DIALOG_K× at the top centre of the canvas, as the product places it. */
+const DIALOG_K = 1.12;
+const DLG = { x: Math.round(EDX + (BODYW - EDX) / 2 - DIALOG.w * DIALOG_K / 2), y: 26, w: DIALOG.w * DIALOG_K, h: DIALOG.h * DIALOG_K };
+export const CREATE_AT = { x: DLG.x + DIALOG.buttonAt.x * DIALOG_K, y: DLG.y + DIALOG.buttonAt.y * DIALOG_K };
+const ON_FACT = { x: CX + 520 * CS + 150, y: CY + 170 * CS + 20 };
+/**
+ * The pointer (body px), one visit: in from below the window, a rest on fct_order's header (the
+ * hover), across to fct_return's date_key (pressed as it arrives), the drag to dim_date's date_key,
+ * the drop, down to Create Relationship, its click, and out past the right edge under the tables.
+ */
 export const HOVER_PATH = [
-  { t: 10.6, x: 1250, y: 860 }, { t: 11.3, x: 960, y: 230 }, { t: 12.9, x: 960, y: 230 },
-  { t: 13.4, x: 690, y: 126 }, { t: 14.7, x: 690, y: 126 },
-  { t: 15.6, x: SWITCH_AT.hops.x + 10, y: SWITCH_AT.hops.y + 9 }, { t: 18.4, x: SWITCH_AT.hops.x + 10, y: SWITCH_AT.hops.y + 9 },
-  { t: 18.7, x: SWITCH_AT.curved.x + 10, y: SWITCH_AT.curved.y + 9 }, { t: 19.5, x: SWITCH_AT.curved.x + 10, y: SWITCH_AT.curved.y + 9 },
-  { t: 20.4, x: 1470, y: 70 },
+  { t: 0.25, x: 1250, y: 860 }, { t: 0.95, ...ON_FACT }, { t: 2.75, ...ON_FACT },
+  { t: PRESS_AT, x: SRC.x - 90, y: SRC.y + 4 }, { t: DRAG_FROM + 0.1, x: SRC.x - 90, y: SRC.y + 4 },
+  { t: DROP_AT - 0.25, x: DST.x + 20, y: DST.y + 4 }, { t: DROP_AT + 0.2, x: DST.x + 20, y: DST.y + 4 },
+  { t: CREATE_CLICK - 0.2, x: CREATE_AT.x + 14, y: CREATE_AT.y + 6 }, { t: CREATE_CLICK + 0.45, x: CREATE_AT.x + 14, y: CREATE_AT.y + 6 },
+  { t: 7.4, x: 1470, y: 770 },
 ];
-const press = (t) => (t >= HOPS_CLICK && t < HOPS_CLICK + CLICK ? (t - HOPS_CLICK) / CLICK : t >= CURVED_CLICK && t < CURVED_CLICK + CLICK ? (t - CURVED_CLICK) / CLICK : 0);
+const press = (t) => (t >= CREATE_CLICK && t < CREATE_ON ? (t - CREATE_CLICK) / CLICK : 0);
+/** True while the column is being dragged: from the long press to the drop. */
+const draggingAt = (t) => t >= DRAG_FROM && t < DROP_AT;
+/** True while the dialog is up: from the drop to the click's mouse-up. */
+const dialogAt = (t) => t >= DROP_AT && t < CREATE_ON;
 
 /** Body px → flow px of the canvas. */
 const toFlow = (p) => ({ x: p.x - CX, y: p.y - CY });
-const tableAt = (p) => { const q = toFlow(p); return RECTS.find((r) => q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h)?.id ?? null; };
+const tableAt = (p) => { const q = toFlow(p); return RECTS.start.find((r) => q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h)?.id ?? null; };
 /** True when the pointer is on a line's 16 px hit area (FkEdge's invisible wider path), off the tables. */
 function onLine(p, li) {
-  const q = toFlow(p), pts = DRAWN.curved[li].flat;
+  const q = toFlow(p), pts = DRAWN.start[li].flat;
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i];
     const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
@@ -416,7 +495,7 @@ function onLine(p, li) {
 /** The tables and lines a table's hover preview keeps bright (computeCanvasFocus, ownLinesOnly). */
 function focusOf(id) {
   if (!id) return null;
-  const lines = LINES.filter((l) => l.from === id || l.to === id);
+  const lines = LINES.start.filter((l) => l.from === id || l.to === id);
   return { node: id, nodes: new Set([id, ...lines.flatMap((l) => [l.from, l.to])]), lines: new Set(lines.map((l) => l.id)) };
 }
 
@@ -428,7 +507,7 @@ export const FOCUS_CHANGES = (() => {
   const changes = [];
   let current = null, enter = null, leave = null, inTable = null, onLines = new Set();
   const commit = (t, id) => { if (id !== current) { current = id; changes.push({ t: +t.toFixed(4), id }); } };
-  const t0 = HOVER_PATH[0].t, t1 = HOVER_PATH.at(-1).t + 1;
+  const t0 = HOVER_PATH[0].t, t1 = PRESS_AT;   // a press ends the preview (and none shows while a column is dragged)
   for (let k = 0; t0 + k / 240 <= t1; k++) {
     const t = t0 + k / 240;
     if (enter && t >= enter.at) { commit(enter.at, enter.id); enter = null; }
@@ -436,7 +515,7 @@ export const FOCUS_CHANGES = (() => {
     const p = path(t, HOVER_PATH);
     const table = tableAt(p);
     // tables sit above the lines: a line under a table takes no pointer events
-    const lines = new Set(table ? [] : LINES.map((l, i) => (onLine(p, i) ? l.id : null)).filter(Boolean));
+    const lines = new Set(table ? [] : LINES.start.map((l, i) => (onLine(p, i) ? l.id : null)).filter(Boolean));
     const bright = focusOf(current)?.lines ?? new Set();
     if (table !== inTable) {
       if (inTable) {                     // mouseleave: drop a pending enter, clear after the grace
@@ -454,6 +533,7 @@ export const FOCUS_CHANGES = (() => {
     for (const id of onLines) if (!lines.has(id) && bright.has(id) && !table && current) leave = { at: t + HOVER.leaveGrace };   // leave()
     onLines = lines;
   }
+  commit(PRESS_AT, null);
   return changes;
 })();
 
@@ -516,92 +596,205 @@ function drawLine(line, drawn, { halo, colour, width, lineOp, labelOp, glyphs })
   return h + label('*', { x: line.many.x, y: line.many.y + 3 }, 24) + label('1', line.one, 17);
 }
 
-/** The diagram's lines (in flow px, under the tables), in the style and hover state at t. */
+
+/** The canvas's lines at t (flow px, under the tables), with the hover's colour and arrows while it is on. */
 function linesSvg(t, f) {
-  const style = styleAt(t);
-  const drawn = DRAWN[style];
-  const halo = LINE_STYLE_OPTIONS[style].crossings === 'halo';
+  const phase = phaseAt(t);
+  const lines = LINES[phase], drawn = DRAWN[phase];
   let h = '';
-  for (const [i, line] of LINES.entries()) {
+  for (const [i, line] of lines.entries()) {
     const on = !!f.now?.lines.has(line.id);
+    // a line just made: by hand (from the click), by the AI (as its last edit lands)
+    const since = line.to === AI_TABLE.name ? AI.done : line.from === DRAG.from[0] && line.to === DRAG.to[0] ? CREATE_ON : null;
+    const fresh = since === null ? 0 : Math.sin(Math.PI * seg(t, since, since + 1.5));
+    if (fresh > 0) h += `<path d="${drawn[i].d}" fill="none" stroke="${since === AI.done ? '#22c55e' : '#60a5fa'}" stroke-width="${(9 * fresh).toFixed(2)}" stroke-linecap="round" opacity="${(0.55 * fresh).toFixed(3)}"/>`;
     h += drawLine(line, drawn[i], {
-      halo,
+      halo: true,
       colour: on ? HOVER.layerColour : COLORS.neutralLine,
       width: on ? 2.5 : 2,
-      lineOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.lineOpacity)),
-      labelOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.labelOpacity)),
+      lineOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.lineOpacity)) * (since === null ? 1 : easeOut(seg(t, since, since + 0.3))),
+      labelOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.labelOpacity)) * (since === null ? 1 : easeOut(seg(t, since, since + 0.3))),
       glyphs: on ? flowGlyphs(drawn[i], line, t) : [],
     });
   }
   return `<svg class="abs" style="left:${CX}px;top:${CY}px;overflow:visible" width="1" height="1">${h}</svg>`;
 }
 
-function ordersCanvas(t) {
-  const lit = (name) => {
-    const k = Object.keys(FILE_ROW).indexOf(name);
-    const at = LIGHT0 + k * LIGHT_STEP;
-    const last = k === Object.keys(FILE_ROW).length - 1;
-    return Math.min(easeOut(seg(t, at, at + 0.25)), 1 - seg(t, at + LIGHT_STEP, at + LIGHT_STEP + 0.3) * (last ? 0 : 1)) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
-  };
-  const f = focusAt(t);
-  let inner = '';
-  for (const tb of T) {
-    const g = lit(tb.name);
-    const shadow = g > 0
-      ? `0 0 0 ${(5 * g).toFixed(1)}px rgba(96,165,250,${(0.55 * g).toFixed(3)}),`
-      : f.now?.node === tb.name ? `0 0 0 ${(3 / CS).toFixed(1)}px ${HOVER.ring},` : '';
-    const op = faded(t, f, (x) => (!x || x.nodes.has(tb.name) ? 1 : HOVER.tableOpacity));
-    const style = `${shadow ? `box-shadow:${shadow}0 18px 44px #0009;` : ''}${op < 1 ? `opacity:${op.toFixed(3)};` : ''}`;
-    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, cols: tb.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style });
-  }
+// ---- By hand: the drag, as the canvas draws it ----------------------------------------------------
+//   - ModelNode.tsx: a long press on a column (220 ms) starts the drag; the pressed row gets a 2 px
+//     inset outline in the focus colour (ModelNode.css `--dragging`), the row under the pointer the
+//     drop target's fill and glow (`--drop-target`).
+//   - DragLine.tsx / .css: a straight dashed line (8 4, 2 px, --edge-design: the Logical blue, on a
+//     neutral canvas too) from the pressed row's centre to the pointer, with an arrow head.
+//   - The drop opens New Relationship filled in (NewFkDialog.tsx), top centre of the canvas; its
+//     Create Relationship button adds the relationship. Seen and photographed in the real canvas
+//     (record/heroRun.mjs).
+export const DRAG_LINE = { colour: '#60a5fa', dash: '8 4', width: 2, focus: '#007fd4' };
+function dragLine(t) {
+  if (!draggingAt(t)) return '';
   const p = path(t, HOVER_PATH);
-  const overSwitch = t >= HOVER_PATH[0].t && t <= HOVER_PATH.at(-1).t
-    ? LINE_STYLES.find((s) => Math.abs(p.x - SWITCH_AT[s].x) <= 20 && Math.abs(p.y - SWITCH_AT[s].y) <= 17) ?? null : null;
-  let h = `<div class="abs grid-bg" style="left:${EDX}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
+  const a = Math.atan2(p.y - SRC.y, p.x - SRC.x), len = Math.hypot(p.x - SRC.x, p.y - SRC.y);
+  if (len < 12) return '';
+  const head = `M0 0 L-13 -6 L-13 6 Z`;
+  return `<svg class="abs" style="left:0;top:0;overflow:visible" width="1" height="1"><line x1="${SRC.x.toFixed(1)}" y1="${SRC.y.toFixed(1)}" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="${DRAG_LINE.colour}" stroke-width="${DRAG_LINE.width * STROKE_K * 1.2}" stroke-dasharray="${DRAG_LINE.dash.split(' ').map((d) => d * 1.6).join(' ')}" opacity=".9"/>
+    <path d="${head}" fill="${DRAG_LINE.colour}" transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) rotate(${(a * 180 / Math.PI).toFixed(1)})"/></svg>`;
+}
+function dialog(t) {
+  if (!dialogAt(t)) return '';
+  const op = easeOut(seg(t, DROP_AT, DROP_AT + 0.2));
+  return `<div class="abs" style="left:${DLG.x}px;top:${(DLG.y + 10 * (1 - op)).toFixed(1)}px;width:${DLG.w}px;height:${DLG.h}px;border-radius:9px;overflow:hidden;box-shadow:0 24px 60px #000c;opacity:${op.toFixed(3)}"><img src="/video/player/assets/${DIALOG.file}" width="${DLG.w}" height="${DLG.h}" style="display:block;width:${DLG.w}px;height:${DLG.h}px"></div>`;
+}
+
+/** The terminal panel's height: its tab row, the prompt and one row per step. */
+const TERM = { head: 36, row: 26, pad: 16 };
+const TERM_H = TERM.head + TERM.pad + TERM.row * (1 + AI_STEPS.length) + 6;
+/** How far the terminal is open at t (0..1). */
+const termOpen = (t) => easeOut(seg(t, AI.open, AI.open + 0.3)) * (1 - easeInOut(seg(t, AI.close, AI.close + 0.35)));
+const PROMPT_END = AI.type + AI_PROMPT.length / AI.cps;
+
+/** Claude Code in the integrated terminal: the prompt typed, then the skill and each file it changed. */
+function terminal(t) {
+  const open = termOpen(t);
+  if (open <= 0) return '';
+  let rows = `<div style="display:flex;align-items:center;gap:10px;height:${TERM.row}px;white-space:pre"><span style="color:var(--text-2)">&gt;</span><span>${esc(typed(AI_PROMPT, t, AI.type, AI.cps))}</span>${t < AI.steps[0] ? caret(t, PROMPT_END) : ''}</div>`;
+  AI_STEPS.forEach(([verb, target], i) => {
+    const at = AI.steps[i];
+    if (t < at) return;
+    const done = t >= at + 0.3;
+    rows += `<div style="display:flex;align-items:center;gap:10px;height:${TERM.row}px;white-space:pre;opacity:${easeOut(seg(t, at, at + 0.2)).toFixed(3)}"><span style="width:9px;height:9px;border-radius:50%;background:${done ? 'var(--green)' : 'var(--text-2)'}"></span><span>${verb}<span style="color:var(--text-2)">(${esc(target)})</span></span></div>`;
+  });
+  return `<div class="abs" style="left:${EDX}px;right:0;bottom:${(-(1 - open) * TERM_H).toFixed(1)}px;height:${TERM_H}px;background:#131517;border-top:1px solid #34363d;box-shadow:0 -14px 34px #0007">
+      <div style="height:${TERM.head}px;display:flex;align-items:center;gap:26px;padding:0 20px;font-size:15px;font-weight:600;letter-spacing:.06em;color:var(--text-3);white-space:nowrap">
+        <span>PROBLEMS</span><span>OUTPUT</span><span style="color:var(--text);box-shadow:0 2px 0 var(--text);padding:8px 0">TERMINAL</span><span style="flex:1"></span>
+        <span style="display:flex;align-items:center;gap:8px;letter-spacing:0;font-size:16px;color:var(--text-2)"><span style="color:var(--claude);display:flex">${ICON.claude({ size: 18 })}</span>Claude Code</span></div>
+      <div class="mono" style="padding:${TERM.pad / 2}px 20px 0;font-size:18px;color:var(--text)">${rows}</div></div>`;
+}
+
+/** fct_order.dbml's text in a card at the canvas's bottom right, the new line typed into it. */
+function textCard(t) {
+  if (t < TEXT_IN || t >= TEXT_OUT + 0.3) return '';
+  const op = Math.min(1, easeOut(seg(t, TEXT_IN, TEXT_IN + 0.3))) * (1 - seg(t, TEXT_OUT, TEXT_OUT + 0.3));
+  const typing = t >= TYPE_FROM, end = TYPE_FROM + TYPED_LINE.length / TYPE_CPS, saved = t >= TYPED_AT;
+  const lines = [...FCT_DBML.slice(0, TYPED_UNDER + 1), ...(typing ? [null] : []), ...FCT_DBML.slice(TYPED_UNDER + 1)];
+  const body = lines.map((l, i) => {
+    const mine = l === null;
+    const text = mine ? `${dbmlLine(typed(TYPED_LINE, t, TYPE_FROM, TYPE_CPS))}${saved ? '' : caret(t, end)}` : dbmlLine(l);
+    return `<div style="display:flex;height:28px;align-items:center;${mine ? `background:rgba(96,165,250,${saved ? '.2' : '.1'});box-shadow:inset 4px 0 0 #60a5fa` : ''}"><span style="width:26px;text-align:right;margin-right:16px;color:var(--line-no)">${i + 1}</span><span style="white-space:pre">${text}</span></div>`;
+  }).join('');
+  const dot = typing && !saved ? '<span style="width:10px;height:10px;border-radius:50%;background:var(--text-2)"></span>' : saved ? `<span style="color:${GIT_COLOUR.M};font-weight:700">M</span>` : '';
+  return `<div class="abs" style="right:24px;bottom:22px;width:560px;border-radius:12px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:0 18px 48px #000c;overflow:hidden;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
+      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 18 })}</span>.erd-studio/main/tables/main/fct_order.dbml<span style="flex:1"></span>${dot}</div>
+      <div class="mono" style="padding:8px 0 10px 4px;font-size:17px">${body}</div></div>`;
+}
+
+function ordersCanvas(t) {
+  const phase = phaseAt(t);
+  const f = focusAt(t);
+  // what an edit just put on the canvas: lit as it lands, then at rest
+  const lit = (since, hold) => (t >= since ? 0.3 + 0.7 * (1 - seg(t, since + hold, since + hold + 0.8)) : 0);
+  const typedGlow = phase === 'typed' || phase === 'after' ? lit(TYPED_AT, 1) * (phase === 'after' ? 0 : 1) : 0;
+  const aiGlow = phase === 'after' ? lit(AI.done, 1.2) : 0;
+  const aiIn = phase === 'after' ? easeOut(seg(t, AI.done, AI.done + 0.35)) : 0;
+  const dragging = draggingAt(t), pressed = t >= PRESS_AT && t < DROP_AT;
+  const p = path(t, HOVER_PATH);
+  const overTarget = dragging && Math.abs(p.x - DST.x) <= NW * CS / 2 && Math.abs(p.y - DST.y) <= 23 * CS;
+  let inner = '';
+  for (const tb of TABLES[phase]) {
+    const isNew = tb.name === AI_TABLE.name;
+    const shadow = isNew ? `0 0 0 ${(5 * aiGlow).toFixed(1)}px rgba(34,197,94,${(0.6 * aiGlow).toFixed(3)}),`
+      : f.now?.node === tb.name ? `0 0 0 ${(3 / CS).toFixed(1)}px ${HOVER.ring},` : '';
+    const op = isNew ? aiIn : faded(t, f, (x) => (!x || x.nodes.has(tb.name) ? 1 : HOVER.tableOpacity));
+    const cols = tb.cols.map(([key, name, type]) => {
+      const is = ([table, column]) => table === tb.name && column === name;
+      const rowStyle = is(DRAG.from) && pressed ? `box-shadow:inset 0 0 0 ${(2 / CS).toFixed(1)}px ${DRAG_LINE.focus};opacity:${dragging ? 0.6 : 1}`
+        : is(DRAG.to) && overTarget ? `background:rgba(0,127,212,.18);box-shadow:inset 0 0 0 ${(2 / CS).toFixed(1)}px ${DRAG_LINE.focus}`
+        : is([TYPED_COLUMN.table, TYPED_COLUMN.col[1]]) && typedGlow > 0 ? `background:rgba(96,165,250,${(0.22 * typedGlow).toFixed(3)});box-shadow:inset 5px 0 0 rgba(96,165,250,${typedGlow.toFixed(3)})`
+        : is([AI_COLUMN.table, AI_COLUMN.col[1]]) && aiGlow > 0 ? `background:rgba(34,197,94,${(0.2 * aiGlow).toFixed(3)});box-shadow:inset 5px 0 0 rgba(34,197,94,${aiGlow.toFixed(3)})` : undefined;
+      return { key: key ?? undefined, name, type, rowStyle };
+    });
+    const style = `${shadow ? `box-shadow:${shadow}0 18px 44px #0009;` : ''}${op < 1 ? `opacity:${op.toFixed(3)};` : ''}`;
+    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, grain: tb.grain, cols, style });
+  }
+  return `<div class="abs grid-bg" style="left:${EDX}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
     ${linesSvg(t, f)}
     <div class="abs" style="left:${CX}px;top:${CY}px;transform-origin:0 0;transform:scale(${CS})">${inner}</div>
-    ${toolbar({ x: EDX + 20, y: 16, logicalOnly: true, layout: 'idle', add: 'idle', lineStyle: styleAt(t), lineStyleHover: overSwitch })}`;
-  // fct_order.dbml's text, bottom right
-  if (t >= CODE_IN && t < CODE_OUT + 0.3) {
-    const op = Math.min(1, easeOut(seg(t, CODE_IN, CODE_IN + 0.3))) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
-    const body = FCT_DBML.map((l, i) => `<div style="display:flex;height:28px;align-items:center"><span style="width:26px;text-align:right;margin-right:16px;color:var(--line-no)">${i + 1}</span><span style="white-space:pre">${dbmlLine(l)}</span></div>`).join('');
-    h += `<div class="abs" style="right:24px;bottom:22px;width:560px;border-radius:12px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:0 18px 48px #000c;overflow:hidden;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
-      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 18 })}</span>.erd-studio/main/tables/main/fct_order.dbml</div>
-      <div class="mono" style="padding:8px 0 10px 4px;font-size:17px">${body}</div></div>`;
-  }
-  return h;
+    ${toolbar({ x: EDX + 20, y: 16, logicalOnly: true, layout: 'idle', add: 'idle', lineStyle: LINE_STYLE })}
+    ${dragLine(t)}${dialog(t)}${textCard(t)}${terminal(t)}`;
 }
 
 function explorer(t) {
-  const lit = (i) => {
-    if (i === SALES_ROW) return easeOut(seg(t, DRAFT_IN - 0.3, DRAFT_IN)) * (1 - seg(t, DRAFT_OUT, DRAFT_OUT + 0.35));
-    const names = Object.keys(FILE_ROW);
-    const k = names.findIndex((n) => FILE_ROW[n] === i);
-    if (k < 0) return 0;
-    const at = LIGHT0 + k * LIGHT_STEP;
-    return Math.min(easeOut(seg(t, at, at + 0.25)), 1 - seg(t, at + LIGHT_STEP, at + LIGHT_STEP + 0.3) * (k < names.length - 1 ? 1 : 0)) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
-  };
+  const live = t < CONF_IN;
+  const rows = heroTree({ store: live && t >= STORE_FILE_AT });
+  const at = (id) => rows.findIndex((r) => r[4] === id);
+  const pulse = (from, hold) => easeOut(seg(t, from, from + 0.25)) * (1 - seg(t, from + hold, from + hold + 0.4));
+  const lights = new Map();
+  const add = (id, v) => { const i = at(id); if (i >= 0 && v > 0) lights.set(i, Math.max(lights.get(i) ?? 0, v)); };
+  if (live) {
+    add('t:fct_order', pulse(TEXT_IN, TEXT_OUT - TEXT_IN));
+    for (const [id, , from] of GIT) add(id, pulse(from, id === 't:dim_store' ? 2 : 1.1));
+    for (const [i, id] of [[1, 't:fct_order'], [2, 'rels']]) add(id, pulse(AI.steps[i] + 0.25, 0.9));
+  }
+  const git = new Map(GIT.filter(([, , from]) => live && t >= from).map(([id, letter]) => [at(id), letter]));
+  const tree = fileTree(rows, {
+    top: 0, rowH: ROW_H, width: SIDEW - 10, indent: 22, font: 19,
+    lit: (i) => lights.get(i) ?? 0,
+    colour: (i) => (git.has(i) ? GIT_COLOUR[git.get(i)] : null),
+    badge: (i) => (git.has(i) ? `<span style="flex:1"></span><span style="margin-right:22px;font-size:17px;font-weight:700;color:${GIT_COLOUR[git.get(i)]}">${git.get(i)}</span>` : ''),
+  });
   return `<div class="abs" style="left:${ACTW}px;top:0;width:${SIDEW}px;bottom:0;background:#16181b;border-right:1px solid var(--card-border)">
     <div class="abs" style="left:22px;top:16px;font-size:18px;font-weight:700;letter-spacing:.08em;color:var(--text-2)">EXPLORER</div>
     <div class="abs" style="left:14px;top:50px;display:flex;align-items:center;gap:6px;font-size:19px;font-weight:800;letter-spacing:.04em">${ICON.chevDown({ size: 18 })}SHOP-ANALYTICS</div>
-    <div class="abs" style="left:10px;top:0;right:0;bottom:0">${fileTree(HERO_TREE, { top: 84, rowH: 38, width: SIDEW - 10, indent: 24, font: 20, lit })}</div></div>`;
+    <div class="abs" style="left:10px;top:${TREE_TOP}px;right:0;bottom:0;overflow:hidden">${tree}</div></div>`;
+}
+
+// ---- The Confluence page ---------------------------------------------------------------------------
+// ERD Studio for Confluence (the Atlassian Marketplace app, docs/dev/compatibility.md) is a read-only
+// viewer: a macro that reads the committed .erd-studio files from the team's GitHub repo and draws
+// the diagram on a Confluence page. Nothing here claims more: no editing in Confluence, no sync
+// back, no price. The diagram is a real render (assets/confluence-hero.png, `npm run confluence:hero`):
+// the files the real run left (record/hero-run.json, design.after) loaded by @erd-studio/core and
+// drawn by @erd-studio/renderer's ErdCanvas in viewer mode, as the macro runs it, on a light page.
+export const CONFLUENCE = {
+  shot: { file: 'confluence-hero.png', w: 1300, h: 560 },   // confluence-shot.mjs SHOT (at 2x)
+  app: 'ERD Studio for Confluence', readOnly: 'Read-only', title: 'Orders data model',
+  repo: 'shop-analytics', file: '.erd-studio/main/diagrams/orders.dbml',
+  pill: 'For business users: no VS Code needed',
+};
+const L = { page: '#ffffff', bar: '#f7f8f9', line: '#dfe1e6', text: '#172b4d', text2: '#44546f', text3: '#626f86', blue: '#1868db' };
+const LOGO = (f) => `/video/player/assets/logos/${f}`;
+function confluencePage(t) {
+  if (t < CONF_IN || t >= CONF_OUT) return '';
+  const BAR = 56, MHEAD = 50, MX = 28, MW = WIN.w - 2 * MX;
+  const ih = Math.round(MW * CONFLUENCE.shot.h / CONFLUENCE.shot.w), MY = BAR + 96;
+  const land = (at) => easeOut(seg(t, at, at + 0.4));
+  const biz = land(CONF_IN + 1.3), src = Math.sin(Math.PI * seg(t, CONF_IN + 2.2, CONF_IN + 2.9));
+  const chev = `<span style="color:${L.text3};display:flex">${ICON.chevRight({ size: 18, sw: 2.6 })}</span>`;
+  return `<div class="abs" style="left:${WIN.x}px;top:${WIN.y}px;width:${WIN.w}px;height:${WIN.h}px;border-radius:20px;background:${L.page};overflow:hidden;box-shadow:0 30px 80px #000a">
+      <div class="abs" style="left:0;right:0;top:0;height:${BAR}px;background:${L.bar};border-bottom:1px solid ${L.line};display:flex;align-items:center;gap:12px;padding:0 24px;font-size:21px;color:${L.text2};white-space:nowrap">
+        <img src="${LOGO('confluence.svg')}" width="30" height="30" style="display:block;width:30px;height:30px"><span style="font-weight:700;color:${L.text}">Confluence</span>${chev}Data team${chev}Data models</div>
+      <div class="abs" style="left:${MX}px;top:${BAR + 22}px;font-size:40px;font-weight:800;letter-spacing:-.02em;color:${L.text};white-space:nowrap">${CONFLUENCE.title}</div>
+      <div class="abs" style="right:${MX}px;top:${BAR + 28}px;opacity:${biz.toFixed(3)};transform:scale(${(0.9 + 0.1 * biz).toFixed(3)});transform-origin:100% 50%"><span class="pill" style="font-size:22px;padding:7px 18px;gap:9px;background:#dcfff1;border:2px solid #4bce97;color:#216e4e">${ICON.check({ size: 20 })}${CONFLUENCE.pill}</span></div>
+      <div class="abs" style="left:${MX}px;top:${MY}px;width:${MW}px;height:${MHEAD + ih}px;border-radius:10px;overflow:hidden;border:1px solid ${L.line};background:#fff">
+        <div style="height:${MHEAD}px;display:flex;align-items:center;gap:10px;padding:0 10px;background:${L.bar};border-bottom:1px solid ${L.line}">
+          <span class="pill" style="font-size:20px;padding:5px 14px 5px 6px;gap:9px;background:#0b1422;color:#fff">${appIcon(26, 'box-shadow:none;border-radius:6px')}${CONFLUENCE.app}</span><span style="flex:1"></span>
+          <span class="pill" style="font-size:18px;padding:4px 12px;gap:7px;background:#fff;color:${L.text2};border:1px solid ${L.line}">${ICON.lock({ size: 15 })}${CONFLUENCE.readOnly}</span></div>
+        <img src="/video/player/assets/${CONFLUENCE.shot.file}" width="${MW}" height="${ih}" style="display:block;width:${MW}px;height:${ih}px"></div>
+      <div class="abs" style="left:${MX}px;top:${MY + MHEAD + ih + 12}px;display:flex;align-items:center;gap:10px;font-size:20px;color:${L.text3};white-space:nowrap">
+        <img src="${LOGO('github.svg')}" width="24" height="24" style="display:block;width:24px;height:24px;transform:scale(${(1 + 0.3 * src).toFixed(3)})">
+        <span>Drawn from GitHub: ${CONFLUENCE.repo} · main ·</span><span class="mono" style="font-size:18px;color:${L.text2}">${CONFLUENCE.file}</span></div></div>`;
 }
 
 export function render(t) {
   t = ((t % HERO.loop) + HERO.loop) % HERO.loop;
-  const d = easeOut(seg(t, DRAFT_IN, DRAFT_IN + 0.35)) * (1 - seg(t, DRAFT_OUT, DRAFT_OUT + 0.35));
-  let body = ordersCanvas(t);
-  if (d > 0) body += draftPage(SALES_DRAFT, { left: EDX, width: BODYW - EDX, op: d, glow: easeOut(seg(t, DRAFT_IN + 1.2, DRAFT_IN + 1.6)), scale: DRAFT_SCALE, font: 16, edges: DRAFT_EDGES }).html;
-  body += explorer(t) + activityBar('files');
+  let body = ordersCanvas(t) + explorer(t) + activityBar('files');
   // the pointer, on top of everything (the window clips it as it comes in and goes out)
   if (t >= HOVER_PATH[0].t && t <= HOVER_PATH.at(-1).t) {
     const p = path(t, HOVER_PATH);
     body += pointer(p.x, p.y, press(t));
   }
-  const tabs = [{ label: 'orders.dbml', on: d < 0.5 }];
-  if (d > 0) tabs.push({ label: SALES_DRAFT.tab, on: d >= 0.5 });
   return `<div class="abs" style="left:0;top:0;width:${HERO.w}px;height:${CAP_H}px">${captionBand(t)}</div>`
-    + card({ ...WIN, tabs, crumb: d < 0.5 ? '.erd-studio › main › diagrams › orders.dbml' : 'shop-analytics', body });
+    + card({ ...WIN, tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › main › diagrams › orders.dbml', body })
+    + confluencePage(t);
 }
 
 if (typeof document !== 'undefined') {

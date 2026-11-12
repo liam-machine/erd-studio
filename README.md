@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio in VS Code: an orders diagram beside its .dbml files in the Explorer, then the DBML text of fct_order.dbml, a draft imported from sales.dbml, a hovered table's lines with moving arrows, and the lines switched from Curved to Hops." />
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio in VS Code: an orders diagram beside its .dbml files in the Explorer; a hovered table's lines carry moving arrows. A relationship is drawn by hand, by dragging one column onto another. A column typed into fct_order.dbml appears on its table. Claude Code, asked in plain words for a dim_store table, loads the erd-studio skill and edits the DBML files, and the table and its relationship appear on the diagram. Last, a Confluence page shows the same diagram, read-only, drawn from GitHub by ERD Studio for Confluence." />
 </p>
 
 ## What it is
