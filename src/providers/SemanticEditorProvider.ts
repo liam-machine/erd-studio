@@ -267,6 +267,7 @@ import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec'
 import type { TableId } from '../types/tableId';
 import type { TableFileEntry } from '../services/logicalModelService';
 import { tableIdKey, tableIdOfPath } from '../types/tableId';
+import { listInWords, sharedUseSpellingKey, sharedUseSpellingMessage, sharedUseSpellings, type SharedUseSpelling } from '../services/sharedUseSpelling';
 import { tableIdOfEntry } from '../services/tableLibraryIndex';
 import { renameMemberRefs, type DiagramMemberTable } from '../services/diagramMemberTable';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
@@ -379,6 +380,8 @@ interface TableFileOps {
    * `planDbmlLibraryWrites`' `newRefFile`). A YAML write never reads it.
    */
   newRefFile?: NewRefFileChoice;
+  /** DBML only: tables declared with no schema to declare in their schema folder's (Qualify Tables), by identity. */
+  qualify?: TableId[];
 }
 
 /** The open canvas a table file delete anchors on (see deleteTablesWithCascade, #274). */
@@ -819,6 +822,8 @@ export function refreshFailedNote(kind: RefreshKind): FileNote {
 export const OPEN_AS_TEXT_BUTTON = 'Open as Text';
 export const SELECT_DBT_PROJECT_BUTTON = 'Select dbt Project…';
 export const OPEN_BOTH_FILES_BUTTON = 'Open Both Files';
+/** The button that declares tables imported under one spelling in their schema folders' schemas. */
+export const QUALIFY_TABLES_BUTTON = 'Qualify Tables';
 
 /** Open the copy that is used and, beside it, the copy that is ignored. */
 async function openBothFiles(used: string, ignored: string): Promise<void> {
@@ -4912,7 +4917,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Only positions or sticky-note boxes moved (a drag, a layout, a resize):
     // the layout is all that is written, in either storage, and the sidebar
     // trees are told nothing they show changed.
-    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && options.otherDomains === undefined
+    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && !modelFiles?.qualify?.length && options.otherDomains === undefined
       && isLayoutOnlyChange(file.snapshot, file.parsed);
     if (layoutOnly && (file.storage === 'json' || (file.writable !== false && !file.holdsOwnTables))) {
       const written = await this.applyLayoutOnlyEdit(document, file, text, options);
@@ -5252,6 +5257,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       writes = [...tableWrites, ...others, ...settled];
     } catch (err) {
       throw this.refusalOf(err);
+    }
+    // A diagram or relationships file this edit would make import two tables under one spelling (two
+    // `Table adresse` files with no schema, from bqs/ and ccc/): every DBML parser refuses the second line
+    // ([3003]) and a Ref end of that spelling names neither. Offered once: declare them in their schema
+    // folders' schemas in this same edit, else nothing is written.
+    const shared = this.sharedSpellingsAdded(document, primaryText, writes);
+    if (shared.length > 0) {
+      const ids = this.qualifiableTablesOf(shared);
+      if (modelFiles?.qualify === undefined && ids.length > 0) {
+        if (await this.askToQualifyTables(shared, ids)) {
+          return this.applyStorageEdit(document, file, text, { ...options, modelFiles: { ...(modelFiles ?? {}), qualify: ids } }, layoutOnly);
+        }
+        // Nothing written: the canvas goes back to what the files say.
+        if (refreshWebview && webview && !this.disposedWebviews.has(webview)) await this.sendSubjectAreaData(document, webview);
+        return false;
+      }
+      const group = shared[0];
+      throw new EditRefused(`${this.shownSubjectAreaPath(this.semanticAbsoluteOf(group.file))}: ${sharedUseSpellingMessage(group, group.uses[group.uses.length - 1])}`);
     }
     // Any file this edit writes that is open with unsaved changes would be
     // replaced under the user's work: refused by name, before anything is written.
@@ -5650,6 +5673,116 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /** A path relative to the semantic dir, made absolute. */
+  private semanticAbsoluteOf(rel: string): string {
+    return path.join(this.semanticRootDir(), ...rel.split('/'));
+  }
+
+  /**
+   * The `use` spellings the DBML diagram and relationships files of an edit
+   * would import from two different table files (`sharedUseSpellings`) that
+   * they do not already: what the edit adds, never what a file held before.
+   */
+  private sharedSpellingsAdded(document: vscode.TextDocument, primaryText: string, writes: readonly FileWrite[]): Array<SharedUseSpelling & { file: string }> {
+    const root = this.semanticRootDir();
+    const relOf = (p: string): string => path.relative(root, p).split(path.sep).join('/');
+    const files: Array<{ abs: string; before: string | null; after: string }> = [];
+    if (this.isDbmlDocument(document)) files.push({ abs: document.uri.fsPath, before: document.getText(), after: primaryText });
+    for (const w of writes) {
+      if (w.kind === 'delete' || !/\.dbml$/i.test(w.path) || samePath(w.path, document.uri.fsPath)) continue;
+      const kind = classifySemanticFile(relOf(w.path), { tablesDirIsLayer: false }).kind;
+      if (kind !== 'relationships' && kind !== 'diagram') continue;
+      files.push({ abs: w.path, before: w.kind === 'create' ? null : this.openOrDiskText(w.path), after: w.text });
+    }
+    const out: Array<SharedUseSpelling & { file: string }> = [];
+    for (const f of files) {
+      if (f.before === f.after) continue;
+      const rel = relOf(f.abs);
+      const after = sharedUseSpellings(f.after, rel);
+      if (after.length === 0) continue;
+      const before = new Set(f.before === null ? [] : sharedUseSpellings(f.before, rel).map(sharedUseSpellingKey));
+      for (const group of after) if (!before.has(sharedUseSpellingKey(group))) out.push({ ...group, file: rel });
+    }
+    return out;
+  }
+
+  /** The tables of `groups` that Qualify can declare in their folder's schema: every one outside `public/`, once. */
+  private qualifiableTablesOf(groups: readonly SharedUseSpelling[]): TableId[] {
+    const ids = new Map<string, TableId>();
+    for (const group of groups) {
+      for (const use of group.uses) {
+        if (use.id === undefined || use.id.schema.toLowerCase() === 'public') continue;
+        ids.set(tableIdKey(use.id), { schema: use.id.schema, name: use.id.name });
+      }
+    }
+    return [...ids.values()];
+  }
+
+  /** Ask before Qualify rewrites table files: true to qualify, false to write nothing. */
+  private async askToQualifyTables(groups: readonly SharedUseSpelling[], ids: readonly TableId[]): Promise<boolean> {
+    const group = groups[0];
+    const name = group.uses[0].id?.name ?? group.spelling;
+    const files = [...new Set(groups.flatMap((g) => g.uses.map((u) => u.resolved)))];
+    const choice = await vscode.window.showWarningMessage(
+      `${listInWords(files)} ${files.length === 2 ? 'both' : 'all'} declare Table ${group.spelling} with no schema. DBML reads them as one table, so dbdiagram.io and other DBML tools show only one ${name}.`,
+      {
+        modal: true,
+        detail: `Qualify Tables declares ${listInWords(ids.map((id) => `Table ${id.schema}.${id.name}`))} and spells every use line and Ref that names them the same way, in this edit (one undo). Cancel changes nothing.`,
+      },
+      QUALIFY_TABLES_BUTTON,
+    );
+    return choice === QUALIFY_TABLES_BUTTON;
+  }
+
+  /**
+   * Say so, once per session per file, when an opened DBML diagram (or a
+   * relationships file it imports) already imports two tables under one
+   * spelling: written by hand, by another tool, or by ERD Studio 2.0.4 or
+   * older. Offers Qualify Tables, which fixes every such file in one edit.
+   */
+  private warnAboutSharedUseSpellings(document: vscode.TextDocument, webview: vscode.Webview): void {
+    if (this.refreshHolds > 0 || !this.isDbmlDocument(document)) return;
+    const root = this.semanticRootDir();
+    const rel = path.relative(root, document.uri.fsPath).split(path.sep).join('/');
+    const files = [rel];
+    const diagramText = document.getText();
+    const relationships = /^[ \t]*use[ \t]*\*[ \t]*from[ \t]*(['"])(.*?)\1/gm;
+    let m: RegExpExecArray | null;
+    while ((m = relationships.exec(diagramText)) !== null) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[2].toLowerCase().endsWith('.dbml') ? m[2] : `${m[2]}.dbml`));
+      if (classifySemanticFile(target, { tablesDirIsLayer: false }).kind === 'relationships') files.push(target);
+    }
+    const groups: Array<SharedUseSpelling & { file: string }> = [];
+    for (const file of files) {
+      const text = file === rel ? diagramText : this.openOrDiskText(this.semanticAbsoluteOf(file));
+      if (text === null) continue;
+      for (const group of sharedUseSpellings(text, file)) groups.push({ ...group, file });
+    }
+    if (groups.length === 0) return;
+    const key = `${document.uri.fsPath}\0shared-use\0${groups.map((g) => `${g.file}:${sharedUseSpellingKey(g)}`).join('|')}`;
+    if (this.duplicateWarningsShown.has(key)) return;
+    this.duplicateWarningsShown.add(key);
+    const first = groups[0];
+    const ids = this.qualifiableTablesOf(groups);
+    void vscode.window.showWarningMessage(
+      `${first.file}: ${sharedUseSpellingMessage(first, first.uses[first.uses.length - 1], 'canvas')}`,
+      ...(ids.length > 0 ? [QUALIFY_TABLES_BUTTON] : []),
+    ).then(async (choice) => {
+      if (choice !== QUALIFY_TABLES_BUTTON || this.disposedWebviews.has(webview)) return;
+      try {
+        await this.applySubjectAreaEdit(document, () => { /* the tables' headers, use lines and Refs only */ }, {
+          stage: 'logical',
+          webview,
+          modelFiles: { qualify: ids },
+          errorLabel: 'Failed to qualify the tables.',
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!this.disposedWebviews.has(webview)) void webview.postMessage({ type: 'error', payload: { message } });
+      }
+    });
+  }
+
   /**
    * Say so — once per session per file — when this domain uses a name that
    * two files in the library define. Only one of them can be used (names are
@@ -6011,6 +6144,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       timer.phase('reading the diagram and its tables');
       let unifiedDomain = await this.readSubjectAreaTolerantly(document.uri.fsPath, { dbtKeyIndex });
       this.warnAboutDuplicateTables(unifiedDomain, document);
+      this.warnAboutSharedUseSpellings(document, webview);
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's

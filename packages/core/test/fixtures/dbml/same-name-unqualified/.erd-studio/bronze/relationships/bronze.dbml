@@ -1,0 +1,9 @@
+// ERD Studio relationships: Refs only, split across relationships/ files however you like. Every table a Ref names has a use line here.
+use { table adresse }               from '../tables/bqs/adresse.dbml'
+use { table bqs__v_sap_prod_unit2 } from '../tables/bqs/bqs__v_sap_prod_unit2.dbml'
+use { table adresse }               from '../tables/ccc/adresse.dbml'
+
+Ref: bqs__v_sap_prod_unit2.bqs_adresse_id >? adresse.id
+Ref: bqs__v_sap_prod_unit2.ccc_adresse_id >? adresse.adr_id
+Ref: adresse.adr_id >? adresse.id
+Ref: bqs__v_sap_prod_unit2.unit_id >? adresse.nowhere

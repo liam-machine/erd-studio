@@ -1,0 +1,5 @@
+Table adresse {
+  id INT [pk]
+  strasse VARCHAR
+  ort VARCHAR
+}

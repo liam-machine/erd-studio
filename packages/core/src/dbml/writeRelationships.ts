@@ -26,6 +26,7 @@ import { dbmlName } from '../dbmlText.js';
 import { canonicalRelationship } from '../relationships.js';
 import { reverseBareOneToOne } from '../dbmlAttach.js';
 import { classifySemanticFile, dirnamePosix, normalisePosix, relativePosix, resolvePosix } from '../storage.js';
+import { tableIdKey, tableIdOfPath } from '../tableIdentity.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
@@ -91,6 +92,15 @@ export interface DbmlTableText {
    * semantic dir. Absent when no `use` line names it.
    */
   path?: string;
+  /**
+   * Set instead of `path` when the file's `use` lines give this spelling to
+   * two or more different table files (no one line is the end's own): each,
+   * resolved, in line order, with the end's columns (`columns`), so the
+   * table that has them can be told (`DbmlRefEndHint.usePaths`).
+   */
+  paths?: readonly string[];
+  /** The Ref end's columns as written, given with `paths`. */
+  columns?: readonly string[];
 }
 
 /** What {@link editRelationshipsDbml} changes in one relationships file. */
@@ -554,25 +564,45 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
    * The key of a table as the file writes it: what `identify` answers for its name, qualifier and
    * the file its own `use` line imports; without `identify`, the name as written.
    */
-  let keyOf: (table: string, qualifier?: string, path?: string) => string = (table) => table;
+  let keyOf: (table: string, qualifier?: string, path?: string, columns?: readonly string[]) => string = (table) => table;
   /** The file's stored Refs with each end named by its key ({@link keyOf}). */
-  const keyed = (stored: DbmlStoredRef): Relationship[] => (edit.identify ? stored.relationships.map((r) => ({
-    ...r,
-    fromModel: keyOf(r.fromModel, stored.ownerQualifier),
-    toModel: keyOf(r.toModel, stored.targetQualifier),
-  })) : stored.relationships);
+  const keyed = (stored: DbmlStoredRef): Relationship[] => {
+    if (!edit.identify || stored.relationships.length === 0) return stored.relationships;
+    // Each end keyed once, with all its columns (a spelling two use lines share is told apart by them).
+    const owner = keyOf(stored.relationships[0].fromModel, stored.ownerQualifier, undefined, stored.relationships.map((r) => r.fromColumn));
+    const target = keyOf(stored.relationships[0].toModel, stored.targetQualifier, undefined, stored.relationships.map((r) => r.toColumn));
+    return stored.relationships.map((r) => ({ ...r, fromModel: owner, toModel: target }));
+  };
   if (oldText !== null) {
     const reading = readRelationshipsDbml(text, parser);
     if (edit.identify) {
       const identify = edit.identify;
       const folder = dirnamePosix(file);
-      keyOf = (table, qualifier, path) => {
-        const use = path === undefined
-          ? reading.useTables?.find((u) => lower(u.table) === lower(table)
-            && (u.qualifier === undefined ? qualifier === undefined : qualifier !== undefined && lower(u.qualifier) === lower(qualifier)))
-          : undefined;
-        const usePath = path ?? (use ? normalisePosix(resolvePosix(folder, withExtension(use.path))) : undefined);
-        return identify({ name: table, ...(qualifier !== undefined ? { qualifier } : {}), ...(usePath !== undefined ? { path: usePath } : {}) }) ?? table;
+      // Each spelling's table files, in line order, once per file (not per Ref end).
+      const filesBySpelling = new Map<string, string[]>();
+      for (const u of reading.useTables ?? []) {
+        const key = `${u.qualifier === undefined ? '\u0001' : lower(u.qualifier)}\u0000${lower(u.table)}`;
+        const resolved = normalisePosix(resolvePosix(folder, withExtension(u.path)));
+        const list = filesBySpelling.get(key) ?? [];
+        if (!list.includes(resolved)) list.push(resolved);
+        filesBySpelling.set(key, list);
+      }
+      keyOf = (table, qualifier, path, columns) => {
+        const files = path === undefined
+          ? filesBySpelling.get(`${qualifier === undefined ? '\u0001' : lower(qualifier)}\u0000${lower(table)}`) ?? []
+          : [];
+        // The same spelling imported from two or more files ([3003] in every parser): no line is the end's own.
+        const shared = files.length > 1 && new Set(files.map((f) => {
+          const id = tableIdOfPath(f);
+          return id !== undefined ? tableIdKey(id) : lower(f);
+        })).size > 1;
+        const usePath = path ?? (!shared && files.length > 0 ? files[0] : undefined);
+        return identify({
+          name: table,
+          ...(qualifier !== undefined ? { qualifier } : {}),
+          ...(usePath !== undefined ? { path: usePath } : {}),
+          ...(shared ? { paths: files, columns: columns ?? [] } : {}),
+        }) ?? table;
       };
     }
     for (const stored of reading.pending ?? []) {
@@ -1084,7 +1114,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     const roles = sides.map((side) => {
       const parts = endParts(side);
       if (!parts) return undefined;
-      const named = keyOf(parts.table, parts.qualifier);
+      const named = keyOf(parts.table, parts.qualifier, undefined, parts.columns);
       const table = lower(canonical(named));
       const columns = parts.columns.map((c) => lower(columnAfter(canonical(named), c))).join(',');
       const isFrom = table === lower(read.from) && columns === read.fromColumns.map(lower).join(',');
@@ -1123,7 +1153,7 @@ function editRelationships(oldText: string | null, edit: RelationshipsFileEdit):
     for (const side of sides) {
       const parts = endParts(side);
       if (!parts || !side) continue;
-      const named = keyOf(parts.table, parts.qualifier);
+      const named = keyOf(parts.table, parts.qualifier, undefined, parts.columns);
       const table = canonical(named);
       const after = parts.columns.map((c) => columnAfter(table, c));
       if (renamed.has(lower(named)) || isRequalified(named)) {

@@ -70,6 +70,11 @@ export interface TableFileOps {
    * already checked by {@link TableLibraryService.chosenRelationshipsFile}.
    */
   newRefFile?: NewRefFileChoice;
+  /**
+   * DBML only: tables declared with no schema (`Table adresse`) to declare in
+   * their schema folder's (`planDbmlLibraryWrites`' `qualify`), by identity.
+   */
+  qualify?: TableId[];
 }
 
 /**
@@ -1957,10 +1962,11 @@ export class TableLibraryService {
       const text = this.serializeTable(yamlModel, fromName);
       writes.push(this.tableExists(model.name) ? { kind: 'replace', path: modelPath, text } : { kind: 'create', path: modelPath, text });
     }
-    const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0;
+    const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0 || (ops?.qualify?.length ?? 0) > 0;
     if (!anyDbml && !options.dbml) return { writes };
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), {
       ...dbmlOps,
+      ...(ops?.qualify && ops.qualify.length > 0 ? { qualify: ops.qualify } : {}),
       newTableHome: this.dbmlHomeOf(home),
       ...(options.schemaFromSource ? { schemaFromSource: true } : {}),
       ...(ops?.newRefFile ? { newRefFile: ops.newRefFile } : {}),

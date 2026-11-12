@@ -43,6 +43,8 @@ interface EndResolution {
   contested?: string[];
   /** For `ambiguous`: every schema folder the end could mean (the tables' and the file's own use lines'), when the file names more than the tables in scope. */
   schemas?: string[];
+  /** For `ambiguous`: rule 0 decided it (the file's `use` lines give the end's spelling to several files). */
+  spelledTwice?: true;
 }
 
 /** The text a table is named by in its scope: its reference, else its name. */
@@ -90,9 +92,42 @@ function endResolver(
       if (!byPath.has(path)) byPath.set(path, entry);
     }
   }
+  /** Rule 0: an end spelled as several of its file's `use` lines import, each from another table file. */
+  const bySpelledFiles = (wanted: string, usePaths: readonly string[], columns: readonly string[], exists?: (path: string) => boolean): EndResolution => {
+    const named = (e: DbmlAttachTable | undefined): e is DbmlAttachTable =>
+      e !== undefined && (lower(e.table.name) === wanted || (e.dbmlAlias !== undefined && lower(e.dbmlAlias) === wanted));
+    const paths = usePaths.map((p) => normalisePosix(p));
+    const candidates = distinct(paths.map((p) => byPath.get(lower(p))).filter(named));
+    // Neither table is in scope (a diagram showing neither): nothing of this end is drawn here.
+    if (candidates.length === 0) return {};
+    const inScope = new Set(candidates.map(identityOf));
+    // A file of the spelling that is not in scope may be the one the end means, unless it does not exist
+    // (a reader that sees only some of the library learns that by reading it: `contestedUsePaths`).
+    const outOfScope = paths.filter((p) => {
+      const id = tableIdOfPath(p);
+      return !(id !== undefined && inScope.has(tableIdKey(id)));
+    });
+    const unseen = outOfScope.filter((p) => exists?.(p) !== false);
+    const contested = outOfScope.length > 0 ? { contested: outOfScope } : {};
+    const fit = columns.length === 0 ? [] : candidates.filter((e) => {
+      const has = new Set((e.table.columns ?? []).map((c) => (typeof c?.name === 'string' ? lower(c.name) : '')));
+      return columns.every((c) => has.has(lower(c)));
+    });
+    if (unseen.length === 0 && fit.length === 1) return { entry: fit[0], ...contested };
+    const schemas = new Map<string, string>();
+    for (const p of paths) {
+      const id = tableIdOfPath(p);
+      if (id !== undefined && !schemas.has(lower(id.schema))) schemas.set(lower(id.schema), id.schema);
+    }
+    return { ambiguous: candidates, schemas: [...schemas.values()].sort((a, b) => (lower(a) < lower(b) ? -1 : lower(a) > lower(b) ? 1 : 0)), spelledTwice: true, ...contested };
+  };
   return (name, hint, exists) => {
     const wanted = lower(name);
     const named = byName.get(wanted);
+    // 0. The file's `use` lines give this spelling to several tables (`use { table adresse }` from two schema
+    // folders, which every DBML parser refuses with [3003]): no line is the end's own, so the end is the one
+    // of those tables that has every column it names, decided only when all of them are in scope.
+    if (hint?.usePaths !== undefined && hint.usePaths.length > 1) return bySpelledFiles(wanted, hint.usePaths, hint.columns ?? [], exists);
     // 1. The relationships file's own `use` line for this spelling names the table's file.
     if (hint?.usePath !== undefined) {
       const atPath = byPath.get(lower(normalisePosix(hint.usePath)));
@@ -173,6 +208,13 @@ function endResolver(
  * Tables that carry their schema folder (`schema`) can share a name; what
  * the end says beside its name (`hint`) then tells them apart, in order:
  *
+ * 0. when the relationships file's `use` lines give the end's spelling to
+ *    two or more different table files (`hint.usePaths`: two unqualified
+ *    `Table adresse` files imported side by side, which every DBML parser
+ *    refuses with [3003]), the one of those tables that has every column the
+ *    end names (`hint.columns`), when all of them are in scope (or
+ *    `options.exists` says the others do not exist); otherwise none, reported
+ *    as ambiguous. The first such line is never taken for the end's own;
  * 1. the relationships file's own `use` line for the end's spelling names
  *    the table's file (`path`): exact, and what ERD Studio always writes;
  * 2. else the one table whose schema folder, then whose declared schema
@@ -377,8 +419,45 @@ function resolvedUsePath(use: DbmlUseTable, semanticPath: string): string {
   return path;
 }
 
+/** Each file's selective `use` lines' table files by spelling ({@link useKey}), for the spellings two or more files share. */
+const sharedSpellings = new WeakMap<readonly DbmlUseTable[], { from: string; byKey: Map<string, string[]> }>();
+
+/**
+ * The table files of different identities `item`'s own `use` lines import
+ * under the spelling `qualifier.table` (resolved, in line order), when two or
+ * more do: the spelling names none of them alone. Undefined otherwise.
+ */
+function spelledFilesOf(item: DbmlAttachReading, table: string, qualifier: string | undefined): string[] | undefined {
+  const useTables = item.reading.useTables;
+  if (item.semanticPath === undefined || useTables === undefined || useTables.length < 2) return undefined;
+  let known = sharedSpellings.get(useTables);
+  if (known === undefined || known.from !== item.semanticPath) {
+    const all = new Map<string, { paths: string[]; ids: Set<string> }>();
+    for (const use of useTables) {
+      const path = resolvedUsePath(use, item.semanticPath);
+      const id = tableIdOfPath(path);
+      const key = useKey(use.table, use.qualifier);
+      const entry = all.get(key) ?? { paths: [], ids: new Set<string>() };
+      const idKey = id !== undefined ? tableIdKey(id) : lower(path);
+      if (!entry.ids.has(idKey)) {
+        entry.ids.add(idKey);
+        entry.paths.push(path);
+      }
+      all.set(key, entry);
+    }
+    const byKey = new Map<string, string[]>();
+    for (const [key, entry] of all) if (entry.paths.length > 1) byKey.set(key, entry.paths);
+    known = { from: item.semanticPath, byKey };
+    sharedSpellings.set(useTables, known);
+  }
+  return known.byKey.get(useKey(table, qualifier));
+}
+
 function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint; target: EndHint } {
-  const hintOf = (table: string, qualifier: string | undefined): EndHint => {
+  const hintOf = (table: string, qualifier: string | undefined, columns: () => string[]): EndHint => {
+    // Rule 0: a spelling two or more of the file's use lines import from different files is no one line's.
+    const spelled = spelledFilesOf(item, table, qualifier);
+    if (spelled !== undefined) return { ...(qualifier !== undefined ? { qualifier } : {}), usePaths: spelled, columns: columns() };
     const use = item.semanticPath !== undefined ? useTableFor(item.reading.useTables, table, qualifier) : undefined;
     const usePath = use ? resolvedUsePath(use, item.semanticPath!) : undefined;
     // An unqualified end with no use line of its own: which schema folders the file imports its name from.
@@ -393,7 +472,10 @@ function endHints(item: DbmlAttachReading, ref: DbmlStoredRef): { owner: EndHint
       ...(used !== undefined ? { useSchemaNames: used.names, useSchemaPaths: used.paths } : {}),
     };
   };
-  return { owner: hintOf(ref.owner, ref.ownerQualifier), target: hintOf(ref.target, ref.targetQualifier) };
+  return {
+    owner: hintOf(ref.owner, ref.ownerQualifier, () => ref.relationships.map((r) => r.fromColumn)),
+    target: hintOf(ref.target, ref.targetQualifier, () => ref.relationships.map((r) => r.toColumn)),
+  };
 }
 
 /**
@@ -564,7 +646,9 @@ export function attachRelationships(
       for (const [name, end, hint] of [[rels[0].fromModel, owner, ownerHint], [rels[0].toModel, target, targetHint]] as const) {
         if (!end.ambiguous) continue;
         const schemas = end.schemas ?? end.ambiguous.map((e) => e.schema ?? '');
-        result.warnings.push(`Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
+        result.warnings.push(end.spelledTwice
+          ? `Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which the file's use lines import from more than one schema folder (${schemas.join(', ')}) under that one spelling, and its columns do not say which: it is not drawn. Declare each table with its schema (Table ${schemas[0] ?? '<schema>'}.${name}) and write the end as <schema>.${name}`
+          : `Ref ${describeLink(rels[0])} in ${at(location)} names ${name}, which tables in more than one schema folder have (${schemas.join(', ')}), and nothing says which: it is not drawn until the end names its schema, as in <schema>.${name}`);
         // The schema the end wrote, so a checker can say that schema has no table of the name.
         (result.unresolved ??= []).push({ path, line: ref.line, kind: 'ambiguous', table: name, schemas, ...(hint?.qualifier !== undefined ? { qualifier: hint.qualifier } : {}) });
       }

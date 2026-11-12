@@ -148,6 +148,17 @@ export interface DbmlLibraryOps {
    * where they are. `table` (its identity) names it where given, else `name`.
    */
   move?: Array<{ name: string; table?: TableId; toLayer?: string; toSchema?: string }>;
+  /**
+   * Tables whose file declares them with no schema (`Table adresse`) to
+   * declare in their schema folder's (`Table bqs.adresse`), in place: the
+   * file is not moved, and every `use` specifier and Ref end naming one is
+   * re-spelled with the qualified name (as a move to another schema does).
+   * DBML reads an unqualified Table as `public.<name>`, so two of them in
+   * one diagram or relationships file are one table to every other DBML
+   * tool ([3003]). A table already qualified, under `public/`, or that does
+   * not read is left as it is. By identity.
+   */
+  qualify?: TableId[];
   /** Where new tables go (the diagram's layer, its name as the schema); default: the first layer listed, else `main`. */
   newTableHome?: DbmlTableHome;
   /**
@@ -767,6 +778,28 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
     pathChanged.set(key, path);
   }
 
+  // Qualify in place: an unqualified header declared in its schema folder's schema; the file stays.
+  for (const id of ops.qualify ?? []) {
+    const key = keyOf(id);
+    if (key === undefined) continue;
+    const current = after.get(key);
+    if (!current || current.storage !== 'dbml' || pathChanged.has(key)) continue;
+    const from = dbmlTreePathOf(current.path);
+    if (!from || from.kind !== 'table' || from.schema === undefined || lower(from.schema) === 'public') continue;
+    const stem = stemOf(current.path);
+    const pending = writes.findIndex((w) => w.path === current.path && w.kind !== 'delete');
+    const text = pending >= 0 ? (writes[pending] as { text: string }).text : tableText(current.path);
+    const reading = parseTableDbml(text, stem, { schemaFolder: from.schema });
+    if (!reading.ok || reading.schemaQualified) continue;
+    // Read without its folder, so the header's missing qualifier is what the edit changes.
+    const qualified = editTableDbml(text, { ...reading.table, schema: from.schema }, { requalify: true, file: current.path, fileStem: stem });
+    if (qualified === text) continue;
+    if (pending >= 0) writes.splice(pending, 1);
+    writes.push({ kind: 'replace', path: current.path, text: qualified });
+    requalified.add(key);
+    after.set(key, { ...current, reference: plannedTable(qualified, current.path, reading.table).reference });
+  }
+
   /** A unit (ends named after the plan) with the columns this plan renames spelled anew. */
   const withRenamedColumns = (unit: RefUnit): RefUnit => {
     if (columnRenames.size === 0) return unit;
@@ -1175,8 +1208,12 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
   // Told apart by identity, the writer names each Ref end and `use` specifier by the table its own `use`
   // line and qualifier say (its key before the plan), so an edit of one table never touches its namesake's.
   const identify = scoped
-    ? (table: { name: string; qualifier?: string; path?: string }): string | undefined => {
-      const entry = lookup(table.name, { ...(table.qualifier !== undefined ? { qualifier: table.qualifier } : {}), ...(table.path !== undefined ? { usePath: table.path } : {}) });
+    ? (table: { name: string; qualifier?: string; path?: string; paths?: readonly string[]; columns?: readonly string[] }): string | undefined => {
+      const entry = lookup(table.name, {
+        ...(table.qualifier !== undefined ? { qualifier: table.qualifier } : {}),
+        ...(table.path !== undefined ? { usePath: table.path } : {}),
+        ...(table.paths !== undefined ? { usePaths: table.paths, columns: table.columns ?? [] } : {}),
+      });
       return entry === undefined ? undefined : entry.ref ?? entry.table.name;
     }
     : undefined;

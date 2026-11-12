@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 8,
+  "domain": "sap",
+  "layer": "bronze",
+  "stage": "logical",
+  "description": "Gerhard photo-2: two unqualified Table adresse files, imported side by side as ERD Studio 2.0.4 wrote them",
+  "models": [
+    {
+      "name": "bqs__v_sap_prod_unit2",
+      "schema": "bqs",
+      "description": "",
+      "columns": [
+        {
+          "name": "unit_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "bqs_adresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        },
+        {
+          "name": "ccc_adresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "bqs.adresse",
+      "tableName": "adresse",
+      "schema": "bqs",
+      "description": "",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "strasse",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "ort",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "ccc.adresse",
+      "tableName": "adresse",
+      "schema": "ccc",
+      "description": "",
+      "columns": [
+        {
+          "name": "adr_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        },
+        {
+          "name": "street",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "city",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "postcode",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    }
+  ],
+  "relationships": [
+    {
+      "fromModel": "bqs__v_sap_prod_unit2",
+      "fromColumn": "bqs_adresse_id",
+      "toModel": "bqs.adresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "fromModel": "bqs__v_sap_prod_unit2",
+      "fromColumn": "ccc_adresse_id",
+      "toModel": "ccc.adresse",
+      "toColumn": "adr_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "fromModel": "ccc.adresse",
+      "fromColumn": "adr_id",
+      "toModel": "bqs.adresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "viewConfig": {
+    "positions": {
+      "bqs.adresse": {
+        "x": 400,
+        "y": 40
+      },
+      "bqs__v_sap_prod_unit2": {
+        "x": 40,
+        "y": 40
+      },
+      "ccc.adresse": {
+        "x": 400,
+        "y": 300
+      }
+    }
+  },
+  "layerConfig": {
+    "id": "bronze",
+    "label": "Bronze",
+    "abbreviation": "BRZ",
+    "color": "#cd7f32",
+    "creatable": true,
+    "order": 1
+  },
+  "readOnly": false,
+  "positionDraggable": true,
+  "layerConfigs": [
+    {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 1
+    }
+  ]
+}

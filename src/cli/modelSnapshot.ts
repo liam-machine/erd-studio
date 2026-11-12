@@ -404,8 +404,8 @@ export function readModelSnapshot(
     const ids = new Map<string, { id: string; says: string }>();
     for (const ref of [...reading.refs, ...(reading.pending ?? [])]) {
       const hints = dbmlRefEndHints(item, ref);
-      const hintOf = (end: string): DbmlRefEndHint | undefined => (!hints ? undefined : lower(end) === lower(ref.owner) ? hints.owner : lower(end) === lower(ref.target) ? hints.target : undefined);
-      const pairs = ref.relationships.map((r) => ({ ...r, fromModel: realName(r.fromModel, hintOf(r.fromModel)), toModel: realName(r.toModel, hintOf(r.toModel)) }));
+      // Each end by its own hint (`fromModel` is the owner as read): two ends of one spelling may be two tables.
+      const pairs = ref.relationships.map((r) => ({ ...r, fromModel: realName(r.fromModel, hints.owner), toModel: realName(r.toModel, hints.target) }));
       const identity = identityOfPairs(pairs);
       if (refs.has(identity)) continue;
       refs.set(identity, saysOfPairs(pairs));
