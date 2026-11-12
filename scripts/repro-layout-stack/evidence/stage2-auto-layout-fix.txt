@@ -119,3 +119,26 @@ With the fix: 13 passed (about 17 s, including a child process on node --stack-s
   (twoway 130/160 seed 26 above); Brandes-Koepf (rung 2) produces the layout, as before this fix.
 - In one headless Chrome page, running several ~1,000-table ELK layouts back to back closed the page twice (no 'crash'
   event); each of those diagrams laid out fine in a fresh browser (section 6). Cause not established.
+
+## 8. The filming projects (make-project.cjs), loaded through the real pipeline: @erd-studio/core loadDisplaySubjectArea (DBML reader) -> renderer transformSubjectArea -> runElkLayout
+## before fix = webview/lib/elkLayout.ts at 3aea1343~1, after fix = this commit; real ELK in-process
+$ node scripts/repro-layout-stack/make-project.cjs <scratch>/proj8                     # gerhard8: 8 tables, 14 relationships
+8 tables, 14 relationships; ids t0,t1,t2...
+before fix auto  FAIL Maximum call stack size exceeded
+before fix depth FAIL Maximum call stack size exceeded
+before fix role  OK 8 placed
+before fix none  OK 8 placed
+after fix  auto  OK 8 placed (default, depth/partitioned)
+after fix  depth OK 8 placed (default, depth/partitioned)
+after fix  role  OK 8 placed (default, role/off)
+after fix  none  OK 8 placed (default, none/off)
+$ node scripts/repro-layout-stack/make-project.cjs <scratch>/proj130 twoway 130 160 26
+130 tables, 160 relationships; ids t_0,t_1,t_2...
+before fix auto  FAIL Maximum call stack size exceeded
+before fix depth FAIL Maximum call stack size exceeded
+before fix role  OK 130 placed
+before fix none  OK 130 placed
+after fix  auto  OK 130 placed (default, depth/partitioned)
+after fix  depth OK 130 placed (default, depth/partitioned)
+after fix  role  OK 130 placed (default, role/off)
+after fix  none  OK 130 placed (default, none/off)
