@@ -485,6 +485,47 @@ describe('Gerhard photo-2: both adresse tables have the Ref column', () => {
     await vi.waitFor(() => expect(edgesOf(canvas)).toEqual(['unit>bqs.adresse', 'unit>ccc.adresse']));
   });
 
+  /*
+   * Seen in a real VS Code window (verifier, round 1): on open neither Ref is drawn, so the user draws
+   * the missing line, unit.ccc_adresse_id → ccc.adresse.id, which the line 6 Ref already means. Told
+   * line 6 means ccc.adresse, the two were the same link and the plan refused: "… holds the relationship
+   * ccc.adresse.id → unit.ccc_adresse_id twice. Remove one of them first." and nothing was written.
+   */
+  it('drawing the line an undecided Ref already holds, then Qualify: one Ref, both qualified, nothing refused', async () => {
+    bothHaveId();
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    warnings = [];
+    answer = 'Qualify Tables';
+    const asked = answerWhichTable(bySourceColumn);
+    const errors = await canvas.send({ type: 'addRelationship', payload: { fromModel: 'unit', fromColumn: 'ccc_adresse_id', toModel: 'ccc.adresse', toColumn: 'id', cardinality: 'many-to-one' } });
+    expect(errors).toEqual([]);
+    expect(asked.length).toBe(2);
+    expect(_appliedEdits.length).toBe(1);
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).toContain('Ref: unit.bqs_adresse_id >? bqs.adresse.id');
+    expect(rels.match(/Ref: unit\.ccc_adresse_id [<>-]\?? ccc\.adresse\.id/g)?.length).toBe(1);
+    expect(rels).not.toMatch(/\sadresse\.id/); // no bare (ambiguous) end left
+    expect(rels).not.toMatch(/use \{ table adresse \}/);
+    expect(read('bronze/diagrams/sap.dbml')).toContain("use * from '../relationships/bronze.dbml'");
+    expect(everyFileParses()).toEqual([]);
+    await vi.waitFor(() => expect(edgesOf(canvas)).toEqual(['unit>bqs.adresse', 'unit>ccc.adresse']));
+  });
+
+  it('drawing that line, then telling Qualify the existing Ref means the OTHER adresse: both relationships are kept', async () => {
+    bothHaveId();
+    const canvas = await open('bronze/diagrams/sap.dbml');
+    answer = 'Qualify Tables';
+    // Line 5 and line 6 both mean bqs.adresse: the drawn ccc line is then a relationship of its own.
+    answerWhichTable(() => 'bqs');
+    const errors = await canvas.send({ type: 'addRelationship', payload: { fromModel: 'unit', fromColumn: 'ccc_adresse_id', toModel: 'ccc.adresse', toColumn: 'id', cardinality: 'many-to-one' } });
+    expect(errors).toEqual([]);
+    const rels = read('bronze/relationships/bronze.dbml');
+    expect(rels).toContain('Ref: unit.bqs_adresse_id >? bqs.adresse.id');
+    expect(rels).toContain('Ref: unit.ccc_adresse_id >? bqs.adresse.id');
+    expect(rels).toMatch(/Ref: unit\.ccc_adresse_id [<>-]\?? ccc\.adresse\.id/);
+    expect(everyFileParses()).toEqual([]);
+  });
+
   it('declining that prompt writes nothing: no ambiguous Ref is written', async () => {
     bothHaveId(['Ref: unit.bqs_adresse_id >? adresse.id']);
     const canvas = await open('bronze/diagrams/sap.dbml');

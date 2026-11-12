@@ -101,6 +101,28 @@ describe('doctor on photo-2\'s shape', () => {
     const all = await problems();
     expect(all.filter((p) => p.file === 'bronze/diagrams/sap.dbml' && p.code === 'sharedUseSpelling')).toEqual([]);
   });
+
+  it('once qualified, danglingRef names the end as the file spells it (bqs.adresse.nowhere, not adresse.nowhere)', async () => {
+    const at = (rel: string): string => path.join(root, '.erd-studio', rel);
+    for (const [rel, schema] of [['bronze/tables/bqs/adresse.dbml', 'bqs'], ['bronze/tables/ccc/adresse.dbml', 'ccc']] as const) {
+      fs.writeFileSync(at(rel), fs.readFileSync(at(rel), 'utf-8').replace('Table adresse', `Table ${schema}.adresse`));
+    }
+    // What Qualify Tables writes for the fixture's relationships file, the nowhere end told bqs's.
+    fs.writeFileSync(at('bronze/relationships/bronze.dbml'), [
+      "use { table bqs.adresse } from '../tables/bqs/adresse.dbml'",
+      "use { table bqs__v_sap_prod_unit2 } from '../tables/bqs/bqs__v_sap_prod_unit2.dbml'",
+      "use { table ccc.adresse } from '../tables/ccc/adresse.dbml'",
+      '',
+      'Ref: bqs__v_sap_prod_unit2.bqs_adresse_id >? bqs.adresse.id',
+      'Ref: bqs__v_sap_prod_unit2.ccc_adresse_id >? ccc.adresse.adr_id',
+      'Ref: ccc.adresse.adr_id >? bqs.adresse.id',
+      'Ref: bqs__v_sap_prod_unit2.unit_id >? bqs.adresse.nowhere',
+      '',
+    ].join('\n'));
+    const dangling = (await problems()).filter((p) => p.code === 'danglingRef');
+    expect(dangling.map((p) => [p.file, p.line])).toEqual([['bronze/relationships/bronze.dbml', 8]]);
+    expect(dangling[0].message).toContain('This Ref names bqs.adresse.nowhere, which is not a column of its table.');
+  });
 });
 
 describe('inventory and export on photo-2\'s shape', () => {

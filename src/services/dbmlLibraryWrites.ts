@@ -1496,7 +1496,7 @@ function withToldEnds(save: DbmlLibrarySave, refs: readonly DecidedRefEnds[], sn
   const owner = snapshot.tables.get(lower(save.fromName ?? save.model.name));
   const ownerBare = lower(owner?.name ?? save.model.name);
   const ownerId = owner?.storage === 'dbml' ? tableIdOfPath(owner.path) : undefined;
-  let changed = false;
+  const told = new Set<TableRelationship>();
   const relationships = list.map((r) => {
     if (snapshot.tables.has(lower(r.toModel))) return r;
     for (const ends of refs) {
@@ -1507,13 +1507,39 @@ function withToldEnds(save: DbmlLibrarySave, refs: readonly DecidedRefEnds[], sn
         if (i < 0 || lower(t.columns[i] ?? '') !== lower(r.toColumn)) continue;
         const table = byId.get(tableIdKey(t.id));
         if (!table) continue;
-        changed = true;
-        return { ...r, toModel: table.ref ?? table.name };
+        const named = { ...r, toModel: table.ref ?? table.name };
+        told.add(named);
+        return named;
       }
     }
     return r;
   });
-  return changed ? { ...save, model: { ...save.model, relationships } } : save;
+  if (told.size === 0) return save;
+  return { ...save, model: { ...save.model, relationships: withoutToldTwins(save.model.name, relationships, told) } };
+}
+
+/**
+ * `relationships` with each unit dropped whose links an earlier unit already
+ * has, when either of the two is one a told Ref end just named: the
+ * relationship the user drew to `ccc.adresse` while the Ref meaning it was
+ * still spelled `adresse` (and so not drawn) is that Ref, which keeps its
+ * line and text, as an add of a stored relationship would. Two copies the
+ * user stored themselves are left for the duplicate check to name.
+ */
+function withoutToldTwins(owner: string, relationships: readonly TableRelationship[], told: ReadonlySet<TableRelationship>): TableRelationship[] {
+  const units = relationshipUnitsWithMembers(owner, relationships);
+  const seen: Array<{ links: string; told: boolean }> = [];
+  const dropped = new Set<TableRelationship>();
+  for (const { unit, relationships: members } of units) {
+    const links = [...unitLinks(unit)].sort().join('\n');
+    const isTold = members.some((m) => told.has(m));
+    if (seen.some((s) => s.links === links && (s.told || isTold))) {
+      for (const m of members) dropped.add(m);
+      continue;
+    }
+    seen.push({ links, told: isTold });
+  }
+  return dropped.size === 0 ? [...relationships] : relationships.filter((r) => !dropped.has(r));
 }
 
 /** `a`, `a and b`, `a, b and c`. */

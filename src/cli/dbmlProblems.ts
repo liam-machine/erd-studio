@@ -719,9 +719,11 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       // A table whose file does not read has no columns to check: that file's own problem is the one to fix.
       if ((owner && !readsCleanly(owner)) || (target && !readsCleanly(target))) continue;
       if (owner && target) {
+        // Each end as the Ref spells it (`bqs.adresse.nowhere` once qualified), so the message names what the file says.
+        const asWritten = (name: string, qualifier: string | undefined): string => (qualifier !== undefined ? `${qualifier}.${name}` : name);
         const gone = ref.relationships.flatMap((r) => [
-          ...(owner.columns.some((c) => c.toLowerCase() === r.fromColumn.toLowerCase()) ? [] : [`${owner.name}.${r.fromColumn}`]),
-          ...(target.columns.some((c) => c.toLowerCase() === r.toColumn.toLowerCase()) ? [] : [`${target.name}.${r.toColumn}`]),
+          ...(owner.columns.some((c) => c.toLowerCase() === r.fromColumn.toLowerCase()) ? [] : [`${asWritten(ref.owner, ref.ownerQualifier)}.${r.fromColumn}`]),
+          ...(target.columns.some((c) => c.toLowerCase() === r.toColumn.toLowerCase()) ? [] : [`${asWritten(ref.target, ref.targetQualifier)}.${r.toColumn}`]),
         ]);
         if (gone.length > 0) {
           push({
