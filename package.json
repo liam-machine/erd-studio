@@ -352,6 +352,12 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.addToOpenDiagram",
+        "title": "Add to Open Diagram",
+        "category": "ERD Studio",
+        "icon": "$(add)"
+      },
+      {
         "command": "erdStudio.revealInTableLibrary",
         "title": "Reveal in Table Library",
         "category": "ERD Studio"
@@ -985,6 +991,11 @@
           "group": "1_new@2"
         },
         {
+          "command": "erdStudio.addToOpenDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "inline"
+        },
+        {
           "command": "erdStudio.openInDiagram",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "inline"
@@ -1324,6 +1335,10 @@
         },
         {
           "command": "erdStudio.addToDiagram",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.addToOpenDiagram",
           "when": "false"
         },
         {

@@ -41,6 +41,8 @@ import {
 
 export const GO_TO_TABLE_COMMAND = 'erdStudio.goToTable';
 export const ADD_TO_DIAGRAM_COMMAND = 'erdStudio.addToDiagram';
+/** The Table Library row's inline +: Add to Diagram…, to the diagram that is open (the pick only when none or several are). */
+export const ADD_TO_OPEN_DIAGRAM_COMMAND = 'erdStudio.addToOpenDiagram';
 export const REVEAL_IN_TABLE_LIBRARY_COMMAND = 'erdStudio.revealInTableLibrary';
 
 /** Go to Table…'s title, and what its empty box says: it takes the sidebar's filter keys too. */
@@ -356,6 +358,8 @@ export async function goToTableCommand(deps: GoToTableDeps, query?: string): Pro
 
 export interface DiagramPickItem extends vscode.QuickPickItem {
   summary: SubjectAreaSummary;
+  /** The picked tables this diagram shows already (each once). */
+  alreadyShown?: string[];
 }
 
 /**
@@ -393,7 +397,7 @@ export function diagramPickItems(
     items.push({
       label: summary.domain,
       description: `${layerLabel(summary.layer)}${count}`,
-      ...(already.length > 0 ? { detail: `Already shows ${already.join(', ')}` } : {}),
+      ...(already.length > 0 ? { detail: `Already shows ${already.join(', ')}`, alreadyShown: already } : {}),
       summary,
     });
   }
@@ -445,7 +449,41 @@ export interface AddToDiagramDeps {
   addTables(filePath: string, tables: readonly string[], files?: readonly string[]): Promise<void>;
   /** The file of the diagram in the active editor tab, if that tab is a diagram: it is offered first. */
   activeDiagramPath?(): string | undefined;
+  /**
+   * The files of the diagrams on screen: each editor group's active tab that
+   * is a diagram (`openDiagramPaths`). With no diagram in the active tab and
+   * exactly one of these, the tables are added there without asking.
+   */
+  openDiagramPaths?(): string[];
 }
+
+/**
+ * The diagram Add to Diagram… adds to without asking: the one in the active
+ * tab, else the only diagram on screen. Undefined when there is none, or
+ * several are on screen and none is active (the pick decides), or it is not
+ * one of `summaries` (a diagram outside the project's layers).
+ */
+export function diagramToAddTo(
+  summaries: readonly SubjectAreaSummary[],
+  activePath: string | undefined,
+  openPaths: readonly string[],
+): SubjectAreaSummary | undefined {
+  const find = (p: string): SubjectAreaSummary | undefined => summaries.find((s) => pathKey(s.filePath) === pathKey(p));
+  if (activePath !== undefined) {
+    const active = find(activePath);
+    if (active) return active;
+  }
+  const onScreen = [...new Map(openPaths.map((p) => [pathKey(p), p])).values()];
+  return onScreen.length === 1 ? find(onScreen[0]) : undefined;
+}
+
+/** What the status bar says after Add to Diagram… added without asking. */
+export function addedToDiagramStatus(subject: string, diagram: string): string {
+  return `$(check) ERD Studio: Added ${subject} to ${diagram}`;
+}
+
+/** How long that status bar message stays. */
+export const ADDED_TO_DIAGRAM_STATUS_MS = 6000;
 
 /** What the pick says beside the diagram in the active tab. */
 export const OPEN_DIAGRAM_NOTE = 'open now';
@@ -468,12 +506,15 @@ export function withOpenDiagramFirst(items: readonly DiagramPickItem[], activePa
 }
 
 /**
- * Add to Diagram…: which diagram (the one in the active tab first), then the
- * add. The route that needs no drag: it works from the Table Library's
- * right-click menu on one table or a selection. Where the library tells
- * tables apart by identity, each table is its file: a diagram that shows
- * another schema folder's table of the name does not show this one, and the
- * add is by file.
+ * Add to Diagram… (and the row's inline +, Add to Open Diagram): with a
+ * diagram open — in the active tab, or the only one on screen — the tables
+ * go straight to it, and the status bar says where (tables it shows already
+ * are selected and named on its canvas). Otherwise, which diagram (the one in
+ * the active tab first), then the add. The route that needs no drag: it
+ * works from the Table Library's right-click menu and inline + on one table
+ * or a selection. Where the library tells tables apart by identity, each
+ * table is its file: a diagram that shows another schema folder's table of
+ * the name does not show this one, and the add is by file.
  */
 export async function addToDiagramCommand(deps: AddToDiagramDeps, given: ReadonlyArray<string | SidebarTable>): Promise<void> {
   const usage = deps.usage?.() ?? tableUsageByName(deps.memberNames);
@@ -489,7 +530,25 @@ export async function addToDiagramCommand(deps: AddToDiagramDeps, given: Readonl
     void vscode.window.showInformationMessage('ERD Studio: This project has no diagram yet. Make one with New Diagram…, then add the tables to it.');
     return;
   }
-  const items = withOpenDiagramFirst(diagramPickItems(summaries, deps.memberNames, deps.layerLabel, picked, usage), deps.activeDiagramPath?.());
+  const files = picked.map((t) => t.filePath);
+  const add = (filePath: string): Promise<void> =>
+    usage.byIdentity && files.every((f): f is string => f !== undefined) ? deps.addTables(filePath, tables, files) : deps.addTables(filePath, tables);
+  const activePath = deps.activeDiagramPath?.();
+  const open = diagramToAddTo(summaries, activePath, deps.openDiagramPaths?.() ?? []);
+  if (open) {
+    // Added without asking. Not offered means it shows them all already, or cannot show them (a JSON diagram and a
+    // name two schema folders share): its canvas says which, so the status bar names only what is added.
+    const offered = diagramPickItems([open], deps.memberNames, deps.layerLabel, picked, usage)[0];
+    await add(open.filePath);
+    if (offered) {
+      const already = new Set(offered.alreadyShown ?? []);
+      const fresh = [...new Set(tables)].filter((t) => !already.has(t));
+      const what = fresh.length === 1 ? `"${fresh[0]}"` : `${fresh.length} tables`;
+      vscode.window.setStatusBarMessage(addedToDiagramStatus(what, open.domain), ADDED_TO_DIAGRAM_STATUS_MS);
+    }
+    return;
+  }
+  const items = withOpenDiagramFirst(diagramPickItems(summaries, deps.memberNames, deps.layerLabel, picked, usage), activePath);
   if (items.length === 0) {
     void vscode.window.showInformationMessage(`ERD Studio: Every diagram already shows ${subject}.`);
     return;
@@ -500,9 +559,7 @@ export async function addToDiagramCommand(deps: AddToDiagramDeps, given: Readonl
     matchOnDescription: true,
   });
   if (!pick) return;
-  const files = picked.map((t) => t.filePath);
-  if (usage.byIdentity && files.every((f): f is string => f !== undefined)) await deps.addTables(pick.summary.filePath, tables, files);
-  else await deps.addTables(pick.summary.filePath, tables);
+  await add(pick.summary.filePath);
 }
 
 /** A path from the project folder, with forward slashes (`.erd-studio/gold/tables/sales/fct_order.dbml`). */

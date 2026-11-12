@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as vscode from 'vscode';
 
 import {
   SUBJECT_AREA_EDITOR_VIEW_TYPE,
   activeSubjectAreaCanvasPath,
   hasOpenSubjectAreaCanvas,
+  openDiagramPaths,
   saveAllAndReload,
 } from '../../src/services/recoveryService';
 
@@ -67,6 +68,27 @@ describe('recoveryService', () => {
       active.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file('/p/a.png'), 'imagePreview.previewEditor') };
       expect(activeSubjectAreaCanvasPath()).toBeUndefined();
       active.activeTab = undefined;
+    });
+  });
+
+  describe('openDiagramPaths', () => {
+    const diagram = (p: string) => ({ input: new vscode.TabInputCustom(vscode.Uri.file(p), SUBJECT_AREA_EDITOR_VIEW_TYPE) });
+    afterEach(() => { mockTabGroups.all = []; });
+
+    it('is each editor group\'s active tab that is a diagram, each file once; hidden tabs and other editors are left out', () => {
+      const sales = diagram('/p/.erd-studio/gold/diagrams/sales.dbml');
+      const staging = diagram('/p/.erd-studio/silver/diagrams/staging.dbml');
+      (mockTabGroups as unknown as { all: unknown[] }).all = [
+        { tabs: [staging, sales], activeTab: sales },
+        { tabs: [{ input: { uri: vscode.Uri.file('/p/a.ts') } }], activeTab: { input: { uri: vscode.Uri.file('/p/a.ts') } } },
+        { tabs: [sales], activeTab: sales },
+        { tabs: [], activeTab: undefined },
+      ];
+      expect(openDiagramPaths()).toEqual(['/p/.erd-studio/gold/diagrams/sales.dbml']);
+    });
+
+    it('is empty with no diagram on screen', () => {
+      expect(openDiagramPaths()).toEqual([]);
     });
   });
 

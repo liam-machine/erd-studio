@@ -48,6 +48,24 @@ export function activeSubjectAreaCanvasPath(): string | undefined {
 }
 
 /**
+ * The files of the diagram canvases on screen: each editor group's active tab
+ * that is a diagram, each file once. Add to Diagram… adds to the only one
+ * without asking when the active tab is not a diagram (the sidebar or another
+ * group has focus).
+ */
+export function openDiagramPaths(): string[] {
+  const paths: string[] = [];
+  for (const group of vscode.window.tabGroups.all) {
+    const input = group.activeTab?.input;
+    if (input instanceof vscode.TabInputCustom && input.viewType === SUBJECT_AREA_EDITOR_VIEW_TYPE && input.uri.scheme === 'file'
+      && !paths.includes(input.uri.fsPath)) {
+      paths.push(input.uri.fsPath);
+    }
+  }
+  return paths;
+}
+
+/**
  * Save all dirty editors, then reload the window. saveAll runs first so no
  * work is lost; if it fails the user is prompted to handle it manually rather
  * than silently risking data loss.

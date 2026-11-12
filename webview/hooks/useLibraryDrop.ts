@@ -6,9 +6,21 @@
  * while Shift is held (without it the editor group takes the drop and opens
  * the file). So when the host says a Table Library drag has started
  * (`libraryDragStarted`), the canvas shows "Hold Shift and drop to add … to
- * this diagram" — until the drop, {@link LIBRARY_DRAG_HINT_MS}, or the next
- * pointer move inside the webview (pointer events come back once the drag is
- * over).
+ * this diagram" — until the drop, {@link LIBRARY_DRAG_HINT_MS}, the diagram
+ * changing or the host selecting a table on it (the tables were added, or
+ * found already there, some other way, such as a drop on the diagram's
+ * row), or the next pointer move inside the webview (pointer events
+ * come back once the drag is over). While an acceptable drag is over the
+ * canvas, it says "Let go to add …": the drop will land.
+ *
+ * When Shift is pressed decides nothing by itself, but VS Code notices it
+ * only on its next drag event (its `WebviewWindowDragMonitor` turns the
+ * webview's pointer events back on for a `drag` / `dragover` with Shift, and
+ * the editor group's "Hold Shift to drop into editor" overlay goes on its
+ * next `dragover` with Shift). Shift pressed with the pointer already over
+ * the diagram and held still, then let go, drops on that overlay: the file
+ * opens instead. Hence the hint's second sentence: move the mouse a little
+ * after pressing Shift, and keep it down until the button is released.
  *
  * Over an editable logical diagram, a drag that carries URIs (or the Table
  * Library drag the host announced) is accepted as a copy and highlights the
@@ -34,8 +46,8 @@ import { useSend } from './useMessageBus';
 import { useEditorStore } from '../store/editorStore';
 import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, TABLE_LIBRARY_DRAG_MIME } from '../../src/types/messages';
 
-/** How long the "Hold Shift and drop" hint stays without a drop or a pointer move. */
-export const LIBRARY_DRAG_HINT_MS = 8000;
+/** How long the "Hold Shift and drop" hint stays without a drop or a pointer move (a long sidebar takes a while to cross). */
+export const LIBRARY_DRAG_HINT_MS = 20_000;
 
 /** How long a Table Library drag counts as in progress for accepting a drop (the host remembers it as long). */
 export const LIBRARY_DRAG_FRESH_MS = 60_000;
@@ -53,10 +65,15 @@ const TREE_TYPE_PREFIX = 'application/vnd.code.tree.';
 export const DROP_REFUSED_READ_ONLY =
   'Tables are added on the Logical tab. Switch to Logical and drop again, or right-click the table in the Table Library and choose Add to Diagram…';
 
-/** The hint for a Table Library drag of `tables`. */
-export function libraryDragHintText(tables: readonly string[]): string {
+/**
+ * The hint for a Table Library drag of `tables`; `over`: an acceptable drag
+ * is over the canvas, so letting go adds them.
+ */
+export function libraryDragHintText(tables: readonly string[], over = false): string {
   const what = tables.length === 1 ? tables[0] : `${tables.length} tables`;
-  return `Hold Shift and drop to add ${what} to this diagram`;
+  return over
+    ? `Let go to add ${what} to this diagram`
+    : `Hold Shift and drop to add ${what} to this diagram. Pressed Shift over the diagram? Move the mouse a little, then let go.`;
 }
 
 type DataTransferLike = Pick<DataTransfer, 'getData'> & { readonly types?: ArrayLike<string> | readonly string[] };
@@ -174,6 +191,8 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
   const [dropActive, setDropActive] = useState(false);
   /** When the announced Table Library drag started; undefined once it is over (a drop or a pointer move). */
   const libraryDragAt = useRef<number | undefined>(undefined);
+  /** The announced drag's tables, kept after the hint times out: an acceptable drag over the canvas names them again. */
+  const libraryDragTables = useRef<string[] | null>(null);
   const enterDepth = useRef(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -181,13 +200,28 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     const names = tables.filter((t): t is string => typeof t === 'string' && t.length > 0);
     if (names.length === 0) return;
     libraryDragAt.current = Date.now();
+    libraryDragTables.current = names;
     setHintTables(names);
   }, []);
 
   const endLibraryDrag = useCallback(() => {
     libraryDragAt.current = undefined;
+    libraryDragTables.current = null;
     setHintTables(null);
   }, []);
+
+  // The diagram changed under the hint, or the host selected a table on it
+  // (`revealTable`): the tables were added (or found already there) another
+  // way, such as a drop on the diagram's row. The hint has nothing left to say.
+  const pendingReveal = useEditorStore((s) => s.pendingTableReveal);
+  const domainAtHint = useRef(domain);
+  const revealAtHint = useRef(pendingReveal);
+  useEffect(() => {
+    const revealed = pendingReveal !== null && revealAtHint.current !== pendingReveal;
+    if ((domainAtHint.current !== domain || revealed) && hintTables) setHintTables(null);
+    domainAtHint.current = domain;
+    revealAtHint.current = pendingReveal;
+  }, [domain, pendingReveal, hintTables]);
 
   // The hint goes after a while, or as soon as the pointer moves in the
   // webview: pointer events only reach it again once the drag is over.
@@ -278,10 +312,12 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     },
   };
 
+  // Over the canvas after the hint timed out: the drag's tables, named again ("Let go to add …").
+  const shownTables = hintTables ?? (dropActive && inProgress() ? libraryDragTables.current : null);
   return {
     dropHandlers: viewer ? undefined : editable ? handlers : loaded ? refusing : undefined,
     dropActive: viewer ? false : editable && dropActive,
-    hintTables: viewer ? null : editable ? hintTables : null,
+    hintTables: viewer ? null : editable ? shownTables : null,
     libraryDragStarted,
   };
 }

@@ -22,9 +22,9 @@ import {
   PHYSICAL_READ_ONLY_MESSAGE,
   SemanticEditorProvider,
 } from '../../src/providers/SemanticEditorProvider';
-import { TABLE_LIBRARY_DRAG_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
+import { TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
 import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
-import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../../src/services/tableDrop';
+import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris, tablesOfTreeDrop } from '../../src/services/tableDrop';
 import { validateDropTablesPayload } from '../../src/providers/payloadValidation';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
 import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../../src/services/positionService';
@@ -77,11 +77,15 @@ describe('tablesOfDraggedRows', () => {
 });
 
 describe('TableLibraryDragController', () => {
-  it('offers its tree mime type and text/uri-list, and accepts no drops', () => {
+  it('offers the names\' own type and text/uri-list (never the view\'s tree type, where VS Code writes its own data), and accepts no drops', () => {
     const controller = new TableLibraryDragController(() => {});
-    expect(controller.dragMimeTypes).toEqual([TABLE_LIBRARY_DRAG_MIME, 'text/uri-list']);
+    expect(controller.dragMimeTypes).toEqual([TABLE_LIBRARY_NAMES_MIME, 'text/uri-list']);
+    expect(controller.dragMimeTypes).not.toContain(TABLE_LIBRARY_DRAG_MIME);
     expect(controller.dropMimeTypes).toEqual([]);
     expect(TABLE_LIBRARY_DRAG_MIME).toBe('application/vnd.code.tree.erdstudio.modellibrary');
+    // Lower case: a browser DataTransfer lower-cases types, and VS Code matches them exactly.
+    expect(TABLE_LIBRARY_NAMES_MIME).toBe(TABLE_LIBRARY_NAMES_MIME.toLowerCase());
+    expect(TABLE_LIBRARY_NAMES_MIME.startsWith('application/vnd.code.tree.')).toBe(false);
   });
 
   it('puts the files in text/uri-list and the names under its mime type, then reports the drag', () => {
@@ -92,7 +96,8 @@ describe('TableLibraryDragController', () => {
       vscode.Uri.file('/p/.erd-studio/gold/tables/gold/fct_order.dbml').toString(),
       vscode.Uri.file('/p/.erd-studio/gold/tables/gold/dim_customer.dbml').toString(),
     ].join('\r\n'));
-    expect(transfer.get(TABLE_LIBRARY_DRAG_MIME)?.value).toEqual(['fct_order', 'dim_customer']);
+    expect(transfer.get(TABLE_LIBRARY_NAMES_MIME)?.value).toBe('["fct_order","dim_customer"]');
+    expect(transfer.get(TABLE_LIBRARY_DRAG_MIME)).toBeUndefined();
     expect(started).toHaveBeenCalledWith(['fct_order', 'dim_customer']);
   });
 
@@ -181,6 +186,47 @@ describe('tableFilesOfDroppedUris', () => {
     ], twins, 'linux')).toEqual([twins[1], twins[0]]);
     // By name, as before, the second addresse is the first one again.
     expect(tablesOfDroppedUris(twins.slice(0, 2).map((f) => uri(f.filePath)), twins, 'linux')).toEqual(['addresse']);
+  });
+});
+
+describe('tablesOfTreeDrop (Table Library rows dropped on a Diagrams row)', () => {
+  const uri = (p: string): string => pathToFileURL(p).href;
+  const lib = [
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/bqs/addresse.dbml' },
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/ccc/addresse.dbml' },
+    { name: 'kunde', filePath: '/proj/.erd-studio/bronze/tables/ccc/kunde.dbml' },
+  ];
+
+  it('adds the dragged names; by their files where two schema folders share a name', () => {
+    const drop = { tables: ['addresse'], uris: [uri(lib[1].filePath)] };
+    expect(tablesOfTreeDrop(drop, lib, { byFile: false }, 'linux')).toEqual({ names: ['addresse'] });
+    expect(tablesOfTreeDrop(drop, lib, { byFile: true }, 'linux')).toEqual({ names: ['addresse'], files: [lib[1].filePath] });
+  });
+
+  it('with no names it could read, adds the tables its files are, then the remembered drag; else nothing', () => {
+    expect(tablesOfTreeDrop({ tables: [], uris: [uri(lib[2].filePath)] }, lib, { byFile: false }, 'linux')).toEqual({ names: ['kunde'] });
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: false, remembered: { tables: ['kunde'] } }, 'linux')).toEqual({ names: ['kunde'] });
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: true, remembered: { tables: ['addresse'], files: [lib[0].filePath] } }, 'linux'))
+      .toEqual({ names: ['addresse'], files: [lib[0].filePath] });
+    expect(tablesOfTreeDrop({ tables: [], uris: ['file:///proj/README.md'] }, lib, { byFile: false }, 'linux')).toBeUndefined();
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: false, remembered: { tables: [] } }, 'linux')).toBeUndefined();
+  });
+
+  // Windows, as VS Code writes a dragged row's file there (vscode.Uri.file(...).toString()):
+  // an encoded, lower-case drive letter; joined with CRLF in text/uri-list.
+  it('reads a Windows drag: encoded or plain drive letter, any case, CRLF-joined lines', () => {
+    const win = [
+      { name: 'addresse', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\bqs\\addresse.dbml' },
+      { name: 'addresse', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\ccc\\addresse.dbml' },
+      { name: 'kunde', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\ccc\\kunde.dbml' },
+    ];
+    const lines = 'file:///c%3A/Users/gerhard/proj/.erd-studio/bronze/tables/ccc/addresse.dbml\r\nfile:///C:/users/GERHARD/proj/.erd-studio/bronze/tables/ccc/KUNDE.dbml';
+    const uris = lines.split(/\r?\n/);
+    expect(tablesOfTreeDrop({ tables: [], uris }, win, { byFile: true }, 'win32')).toEqual({
+      names: ['addresse', 'kunde'], files: [win[1].filePath, win[2].filePath],
+    });
+    // Names read: by name unless two schema folders share one.
+    expect(tablesOfTreeDrop({ tables: ['addresse', 'kunde'], uris }, win, { byFile: false }, 'win32')).toEqual({ names: ['addresse', 'kunde'] });
   });
 });
 
@@ -285,6 +331,7 @@ async function loaded(provider: SemanticEditorProvider, rel = STAGING) {
 type Panel = ReturnType<typeof createMockWebviewPanel>;
 const posted = (panel: Panel, type: string) => panel._postedMessages.filter((m) => (m as { type: string }).type === type);
 const errors = (panel: Panel): string[] => posted(panel, 'error').map((m) => (m as { payload: { message: string } }).payload.message);
+const notices = (panel: Panel): string[] => posted(panel, 'canvasNotice').map((m) => (m as { payload: { message: string } }).payload.message);
 const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }, fromLibrary?: boolean) =>
   panel._simulateMessage({ type: 'dropTables', payload: { position, uris, ...(fromLibrary === undefined ? {} : { fromLibrary }) } });
 
@@ -376,25 +423,44 @@ describe('dropTables', () => {
     expect(doc.getText()).not.toContain('dim_region');
   });
 
-  it('a table already on the diagram is selected and named, not added', async () => {
+  it('a table already on the diagram is selected and named on the canvas, not added', async () => {
     const provider = buildProvider(root);
     const { panel } = await loaded(provider);
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await drop(panel, [fileUri(FCT_ORDER)]);
     expect(_appliedEdits).toHaveLength(0);
     expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
-    expect(info).toHaveBeenCalledWith('ERD Studio: "fct_order" is already on this diagram.');
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+    expect(info).not.toHaveBeenCalled();
+    expect(errors(panel)).toEqual([]);
   });
 
-  it('adds the new ones of a mix, names the one already there, and selects the first new one', async () => {
+  it('a Shift-drop of a Table Library row already there (the drag remembered, no file in the drop) says so too', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['fct_order'], [at(FCT_ORDER)]);
+    await drop(panel, [], { x: 1, y: 1 }, true);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+  });
+
+  it('several tables all already there are named together', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider, SALES);
+    await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['These 2 tables are already on this diagram.']);
+    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+  });
+
+  it('adds the new ones of a mix, names the one already there on the canvas, and selects the first new one', async () => {
     const provider = buildProvider(root);
     const { panel, doc } = await loaded(provider);
-    const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
     expect(_appliedEdits).toHaveLength(1);
     expect(doc.getText()).toContain('use { table gold.dim_region }');
     expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_region' } }]);
-    expect(info.mock.calls.map((c) => c[0]).join('\n')).toContain('Already in this diagram: fct_order.');
+    expect(notices(panel)).toEqual(['Added 1 table. Already on this diagram: fct_order.']);
   });
 
   it('keeps the existing placement for a drop on a positioned diagram: only the new table moves in', async () => {

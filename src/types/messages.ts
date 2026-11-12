@@ -431,10 +431,13 @@ export interface FilesNotShownMessage {
 
 /**
  * A brief, dismissable note on the canvas about something ERD Studio did by
- * itself (an info toast that hides after a few seconds). Today only one
- * sender: the relationships imports added to a diagram after a relationships
- * file was saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
- * `importsAddedMessage`). Plain words, never an error.
+ * itself (an info toast that hides after a few seconds). Senders: the
+ * relationships imports added to a diagram after a relationships file was
+ * saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
+ * `importsAddedMessage`), and an add of tables (a drop, Add to Diagram…, Add
+ * Existing Tables) that found some or all of them on the diagram already
+ * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`). Plain words, never
+ * an error.
  */
 export interface CanvasNoticeMessage {
   type: 'canvasNotice';
@@ -683,9 +686,21 @@ export const DROP_TABLES_URI_MAX_LENGTH = 4096;
 /**
  * The Table Library's own drag mime type (`application/vnd.code.tree.<view id,
  * lower case>`): VS Code puts it on every drag that starts in that view, so a
- * drop that carries it is a Table Library drag.
+ * drop that carries it is a Table Library drag. It is only that signal: VS
+ * Code writes its own `{ id, itemHandles }` under it at dragstart, and a drop
+ * in another tree reads that first, so the dragged names travel under
+ * {@link TABLE_LIBRARY_NAMES_MIME} instead.
  */
 export const TABLE_LIBRARY_DRAG_MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
+
+/**
+ * The dragged tables' names (a JSON array of strings), set by the Table
+ * Library's drag controller and read by a drop on a Diagrams row. Lower case,
+ * as a browser DataTransfer keeps types. VS Code also writes an empty native
+ * entry of this type at dragstart (so a tree accepts the drag), which a drop
+ * hands over before the controller's own item: read every item of the type.
+ */
+export const TABLE_LIBRARY_NAMES_MIME = 'application/vnd.erdstudio.tables+json';
 
 /**
  * Something was dropped on the canvas (a Shift-drag from the Table Library,

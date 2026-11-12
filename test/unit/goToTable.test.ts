@@ -17,7 +17,10 @@ import {
   OPEN_IN_DIAGRAM_BUTTON,
   SHOW_RELATIONSHIPS_BUTTON,
   OPEN_DIAGRAM_NOTE,
+  ADDED_TO_DIAGRAM_STATUS_MS,
   addToDiagramCommand,
+  addedToDiagramStatus,
+  diagramToAddTo,
   withOpenDiagramFirst,
   buildGoToTableItems,
   diagramPickItems,
@@ -369,6 +372,66 @@ describe('Add to Diagram…', () => {
     expect(addTables).toHaveBeenCalledWith(`${SEM}/silver/diagrams/staging.dbml`, ['dim_region', 'dim_date']);
   });
 
+  // Gerhard: Add to Diagram should add to the diagram that is open, without asking.
+  describe('with a diagram open', () => {
+    const STAGING = `${SEM}/silver/diagrams/staging.dbml`;
+    const SALES = `${SEM}/gold/diagrams/sales.dbml`;
+
+    it('adds to the diagram in the active tab without asking, and the status bar says where', async () => {
+      const pick = vi.spyOn(vscode.window, 'showQuickPick');
+      const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+      const addTables = vi.fn(async () => undefined);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables, activeDiagramPath: () => STAGING }, ['dim_date']);
+      expect(pick).not.toHaveBeenCalled();
+      expect(addTables).toHaveBeenCalledWith(STAGING, ['dim_date']);
+      expect(status).toHaveBeenCalledWith('$(check) ERD Studio: Added "dim_date" to staging', ADDED_TO_DIAGRAM_STATUS_MS);
+    });
+
+    it('adds to the only diagram on screen when the sidebar has focus (no diagram in the active tab)', async () => {
+      const pick = vi.spyOn(vscode.window, 'showQuickPick');
+      const addTables = vi.fn(async () => undefined);
+      await addToDiagramCommand({
+        listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables,
+        activeDiagramPath: () => undefined, openDiagramPaths: () => [SALES],
+      }, ['dim_date', 'dim_region']);
+      expect(pick).not.toHaveBeenCalled();
+      expect(addTables).toHaveBeenCalledWith(SALES, ['dim_date', 'dim_region']);
+    });
+
+    it('asks when two diagrams are on screen and neither is in the active tab, or none is open', async () => {
+      const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async () => undefined) as never);
+      const addTables = vi.fn(async () => undefined);
+      await addToDiagramCommand({
+        listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables,
+        activeDiagramPath: () => undefined, openDiagramPaths: () => [SALES, STAGING],
+      }, ['dim_date']);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables, openDiagramPaths: () => [] }, ['dim_date']);
+      expect(pick).toHaveBeenCalledTimes(2);
+      expect(addTables).not.toHaveBeenCalled();
+    });
+
+    it('a table the open diagram shows already goes to it too (its canvas says it is already there), and the status bar names only what is new', async () => {
+      const pick = vi.spyOn(vscode.window, 'showQuickPick');
+      const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+      const addTables = vi.fn(async () => undefined);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables, activeDiagramPath: () => STAGING }, ['fct_order']);
+      expect(pick).not.toHaveBeenCalled();
+      expect(addTables).toHaveBeenCalledWith(STAGING, ['fct_order']);
+      expect(status).not.toHaveBeenCalled();
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables, activeDiagramPath: () => STAGING }, ['fct_order', 'dim_date']);
+      expect(status).toHaveBeenCalledWith(addedToDiagramStatus('"dim_date"', 'staging'), ADDED_TO_DIAGRAM_STATUS_MS);
+    });
+
+    it('diagramToAddTo: the active diagram, else the only one on screen (each file once, any case on macOS/Windows), else none', () => {
+      expect(diagramToAddTo(summaries, STAGING, [SALES])?.domain).toBe('staging');
+      expect(diagramToAddTo(summaries, undefined, [SALES, SALES])?.domain).toBe('sales');
+      expect(diagramToAddTo(summaries, undefined, [SALES, STAGING])).toBeUndefined();
+      expect(diagramToAddTo(summaries, undefined, [])).toBeUndefined();
+      // Not a diagram of the project: the pick decides.
+      expect(diagramToAddTo(summaries, '/elsewhere/x.dbml', [])).toBeUndefined();
+    });
+  });
+
   it('says so when every diagram shows them, or there is no diagram', async () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     const addTables = vi.fn(async () => undefined);
@@ -469,5 +532,12 @@ describe('contributions', () => {
 
   it('put Add to Diagram… on a Table Library table\'s right-click menu', () => {
     expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@2' });
+  });
+
+  it('put Add to Open Diagram as a + button on a Table Library table row, out of the palette, with no legacy alias', () => {
+    expect(commands.find((c) => c.command === 'erdStudio.addToOpenDiagram')).toMatchObject({ title: 'Add to Open Diagram', icon: '$(add)' });
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'inline' });
+    expect(menus.commandPalette).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'false' });
+    expect(NO_LEGACY_ALIAS.has('erdStudio.addToOpenDiagram')).toBe(true);
   });
 });

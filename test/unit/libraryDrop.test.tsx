@@ -3,7 +3,9 @@
  * Dropping tables on the canvas, webview side (`useLibraryDrop`,
  * `LibraryDropOverlay`, wired in App.tsx): the host's `libraryDragStarted`
  * shows "Hold Shift and drop to add … to this diagram" until the drop, a
- * pointer move or {@link LIBRARY_DRAG_HINT_MS}; an acceptable drag over an
+ * pointer move, the diagram changing or {@link LIBRARY_DRAG_HINT_MS}, and
+ * "Let go to add …" while an acceptable drag is over the canvas (Shift
+ * pressed early or late); an acceptable drag over an
  * editable logical diagram is highlighted and its drop posts `dropTables`
  * with the flow position and the DataTransfer's URIs. Nothing of it on the
  * physical stage or in the viewer. The host side is `test/unit/dropTables.test.ts`.
@@ -65,7 +67,8 @@ function transfer(data: Record<string, string>) {
 const sent = () => mockVsCode.postMessage.mock.calls.map((c) => c[0] as { type: string; payload?: unknown });
 const drops = () => sent().filter((m) => m.type === 'dropTables');
 const canvas = (container: HTMLElement) => container.querySelector('.editor-canvas') as HTMLElement;
-const HINT = 'Hold Shift and drop to add dim_customer to this diagram';
+const HINT = 'Hold Shift and drop to add dim_customer to this diagram. Pressed Shift over the diagram? Move the mouse a little, then let go.';
+const LET_GO = 'Let go to add dim_customer to this diagram';
 
 beforeAll(() => {
   // React Flow measures its container; jsdom has no ResizeObserver.
@@ -130,9 +133,11 @@ describe('acceptsDrop', () => {
     expect(isLibraryDrag(null)).toBe(false);
   });
 
-  it('words the hint for one table or several', () => {
+  it('words the hint for one table or several, and says "Let go" once the drag is over the canvas', () => {
     expect(libraryDragHintText(['dim_customer'])).toBe(HINT);
-    expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Hold Shift and drop to add 3 tables to this diagram');
+    expect(libraryDragHintText(['a', 'b', 'c'])).toMatch(/^Hold Shift and drop to add 3 tables to this diagram\. /);
+    expect(libraryDragHintText(['dim_customer'], true)).toBe(LET_GO);
+    expect(libraryDragHintText(['a', 'b'], true)).toBe('Let go to add 2 tables to this diagram');
   });
 });
 
@@ -152,7 +157,7 @@ describe('the canvas as a drop target', () => {
     render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
     postFromHost({ type: 'libraryDragStarted', payload: { tables: ['a', 'b'] } });
-    expect(screen.getByText('Hold Shift and drop to add 2 tables to this diagram')).toBeTruthy();
+    expect(screen.getByText(libraryDragHintText(['a', 'b']))).toBeTruthy();
     act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
     expect(screen.queryByText(/Hold Shift and drop/)).toBeNull();
   });
@@ -169,6 +174,8 @@ describe('the canvas as a drop target', () => {
     expect(accepted).toBe(false); // preventDefault: the drop is allowed
     expect(dataTransfer.dropEffect).toBe('copy');
     expect(screen.getByTestId('library-drop-highlight')).toBeTruthy();
+    // Over the canvas, the hint says the drop will land.
+    expect(screen.getByText(LET_GO)).toBeTruthy();
 
     fireEvent.drop(target, { dataTransfer, clientX: 120, clientY: 80 });
     expect(drops()).toEqual([{
@@ -198,6 +205,8 @@ describe('the canvas as a drop target', () => {
       'text/uri-list': '',
       resourceurls: '',
       'application/vnd.code.tree.erdstudio.modellibrary': '{"id":"erdStudio.modelLibrary","itemHandles":["0/0:fct_order","0/1:sales"]}',
+      // The names' own type, declared in dragMimeTypes: blank here too (the real names stay in the workbench).
+      'application/vnd.erdstudio.tables+json': '',
       'application/vnd.code.uri-list': 'file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml',
       codefiles: '["c:\\\\proj\\\\.erd-studio\\\\gold\\\\tables\\\\dbo\\\\fct_order.dbml"]',
     });
@@ -207,6 +216,60 @@ describe('the canvas as a drop target', () => {
       type: 'dropTables',
       payload: { position: { x: 10, y: 20 }, uris: ['file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml'], fromLibrary: true },
     }]);
+  });
+
+  // Shift pressed late (after the hint has gone, or with the pointer already over
+  // the diagram): VS Code lets the drag reach the webview from its next drag
+  // event on, and the canvas takes it exactly as it takes an early-Shift drag.
+  it('Shift pressed late: a drag that reaches the canvas after the hint timed out is taken, named, and dropped', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
+    expect(screen.queryByText(HINT)).toBeNull();
+    // What the webview sees once Shift is down: VS Code's tree types, blank, and the row's file.
+    const dataTransfer = transfer({
+      'application/vnd.code.tree.erdstudio.modellibrary': '',
+      'application/vnd.code.uri-list': 'file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml',
+    });
+    fireEvent.dragEnter(canvas(container), { dataTransfer });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer, clientX: 5, clientY: 5 })).toBe(false);
+    expect(screen.getByText(LET_GO)).toBeTruthy();
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 5, clientY: 5 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 5, y: 5 }, uris: ['file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml'], fromLibrary: true },
+    }]);
+    expect(screen.queryByText(LET_GO)).toBeNull();
+  });
+
+  it('Shift pressed early: the first event the canvas sees is a dragover (no dragenter), and the drop still lands', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const dataTransfer = transfer({ 'application/vnd.code.tree.erdstudio.modellibrary': '' });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(false);
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 1, clientY: 2 });
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 1, y: 2 }, uris: [], fromLibrary: true } }]);
+  });
+
+  it('the hint goes when the diagram changes under it (the tables were added by a drop on its row)', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    postFromHost({ type: 'domainLoaded', payload: { ...subjectArea('logical'), description: 'now with dim_customer' } });
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('the hint goes when the host selects a table (a drop on the row found it already there)', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    postFromHost({ type: 'revealTable', payload: { modelName: 'dim_customer' } });
+    expect(screen.queryByText(HINT)).toBeNull();
   });
 
   it('leaves a plain text drag alone, and drops the highlight when the drag leaves', () => {

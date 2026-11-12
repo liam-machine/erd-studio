@@ -6,12 +6,17 @@
  * a table row, every table of a schema row, every table of a layer row; never
  * an ignored duplicate — and puts their files in `text/uri-list` (so a drop
  * in a text editor or the Explorer behaves as for any file) and their names
- * under {@link TABLE_LIBRARY_DRAG_MIME}. It then reports the drag
+ * under {@link TABLE_LIBRARY_NAMES_MIME}. It then reports the drag
  * (`onDragStarted`, with each table's file where the extension asks for
  * them: two schema folders may each hold a table of one name, and only the
  * file says which): the editor provider remembers it for a minute and tells
  * the open canvases, which show "Hold Shift and drop to add … to this
  * diagram".
+ *
+ * The names never go under the view's own tree mime type
+ * ({@link TABLE_LIBRARY_DRAG_MIME}): VS Code writes `{ id, itemHandles }`
+ * there at dragstart, and a drop on a Diagrams row hands that over first, so
+ * a drop that read the names from it found none and added nothing (2.0.4).
  *
  * Why Shift: while a drag that started in the workbench is in progress, VS
  * Code turns off pointer events on every webview unless Shift is held, so a
@@ -25,11 +30,11 @@
 import * as vscode from 'vscode';
 
 import type { TableLibraryNode } from './ModelLibraryTreeProvider';
-import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME } from '../types/messages';
+import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME } from '../types/messages';
 import { normaliseName } from '../services/nameUtils';
 import { tableIdKey } from '../types/tableId';
 
-export { TABLE_LIBRARY_DRAG_MIME };
+export { TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME };
 
 /** The tables a drag carries: names and their files, in the same order. */
 export interface DraggedTables {
@@ -69,7 +74,7 @@ export function tablesOfDraggedRows(rows: readonly TableLibraryNode[], limit = A
 
 /** The Table Library's drag source; it accepts no drops. */
 export class TableLibraryDragController implements vscode.TreeDragAndDropController<TableLibraryNode> {
-  readonly dragMimeTypes: readonly string[] = [TABLE_LIBRARY_DRAG_MIME, 'text/uri-list'];
+  readonly dragMimeTypes: readonly string[] = [TABLE_LIBRARY_NAMES_MIME, 'text/uri-list'];
   readonly dropMimeTypes: readonly string[] = [];
 
   constructor(
@@ -83,7 +88,8 @@ export class TableLibraryDragController implements vscode.TreeDragAndDropControl
     const { names, filePaths } = tablesOfDraggedRows(source);
     if (names.length === 0) return;
     dataTransfer.set('text/uri-list', new vscode.DataTransferItem(filePaths.map((p) => vscode.Uri.file(p).toString()).join('\r\n')));
-    dataTransfer.set(TABLE_LIBRARY_DRAG_MIME, new vscode.DataTransferItem(names));
+    // JSON text, as VS Code would serialise it anyway on its way to another tree.
+    dataTransfer.set(TABLE_LIBRARY_NAMES_MIME, new vscode.DataTransferItem(JSON.stringify(names)));
     if (this.options.withFiles) this.onDragStarted(names, filePaths);
     else this.onDragStarted(names);
   }

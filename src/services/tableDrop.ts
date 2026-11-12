@@ -105,6 +105,37 @@ export function tableFilesOfDroppedUris<T extends DroppableTableFile>(
   return out;
 }
 
+/** The tables a drop on a diagram's row adds: names, and their files where they are added by file. */
+export interface TreeDropTables {
+  readonly names: string[];
+  readonly files?: string[];
+}
+
+/**
+ * Which tables Table Library rows dropped on a diagram's row in the Diagrams
+ * view add: by their files (`uris`) where the library tells tables apart by
+ * file (`byFile`: two schema folders share a name), else the dragged names;
+ * when the drop's names could not be read, the tables its files are; and
+ * when it carried neither, the drag the editor remembered (`remembered`).
+ * Undefined when nothing names a table, so the caller can say so.
+ */
+export function tablesOfTreeDrop<T extends DroppableTableFile>(
+  drop: { readonly tables: readonly string[]; readonly uris: readonly string[] },
+  library: readonly T[],
+  options: { readonly byFile: boolean; readonly remembered?: { readonly tables: readonly string[]; readonly files?: readonly string[] } },
+  platform: NodeJS.Platform = process.platform,
+): TreeDropTables | undefined {
+  const dropped = tableFilesOfDroppedUris(drop.uris, library, platform);
+  if (options.byFile && dropped.length > 0) return { names: dropped.map((f) => f.name), files: dropped.map((f) => f.filePath) };
+  if (drop.tables.length > 0) return { names: [...drop.tables] };
+  if (dropped.length > 0) return { names: tablesOfDroppedUris(drop.uris, library, platform) };
+  const remembered = options.remembered;
+  if (!remembered || remembered.tables.length === 0) return undefined;
+  return options.byFile && remembered.files && remembered.files.length === remembered.tables.length
+    ? { names: [...remembered.tables], files: [...remembered.files] }
+    : { names: [...remembered.tables] };
+}
+
 /**
  * Where dropped tables go: the first centred under the drop point with its
  * header under the pointer, the others in a grid to its right and below,

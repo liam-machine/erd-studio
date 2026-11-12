@@ -139,6 +139,33 @@ describe('addTablesToDiagram (Add to Diagram…)', () => {
     expect(reveals(panel)).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_customer' } }]);
   });
 
+  it('a table already on the diagram is selected and said to be there, on the canvas, and nothing is written', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await open(provider, STAGING);
+    await panel._simulateMessage({ type: 'ready' });
+    _appliedEdits.length = 0;
+    panel._postedMessages.length = 0;
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order']);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: '"fct_order" is already on this diagram.' } });
+    expect(reveals(panel)).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('of a mix, adds the new one and names the one already there, on the canvas', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await open(provider, STAGING);
+    await panel._simulateMessage({ type: 'ready' });
+    _appliedEdits.length = 0;
+    panel._postedMessages.length = 0;
+    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order', 'dim_region']);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: 'Added 1 table. Already on this diagram: fct_order.' } });
+    expect(reveals(panel)).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_region' } }]);
+  });
+
   it('waits for a diagram that is still opening', async () => {
     const provider = buildProvider(root);
     await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_region']);

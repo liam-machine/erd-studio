@@ -161,7 +161,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasNoticeMessage, DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -731,11 +731,26 @@ export const PENDING_LIBRARY_DRAG_MS = 60_000;
 export const DROP_TABLES_NOTHING_MESSAGE =
   'ERD Studio: Hold Shift and drop a table from the Table Library, or a table file from the Explorer, onto the diagram.';
 
-/** The answer to a drop of tables that are all on the diagram already (they are selected instead). */
+/**
+ * The answer to a drop (or Add to Diagram…) of tables that are all on the
+ * diagram already (they are selected instead): a notice on that canvas
+ * (`canvasNotice`), where the user is looking.
+ */
 export function alreadyOnDiagramMessage(tables: readonly string[]): string {
   return tables.length === 1
-    ? `ERD Studio: "${tables[0]}" is already on this diagram.`
-    : `ERD Studio: These ${tables.length} tables are already on this diagram.`;
+    ? `"${tables[0]}" is already on this diagram.`
+    : `These ${tables.length} tables are already on this diagram.`;
+}
+
+/** "Already on this diagram: a, b and 3 more." — the tables of a mixed add that were there already. */
+export function alreadyOnDiagramList(tables: readonly string[]): string {
+  const more = tables.length > 5 ? ` and ${tables.length - 5} more` : '';
+  return `Already on this diagram: ${tables.slice(0, 5).join(', ')}${more}.`;
+}
+
+/** The canvas notice for an add of some tables where the others were there already. */
+export function addedWithAlreadyMessage(added: number, already: readonly string[]): string {
+  return `Added ${added} table${added === 1 ? '' : 's'}. ${alreadyOnDiagramList(already)}`;
 }
 
 /** How long the status bar says where a new relationship was saved. */
@@ -6816,6 +6831,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * The Table Library drag a drop on a diagram's row in the Diagrams view
+   * ended (the extension's drop handler): used up there, so a later canvas
+   * drop never adds it again, and its fallback when the drop names no table.
+   */
+  takeRememberedLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
+    return this.takeLibraryDrag();
+  }
+
+  /** A brief note on one canvas (`canvasNotice`): what an add of tables found already there. */
+  private postCanvasNotice(webview: vscode.Webview, message: string): void {
+    this.post(webview, { type: 'canvasNotice', payload: { message } } satisfies CanvasNoticeMessage);
+  }
+
+  /**
    * A drop on the canvas (`dropTables`): the Table Library drag of the last
    * minute when the drop says it is one (`fromLibrary`), else the table files
    * among the dropped URIs, else that remembered drag. Tables already on
@@ -6846,7 +6875,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (byFile && byFile.rest.length === 0) {
         telemetry.feature('addModel');
         await this.queueEdit(panelKey, async () => {
-          const added = await this.addTableFiles(document, webview, byFile.files, { dropAt: payload.position });
+          const added = await this.addTableFiles(document, webview, byFile.files, { dropAt: payload.position, alreadyAsNotice: true });
           if (added.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: added[0] } } satisfies RevealTableMessage);
         });
         return;
@@ -6866,7 +6895,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const fresh = names.filter((name) => !members.has(normaliseName(name)));
       if (fresh.length === 0) {
         this.post(webview, { type: 'revealTable', payload: { modelName: names[0] } } satisfies RevealTableMessage);
-        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+        this.postCanvasNotice(webview, alreadyOnDiagramMessage(names));
         return;
       }
       telemetry.feature('addModel');
@@ -6921,8 +6950,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const before = membersOf();
       const fresh = add.filter((name) => !before.has(normaliseName(name)));
       if (fresh.length === 0) {
-        // All there already: select the first and say so, briefly.
-        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(add));
+        // All there already: select the first and say so, on the canvas.
+        this.postCanvasNotice(panel.webview, alreadyOnDiagramMessage(add));
       } else {
         // Every name goes to the add, so its note names the ones already here.
         await this.queueEdit(panelKey, () => this.handleAddExistingModels(panel.document, panel.webview, add));
@@ -6959,8 +6988,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const fresh = names.map((_n, i) => i).filter((i) => shownAs(i) === undefined);
     if (fresh.length === 0) {
-      // All there already: select the first and say so, briefly.
-      void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+      // All there already: select the first and say so, on the canvas.
+      this.postCanvasNotice(webview, alreadyOnDiagramMessage(names.map((n, i) => shownAs(i) ?? n)));
       this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(0) ?? names[0] } } satisfies RevealTableMessage);
       return;
     }
@@ -9011,14 +9040,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     files: readonly TableFileEntry[],
-    options: { dropAt?: NodePosition } = {},
+    /**
+     * `alreadyAsNotice`: a drop on the canvas: tables that are all there already
+     * are selected and named in a canvas notice ({@link alreadyOnDiagramMessage}),
+     * as a drop of names is, rather than refused with an error.
+     */
+    options: { dropAt?: NodePosition; alreadyAsNotice?: boolean } = {},
   ): Promise<string[]> {
     const members = this.parseSubjectAreaFile(document).members;
     if (!members) return [];
-    const fresh = files.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && files.findIndex((g) => samePath(g.filePath, f.filePath)) === i);
+    const firstOfFile = (f: TableFileEntry, i: number): boolean => files.findIndex((g) => samePath(g.filePath, f.filePath)) === i;
+    const fresh = files.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && firstOfFile(f, i));
+    // The tables the diagram shows already (the same file), as it names them: named after the add, never dropped silently.
+    const present = files
+      .filter((f, i) => f.id !== undefined && members.memberOf(f.id) !== undefined && firstOfFile(f, i))
+      .map((f) => members.memberOf(f.id!)!.ref);
     if (fresh.length === 0) {
       const first = files[0];
       const shown = first?.id ? members.memberOf(first.id)?.ref ?? first.name : first?.name ?? '';
+      if (options.alreadyAsNotice && present.length > 0) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: present[0] } } satisfies RevealTableMessage);
+        this.postCanvasNotice(webview, alreadyOnDiagramMessage(present));
+        return [];
+      }
       this.post(webview, { type: 'error', payload: { message: `Table "${shown}" already exists in this diagram.` } });
       return [];
     }
@@ -9054,6 +9098,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     );
     if (!success) return [];
     this.selectorsService.scheduleRegenerate();
+    if (present.length > 0) this.postCanvasNotice(webview, addedWithAlreadyMessage(refs.length, present.map((ref) => renames.get(ref) ?? ref)));
     if (dbt.unstored) void vscode.window.showInformationMessage(`Added ${refs.join(', ')}. ${dbt.unstored}`);
     return refs;
   }
@@ -9458,12 +9503,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // without a word. The dbt picker leaves those out up front.
       const alreadyIn = fromDbt ? [] : [
         ...draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name),
-        ...(members ? resolvedFiles.filter((f) => members.memberOf(f.id!) !== undefined).map((f) => members.memberOf(f.id!)!.ref) : []),
+        ...(members ? [...(byFile ?? []), ...resolvedFiles]
+          .filter((f, i, all) => f.id !== undefined && members.memberOf(f.id) !== undefined && all.findIndex((g) => samePath(g.filePath, f.filePath)) === i)
+          .map((f) => members.memberOf(f.id!)!.ref) : []),
       ];
-      const skippedNote = [
-        describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
-        alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',
-      ].filter(Boolean).join(' ');
+      const describedSkips = describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly });
+      const skippedNote = [describedSkips, alreadyIn.length > 0 ? alreadyOnDiagramList(alreadyIn) : ''].filter(Boolean).join(' ');
       if (draft.modelNames.length === 0 && files.length === 0) {
         if (fromDbt) telemetry.feature('addFromDbtNothingDrawable');
         this.post(webview, {
@@ -9553,9 +9598,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
-            const note = [skippedNote, routed.unstored].filter(Boolean).join(' ');
+            const added = addedNames.length;
+            // The tables already there are named on the canvas, where the user is looking.
+            if (alreadyIn.length > 0) this.postCanvasNotice(webview, addedWithAlreadyMessage(added, alreadyIn));
+            const note = [describedSkips, routed.unstored].filter(Boolean).join(' ');
             if (note) {
-              const added = addedNames.length;
               void vscode.window.showInformationMessage(
                 `Added ${added} table${added === 1 ? '' : 's'}${from}. ${note}`,
               );
