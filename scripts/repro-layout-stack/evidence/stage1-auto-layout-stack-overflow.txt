@@ -2,7 +2,7 @@
 # worktree 26f635d2 on fix/gerhard-feedback-3 (origin/develop 9e246d57 + repro commits), node v26.3.1, 2026-11-12 19:05 AEDT
 
 $ node scripts/repro-layout-stack/build.mjs
-built /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/scripts/repro-layout-stack/.out/layout.cjs
+built scripts/repro-layout-stack/.out/layout.cjs
 
 ## 1. The 8-table / 14-relationship diagram (two-way relationships). Real runElkLayout, real ELK, full fallback ladder, Node default stack
 $ node scripts/repro-layout-stack/run.cjs twoway 8 14 all 192

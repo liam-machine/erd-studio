@@ -68,8 +68,8 @@
  ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > control: the same project with qualified headers (what ERD Studio writes itself) > Add Existing writes qualified use lines the official parser accepts, and asks nothing
  ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > opening it says how many relationships are not drawn and why; none is drawn on the wrong table
  ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > Qualify Tables asks which table each Ref end means, writes the answers, and leaves every file valid DBML in one edit
- ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/packages/core/test/fixtures/dbml/same-name-unqualified
- ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/packages/core/test/fixtures/dbml/same-name-unqualified
+ ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: packages/core/test/fixtures/dbml/same-name-unqualified
+ ✓ test/unit/dbmlDisplayParity.test.ts > the canvas draws what core draws, for every DBML diagram > twin same-name-unqualified: packages/core/test/fixtures/dbml/same-name-unqualified
  ✓ test/unit/breaker.sharedUseSpelling.test.ts > breaker: shared spelling where both tables have the Ref column > after Qualify, reopening the diagram does not offer Qualify Tables again for a fix it cannot make
  ✓ test/unit/breaker.sharedUseSpelling.test.ts > breaker: shared spelling where both tables have the Ref column > a relationship the user draws to ccc.adresse (Qualify declined) is drawn, or the edit asks first
  ✓ test/unit/semanticEditorProvider.sharedUseSpelling.test.ts > Gerhard photo-2: both adresse tables have the Ref column > Cancel on a "which table" question writes nothing
