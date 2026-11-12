@@ -7,7 +7,7 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted, filesNotShown,
+ *                         revealTable, libraryDragStarted, libraryDragEnded, filesNotShown,
  *                         canvasNotice
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
@@ -474,6 +474,19 @@ export interface LibraryDragStartedMessage {
 }
 
 /**
+ * The Table Library drag announced by `libraryDragStarted` is used up: its
+ * tables were dropped on a canvas or on a diagram's row in the Diagrams view,
+ * or the drop missed the canvas and opened the file instead (the host offers
+ * the add). Posted by `SemanticEditorProvider.takeLibraryDrag` to every
+ * loaded canvas, which takes its "Hold Shift and drop" hint down and stops
+ * treating the drag as in progress. An older webview ignores it (the hint
+ * then times out as before).
+ */
+export interface LibraryDragEndedMessage {
+  type: 'libraryDragEnded';
+}
+
+/**
  * Start the onboarding guide's phase B on this canvas (**Show Me Around**,
  * `src/types/onboardingGuide.ts`): the first diagram opened after the guide's
  * draft part, or the open diagram when the command asks. The webview builds
@@ -520,6 +533,7 @@ export type ExtensionMessage =
   | CanvasNoticeMessage
   | RevealTableMessage
   | LibraryDragStartedMessage
+  | LibraryDragEndedMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------

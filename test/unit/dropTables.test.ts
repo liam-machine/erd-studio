@@ -532,6 +532,24 @@ describe('noteLibraryDrag', () => {
     expect(posted(opening, 'libraryDragStarted')).toEqual([]);
   });
 
+  it('once the drag is used up (a drop on a row or a canvas, or a missed drop), every loaded canvas is told it ended', async () => {
+    const provider = buildProvider(root);
+    const staging = await loaded(provider, STAGING);
+    const sales = await loaded(provider, SALES);
+    expect(provider.takeRememberedLibraryDrag()).toBeUndefined();
+    expect(posted(staging.panel, 'libraryDragEnded')).toEqual([]);
+    provider.noteLibraryDrag(['dim_customer'], [at('gold/tables/gold/dim_customer.dbml')]);
+    const peeked = provider.peekRememberedLibraryDrag();
+    expect(peeked).toMatchObject({ tables: ['dim_customer'], files: [at('gold/tables/gold/dim_customer.dbml')] });
+    expect(typeof peeked?.at).toBe('number');
+    // A peek does not use it up.
+    expect(provider.peekRememberedLibraryDrag()?.tables).toEqual(['dim_customer']);
+    expect(provider.takeRememberedLibraryDrag()?.tables).toEqual(['dim_customer']);
+    expect(posted(staging.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
+    expect(posted(sales.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
+    expect(provider.peekRememberedLibraryDrag()).toBeUndefined();
+  });
+
   it('an empty drag tells no one', async () => {
     const provider = buildProvider(root);
     const { panel } = await loaded(provider);

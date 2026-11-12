@@ -6,21 +6,25 @@
  * while Shift is held (without it the editor group takes the drop and opens
  * the file). So when the host says a Table Library drag has started
  * (`libraryDragStarted`), the canvas shows "Hold Shift and drop to add … to
- * this diagram" — until the drop, {@link LIBRARY_DRAG_HINT_MS}, the diagram
- * changing or the host selecting a table on it (the tables were added, or
- * found already there, some other way, such as a drop on the diagram's
- * row), or the next pointer move inside the webview (pointer events
- * come back once the drag is over). While an acceptable drag is over the
- * canvas, it says "Let go to add …": the drop will land.
+ * this diagram" — until the drop, the host's `libraryDragEnded` (the drag
+ * was used up: dropped on a canvas or a diagram's row, or it missed the canvas
+ * and opened the file), {@link LIBRARY_DRAG_HINT_MS}, the diagram changing or
+ * the host selecting a table on it (the tables were added, or found already
+ * there, some other way), or the next pointer move inside the webview
+ * (pointer events come back once the drag is over). While an acceptable drag
+ * is over the canvas, it says "Let go to add …": the drop will land.
  *
- * When Shift is pressed decides nothing by itself, but VS Code notices it
- * only on its next drag event (its `WebviewWindowDragMonitor` turns the
- * webview's pointer events back on for a `drag` / `dragover` with Shift, and
+ * When Shift is pressed decides nothing by itself: VS Code reads it on each
+ * drag event (its `WebviewWindowDragMonitor` turns the webview's pointer
+ * events on for a `drag` / `dragover` with Shift and off for one without, and
  * the editor group's "Hold Shift to drop into editor" overlay goes on its
- * next `dragover` with Shift). Shift pressed with the pointer already over
- * the diagram and held still, then let go, drops on that overlay: the file
- * opens instead. Hence the hint's second sentence: move the mouse a little
- * after pressing Shift, and keep it down until the button is released.
+ * next `dragover` with Shift). What matters is that Shift is down when the
+ * button is let go: released a moment early, the drop lands on the editor
+ * group and the file opens. Hence the hint's second sentence. (Whether a
+ * Shift pressed with the pointer held still is noticed before the release
+ * depends on the OS sending drag events without movement; not observed with
+ * a real mouse yet.) A drop that misses this way is caught by the host,
+ * which offers the add (`missedCanvasDrop`, `src/services/tableDrop.ts`).
  *
  * Over an editable logical diagram, a drag that carries URIs (or the Table
  * Library drag the host announced) is accepted as a copy and highlights the
@@ -73,7 +77,7 @@ export function libraryDragHintText(tables: readonly string[], over = false): st
   const what = tables.length === 1 ? tables[0] : `${tables.length} tables`;
   return over
     ? `Let go to add ${what} to this diagram`
-    : `Hold Shift and drop to add ${what} to this diagram. Pressed Shift over the diagram? Move the mouse a little, then let go.`;
+    : `Hold Shift and drop to add ${what} to this diagram. Keep Shift down until you let go.`;
 }
 
 type DataTransferLike = Pick<DataTransfer, 'getData'> & { readonly types?: ArrayLike<string> | readonly string[] };
@@ -160,6 +164,8 @@ export interface LibraryDrop {
   hintTables: string[] | null;
   /** The host's `libraryDragStarted`. */
   libraryDragStarted: (tables: readonly string[]) => void;
+  /** The host's `libraryDragEnded`: the drag was used up elsewhere. */
+  libraryDragEnded: () => void;
 }
 
 /**
@@ -319,5 +325,6 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     dropActive: viewer ? false : editable && dropActive,
     hintTables: viewer ? null : editable ? shownTables : null,
     libraryDragStarted,
+    libraryDragEnded: endLibraryDrag,
   };
 }

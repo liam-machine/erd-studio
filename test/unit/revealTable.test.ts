@@ -131,7 +131,8 @@ describe('addTablesToDiagram (Add to Diagram…)', () => {
     const { panel, doc } = await open(provider, STAGING);
     await panel._simulateMessage({ type: 'ready' });
     _appliedEdits.length = 0;
-    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_customer', 'dim_region']);
+    // It says what it added (Add to Open Diagram's status bar names exactly that).
+    expect(await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_customer', 'dim_region'])).toEqual(['dim_customer', 'dim_region']);
     expect(errors(panel)).toEqual([]);
     expect(_appliedEdits).toHaveLength(1);
     expect(doc.getText()).toContain('use { table gold.dim_customer }');
@@ -146,7 +147,7 @@ describe('addTablesToDiagram (Add to Diagram…)', () => {
     _appliedEdits.length = 0;
     panel._postedMessages.length = 0;
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
-    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order']);
+    expect(await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order'])).toEqual([]);
     expect(_appliedEdits).toHaveLength(0);
     expect(panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: '"fct_order" is already on this diagram.' } });
     expect(reveals(panel)).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
@@ -159,7 +160,7 @@ describe('addTablesToDiagram (Add to Diagram…)', () => {
     await panel._simulateMessage({ type: 'ready' });
     _appliedEdits.length = 0;
     panel._postedMessages.length = 0;
-    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order', 'dim_region']);
+    expect(await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['fct_order', 'dim_region'])).toEqual(['dim_region']);
     expect(_appliedEdits).toHaveLength(1);
     expect(doc.getText()).toContain('use { table gold.dim_region }');
     expect(panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: 'Added 1 table. Already on this diagram: fct_order.' } });
@@ -168,7 +169,8 @@ describe('addTablesToDiagram (Add to Diagram…)', () => {
 
   it('waits for a diagram that is still opening', async () => {
     const provider = buildProvider(root);
-    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_region']);
+    // Held for the canvas's ready: what it will add is not known yet.
+    expect(await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_region'])).toBeUndefined();
     const { panel, doc } = await open(provider, STAGING);
     await panel._simulateMessage({ type: 'ready' });
     await vi.waitFor(() => expect(reveals(panel)).toHaveLength(1));

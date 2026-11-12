@@ -1011,9 +1011,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "erdStudio.addToDiagram",
+          "command": "erdStudio.addToOpenDiagram",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "navigation@2"
+        },
+        {
+          "command": "erdStudio.addToDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "group": "navigation@3"
         },
         {
           "command": "erdStudio.moveTable",

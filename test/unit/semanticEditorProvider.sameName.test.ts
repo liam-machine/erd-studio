@@ -851,7 +851,7 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
   it('Add to Diagram… (and a drop on the diagram\'s row) adds the table of the file given, beside its namesake, and selects it', async () => {
     const canvas = await open('bronze/diagrams/bqs.dbml');
     canvas.panel._postedMessages.length = 0;
-    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/bqs.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')]);
+    expect(await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/bqs.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')])).toEqual(['addresse']);
     const after = read('bronze/diagrams/bqs.dbml');
     expect(after).toContain('bqs.addresse 10 20');
     expect(after).toMatch(/^use \{ table ccc\.addresse \} +from '\.\.\/tables\/ccc\/addresse\.dbml'$/m);
@@ -864,7 +864,7 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     const canvas = await open('bronze/diagrams/kunden.dbml');
     const before = snapshot();
     canvas.panel._postedMessages.length = 0;
-    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/kunden.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')]);
+    expect(await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/kunden.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')])).toEqual([]);
     expect(changed(before, snapshot())).toEqual([]);
     const reveals = canvas.panel._postedMessages.filter((m) => (m as { type: string }).type === 'revealTable') as Array<{ payload: { modelName: string } }>;
     expect(reveals.map((m) => m.payload.modelName)).toEqual(['ccc.addresse']);

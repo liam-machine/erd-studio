@@ -384,6 +384,35 @@ describe('activate() with a dbt project', () => {
   // #167: a click in the Domains tree (and the picker, the status bar, the
   // Welcome panel) opens a preview tab, so browsing diagrams reuses one tab
   // until an edit pins it, as a single click in the Explorer does.
+  // Breaker (gerhard-3): the only diagram on screen sat in a group that was not active, and the add opened a second tab of it.
+  it('Add to Open Diagram brings the diagram forward in the group that shows it, never a second tab in the active group', async () => {
+    await activate(context);
+    const ttt = path.join(root, '.erd-studio', 'silver', 'ttt.json');
+    const readme = { input: new vscode.TabInputText(vscode.Uri.file(path.join(root, 'README.md'))), isPreview: false };
+    const diagram = { input: new vscode.TabInputCustom(vscode.Uri.file(ttt), SUBJECT_AREA_EDITOR_VIEW_TYPE), isPreview: false };
+    const left = { tabs: [readme], activeTab: readme, viewColumn: 1 };
+    const right = { tabs: [diagram], activeTab: diagram, viewColumn: 2 };
+    const tabGroups = vscode.window.tabGroups as unknown as { all: unknown[]; activeTabGroup: unknown };
+    const activeBefore = tabGroups.activeTabGroup;
+    tabGroups.all = [left, right];
+    tabGroups.activeTabGroup = left;
+    try {
+      const exec = vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
+        (command === 'erdStudio.addToOpenDiagram' ? realExecute(command, ...args) : undefined)) as never);
+      vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined as never);
+      await vscode.commands.executeCommand('erdStudio.addToOpenDiagram', 'dim_customer');
+      const opened = exec.mock.calls.filter((c) => c[0] === 'vscode.openWith');
+      expect(opened).toHaveLength(1);
+      expect((opened[0][1] as { fsPath: string }).fsPath).toBe(vscode.Uri.file(ttt).fsPath);
+      expect(opened[0][3]).toEqual({ preview: true, viewColumn: 2 });
+      expect(exec.mock.calls.some((c) => c[0] === 'erdStudio.openDomain')).toBe(false);
+      expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+    } finally {
+      tabGroups.activeTabGroup = activeBefore;
+      tabGroups.all = [];
+    }
+  });
+
   it('erdStudio.openDomain opens the diagram in a preview tab', async () => {
     await activate(context);
     const real = vscode.commands.executeCommand;

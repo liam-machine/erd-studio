@@ -10,9 +10,12 @@
  *   waits for a read, and files not read yet are read after it shows, a
  *   slice at a time, filling them in. Accepting a row opens it in a diagram;
  *   its buttons open its file or show its relationships.
- * - **Add to Diagram…** (`erdStudio.addToDiagram`, the Table Library's
- *   right-click menu, several rows at once): the diagram to add the tables
- *   to, then the canvas's own Add Existing Tables edit (one edit, one undo).
+ * - **Add to Open Diagram** (`erdStudio.addToOpenDiagram`, the Table
+ *   Library row's inline + and its right-click menu, several rows at once):
+ *   the diagram that is open, then the canvas's own Add Existing Tables edit
+ *   (one edit, one undo); it asks which only with none or several open.
+ * - **Add to Diagram…** (`erdStudio.addToDiagram`, the right-click menu): the
+ *   same add, always asking which diagram (the open one first).
  *
  * Where the library tells tables apart by their schema folders, two tables
  * of one name are two rows, each counted, read, opened and added by its own
@@ -41,7 +44,7 @@ import {
 
 export const GO_TO_TABLE_COMMAND = 'erdStudio.goToTable';
 export const ADD_TO_DIAGRAM_COMMAND = 'erdStudio.addToDiagram';
-/** The Table Library row's inline +: Add to Diagram…, to the diagram that is open (the pick only when none or several are). */
+/** The Table Library row's inline + and right-click Add to Open Diagram: to the diagram that is open (the pick only when none or several are). */
 export const ADD_TO_OPEN_DIAGRAM_COMMAND = 'erdStudio.addToOpenDiagram';
 export const REVEAL_IN_TABLE_LIBRARY_COMMAND = 'erdStudio.revealInTableLibrary';
 
@@ -445,8 +448,9 @@ export interface AddToDiagramDeps {
    * Open the diagram, add the tables in one edit and select the first
    * (`SemanticEditorProvider.addTablesToDiagram`). `files`, index for index
    * with `tables`, is given only where tables are told apart by identity.
+   * Resolves to the tables added, when the canvas could say (it had loaded).
    */
-  addTables(filePath: string, tables: readonly string[], files?: readonly string[]): Promise<void>;
+  addTables(filePath: string, tables: readonly string[], files?: readonly string[]): Promise<readonly string[] | undefined | void>;
   /** The file of the diagram in the active editor tab, if that tab is a diagram: it is offered first. */
   activeDiagramPath?(): string | undefined;
   /**
@@ -506,17 +510,22 @@ export function withOpenDiagramFirst(items: readonly DiagramPickItem[], activePa
 }
 
 /**
- * Add to Diagram… (and the row's inline +, Add to Open Diagram): with a
+ * Add to Open Diagram (the row's inline + and right-click menu): with a
  * diagram open — in the active tab, or the only one on screen — the tables
- * go straight to it, and the status bar says where (tables it shows already
- * are selected and named on its canvas). Otherwise, which diagram (the one in
- * the active tab first), then the add. The route that needs no drag: it
- * works from the Table Library's right-click menu and inline + on one table
- * or a selection. Where the library tells tables apart by identity, each
- * table is its file: a diagram that shows another schema folder's table of
- * the name does not show this one, and the add is by file.
+ * go straight to it, and the status bar says what was added where (tables it
+ * shows already are selected and named on its canvas; nothing is said when
+ * the canvas refused the add, it says why). Otherwise, and always for Add to
+ * Diagram… (`ask`), which diagram (the one in the active tab first), then the
+ * add. The route that needs no drag: it works on one table or a selection.
+ * Where the library tells tables apart by identity, each table is its file:
+ * a diagram that shows another schema folder's table of the name does not
+ * show this one, and the add is by file.
  */
-export async function addToDiagramCommand(deps: AddToDiagramDeps, given: ReadonlyArray<string | SidebarTable>): Promise<void> {
+export async function addToDiagramCommand(
+  deps: AddToDiagramDeps,
+  given: ReadonlyArray<string | SidebarTable>,
+  options: { readonly ask?: boolean } = {},
+): Promise<void> {
   const usage = deps.usage?.() ?? tableUsageByName(deps.memberNames);
   const picked = given.map((t) => usage.tableOf(t));
   const tables = picked.map((t) => t.name);
@@ -531,18 +540,20 @@ export async function addToDiagramCommand(deps: AddToDiagramDeps, given: Readonl
     return;
   }
   const files = picked.map((t) => t.filePath);
-  const add = (filePath: string): Promise<void> =>
+  const add = (filePath: string): Promise<readonly string[] | undefined | void> =>
     usage.byIdentity && files.every((f): f is string => f !== undefined) ? deps.addTables(filePath, tables, files) : deps.addTables(filePath, tables);
   const activePath = deps.activeDiagramPath?.();
-  const open = diagramToAddTo(summaries, activePath, deps.openDiagramPaths?.() ?? []);
+  const open = options.ask ? undefined : diagramToAddTo(summaries, activePath, deps.openDiagramPaths?.() ?? []);
   if (open) {
     // Added without asking. Not offered means it shows them all already, or cannot show them (a JSON diagram and a
     // name two schema folders share): its canvas says which, so the status bar names only what is added.
     const offered = diagramPickItems([open], deps.memberNames, deps.layerLabel, picked, usage)[0];
-    await add(open.filePath);
-    if (offered) {
-      const already = new Set(offered.alreadyShown ?? []);
-      const fresh = [...new Set(tables)].filter((t) => !already.has(t));
+    const added = await add(open.filePath);
+    // What the canvas added, when it could say; else what it was expected to add (it had not loaded yet).
+    const fresh = Array.isArray(added)
+      ? [...new Set(added)]
+      : offered ? [...new Set(tables)].filter((t) => !new Set(offered.alreadyShown ?? []).has(t)) : [];
+    if (fresh.length > 0) {
       const what = fresh.length === 1 ? `"${fresh[0]}"` : `${fresh.length} tables`;
       vscode.window.setStatusBarMessage(addedToDiagramStatus(what, open.domain), ADDED_TO_DIAGRAM_STATUS_MS);
     }

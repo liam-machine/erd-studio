@@ -67,7 +67,7 @@ function transfer(data: Record<string, string>) {
 const sent = () => mockVsCode.postMessage.mock.calls.map((c) => c[0] as { type: string; payload?: unknown });
 const drops = () => sent().filter((m) => m.type === 'dropTables');
 const canvas = (container: HTMLElement) => container.querySelector('.editor-canvas') as HTMLElement;
-const HINT = 'Hold Shift and drop to add dim_customer to this diagram. Pressed Shift over the diagram? Move the mouse a little, then let go.';
+const HINT = 'Hold Shift and drop to add dim_customer to this diagram. Keep Shift down until you let go.';
 const LET_GO = 'Let go to add dim_customer to this diagram';
 
 beforeAll(() => {
@@ -150,6 +150,20 @@ describe('the canvas as a drop target', () => {
     expect(hint.closest('[role="status"]')?.getAttribute('aria-live')).toBe('polite');
     act(() => { window.dispatchEvent(new Event('pointermove')); });
     expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('hides the hint, and stops taking the drag, when the host says the drag was used up elsewhere (libraryDragEnded)', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    // Dropped on another diagram's row, or missed this canvas and opened the file: no pointer move ever reaches this webview.
+    postFromHost({ type: 'libraryDragEnded' });
+    expect(screen.queryByText(HINT)).toBeNull();
+    // A later drag with nothing the canvas can read is no longer taken as the library drag.
+    const dataTransfer = transfer({});
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(true);
+    expect(screen.queryByText(LET_GO)).toBeNull();
   });
 
   it('hides the hint after a while', () => {

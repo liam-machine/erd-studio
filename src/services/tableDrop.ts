@@ -136,6 +136,66 @@ export function tablesOfTreeDrop<T extends DroppableTableFile>(
     : { names: [...remembered.tables] };
 }
 
+/** How long after a Table Library drag starts a file it carries may open and still count as its missed canvas drop. */
+export const MISSED_DROP_MS = 30_000;
+
+/** What a missed canvas drop was aiming at: the diagram, and the drag's tables (with their files where it knew them). */
+export interface MissedCanvasDrop {
+  readonly diagramPath: string;
+  readonly names: string[];
+  readonly files?: string[];
+}
+
+/**
+ * Whether a text tab that just opened is a Table Library drag that missed
+ * the canvas: let go over a diagram without Shift (or with Shift released a
+ * moment early), the editor group takes the drop and VS Code opens the
+ * dragged files there, pinned. It is when
+ * - a Table Library drag is remembered and started at most
+ *   {@link MISSED_DROP_MS} ago,
+ * - the tab opened pinned (VS Code pins dropped editors; a single click on a
+ *   Table Library row opens a preview),
+ * - its file is one of the drag's tables (by file where the drag knew them,
+ *   else by name through the library),
+ * - and the tab's editor group had a diagram in front just before
+ *   (`frontDiagram`): the one the drop was aimed at.
+ * Then the answer is that diagram and the whole drag; otherwise undefined.
+ */
+export function missedCanvasDrop<T extends DroppableTableFile>(input: {
+  readonly opened: { readonly filePath: string; readonly preview: boolean };
+  readonly drag: { readonly tables: readonly string[]; readonly files?: readonly string[]; readonly at: number } | undefined;
+  readonly now: number;
+  readonly frontDiagram: string | undefined;
+  readonly library: readonly T[];
+  readonly platform?: NodeJS.Platform;
+}): MissedCanvasDrop | undefined {
+  const { opened, drag, frontDiagram } = input;
+  const platform = input.platform ?? process.platform;
+  if (!drag || drag.tables.length === 0 || frontDiagram === undefined || opened.preview) return undefined;
+  if (input.now - drag.at > MISSED_DROP_MS || input.now < drag.at) return undefined;
+  const withFiles = drag.files !== undefined && drag.files.length === drag.tables.length;
+  const dragged = withFiles
+    ? drag.files!.some((f) => samePath(f, opened.filePath, platform))
+    : (() => {
+      const entry = input.library.find((e) => !e.shadowedBy && samePath(e.filePath, opened.filePath, platform));
+      return entry !== undefined && drag.tables.some((t) => normaliseName(t) === normaliseName(entry.name));
+    })();
+  if (!dragged) return undefined;
+  return { diagramPath: frontDiagram, names: [...drag.tables], ...(withFiles ? { files: [...drag.files!] } : {}) };
+}
+
+/** What the missed-drop notice says: the file opened, and why the table was not added. */
+export function missedCanvasDropMessage(names: readonly string[], diagram: string): string {
+  const what = names.length === 1 ? `"${names[0]}"` : `${names.length} tables`;
+  return `ERD Studio: ${what} opened as ${names.length === 1 ? 'a file' : 'files'} instead of being added to ${diagram}. `
+    + 'VS Code adds a dragged table to a diagram only while Shift is held as you let go.';
+}
+
+/** The missed-drop notice's button. */
+export function missedCanvasDropButton(diagram: string): string {
+  return `Add to ${diagram}`;
+}
+
 /**
  * Where dropped tables go: the first centred under the drop point with its
  * header under the pointer, the others in a grid to its right and below,

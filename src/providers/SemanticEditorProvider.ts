@@ -161,7 +161,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { CanvasNoticeMessage, DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasNoticeMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -6855,7 +6855,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * edit (`handleAddExistingModels`: one edit, one undo, placed next to
    * related tables), then select the first one added. When every one is on
    * the diagram already, the first is selected and named instead. The caller
-   * opens the diagram.
+   * opens the diagram. Resolves to the tables added (none when every one was
+   * there already or the add was refused), or undefined when the canvas has
+   * not loaded its diagram yet and the add is held for its `ready`.
    */
   async addTablesToDiagram(
     uri: vscode.Uri,
@@ -6866,9 +6868,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      * the diagram) by its file, never by a name another schema folder shares.
      */
     files?: readonly string[],
-  ): Promise<void> {
-    if (modelNames.length === 0) return;
-    await this.runTableAction(uri, {
+  ): Promise<string[] | undefined> {
+    if (modelNames.length === 0) return [];
+    return this.runTableAction(uri, {
       reveal: modelNames[0],
       add: [...modelNames],
       ...(files !== undefined && files.length === modelNames.length ? { files: [...files] } : {}),
@@ -6899,6 +6901,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private takeLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
     const pending = this.pendingLibraryDrag;
     this.pendingLibraryDrag = undefined;
+    // Used up (a drop somewhere, or a missed canvas drop): no canvas goes on saying "Hold Shift and drop".
+    if (pending) {
+      const ended: LibraryDragEndedMessage = { type: 'libraryDragEnded' };
+      for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
+        if (!panel.loaded || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
+        this.post(panel.webview, ended);
+      }
+    }
     return pending && Date.now() - pending.at <= PENDING_LIBRARY_DRAG_MS
       ? { tables: pending.tables, ...(pending.files ? { files: pending.files } : {}) }
       : undefined;
@@ -6911,6 +6921,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   takeRememberedLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
     return this.takeLibraryDrag();
+  }
+
+  /** The remembered Table Library drag, with when it started, if there is one; not used up (the missed-drop check). */
+  peekRememberedLibraryDrag(): { tables: string[]; files?: string[]; at: number } | undefined {
+    const pending = this.pendingLibraryDrag;
+    return pending ? { tables: [...pending.tables], ...(pending.files ? { files: [...pending.files] } : {}), at: pending.at } : undefined;
   }
 
   /** A brief note on one canvas (`canvasNotice`): what an add of tables found already there. */
@@ -6990,33 +7006,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Run a table action on a loaded canvas of `uri` now, or hold it for its `ready`. */
-  private async runTableAction(uri: vscode.Uri, action: TableAction): Promise<void> {
+  private async runTableAction(uri: vscode.Uri, action: TableAction): Promise<string[] | undefined> {
     const open = Array.from(this.openPanels.entries()).find(([, p]) =>
       p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
     if (!open) {
       this.pendingTableActions.set(uri.fsPath, { ...action, at: Date.now() });
-      return;
+      return undefined;
     }
-    await this.applyTableAction(open[0], action);
+    return this.applyTableAction(open[0], action);
   }
 
-  private async applyTableAction(panelKey: string, action: TableAction): Promise<void> {
+  /** Apply a table action to a loaded canvas; resolves to the tables it added (none for a reveal, a refusal or all there). */
+  private async applyTableAction(panelKey: string, action: TableAction): Promise<string[]> {
     const panel = this.openPanels.get(panelKey);
-    if (!panel) return;
+    if (!panel) return [];
     if (panel.activeStage !== 'logical') {
       await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
     }
     if (action.add && action.files && this.schemaScoped() && this.isDbmlDocument(panel.document)) {
-      await this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
-      return;
+      return this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
     }
     // A JSON diagram adds by name, which reads the library's first table of a shared name: any other is refused, never swapped.
     const refused = action.add && action.files && this.schemaScoped() ? this.sharedNameAddRefusal(action.add, action.files) : null;
     if (refused !== null) {
       this.post(panel.webview, { type: 'error', payload: { message: refused } });
-      return;
+      return [];
     }
     let reveal = action.reveal;
+    let addedNames: string[] = [];
     if (action.add) {
       const add = action.add;
       const membersOf = (): Set<string> =>
@@ -7030,13 +7047,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // Every name goes to the add, so its note names the ones already here.
         await this.queueEdit(panelKey, () => this.handleAddExistingModels(panel.document, panel.webview, add));
         const after = membersOf();
-        const added = fresh.find((name) => after.has(normaliseName(name)));
+        addedNames = fresh.filter((name) => after.has(normaliseName(name)));
         // A refused add has said why: nothing to select.
-        if (added === undefined) return;
-        reveal = added;
+        if (addedNames.length === 0) return [];
+        reveal = addedNames[0];
       }
     }
     this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+    return addedNames;
   }
 
   /**
@@ -7054,7 +7072,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     names: readonly string[],
     files: readonly string[],
-  ): Promise<void> {
+  ): Promise<string[]> {
     const entries = files.map((f) => this.tableLibraryService.tableEntryAt(f));
     const shownAs = (i: number): string | undefined => {
       const id = entries[i]?.id;
@@ -7065,15 +7083,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // All there already: select the first and say so, on the canvas.
       this.postCanvasNotice(webview, alreadyOnDiagramMessage(names.map((n, i) => shownAs(i) ?? n)));
       this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(0) ?? names[0] } } satisfies RevealTableMessage);
-      return;
+      return [];
     }
     // Every table goes to the add, so its note names the ones already here.
     await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, {
       sourcePaths: files.map((f) => this.workspaceRelative(f)),
     }));
     // A refused add has said why: nothing to select.
-    const added = fresh.map(shownAs).find((ref) => ref !== undefined);
-    if (added !== undefined) this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
+    const addedAt = fresh.filter((i) => shownAs(i) !== undefined);
+    if (addedAt.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(addedAt[0]) ?? names[addedAt[0]] } } satisfies RevealTableMessage);
+    return addedAt.map((i) => names[i]);
   }
 
   /** Run the table action held for the diagram at `fsPath`, if it is still fresh. */

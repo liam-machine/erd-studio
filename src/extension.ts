@@ -70,7 +70,8 @@ import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
 import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, convertRowShows, type ConvertOfferState } from './services/convertOffer';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
-import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, hasOpenSubjectAreaCanvas, openDiagramPaths, saveAllAndReload } from './services/recoveryService';
+import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, diagramViewColumn, hasOpenSubjectAreaCanvas, openDiagramPaths, saveAllAndReload } from './services/recoveryService';
+import { watchMissedCanvasDrops } from './providers/missedCanvasDrop';
 import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
@@ -3335,8 +3336,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         usage: tableUsage,
         layerLabel: deps.layerLabel,
         addTables: async (filePath, tables, files) => {
-          await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
-          await editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
+          // A group that shows the diagram already brings it forward: never a second tab of it in the active group.
+          const viewColumn = diagramViewColumn(filePath);
+          if (viewColumn !== undefined) {
+            await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), SUBJECT_AREA_EDITOR_VIEW_TYPE, { preview: true, viewColumn });
+          } else {
+            await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+          }
+          return editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
         // The diagram in front of the user (or the only one on screen) takes the tables without a pick.
         activeDiagramPath: activeSubjectAreaCanvasPath,
@@ -3420,11 +3427,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         },
       };
       return vscode.Disposable.from(
+        // A Table Library drag let go over a diagram without Shift opens the file instead: say so, and offer the add.
+        watchMissedCanvasDrops({
+          peekDrag: () => editorProvider.peekRememberedLibraryDrag(),
+          takeDrag: () => editorProvider.takeRememberedLibraryDrag(),
+          listTableFiles: () => tableLibraryService.listTableFiles(),
+          diagramName: (filePath) => deps.listSubjectAreas().find((s) => samePath(s.filePath, filePath))?.domain
+            ?? path.basename(filePath, path.extname(filePath)),
+          addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
+        }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
+        // Add to Diagram… always asks which diagram (the open one first); Add to Open Diagram (the row's
+        // inline + and the right-click menu) adds to the diagram that is open, asking only with none or several.
         vscode.commands.registerCommand(ADD_TO_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
-          addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection))),
-        // The table row's inline +: the same command, worded for the diagram that is open.
+          addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection), { ask: true })),
         vscode.commands.registerCommand(ADD_TO_OPEN_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
           addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection))),
         // `filePath` (optional): the table's file, whose row is revealed (two schema folders may share the name).

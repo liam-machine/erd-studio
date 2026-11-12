@@ -422,6 +422,28 @@ describe('Add to Diagram…', () => {
       expect(status).toHaveBeenCalledWith(addedToDiagramStatus('"dim_date"', 'staging'), ADDED_TO_DIAGRAM_STATUS_MS);
     });
 
+    it('Add to Diagram… (ask) always asks, the open diagram first, so another diagram can still be chosen', async () => {
+      const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) => items[1]) as never);
+      const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+      const addTables = vi.fn(async () => undefined);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables, activeDiagramPath: () => STAGING }, ['dim_region'], { ask: true });
+      expect(pick).toHaveBeenCalledTimes(1);
+      expect((pick.mock.calls[0][0] as unknown as Array<{ label: string }>).map((i) => i.label)).toEqual(['staging', 'sales', 'finance']);
+      expect(addTables).toHaveBeenCalledWith(SALES, ['dim_region']);
+      expect(status).not.toHaveBeenCalled();
+    });
+
+    it('the status bar names what the canvas says it added, and nothing when it added nothing (a refused add)', async () => {
+      const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+      const refused = vi.fn(async () => [] as string[]);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables: refused, activeDiagramPath: () => STAGING }, ['dim_date']);
+      expect(refused).toHaveBeenCalledWith(STAGING, ['dim_date']);
+      expect(status).not.toHaveBeenCalled();
+      const someAdded = vi.fn(async () => ['dim_region', 'dim_date']);
+      await addToDiagramCommand({ listSubjectAreas: () => summaries, memberNames: members, layerLabel, addTables: someAdded, activeDiagramPath: () => STAGING }, ['dim_region', 'dim_date', 'fct_order']);
+      expect(status).toHaveBeenCalledWith(addedToDiagramStatus('2 tables', 'staging'), ADDED_TO_DIAGRAM_STATUS_MS);
+    });
+
     it('diagramToAddTo: the active diagram, else the only one on screen (each file once, any case on macOS/Windows), else none', () => {
       expect(diagramToAddTo(summaries, STAGING, [SALES])?.domain).toBe('staging');
       expect(diagramToAddTo(summaries, undefined, [SALES, SALES])?.domain).toBe('sales');
@@ -530,8 +552,10 @@ describe('contributions', () => {
     expect(menus.commandPalette).toContainEqual({ command: 'erdStudio.revealInTableLibrary', when: 'false' });
   });
 
-  it('put Add to Diagram… on a Table Library table\'s right-click menu', () => {
-    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@2' });
+  it('put Add to Open Diagram, then Add to Diagram…, on a Table Library table\'s right-click menu', () => {
+    // Gerhard: the right-click add goes to the open diagram; Add to Diagram… still asks, for any other diagram.
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@2' });
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@3' });
   });
 
   it('put Add to Open Diagram as a + button on a Table Library table row, out of the palette, with no legacy alias', () => {
