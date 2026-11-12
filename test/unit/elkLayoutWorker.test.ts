@@ -32,7 +32,10 @@ const fakes = vi.hoisted(() => {
 
 vi.mock('elkjs/lib/elk-api', () => ({ default: fakes.FakeELK }));
 
-import { runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow, stackSafeFallbacks } from '../../webview/lib/elkLayout';
+import {
+  runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow, stackSafeFallbacks, stackSafeFallbackRungs,
+  classifyLayoutFailure, layoutFailureReport,
+} from '../../webview/lib/elkLayout';
 import type { TableFlowNode } from '@erd-studio/renderer/editor';
 
 const node: TableFlowNode = {
@@ -98,7 +101,7 @@ describe('runElkLayout worker guard', () => {
 
     // A fresh instance is built for the next run
     vi.useRealTimers();
-    fakes.state.layoutImpl = () => Promise.resolve({ id: 'root', children: [] });
+    fakes.state.layoutImpl = () => Promise.resolve({ id: 'root', children: [{ id: 'a', x: 0, y: 0 }] });
     await runElkLayout([node], []);
     expect(fakes.state.elkInstances).toBe(instancesBefore + 1);
   });
@@ -179,9 +182,155 @@ describe('runElkLayout worker guard', () => {
     // Same ELK instance (and worker) is reused on the next run
     const instancesBefore = fakes.state.elkInstances;
     const workersBefore = fakes.state.workers.length;
-    fakes.state.layoutImpl = () => Promise.resolve({ id: 'root', children: [] });
+    fakes.state.layoutImpl = () => Promise.resolve({ id: 'root', children: [{ id: 'a', x: 0, y: 0 }] });
     await runElkLayout([node], []);
     expect(fakes.state.elkInstances).toBe(instancesBefore);
     expect(fakes.state.workers.length).toBe(workersBefore);
   });
 });
+
+// Usage telemetry: how far the fallbacks got, and what kind of failure it was.
+describe('runElkLayout fallback rungs and failure reports', () => {
+  const overflow = () => new RangeError('Maximum call stack size exceeded');
+  const placed = { id: 'root', children: [{ id: 'a', x: 1, y: 2 }] };
+  const size = { tables: 1100, relationships: 2400 };
+
+  const failing = async (run: Promise<unknown>): Promise<unknown> => {
+    try {
+      await run;
+    } catch (err) {
+      return err;
+    }
+    throw new Error('the layout did not fail');
+  };
+
+  it('a default layout that works reports no rung', async () => {
+    const rungs: number[] = [];
+    fakes.state.layoutImpl = () => Promise.resolve(placed);
+    await runElkLayout([node], [], undefined, 'auto', { onFallbackRung: (r) => rungs.push(r) });
+    expect(rungs).toEqual([]);
+  });
+
+  it('rung 2: Brandes–Köpf produced the layout', async () => {
+    const rungs: number[] = [];
+    let calls = 0;
+    fakes.state.layoutImpl = () => (++calls === 1 ? Promise.reject(overflow()) : Promise.resolve(placed));
+    await runElkLayout([node], [], undefined, 'auto', { onFallbackRung: (r) => rungs.push(r) });
+    expect(rungs).toEqual([2]);
+  });
+
+  it('rung 3: leaving post-compaction out produced the layout, told once, for a failure that is not a stack overflow too', async () => {
+    const rungs: number[] = [];
+    let calls = 0; let stack = 0;
+    fakes.state.layoutImpl = () => (++calls < 3 ? Promise.reject(new Error('java.lang.IllegalStateException: Invalid hitboxes')) : Promise.resolve(placed));
+    await runElkLayout([node], [], undefined, 'auto', { onFallbackRung: (r) => rungs.push(r), onStackFallback: () => { stack++; } });
+    expect(rungs).toEqual([3]);
+    // layoutStackFallback keeps its meaning: only a stack overflow.
+    expect(stack).toBe(0);
+  });
+
+  it('a rung is named by what it drops: a diagram already on Brandes–Köpf has only rung 3', async () => {
+    const own = { 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT };
+    expect(stackSafeFallbackRungs({ ...own, 'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH' }).map((s) => s.rung)).toEqual([3]);
+    expect(stackSafeFallbackRungs({ 'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH' }).map((s) => s.rung)).toEqual([2, 3]);
+    expect(stackSafeFallbackRungs({ 'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH' }).map((s) => s.options))
+      .toEqual(stackSafeFallbacks({ 'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH' }));
+    const rungs: number[] = [];
+    let calls = 0;
+    fakes.state.layoutImpl = () => (++calls === 1 ? Promise.reject(overflow()) : Promise.resolve(placed));
+    await runElkLayout([node], [], own, 'auto', { onFallbackRung: (r) => rungs.push(r) });
+    expect(rungs).toEqual([3]);
+  });
+
+  it('a hook that throws never stops the layout', async () => {
+    let calls = 0;
+    fakes.state.layoutImpl = () => (++calls === 1 ? Promise.reject(overflow()) : Promise.resolve(placed));
+    expect(await runElkLayout([node], [], undefined, 'auto', { onFallbackRung: () => { throw new Error('telemetry'); } })).toEqual({ a: { x: 1, y: 2 } });
+  });
+
+  it('every rung failed: the first error is thrown and reported with the last rung\'s class', async () => {
+    let calls = 0;
+    fakes.state.layoutImpl = () => (++calls < 3 ? Promise.reject(overflow()) : Promise.reject(new RangeError('Invalid array length')));
+    const err = await failing(runElkLayout([node], [], undefined, 'auto'));
+    expect((err as Error).message).toBe('Maximum call stack size exceeded');
+    expect(layoutFailureReport(err, size)).toEqual({
+      failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'memory',
+      log: { tables: 1100, relationships: 2400, message: 'RangeError: Maximum call stack size exceeded' },
+    });
+  });
+
+  it('a fallback that runs out of time is the last rung\'s class', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fakes.state.layoutImpl = () => (++calls === 1 ? Promise.reject(overflow()) : new Promise(() => {}));
+    const run = failing(runElkLayout([node], [], undefined, 'auto'));
+    await vi.advanceTimersByTimeAsync(LAYOUT_TIMEOUT_MS * 2 + 10);
+    const report = layoutFailureReport(await run, size);
+    expect(report).toMatchObject({ failure: 'stack', exhausted: true, lastFailure: 'timeout' });
+    expect(calls).toBe(3);
+  });
+
+  it('a timeout or a dead worker on the default layout tries no fallback', async () => {
+    vi.useFakeTimers();
+    fakes.state.layoutImpl = () => new Promise(() => {});
+    const timedOut = failing(runElkLayout([node], []));
+    await vi.advanceTimersByTimeAsync(LAYOUT_TIMEOUT_MS + 10);
+    const report = layoutFailureReport(await timedOut, { tables: 12, relationships: 3 });
+    expect(report).toMatchObject({ failure: 'timeout', tableBucket: 'under50', relBucket: 'under100' });
+    expect(report.exhausted).toBeUndefined();
+    expect(report.lastFailure).toBeUndefined();
+
+    const crashed = failing(runElkLayout([node], []));
+    fakes.state.workers.at(-1)!.onerror!({ message: 'boom' });
+    expect(layoutFailureReport(await crashed, size)).toMatchObject({ failure: 'worker' });
+  });
+
+  it('no fallback to try (the diagram\'s own options already take both) is not "every rung failed"', async () => {
+    fakes.state.layoutImpl = () => Promise.reject(overflow());
+    const own = { 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'NONE' };
+    const report = layoutFailureReport(await failing(runElkLayout([node], [], own)), size);
+    expect(report.failure).toBe('stack');
+    expect(report.exhausted).toBeUndefined();
+  });
+
+  it.each([
+    ['a table missing from the result', { id: 'root', children: [] }],
+    ['no children at all', { id: 'root' }],
+    ['a missing coordinate', { id: 'root', children: [{ id: 'a', x: 1 }] }],
+    ['a coordinate that is not a number', { id: 'root', children: [{ id: 'a', x: Number.NaN, y: 2 }] }],
+    ['an infinite coordinate', { id: 'root', children: [{ id: 'a', x: 1, y: Number.POSITIVE_INFINITY }] }],
+  ])('an unusable result (%s) fails as its own class after the fallbacks', async (_name, result) => {
+    let calls = 0;
+    fakes.state.layoutImpl = () => { calls++; return Promise.resolve(result); };
+    const report = layoutFailureReport(await failing(runElkLayout([node], [])), size);
+    expect(report).toMatchObject({ failure: 'result', exhausted: true, lastFailure: 'result' });
+    expect(calls).toBe(3);
+  });
+
+  it('an unusable default result is laid out again by the next rung', async () => {
+    const rungs: number[] = [];
+    let calls = 0;
+    fakes.state.layoutImpl = () => Promise.resolve(++calls === 1 ? { id: 'root', children: [{ id: 'a' }] } : placed);
+    expect(await runElkLayout([node], [], undefined, 'auto', { onFallbackRung: (r) => rungs.push(r) })).toEqual({ a: { x: 1, y: 2 } });
+    expect(rungs).toEqual([2]);
+  });
+
+  it('classifies an error by its type and the engine\'s fixed text', () => {
+    expect(classifyLayoutFailure(overflow())).toBe('stack');
+    expect(classifyLayoutFailure(new RangeError('Invalid array length'))).toBe('memory');
+    expect(classifyLayoutFailure(new Error('org.eclipse.elk.core.UnsupportedConfigurationException: x'))).toBe('unsupported');
+    expect(classifyLayoutFailure(new Error('org.eclipse.elk.graph.json.JsonImportException: x'))).toBe('input');
+    expect(classifyLayoutFailure(new Error('java.lang.IllegalStateException: x'))).toBe('engine');
+    expect(classifyLayoutFailure(new Error('cycle detected'))).toBe('other');
+    expect(classifyLayoutFailure('too much recursion')).toBe('stack');
+    expect(classifyLayoutFailure(undefined)).toBe('other');
+  });
+
+  it('the report cuts the message for the log and bounds the counts', () => {
+    const report = layoutFailureReport(new Error('x'.repeat(2000)), { tables: 5e9, relationships: -3 });
+    expect(report.log).toEqual({ tables: 1_000_000, relationships: 0, message: 'x'.repeat(500) });
+    expect(report.tableBucket).toBe('500plus');
+    expect(report.relBucket).toBe('under100');
+  });
+});
+
