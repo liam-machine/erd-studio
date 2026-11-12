@@ -112,7 +112,6 @@ export async function draggedTableNamesOf(dataTransfer: vscode.DataTransfer): Pr
   return [];
 }
 
-/** Whether a drop is a Table Library drag: it carries the names' type or the view's own tree mime type. */
 /** What a drop landed on, for the log: a diagram's or layer's name, or the empty space. */
 function dropTargetLabel(target: TreeElement | undefined): string {
   if (!target) return 'the empty space';
@@ -121,6 +120,7 @@ function dropTargetLabel(target: TreeElement | undefined): string {
   return `a ${target.type} row`;
 }
 
+/** Whether a drop is a Table Library drag: it carries the names' type or the view's own tree mime type. */
 export function isTableLibraryDrop(dataTransfer: vscode.DataTransfer): boolean {
   return dataTransfer.get(TABLE_LIBRARY_NAMES_MIME) !== undefined || dataTransfer.get(TABLE_LIBRARY_DRAG_MIME) !== undefined;
 }
