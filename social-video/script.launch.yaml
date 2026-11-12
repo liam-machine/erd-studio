@@ -13,10 +13,10 @@
 #                for Confluence for the business.
 #   GET STARTED  already have a model? (the reverse-engineering nod lives here) every source the
 #                import reads on one still logo wall; the DDL out in one step at schema grain
-#                (Snowflake GET_DDL, pg_dump); a draft first; dbt as an add-on (Compare); free to
+#                (Snowflake GET_DDL, pg_dump); a draft first; free to
 #                use in VS Code.
 # Voice only (`music: false`). Per-scene direction: SCENES.launch.md. Scenes reuse the README cut's
-# 2.0 modules (readme/flip, readme/canvas, readme/dbt) and the pro cut's hook and ai (their visuals
+# 2.0 modules (readme/flip, readme/canvas) and the pro cut's hook and ai (their visuals
 # carry no file format), with the launch modules for the rest.
 #
 # Format: exactly as script.yaml (see its header). Wording follows docs/dev/onboarding-and-cli.md
@@ -26,7 +26,7 @@
 # routing time in seconds anywhere (it depends on the machine). Never "No AI needed".
 
 title: ERD Studio 2.0
-maxDuration: 150
+maxDuration: 160
 # Voice only, like the README cut.
 music: false
 
@@ -114,6 +114,11 @@ scenes:
       - id: f_own
         beat: own
         caption: No separate repo | to manage model changes, | and {you own} the data.
+      # Liam (2026-11-12): the answer to the lock-in line in `ai`: nobody can meter access to your own files.
+      - id: f_free
+        beat: free
+        caption: "So no vendor can charge | for {API or MCP} access | to your own model, | now or later."
+        say: "So no vendor can charge for API or MCP access to your own model, now or later."
 
   - id: canvas
     module: readme/canvas
@@ -185,10 +190,15 @@ scenes:
     lines:
       - id: c_app
         beat: app
-        caption: "And the business still gets its diagram: | {ERD Studio for Confluence} | reads the same DBML | from {GitHub},"
+        caption: "And the business still gets its diagram: | {ERD Studio for Confluence} | reads the same DBML | straight from your {GitHub}."
+      # Liam (2026-11-12): one GitHub-to-Confluence connection = a single source of truth; nothing sits
+      # in the middle (the app's only egress is github.com), it only renders the open format.
+      - id: c_truth
+        beat: truth
+        caption: "One connection, | so your repo stays the | {single source of truth}. | No vendor in the middle | ever sees it: | the app just renders DBML, | an open format, | in your company's docs."
       - id: c_view
         beat: view
-        caption: so business users can | view the data model there, | {no VS Code} needed.
+        caption: So business users | view the data model there, | {no VS Code} needed.
 
   # ---------------------------------------------------------------- GET STARTED
   - id: wall
@@ -235,20 +245,6 @@ scenes:
       - id: d_keep
         beat: keep
         caption: "{Keep as Diagram}, | and it's DBML files in your repo."
-
-  - id: dbt
-    module: readme/dbt
-    chapter: 3
-    minDur: 8
-    accent: green
-    headline: ["Using dbt?", "{Compare} with your design."]
-    lines:
-      - id: d_open
-        beat: open
-        caption: Using dbt? | The {Physical} tab | shows what it builds, read-only,
-      - id: d_compare
-        beat: compare
-        caption: "and {Compare with dbt} marks | every difference from your design, | before it ships."
 
   - id: end
     module: endCard

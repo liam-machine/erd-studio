@@ -1,6 +1,6 @@
-// launch · 4 · flip — readme/flip.js plus ownership: under the Explorer, three chips light on the
+// launch · 4 · flip — readme/flip.js plus ownership: under the Explorer, four chips light on the
 // launch lines' words — "Your repo" ("your own repo"), "Open format" ("open format"), "You own it"
-// ("you own"); on "No separate repo" the bracket's label says the model needs none. As the README
+// ("you own"), "No API or MCP fees" ("API", the answer to the lock-in line in `ai`); on "No separate repo" the bracket's label says the model needs none. As the README
 // cut otherwise — the repo's Explorer: the code is there
 // (sql/, README.md); on "DBML" the .erd-studio folder slides in at the top (VS Code sorts dot
 // folders first), green, and on "right next to the code" a bracket spans the model and the SQL:
@@ -53,14 +53,14 @@ export default {
         <div style="margin-top:8px;font-size:26px;color:var(--text-2)">model next to code</div></div>`;
     }
     // Ownership chips, under the tree.
-    const chipsAt = [wordAt(scene, 'repo', 'own repo'), wordAt(scene, 'repo', 'open format'), wordAt(scene, 'own', 'you own')];
-    const labels = ['Your repo', 'Open format', 'You own it'];
-    const icons = [ICON.folder({ size: 22 }), ICON.file({ size: 22 }), ICON.check({ size: 22 })];
+    const chipsAt = [wordAt(scene, 'repo', 'own repo'), wordAt(scene, 'repo', 'open format'), wordAt(scene, 'own', 'you own'), wordAt(scene, 'free', 'API')];
+    const labels = ['Your repo', 'Open format', 'You own it', 'No API or MCP fees'];
+    const icons = [ICON.folder({ size: 22 }), ICON.file({ size: 22 }), ICON.check({ size: 22 }), ICON.check({ size: 22 })];
     const chips = labels.map((l, i) => {
       const p = easeOut(seg(t, chipsAt[i] - 0.1, chipsAt[i] + 0.25));
-      return `<span class="pill" style="font-size:28px;padding:10px 24px;gap:10px;background:rgba(${GREEN},${(0.05 + 0.13 * p).toFixed(3)});border:2px solid rgba(${GREEN},${(0.2 + 0.75 * p).toFixed(3)});color:${p > 0.5 ? 'var(--green)' : 'var(--text-3)'};transform:scale(${(1 + 0.07 * Math.sin(Math.PI * p)).toFixed(3)})">${icons[i]}${l}</span>`;
+      return `<span class="pill" style="font-size:24px;padding:9px 18px;gap:8px;background:rgba(${GREEN},${(0.05 + 0.13 * p).toFixed(3)});border:2px solid rgba(${GREEN},${(0.2 + 0.75 * p).toFixed(3)});color:${p > 0.5 ? 'var(--green)' : 'var(--text-3)'};transform:scale(${(1 + 0.07 * Math.sin(Math.PI * p)).toFixed(3)})">${icons[i]}${l}</span>`;
     }).join('');
-    html += `<div class="abs" style="left:${X}px;width:${W}px;top:${Y + H - 120}px;display:flex;justify-content:center;gap:16px;white-space:nowrap;${appear(t, chipsAt[0] - 0.3, { dy: 8 })}">${chips}</div>`;
+    html += `<div class="abs" style="left:${X}px;width:${W}px;top:${Y + H - 120}px;display:flex;justify-content:center;gap:10px;white-space:nowrap;${appear(t, chipsAt[0] - 0.3, { dy: 8 })}">${chips}</div>`;
     // "No separate repo": the bracket's note says so.
     const noAt = wordAt(scene, 'own', 'No separate');
     if (t >= noAt) {
