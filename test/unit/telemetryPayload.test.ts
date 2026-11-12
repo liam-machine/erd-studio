@@ -686,14 +686,24 @@ describe('allowlists agree with the Worker', () => {
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
       'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
       'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
+      'layoutFallbackRung2', 'layoutFallbackRung3',
     ]);
-    // #262's per-step load codes follow the logged-error ones.
+    // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
+    // what a failed layout was like (after 2.0.4) is appended after them.
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
       'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
       'domainLoadInternalPositions', 'domainLoadInternalPhysical', 'domainLoadInternalDisplay', 'domainLoadInternalOther',
+      'layoutFailedMemory', 'layoutFailedUnsupported', 'layoutFailedInput', 'layoutFailedEngine', 'layoutFailedResult', 'layoutFailedOther',
+      'layoutFailedTablesUnder50', 'layoutFailedTables50to199', 'layoutFailedTables200to499', 'layoutFailedTables500Plus',
+      'layoutFailedRelsUnder100', 'layoutFailedRels100to499', 'layoutFailedRels500to1999', 'layoutFailedRels2000Plus',
+      'layoutFailedUnder1s', 'layoutFailed1to5s', 'layoutFailedOver5s',
+      'layoutFailedAllRungs', 'layoutFailedLastRungTimeout', 'layoutFailedLastRungWorker', 'layoutFailedLastRungMemory',
     ]);
-    // Liam's decision for B6: no table-count bucket is ever a key.
+    // Liam's decision for B6: no table-count bucket is ever a key of a draft or a canvas open.
+    // The one exception is a layout that failed (four fixed ranges, as error codes).
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
+    expect(FEATURES.filter((f) => /Tables\d|Rels\d|TablesUnder|RelsUnder/.test(f))).toEqual([]);
+    expect(ERROR_CODES.filter((c) => /Tables|Rels/.test(c)).every((c) => c.startsWith('layoutFailed'))).toBe(true);
   });
 
   it('the Worker README lists every 2.0.0 key, one line each, under Keys added in 2.0.0', () => {
@@ -705,7 +715,7 @@ describe('allowlists agree with the Worker', () => {
     // The 2.0.0 list ends at draftDropTimeLimit; a key appended after it is listed under "Keys added after 2.0.0".
     const added = [
       ...FEATURES.slice(FEATURES.indexOf('heartbeatProvisional'), FEATURES.indexOf('draftDropTimeLimit') + 1),
-      ...ERROR_CODES.slice(ERROR_CODES.indexOf('activationFailed')),
+      ...ERROR_CODES.slice(ERROR_CODES.indexOf('activationFailed'), ERROR_CODES.indexOf('domainLoadInternalOther') + 1),
     ];
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
   });
@@ -722,8 +732,13 @@ describe('allowlists agree with the Worker', () => {
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
       'importFabricOutcomeFail', 'importFabricOutcomeCancelled', 'importFabricOutcomeTimedOut',
       'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
+      'layoutFallbackRung2', 'layoutFallbackRung3',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
+    // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks), marked as errors.
+    const addedErrors = ERROR_CODES.slice(ERROR_CODES.indexOf('domainLoadInternalOther') + 1);
+    expect(addedErrors).toHaveLength(21);
+    for (const code of addedErrors) expect(section, code).toMatch(new RegExp(`^- \`${code}\` \\(error\\) `, 'm'));
     // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
     const outcomes = readme.slice(readme.indexOf('### Import outcomes (2.0)'), readme.indexOf('### Onboarding funnel'));
     expect(outcomes).toContain('importFabricOutcomeFail');

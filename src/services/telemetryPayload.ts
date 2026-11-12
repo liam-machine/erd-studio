@@ -735,6 +735,11 @@ export const FEATURES = [
   'majorUpdateNoticeShown',
   'majorUpdateNoticeShowMeAround',
   'majorUpdateNoticeWhatsNew',
+  // Added after 2.0.4. An auto layout (the canvas's or a draft page's) whose
+  // default attempt failed was produced by a fallback: Brandes–Köpf node
+  // placement (rung 2), or that with post-compaction left out (rung 3).
+  'layoutFallbackRung2',
+  'layoutFallbackRung3',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1004,6 +1009,36 @@ export const ERROR_CODES = [
   'domainLoadInternalPhysical',
   'domainLoadInternalDisplay',
   'domainLoadInternalOther',
+  // Added after 2.0.4 — what kind of diagram a failed auto layout (the
+  // canvas's, beside layoutFailed, or a draft page's, beside draftLayoutFailed)
+  // was, how it failed and how far the fallbacks got. Fixed keys: never a
+  // count, a name or the error's text.
+  // Its class, beside layoutFailedTimeout / Worker / Stack.
+  'layoutFailedMemory',
+  'layoutFailedUnsupported',
+  'layoutFailedInput',
+  'layoutFailedEngine',
+  'layoutFailedResult',
+  'layoutFailedOther',
+  // The diagram's tables and relationships, as buckets.
+  'layoutFailedTablesUnder50',
+  'layoutFailedTables50to199',
+  'layoutFailedTables200to499',
+  'layoutFailedTables500Plus',
+  'layoutFailedRelsUnder100',
+  'layoutFailedRels100to499',
+  'layoutFailedRels500to1999',
+  'layoutFailedRels2000Plus',
+  // How long it ran before it failed.
+  'layoutFailedUnder1s',
+  'layoutFailed1to5s',
+  'layoutFailedOver5s',
+  // Every fallback was tried and failed, and how the last one failed when
+  // that was a timeout, the worker dying or memory.
+  'layoutFailedAllRungs',
+  'layoutFailedLastRungTimeout',
+  'layoutFailedLastRungWorker',
+  'layoutFailedLastRungMemory',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

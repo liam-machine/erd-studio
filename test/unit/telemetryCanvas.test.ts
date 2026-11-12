@@ -11,6 +11,8 @@ import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import {
   CANVAS_LOAD_SLOW_MS,
   canvasLayoutTelemetry,
+  layoutFailureCodes,
+  layoutFailureLogLine,
   dbmlDiagramFeatures,
   draftLayoutFeatures,
   isUserFileProblem,
@@ -21,7 +23,7 @@ import {
   webviewErrorCodes,
 } from '../../src/services/telemetryCanvas';
 import { ERROR_CODES, FEATURES } from '../../src/services/telemetryPayload';
-import { LAYOUT_FAILURES, WEBVIEW_ERROR_AREAS, WEBVIEW_ERROR_KINDS, fitZoomBucket } from '../../src/types/webviewError';
+import { LAYOUT_FAILURES, LAYOUT_FALLBACK_RUNGS, LAYOUT_REL_BUCKETS, LAYOUT_TABLE_BUCKETS, WEBVIEW_ERROR_AREAS, WEBVIEW_ERROR_KINDS, fitZoomBucket } from '../../src/types/webviewError';
 
 const isFeature = (key: string) => (FEATURES as readonly string[]).includes(key);
 const isError = (key: string) => (ERROR_CODES as readonly string[]).includes(key);
@@ -49,13 +51,68 @@ describe('webviewErrorCodes (B13)', () => {
 });
 
 describe('canvasLayoutTelemetry (B17)', () => {
-  it('records the failure class of a failed layout; other has no code', () => {
-    expect(canvasLayoutTelemetry({ ms: 30000, ok: false, failure: 'timeout' }).errors).toEqual(['layoutFailedTimeout']);
-    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'worker' }).errors).toEqual(['layoutFailedWorker']);
-    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'stack' }).errors).toEqual(['layoutFailedStack']);
-    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'other' }).errors).toEqual([]);
-    // An older webview sends no failure.
-    expect(canvasLayoutTelemetry({ ms: 10, ok: false })).toEqual({ features: [], errors: [] });
+  it('records the failure class of a failed layout, other included, and how long it ran', () => {
+    expect(canvasLayoutTelemetry({ ms: 30000, ok: false, failure: 'timeout' }).errors).toEqual(['layoutFailedTimeout', 'layoutFailedOver5s']);
+    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'worker' }).errors).toEqual(['layoutFailedWorker', 'layoutFailedUnder1s']);
+    expect(canvasLayoutTelemetry({ ms: 1000, ok: false, failure: 'stack' }).errors).toEqual(['layoutFailedStack', 'layoutFailed1to5s']);
+    expect(canvasLayoutTelemetry({ ms: 5000, ok: false, failure: 'other' }).errors).toEqual(['layoutFailedOther', 'layoutFailed1to5s']);
+    expect(canvasLayoutTelemetry({ ms: 5001, ok: false, failure: 'memory' }).errors).toEqual(['layoutFailedMemory', 'layoutFailedOver5s']);
+    expect(canvasLayoutTelemetry({ ms: 999, ok: false, failure: 'unsupported' }).errors).toEqual(['layoutFailedUnsupported', 'layoutFailedUnder1s']);
+    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'input' }).errors).toEqual(['layoutFailedInput', 'layoutFailedUnder1s']);
+    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'engine' }).errors).toEqual(['layoutFailedEngine', 'layoutFailedUnder1s']);
+    expect(canvasLayoutTelemetry({ ms: 10, ok: false, failure: 'result' }).errors).toEqual(['layoutFailedResult', 'layoutFailedUnder1s']);
+    // An older webview sends no failure: only the duration is known.
+    expect(canvasLayoutTelemetry({ ms: 10, ok: false })).toEqual({ features: [], errors: ['layoutFailedUnder1s'] });
+  });
+
+  it('records the size buckets of a failed layout, one code each', () => {
+    const tables = LAYOUT_TABLE_BUCKETS.map((tableBucket) => layoutFailureCodes({ tableBucket }));
+    expect(tables).toEqual([['layoutFailedTablesUnder50'], ['layoutFailedTables50to199'], ['layoutFailedTables200to499'], ['layoutFailedTables500Plus']]);
+    const rels = LAYOUT_REL_BUCKETS.map((relBucket) => layoutFailureCodes({ relBucket }));
+    expect(rels).toEqual([['layoutFailedRelsUnder100'], ['layoutFailedRels100to499'], ['layoutFailedRels500to1999'], ['layoutFailedRels2000Plus']]);
+  });
+
+  it('records how far the fallbacks got', () => {
+    // Every rung failed; the last one's class only when it adds something.
+    expect(layoutFailureCodes({ failure: 'stack', exhausted: true, lastFailure: 'stack' })).toEqual(['layoutFailedStack', 'layoutFailedAllRungs']);
+    expect(layoutFailureCodes({ failure: 'stack', exhausted: true, lastFailure: 'timeout' })).toEqual(['layoutFailedStack', 'layoutFailedAllRungs', 'layoutFailedLastRungTimeout']);
+    expect(layoutFailureCodes({ failure: 'stack', exhausted: true, lastFailure: 'worker' })).toEqual(['layoutFailedStack', 'layoutFailedAllRungs', 'layoutFailedLastRungWorker']);
+    expect(layoutFailureCodes({ failure: 'engine', exhausted: true, lastFailure: 'memory' })).toEqual(['layoutFailedEngine', 'layoutFailedAllRungs', 'layoutFailedLastRungMemory']);
+    // A last-rung class without "every rung failed" says nothing.
+    expect(layoutFailureCodes({ failure: 'timeout', lastFailure: 'timeout' })).toEqual(['layoutFailedTimeout']);
+    // The rung that produced a layout is a feature of a finished layout only.
+    expect(canvasLayoutTelemetry({ ms: 100, ok: true, fallback: true, rung: 2 }).features).toEqual(['layoutStackFallback', 'layoutFallbackRung2']);
+    expect(canvasLayoutTelemetry({ ms: 100, ok: true, rung: 3 }).features).toEqual(['layoutFallbackRung3']);
+    expect(canvasLayoutTelemetry({ ms: 100, ok: false, rung: 3 }).features).toEqual([]);
+    expect(draftLayoutFeatures({ ms: 100, fitZoom: 'ok', fallback: true, rung: 3 })).toEqual(['draftLayoutFallback', 'layoutFallbackRung3']);
+  });
+
+  it('the customer\'s case in one record: 1,100 tables, a stack overflow, every fallback failed', () => {
+    const out = canvasLayoutTelemetry({
+      ms: 64000, ok: false, firstOpen: true, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout',
+    });
+    expect(out).toEqual({
+      features: [],
+      errors: ['layoutFailedStack', 'layoutFailedTables500Plus', 'layoutFailedRels2000Plus', 'layoutFailedOver5s', 'layoutFailedAllRungs', 'layoutFailedLastRungTimeout'],
+    });
+  });
+
+  it('never counts the log: the counts and the message reach no key', () => {
+    const log = { tables: 1134, relationships: 2417, message: 'Referenced shape does not exist: dim_customer' };
+    const out = canvasLayoutTelemetry({ ms: 12, ok: false, failure: 'input', tableBucket: '500plus', relBucket: '2000plus', log } as Parameters<typeof canvasLayoutTelemetry>[0]);
+    expect(JSON.stringify(out)).not.toMatch(/1134|2417|dim_customer|Referenced/);
+    expect(out.errors).toEqual(['layoutFailedInput', 'layoutFailedTables500Plus', 'layoutFailedRels2000Plus', 'layoutFailedUnder1s']);
+  });
+
+  it('the log line carries the real counts and message, for the local log only', () => {
+    const failure = { failure: 'stack' as const, tableBucket: '500plus' as const, relBucket: '2000plus' as const, exhausted: true as const, lastFailure: 'timeout' as const,
+      log: { tables: 1134, relationships: 2417, message: 'RangeError: Maximum call stack size exceeded' } };
+    expect(layoutFailureLogLine('canvas', { ...failure, ms: 64000.4 })).toBe(
+      'Auto layout failed (class stack, tables 500plus, relationships 2000plus, every fallback failed (last: timeout); 1134 tables, 2417 relationships; after 64000 ms): RangeError: Maximum call stack size exceeded');
+    expect(layoutFailureLogLine('canvas', { ...failure, ms: 10, firstOpen: true })).toMatch(/^First-open auto layout failed \(/);
+    expect(layoutFailureLogLine('draft', { ...failure, ms: 10 })).toMatch(/^Draft layout failed \(/);
+    // An older page: no detail at all.
+    expect(layoutFailureLogLine('draft', {})).toBe('Draft layout failed (class unknown, no fallback tried)');
   });
 
   it('flags the stack-safe fallback and a slow first-open layout', () => {
@@ -74,6 +131,23 @@ describe('canvasLayoutTelemetry (B17)', () => {
       for (const f of out.features) expect(isFeature(f), f).toBe(true);
     }
     for (const f of canvasLayoutTelemetry({ ms: 9000, ok: true, firstOpen: true, fallback: true }).features) expect(isFeature(f), f).toBe(true);
+    // Every class, bucket, duration and rung has a key of its own, each on the right list.
+    const errors = new Set<string>();
+    for (const failure of LAYOUT_FAILURES) {
+      for (const lastFailure of LAYOUT_FAILURES) {
+        for (const code of layoutFailureCodes({ failure, exhausted: true, lastFailure })) errors.add(code);
+      }
+    }
+    for (const tableBucket of LAYOUT_TABLE_BUCKETS) for (const code of layoutFailureCodes({ tableBucket })) errors.add(code);
+    for (const relBucket of LAYOUT_REL_BUCKETS) for (const code of layoutFailureCodes({ relBucket })) errors.add(code);
+    for (const ms of [0, 2000, 9000]) for (const code of layoutFailureCodes({ ms })) errors.add(code);
+    for (const e of errors) expect(isError(e), e).toBe(true);
+    // Exactly the layoutFailed* codes on the list, bar the total: none is recorded by nothing.
+    expect([...errors].sort()).toEqual(ERROR_CODES.filter((c) => c.startsWith('layoutFailed') && c !== 'layoutFailed').sort());
+    for (const rung of LAYOUT_FALLBACK_RUNGS) {
+      for (const f of canvasLayoutTelemetry({ ms: 1, ok: true, rung }).features) expect(isFeature(f), f).toBe(true);
+    }
+    expect(FEATURES.filter((f) => f.startsWith('layoutFallbackRung'))).toEqual(['layoutFallbackRung2', 'layoutFallbackRung3']);
   });
 });
 
