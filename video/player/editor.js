@@ -54,12 +54,12 @@ export function activityBar(active, { erd = true, erdOp = 1, erdGlow = 0 } = {})
 
 /**
  * An Explorer file tree (for the README GIF). `rows` are
- * [depth, kind ('folder' | 'dbml' | 'json' | 'md'), label, closed?] (a closed folder's chevron points
+ * [depth, kind ('folder' | 'dbml' | 'json' | 'md' | 'sql' | 'yml' | 'other'), label, closed?] (a closed folder's chevron points
  * right); `lit(i)` 0..1 highlights row i,
  * `badge(i)` returns HTML at its right (the Source Control "U"). Rows are `rowH` apart from `top`.
  */
 export function fileTree(rows, { top = 58, rowH = 40, width = 560, indent = 26, font = 22, lit = () => 0, badge = () => '', style = () => '', colour = () => null } = {}) {
-  const ICOL = { folder: '#d9b35a', json: '#e8c46a', dbml: '#5ca2f8', md: '#8b9099' };
+  const ICOL = { folder: '#d9b35a', json: '#e8c46a', dbml: '#5ca2f8', md: '#8b9099', sql: '#e0a458', yml: '#c586c0', other: '#8b9099' };
   let r = '';
   rows.forEach(([d, kind, label, closed], i) => {
     const y = top + i * rowH;
@@ -99,12 +99,12 @@ export const SALES_DRAFT = {
   // ...and every import's draft (not an example's) offers its report (draftModel `importReport`, set
   // from importDbml.ts's reportId: a DBML file is an IMPORT_REPORT_SOURCES source): "Show Import Report".
   importReport: true,
-  // No name the README GIF's library already has (its .erd-studio tables): a name that is would be
-  // reused, and the detail would say so.
+  // No name the README GIF's library has, at the start or once Claude Code has added dim_store: a
+  // name that is would be reused, and the detail would say so.
   tables: [
-    { name: 'dim_store', x: 0, y: 0, cols: [['PK', 'store_id', 'int'], [null, 'store_name', 'varchar'], [null, 'region', 'varchar']] },
+    { name: 'dim_branch', x: 0, y: 0, cols: [['PK', 'branch_id', 'int'], [null, 'branch_name', 'varchar'], [null, 'region', 'varchar']] },
     { name: 'dim_staff', x: 0, y: 330, cols: [['PK', 'staff_id', 'int'], [null, 'staff_name', 'varchar']] },
-    { name: 'fct_sale', x: 540, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'store_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
+    { name: 'fct_sale', x: 540, y: 120, cols: [['PK', 'sale_id', 'int'], ['FK', 'branch_id', 'int'], ['FK', 'staff_id', 'int'], ['FK', 'sale_date', 'date'], [null, 'amount', 'decimal(12,2)']] },
     { name: 'dim_calendar', x: 1080, y: 0, cols: [['PK', 'date_day', 'date'], [null, 'month_name', 'varchar']] },
     { name: 'fct_refund', x: 1080, y: 300, cols: [['PK', 'refund_id', 'int'], ['FK', 'sale_id', 'int'], [null, 'refunded', 'decimal(12,2)']] },
   ],
@@ -125,7 +125,7 @@ const miniRowY = (top, i) => top + 62 + i * 46 + 23;
  * lines, drawn by the caller (the README GIF routes them Curved, as the product's draft canvas
  * does); without it, plain square steps between the key rows.
  */
-function draftDiagram(d, { op = 1, edges = null } = {}) {
+function draftDiagram(d, { op = 1, edges = null, stage = 'neutral' } = {}) {
   let h = edges ? `<div class="abs" style="left:0;top:0;opacity:${op.toFixed(3)}">${edges}</div>` : '';
   if (!edges) for (const [a, ar, b, br] of d.rels) {
     const A = d.tables[a], B = d.tables[b];
@@ -135,7 +135,7 @@ function draftDiagram(d, { op = 1, edges = null } = {}) {
     h += edge([[x0, y0], [mx, y0], [mx, y1], [x1, y1]], { width: 4, opacity: op });
   }
   for (const t of d.tables) {
-    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'MAIN', cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
+    h += node({ x: t.x, y: t.y, w: MINI_W, name: t.name, layer: 'MAIN', stage, cols: t.cols.map(([key, name, type]) => ({ key: key ?? undefined, name, type })), style: `opacity:${op.toFixed(3)};` });
   }
   return h;
 }
@@ -145,7 +145,7 @@ function draftDiagram(d, { op = 1, edges = null } = {}) {
  * rows: the text, then the switcher and buttons) over the draft's read-only diagram. `press` is
  * [buttonIndex, 0..1] for a click, `glow` rings the primary; `diagramOp` fades the diagram in.
  */
-export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17, edges = null } = {}) {
+export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagramOp = 1, scale = 0.52, width = BODY.w - left, font = 17, edges = null, stage = 'neutral' } = {}) {
   // DraftBanner: the headline, the detail, then (a draft with details or an import's report) a line
   // of links: "Show details · Show Import Report".
   const links = [d.details && SHOW_DETAILS, d.importReport && SHOW_IMPORT_REPORT].filter(Boolean);
@@ -162,7 +162,7 @@ export function draftPage(d, { left = ED, op = 1, press = null, glow = 0, diagra
     : '';
   const html = `<div class="abs" style="left:${left}px;top:0;width:${width}px;bottom:0;background:var(--card);opacity:${op.toFixed(3)};overflow:hidden">
       <div class="abs grid-bg" style="left:0;right:0;top:${BAN}px;bottom:0"></div>
-      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp, edges })}</div>
+      <div class="abs" style="left:${bx + 6}px;top:${BAN + 26}px;transform:scale(${scale});transform-origin:0 0">${draftDiagram(d, { op: diagramOp, edges, stage })}</div>
       <div class="abs" style="left:0;right:0;top:0;height:${BAN}px;background:#1d2633;border-bottom:1px solid #2d4a70"></div>
       <div class="abs" style="left:${bx}px;top:14px;right:20px;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.headline)}</div>
       <div class="abs" style="left:${bx}px;top:46px;right:20px;font-size:17px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.detail)}</div>

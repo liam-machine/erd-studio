@@ -160,7 +160,8 @@ export const STAGE_TABS = [['logical', 'Logical', 'your design'], ['physical', '
  * Canvas toolbar: the diagram's name, its layer badge only when given (`layer`: "GLD Gold layer" in a
  * project with more than one layer; a new folder without dbt has one, Main, and no badge), then the Layout button, "+ Add ▾" and the Export glyph. A
  * folder without dbt (`logicalOnly`) has no stage tabs and nothing to compare (Toolbar.tsx renders
- * neither). A dbt project adds the Compare button (`compare`: 'off' or 'on') before "+ Add", and
+ * neither). A dbt project adds the Compare button (`compare`: 'off' or 'on') between the line style
+ * switch and "+ Add" (Toolbar.tsx's order), and
  * the Logical · Physical tabs as their own pill in a second row, centred under the toolbar
  * (Toolbar.tsx "Row 2: Stage tabs (attached below toolbar)", `.toolbar-container`). The Physical
  * stage is read-only, so its toolbar has no "+ Add" (`{!isReadOnly && (`).
@@ -184,7 +185,7 @@ export function toolbar({ x, y, domain = 'orders', layer = null, layerLabel = ''
   const tab = ([s, label, hint]) => `<span class="tb__tab${stage === s ? ` tb__tab--${s}` : ''}">${stage === s && s === 'physical' ? ICON.lock({ size: 18 }) : ''}${label}<span class="tb__hint">· ${hint}</span></span>`;
   const cmp = compare === 'on' ? COMPARE_WORDS.stop : COMPARE_WORDS[stage];
   return `<div class="tb-stack" style="left:${x}px;top:${y}px;${style}"><div class="tb tb--row"><span class="tb__domain">${domain}</span>${badge}${layoutBtn}
-    <span class="tb__diff${compare === 'on' ? ' tb__diff--amber' : ''}">${cmp}</span>${addBtn}${exp}</div>
+    ${lines}<span data-compare class="tb__diff${compare === 'on' ? ' tb__diff--amber' : ''}">${cmp}</span>${addBtn}${exp}</div>
     <div class="tb__tabs tb__tabs--row2">${STAGE_TABS.map(tab).join('')}</div></div>`;
 }
 
